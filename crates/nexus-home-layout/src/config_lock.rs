@@ -22,6 +22,13 @@
 //! of the contract: every whole-document writer replaces `config.toml` by an
 //! atomic rename, so a reader always opens one complete version — the old or
 //! the new one — and needs no directory write of its own.
+//!
+//! I-000299: an atomic replacement must not lose the old document's access
+//! policy or expose staging bytes. The staging file is created owner-only
+//! before any byte, the captured owner/group/mode/ACL/extended attributes are
+//! applied before the rename (through the audited `nexus-config-metadata`
+//! bridge), and a policy that cannot be captured or applied refuses the
+//! publication instead of silently widening access.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -40,6 +47,9 @@ const BACKOFF_CAP: Duration = Duration::from_millis(500);
 /// instead of hot-looping — the same 2× stale window the service and desktop
 /// writers use.
 const STEAL_DEADLINE: Duration = Duration::from_secs(20);
+/// Bounded link-following for a symlinked `config.toml`, matching the common OS
+/// limit so a link loop fails instead of spinning.
+const MAX_SYMLINK_HOPS: usize = 40;
 
 /// The held lock: unlinking on drop releases it on every return path.
 pub struct ConfigLock {
@@ -84,113 +94,180 @@ fn release(path: &Path, token: &str) {
 ///
 /// I-000291: readers must see one whole document without taking the lock or
 /// writing anything, so an already-provisioned but not writable `.nexus42` can
-/// still serve a `ReadOnly` open. Writing a sibling temporary file and renaming
-/// it over `config.toml` makes the replacement atomic: a reader opens either
-/// the previous complete version or the new one, never a truncated document
-/// that would read as "no `[memory_provider]`" (the implicit local default).
+/// still serve a `ReadOnly` open. Writing a sibling staging file and renaming it
+/// over `config.toml` makes the replacement atomic: a reader opens either the
+/// previous complete version or the new one, never a truncated document that
+/// would read as "no `[memory_provider]`" (the implicit local default).
 ///
 /// The caller still holds [`acquire`]: publication replaces in-place
 /// truncation, it does not replace writer exclusion (read-modify-write
 /// lost-update safety).
 ///
-/// # Authorization and metadata
+/// # Access policy
 ///
-/// A rename is authorized by the containing directory, not by the file, so
-/// atomic replacement alone would let a write-denied document be replaced. To
-/// retain the previous `std::fs::write` boundary, publication opens an existing
-/// target for writing (without truncating) before the rename and returns that
-/// error — a `0444` document stays unwritable. A missing target is created the
-/// same way the in-place write created it; metadata errors other than "not
-/// found" are propagated instead of masked. A symlinked `config.toml` is
-/// followed (the link survives and the document it points at is replaced),
-/// matching the in-place write this replaces. Unix mode bits of an existing
-/// document are preserved; ACLs, extended attributes and hard-link identity are
-/// not copied — no repository writer or reader sets or depends on them, and the
-/// two Node publishers already replace the inode the same way.
+/// The replacement keeps the old document's access policy. The staging file is
+/// created owner-only (`0600`, the narrowest mode that still allows writing), so
+/// no document byte is staged under a policy broader than the target's; the
+/// captured owner, group, mode, ACL and extended attributes are then applied
+/// before the rename. When the policy cannot be captured or applied — an
+/// unreadable document, a write-denied document, an ownership this process
+/// cannot reproduce, an attribute it cannot set — publication refuses and the
+/// old bytes stay in place.
+///
+/// A rename is authorized by the containing directory, not by the file, so the
+/// previous write boundary is rechecked by opening an existing target for
+/// writing without truncating before anything is published. A symlinked document
+/// is followed (the link survives and its real target is replaced), including a
+/// dangling link whose destination is creatable, as the in-place write this
+/// replaces did. A hard-linked document is refused: replacing it would detach
+/// the other path instead of updating it.
 ///
 /// # Errors
-/// The I/O error that prevented the authorization check, the write, the sync or
-/// the rename. The temporary file is removed on every failure path; when that
-/// cleanup also fails, the returned error keeps the original kind and names the
-/// leftover temporary file instead of discarding the cleanup failure.
+/// The I/O error that prevented the policy capture, the authorization check, the
+/// write, the sync, the policy application or the rename. The staging file is
+/// removed on every failure path; when that cleanup also fails, the returned
+/// error keeps the original kind and names the leftover staging file instead of
+/// discarding the cleanup failure.
 pub fn publish_document(nexus_home: &Path, contents: &str) -> std::io::Result<()> {
-    let target = resolve_publication_target(&nexus_home.join("config.toml"))?;
-    // The temporary file must share the target's directory: a symlinked
-    // document can live outside the nexus home, and a cross-filesystem rename
-    // would not be atomic (or would fail outright).
-    let temp_directory = target.parent().unwrap_or(nexus_home);
-    let temp = temp_directory.join(format!(".config.toml.{}.tmp", uuid::Uuid::new_v4()));
+    let requested = nexus_home.join("config.toml");
+    let target = resolve_publication_target(&requested)?;
+    let existing = existing_document(&target)?;
 
-    let result = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp)?;
-        file.write_all(contents.as_bytes())?;
-        // Complete the bytes before the rename publishes them: a crash after
-        // the rename must not leave a shorter, empty-looking document.
-        file.sync_all()?;
-        drop(file);
-
+    if let Some(metadata) = &existing {
+        if has_multiple_links(metadata) {
+            return Err(std::io::Error::other(format!(
+                "refusing to replace the hard-linked document {}",
+                target.display()
+            )));
+        }
         // Retain the previous write boundary: the rename is authorized by the
         // directory and must not replace a document this process may not write.
-        match std::fs::OpenOptions::new().write(true).open(&target) {
-            Ok(handle) => drop(handle),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
+        let _authorized = std::fs::OpenOptions::new().write(true).open(&target)?;
+    }
 
-        // A new document keeps `std::fs::write`'s creation mode (0666 under the
-        // umask); an existing document keeps its own mode.
-        match std::fs::metadata(&target) {
-            Ok(meta) => std::fs::set_permissions(&temp, meta.permissions())?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
+    let policy = match existing {
+        Some(_) => Some(nexus_config_metadata::capture(&target)?),
+        None => None,
+    };
 
-        std::fs::rename(&temp, &target)
-    })();
+    // The staging file must share the target's directory: a symlinked document
+    // can live outside the nexus home, and a cross-filesystem rename would not
+    // be atomic (or would fail outright).
+    let staging_directory = target.parent().unwrap_or(nexus_home);
+    let staging = staging_directory.join(format!(".config.toml.{}.tmp", uuid::Uuid::new_v4()));
+    let file = nexus_config_metadata::create_staging(&staging, policy.as_ref())?;
+
+    let result = stage_document(file, contents, policy.as_ref(), &staging)
+        .and_then(|()| std::fs::rename(&staging, &target));
 
     let error = match result {
         Ok(()) => return Ok(()),
         Err(error) => error,
     };
-    match std::fs::remove_file(&temp) {
+    match std::fs::remove_file(&staging) {
         Ok(()) => {}
         // Nothing was written at this path (e.g. the directory is gone).
         Err(cleanup) if cleanup.kind() == std::io::ErrorKind::NotFound => {}
         Err(cleanup) => {
-            tracing::warn!(
-                %error,
-                %cleanup,
-                path = %temp.display(),
-                "config.toml publication failed and its temporary file could not be removed"
-            );
-            return Err(std::io::Error::new(
-                error.kind(),
-                format!(
-                    "{error}; the temporary file {} could not be removed: {cleanup}",
-                    temp.display()
-                ),
-            ));
+            return Err(cleanup_failure(&error, &cleanup, &staging));
         }
     }
     Err(error)
+}
+
+/// Report a publication failure whose staging file could not be removed.
+///
+/// The primary failure keeps its kind and message; the leftover path and the
+/// cleanup error are appended so the caller can see both. A failed cleanup is
+/// never discarded: the whole document may still exist in that file.
+fn cleanup_failure(
+    primary: &std::io::Error,
+    cleanup: &std::io::Error,
+    staging: &Path,
+) -> std::io::Error {
+    tracing::warn!(
+        error = %primary,
+        cleanup = %cleanup,
+        path = %staging.display(),
+        "config.toml publication failed and its staging file could not be removed"
+    );
+    std::io::Error::new(
+        primary.kind(),
+        format!(
+            "{primary}; the staging file {} could not be removed: {cleanup}",
+            staging.display()
+        ),
+    )
+}
+
+/// Write the staged document and apply the captured access policy.
+fn stage_document(
+    mut file: std::fs::File,
+    contents: &str,
+    policy: Option<&nexus_config_metadata::AccessPolicy>,
+    staging: &Path,
+) -> std::io::Result<()> {
+    file.write_all(contents.as_bytes())?;
+    // Complete the bytes before the rename publishes them: a crash after the
+    // rename must not leave a shorter, empty-looking document.
+    file.sync_all()?;
+    nexus_config_metadata::apply_after_write(policy, &file, staging)
+}
+
+/// The existing document's metadata, refusing a path that is not a regular file.
+fn existing_document(target: &Path) -> std::io::Result<Option<std::fs::Metadata>> {
+    match std::fs::symlink_metadata(target) {
+        Ok(metadata) if metadata.file_type().is_file() => Ok(Some(metadata)),
+        Ok(_) => Err(std::io::Error::other(format!(
+            "refusing to replace the non-regular document {}",
+            target.display()
+        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Whether the document has another hard link, whose content a replacement
+/// would silently stop sharing.
+#[cfg(unix)]
+fn has_multiple_links(metadata: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    metadata.nlink() > 1
+}
+
+/// Windows hard-link detection is not implemented; the selected strategy only
+/// requires the Unix refusal, and this is disclosed rather than claimed.
+#[cfg(not(unix))]
+fn has_multiple_links(_metadata: &std::fs::Metadata) -> bool {
+    false
 }
 
 /// Resolve the document a publication replaces.
 ///
 /// A symlinked `config.toml` is followed like the in-place write did, so the
 /// link keeps pointing at the real document and the real document is replaced.
-/// A missing document stays at its requested path; every other metadata error
-/// is propagated rather than treated as "absent".
+/// A dangling link's destination is used (the in-place write created it); every
+/// other metadata error is propagated rather than treated as "absent".
 fn resolve_publication_target(requested: &Path) -> std::io::Result<PathBuf> {
-    match std::fs::symlink_metadata(requested) {
-        Ok(meta) if meta.file_type().is_symlink() => std::fs::canonicalize(requested),
-        Ok(_) => Ok(requested.to_path_buf()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(requested.to_path_buf()),
-        Err(error) => Err(error),
+    let mut current = requested.to_path_buf();
+    for _ in 0..MAX_SYMLINK_HOPS {
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                let destination = std::fs::read_link(&current)?;
+                current = if destination.is_absolute() {
+                    destination
+                } else {
+                    current.parent().unwrap_or(requested).join(destination)
+                };
+            }
+            Ok(_) => return Ok(current),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(current),
+            Err(error) => return Err(error),
+        }
     }
+    Err(std::io::Error::other(
+        "too many symbolic links in the config document path",
+    ))
 }
 
 #[cfg(test)]
@@ -671,11 +748,10 @@ mod tests {
         assert_eq!(entries, ["config.toml"], "the temporary file was removed");
     }
 
-    /// BUG-03: a failure after the temporary file exists still removes it and
-    /// preserves the primary error. A directory at the document path makes the
-    /// authorization probe fail after the write.
+    /// A document path that is not a regular file is refused before any staging
+    /// file is created.
     #[test]
-    fn a_failed_publication_removes_its_temporary_file() {
+    fn a_non_regular_document_is_refused_before_staging() {
         let tmp = tempfile::tempdir().expect("temp home");
         let home = tmp.path().to_path_buf();
         std::fs::create_dir_all(config_path(&home)).expect("directory at the document path");
@@ -684,8 +760,8 @@ mod tests {
             .expect_err("a directory cannot be published over");
 
         assert!(
-            !error.to_string().is_empty(),
-            "the primary failure is reported"
+            error.to_string().contains("non-regular"),
+            "the refusal names the document kind: {error}"
         );
         let mut entries: Vec<_> = std::fs::read_dir(&home)
             .expect("home listing")
@@ -693,6 +769,169 @@ mod tests {
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
             .collect();
         entries.sort();
-        assert_eq!(entries, ["config.toml"], "the temporary file was removed");
+        assert_eq!(entries, ["config.toml"], "no staging file was created");
+    }
+
+    /// SEC-02: the staging file is created owner-only, before any byte is
+    /// written, so the document is never exposed under a broader policy.
+    #[cfg(unix)]
+    #[test]
+    fn the_staging_file_is_created_owner_only() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let staging = tmp.path().join(".config.toml.staging.tmp");
+        let file = nexus_config_metadata::create_staging(&staging, None).expect("staging file");
+        let mode = file
+            .metadata()
+            .expect("staging metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "the staging file is owner-only");
+    }
+
+    /// SEC-03: the replacement keeps the target's owner, group, mode and access
+    /// policy (ACL and extended attributes) instead of installing a fresh inode
+    /// with the directory's defaults.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_published_document_keeps_the_target_access_policy() {
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+        std::fs::create_dir_all(&home).expect("home");
+        let path = config_path(&home);
+        std::fs::write(&path, "active_creator_id = \"ctr_old\"\n").expect("document");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).expect("mode");
+        // A named deny entry plus a user attribute: both belong to the policy an
+        // atomic replacement must carry over.
+        let acl = std::process::Command::new("chmod")
+            .arg("+a")
+            .arg("nobody deny read")
+            .arg(&path)
+            .status()
+            .expect("run chmod");
+        assert!(acl.success(), "the deny ACL was installed");
+        let attribute = std::process::Command::new("xattr")
+            .arg("-w")
+            .arg("com.nexus.config-test")
+            .arg("kept")
+            .arg(&path)
+            .status()
+            .expect("run xattr");
+        assert!(attribute.success(), "the extended attribute was installed");
+
+        let before = std::fs::metadata(&path).expect("metadata");
+        let acl_before = nexus_config_metadata::access_policy_blob(&path).expect("acl before");
+        assert!(!acl_before.is_empty(), "the target really has an ACL");
+
+        super::publish_document(&home, "active_creator_id = \"ctr_new\"\n").expect("publish");
+
+        let after = std::fs::metadata(&path).expect("metadata");
+        let acl_after = nexus_config_metadata::access_policy_blob(&path).expect("acl after");
+        assert_eq!(acl_before, acl_after, "the access ACL survives");
+        assert_eq!(before.uid(), after.uid(), "the owner survives");
+        assert_eq!(before.gid(), after.gid(), "the group survives");
+        assert_eq!(
+            after.permissions().mode() & 0o777,
+            0o640,
+            "the mode survives"
+        );
+        let value = std::process::Command::new("xattr")
+            .arg("-p")
+            .arg("com.nexus.config-test")
+            .arg(&path)
+            .output()
+            .expect("read the attribute");
+        assert!(value.status.success(), "the extended attribute is present");
+        assert_eq!(
+            String::from_utf8_lossy(&value.stdout).trim(),
+            "kept",
+            "the extended attribute value survives"
+        );
+    }
+
+    /// A hard-linked document is refused: an atomic replacement would detach the
+    /// other path instead of updating it.
+    #[cfg(unix)]
+    #[test]
+    fn a_hard_linked_document_is_refused_unchanged() {
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+        std::fs::create_dir_all(&home).expect("home");
+        let path = config_path(&home);
+        std::fs::write(&path, "active_creator_id = \"ctr_old\"\n").expect("document");
+        let other = home.join("other.toml");
+        std::fs::hard_link(&path, &other).expect("hard link");
+
+        let error = super::publish_document(&home, "active_creator_id = \"ctr_new\"\n")
+            .expect_err("a hard-linked document is refused");
+
+        assert!(
+            error.to_string().contains("hard-linked"),
+            "the refusal names the hard link: {error}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("document"),
+            "active_creator_id = \"ctr_old\"\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&other).expect("other link"),
+            "active_creator_id = \"ctr_old\"\n",
+            "the other link keeps its bytes"
+        );
+    }
+
+    /// A dangling symlink whose destination is creatable publishes to the
+    /// destination and keeps the link (the selected contract keeps ordinary and
+    /// creatable links, only refusing hard links and unsafe atomic paths).
+    #[cfg(unix)]
+    #[test]
+    fn a_creatable_dangling_symlink_is_published_through() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().join("home");
+        let real_directory = tmp.path().join("real");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::create_dir_all(&real_directory).expect("real directory");
+        let real = real_directory.join("config.toml");
+        symlink(&real, config_path(&home)).expect("dangling link");
+
+        super::publish_document(&home, "active_creator_id = \"ctr_new\"\n").expect("publish");
+
+        assert!(
+            std::fs::symlink_metadata(config_path(&home))
+                .expect("link metadata")
+                .file_type()
+                .is_symlink(),
+            "the link survives"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&real).expect("destination"),
+            "active_creator_id = \"ctr_new\"\n"
+        );
+    }
+
+    /// The double-failure report keeps the primary error's kind and names both
+    /// the cleanup failure and the leftover staging path.
+    #[test]
+    fn a_cleanup_failure_keeps_the_primary_error_and_names_the_leftover() {
+        let primary = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "primary failure");
+        let cleanup = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "cleanup failure");
+        let staging = Path::new("/tmp/.config.toml.test.tmp");
+
+        let error = super::cleanup_failure(&primary, &cleanup, staging);
+
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        let rendered = error.to_string();
+        assert!(rendered.contains("primary failure"), "{rendered}");
+        assert!(rendered.contains("cleanup failure"), "{rendered}");
+        assert!(
+            rendered.contains("/tmp/.config.toml.test.tmp"),
+            "{rendered}"
+        );
     }
 }

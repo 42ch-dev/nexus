@@ -3740,6 +3740,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-config-metadata"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "tempfile",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "nexus-contracts"
 version = "0.1.0"
 dependencies = [
@@ -3884,6 +3893,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "nexus-config-metadata",
  "serde",
  "serde_json",
  "tempfile",

@@ -106,7 +106,18 @@ impl CliConfigSnapshot {
         if toml_path.exists() {
             return Self::read_document(toml_path);
         }
-        let text = std::fs::read_to_string(json_path)?;
+        let text = match std::fs::read_to_string(json_path) {
+            Ok(text) => text,
+            // A concurrent loader can pass the same pre-lock check and complete
+            // an *empty* legacy migration first: it renames the JSON away and
+            // creates no TOML. Under this lock that is the documented "no legacy
+            // document" state, not a read fault. Every other I/O error (and
+            // every parse error below) is still returned unchanged.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self::default());
+            }
+            Err(error) => return Err(error.into()),
+        };
         if text.trim().is_empty() {
             std::fs::rename(json_path, nexus_root.join("config.json.migrated"))?;
             return Ok(Self::default());
@@ -272,11 +283,16 @@ mod migration_rendezvous {
 mod tests {
     use super::*;
 
+    /// The rendezvous is process-global and armed per home; the tests that use
+    /// it must not overlap or one would replace the other's arming.
+    static RENDEZVOUS_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// BUG-02: a legacy migration must not overwrite a newer document that a
     /// locked writer committed while the migration waited. The migration is
     /// held deterministically between its pre-lock check and the acquisition.
     #[test]
     fn a_legacy_migration_does_not_overwrite_a_newer_committed_document() {
+        let _serial = RENDEZVOUS_TEST.lock().expect("rendezvous test serial");
         let tmp = tempfile::tempdir().expect("temp home");
         let root = tmp.path().to_path_buf();
         std::fs::write(
@@ -339,5 +355,39 @@ mod tests {
             !root.join("config.toml.lock").exists(),
             "reading a provisioned document takes no lock"
         );
+    }
+
+    /// BUG-04: a loader that passed its pre-lock check while another loader
+    /// completed an *empty* legacy migration must see the documented default,
+    /// not a `NotFound` fault. Only the disappeared-JSON case is treated that
+    /// way; every other read error still fails.
+    #[test]
+    fn a_disappeared_empty_legacy_document_reads_as_default() {
+        let _serial = RENDEZVOUS_TEST.lock().expect("rendezvous test serial");
+        let tmp = tempfile::tempdir().expect("temp home");
+        let root = tmp.path().to_path_buf();
+        std::fs::write(root.join("config.json"), "").expect("empty legacy json");
+
+        let (arrived, release) = migration_rendezvous::arm(&root);
+        let loader_root = root.clone();
+        let loader = std::thread::spawn(move || CliConfigSnapshot::load(&loader_root));
+
+        // The loader passed its pre-check and is held before the lock.
+        arrived.recv().expect("the migration reached the hold");
+
+        // The concurrent loader completes the empty migration: the JSON is
+        // renamed away and no TOML is created.
+        {
+            let _lock = crate::config_lock::acquire(&root).expect("the migration lock");
+            std::fs::rename(root.join("config.json"), root.join("config.json.migrated"))
+                .expect("complete the empty migration");
+        }
+        release.send(()).expect("release the migration");
+
+        let snapshot = loader
+            .join()
+            .expect("loader thread")
+            .expect("the empty legacy home reads as the default");
+        assert_eq!(snapshot.active_creator_id, None);
     }
 }

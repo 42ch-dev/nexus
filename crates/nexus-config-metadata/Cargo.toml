@@ -1,0 +1,38 @@
+[package]
+name = "nexus-config-metadata"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Private, audited bridge for the native access-policy operations policy-preserving config.toml publication needs"
+
+[lib]
+path = "src/lib.rs"
+
+# The workspace's single, deliberately approved `unsafe` exception.
+#
+# This crate cannot inherit the workspace lint table: Cargo rejects
+# `[lints] workspace = true` combined with a local override, and per-lint
+# inheritance is unsupported, while omitting `workspace = true` inherits
+# nothing. The Clippy entries below therefore reproduce the workspace table
+# verbatim; `unsafe_code` is the one deliberate difference. Every other crate
+# keeps the inherited `unsafe_code = "forbid"`.
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+missing_docs_in_private_items = "allow"
+allow_attributes_without_reason = "allow"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Security"] }
+
+[dev-dependencies]
+tempfile = "3"
