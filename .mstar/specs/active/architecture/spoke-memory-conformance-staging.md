@@ -1,6 +1,7 @@
 # Spoke Memory Conformance Staging
 
 > **Status:** Active architecture and staged-conformance contract.
+> **Document class:** Master
 > **Scope:** The independent durable provider used for cross-provider conformance, the exact 95-scenario disposition, and the mandatory N4 reflection/transfer remainders.
 > **Related:** [Spoke Memory Provider Binding](spoke-memory-provider-binding.md).
 
