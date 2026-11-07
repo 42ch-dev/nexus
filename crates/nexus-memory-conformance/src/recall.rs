@@ -1073,12 +1073,7 @@ mod tests {
             let provider = FixtureMemoryProvider::open(&self.path)
                 .await
                 .expect("fixture reopens");
-            Self {
-                _home: self._home,
-                path: self.path,
-                provider,
-                space_id: self.space_id,
-            }
+            Self { provider, ..self }
         }
 
         async fn ensure_subject(&self) {
@@ -1133,13 +1128,13 @@ mod tests {
         async fn insert_record(
             &self,
             record_id: &str,
-            visibility: &str,
-            context_id: Option<&str>,
+            placement: (&str, Option<&str>),
             text: &str,
             source_contexts: &[&str],
             occurred_at: Option<&str>,
             created_at: &str,
         ) {
+            let (visibility, context_id) = placement;
             let content = serde_json::to_string(&json!({ "text": text })).expect("content json");
             let provenance = serde_json::to_string(&json!({
                 "source_context_ids": source_contexts,
@@ -1234,9 +1229,9 @@ mod tests {
         let mut value = json!({
             "space_id": space,
             "subject_id": SUBJECT,
-            "selection": selection,
-            "budget": budget,
         });
+        value["selection"] = selection;
+        value["budget"] = budget;
         if let Some(cursor) = cursor {
             value["cursor"] = json!(cursor);
         }
@@ -1310,7 +1305,7 @@ mod tests {
         ids
     }
 
-    fn recalled_text<'a>(record: &'a RetainedRecord) -> &'a str {
+    fn recalled_text(record: &RetainedRecord) -> &str {
         match record {
             RetainedRecord::LiveRecord(record) => record.content.text.as_str(),
             RetainedRecord::TombstonedRecord(_) => {
@@ -1331,8 +1326,7 @@ mod tests {
         scenario
             .insert_record(
                 "rec_shared",
-                "shared",
-                None,
+                ("shared", None),
                 "shared row",
                 &[],
                 None,
@@ -1342,8 +1336,7 @@ mod tests {
         scenario
             .insert_record(
                 "rec_a",
-                "context",
-                Some("ctx-a"),
+                ("context", Some("ctx-a")),
                 "a row",
                 &[],
                 None,
@@ -1353,8 +1346,7 @@ mod tests {
         scenario
             .insert_record(
                 "rec_b",
-                "context",
-                Some("ctx-b"),
+                ("context", Some("ctx-b")),
                 "b row",
                 &[],
                 None,
@@ -1362,7 +1354,78 @@ mod tests {
             )
             .await;
 
-        let page = scenario
+        let page = recall_page(&scenario, subject_all()).await;
+        assert_eq!(page.total_authorized, 3);
+        assert!(!page.truncated);
+        assert_eq!(sorted_ids(&page), vec!["rec_a", "rec_b", "rec_shared"]);
+
+        let page = recall_page(&scenario, shared_only()).await;
+        assert_eq!(page.total_authorized, 1);
+        assert_eq!(sorted_ids(&page), vec!["rec_shared"]);
+
+        let page = recall_page(&scenario, selected_contexts(&["ctx-a"], None)).await;
+        assert_eq!(sorted_ids(&page), vec!["rec_a"]);
+
+        let page = recall_page(&scenario, selected_contexts(&["ctx-a"], Some(true))).await;
+        assert_eq!(sorted_ids(&page), vec!["rec_a", "rec_shared"]);
+
+        let page = recall_page(&scenario, selected_contexts(&["ctx-a", "ctx-b"], None)).await;
+        assert_eq!(sorted_ids(&page), vec!["rec_a", "rec_b"]);
+    }
+
+    async fn recall_page(scenario: &Scenario, selection: Value) -> RecallPage {
+        recall_selection(scenario, CLIENT, selection)
+            .await
+            .expect("recall selection")
+    }
+
+    async fn recall_selection(
+        scenario: &Scenario,
+        actor: &str,
+        selection: Value,
+    ) -> Result<RecallPage, SpokeReject> {
+        scenario
+            .provider
+            .recall(
+                actor,
+                &recall_request(
+                    &scenario.space_id,
+                    selection,
+                    budget(10, None),
+                    None,
+                    None,
+                    None,
+                ),
+                now(),
+            )
+            .await
+    }
+
+    async fn recall_with_budget(
+        scenario: &Scenario,
+        page_budget: Value,
+        cursor: Option<&str>,
+    ) -> RecallPage {
+        scenario
+            .provider
+            .recall(
+                CLIENT,
+                &recall_request(
+                    &scenario.space_id,
+                    subject_all(),
+                    page_budget,
+                    cursor,
+                    None,
+                    None,
+                ),
+                now(),
+            )
+            .await
+            .expect("recall budget")
+    }
+
+    async fn recall_with_query(scenario: &Scenario, query: &str) -> RecallPage {
+        scenario
             .provider
             .recall(
                 CLIENT,
@@ -1372,88 +1435,12 @@ mod tests {
                     budget(10, None),
                     None,
                     None,
-                    None,
+                    Some(query),
                 ),
                 now(),
             )
             .await
-            .expect("subject_all");
-        assert_eq!(page.total_authorized, 3);
-        assert!(!page.truncated);
-        assert_eq!(sorted_ids(&page), vec!["rec_a", "rec_b", "rec_shared"]);
-
-        let page = scenario
-            .provider
-            .recall(
-                CLIENT,
-                &recall_request(
-                    &scenario.space_id,
-                    shared_only(),
-                    budget(10, None),
-                    None,
-                    None,
-                    None,
-                ),
-                now(),
-            )
-            .await
-            .expect("shared_only");
-        assert_eq!(page.total_authorized, 1);
-        assert_eq!(sorted_ids(&page), vec!["rec_shared"]);
-
-        let page = scenario
-            .provider
-            .recall(
-                CLIENT,
-                &recall_request(
-                    &scenario.space_id,
-                    selected_contexts(&["ctx-a"], None),
-                    budget(10, None),
-                    None,
-                    None,
-                    None,
-                ),
-                now(),
-            )
-            .await
-            .expect("selected_contexts without shared");
-        assert_eq!(sorted_ids(&page), vec!["rec_a"]);
-
-        let page = scenario
-            .provider
-            .recall(
-                CLIENT,
-                &recall_request(
-                    &scenario.space_id,
-                    selected_contexts(&["ctx-a"], Some(true)),
-                    budget(10, None),
-                    None,
-                    None,
-                    None,
-                ),
-                now(),
-            )
-            .await
-            .expect("selected_contexts including shared");
-        assert_eq!(sorted_ids(&page), vec!["rec_a", "rec_shared"]);
-
-        let page = scenario
-            .provider
-            .recall(
-                CLIENT,
-                &recall_request(
-                    &scenario.space_id,
-                    selected_contexts(&["ctx-a", "ctx-b"], None),
-                    budget(10, None),
-                    None,
-                    None,
-                    None,
-                ),
-                now(),
-            )
-            .await
-            .expect("two contexts");
-        assert_eq!(sorted_ids(&page), vec!["rec_a", "rec_b"]);
+            .expect("recall query")
     }
 
     #[tokio::test]
@@ -1463,8 +1450,7 @@ mod tests {
         scenario
             .insert_record(
                 "rec_shared",
-                "shared",
-                None,
+                ("shared", None),
                 "shared row",
                 &[],
                 None,
@@ -1474,8 +1460,7 @@ mod tests {
         scenario
             .insert_record(
                 "rec_a",
-                "context",
-                Some("ctx-a"),
+                ("context", Some("ctx-a")),
                 "a row",
                 &[],
                 None,
@@ -1485,8 +1470,7 @@ mod tests {
         scenario
             .insert_record(
                 "rec_b",
-                "context",
-                Some("ctx-b"),
+                ("context", Some("ctx-b")),
                 "b row",
                 &[],
                 None,
@@ -1498,67 +1482,20 @@ mod tests {
             .grant(LIMITED, &["recall"], Some(&["ctx-a"]), None)
             .await;
 
-        let request = recall_request(
-            &scenario.space_id,
+        for selection in [
             subject_all(),
-            budget(10, None),
-            None,
-            None,
-            None,
-        );
-        assert_eq!(
-            reject_code(scenario.provider.recall(LIMITED, &request, now()).await),
-            SpokeRejectCode::NotAuthorized
-        );
-        let request = recall_request(
-            &scenario.space_id,
             shared_only(),
-            budget(10, None),
-            None,
-            None,
-            None,
-        );
-        assert_eq!(
-            reject_code(scenario.provider.recall(LIMITED, &request, now()).await),
-            SpokeRejectCode::NotAuthorized
-        );
-        let request = recall_request(
-            &scenario.space_id,
             selected_contexts(&["ctx-a", "ctx-b"], None),
-            budget(10, None),
-            None,
-            None,
-            None,
-        );
-        assert_eq!(
-            reject_code(scenario.provider.recall(LIMITED, &request, now()).await),
-            SpokeRejectCode::NotAuthorized
-        );
-        let request = recall_request(
-            &scenario.space_id,
             selected_contexts(&["ctx-a"], Some(true)),
-            budget(10, None),
-            None,
-            None,
-            None,
-        );
-        assert_eq!(
-            reject_code(scenario.provider.recall(LIMITED, &request, now()).await),
-            SpokeRejectCode::NotAuthorized
-        );
+        ] {
+            assert_eq!(
+                reject_code(recall_selection(&scenario, LIMITED, selection).await),
+                SpokeRejectCode::NotAuthorized
+            );
+        }
 
         // The named context alone is inside the coverage.
-        let request = recall_request(
-            &scenario.space_id,
-            selected_contexts(&["ctx-a"], None),
-            budget(10, None),
-            None,
-            None,
-            None,
-        );
-        let page = scenario
-            .provider
-            .recall(LIMITED, &request, now())
+        let page = recall_selection(&scenario, LIMITED, selected_contexts(&["ctx-a"], None))
             .await
             .expect("covered context");
         assert_eq!(sorted_ids(&page), vec!["rec_a"]);
@@ -1568,30 +1505,16 @@ mod tests {
         scenario
             .grant(LIMITED, &["recall"], Some(&["ctx-a"]), Some(true))
             .await;
-        let request = recall_request(
-            &scenario.space_id,
+        let page = recall_selection(
+            &scenario,
+            LIMITED,
             selected_contexts(&["ctx-a"], Some(true)),
-            budget(10, None),
-            None,
-            None,
-            None,
-        );
-        let page = scenario
-            .provider
-            .recall(LIMITED, &request, now())
-            .await
-            .expect("shared access");
+        )
+        .await
+        .expect("shared access");
         assert_eq!(sorted_ids(&page), vec!["rec_a", "rec_shared"]);
-        let request = recall_request(
-            &scenario.space_id,
-            subject_all(),
-            budget(10, None),
-            None,
-            None,
-            None,
-        );
         assert_eq!(
-            reject_code(scenario.provider.recall(LIMITED, &request, now()).await),
+            reject_code(recall_selection(&scenario, LIMITED, subject_all()).await),
             SpokeRejectCode::NotAuthorized
         );
     }
@@ -1667,8 +1590,7 @@ mod tests {
         scenario
             .insert_record(
                 "rec_two",
-                "shared",
-                None,
+                ("shared", None),
                 "zz",
                 &[],
                 None,
@@ -1678,8 +1600,7 @@ mod tests {
         scenario
             .insert_record(
                 "rec_one",
-                "shared",
-                None,
+                ("shared", None),
                 "é",
                 &[],
                 None,
@@ -1690,64 +1611,19 @@ mod tests {
         // rec_one ranks first (most recently written). A one-byte budget cannot
         // hold its serialized content, but the first item is surfaced whole
         // instead of being dropped.
-        let page = scenario
-            .provider
-            .recall(
-                CLIENT,
-                &recall_request(
-                    &scenario.space_id,
-                    subject_all(),
-                    budget(10, Some(1)),
-                    None,
-                    None,
-                    None,
-                ),
-                now(),
-            )
-            .await
-            .expect("oversized first item");
+        let page = recall_with_budget(&scenario, budget(10, Some(1)), None).await;
         assert_eq!(recalled_ids(&page), vec!["rec_one"]);
         assert_eq!(page.overflow_record_id.as_deref(), Some("rec_one"));
         assert!(page.truncated);
         assert!(page.next_cursor.is_some());
 
         // The item cap is a hard cap; the cursor continues the same ranked set.
-        let page = scenario
-            .provider
-            .recall(
-                CLIENT,
-                &recall_request(
-                    &scenario.space_id,
-                    subject_all(),
-                    budget(1, None),
-                    None,
-                    None,
-                    None,
-                ),
-                now(),
-            )
-            .await
-            .expect("item cap");
+        let page = recall_with_budget(&scenario, budget(1, None), None).await;
         assert_eq!(recalled_ids(&page), vec!["rec_one"]);
         assert!(page.truncated);
         assert!(page.overflow_record_id.is_none());
         let cursor = page.next_cursor.expect("a truncated page issues a cursor");
-        let page = scenario
-            .provider
-            .recall(
-                CLIENT,
-                &recall_request(
-                    &scenario.space_id,
-                    subject_all(),
-                    budget(1, None),
-                    Some(&cursor),
-                    None,
-                    None,
-                ),
-                now(),
-            )
-            .await
-            .expect("second page");
+        let page = recall_with_budget(&scenario, budget(1, None), Some(&cursor)).await;
         assert_eq!(recalled_ids(&page), vec!["rec_two"]);
         assert!(!page.truncated);
         assert!(page.next_cursor.is_none());
@@ -1758,41 +1634,21 @@ mod tests {
         let one = content_serialized_bytes(&json!({ "text": "é" }));
         let two = content_serialized_bytes(&json!({ "text": "zz" }));
         assert!(one > 1, "a multi-byte body must serialize to more bytes");
-        let page = scenario
-            .provider
-            .recall(
-                CLIENT,
-                &recall_request(
-                    &scenario.space_id,
-                    subject_all(),
-                    budget(10, Some(u64::try_from(one).expect("size fits"))),
-                    None,
-                    None,
-                    None,
-                ),
-                now(),
-            )
-            .await
-            .expect("exact byte fit");
+        let page = recall_with_budget(
+            &scenario,
+            budget(10, Some(u64::try_from(one).expect("size fits"))),
+            None,
+        )
+        .await;
         assert_eq!(recalled_ids(&page), vec!["rec_one"]);
         assert!(page.overflow_record_id.is_none());
         assert!(page.truncated);
-        let page = scenario
-            .provider
-            .recall(
-                CLIENT,
-                &recall_request(
-                    &scenario.space_id,
-                    subject_all(),
-                    budget(10, Some(u64::try_from(one + two).expect("size fits"))),
-                    None,
-                    None,
-                    None,
-                ),
-                now(),
-            )
-            .await
-            .expect("both fit");
+        let page = recall_with_budget(
+            &scenario,
+            budget(10, Some(u64::try_from(one + two).expect("size fits"))),
+            None,
+        )
+        .await;
         assert_eq!(recalled_ids(&page), vec!["rec_one", "rec_two"]);
         assert!(!page.truncated);
         assert!(page.next_cursor.is_none());
@@ -1807,8 +1663,7 @@ mod tests {
             scenario
                 .insert_record(
                     &format!("rec_{index}"),
-                    "shared",
-                    None,
+                    ("shared", None),
                     &format!("row {index}"),
                     &[],
                     None,
@@ -1911,6 +1766,11 @@ mod tests {
         let scenario = Scenario::open().await;
         scenario.ensure_subject().await;
         scenario.grant(CLIENT, &["recall"], None, None).await;
+        seeded_ranking_is_deterministic(&scenario).await;
+        provenance_filter_is_anded_with_the_selection(&scenario).await;
+    }
+
+    async fn seeded_ranking_is_deterministic(scenario: &Scenario) {
         let records: [(&str, &str, Option<&str>, &str); 7] = [
             (
                 "rec_alpaca",
@@ -1954,8 +1814,7 @@ mod tests {
             scenario
                 .insert_record(
                     record_id,
-                    "shared",
-                    None,
+                    ("shared", None),
                     text,
                     &[],
                     occurred_at,
@@ -1964,19 +1823,7 @@ mod tests {
                 .await;
         }
 
-        let request = recall_request(
-            &scenario.space_id,
-            subject_all(),
-            budget(10, None),
-            None,
-            None,
-            None,
-        );
-        let first = scenario
-            .provider
-            .recall(CLIENT, &request, now())
-            .await
-            .expect("ranked");
+        let first = recall_page(scenario, subject_all()).await;
         assert_eq!(first.total_authorized, 7);
         assert_eq!(
             recalled_ids(&first),
@@ -1990,27 +1837,11 @@ mod tests {
                 "rec_none",
             ]
         );
-        let again = scenario
-            .provider
-            .recall(CLIENT, &request, now())
-            .await
-            .expect("ranked again");
+        let again = recall_page(scenario, subject_all()).await;
         assert_eq!(recalled_ids(&again), recalled_ids(&first));
 
         // The hint orders matching records first and never filters.
-        let request = recall_request(
-            &scenario.space_id,
-            subject_all(),
-            budget(10, None),
-            None,
-            None,
-            Some("alpaca"),
-        );
-        let hinted = scenario
-            .provider
-            .recall(CLIENT, &request, now())
-            .await
-            .expect("hinted");
+        let hinted = recall_with_query(scenario, "alpaca").await;
         assert_eq!(hinted.total_authorized, 7);
         assert_eq!(
             recalled_ids(&hinted),
@@ -2024,14 +1855,15 @@ mod tests {
                 "rec_none",
             ]
         );
+    }
 
+    async fn provenance_filter_is_anded_with_the_selection(scenario: &Scenario) {
         // The provenance filter is ANDed with the selection and never rewrites
         // placement: a record placed in ctx-a is filtered by its origin.
         scenario
             .insert_record(
                 "rec_origin",
-                "shared",
-                None,
+                ("shared", None),
                 "originated",
                 &["ctx-a"],
                 None,
@@ -2041,8 +1873,7 @@ mod tests {
         scenario
             .insert_record(
                 "rec_foreign",
-                "shared",
-                None,
+                ("shared", None),
                 "elsewhere",
                 &["ctx-z"],
                 None,
@@ -2075,8 +1906,7 @@ mod tests {
         scenario
             .insert_record(
                 "rec_archived",
-                "shared",
-                None,
+                ("shared", None),
                 "still stored",
                 &[],
                 None,
@@ -2150,6 +1980,16 @@ mod tests {
         let first_body = "Naïve draft — \"quoted\", backslash \\ and a newline\nend 🐙";
         let second_body = "Second body\nwith two lines\tand a tab";
 
+        profile_bodies_round_trip_and_stale_cas_is_refused(&scenario, first_body, second_body)
+            .await;
+        profile_create_only_then_reopen(scenario, second_body).await;
+    }
+
+    async fn profile_bodies_round_trip_and_stale_cas_is_refused(
+        scenario: &Scenario,
+        first_body: &str,
+        second_body: &str,
+    ) {
         let change = scenario
             .provider
             .profile_update(
@@ -2222,7 +2062,9 @@ mod tests {
                     .as_str()
             )
         );
+    }
 
+    async fn profile_create_only_then_reopen(scenario: Scenario, second_body: &str) {
         // `null` admits creation only.
         let create_only = scenario
             .provider
@@ -2286,6 +2128,15 @@ mod tests {
                 .expect("operator authors a profile");
         }
 
+        profile_reads_without_a_grant_are_refused(&scenario).await;
+        profile_reads_follow_the_grant_coverage(&scenario).await;
+        context_limited_shared_facet_widens_the_read(&scenario).await;
+        profile_writes_require_shared_document_access(&scenario).await;
+        disjoint_contexts_are_never_unioned(&scenario).await;
+        the_shared_facet_admits_the_write(&scenario).await;
+    }
+
+    async fn profile_reads_without_a_grant_are_refused(scenario: &Scenario) {
         // No grant at all: neither read nor write is admitted.
         assert_eq!(
             reject_code(
@@ -2319,7 +2170,9 @@ mod tests {
             ),
             SpokeRejectCode::NotAuthorized
         );
+    }
 
+    async fn profile_reads_follow_the_grant_coverage(scenario: &Scenario) {
         // Any capability with unrestricted coverage admits the read (§7.23),
         // but only profile_write admits the write (§7.24).
         scenario.grant(CLIENT, &["recall"], None, None).await;
@@ -2355,7 +2208,9 @@ mod tests {
             ),
             SpokeRejectCode::NotAuthorized
         );
+    }
 
+    async fn context_limited_shared_facet_widens_the_read(scenario: &Scenario) {
         // A context-limited grant without shared access cannot read a profile;
         // the shared facet is what widens it.
         scenario
@@ -2414,7 +2269,9 @@ mod tests {
             .await
             .expect("absent kind");
         assert!(page.profiles.is_empty());
+    }
 
+    async fn profile_writes_require_shared_document_access(scenario: &Scenario) {
         // profile_write on the same principal admits the update.
         scenario.grant(CLIENT, &["profile_write"], None, None).await;
         let change = scenario
@@ -2497,12 +2354,18 @@ mod tests {
                 .get(),
             2
         );
+    }
 
+    async fn disjoint_contexts_are_never_unioned(scenario: &Scenario) {
         // Two partial grants on disjoint contexts are never unioned into
         // shared coverage.
         scenario
             .grant(LIMITED, &["profile_write"], Some(&["ctx-b"]), None)
             .await;
+        let document = scenario
+            .raw_profile("personality")
+            .await
+            .expect("stored document");
         let union_marker = scenario.marker().await;
         let refused = scenario
             .provider
@@ -2524,7 +2387,9 @@ mod tests {
             scenario.raw_profile("personality").await.as_deref(),
             Some(document.as_str())
         );
+    }
 
+    async fn the_shared_facet_admits_the_write(scenario: &Scenario) {
         // The shared facet on the same context restriction is the legal
         // control: the document is read and written again.
         scenario
@@ -2575,8 +2440,7 @@ mod tests {
         scenario
             .insert_record(
                 "rec_captured",
-                "shared",
-                None,
+                ("shared", None),
                 "captured-marker-7f3",
                 &[],
                 None,
@@ -2599,12 +2463,11 @@ mod tests {
             .await
             .expect("authored profile");
 
-        let record_before = scenario.raw_record("rec_captured").await;
-        let profile_before = scenario
-            .raw_profile("personality")
-            .await
-            .expect("stored profile");
+        captured_text_and_profiles_never_bleed(&scenario).await;
+        authoring_and_recall_never_cross_write(&scenario).await;
+    }
 
+    async fn captured_text_and_profiles_never_bleed(scenario: &Scenario) {
         let page = scenario
             .provider
             .recall(
@@ -2635,9 +2498,16 @@ mod tests {
         assert_eq!(profiles.profiles[0].document.body, "authored-marker-9c1");
         let serialized = serde_json::to_string(&profiles.profiles).expect("profiles json");
         assert!(!serialized.contains("captured-marker-7f3"));
+    }
 
+    async fn authoring_and_recall_never_cross_write(scenario: &Scenario) {
         // Authoring a new profile document never rewrote captured text, and a
         // recall never rewrote an authored document.
+        let record_before = scenario.raw_record("rec_captured").await;
+        let profile_before = scenario
+            .raw_profile("personality")
+            .await
+            .expect("stored profile");
         scenario
             .provider
             .profile_update(
@@ -2701,8 +2571,7 @@ mod tests {
         scenario
             .insert_record(
                 "rec_shared",
-                "shared",
-                None,
+                ("shared", None),
                 "row",
                 &[],
                 None,
@@ -2711,6 +2580,12 @@ mod tests {
             .await;
         let baseline = scenario.marker().await;
 
+        caller_rollback_discards_the_staged_profile(&scenario, baseline).await;
+        caller_commit_applies_the_profile(&scenario, baseline).await;
+        a_frozen_space_refuses_only_the_write(&scenario).await;
+    }
+
+    async fn caller_rollback_discards_the_staged_profile(scenario: &Scenario, baseline: u64) {
         // A caller rollback discards both the staged document and its marker
         // step: the mutation owns no commit of its own.
         let mut transaction = scenario
@@ -2740,7 +2615,9 @@ mod tests {
         transaction.rollback().await.expect("rollback");
         assert_eq!(scenario.marker().await, baseline);
         assert!(scenario.raw_profile("personality").await.is_none());
+    }
 
+    async fn caller_commit_applies_the_profile(scenario: &Scenario, baseline: u64) {
         // A caller commit applies the document and its marker step together.
         let mut transaction = scenario
             .provider
@@ -2796,7 +2673,9 @@ mod tests {
             .await;
         assert_eq!(reject_code(stale), SpokeRejectCode::RevisionConflict);
         assert_eq!(scenario.marker().await, after_commit);
+    }
 
+    async fn a_frozen_space_refuses_only_the_write(scenario: &Scenario) {
         // §8.2: a frozen space still admits the read-only ops and refuses the
         // write, leaving no effect behind.
         let freeze: MemorySpacesFreezeRequest = serde_json::from_value(json!({

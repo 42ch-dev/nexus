@@ -490,30 +490,69 @@ async fn capture_to_fenced_target_has_no_effect(matrix: &Matrix, resources: &mut
     let captures_before = sorted(resources.receipt_ids_for(observer, "memory.capture").await);
     let candidates_before = sorted(all_candidate_ids(&admin).await);
     let records_before = sorted(all_record_ids(&admin).await);
+
     let denied = admin
         .capture(capture_body("k-c026", TEXT, &context_scope(CONTEXT)))
         .await;
-    assert_eq!(error_code(&denied), "SUBJECT_FENCED", "{denied}");
+    assert_fenced_refusal(&denied);
+    assert_fenced_write_left_no_effect(
+        &admin,
+        resources,
+        observer,
+        &captures_before,
+        &candidates_before,
+        &records_before,
+    )
+    .await;
+
+    let admitted = unfence_and_retry(&admin).await;
+    assert_retry_committed_exactly_once(
+        &admin,
+        resources,
+        observer,
+        &captures_before,
+        &candidates_before,
+        &records_before,
+        &admitted,
+    )
+    .await;
+    resources
+        .close_observer(observer)
+        .await
+        .expect("the no-effect observer closes");
+}
+
+fn assert_fenced_refusal(denied: &Value) {
+    assert_eq!(error_code(denied), "SUBJECT_FENCED", "{denied}");
     assert_eq!(
-        error_details(&denied)["scope"],
+        error_details(denied)["scope"],
         json!("context"),
         "the fenced-context write names its scope (§7.7): {denied}"
     );
-    assert_eq!(retry_class(&denied), "terminal");
+    assert_eq!(retry_class(denied), "terminal");
+}
 
-    // Protocol-visible absence of every effect the refused write could have had.
+/// Protocol-visible absence of every effect the refused write could have had.
+async fn assert_fenced_write_left_no_effect(
+    admin: &Actor<'_>,
+    resources: &mut OwnedResources,
+    observer: usize,
+    captures_before: &[String],
+    candidates_before: &[String],
+    records_before: &[String],
+) {
     assert_eq!(
-        sorted(all_candidate_ids(&admin).await),
+        sorted(all_candidate_ids(admin).await),
         candidates_before,
         "the fenced refusal added no candidate of any status"
     );
     assert_eq!(
-        sorted(all_record_ids(&admin).await),
+        sorted(all_record_ids(admin).await),
         records_before,
         "the fenced refusal added no record"
     );
-    assert_eq!(ids(&pending(&admin).await), [] as [std::string::String; 0]);
-    let recalled_page = recalled(&admin, json!({ "mode": "subject_all" })).await;
+    assert_eq!(ids(&pending(admin).await), [] as [std::string::String; 0]);
+    let recalled_page = recalled(admin, json!({ "mode": "subject_all" })).await;
     assert_eq!(
         recalled_page["total_authorized"],
         json!(0),
@@ -524,9 +563,10 @@ async fn capture_to_fenced_target_has_no_effect(matrix: &Matrix, resources: &mut
         captures_before,
         "the fenced refusal created no durable receipt for its key"
     );
+}
 
-    // Clearing the fence leaves the key unconsumed: the SAME key now commits
-    // and owns exactly the one new durable receipt and candidate.
+/// Clearing the fence leaves the key unconsumed: the SAME key now commits.
+async fn unfence_and_retry(admin: &Actor<'_>) -> Value {
     admin
         .fence_subject(
             SUBJECT,
@@ -543,14 +583,27 @@ async fn capture_to_fenced_target_has_no_effect(matrix: &Matrix, resources: &mut
         is_committed(&admitted),
         "the fenced refusal never consumed the original key: {admitted}"
     );
-    let retried = candidate_ids(&admitted);
+    admitted
+}
+
+/// The retry owns exactly the one new durable receipt and candidate.
+async fn assert_retry_committed_exactly_once(
+    admin: &Actor<'_>,
+    resources: &mut OwnedResources,
+    observer: usize,
+    captures_before: &[String],
+    candidates_before: &[String],
+    records_before: &[String],
+    admitted: &Value,
+) {
+    let retried = candidate_ids(admitted);
     assert_eq!(
         retried.len(),
         1,
         "this deterministic capture produces exactly one candidate: {admitted}"
     );
     let retried_id = &retried[0];
-    let pending_page = pending(&admin).await;
+    let pending_page = pending(admin).await;
     let retried_row = pending_page["candidates"]
         .as_array()
         .expect("pending candidates")
@@ -563,30 +616,26 @@ async fn capture_to_fenced_target_has_no_effect(matrix: &Matrix, resources: &mut
         context_scope(CONTEXT),
         "the candidate keeps the requested context placement"
     );
-    let mut candidates_expected = candidates_before.clone();
+    let mut candidates_expected = candidates_before.to_vec();
     candidates_expected.extend(retried);
     assert_eq!(
-        sorted(all_candidate_ids(&admin).await),
+        sorted(all_candidate_ids(admin).await),
         sorted(candidates_expected),
         "the retry contributed exactly its own candidate"
     );
     assert_eq!(
-        sorted(all_record_ids(&admin).await),
+        sorted(all_record_ids(admin).await),
         records_before,
         "the capture retry created no record"
     );
     let receipts_after = sorted(resources.receipt_ids_for(observer, "memory.capture").await);
-    let mut receipts_expected = captures_before.clone();
-    receipts_expected.push(receipt_id(&admitted).to_owned());
+    let mut receipts_expected = captures_before.to_vec();
+    receipts_expected.push(receipt_id(admitted).to_owned());
     assert_eq!(
         receipts_after,
         sorted(receipts_expected),
         "the exact durable receipt set is the prior set plus the committed retry: {receipts_after:?}"
     );
-    resources
-        .close_observer(observer)
-        .await
-        .expect("the no-effect observer closes");
 }
 
 #[tokio::test]

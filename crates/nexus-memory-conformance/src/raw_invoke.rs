@@ -165,9 +165,8 @@ mod tests {
 
     #[test]
     fn a_request_without_a_scope_fails_closed() {
-        let reject = match admitted::<&str>("memory.capture", "fixture-a", "request") {
-            Ok(_) => panic!("no scope is admitted"),
-            Err(reject) => reject,
+        let Err(reject) = admitted::<&str>("memory.capture", "fixture-a", "request") else {
+            panic!("no scope is admitted");
         };
         assert_eq!(reject.code, SpokeRejectCode::InternalError);
         assert_eq!(missing_kind(&reject), Some("request_scope_missing"));
@@ -175,13 +174,12 @@ mod tests {
 
     #[tokio::test]
     async fn another_operations_scope_is_refused() {
-        let reject = match with_scope(scope("memory.records.create", "fixture-a"), async {
+        let Err(reject) = with_scope(scope("memory.records.create", "fixture-a"), async {
             admitted::<&str>("memory.capture", "fixture-a", "request")
         })
         .await
-        {
-            Ok(_) => panic!("an op may only consume its own scope"),
-            Err(reject) => reject,
+        else {
+            panic!("an op may only consume its own scope");
         };
         assert_eq!(reject.code, SpokeRejectCode::InternalError);
         assert_eq!(missing_kind(&reject), Some("request_scope_missing"));
@@ -189,13 +187,12 @@ mod tests {
 
     #[tokio::test]
     async fn another_providers_scope_is_refused() {
-        let reject = match with_scope(scope("memory.capture", "fixture-b"), async {
+        let Err(reject) = with_scope(scope("memory.capture", "fixture-b"), async {
             admitted::<&str>("memory.capture", "fixture-a", "request")
         })
         .await
-        {
-            Ok(_) => panic!("a provider may only consume its own scope"),
-            Err(reject) => reject,
+        else {
+            panic!("a provider may only consume its own scope");
         };
         assert_eq!(reject.code, SpokeRejectCode::InternalError);
         assert_eq!(missing_kind(&reject), Some("request_scope_missing"));

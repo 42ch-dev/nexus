@@ -1254,7 +1254,11 @@ impl FixtureMemoryProvider {
             SpokeResult::Ok(digest) => digest,
             SpokeResult::Reject(reject) => return Err(reject),
         };
-        let start = list_cursor_start(&binding_digest, &records, request.cursor.as_ref().map(|cursor| cursor.as_str()))?;
+        let start = list_cursor_start(
+            &binding_digest,
+            &records,
+            request.cursor.as_ref().map(|cursor| cursor.as_str()),
+        )?;
         let limit = usize::try_from(request.limit.map_or(MAX_PAGE_SIZE.get(), NonZeroU64::get))
             .map_err(internal_failure)?;
         let remaining = &records[start..];
@@ -1311,6 +1315,8 @@ mod tests {
         MemorySpacesUnfreezeRequest, MemorySubjectsEnsureRequest, MemorySubjectsFenceRequest,
     };
 
+    use crate::spaces::GrantIssued;
+
     const OPERATOR: &str = "principal-operator";
     const CLIENT: &str = "principal-client-b";
     const WRITER: &str = "principal-writer";
@@ -1348,12 +1354,7 @@ mod tests {
             let provider = FixtureMemoryProvider::open(&self.path)
                 .await
                 .expect("fixture reopens");
-            Self {
-                _home: self._home,
-                path: self.path,
-                provider,
-                space_id: self.space_id,
-            }
+            Self { provider, ..self }
         }
     }
 
@@ -1442,10 +1443,10 @@ mod tests {
             "subject_id": subject,
             "kind": kind,
             "content": { "text": text },
-            "scope": match context {
-                Some(context) => json!({ "visibility": "context", "context_id": context }),
-                None => json!({ "visibility": "shared" }),
-            },
+            "scope": context.map_or_else(
+                || json!({ "visibility": "shared" }),
+                |context| json!({ "visibility": "context", "context_id": context }),
+            ),
             "source_context_ids": [],
             "anchors": [],
             "idempotency_key": key,
@@ -1500,23 +1501,23 @@ mod tests {
         subject: &str,
         kind: &str,
         content: Value,
-        context: Option<&str>,
+        scope: Option<&str>,
         key: &str,
     ) -> MemoryRecordsCreateRequest {
-        serde_json::from_value(json!({
+        let mut value = json!({
             "space_id": space,
             "subject_id": subject,
             "kind": kind,
-            "content": content,
-            "scope": match context {
-                Some(context) => json!({ "visibility": "context", "context_id": context }),
-                None => json!({ "visibility": "shared" }),
-            },
+            "scope": scope.map_or_else(
+                || json!({ "visibility": "shared" }),
+                |context_id| json!({ "visibility": "context", "context_id": context_id }),
+            ),
             "source_context_ids": [],
             "anchors": [],
             "idempotency_key": key,
-        }))
-        .expect("valid records.create request")
+        });
+        value["content"] = content;
+        serde_json::from_value(value).expect("valid records.create request")
     }
 
     fn expiring_grant_request(
@@ -1617,14 +1618,14 @@ mod tests {
         target: Value,
         key: &str,
     ) -> MemoryRecordsPromoteRequest {
-        serde_json::from_value(json!({
+        let mut value = json!({
             "space_id": space,
             "record_id": record_id,
             "expected_revision": expected,
-            "target_scope": target,
             "idempotency_key": key,
-        }))
-        .expect("valid records.promote request")
+        });
+        value["target_scope"] = target;
+        serde_json::from_value(value).expect("valid records.promote request")
     }
 
     fn list_request(
@@ -1639,10 +1640,10 @@ mod tests {
         let mut value = json!({
             "space_id": space,
             "subject_id": subject,
-            "selection": selection,
             "kinds": kinds,
             "include_tombstoned": include_tombstoned,
         });
+        value["selection"] = selection;
         if let Some(limit) = limit {
             value["limit"] = json!(limit);
         }
@@ -1659,15 +1660,15 @@ mod tests {
         target: Value,
         expected: u64,
     ) -> MemorySubjectsFenceRequest {
-        serde_json::from_value(json!({
+        let mut value = json!({
             "space_id": space,
             "subject_id": subject,
-            "target": target,
             "action": action,
             "expected_revision": expected,
             "idempotency_key": format!("fence-{action}-{expected}"),
-        }))
-        .expect("valid subjects.fence request")
+        });
+        value["target"] = target;
+        serde_json::from_value(value).expect("valid subjects.fence request")
     }
 
     fn reject_code<T: std::fmt::Debug>(result: Result<T, SpokeReject>) -> SpokeRejectCode {
@@ -1680,14 +1681,18 @@ mod tests {
     fn live(record: &RetainedRecord) -> &LiveRecord {
         match record {
             RetainedRecord::LiveRecord(record) => record,
-            other => panic!("expected a live record, observed {other:?}"),
+            other @ RetainedRecord::TombstonedRecord(_) => {
+                panic!("expected a live record, observed {other:?}")
+            }
         }
     }
 
     fn tombstoned(record: &RetainedRecord) -> &TombstonedRecord {
         match record {
             RetainedRecord::TombstonedRecord(record) => record,
-            other => panic!("expected a tombstoned record, observed {other:?}"),
+            other @ RetainedRecord::LiveRecord(_) => {
+                panic!("expected a tombstoned record, observed {other:?}")
+            }
         }
     }
 
@@ -1714,6 +1719,12 @@ mod tests {
     #[tokio::test]
     async fn create_read_update_delete_with_revision_cas() {
         let scenario = Scenario::open().await;
+        let created = create_and_read_the_record(&scenario).await;
+        content_update_enforces_the_revision_cas(&scenario, &created).await;
+        delete_hides_the_tombstone_from_non_admins(&scenario, &created).await;
+    }
+
+    async fn create_and_read_the_record(scenario: &Scenario) -> RecordRevision {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         scenario
@@ -1749,7 +1760,14 @@ mod tests {
         assert_eq!(live_record.provenance.captured_by.as_str(), OPERATOR);
         assert_eq!(*live_record.provenance.captured_at, now());
         assert_eq!(live_record.record_id.as_str(), created.record_id);
+        created
+    }
 
+    async fn content_update_enforces_the_revision_cas(
+        scenario: &Scenario,
+        created: &RecordRevision,
+    ) {
+        let space = scenario.space_id.clone();
         let updated = scenario
             .provider
             .records_update(
@@ -1790,7 +1808,14 @@ mod tests {
             .expect("operator reads the unchanged record");
         assert_eq!(live(&record).content.text, "second");
         assert_eq!(live(&record).revision.get(), 2);
+    }
 
+    async fn delete_hides_the_tombstone_from_non_admins(
+        scenario: &Scenario,
+        created: &RecordRevision,
+    ) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
         let deleted = scenario
             .provider
             .records_delete(
@@ -1979,6 +2004,15 @@ mod tests {
     #[tokio::test]
     async fn pages_are_bounded_stable_and_authorized() {
         let scenario = Scenario::open().await;
+        let ctx_a = seed_authorized_page_records(&scenario).await;
+        let (first_page, cursor) = scoped_pages_cover_the_authorized_rows(&scenario, &ctx_a).await;
+        replaying_the_query_keeps_the_page_order(&scenario, &first_page).await;
+        out_of_coverage_selections_and_oversized_pages_are_refused(&scenario).await;
+        a_state_change_invalidates_the_outstanding_cursor(&scenario, &cursor).await;
+        shared_access_widens_the_selection(&scenario).await;
+    }
+
+    async fn seed_authorized_page_records(scenario: &Scenario) -> Vec<String> {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         scenario
@@ -2025,7 +2059,15 @@ mod tests {
             )
             .await
             .expect("context-scoped reader grant");
+        ctx_a
+    }
 
+    async fn scoped_pages_cover_the_authorized_rows(
+        scenario: &Scenario,
+        ctx_a: &[String],
+    ) -> (RecordPage, String) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
         let selection = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"] });
         let first_page = scenario
             .provider
@@ -2076,17 +2118,28 @@ mod tests {
             .chain(second_page.records.iter())
             .map(|record| match record {
                 RetainedRecord::LiveRecord(record) => record.record_id.to_string(),
-                other => panic!("unexpected record variant {other:?}"),
+                other @ RetainedRecord::TombstonedRecord(_) => {
+                    panic!("unexpected record variant {other:?}")
+                }
             })
             .collect();
         paged.sort_unstable();
-        let mut expected = ctx_a.clone();
+        let mut expected = ctx_a.to_vec();
         expected.sort_unstable();
         assert_eq!(
             paged, expected,
             "authorized rows are exact and no other placement leaks"
         );
+        (first_page, cursor)
+    }
 
+    async fn replaying_the_query_keeps_the_page_order(
+        scenario: &Scenario,
+        first_page: &RecordPage,
+    ) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        let selection = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"] });
         // The same query started again yields the same order and totals.
         let replay = scenario
             .provider
@@ -2104,7 +2157,9 @@ mod tests {
             .iter()
             .map(|record| match record {
                 RetainedRecord::LiveRecord(record) => record.record_id.to_string(),
-                other => panic!("unexpected record variant {other:?}"),
+                other @ RetainedRecord::TombstonedRecord(_) => {
+                    panic!("unexpected record variant {other:?}")
+                }
             })
             .collect();
         let first_two: Vec<String> = first_page
@@ -2112,11 +2167,18 @@ mod tests {
             .iter()
             .map(|record| match record {
                 RetainedRecord::LiveRecord(record) => record.record_id.to_string(),
-                other => panic!("unexpected record variant {other:?}"),
+                other @ RetainedRecord::TombstonedRecord(_) => {
+                    panic!("unexpected record variant {other:?}")
+                }
             })
             .collect();
         assert_eq!(replayed[..2], first_two[..], "page order is stable");
+    }
 
+    async fn out_of_coverage_selections_and_oversized_pages_are_refused(scenario: &Scenario) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        let selection = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"] });
         // Selection modes outside the grant's coverage are refused, and the
         // page bound is the published one.
         assert_eq!(
@@ -2182,7 +2244,12 @@ mod tests {
             ),
             SpokeRejectCode::InvalidInput
         );
+    }
 
+    async fn a_state_change_invalidates_the_outstanding_cursor(scenario: &Scenario, cursor: &str) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        let selection = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"] });
         // Any committed record change advances the snapshot and invalidates an
         // outstanding cursor instead of silently re-filtering the next page.
         scenario
@@ -2207,7 +2274,7 @@ mod tests {
                             &[],
                             false,
                             Some(2),
-                            Some(&cursor)
+                            Some(cursor)
                         ),
                         now(),
                     )
@@ -2215,7 +2282,11 @@ mod tests {
             ),
             SpokeRejectCode::CursorInvalid
         );
+    }
 
+    async fn shared_access_widens_the_selection(scenario: &Scenario) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
         // A shared-access grant widens the selection to shared records only
         // because the selection asks for them.
         scenario
@@ -2257,6 +2328,14 @@ mod tests {
     #[tokio::test]
     async fn promote_needs_one_grant_over_both_capabilities_and_placements() {
         let scenario = Scenario::open().await;
+        let created = seed_promotable_record(&scenario).await;
+        promotion_needs_both_capabilities_in_one_grant(&scenario, &created).await;
+        split_capabilities_never_compose(&scenario, &created).await;
+        a_dual_capability_grant_promotes_the_record(&scenario, &created).await;
+        promoting_into_shared_needs_shared_access(&scenario, &created).await;
+    }
+
+    async fn seed_promotable_record(scenario: &Scenario) -> RecordRevision {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         scenario
@@ -2280,8 +2359,16 @@ mod tests {
             )
             .await
             .expect("record exists");
-        let target_ctx_b = json!({ "visibility": "context", "context_id": "ctx-b" });
+        created
+    }
 
+    async fn promotion_needs_both_capabilities_in_one_grant(
+        scenario: &Scenario,
+        created: &RecordRevision,
+    ) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        let target_ctx_b = json!({ "visibility": "context", "context_id": "ctx-b" });
         scenario
             .provider
             .grants_grant(
@@ -2371,7 +2458,12 @@ mod tests {
             SpokeRejectCode::NotFound,
             "the target placement is outside the grant"
         );
+    }
 
+    async fn split_capabilities_never_compose(scenario: &Scenario, created: &RecordRevision) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        let target_ctx_b = json!({ "visibility": "context", "context_id": "ctx-b" });
         // Two disjoint grants (one per capability) never compose into
         // promotion authority.
         scenario
@@ -2418,7 +2510,15 @@ mod tests {
             SpokeRejectCode::NotFound,
             "capabilities split across grants are not unioned"
         );
+    }
 
+    async fn a_dual_capability_grant_promotes_the_record(
+        scenario: &Scenario,
+        created: &RecordRevision,
+    ) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        let target_ctx_b = json!({ "visibility": "context", "context_id": "ctx-b" });
         scenario
             .provider
             .grants_grant(
@@ -2457,7 +2557,13 @@ mod tests {
             scope_of(&live(&record).scope),
             ("context".to_owned(), Some("ctx-b".to_owned()))
         );
+    }
 
+    async fn promoting_into_shared_needs_shared_access(
+        scenario: &Scenario,
+        created: &RecordRevision,
+    ) {
+        let space = scenario.space_id.clone();
         // Promoting into shared visibility needs shared access in the same
         // grant; the ctx-only dual grant is refused.
         assert_eq!(
@@ -2501,6 +2607,12 @@ mod tests {
     #[tokio::test]
     async fn freeze_blocks_record_mutations_but_admits_reads() {
         let scenario = Scenario::open().await;
+        let created = frozen_space_with_one_record(&scenario).await;
+        frozen_writes_are_refused(&scenario, &created).await;
+        reads_and_post_unfreeze_writes_stay_admitted(&scenario, &created).await;
+    }
+
+    async fn frozen_space_with_one_record(scenario: &Scenario) -> RecordRevision {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         scenario
@@ -2522,7 +2634,12 @@ mod tests {
             .spaces_freeze(OPERATOR, &freeze_request(&space, 1), now())
             .await
             .expect("space freezes");
+        created
+    }
 
+    async fn frozen_writes_are_refused(scenario: &Scenario, created: &RecordRevision) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
         assert_eq!(
             reject_code(
                 scenario
@@ -2594,7 +2711,14 @@ mod tests {
             ),
             SpokeRejectCode::SpaceFrozen
         );
+    }
 
+    async fn reads_and_post_unfreeze_writes_stay_admitted(
+        scenario: &Scenario,
+        created: &RecordRevision,
+    ) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
         // Read-only ops stay admitted while frozen (MEM-R011).
         let record = scenario
             .provider
@@ -2641,6 +2765,14 @@ mod tests {
     #[tokio::test]
     async fn subject_and_context_fence_refuse_record_writes() {
         let scenario = Scenario::open().await;
+        let (ctx_a, ctx_b) = two_records_in_sibling_contexts(&scenario).await;
+        subject_fence_refuses_writes_but_admits_reads(&scenario, &ctx_b).await;
+        context_fence_scopes_writes_and_promotion(&scenario, &ctx_a, &ctx_b).await;
+    }
+
+    async fn two_records_in_sibling_contexts(
+        scenario: &Scenario,
+    ) -> (RecordRevision, RecordRevision) {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         scenario
@@ -2666,7 +2798,15 @@ mod tests {
             )
             .await
             .expect("ctx-b record");
+        (ctx_a, ctx_b)
+    }
 
+    async fn subject_fence_refuses_writes_but_admits_reads(
+        scenario: &Scenario,
+        ctx_b: &RecordRevision,
+    ) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
         scenario
             .provider
             .subjects_fence(
@@ -2715,7 +2855,15 @@ mod tests {
             .records_get(OPERATOR, &get_request(&space, &ctx_b.record_id), now())
             .await
             .expect("read stays admitted under a subject fence");
+    }
 
+    async fn context_fence_scopes_writes_and_promotion(
+        scenario: &Scenario,
+        ctx_a: &RecordRevision,
+        ctx_b: &RecordRevision,
+    ) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
         scenario
             .provider
             .subjects_fence(
@@ -2872,7 +3020,9 @@ mod tests {
             .iter()
             .map(|record| match record {
                 RetainedRecord::LiveRecord(record) => record.record_id.to_string(),
-                other => panic!("unexpected record variant {other:?}"),
+                other @ RetainedRecord::TombstonedRecord(_) => {
+                    panic!("unexpected record variant {other:?}")
+                }
             })
             .collect()
     }
@@ -2883,6 +3033,12 @@ mod tests {
     #[tokio::test]
     async fn foreign_and_missing_record_ids_have_no_existence_oracle() {
         let scenario = Scenario::open().await;
+        let created = seed_foreign_and_owned_records(&scenario).await;
+        by_id_refusals_are_indistinguishable(&scenario, &created).await;
+        refusals_leave_no_effect_and_authorized_ops_answer(&scenario, &created).await;
+    }
+
+    async fn seed_foreign_and_owned_records(scenario: &Scenario) -> RecordRevision {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         scenario
@@ -2921,10 +3077,13 @@ mod tests {
             )
             .await
             .expect("foreign placement grant");
-        let before = marker(&scenario).await;
+        created
+    }
+
+    async fn by_id_refusals_are_indistinguishable(scenario: &Scenario, created: &RecordRevision) {
+        let space = scenario.space_id.clone();
         let missing = "rec_00000000000000000000000000000000";
         let target_ctx_b = json!({ "visibility": "context", "context_id": "ctx-b" });
-
         // Every by-id operation answers a foreign placement exactly like an
         // absent id: same code, message and details.
         assert_same_refusal(
@@ -2997,7 +3156,15 @@ mod tests {
                 )
                 .await,
         );
+    }
 
+    async fn refusals_leave_no_effect_and_authorized_ops_answer(
+        scenario: &Scenario,
+        created: &RecordRevision,
+    ) {
+        let space = scenario.space_id.clone();
+        let before = marker(scenario).await;
+        let missing = "rec_00000000000000000000000000000000";
         // A principal with no grants observes the same single refusal.
         assert_same_refusal(
             scenario
@@ -3015,8 +3182,8 @@ mod tests {
         );
 
         // Refusals leave the record and the private snapshot untouched.
-        assert_eq!(marker(&scenario).await, before);
-        let (_, revision, tombstone) = stored_row(&scenario, &created.record_id).await;
+        assert_eq!(marker(scenario).await, before);
+        let (_, revision, tombstone) = stored_row(scenario, &created.record_id).await;
         assert_eq!(revision, 1);
         assert!(tombstone.is_none());
 
@@ -3053,6 +3220,12 @@ mod tests {
     #[tokio::test]
     async fn tombstoned_records_cannot_regain_content_or_placement() {
         let scenario = Scenario::open().await;
+        let (created, after_delete) = tombstone_one_record(&scenario).await;
+        no_write_can_resurrect_the_record(&scenario, &created).await;
+        the_audit_view_and_repeat_delete_stay_stable(&scenario, &created, after_delete).await;
+    }
+
+    async fn tombstone_one_record(scenario: &Scenario) -> (RecordRevision, u64) {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         scenario
@@ -3078,12 +3251,16 @@ mod tests {
             )
             .await
             .expect("record is tombstoned");
-        let after_delete = marker(&scenario).await;
-        let (scrubbed, revision, tombstone) = stored_row(&scenario, &created.record_id).await;
+        let after_delete = marker(scenario).await;
+        let (scrubbed, revision, tombstone) = stored_row(scenario, &created.record_id).await;
         assert_eq!(scrubbed, "{\"text\":\"\"}");
         assert_eq!(revision, 2);
         assert!(tombstone.is_some());
+        (created, after_delete)
+    }
 
+    async fn no_write_can_resurrect_the_record(scenario: &Scenario, created: &RecordRevision) {
+        let space = scenario.space_id.clone();
         // No update can write content back onto a deleted record, and no
         // promotion can move it, whatever revision the caller claims.
         assert_eq!(
@@ -3143,10 +3320,17 @@ mod tests {
             ),
             SpokeRejectCode::NotFound
         );
+    }
 
+    async fn the_audit_view_and_repeat_delete_stay_stable(
+        scenario: &Scenario,
+        created: &RecordRevision,
+        after_delete: u64,
+    ) {
+        let space = scenario.space_id.clone();
         // Durable scrub, revision and snapshot are preserved.
-        assert_eq!(marker(&scenario).await, after_delete);
-        let (scrubbed, revision, tombstone) = stored_row(&scenario, &created.record_id).await;
+        assert_eq!(marker(scenario).await, after_delete);
+        let (scrubbed, revision, tombstone) = stored_row(scenario, &created.record_id).await;
         assert_eq!(scrubbed, "{\"text\":\"\"}");
         assert_eq!(revision, 2);
         assert!(tombstone.is_some());
@@ -3173,38 +3357,21 @@ mod tests {
             .await
             .expect("repeat delete is a no-op success");
         assert!(repeated.tombstoned);
-        assert_eq!(marker(&scenario).await, after_delete);
+        assert_eq!(marker(scenario).await, after_delete);
     }
 
     #[tokio::test]
     async fn delete_obeys_subject_fence_but_not_context_fence() {
         let scenario = Scenario::open().await;
+        let (ctx_a, ctx_b) = two_records_in_sibling_contexts(&scenario).await;
+        subject_fence_blocks_erasure(&scenario, &ctx_a).await;
+        context_fence_does_not_ban_erasure(&scenario, &ctx_a, &ctx_b).await;
+        an_archived_subject_rejects_erasure(&scenario).await;
+    }
+
+    async fn subject_fence_blocks_erasure(scenario: &Scenario, ctx_a: &RecordRevision) {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
-        scenario
-            .provider
-            .subjects_ensure(OPERATOR, &ensure_request(&space, subject), now())
-            .await
-            .expect("subject exists");
-        let ctx_a = scenario
-            .provider
-            .records_create(
-                OPERATOR,
-                &create_request(&space, subject, "note", "a", Some("ctx-a"), "create-a"),
-                now(),
-            )
-            .await
-            .expect("ctx-a record");
-        let ctx_b = scenario
-            .provider
-            .records_create(
-                OPERATOR,
-                &create_request(&space, subject, "note", "b", Some("ctx-b"), "create-b"),
-                now(),
-            )
-            .await
-            .expect("ctx-b record");
-
         scenario
             .provider
             .subjects_fence(
@@ -3214,7 +3381,7 @@ mod tests {
             )
             .await
             .expect("subject fences");
-        let fenced_marker = marker(&scenario).await;
+        let fenced_marker = marker(scenario).await;
         assert_eq!(
             reject_code(
                 scenario
@@ -3229,8 +3396,8 @@ mod tests {
             SpokeRejectCode::SubjectFenced
         );
         // No tombstone, revision or snapshot change from the refused erase.
-        assert_eq!(marker(&scenario).await, fenced_marker);
-        let (_, revision, tombstone) = stored_row(&scenario, &ctx_a.record_id).await;
+        assert_eq!(marker(scenario).await, fenced_marker);
+        let (_, revision, tombstone) = stored_row(scenario, &ctx_a.record_id).await;
         assert_eq!((revision, tombstone.is_none()), (1, true));
 
         scenario
@@ -3257,7 +3424,14 @@ mod tests {
             )
             .await
             .expect("ctx-a fences");
+    }
 
+    async fn context_fence_does_not_ban_erasure(
+        scenario: &Scenario,
+        ctx_a: &RecordRevision,
+        ctx_b: &RecordRevision,
+    ) {
+        let space = scenario.space_id.clone();
         // A context fence is placement-scoped: it does not invent an erasure
         // ban for records already placed in that context.
         let erased = scenario
@@ -3280,7 +3454,11 @@ mod tests {
             .await
             .expect("sibling context erasure");
         assert!(erased.tombstoned);
+    }
 
+    async fn an_archived_subject_rejects_erasure(scenario: &Scenario) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
         // An archived subject rejects erasure like a fence does.
         let later = scenario
             .provider
@@ -3300,7 +3478,7 @@ mod tests {
             )
             .await
             .expect("subject archives");
-        let archived_marker = marker(&scenario).await;
+        let archived_marker = marker(scenario).await;
         assert_eq!(
             reject_code(
                 scenario
@@ -3314,8 +3492,8 @@ mod tests {
             ),
             SpokeRejectCode::SubjectFenced
         );
-        assert_eq!(marker(&scenario).await, archived_marker);
-        let (_, revision, tombstone) = stored_row(&scenario, &later.record_id).await;
+        assert_eq!(marker(scenario).await, archived_marker);
+        let (_, revision, tombstone) = stored_row(scenario, &later.record_id).await;
         assert_eq!((revision, tombstone.is_none()), (1, true));
     }
 
@@ -3323,6 +3501,16 @@ mod tests {
     async fn content_bound_is_exact_jcs_bytes_with_utf8_and_structured() {
         assert_eq!(MAX_CONTENT_BYTES, 65_536);
         let scenario = Scenario::open().await;
+        let created_ascii = ascii_content_at_the_bound_is_admitted(&scenario).await;
+        let created_utf8 = multi_byte_content_counts_bytes_not_characters(&scenario).await;
+        let created_structured = structured_content_counts_canonical_bytes(&scenario).await;
+        let before_updates = marker(&scenario).await;
+        ascii_updates_share_the_bound(&scenario, &created_ascii, before_updates).await;
+        multi_byte_updates_share_the_bound(&scenario, &created_utf8, before_updates).await;
+        structured_updates_share_the_bound(&scenario, &created_structured, before_updates).await;
+    }
+
+    async fn ascii_content_at_the_bound_is_admitted(scenario: &Scenario) -> RecordRevision {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         scenario
@@ -3408,7 +3596,13 @@ mod tests {
             page.total_authorized, 1,
             "the refused create stored nothing"
         );
+        created_ascii
+    }
 
+    async fn multi_byte_content_counts_bytes_not_characters(scenario: &Scenario) -> RecordRevision {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        let text_prefix = "{\"text\":\"\"}".len();
         // The bound counts UTF-8 bytes, not characters: 32,763 two-byte
         // characters are 65,526 bytes and overflow even though the scalar
         // count alone is far below the limit.
@@ -3462,7 +3656,12 @@ mod tests {
             ),
             SpokeRejectCode::InvalidInput
         );
+        created_utf8
+    }
 
+    async fn structured_content_counts_canonical_bytes(scenario: &Scenario) -> RecordRevision {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
         // Structured payloads count through canonical (key-sorted) JCS bytes.
         let structured_base = "{\"structured\":{\"pad\":\"\"},\"text\":\"\"}";
         let pad = "x".repeat(MAX_CONTENT_BYTES - structured_base.len());
@@ -3520,13 +3719,20 @@ mod tests {
             ),
             SpokeRejectCode::InvalidInput
         );
+        created_structured
+    }
 
+    async fn ascii_updates_share_the_bound(
+        scenario: &Scenario,
+        created_ascii: &RecordRevision,
+        before_updates: u64,
+    ) {
+        let space = scenario.space_id.clone();
+        let text_prefix = "{\"text\":\"\"}".len();
         // The update path applies the same serialized-byte bound. Each exact
         // update uses the record's true current revision and is read back; each
         // overflow uses that record's *new* current revision, so INVALID_INPUT
         // cannot be a mislabelled CAS refusal.
-        let before_updates = marker(&scenario).await;
-
         let ascii_updated = "b".repeat(MAX_CONTENT_BYTES - text_prefix);
         let updated = scenario
             .provider
@@ -3559,7 +3765,7 @@ mod tests {
             MAX_CONTENT_BYTES - text_prefix
         );
         assert_eq!(live(&record).revision.get(), 2);
-        assert_eq!(marker(&scenario).await, before_updates + 1);
+        assert_eq!(marker(scenario).await, before_updates + 1);
         let overflow = refusal(
             scenario
                 .provider
@@ -3581,7 +3787,7 @@ mod tests {
         assert_eq!(details["field"], json!("content"));
         assert_eq!(details["limit"], json!("max_content_bytes"));
         assert_eq!(
-            marker(&scenario).await,
+            marker(scenario).await,
             before_updates + 1,
             "refusal has no effect"
         );
@@ -3596,7 +3802,15 @@ mod tests {
             .expect("ASCII record after refused update");
         assert_eq!(live(&record).content.text, ascii_updated);
         assert_eq!(live(&record).revision.get(), 2);
+    }
 
+    async fn multi_byte_updates_share_the_bound(
+        scenario: &Scenario,
+        created_utf8: &RecordRevision,
+        before_updates: u64,
+    ) {
+        let space = scenario.space_id.clone();
+        let text_prefix = "{\"text\":\"\"}".len();
         let utf8_updated = format!("{}{}", "é".repeat(32_762), "b");
         assert_eq!(utf8_updated.len(), MAX_CONTENT_BYTES - text_prefix);
         let updated = scenario
@@ -3630,7 +3844,7 @@ mod tests {
             MAX_CONTENT_BYTES - text_prefix
         );
         assert_eq!(live(&record).revision.get(), 2);
-        assert_eq!(marker(&scenario).await, before_updates + 2);
+        assert_eq!(marker(scenario).await, before_updates + 2);
         assert_eq!(
             reject_code(
                 scenario
@@ -3651,7 +3865,7 @@ mod tests {
             SpokeRejectCode::InvalidInput
         );
         assert_eq!(
-            marker(&scenario).await,
+            marker(scenario).await,
             before_updates + 2,
             "refusal has no effect"
         );
@@ -3666,7 +3880,15 @@ mod tests {
             .expect("multi-byte record after refused update");
         assert_eq!(live(&record).content.text, utf8_updated);
         assert_eq!(live(&record).revision.get(), 2);
+    }
 
+    async fn structured_updates_share_the_bound(
+        scenario: &Scenario,
+        created_structured: &RecordRevision,
+        before_updates: u64,
+    ) {
+        let space = scenario.space_id.clone();
+        let structured_base = "{\"structured\":{\"pad\":\"\"},\"text\":\"\"}";
         let updated_pad = "y".repeat(MAX_CONTENT_BYTES - structured_base.len());
         let structured_update: MemoryRecordsUpdateRequest = serde_json::from_value(json!({
             "space_id": &space,
@@ -3697,7 +3919,7 @@ mod tests {
             Some(&json!({ "pad": &updated_pad }))
         );
         assert_eq!(live(&record).revision.get(), 2);
-        assert_eq!(marker(&scenario).await, before_updates + 3);
+        assert_eq!(marker(scenario).await, before_updates + 3);
         let structured_overflow_update: MemoryRecordsUpdateRequest = serde_json::from_value(json!({
             "space_id": &space,
             "record_id": &created_structured.record_id,
@@ -3719,7 +3941,7 @@ mod tests {
             SpokeRejectCode::InvalidInput
         );
         assert_eq!(
-            marker(&scenario).await,
+            marker(scenario).await,
             before_updates + 3,
             "refusal has no effect"
         );
@@ -3744,6 +3966,13 @@ mod tests {
     #[tokio::test]
     async fn by_id_reads_recheck_revocation_and_expiry() {
         let scenario = Scenario::open().await;
+        let (created, issued) = reader_sees_the_record_before_revocation(&scenario).await;
+        revocation_and_expiry_refuse_by_id_reads(&scenario, &created, &issued).await;
+    }
+
+    async fn reader_sees_the_record_before_revocation(
+        scenario: &Scenario,
+    ) -> (RecordRevision, GrantIssued) {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         scenario
@@ -3788,7 +4017,16 @@ mod tests {
             .records_get(CLIENT, &get_request(&space, &created.record_id), now())
             .await
             .expect("reader sees the record before revocation");
+        (created, issued)
+    }
 
+    async fn revocation_and_expiry_refuse_by_id_reads(
+        scenario: &Scenario,
+        created: &RecordRevision,
+        issued: &GrantIssued,
+    ) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
         scenario
             .provider
             .grants_revoke(
@@ -3798,7 +4036,7 @@ mod tests {
             )
             .await
             .expect("reader grant revokes");
-        let revoked = marker(&scenario).await;
+        let revoked = marker(scenario).await;
         assert_eq!(
             reject_code(
                 scenario
@@ -3808,8 +4046,8 @@ mod tests {
             ),
             SpokeRejectCode::NotFound
         );
-        assert_eq!(marker(&scenario).await, revoked, "refusal has no effect");
-        let (_, revision, _) = stored_row(&scenario, &created.record_id).await;
+        assert_eq!(marker(scenario).await, revoked, "refusal has no effect");
+        let (_, revision, _) = stored_row(scenario, &created.record_id).await;
         assert_eq!(revision, 1);
 
         // Expiry is evaluated at the supplied admission instant.
@@ -3874,13 +4112,18 @@ mod tests {
             ),
             SpokeRejectCode::NotFound
         );
-        let (_, revision, _) = stored_row(&scenario, &created.record_id).await;
+        let (_, revision, _) = stored_row(scenario, &created.record_id).await;
         assert_eq!(revision, 2, "expired refusals leave the record untouched");
     }
 
     #[tokio::test]
     async fn caller_owned_transactions_compose_or_discard_record_effects() {
         let scenario = Scenario::open().await;
+        let before = a_rolled_back_caller_transaction_discards_everything(&scenario).await;
+        a_caller_commit_keeps_both_effects_and_markers(&scenario, before).await;
+    }
+
+    async fn a_rolled_back_caller_transaction_discards_everything(scenario: &Scenario) -> u64 {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         scenario
@@ -3888,7 +4131,7 @@ mod tests {
             .subjects_ensure(OPERATOR, &ensure_request(&space, subject), now())
             .await
             .expect("subject exists");
-        let before = marker(&scenario).await;
+        let before = marker(scenario).await;
 
         // Rolled back caller transaction: neither record nor snapshot survives.
         let mut transaction = scenario
@@ -3931,7 +4174,7 @@ mod tests {
             SpokeRejectCode::NotFound
         );
         transaction.rollback().await.expect("caller rollback");
-        assert_eq!(marker(&scenario).await, before);
+        assert_eq!(marker(scenario).await, before);
         let mut conn = scenario
             .provider
             .store()
@@ -3945,7 +4188,12 @@ mod tests {
             .await
             .expect("rollback query");
         assert!(row.is_none(), "rollback discarded the staged record");
+        before
+    }
 
+    async fn a_caller_commit_keeps_both_effects_and_markers(scenario: &Scenario, before: u64) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
         // Committed caller transaction: both owned effects and both snapshot
         // bumps land in C7's single commit.
         let mut transaction = scenario
@@ -3984,7 +4232,7 @@ mod tests {
             .expect("staged update");
         assert_eq!(updated.revision, 2);
         transaction.commit().await.expect("caller commit");
-        assert_eq!(marker(&scenario).await, before + 2);
+        assert_eq!(marker(scenario).await, before + 2);
         let record = scenario
             .provider
             .records_get(OPERATOR, &get_request(&space, &created.record_id), now())
@@ -3997,6 +4245,12 @@ mod tests {
     #[tokio::test]
     async fn read_snapshot_is_stable_under_committed_state_change() {
         let scenario = Scenario::open().await;
+        let issued = snapshot_pins_rows_and_marker(&scenario).await;
+        snapshot_pins_the_authorization_decision(&scenario, &issued).await;
+        a_revoked_reader_is_refused_outside_the_snapshot(&scenario).await;
+    }
+
+    async fn snapshot_pins_rows_and_marker(scenario: &Scenario) -> GrantIssued {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         scenario
@@ -4084,7 +4338,13 @@ mod tests {
             .await
             .expect("fresh read sees the commit");
         assert_eq!(fresh.total_authorized, 2);
+        issued
+    }
 
+    async fn snapshot_pins_the_authorization_decision(scenario: &Scenario, issued: &GrantIssued) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        let selection = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"] });
         // The same snapshot also pins the authorization decision: a committed
         // revoke does not re-filter an already-open page.
         let mut transaction = scenario
@@ -4126,7 +4386,12 @@ mod tests {
             .expect("same snapshot stays authorized");
         assert_eq!(after_revoke.total_authorized, 2);
         transaction.rollback().await.expect("read transaction ends");
+    }
 
+    async fn a_revoked_reader_is_refused_outside_the_snapshot(scenario: &Scenario) {
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        let selection = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"] });
         assert_eq!(
             reject_code(
                 scenario
