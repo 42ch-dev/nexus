@@ -6557,4 +6557,95 @@ mod tests {
             "{branch}: peer newline escaped: {rendered:?}"
         );
     }
+
+    /// A committed receipt only proves an effect for THIS request. The capture
+    /// and promotion validators accept their own request's answer and refuse a
+    /// schema-valid answer that belongs to another space, key, record or
+    /// placement — always with a static category, never the peer's bytes.
+    #[test]
+    fn committed_receipts_prove_only_their_own_request() {
+        let candidate_receipt = |space: &str, key: &str, ids: Value| {
+            json!({
+                "space_id": space,
+                "idempotency_key": key,
+                "result": { "candidate_ids": ids },
+            })
+        };
+        let own = candidate_receipt("spc_a", "e4capture:1", json!(["cand_1"]));
+        assert_eq!(
+            capture_result_candidate_ids(&own, "spc_a", "e4capture:1")
+                .expect("this request's own receipt"),
+            vec!["cand_1".to_string()],
+        );
+        assert!(
+            capture_result_candidate_ids(
+                &candidate_receipt("spc_a", "e4capture:1", json!([])),
+                "spc_a",
+                "e4capture:1",
+            )
+            .expect("an empty answer is still this request's")
+            .is_empty(),
+            "a capture may legitimately retain no candidate",
+        );
+        for (body, what) in [
+            (
+                candidate_receipt("spc_b", "e4capture:1", json!(["cand_1"])),
+                "space",
+            ),
+            (
+                candidate_receipt("spc_a", "e4capture:2", json!(["cand_1"])),
+                "key",
+            ),
+        ] {
+            let error = capture_result_candidate_ids(&body, "spc_a", "e4capture:1")
+                .expect_err("another request's receipt proves nothing");
+            match error {
+                CoreError::Internal { category } => assert!(
+                    category.starts_with("memory_capture_receipt"),
+                    "the static capture refusal for the {what}, got {category}"
+                ),
+                other => panic!("expected the static capture refusal for the {what}: {other:?}"),
+            }
+        }
+
+        let promotion = |space: &str, key: &str, record: &str, visibility: &str| {
+            json!({
+                "space_id": space,
+                "idempotency_key": key,
+                "result": { "record_id": record, "scope": { "visibility": visibility } },
+            })
+        };
+        assert_eq!(
+            promote_result_record_id(
+                &promotion("spc_a", "promote:r1", "rec_1", "shared"),
+                "spc_a",
+                "promote:r1",
+                "rec_1",
+            )
+            .expect("this request's own promotion"),
+            "rec_1",
+        );
+        for (body, what) in [
+            (promotion("spc_b", "promote:r1", "rec_1", "shared"), "space"),
+            (promotion("spc_a", "promote:r2", "rec_1", "shared"), "key"),
+            (
+                promotion("spc_a", "promote:r1", "rec_2", "shared"),
+                "record",
+            ),
+            (
+                promotion("spc_a", "promote:r1", "rec_1", "context"),
+                "requested shared placement",
+            ),
+        ] {
+            let error = promote_result_record_id(&body, "spc_a", "promote:r1", "rec_1")
+                .expect_err("another request's receipt releases nothing");
+            match error {
+                CoreError::Internal { category } => assert!(
+                    category.starts_with("memory_promote_receipt"),
+                    "the static promotion refusal for the {what}, got {category}"
+                ),
+                other => panic!("expected the static promotion refusal for the {what}: {other:?}"),
+            }
+        }
+    }
 }

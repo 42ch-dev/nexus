@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM remote_binding_memory_objects WHERE binding_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "886920112eb3c87e1650016a331e2dfbc46d518bdb1559a2a8e140e445f5ca80"
+}

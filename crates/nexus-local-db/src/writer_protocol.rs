@@ -289,13 +289,13 @@ impl GuardedPool {
 
     /// Withdraw this handle's registration if the pool it just gave up has
     /// closed — i.e. no clone of it is left usable.
-    #[allow(clippy::significant_drop_tightening)] // one registry read-modify-write; the lock is the mutation
     fn settle_dropped_pool(&self) {
         let mut pools = ACTIVE_POOLS.lock().expect("pool registry poisoned");
         let Some(registered) = pools.get_mut(&self.pool_key()) else {
             return;
         };
         registered.retain_mut(|reg| reg.id != self.registration || registration_open(reg));
+        drop(pools);
     }
 
     /// Give up THIS handle's live claim on its retained admission entry.
@@ -383,7 +383,6 @@ fn reserve_retained_admission(
 /// Claim this process's live admission for `(db_path, mode)` atomically with
 /// the lookup, so the admission cannot be released between joining it and
 /// owning a claim on it.
-#[allow(clippy::significant_drop_tightening)] // the claim spans the lookup, the join and the early removal
 fn claim_live_admission(
     db_path: &Path,
     mode: WriterMode,
@@ -399,10 +398,9 @@ fn claim_live_admission(
     };
     let entry = guards.get_mut(&key)?;
     entry.claims += 1;
-    Some((
-        published,
-        RetainedAdmissionClaim::held(key, entry.writer_id.clone()),
-    ))
+    let claim = RetainedAdmissionClaim::held(key, entry.writer_id.clone());
+    drop(guards);
+    Some((published, claim))
 }
 
 /// Retain a live writer guard in this process's registry so published pools

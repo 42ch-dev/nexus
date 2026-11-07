@@ -39,6 +39,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::net::{Shutdown, SocketAddr};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -3862,4 +3863,338 @@ async fn live_read_readiness_does_not_close_a_queued_recv() {
         .await
         .expect("the peer ends")
         .expect("peer task");
+}
+
+// ---------------------------------------------------------------------------
+// The provider's advertised page bound and request-bound receipt identity
+// ---------------------------------------------------------------------------
+
+/// A provider that advertises a narrower page bound than the adapter's former
+/// constant still serves a whole Core read: the pending page requests, and the
+/// count walks them, at the limit this open negotiated with this provider.
+///
+/// The fixture's advertised bound and its enforced bound are the same constant,
+/// so an over-large request is refused `INVALID_INPUT` — which is exactly what a
+/// Core that ignored the advertised bound would hit on the second page.
+#[tokio::test]
+async fn a_narrower_provider_page_bound_still_serves_the_whole_core_read() {
+    let host_pubkey = pubkey(&HOST_SEED);
+    let client_pubkey = pubkey(&CLIENT_SEED);
+    let client_peer = peer_id(&CLIENT_SEED);
+
+    let fixture_home = TempDir::new().expect("fixture home");
+    let provider = Arc::new(
+        FixtureMemoryProvider::open(&provider_database(&fixture_home))
+            .await
+            .expect("open the durable fixture"),
+    );
+    let served_space = provider.identity().space_id.clone();
+    let authority_host_id = provider.identity().authority_host_id.clone();
+    let principal_id = format!("prn_{client_peer}");
+    provider
+        .provision_operator_admin(&principal_id)
+        .await
+        .expect("operator provisions the admin grant");
+    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id));
+
+    let home = Env::boot("Narrow Bound Owner").await;
+    home.write_credential(&CLIENT_SEED);
+    let (addr, host) = start_listener(
+        provider.server(directory.admission()),
+        manifest(&authority_host_id),
+        client_peer,
+        client_pubkey,
+        5_000,
+    )
+    .await;
+    let core = open(&home, selection(&served_space, addr, &host_pubkey))
+        .await
+        .expect("the exact selection opens against the served space");
+    let principal = core.active_principal().await.expect("active principal");
+    // The adapter's own open provisions the subject this bearer speaks for, so
+    // the first read is the empty queue.
+    assert_eq!(
+        core.count_pending_reviews(&principal)
+            .await
+            .expect("the pinned binding serves the empty queue")
+            .count,
+        0,
+    );
+
+    // More pending candidates than the advertised bound: one page cannot hold
+    // them, so a read that kept a hard-coded larger limit would be refused.
+    let subject_id = legacy::creator_subject_id(&home.creator_id);
+    let bound = nexus_memory_conformance::MAX_PAGE_SIZE.get();
+    for index in 0..(bound + 5) {
+        provider
+            .stage_pending_candidate(
+                &format!("cand_narrow_bound_{index}"),
+                &subject_id,
+                None,
+                &format!("pending_narrow_bound_{index}"),
+                &format!("A narrower page bound still serves row {index}."),
+            )
+            .await
+            .expect("stage one pending candidate");
+    }
+    assert_eq!(
+        core.count_pending_reviews(&principal)
+            .await
+            .expect("the negotiated bound serves every page")
+            .count,
+        i64::try_from(bound + 5).expect("the staged count fits"),
+        "every pending candidate is reachable through the negotiated bound",
+    );
+
+    assert!(core.close().await.expect("close").cleanup_confirmed);
+    settle_listener(host).await;
+}
+
+/// Rewrites the committed receipt one provider returns, so the Core can be shown
+/// a schema-valid answer that belongs to another request. It changes no durable
+/// state and every other answer passes through untouched.
+struct MismatchedReceipt {
+    inner: Arc<dyn RemoteMemoryService>,
+    rewrite: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl RemoteMemoryService for MismatchedReceipt {
+    async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
+        let answer = self.inner.invoke(peer_id, op, payload).await;
+        if !self.rewrite.load(Ordering::SeqCst) || op != "memory.capture" {
+            return answer;
+        }
+        match answer {
+            SpokeResult::Ok(mut body) => {
+                body["idempotency_key"] = json!("a-receipt-for-another-request");
+                SpokeResult::Ok(body)
+            }
+            SpokeResult::Reject(reject) => SpokeResult::Reject(reject),
+        }
+    }
+}
+
+/// A schema-valid capture receipt that does not answer this request must not
+/// publish its objects nor retire this attempt's protective admission: the
+/// mismatch stays a static fail-closed error, and the binding therefore cannot
+/// be removed while it still owns remote memory.
+#[tokio::test]
+async fn a_mismatched_capture_receipt_keeps_the_binding_protected() {
+    let host_pubkey = pubkey(&HOST_SEED);
+    let client_pubkey = pubkey(&CLIENT_SEED);
+    let client_peer = peer_id(&CLIENT_SEED);
+    let fixture_home = TempDir::new().expect("fixture home");
+    let provider = Arc::new(
+        FixtureMemoryProvider::open(&provider_database(&fixture_home))
+            .await
+            .expect("open the durable fixture"),
+    );
+    let served_space = provider.identity().space_id.clone();
+    let authority_host_id = provider.identity().authority_host_id.clone();
+    let principal_id = format!("prn_{client_peer}");
+    provider
+        .provision_operator_admin(&principal_id)
+        .await
+        .expect("operator provisions the admin grant");
+    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id));
+    let env = Env::boot("Receipt Identity Owner").await;
+    env.write_credential(&CLIENT_SEED);
+
+    let rewrite = Arc::new(AtomicBool::new(false));
+    let (addr, task) = start_listener(
+        Arc::new(MismatchedReceipt {
+            inner: provider.server(directory.admission()),
+            rewrite: Arc::clone(&rewrite),
+        }),
+        manifest(&authority_host_id),
+        client_peer,
+        client_pubkey,
+        5_000,
+    )
+    .await;
+    let core = open(&env, selection(&served_space, addr, &host_pubkey))
+        .await
+        .expect("the exact selection opens");
+    let principal = core.active_principal().await.expect("active principal");
+    let world = create_world(&core, &principal, "Receipt Identity World").await;
+    let (character_id, binding_id, _) =
+        create_character(&core, &principal, "Receipt Identity Ada", &world).await;
+
+    // The honest receipt first: this request's own candidate is published.
+    core.capture_character_pending_review(
+        &principal,
+        character_id.clone(),
+        dto::<CaptureCharacterPendingReviewRequest>(character_capture_request(
+            Some(&binding_id),
+            "pend_receipt_identity",
+            "The honest receipt publishes exactly this request's candidate.",
+        )),
+    )
+    .await
+    .expect("the honest capture publishes its candidate");
+    let facts_db = core_db(&env).await;
+    let honest = binding_object_facts(&facts_db, &binding_id).await;
+    assert_eq!(honest.len(), 1, "one live candidate fact");
+    assert_eq!(honest[0].8, "live", "the committed candidate is live");
+
+    // A receipt for another request: the mismatch fails closed, statically.
+    rewrite.store(true, Ordering::SeqCst);
+    let error = core
+        .capture_character_pending_review(
+            &principal,
+            character_id.clone(),
+            dto::<CaptureCharacterPendingReviewRequest>(character_capture_request(
+                Some(&binding_id),
+                "pend_receipt_mismatch",
+                "A mismatched receipt must never publish this request's candidate.",
+            )),
+        )
+        .await
+        .expect_err("a mismatched receipt refuses the capture");
+    match &error {
+        CoreError::Internal { category } => assert!(
+            category.starts_with("memory_capture_receipt"),
+            "the static receipt-identity refusal, got {category}"
+        ),
+        other => panic!("expected the static receipt refusal, got {other:?}"),
+    }
+    let after = binding_object_facts(&facts_db, &binding_id).await;
+    assert_eq!(after, honest, "a mismatch publishes no object fact");
+    let admissions = binding_admissions(&facts_db, &binding_id).await;
+    assert_eq!(
+        admissions.len(),
+        1,
+        "the mismatched attempt keeps its admission, so the binding stays protected"
+    );
+    assert_eq!(
+        admissions[0].0, env.creator_id,
+        "the retained admission names its owner"
+    );
+    facts_db.close().await;
+
+    assert!(core.close().await.expect("close").cleanup_confirmed);
+    settle_listener(task).await;
+}
+
+/// A reachable decoder failure becomes a static wire refusal: the signed client
+/// sees `INTERNAL_ERROR` with no provider storage or decoder text, while a
+/// legitimate capture on the same subject still commits.
+#[tokio::test]
+async fn a_malformed_stored_document_never_reaches_the_wire() {
+    const CANARY: &str = "NEXUS-CANARY-3f9a";
+    let admin_peer = peer_id(&CLIENT_SEED);
+    let fixture_home = TempDir::new().expect("fixture home");
+    let provider = Arc::new(
+        FixtureMemoryProvider::open(&provider_database(&fixture_home))
+            .await
+            .expect("open the durable fixture"),
+    );
+    let space = provider.identity().space_id.clone();
+    let authority_host_id = provider.identity().authority_host_id.clone();
+    let admin_principal = format!("prn_{admin_peer}");
+    provider
+        .provision_operator_admin(&admin_principal)
+        .await
+        .expect("operator provisions the admin grant");
+    let directory =
+        Arc::new(PeerDirectory::new().with_peer(admin_peer.clone(), admin_principal.clone()));
+    let env = Env::boot("Wire Error Owner").await;
+    env.write_credential(&CLIENT_SEED);
+    let pool = provider_pool(&fixture_home).await;
+
+    let (addr, task) = start_listener(
+        provider.server(directory.admission()),
+        manifest(&authority_host_id),
+        admin_peer,
+        pubkey(&CLIENT_SEED),
+        5_000,
+    )
+    .await;
+    let core = open(&env, selection(&space, addr, &pubkey(&HOST_SEED)))
+        .await
+        .expect("the exact selection opens");
+    let principal = core.active_principal().await.expect("active principal");
+    // The adapter's own open provisions the subject this bearer speaks for.
+    core.count_pending_reviews(&principal)
+        .await
+        .expect("the pinned binding serves the empty queue");
+    let subject = legacy::creator_subject_id(&env.creator_id);
+
+    // The legitimate positive on that subject, over the same signed session.
+    let capture = |key: &str, text: &str| {
+        dto::<MemoryCaptureRequest>(json!({
+            "space_id": space.clone(),
+            "subject_id": subject.clone(),
+            "content": { "text": text },
+            "capture_scope": { "visibility": "shared" },
+            "idempotency_key": key,
+        }))
+    };
+    // A signed session of its own: one listener admits one established session,
+    // so the consumer dials a second listener for the same provider/principal.
+    let (consumer_addr, consumer_task) = start_listener(
+        provider.server(directory.admission()),
+        manifest(&authority_host_id),
+        peer_id(&CLIENT_SEED),
+        pubkey(&CLIENT_SEED),
+        5_000,
+    )
+    .await;
+    let consumer = dial_adapter(consumer_addr, CLIENT_SEED).await;
+    let consumer_principal = principal_label(&admin_principal);
+    match consumer
+        .capture(
+            &consumer_principal,
+            capture("canary-honest", "An honest capture."),
+        )
+        .await
+    {
+        SpokeResult::Ok(_) => {}
+        SpokeResult::Reject(reject) => panic!("the honest capture commits: {reject:?}"),
+    }
+
+    // A stored document the provider cannot decode, carrying a sentinel that
+    // must never appear on the wire.
+    sqlx::query(
+        "UPDATE subjects SET fenced_contexts_json = ? WHERE space_id = ? AND subject_id = ?",
+    )
+    .bind(format!("{{\"sentinel\":\"{CANARY}\"}}"))
+    .bind(&space)
+    .bind(&subject)
+    .execute(&pool)
+    .await
+    .expect("corrupt one stored document");
+    let reject = match consumer
+        .capture(
+            &consumer_principal,
+            capture("canary-corrupt", "This request reaches the decoder."),
+        )
+        .await
+    {
+        SpokeResult::Reject(reject) => reject,
+        SpokeResult::Ok(body) => panic!("a decoder failure must not commit: {body:?}"),
+    };
+    let wire = json!({
+        "code": reject.code.as_str(),
+        "message": reject.message.clone(),
+        "details": reject.details.clone(),
+    })
+    .to_string();
+    assert_eq!(
+        reject.code.as_str(),
+        "INTERNAL_ERROR",
+        "a decoder failure is the fixture's retryable internal"
+    );
+    for leaked in [CANARY, "sqlx", "serde", "invalid type", "expected value"] {
+        assert!(
+            !wire.contains(leaked),
+            "the wire answer leaked provider internals ({leaked}): {wire}"
+        );
+    }
+
+    pool.close().await;
+    assert!(core.close().await.expect("close").cleanup_confirmed);
+    settle_listener(task).await;
+    settle_listener(consumer_task).await;
 }

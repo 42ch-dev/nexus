@@ -681,8 +681,8 @@ async fn commit_binding_removal(
     }
 }
 
-#[allow(clippy::too_many_lines)] // one linear removal gate: dependencies, terminal clear and row
-async fn remove_binding_tx(
+/// Every dependency gate one active binding must pass before removal.
+async fn require_binding_removable_tx(
     tx: &mut Transaction<'_, Sqlite>,
     owner_creator_id: &str,
     character_id: &str,
@@ -773,10 +773,22 @@ async fn remove_binding_tx(
             code: ActorContractConflict::BindingHasRemoteMemory,
         });
     }
-    sqlx::query("DELETE FROM remote_binding_memory_objects WHERE binding_id = ?")
-        .bind(binding_id)
-        .execute(&mut **tx)
-        .await?;
+    Ok(())
+}
+
+/// Release the dependencies the removal gate proved settleable: the
+/// binding's terminal remote facts, then the legacy provenance the gate
+/// proved the provider already owns.
+async fn release_binding_dependencies_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    binding_id: &str,
+) -> Result<(), LocalDbError> {
+    sqlx::query!(
+        "DELETE FROM remote_binding_memory_objects WHERE binding_id = ?",
+        binding_id
+    )
+    .execute(&mut **tx)
+    .await?;
 
     // The legacy rows the gate proved are no longer served still name this
     // binding in their foreign key (`ON DELETE RESTRICT`), so removal releases
@@ -817,6 +829,19 @@ async fn remove_binding_tx(
     .execute(&mut **tx)
     .await?;
 
+    Ok(())
+}
+
+/// Apply every removal gate, release what it proved settleable, then drop
+/// the binding row itself.
+async fn remove_binding_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    owner_creator_id: &str,
+    character_id: &str,
+    binding_id: &str,
+) -> Result<(), LocalDbError> {
+    require_binding_removable_tx(tx, owner_creator_id, character_id, binding_id).await?;
+    release_binding_dependencies_tx(tx, binding_id).await?;
     let deleted = sqlx::query!(
         r#"DELETE FROM actor_world_bindings WHERE binding_id = ? AND character_id = ? AND status = 'active'"#,
         binding_id,
@@ -955,21 +980,21 @@ pub async fn insert_remote_binding_admission_tx(
     namespace: &RemoteBindingNamespace<'_>,
     now: &str,
 ) -> Result<(), LocalDbError> {
-    sqlx::query(
+    sqlx::query!(
         r"INSERT INTO remote_binding_memory_admissions
           (admission_id, owner_creator_id, character_id, binding_id, authority_host_id,
            authority_generation, space_id, client_identity, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        admission_id,
+        namespace.owner_creator_id,
+        namespace.character_id,
+        namespace.binding_id,
+        namespace.authority_host_id,
+        namespace.generation_text(),
+        namespace.space_id,
+        namespace.client_identity,
+        now
     )
-    .bind(admission_id)
-    .bind(namespace.owner_creator_id)
-    .bind(namespace.character_id)
-    .bind(namespace.binding_id)
-    .bind(namespace.authority_host_id)
-    .bind(namespace.generation_text())
-    .bind(namespace.space_id)
-    .bind(namespace.client_identity)
-    .bind(now)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -989,20 +1014,20 @@ pub async fn retire_remote_binding_admission_tx(
     admission_id: &str,
     namespace: &RemoteBindingNamespace<'_>,
 ) -> Result<bool, LocalDbError> {
-    let retired = sqlx::query(
+    let retired = sqlx::query!(
         r"DELETE FROM remote_binding_memory_admissions
           WHERE admission_id = ? AND owner_creator_id = ? AND character_id = ?
             AND binding_id = ? AND authority_host_id = ? AND authority_generation = ?
             AND space_id = ? AND client_identity = ?",
+        admission_id,
+        namespace.owner_creator_id,
+        namespace.character_id,
+        namespace.binding_id,
+        namespace.authority_host_id,
+        namespace.generation_text(),
+        namespace.space_id,
+        namespace.client_identity
     )
-    .bind(admission_id)
-    .bind(namespace.owner_creator_id)
-    .bind(namespace.character_id)
-    .bind(namespace.binding_id)
-    .bind(namespace.authority_host_id)
-    .bind(namespace.generation_text())
-    .bind(namespace.space_id)
-    .bind(namespace.client_identity)
     .execute(&mut **tx)
     .await?
     .rows_affected();
@@ -1027,7 +1052,7 @@ pub async fn record_remote_binding_object_tx(
     state: RemoteBindingObjectState,
     now: &str,
 ) -> Result<(), LocalDbError> {
-    sqlx::query(
+    sqlx::query!(
         r"INSERT INTO remote_binding_memory_objects
           (authority_host_id, authority_generation, space_id, client_identity, character_id,
            binding_id, object_kind, object_id, state, created_at, updated_at)
@@ -1039,19 +1064,19 @@ pub async fn record_remote_binding_object_tx(
           WHERE (CASE excluded.state WHEN 'live' THEN 0 WHEN 'consumed' THEN 1 ELSE 2 END)
               > (CASE remote_binding_memory_objects.state
                       WHEN 'live' THEN 0 WHEN 'consumed' THEN 1 ELSE 2 END)",
+        namespace.authority_host_id,
+        namespace.generation_text(),
+        namespace.space_id,
+        namespace.client_identity,
+        namespace.character_id,
+        namespace.binding_id,
+        kind.as_str(),
+        object_id,
+        state.as_str(),
+        now,
+        now,
+        namespace.binding_id
     )
-    .bind(namespace.authority_host_id)
-    .bind(namespace.generation_text())
-    .bind(namespace.space_id)
-    .bind(namespace.client_identity)
-    .bind(namespace.character_id)
-    .bind(namespace.binding_id)
-    .bind(kind.as_str())
-    .bind(object_id)
-    .bind(state.as_str())
-    .bind(now)
-    .bind(now)
-    .bind(namespace.binding_id)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -1066,17 +1091,17 @@ pub async fn remote_binding_dependency_counts_tx(
     tx: &mut Transaction<'_, Sqlite>,
     binding_id: &str,
 ) -> Result<RemoteBindingDependencyCounts, LocalDbError> {
-    let admissions: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM remote_binding_memory_admissions WHERE binding_id = ?",
+    let admissions = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) as "count!" FROM remote_binding_memory_admissions WHERE binding_id = ?"#,
+        binding_id
     )
-    .bind(binding_id)
     .fetch_one(&mut **tx)
     .await?;
-    let live_objects: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM remote_binding_memory_objects \
-         WHERE binding_id = ? AND state = 'live'",
+    let live_objects = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) as "count!" FROM remote_binding_memory_objects
+           WHERE binding_id = ? AND state = 'live'"#,
+        binding_id
     )
-    .bind(binding_id)
     .fetch_one(&mut **tx)
     .await?;
     Ok(RemoteBindingDependencyCounts {
@@ -1103,22 +1128,22 @@ pub async fn remote_binding_object_is_known(
     kind: RemoteBindingObjectKind,
     object_id: &str,
 ) -> Result<bool, LocalDbError> {
-    let known: i64 = sqlx::query_scalar(
-        r"SELECT EXISTS (
+    let known = sqlx::query_scalar!(
+        r#"SELECT EXISTS (
               SELECT 1 FROM remote_binding_memory_objects
               WHERE authority_host_id = ? AND authority_generation = ? AND space_id = ?
                 AND client_identity = ? AND character_id = ? AND binding_id = ?
                 AND object_kind = ? AND object_id = ?
-          )",
+          ) as "known!""#,
+        namespace.authority_host_id,
+        namespace.generation_text(),
+        namespace.space_id,
+        namespace.client_identity,
+        namespace.character_id,
+        namespace.binding_id,
+        kind.as_str(),
+        object_id
     )
-    .bind(namespace.authority_host_id)
-    .bind(namespace.generation_text())
-    .bind(namespace.space_id)
-    .bind(namespace.client_identity)
-    .bind(namespace.character_id)
-    .bind(namespace.binding_id)
-    .bind(kind.as_str())
-    .bind(object_id)
     .fetch_one(pool)
     .await?;
     Ok(known != 0)

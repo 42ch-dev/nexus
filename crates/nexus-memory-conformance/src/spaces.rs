@@ -115,6 +115,71 @@ pub struct GrantRevoked {
 // Protocol errors
 // ---------------------------------------------------------------------------
 
+/// The grant one request asks for, projected off either wire variant.
+struct GrantFields {
+    space_id: String,
+    grantee: String,
+    capabilities: Vec<String>,
+    context_ids: Vec<String>,
+    shared_access: bool,
+    expires_at: Option<DateTime<Utc>>,
+    subject_id: Option<String>,
+}
+
+/// Project one grant request onto [`GrantFields`].
+fn grant_fields(request: &MemoryGrantsGrantRequest) -> GrantFields {
+    use spoke_operations::spoke_schemas::MemoryGrantsGrantRequest::{
+        Variant0 as Restricted, Variant1 as Unrestricted,
+    };
+
+    let (space_id, grantee, capabilities, context_ids, shared_access, expires_at, subject_id) =
+        match request {
+            Restricted {
+                capabilities,
+                context_ids,
+                expires_at,
+                shared_access,
+                principal_id,
+                space_id,
+                subject_id,
+                ..
+            } => (
+                space_id.as_str().to_owned(),
+                principal_id.as_str().to_owned(),
+                capabilities.clone(),
+                context_ids.clone(),
+                shared_access.unwrap_or(false),
+                *expires_at,
+                subject_id.as_ref().map(|id| id.as_str().to_owned()),
+            ),
+            Unrestricted {
+                capabilities,
+                expires_at,
+                principal_id,
+                space_id,
+                subject_id,
+                ..
+            } => (
+                space_id.as_str().to_owned(),
+                principal_id.as_str().to_owned(),
+                capabilities.clone(),
+                Vec::new(),
+                false,
+                expires_at.as_deref().copied(),
+                subject_id.as_ref().map(|id| id.as_str().to_owned()),
+            ),
+        };
+    GrantFields {
+        space_id,
+        grantee,
+        capabilities,
+        context_ids,
+        shared_access,
+        expires_at,
+        subject_id,
+    }
+}
+
 /// A storage or serialization failure: the caller's request was not at fault.
 ///
 /// The message is the fixture's own static text; it never interpolates an
@@ -1255,7 +1320,6 @@ impl FixtureMemoryProvider {
     }
 
     /// [`Self::grants_grant`] on a caller-owned connection; never commits.
-    #[allow(clippy::too_many_lines)] // one linear issuance: coverage, grant row and audit in one tx
     pub(crate) async fn grants_grant_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -1263,48 +1327,16 @@ impl FixtureMemoryProvider {
         request: &MemoryGrantsGrantRequest,
         now: DateTime<Utc>,
     ) -> Result<GrantIssued, SpokeReject> {
-        use spoke_operations::spoke_schemas::MemoryGrantsGrantRequest::{
-            Variant0 as Restricted, Variant1 as Unrestricted,
-        };
-
         checked(validate_memory_grants_grant(request))?;
-        let (space_id, grantee, capabilities, context_ids, shared_access, expires_at, subject_id) =
-            match request {
-                Restricted {
-                    capabilities,
-                    context_ids,
-                    expires_at,
-                    shared_access,
-                    principal_id,
-                    space_id,
-                    subject_id,
-                    ..
-                } => (
-                    space_id.as_str().to_owned(),
-                    principal_id.as_str().to_owned(),
-                    capabilities.clone(),
-                    context_ids.clone(),
-                    shared_access.unwrap_or(false),
-                    *expires_at,
-                    subject_id.as_ref().map(|id| id.as_str().to_owned()),
-                ),
-                Unrestricted {
-                    capabilities,
-                    expires_at,
-                    principal_id,
-                    space_id,
-                    subject_id,
-                    ..
-                } => (
-                    space_id.as_str().to_owned(),
-                    principal_id.as_str().to_owned(),
-                    capabilities.clone(),
-                    Vec::new(),
-                    false,
-                    expires_at.as_deref().copied(),
-                    subject_id.as_ref().map(|id| id.as_str().to_owned()),
-                ),
-            };
+        let GrantFields {
+            space_id,
+            grantee,
+            capabilities,
+            context_ids,
+            shared_access,
+            expires_at,
+            subject_id,
+        } = grant_fields(request);
         self.require_served_space(&space_id)?;
         let space = fetch_space(conn, &space_id).await?;
         require_admitted("memory.grants.grant", &space)?;

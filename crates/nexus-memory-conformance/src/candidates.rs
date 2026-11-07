@@ -315,13 +315,12 @@ fn outcome_uncertain() -> SpokeReject {
 /// A commit that failed may still have taken effect (§14.3): the caller cannot
 /// be told whether anything committed, so it is `OUTCOME_UNCERTAIN` — never a
 /// clean retryable internal error.
-fn commit_unknown(error: &sqlx::Error) -> SpokeReject {
+fn commit_unknown() -> SpokeReject {
     SpokeReject {
         code: SpokeRejectCode::OutcomeUncertain,
-        message: format!(
-            "the transaction's commit state is unknown; resolve with the same idempotency \
-             key or memory.receipts.get: {error}"
-        ),
+        message: "the transaction's commit state is unknown; resolve with the same idempotency \
+                  key or memory.receipts.get"
+            .to_owned(),
         details: None,
     }
 }
@@ -775,11 +774,9 @@ async fn fetch_receipt_target(
         let reads_shared: i64 = row.try_get("reads_shared").map_err(internal_failure)?;
         let subject_all: i64 = row.try_get("subject_all").map_err(internal_failure)?;
         Ok(ReceiptTarget {
-            capabilities: serde_json::from_str(&capabilities)
-                .map_err(internal_failure)?,
+            capabilities: serde_json::from_str(&capabilities).map_err(internal_failure)?,
             subject_id: row.try_get("subject_id").map_err(internal_failure)?,
-            context_ids: serde_json::from_str(&context_ids)
-                .map_err(internal_failure)?,
+            context_ids: serde_json::from_str(&context_ids).map_err(internal_failure)?,
             reads_shared: reads_shared != 0,
             subject_all: subject_all != 0,
         })
@@ -1378,15 +1375,12 @@ pub async fn settle_receipt_in_tx(
 }
 
 /// §7.0.5/MEM-R021 replay resolution at the supplied instant.
-// The replayed receipt is moved once per admitted replay; boxing would add an
-// allocation to the exact-once path clippy's size heuristic wants to shrink.
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum ReplayResolution {
     /// No binding: the operation executes like a first attempt.
     Fresh,
     /// The identical admitted replay returns the stored receipt.
-    Replayed(MemoryReceipt),
+    Replayed(Box<MemoryReceipt>),
     /// The whole namespace lifetime ended. The caller releases this stale
     /// binding inside its own transaction before staging the new effect, so a
     /// refusal after this point rolls the release back with the refused effect.
@@ -1471,7 +1465,9 @@ pub async fn resolve_replay(
             let body = body.ok_or_else(|| {
                 internal(format!("retained receipt {receipt_id} is not readable"))
             })?;
-            Ok(ReplayResolution::Replayed(receipt_to_wire(&body)?))
+            Ok(ReplayResolution::Replayed(Box::new(receipt_to_wire(
+                &body,
+            )?)))
         }
     }
 }
@@ -1489,7 +1485,7 @@ async fn resolve_or_release(
 ) -> Result<Option<MemoryReceipt>, SpokeReject> {
     match resolve_replay(conn, space_id, principal_id, admission, now).await? {
         ReplayResolution::Fresh => Ok(None),
-        ReplayResolution::Replayed(receipt) => Ok(Some(receipt)),
+        ReplayResolution::Replayed(receipt) => Ok(Some(*receipt)),
         ReplayResolution::KeyReusable { receipt_id } => {
             release_expired_binding_in_tx(conn, space_id, principal_id, admission, &receipt_id)
                 .await?;
@@ -1830,6 +1826,179 @@ const fn status_name(status: CandidateStatus) -> &'static str {
     }
 }
 
+/// The resume index a continuation cursor names on exactly this visible set.
+///
+/// A cursor is only meaningful against the query and provider state that issued
+/// it: a different digest, a missing entry or a malformed cursor is refused
+/// instead of silently re-filtering the page (§6.7/§7.0.7).
+fn cursor_start(
+    binding_digest: &str,
+    visible: &[StoredCandidate],
+    cursor: Option<&str>,
+) -> Result<usize, SpokeReject> {
+    let Some(cursor) = cursor else {
+        return Ok(0);
+    };
+    let (digest, last_id) = cursor
+        .split_once(':')
+        .ok_or_else(|| cursor_invalid("cursor is malformed"))?;
+    if digest != binding_digest {
+        return Err(cursor_invalid(
+            "cursor was issued for a different query or provider state",
+        ));
+    }
+    visible
+        .iter()
+        .position(|candidate| candidate.candidate_id == last_id)
+        .map(|position| position + 1)
+        .ok_or_else(|| cursor_invalid("cursor no longer matches the candidate set"))
+}
+
+/// §7.15: one grant must cover both `review` and `records_write` over the
+/// candidate's capture scope, so no union of grants amplifies coverage.
+fn require_review_authority(
+    grants: &[MemoryGrant],
+    principal_id: &str,
+    space_id: &str,
+    subject_id: &str,
+    visibility: &str,
+    context_id: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<(), SpokeReject> {
+    let covered = one_grant_covers(
+        grants,
+        principal_id,
+        space_id,
+        now,
+        &[
+            scope_requirement("review", subject_id, visibility, context_id),
+            scope_requirement("records_write", subject_id, visibility, context_id),
+        ],
+    );
+    if covered {
+        return Ok(());
+    }
+    // Indistinguishable from a missing id (C-102), including the partial-coverage
+    // case where only one of the two capabilities is held.
+    Err(candidate_unavailable())
+}
+
+/// One planned content object: the field it was authored under, its kind and its
+/// encoded value.
+type PlannedContent = Vec<(String, String, Value)>;
+
+/// Plan every content object one review decision retains, bounding each one
+/// before ANY effect: an oversized override — or a later oversized fragment
+/// after valid earlier ones — can neither consume the candidate nor leave
+/// partial records.
+///
+/// The decision carries no placement: created records inherit the candidate's
+/// admitted capture scope (§7.15).
+fn plan_review_content(
+    candidate: &StoredCandidate,
+    decision: &Decision,
+) -> Result<(String, PlannedContent), SpokeReject> {
+    // §7.1/§7.15: plan every content object this decision will retain and
+    // bound each one before ANY effect, so an oversized override — or a later
+    // oversized fragment after valid earlier ones — cannot consume the
+    // candidate or leave partial records. The decision carries no placement:
+    // created records inherit the candidate's admitted capture scope (§7.15).
+    let (outcome, planned) = match decision {
+        Decision::Promote {
+            content_override,
+            kind,
+        } => {
+            let kind = kind
+                .as_ref()
+                .map_or(candidate.kind.as_str(), |kind| kind.as_str());
+            let (field, content) = match content_override {
+                Some(overridden) => (
+                    "decision.content_override",
+                    serde_json::to_value(overridden).map_err(internal_failure)?,
+                ),
+                None => (
+                    "content",
+                    stored_json(
+                        candidate
+                            .content
+                            .as_deref()
+                            .ok_or_else(|| internal("a pending candidate carries no content"))?,
+                        "candidate content",
+                    )?,
+                ),
+            };
+            (
+                "promoted".to_owned(),
+                vec![(field.to_owned(), kind.to_owned(), content)],
+            )
+        }
+        Decision::Fragment { fragments } => {
+            let mut planned = Vec::with_capacity(fragments.len());
+            for (index, fragment) in fragments.iter().enumerate() {
+                let content = serde_json::to_value(&fragment.content).map_err(internal_failure)?;
+                planned.push((
+                    format!("decision.fragments[{index}].content"),
+                    fragment.kind.as_str().to_owned(),
+                    content,
+                ));
+            }
+            ("fragmented".to_owned(), planned)
+        }
+        Decision::Drop { .. } => ("dropped".to_owned(), Vec::new()),
+    };
+    for (field, _, content) in &planned {
+        require_review_content(field, content)?;
+    }
+    Ok((outcome, planned))
+}
+
+/// The candidates this caller may see in the current snapshot, already filtered
+/// by status, expiry and each candidate's immutable capture scope.
+async fn visible_candidates(
+    conn: &mut SqliteConnection,
+    grants: &[MemoryGrant],
+    principal_id: &str,
+    request: &MemoryCandidatesListRequest,
+    target: &CaptureTarget,
+    now: DateTime<Utc>,
+) -> Result<Vec<StoredCandidate>, SpokeReject> {
+    let space_id = request.space_id.as_str();
+    let subject_id = request.subject_id.as_str();
+    let status_filter = request.status.map(status_name);
+    let mut visible = Vec::new();
+    // §7.7: `archived` is terminal decommission and excludes the subject's
+    // candidates from the listing; fence (`fenced`) still lists so the queue
+    // stays inspectable, and reads remain allowed for archived subjects.
+    if target.status != "archived" {
+        for candidate in candidate_rows(conn, space_id, subject_id).await? {
+            if status_filter.is_some_and(|status| candidate.status != status) {
+                continue;
+            }
+            if candidate.is_expired_at(now)? {
+                continue;
+            }
+            // Each candidate is filtered by its immutable capture scope, so a
+            // context-limited review grant never sees another placement.
+            if !is_authorized(
+                grants,
+                principal_id,
+                space_id,
+                now,
+                &scope_requirement(
+                    "review",
+                    subject_id,
+                    &candidate.capture_visibility,
+                    candidate.scope_context(),
+                ),
+            ) {
+                continue;
+            }
+            visible.push(candidate);
+        }
+    }
+    Ok(visible)
+}
+
 impl FixtureMemoryProvider {
     // -----------------------------------------------------------------------
     // memory.capture (§7.11)
@@ -1880,10 +2049,7 @@ impl FixtureMemoryProvider {
             transaction.rollback().await.map_err(internal_failure)?;
             return Err(outcome_uncertain());
         }
-        transaction
-            .commit()
-            .await
-            .map_err(|error| commit_unknown(&error))?;
+        transaction.commit().await.map_err(|_| commit_unknown())?;
         // Loss after commit, before the response: the effect is durable and the
         // caller must resolve the uncertainty through replay or receipts.get.
         if self.faults().trip(FaultPoint::AfterCommitBeforeResponse) {
@@ -2175,7 +2341,6 @@ impl FixtureMemoryProvider {
 
     /// Whole page read on the caller's snapshot: space access, grants,
     /// candidates and the cursor marker all agree in one snapshot (MEM-R026).
-    #[allow(clippy::too_many_lines)] // one linear authorized read: the same snapshot bounds every step
     pub(crate) async fn candidates_list_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -2204,37 +2369,8 @@ impl FixtureMemoryProvider {
         let target = capture_target(conn, space_id, subject_id).await?;
 
         let status_filter = request.status.map(status_name);
-        let mut visible = Vec::new();
-        // §7.7: `archived` is terminal decommission and excludes the subject's
-        // candidates from the listing; fence (`fenced`) still lists so the queue
-        // stays inspectable, and reads remain allowed for archived subjects.
-        if target.status != "archived" {
-            for candidate in candidate_rows(conn, space_id, subject_id).await? {
-                if status_filter.is_some_and(|status| candidate.status != status) {
-                    continue;
-                }
-                if candidate.is_expired_at(now)? {
-                    continue;
-                }
-                // Each candidate is filtered by its immutable capture scope, so
-                // a context-limited review grant never sees another placement.
-                if !is_authorized(
-                    &grants,
-                    principal_id,
-                    space_id,
-                    now,
-                    &scope_requirement(
-                        "review",
-                        subject_id,
-                        &candidate.capture_visibility,
-                        candidate.scope_context(),
-                    ),
-                ) {
-                    continue;
-                }
-                visible.push(candidate);
-            }
-        }
+        let visible =
+            visible_candidates(conn, &grants, principal_id, request, &target, now).await?;
 
         // §6.7/§7.0.7: a pending candidate's expiry is time-dependent, so the
         // cursor also binds the visible set and every entry's expiry boundary at
@@ -2266,24 +2402,11 @@ impl FixtureMemoryProvider {
             "visible": visible_signature,
             "policy": ENGINE_POLICY_VERSION,
         }))?;
-        let start = match request.cursor.as_deref() {
-            None => 0,
-            Some(cursor) => {
-                let (digest, last_id) = cursor
-                    .split_once(':')
-                    .ok_or_else(|| cursor_invalid("cursor is malformed"))?;
-                if digest != binding_digest {
-                    return Err(cursor_invalid(
-                        "cursor was issued for a different query or provider state",
-                    ));
-                }
-                visible
-                    .iter()
-                    .position(|candidate| candidate.candidate_id == last_id)
-                    .map(|position| position + 1)
-                    .ok_or_else(|| cursor_invalid("cursor no longer matches the candidate set"))?
-            }
-        };
+        let start = cursor_start(
+            &binding_digest,
+            &visible,
+            request.cursor.as_ref().map(|cursor| cursor.as_str()),
+        )?;
         let limit = usize::try_from(
             request
                 .limit
@@ -2381,10 +2504,7 @@ impl FixtureMemoryProvider {
         let receipt = self
             .candidates_dismiss_in_tx(&mut transaction, principal_id, admitted, now)
             .await?;
-        transaction
-            .commit()
-            .await
-            .map_err(|error| commit_unknown(&error))?;
+        transaction.commit().await.map_err(|_| commit_unknown())?;
         Ok(receipt)
     }
 
@@ -2497,17 +2617,13 @@ impl FixtureMemoryProvider {
         let receipt = self
             .candidates_review_in_tx(&mut transaction, principal_id, admitted, now)
             .await?;
-        transaction
-            .commit()
-            .await
-            .map_err(|error| commit_unknown(&error))?;
+        transaction.commit().await.map_err(|_| commit_unknown())?;
         Ok(receipt)
     }
 
     /// [`Self::candidates_review`] on a caller-owned connection; never commits,
     /// so candidate consumption, every created record and the receipt are one
     /// atomic outcome (MEM-R009).
-    #[allow(clippy::too_many_lines)] // one linear atomic outcome: consumption, records and receipt
     pub(crate) async fn candidates_review_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -2527,27 +2643,15 @@ impl FixtureMemoryProvider {
         let subject_id = candidate.subject_id.clone();
         let visibility = candidate.capture_visibility.clone();
         let context_id = candidate.scope_context().map(str::to_owned);
-        // §7.15: `review` *and* `records_write`, both covering the candidate's
-        // capture scope — in one grant, so no union amplifies coverage.
-        if !one_grant_covers(
+        require_review_authority(
             &grants,
             principal_id,
             space_id,
+            &subject_id,
+            &visibility,
+            context_id.as_deref(),
             now,
-            &[
-                scope_requirement("review", &subject_id, &visibility, context_id.as_deref()),
-                scope_requirement(
-                    "records_write",
-                    &subject_id,
-                    &visibility,
-                    context_id.as_deref(),
-                ),
-            ],
-        ) {
-            // Indistinguishable from a missing id (C-102), including the
-            // partial-coverage case where only one of the two capabilities is held.
-            return Err(candidate_unavailable());
-        }
+        )?;
         let admission = Mutation::keyed(
             OP_CANDIDATES_REVIEW,
             request.idempotency_key.as_str(),
@@ -2578,59 +2682,7 @@ impl FixtureMemoryProvider {
         require_write_target(conn, space_id, &subject_id, context_id.as_deref()).await?;
 
         let receipt_id = receipt_id();
-        // §7.1/§7.15: plan every content object this decision will retain and
-        // bound each one before ANY effect, so an oversized override — or a later
-        // oversized fragment after valid earlier ones — cannot consume the
-        // candidate or leave partial records. The decision carries no placement:
-        // created records inherit the candidate's admitted capture scope (§7.15).
-        let (outcome, planned) = match &request.decision {
-            Decision::Promote {
-                content_override,
-                kind,
-            } => {
-                let kind = match kind {
-                    Some(kind) => kind.as_str(),
-                    None => candidate.kind.as_str(),
-                };
-                let (field, content) = match content_override {
-                    Some(overridden) => (
-                        "decision.content_override",
-                        serde_json::to_value(overridden)
-                            .map_err(internal_failure)?,
-                    ),
-                    None => (
-                        "content",
-                        stored_json(
-                            candidate.content.as_deref().ok_or_else(|| {
-                                internal("a pending candidate carries no content")
-                            })?,
-                            "candidate content",
-                        )?,
-                    ),
-                };
-                (
-                    "promoted".to_owned(),
-                    vec![(field.to_owned(), kind.to_owned(), content)],
-                )
-            }
-            Decision::Fragment { fragments } => {
-                let mut planned = Vec::with_capacity(fragments.len());
-                for (index, fragment) in fragments.iter().enumerate() {
-                    let content = serde_json::to_value(&fragment.content)
-                        .map_err(internal_failure)?;
-                    planned.push((
-                        format!("decision.fragments[{index}].content"),
-                        fragment.kind.as_str().to_owned(),
-                        content,
-                    ));
-                }
-                ("fragmented".to_owned(), planned)
-            }
-            Decision::Drop { .. } => ("dropped".to_owned(), Vec::new()),
-        };
-        for (field, _, content) in &planned {
-            require_review_content(field, content)?;
-        }
+        let (outcome, planned) = plan_review_content(&candidate, &request.decision)?;
         let mut record_ids = Vec::with_capacity(planned.len());
         for (_, kind, content) in &planned {
             record_ids.push(
@@ -4249,7 +4301,7 @@ mod tests {
                 .await
                 .expect("replay resolves")
             {
-                ReplayResolution::Replayed(receipt) => receipt,
+                ReplayResolution::Replayed(receipt) => *receipt,
                 other => panic!("expected the bound receipt, observed {other:?}"),
             };
         transaction.commit().await.expect("read commits");

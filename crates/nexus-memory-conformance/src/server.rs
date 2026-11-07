@@ -322,15 +322,146 @@ impl PrecheckRefusal {
     }
 }
 
+impl FixtureMemoryProvider {
+    /// Execute the revoke and answer with its receipt: the effect, its dedup row
+    /// and the receipt share this one transaction, and a commit that failed keeps
+    /// the honest unknown outcome.
+    async fn revoke_effect(
+        &self,
+        mut transaction: sqlx::Transaction<'_, sqlx::Sqlite>,
+        principal_id: &str,
+        space_id: &str,
+        admitted: &Admitted<MemoryGrantsRevokeRequest>,
+        target: &OpTarget,
+        now: DateTime<Utc>,
+    ) -> SpokeResult<MemoryGrantsRevokeResponse> {
+        let op = "memory.grants.revoke";
+        let idempotency_key = admitted.request().idempotency_key.as_str().to_owned();
+        let revoked = match self
+            .grants_revoke_in_tx(&mut transaction, principal_id, admitted.request(), now)
+            .await
+        {
+            Ok(revoked) => revoked,
+            Err(reject) => return SpokeResult::Reject(reject),
+        };
+        let result = json!({
+            "grant_id": revoked.grant_id,
+            "revoked": revoked.revoked,
+            "revision": non_zero(revoked.revision),
+        });
+        let receipt = match Self::stage_committed(
+            &mut transaction,
+            space_id,
+            principal_id,
+            op,
+            &idempotency_key,
+            admitted,
+            target,
+            result,
+            now,
+        )
+        .await
+        {
+            Ok(receipt) => receipt,
+            Err(reject) => return SpokeResult::Reject(reject),
+        };
+        if transaction.commit().await.is_err() {
+            return SpokeResult::Reject(commit_outcome_unknown());
+        }
+        respond_receipt(&receipt)
+    }
+
+    /// The grant a revoke names, as the receipt target of the grant's own
+    /// facets, or the revoke slice's own refusal when no such row exists.
+    ///
+    /// A live admin is checked first so a non-admin never learns whether an id
+    /// exists; an unserved space is the producer's `NOT_FOUND`, not a grant
+    /// decision (§7.19).
+    async fn revoke_target(
+        &self,
+        tx: &mut SqliteConnection,
+        principal_id: &str,
+        space_id: &str,
+        grant_id: &str,
+        op: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Option<OpTarget>, SpokeReject> {
+        self.require_served_space(space_id)?;
+        let grants = load_grants(tx, space_id).await?;
+        if !has_live_admin(&grants, principal_id, space_id, now) {
+            return Err(not_authorized(
+                "revocation requires an admin grant in this space",
+            ));
+        }
+        grants
+            .iter()
+            .find(|grant| grant_id_of(grant) == grant_id)
+            .map(grant_facets)
+            .map(|target| capabilities_of(op).map(|caps| target.with_capabilities(caps)))
+            .transpose()
+    }
+
+    /// Answer a revoke that names no grant row through the revoke slice itself,
+    /// discarding the transaction: the slice owns the refusal vocabulary
+    /// (`NOT_FOUND` for a whole-space admin, one indistinguishable refusal
+    /// otherwise).
+    async fn revoke_unknown_grant(
+        &self,
+        mut transaction: sqlx::Transaction<'_, sqlx::Sqlite>,
+        principal_id: &str,
+        request: &MemoryGrantsRevokeRequest,
+        now: DateTime<Utc>,
+    ) -> SpokeResult<MemoryGrantsRevokeResponse> {
+        let outcome = self
+            .grants_revoke_in_tx(&mut transaction, principal_id, request, now)
+            .await;
+        let _ = transaction.rollback().await;
+        match outcome {
+            Err(reject) => SpokeResult::Reject(reject),
+            Ok(_) => SpokeResult::Reject(internal("a grant revoke succeeded without a grant row")),
+        }
+    }
+}
+
+/// §7.21: the receipt target of a promotion covers *both* placements — the
+/// union of the source and target contexts, the shared facet of either side,
+/// and both the `promote` and `records_write` capabilities.
+fn promote_target(
+    subject_id: &str,
+    source_visibility: &str,
+    source_context: Option<&str>,
+    target: &PromoteScope,
+) -> Result<OpTarget, SpokeReject> {
+    // §7.21 authorizes one grant over *both* placements: the receipt target
+    // records the union of the source and target contexts, the shared facet
+    // of either side, and both required capabilities.
+    let (target_visibility, target_context) = match target {
+        PromoteScope::Shared => ("shared", None),
+        PromoteScope::Context(context) => ("context", Some(context.as_str())),
+    };
+    let mut contexts: Vec<String> = Vec::new();
+    for context in [source_context, target_context].into_iter().flatten() {
+        if !contexts.iter().any(|known| known == context) {
+            contexts.push(context.to_owned());
+        }
+    }
+    let context_refs: Vec<&str> = contexts.iter().map(String::as_str).collect();
+    let capabilities = capabilities_of("memory.records.promote")?;
+    Ok(OpTarget::new(
+        capabilities,
+        Some(subject_id),
+        &context_refs,
+        source_visibility == "shared" || target_visibility == "shared",
+        false,
+    ))
+}
+
 /// What the replay step decided for this admitted mutation.
-// The replayed receipt is moved once per admitted replay; boxing would add an
-// allocation to the exact-once path clippy's size heuristic wants to shrink.
-#[allow(clippy::large_enum_variant)]
 enum ReplayStep {
     /// No binding, or a stale one already released inside this transaction.
     Execute,
     /// The identical admitted replay: return the stored receipt, no effect.
-    Replayed(MemoryReceipt),
+    Replayed(Box<MemoryReceipt>),
 }
 
 impl FixtureMemoryProvider {
@@ -944,7 +1075,6 @@ impl MemoryPort for FixtureMemoryProvider {
         respond_receipt(&receipt)
     }
 
-    #[allow(clippy::too_many_lines)] // one linear admission -> replay -> effect -> receipt walk
     async fn revoke_grant(
         &self,
         principal: &Principal,
@@ -967,49 +1097,22 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(transaction) => transaction,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        // Revocation authority is admin coverage of the grant being revoked, so
-        // the receipt target is that grant's own facets. An unserved space is
-        // the producer's NOT_FOUND, not a grant decision.
-        if let Err(reject) = self.require_served_space(&space_id) {
-            return SpokeResult::Reject(reject);
-        }
-        // The precheck keeps the revoke slice's own vocabulary: any live admin first (so a non-admin
-        // never learns whether an id exists), then coverage of the target's
-        // facets with the one indistinguishable revoke refusal.
-        let grants = match load_grants(&mut transaction, &space_id).await {
-            Ok(grants) => grants,
-            Err(reject) => return SpokeResult::Reject(reject),
-        };
-        if !has_live_admin(&grants, principal_id, &space_id, now) {
-            return SpokeResult::Reject(not_authorized(
-                "revocation requires an admin grant in this space",
-            ));
-        }
-        let target = grants
-            .iter()
-            .find(|grant| grant_id_of(grant) == admitted.request().grant_id.as_str())
-            .map(grant_facets)
-            .map(|target| match capabilities_of(op) {
-                Ok(capabilities) => Ok(target.with_capabilities(capabilities)),
-                Err(reject) => Err(reject),
-            })
-            .transpose();
-        let target = match target {
+        let precheck = self
+            .revoke_target(
+                &mut transaction,
+                principal_id,
+                &space_id,
+                admitted.request().grant_id.as_str(),
+                op,
+                now,
+            )
+            .await;
+        let target = match precheck {
             Ok(Some(target)) => target,
             Ok(None) => {
-                // No grant row: let the revoke slice answer its own refusal
-                // (NOT_FOUND for a whole-space admin, the one indistinguishable
-                // refusal otherwise) and discard the transaction.
-                let outcome = self
-                    .grants_revoke_in_tx(&mut transaction, principal_id, admitted.request(), now)
-                    .await;
-                let _ = transaction.rollback().await;
-                return match outcome {
-                    Err(reject) => SpokeResult::Reject(reject),
-                    Ok(_) => SpokeResult::Reject(internal(
-                        "a grant revoke succeeded without a grant row",
-                    )),
-                };
+                return self
+                    .revoke_unknown_grant(transaction, principal_id, admitted.request(), now)
+                    .await
             }
             Err(reject) => return SpokeResult::Reject(reject),
         };
@@ -1043,38 +1146,15 @@ impl MemoryPort for FixtureMemoryProvider {
             }
             Err(reject) => return SpokeResult::Reject(reject),
         }
-        let revoked = match self
-            .grants_revoke_in_tx(&mut transaction, principal_id, admitted.request(), now)
-            .await
-        {
-            Ok(revoked) => revoked,
-            Err(reject) => return SpokeResult::Reject(reject),
-        };
-        let result = json!({
-            "grant_id": revoked.grant_id,
-            "revoked": revoked.revoked,
-            "revision": non_zero(revoked.revision),
-        });
-        let receipt = match Self::stage_committed(
-            &mut transaction,
-            &space_id,
+        self.revoke_effect(
+            transaction,
             principal_id,
-            op,
-            &idempotency_key,
+            &space_id,
             &admitted,
             &target,
-            result,
             now,
         )
         .await
-        {
-            Ok(receipt) => receipt,
-            Err(reject) => return SpokeResult::Reject(reject),
-        };
-        if transaction.commit().await.is_err() {
-            return SpokeResult::Reject(commit_outcome_unknown());
-        }
-        respond_receipt(&receipt)
     }
 
     async fn capture(
@@ -1479,7 +1559,6 @@ impl MemoryPort for FixtureMemoryProvider {
         }
     }
 
-    #[allow(clippy::too_many_lines)] // one linear admission -> replay -> promote -> receipt walk
     async fn promote_record(
         &self,
         principal: &Principal,
@@ -1518,31 +1597,13 @@ impl MemoryPort for FixtureMemoryProvider {
                 )),
             };
         };
-        // §7.21 authorizes one grant over *both* placements: the receipt target
-        // records the union of the source and target contexts, the shared facet
-        // of either side, and both required capabilities.
-        let (target_visibility, target_context) = match &admitted.request().target_scope {
-            PromoteScope::Shared => ("shared", None),
-            PromoteScope::Context(context) => ("context", Some(context.as_str())),
-        };
-        let mut contexts: Vec<String> = Vec::new();
-        for context in [source_context.as_deref(), target_context]
-            .into_iter()
-            .flatten()
-        {
-            if !contexts.iter().any(|known| known == context) {
-                contexts.push(context.to_owned());
-            }
-        }
-        let context_refs: Vec<&str> = contexts.iter().map(String::as_str).collect();
-        let target = match capabilities_of(op) {
-            Ok(capabilities) => OpTarget::new(
-                capabilities,
-                Some(&subject_id),
-                &context_refs,
-                source_visibility == "shared" || target_visibility == "shared",
-                false,
-            ),
+        let target = match promote_target(
+            &subject_id,
+            &source_visibility,
+            source_context.as_deref(),
+            &admitted.request().target_scope,
+        ) {
+            Ok(target) => target,
             Err(reject) => return SpokeResult::Reject(reject),
         };
         match Self::replay_step(
