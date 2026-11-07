@@ -72,6 +72,28 @@ fn release(path: &Path, token: &str) {
     }
 }
 
+/// Take the lock for a snapshot read, or establish that no writer can take it.
+///
+/// I-000291: a `ReadOnly` open must still work on an already-provisioned home
+/// whose `.nexus42` is readable but not writable. Every writer's FIRST step is
+/// this same exclusive create, so a create the filesystem denies
+/// (`EACCES`/`EPERM`) means no protocol writer can enter its read-modify-write
+/// on that home, and the document cannot be rewritten while it is read.
+///
+/// `Ok(None)` is that proven no-writer case. Every other acquisition error is
+/// returned unchanged: the lock is never skipped because it is busy, stale or
+/// unreadable.
+///
+/// # Errors
+/// Every acquisition error except a write-denied exclusive create.
+pub fn acquire_for_read(nexus_home: &Path) -> std::io::Result<Option<ConfigLock>> {
+    match acquire(nexus_home) {
+        Ok(lock) => Ok(Some(lock)),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 #[cfg(test)]
 thread_local! {
     /// Test-only fault injection: the lock file is created, but its ownership
@@ -430,5 +452,77 @@ mod tests {
             lock.exists(),
             "a stolen holder must not unlink the new owner's lock"
         );
+    }
+
+    /// I-000291: a home whose directory denies the exclusive create also denies
+    /// every writer's first step, so the read path may proceed without the lock
+    /// instead of failing the whole read-only open.
+    #[cfg(unix)]
+    #[test]
+    fn a_read_snapshot_proceeds_only_when_the_home_denies_writer_entry() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::write(config_path(&home), "active_creator_id = \"ctr_kept\"\n").expect("config");
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o555)).expect("seal");
+
+        // The writer cannot enter its read-modify-write here...
+        let writer = super::acquire(&home).err();
+        // ...which is exactly the case the read path may skip the lock for.
+        let reader = super::acquire_for_read(&home);
+
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).expect("unseal");
+
+        let writer_error = writer.expect("a writer cannot enter a write-denied home");
+        assert_eq!(writer_error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(
+            reader.expect("the read path proceeds").is_none(),
+            "the read path must not hold a lock it could not create"
+        );
+        assert!(!lock_path(&home).exists(), "no lock was created");
+        assert!(
+            std::fs::read_to_string(config_path(&home))
+                .expect("config")
+                .contains("ctr_kept"),
+            "the readable document is untouched"
+        );
+    }
+
+    /// The read path only skips the lock for a write-denied create; a live
+    /// holder still blocks it, exactly like a writer.
+    #[test]
+    fn a_read_snapshot_waits_for_a_live_holder() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+        let lock = lock_path(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::write(&lock, format!("{} foreign\n", std::process::id())).expect("foreign lock");
+
+        let done = Arc::new(AtomicBool::new(false));
+        let reader = {
+            let done = Arc::clone(&done);
+            let home = home.clone();
+            std::thread::spawn(move || {
+                let guard = super::acquire_for_read(&home).expect("read acquisition");
+                assert!(guard.is_some(), "a held lock is not a write-denied home");
+                done.store(true, Ordering::SeqCst);
+            })
+        };
+
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !done.load(Ordering::SeqCst),
+            "the snapshot read must wait for a live holder, not skip it"
+        );
+
+        std::fs::remove_file(&lock).expect("release foreign lock");
+        reader.join().expect("reader thread");
+        assert!(done.load(Ordering::SeqCst));
+        assert!(!lock.exists(), "the reader released its own lock");
     }
 }

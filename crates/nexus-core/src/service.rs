@@ -21,7 +21,6 @@ use sqlx::SqlitePool;
 
 use crate::actor_fence::ActorFenceTable;
 use crate::changes::read_changes;
-use crate::config_lock::with_config_lock;
 use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::memory_binding::MemoryProviderBinding;
 use crate::memory_provider::LocalMemoryProvider;
@@ -207,13 +206,20 @@ pub struct CoreService {
 
 /// The one disk snapshot of `[memory_provider]` an open takes.
 ///
-/// The read runs under the same daemon-home `config.toml` advisory lock every
-/// writer holds: a read-modify-write truncated by `std::fs::write` can otherwise
-/// be observed as an empty document, which the layout reports as "no
-/// `[memory_provider]`" — the implicit local default — silently replacing a
+/// The read joins the same daemon-home `config.toml` advisory lock every writer
+/// holds, so a read-modify-write truncated by `std::fs::write` cannot be
+/// observed as an empty document — which the layout reports as "no
+/// `[memory_provider]`", the implicit local default — silently replacing a
 /// stored remote selection. The lock is taken and released synchronously here,
 /// before the open awaits anything (its own residual stale-steal heuristic is
 /// unchanged).
+///
+/// I-000291: a `ReadOnly` open on an already-provisioned but not writable home
+/// cannot create that lock and must not fail for it. Every writer's first step
+/// is the same exclusive create, so a write-denied create proves no writer can
+/// enter its read-modify-write on this home; the snapshot then reads without
+/// the lock and cannot observe a torn document. Every other acquisition error
+/// still fails the open.
 ///
 /// # Errors
 ///
@@ -221,10 +227,13 @@ pub struct CoreService {
 /// and the mapped [`CoreError::InvalidInput`] of a stored remote reference that
 /// fails validation — a malformed table never degrades to local silently.
 fn selection_snapshot(nexus_home: &Path) -> CoreResult<MemoryProviderSelection> {
-    let config = with_config_lock(nexus_home, || {
-        read_memory_provider_config(nexus_home).map_err(|error| CoreError::Internal {
-            category: format!("config_load: {error}"),
-        })
+    let _lock = nexus_home_layout::config_lock::acquire_for_read(nexus_home).map_err(|error| {
+        CoreError::Internal {
+            category: format!("config_lock: {error}"),
+        }
+    })?;
+    let config = read_memory_provider_config(nexus_home).map_err(|error| CoreError::Internal {
+        category: format!("config_load: {error}"),
     })?;
     MemoryProviderSelection::from_config(config)
 }
