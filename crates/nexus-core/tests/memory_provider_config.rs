@@ -6,12 +6,14 @@
 //! material is read or logged.
 
 use nexus_core::{
-    CoreError, CoreHomeService, MemoryCredential, MemoryProviderConfig, MemoryProviderSelection,
-    RemoteMemoryProviderSelection,
+    CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreService, MemoryCredential,
+    MemoryProviderConfig, MemoryProviderSelection, RemoteMemoryProviderSelection,
 };
 use nexus_home_layout::active_context::{
     read_active_creator_id, read_active_workspace_slug, read_memory_provider_config,
 };
+#[cfg(unix)]
+use std::future::Future as _;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -113,6 +115,136 @@ fn missing_memory_provider_table_selects_local() {
     std::fs::write(config_path(home.path()), OTHER_WRITER_TOML).expect("seed config");
     assert_eq!(read_selection(home.path()), MemoryProviderSelection::Local);
     assert!(config_path(home.path()).exists());
+}
+
+/// I-000304: only a genuinely absent `config.toml` is the implicit local
+/// default. A metadata failure must reach the caller as an error, so a remote
+/// configured home can never silently fall through to the local provider.
+#[test]
+fn unreadable_provider_config_is_an_error_not_the_local_default() {
+    let home = home();
+
+    // Genuine absence stays the documented default.
+    assert!(read_memory_provider_config(&nexus_dir(home.path()))
+        .expect("an absent config is not an error")
+        .is_none());
+
+    // A readable config still yields its remote selection.
+    std::fs::create_dir_all(nexus_dir(home.path())).expect("nexus dir");
+    let service = CoreHomeService::open(home.path().to_path_buf()).expect("home entry");
+    let selection = MemoryProviderSelection::Remote(remote(
+        CREDENTIAL_ID,
+        "ws://127.0.0.1:8420/memory",
+        PUBKEY_HEX,
+    ));
+    service
+        .set_memory_provider_selection(&selection)
+        .expect("write remote selection");
+    assert_eq!(read_selection(home.path()), selection);
+
+    // The config path's parent is a regular file, so metadata fails with a
+    // real non-`NotFound` error (ENOTDIR on Unix). `Path::exists()` used to
+    // fold that into "absent", which pinned Local for a config the reader
+    // could not inspect.
+    let not_a_dir = home.path().join("not-a-dir");
+    std::fs::write(&not_a_dir, "regular file").expect("parent file");
+    let error = read_memory_provider_config(&not_a_dir)
+        .expect_err("an uninspectable config must not read as absent");
+    assert!(
+        !error.to_string().is_empty(),
+        "the filesystem error reaches the caller: {error}"
+    );
+}
+
+/// I-000304, consumer level: `CoreService::open` resolves the workspace from
+/// `config.toml` first and reads the `[memory_provider]` table afterwards, from
+/// the SAME document. When that document becomes uninspectable inside that
+/// window — the report's own "symlinked target becomes inaccessible between
+/// workspace resolution and provider selection" — the open must reach the
+/// existing `config_load` failure instead of pinning the implicit local
+/// provider. Before the fix `Path::exists()` folded the ELOOP into "absent",
+/// so the open succeeded on Local.
+///
+/// The swap is ordered by this test, not by the scheduler: the fresh store's
+/// public migration fence is held while the open is polled exactly once, so
+/// the open must park in its fenced migration admission after the workspace
+/// snapshot and before the provider selection reads the same document again.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_uninspectable_provider_table_fails_the_open_instead_of_selecting_local() {
+    const CREATOR: &str = "crt_alpha";
+    const SLUG: &str = "default";
+
+    let home = tempfile::tempdir().expect("temp home");
+    let user_home = home.path().canonicalize().expect("canonical home");
+    let nexus_home = nexus_home_layout::nexus_root_from_home(&user_home);
+    std::fs::create_dir_all(&nexus_home).expect("nexus home");
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        &user_home, CREATOR, SLUG,
+    ))
+    .expect("workspace dir");
+    let document = format!(
+        "active_creator_id = \"{CREATOR}\"\n\
+         [active_workspace_slug_by_creator]\n\
+         \"{CREATOR}\" = \"{SLUG}\"\n"
+    );
+    let config = nexus_home.join("config.toml");
+    std::fs::write(&config, &document).expect("seed config");
+    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, SLUG);
+    let open = |access| CoreOpenOptions {
+        user_home: user_home.clone(),
+        access,
+        memory: None,
+    };
+
+    // Hold the fresh store's public migration fence before the open runs: the
+    // open's first admission must take this exclusive lock, so a single poll
+    // can only reach that wait — it can neither migrate, open a writer nor
+    // select a provider while this test owns the lock.
+    let fence = nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path)
+        .expect("the fresh store has no live writer");
+    let mut opened = Box::pin(CoreService::open(open(CoreAccess::EngineOwner)));
+    // One poll runs the synchronous workspace discovery and parks on the
+    // fenced admission, so the workspace snapshot has been read and the
+    // provider selection has provably not run yet.
+    let mut poll_once = std::task::Context::from_waker(std::task::Waker::noop());
+    assert!(
+        matches!(
+            opened.as_mut().poll(&mut poll_once),
+            std::task::Poll::Pending
+        ),
+        "the held migration fence keeps the open from finishing"
+    );
+    // The window: the same `config.toml` turns uninspectable — a
+    // self-referential symlink answers ELOOP, a non-`NotFound` metadata error —
+    // between the workspace snapshot and the provider selection.
+    std::fs::remove_file(&config).expect("drop the readable document");
+    std::os::unix::fs::symlink("config.toml", &config).expect("self-referential config symlink");
+    drop(fence);
+
+    let Err(error) = opened.await else {
+        panic!("an uninspectable provider table must not select the local default");
+    };
+    let CoreError::Internal { category } = &error else {
+        panic!("expected the config_load refusal, got {error:?}");
+    };
+    assert!(
+        category.starts_with("config_load:"),
+        "the provider snapshot refused the document: {error:?}"
+    );
+    assert!(
+        category.contains("Too many levels of symbolic links"),
+        "the failure is the uninspectable document, not workspace discovery: {category}"
+    );
+
+    // The failed pin released the engine admission it took: a real writer open
+    // acquires it once the document is readable again.
+    std::fs::remove_file(&config).expect("drop the config symlink");
+    std::fs::write(&config, &document).expect("restore config");
+    let writer = CoreService::open(open(CoreAccess::DirectWriter))
+        .await
+        .expect("the failed open released its writer admission");
+    writer.close().await.expect("close");
 }
 
 #[test]

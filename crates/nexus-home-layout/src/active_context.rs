@@ -200,14 +200,20 @@ pub fn read_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option
 ///
 /// # Errors
 ///
-/// Returns an error when `config.toml` cannot be read or parsed, or when the
-/// provider table does not match [`MemoryProviderConfig`].
+/// Returns an error when `config.toml` cannot be inspected, read or parsed, or
+/// when the provider table does not match [`MemoryProviderConfig`].
 pub fn read_memory_provider_config(
     nexus_root: &Path,
 ) -> Result<Option<MemoryProviderConfig>, anyhow::Error> {
     let path = nexus_root.join("config.toml");
-    if !path.exists() {
-        return Ok(None);
+    // I-000304: only a genuinely absent document is the implicit local default.
+    // `Path::exists()` folds every metadata failure into `false`, which would
+    // let Core pin Local for a config it could not inspect; every other error
+    // keeps the caller's failure path.
+    match std::fs::metadata(&path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
     }
     let text = std::fs::read_to_string(&path)?;
     if text.trim().is_empty() {

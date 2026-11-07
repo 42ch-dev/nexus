@@ -163,6 +163,12 @@ const PROMOTE_DIGEST: &str =
 /// validation and still exceeds the provider's payload bound.
 const OVER_LIMIT_DIGEST_BYTES: usize = 64 * 1024;
 
+/// A schema-valid but foreign dismissal-receipt candidate id carrying a peer
+/// sentinel. The response schema types the id as a nonempty string, not a
+/// patterned id, so only binding the receipt to its request rejects it
+/// (I-000303).
+const FORGED_RECEIPT_CANDIDATE: &str = "cand_forged\nMARKER-I303 token=abc";
+
 // ---------------------------------------------------------------------------
 // A memory-only responder host
 // ---------------------------------------------------------------------------
@@ -3920,6 +3926,326 @@ async fn remote_refusals_stay_static_without_peer_text() {
     assert_eq!(
         responder_of(responder).await.remote_peer_id().as_deref(),
         Some(peer_id(&CLIENT_SEED).as_str())
+    );
+    assert!(
+        core.close().await.expect("close").cleanup_confirmed,
+        "the open releases its own admission"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// I-000303: a committed dismissal receipt only proves ITS OWN request
+// ---------------------------------------------------------------------------
+
+/// Test-only decorator over the REAL fixture memory service.
+///
+/// It forwards every ordinary request unchanged to the assembled fixture and
+/// rewrites exactly one committed `memory.candidates.dismiss` answer into a
+/// schema-valid receipt that names a different candidate. The provider's own
+/// durable effect is untouched — the request really commits and consumes the
+/// candidate — so what the caller sees is the threat I-000303 names: a
+/// peer-valid receipt that belongs to no request this Core sent.
+struct DismissReceiptProbe {
+    inner: Arc<dyn RemoteMemoryService>,
+    forge: std::sync::Mutex<Option<String>>,
+    forged: AtomicUsize,
+}
+
+impl DismissReceiptProbe {
+    fn over(inner: Arc<dyn RemoteMemoryService>) -> Self {
+        Self {
+            inner,
+            forge: std::sync::Mutex::new(None),
+            forged: AtomicUsize::new(0),
+        }
+    }
+
+    /// Rewrite the NEXT committed dismissal receipt to name `candidate`.
+    fn forge_next(&self, candidate: &str) {
+        *self.forge.lock().expect("forged candidate") = Some(candidate.to_string());
+    }
+
+    /// How many committed dismissal answers the fixture actually rewrote.
+    fn forged_count(&self) -> usize {
+        self.forged.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl RemoteMemoryService for DismissReceiptProbe {
+    async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
+        let answer = self.inner.invoke(peer_id, op, payload).await;
+        if op != "memory.candidates.dismiss" {
+            return answer;
+        }
+        let Some(candidate) = self.forge.lock().expect("forged candidate").take() else {
+            return answer;
+        };
+        let SpokeResult::Ok(mut body) = answer else {
+            return answer;
+        };
+        // Only a committed receipt carries `result`; a refusal stays a refusal.
+        if body.get("status").and_then(Value::as_str) != Some("committed")
+            || body.pointer("/result/candidate_id").is_none()
+        {
+            return SpokeResult::Ok(body);
+        }
+        // The response schema types most fields as nonempty strings, not as
+        // patterned ids, so this stays a schema-valid receipt.
+        body["result"]["candidate_id"] = json!(candidate);
+        self.forged.fetch_add(1, Ordering::SeqCst);
+        SpokeResult::Ok(body)
+    }
+}
+
+/// I-000303 (consumer): the nonlocal dismissal sender must bind the committed
+/// receipt to the request that issued it BEFORE it releases the binding
+/// dependency. A schema-valid receipt for another candidate must refuse the
+/// dismissal, echo no peer bytes, leave the issued candidate's persisted
+/// dependency fact `live` (no `released` row, and no independently positive
+/// object read standing in for that write), and leave the real removal gate
+/// refusing the binding. A matching receipt releases exactly its own
+/// dependency; unrelated live objects and an unknown admission keep their
+/// protection, and the retained replay/no-effect answer is unchanged.
+#[tokio::test]
+async fn foreign_dismissal_receipt_cannot_release_a_remote_binding_dependency() {
+    let env = Env::boot("R3 Receipt Owner").await;
+    let provider = Provider::open().await;
+    let probe = Arc::new(DismissReceiptProbe::over(
+        provider.inner.server(provider.directory.admission()),
+    ));
+    let (core, responder) = provider.open_core_serving(&env, probe.clone()).await;
+    let principal = core.active_principal().await.expect("principal");
+
+    let mut worlds = Vec::new();
+    for index in 0..4 {
+        worlds.push(create_world(&core, &principal, &format!("R3 Receipt {index}")).await);
+    }
+    let (character_id, _keeper, _) =
+        create_character(&core, &principal, "R3 Receipt Ada", &worlds[0]).await;
+    let mismatched = add_binding(&core, &principal, &character_id, &worlds[1]).await;
+    let legal = add_binding(&core, &principal, &character_id, &worlds[2]).await;
+    let uncertain = add_binding(&core, &principal, &character_id, &worlds[3]).await;
+
+    // (1) A genuinely live binding-local candidate: the committed capture
+    // published the one persisted dependency fact the removal gate counts.
+    capture(
+        &core,
+        &principal,
+        &character_id,
+        Some(&mismatched),
+        "pend_receipt_forged",
+    )
+    .await
+    .expect("binding-local capture");
+    let nexus = core_db(&env).await;
+    let facts = object_facts(&nexus, &mismatched).await;
+    assert_eq!(facts.len(), 1, "the capture published one fact: {facts:?}");
+    assert_eq!(facts[0].0, "candidate");
+    assert_eq!(facts[0].2, "live", "the captured candidate is live");
+    let issued = facts[0].1.clone();
+    nexus.close().await;
+    assert_remote_memory_holds(&core, &principal, &character_id, &mismatched).await;
+
+    // (2) The provider answers with a schema-valid receipt for another
+    // candidate. The dismissal fails, and nothing peer-authored reaches the
+    // caller.
+    probe.forge_next(FORGED_RECEIPT_CANDIDATE);
+    let error = core
+        .delete_character_pending_review(
+            &principal,
+            character_id.clone(),
+            "pend_receipt_forged".to_string(),
+        )
+        .await
+        .expect_err("a receipt for another candidate dismisses nothing");
+    assert_eq!(
+        probe.forged_count(),
+        1,
+        "the fixture delivered the foreign receipt"
+    );
+    let CoreError::Internal { category } = &error else {
+        panic!("expected the static receipt refusal, got {error:?}");
+    };
+    assert!(
+        category.starts_with("memory_dismiss_receipt"),
+        "the static receipt category, got {category}"
+    );
+    let rendered = format!("{error} {error:?} {category}");
+    for leaked in ["MARKER-I303", "token=abc"] {
+        assert!(
+            !rendered.contains(leaked),
+            "peer bytes must not escape the refusal: {rendered}"
+        );
+    }
+    assert!(
+        !rendered.contains('\n'),
+        "peer newline must not escape the refusal: {rendered:?}"
+    );
+
+    // The refused dismissal wrote no `released` fact: the persisted dependency
+    // is still the live candidate the capture published.
+    let nexus = core_db(&env).await;
+    assert_eq!(
+        object_facts(&nexus, &mismatched).await,
+        vec![("candidate".to_string(), issued.clone(), "live".to_string())],
+        "a foreign receipt must not release another candidate's protection"
+    );
+    nexus.close().await;
+    assert_remote_memory_holds(&core, &principal, &character_id, &mismatched).await;
+
+    // The peer really committed the dismissal; only the receipt binding is
+    // what kept the dependency live.
+    let pool = provider.pool().await;
+    assert_eq!(
+        provider_candidate(&pool, &issued)
+            .await
+            .map(|(status, _, _)| status),
+        Some("consumed".to_string()),
+        "the provider committed the dismissal the receipt failed to prove"
+    );
+    pool.close().await;
+
+    // (3) The retained no-effect answer is unchanged: the consumed candidate is
+    // no longer queued, so the repeat is the retained absence, and the live
+    // dependency and the removal gate are untouched.
+    let replay = core
+        .delete_character_pending_review(
+            &principal,
+            character_id.clone(),
+            "pend_receipt_forged".to_string(),
+        )
+        .await
+        .expect_err("a consumed candidate is no longer queued");
+    assert!(
+        matches!(replay, CoreError::NotFound { .. }),
+        "the retained absence, got {replay:?}"
+    );
+    let nexus = core_db(&env).await;
+    assert_eq!(
+        object_facts(&nexus, &mismatched).await,
+        vec![("candidate".to_string(), issued.clone(), "live".to_string())],
+        "a replay resurrects nothing and releases nothing"
+    );
+    nexus.close().await;
+    assert_remote_memory_holds(&core, &principal, &character_id, &mismatched).await;
+
+    // (4) A matching legal receipt releases exactly its own dependency: one of
+    // two live candidates, leaving the unrelated one protected.
+    capture(
+        &core,
+        &principal,
+        &character_id,
+        Some(&legal),
+        "pend_receipt_legal_a",
+    )
+    .await
+    .expect("first legal capture");
+    capture(
+        &core,
+        &principal,
+        &character_id,
+        Some(&legal),
+        "pend_receipt_legal_b",
+    )
+    .await
+    .expect("second legal capture");
+    let nexus = core_db(&env).await;
+    let live = object_facts(&nexus, &legal).await;
+    assert_eq!(live.len(), 2, "two live candidates: {live:?}");
+    assert!(
+        live.iter()
+            .all(|(kind, _, state)| kind == "candidate" && state == "live"),
+        "both are live dependencies: {live:?}"
+    );
+    nexus.close().await;
+    assert_remote_memory_holds(&core, &principal, &character_id, &legal).await;
+
+    core.delete_character_pending_review(
+        &principal,
+        character_id.clone(),
+        "pend_receipt_legal_a".to_string(),
+    )
+    .await
+    .expect("the matching receipt dismisses its own candidate");
+    let nexus = core_db(&env).await;
+    let after_one = object_facts(&nexus, &legal).await;
+    assert_eq!(
+        after_one
+            .iter()
+            .filter(|(_, _, state)| state == "released")
+            .count(),
+        1,
+        "exactly the issued candidate is released: {after_one:?}"
+    );
+    assert_eq!(
+        after_one
+            .iter()
+            .filter(|(_, _, state)| state == "live")
+            .count(),
+        1,
+        "the unrelated live candidate stays protected: {after_one:?}"
+    );
+    nexus.close().await;
+    assert_remote_memory_holds(&core, &principal, &character_id, &legal).await;
+
+    core.delete_character_pending_review(
+        &principal,
+        character_id.clone(),
+        "pend_receipt_legal_b".to_string(),
+    )
+    .await
+    .expect("the second matching receipt dismisses its own candidate");
+    let nexus = core_db(&env).await;
+    assert!(
+        object_facts(&nexus, &legal)
+            .await
+            .iter()
+            .all(|(_, _, state)| state == "released"),
+        "a fully disposed binding has only terminal facts"
+    );
+    nexus.close().await;
+    core.remove_binding(&principal, character_id.clone(), legal.clone())
+        .await
+        .expect("a fully released binding is removable");
+
+    // (5) An unknown admission is a dependency of its own: a capture whose
+    // answer was lost keeps it protected while the other bindings settle.
+    provider
+        .faults()
+        .fail_next(nexus_memory_conformance::FaultPoint::AfterCommitBeforeResponse);
+    let lost = capture(
+        &core,
+        &principal,
+        &character_id,
+        Some(&uncertain),
+        "pend_receipt_uncertain",
+    )
+    .await
+    .expect_err("a lost post-commit answer is not a success");
+    let (refusal_code, retry_class, _, _) = provider_refusal(&lost);
+    assert_eq!(refusal_code, "OUTCOME_UNCERTAIN");
+    assert_eq!(retry_class, "uncertain");
+    let nexus = core_db(&env).await;
+    assert_eq!(
+        admission_count(&nexus, &uncertain).await,
+        1,
+        "the unknown attempt keeps its own admission"
+    );
+    assert!(
+        object_facts(&nexus, &uncertain).await.is_empty(),
+        "a lost answer published no candidate fact"
+    );
+    nexus.close().await;
+    assert_remote_memory_holds(&core, &principal, &character_id, &uncertain).await;
+    // The binding whose receipt was foreign is still protected as well: the
+    // legal dismissal of another binding never cleared it.
+    assert_remote_memory_holds(&core, &principal, &character_id, &mismatched).await;
+
+    assert_eq!(
+        responder_of(responder).await.remote_peer_id().as_deref(),
+        Some(peer_id(&CLIENT_SEED).as_str()),
+        "every effect above travelled the signed session of the loaded credential"
     );
     assert!(
         core.close().await.expect("close").cleanup_confirmed,
