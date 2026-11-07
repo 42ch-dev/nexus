@@ -4145,12 +4145,9 @@ async fn adopt_records_in_tx(
 }
 
 /// What one legacy-content migration pass did.
-// One outcome per migration pass: boxing the receipt would add an allocation to
-// a one-shot path whose value is moved once.
-#[allow(clippy::large_enum_variant)]
 pub(super) enum MigrationOutcome {
     /// The pass committed its objects, its journal intent and the manifest.
-    Migrated(ReceiptRow),
+    Migrated(Box<ReceiptRow>),
     /// The space was already migrated and its manifest still matches the source.
     Verified(Value),
 }
@@ -6200,7 +6197,7 @@ impl MemoryStore {
             now,
         )
         .await
-        .map(MigrationOutcome::Migrated)
+        .map(|receipt| MigrationOutcome::Migrated(Box::new(receipt)))
     }
 
     /// §7.23 profile read: every present profile, or the requested kinds that

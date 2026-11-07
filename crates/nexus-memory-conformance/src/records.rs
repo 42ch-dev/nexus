@@ -451,6 +451,185 @@ fn authorized_for(
     })
 }
 
+/// The read requirement one list selection must be covered by.
+fn selection_requirement(request: &MemoryRecordsListRequest) -> GrantRequirement<'_> {
+    let subject_id = request.subject_id.as_str();
+    match &request.selection {
+        ReadSelection::SubjectAll => whole_scope_requirement("records_read", Some(subject_id)),
+        ReadSelection::SharedOnly => GrantRequirement {
+            capability: "records_read",
+            subject_id: Some(subject_id),
+            context_ids: Vec::new(),
+            reads_shared: true,
+            subject_all: false,
+        },
+        ReadSelection::SelectedContexts {
+            context_ids,
+            include_shared,
+        } => GrantRequirement {
+            capability: "records_read",
+            subject_id: Some(subject_id),
+            context_ids: context_ids.clone(),
+            reads_shared: include_shared.unwrap_or(false),
+            subject_all: false,
+        },
+    }
+}
+
+/// The records this caller may see in the current snapshot, ordered and decoded
+/// before any placement, kind, provenance or tombstone filtering.
+async fn list_records_snapshot(
+    conn: &mut SqliteConnection,
+    request: &MemoryRecordsListRequest,
+    sees_tombstones: bool,
+) -> Result<Vec<StoredRecord>, SpokeReject> {
+    let space_id = request.space_id.as_str();
+    let subject_id = request.subject_id.as_str();
+    let rows = sqlx::query(
+        "SELECT record_id, space_id, subject_id, kind, content_json, scope_visibility, \
+         scope_context_id, provenance_json, import_ref_json, occurred_at, tombstone_json, \
+         revision, created_at, updated_at, extensions_json \
+         FROM records WHERE space_id = ? AND subject_id = ? \
+         ORDER BY created_at DESC, record_id ASC",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(internal_failure)?;
+    let mut records = Vec::with_capacity(rows.len());
+    for row in rows {
+        let record = StoredRecord {
+            record_id: row.try_get("record_id").map_err(internal_failure)?,
+            space_id: row.try_get("space_id").map_err(internal_failure)?,
+            subject_id: row.try_get("subject_id").map_err(internal_failure)?,
+            kind: row.try_get("kind").map_err(internal_failure)?,
+            content_json: row.try_get("content_json").map_err(internal_failure)?,
+            scope_visibility: row.try_get("scope_visibility").map_err(internal_failure)?,
+            scope_context_id: row.try_get("scope_context_id").map_err(internal_failure)?,
+            provenance_json: row.try_get("provenance_json").map_err(internal_failure)?,
+            import_ref_json: row.try_get("import_ref_json").map_err(internal_failure)?,
+            occurred_at: optional_timestamp(row.try_get("occurred_at").map_err(internal_failure)?)?,
+            tombstone_json: row.try_get("tombstone_json").map_err(internal_failure)?,
+            revision: row_u64(&row, "revision")?,
+            created_at: timestamp(
+                &row.try_get::<String, _>("created_at")
+                    .map_err(internal_failure)?,
+            )?,
+            updated_at: timestamp(
+                &row.try_get::<String, _>("updated_at")
+                    .map_err(internal_failure)?,
+            )?,
+            extensions_json: row.try_get("extensions_json").map_err(internal_failure)?,
+        };
+        if !placement_matches(&request.selection, &record) {
+            continue;
+        }
+        if !request.kinds.is_empty() && !request.kinds.iter().any(|kind| kind == &record.kind) {
+            continue;
+        }
+        if let Some(filter) = &request.filter {
+            let provenance = json_field(&record.provenance_json, "record provenance")?;
+            let claims = provenance["source_context_ids"].as_array();
+            let matches = claims.is_some_and(|claims| {
+                claims.iter().any(|claim| {
+                    claim.as_str().is_some_and(|claim| {
+                        filter
+                            .source_context_ids
+                            .iter()
+                            .any(|context| context == claim)
+                    })
+                })
+            });
+            if !matches {
+                continue;
+            }
+        }
+        if record.tombstone_json.is_some() && !sees_tombstones {
+            continue;
+        }
+        records.push(record);
+    }
+    Ok(records)
+}
+
+/// The resume index a continuation cursor names on exactly this record set.
+fn list_cursor_start(
+    binding_digest: &str,
+    records: &[StoredRecord],
+    cursor: Option<&str>,
+) -> Result<usize, SpokeReject> {
+    let Some(cursor) = cursor else {
+        return Ok(0);
+    };
+    let (digest, last_id) = cursor
+        .split_once(':')
+        .ok_or_else(|| cursor_invalid("cursor is malformed"))?;
+    if digest != binding_digest {
+        return Err(cursor_invalid(
+            "cursor was issued for a different query or provider state",
+        ));
+    }
+    let position = records
+        .iter()
+        .position(|record| record.record_id == last_id)
+        .ok_or_else(|| cursor_invalid("cursor no longer matches the record set"))?;
+    Ok(position + 1)
+}
+
+/// Refuse unless the caller's one grant covers `records_write` over the
+/// record's current placement; the refusal is the uniform absent answer.
+async fn require_record_write(
+    conn: &mut SqliteConnection,
+    principal_id: &str,
+    space_id: &str,
+    record: &StoredRecord,
+    now: DateTime<Utc>,
+) -> Result<(), SpokeReject> {
+    let grants = load_grants(conn, space_id).await?;
+    let covered = authorized_for(
+        &grants,
+        principal_id,
+        space_id,
+        now,
+        &placement_requirement(
+            "records_write",
+            &record.subject_id,
+            &record.scope_visibility,
+            record.scope_context_id.as_deref(),
+        ),
+        &["records_write"],
+    );
+    if covered {
+        return Ok(());
+    }
+    Err(record_absent())
+}
+
+/// The record's next `(content_json, kind)` when this update changes something
+/// observable, or `None` when it names only the already-stored identity
+/// (§7.0.4: an update is never a no-op, but this one would change nothing).
+fn next_record_state(
+    record: &StoredRecord,
+    content_text: Option<String>,
+    content_structured: Option<&Value>,
+    kind: Option<&str>,
+) -> Result<Option<(String, String)>, SpokeReject> {
+    let changes_content = content_text.is_some();
+    let changes_kind = kind.is_some_and(|kind| kind != record.kind);
+    if !changes_content && !changes_kind {
+        return Ok(None);
+    }
+    let next_content = match content_text {
+        Some(text) => content_json(&text, content_structured)?,
+        None => record.content_json.clone(),
+    };
+    Ok(Some((
+        next_content,
+        kind.unwrap_or(&record.kind).to_owned(),
+    )))
+}
+
 impl FixtureMemoryProvider {
     fn require_identity_space(&self, requested: &str) -> Result<(), SpokeReject> {
         if requested == self.identity.space_id {
@@ -660,7 +839,6 @@ impl FixtureMemoryProvider {
     }
 
     /// [`Self::records_update`] on a caller-owned connection; never commits.
-    #[allow(clippy::too_many_lines)] // one linear CAS update: precheck, revision and receipt
     pub(crate) async fn records_update_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -711,22 +889,7 @@ impl FixtureMemoryProvider {
             // rewritten or regrown (MEM-R014/§6.6).
             return Err(record_absent());
         }
-        let grants = load_grants(conn, space_id).await?;
-        if !authorized_for(
-            &grants,
-            principal_id,
-            space_id,
-            now,
-            &placement_requirement(
-                "records_write",
-                &record.subject_id,
-                &record.scope_visibility,
-                record.scope_context_id.as_deref(),
-            ),
-            &["records_write"],
-        ) {
-            return Err(record_absent());
-        }
+        require_record_write(conn, principal_id, space_id, &record, now).await?;
         let placement_contexts: Vec<&str> =
             record.scope_context_id.as_deref().into_iter().collect();
         require_subject_writable(conn, space_id, &record.subject_id, &placement_contexts).await?;
@@ -734,28 +897,21 @@ impl FixtureMemoryProvider {
             return Err(revision_conflict(expected_revision, record.revision));
         }
 
-        // §7.0.4: content updates are never no-ops, but an update that names
-        // only the already-stored kind changes nothing observable.
-        let changes_content = content_text.is_some();
-        let changes_kind = kind.is_some_and(|kind| kind != record.kind);
-        if !changes_content && !changes_kind {
+        let Some((next_content, next_kind)) =
+            next_record_state(&record, content_text, content_structured.as_ref(), kind)?
+        else {
             return Ok(RecordRevision {
                 record_id: record.record_id,
                 revision: record.revision,
             });
-        }
-        let next_content = match content_text {
-            Some(text) => content_json(&text, content_structured.as_ref())?,
-            None => record.content_json.clone(),
         };
-        let next_kind = kind.unwrap_or(&record.kind);
         let revision = record.revision + 1;
         let updated = sqlx::query(
             "UPDATE records SET content_json = ?, kind = ?, updated_at = ?, revision = ? \
              WHERE space_id = ? AND record_id = ? AND revision = ?",
         )
         .bind(&next_content)
-        .bind(next_kind)
+        .bind(next_kind.as_str())
         .bind(timestamp_text(now))
         .bind(row_i64(revision)?)
         .bind(space_id)
@@ -1034,7 +1190,6 @@ impl FixtureMemoryProvider {
 
     /// [`Self::records_list`] on a caller-owned connection: authorization, the
     /// rows and the cursor marker come from the caller's one read snapshot.
-    #[allow(clippy::too_many_lines)] // one linear authorized page: rows and marker from one snapshot
     pub(crate) async fn records_list_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -1046,26 +1201,7 @@ impl FixtureMemoryProvider {
         let space_id = request.space_id.as_str();
         self.require_identity_space(space_id)?;
         let subject_id = request.subject_id.as_str();
-        let selection_requirement = match &request.selection {
-            ReadSelection::SubjectAll => whole_scope_requirement("records_read", Some(subject_id)),
-            ReadSelection::SharedOnly => GrantRequirement {
-                capability: "records_read",
-                subject_id: Some(subject_id),
-                context_ids: Vec::new(),
-                reads_shared: true,
-                subject_all: false,
-            },
-            ReadSelection::SelectedContexts {
-                context_ids,
-                include_shared,
-            } => GrantRequirement {
-                capability: "records_read",
-                subject_id: Some(subject_id),
-                context_ids: context_ids.clone(),
-                reads_shared: include_shared.unwrap_or(false),
-                subject_all: false,
-            },
-        };
+        let selection_requirement = selection_requirement(request);
         let grants = load_grants(conn, space_id).await?;
         if !authorized_for(
             &grants,
@@ -1096,73 +1232,7 @@ impl FixtureMemoryProvider {
             ));
         }
 
-        let rows = sqlx::query(
-            "SELECT record_id, space_id, subject_id, kind, content_json, scope_visibility, \
-             scope_context_id, provenance_json, import_ref_json, occurred_at, tombstone_json, \
-             revision, created_at, updated_at, extensions_json \
-             FROM records WHERE space_id = ? AND subject_id = ? \
-             ORDER BY created_at DESC, record_id ASC",
-        )
-        .bind(space_id)
-        .bind(subject_id)
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(internal_failure)?;
-        let mut records = Vec::with_capacity(rows.len());
-        for row in rows {
-            let record = StoredRecord {
-                record_id: row.try_get("record_id").map_err(internal_failure)?,
-                space_id: row.try_get("space_id").map_err(internal_failure)?,
-                subject_id: row.try_get("subject_id").map_err(internal_failure)?,
-                kind: row.try_get("kind").map_err(internal_failure)?,
-                content_json: row.try_get("content_json").map_err(internal_failure)?,
-                scope_visibility: row.try_get("scope_visibility").map_err(internal_failure)?,
-                scope_context_id: row.try_get("scope_context_id").map_err(internal_failure)?,
-                provenance_json: row.try_get("provenance_json").map_err(internal_failure)?,
-                import_ref_json: row.try_get("import_ref_json").map_err(internal_failure)?,
-                occurred_at: optional_timestamp(
-                    row.try_get("occurred_at").map_err(internal_failure)?,
-                )?,
-                tombstone_json: row.try_get("tombstone_json").map_err(internal_failure)?,
-                revision: row_u64(&row, "revision")?,
-                created_at: timestamp(
-                    &row.try_get::<String, _>("created_at")
-                        .map_err(internal_failure)?,
-                )?,
-                updated_at: timestamp(
-                    &row.try_get::<String, _>("updated_at")
-                        .map_err(internal_failure)?,
-                )?,
-                extensions_json: row.try_get("extensions_json").map_err(internal_failure)?,
-            };
-            if !placement_matches(&request.selection, &record) {
-                continue;
-            }
-            if !request.kinds.is_empty() && !request.kinds.iter().any(|kind| kind == &record.kind) {
-                continue;
-            }
-            if let Some(filter) = &request.filter {
-                let provenance = json_field(&record.provenance_json, "record provenance")?;
-                let claims = provenance["source_context_ids"].as_array();
-                let matches = claims.is_some_and(|claims| {
-                    claims.iter().any(|claim| {
-                        claim.as_str().is_some_and(|claim| {
-                            filter
-                                .source_context_ids
-                                .iter()
-                                .any(|context| context == claim)
-                        })
-                    })
-                });
-                if !matches {
-                    continue;
-                }
-            }
-            if record.tombstone_json.is_some() && !sees_tombstones {
-                continue;
-            }
-            records.push(record);
-        }
+        let records = list_records_snapshot(conn, request, sees_tombstones).await?;
         let total_authorized = u64::try_from(records.len()).map_err(internal_failure)?;
 
         // §7.0.7/MEM-R026: the cursor is bound to the provider snapshot marker,
@@ -1184,24 +1254,7 @@ impl FixtureMemoryProvider {
             SpokeResult::Ok(digest) => digest,
             SpokeResult::Reject(reject) => return Err(reject),
         };
-        let start = match request.cursor.as_deref() {
-            None => 0,
-            Some(cursor) => {
-                let (digest, last_id) = cursor
-                    .split_once(':')
-                    .ok_or_else(|| cursor_invalid("cursor is malformed"))?;
-                if digest != binding_digest {
-                    return Err(cursor_invalid(
-                        "cursor was issued for a different query or provider state",
-                    ));
-                }
-                let position = records
-                    .iter()
-                    .position(|record| record.record_id == last_id)
-                    .ok_or_else(|| cursor_invalid("cursor no longer matches the record set"))?;
-                position + 1
-            }
-        };
+        let start = list_cursor_start(&binding_digest, &records, request.cursor.as_ref().map(|cursor| cursor.as_str()))?;
         let limit = usize::try_from(request.limit.map_or(MAX_PAGE_SIZE.get(), NonZeroU64::get))
             .map_err(internal_failure)?;
         let remaining = &records[start..];

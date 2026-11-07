@@ -83,7 +83,10 @@ impl MemoryProviderBinding {
             space_id,
             authority_host_id,
             authority_generation,
-            max_page_size,
+            // The advertised value is a maximum, not permission to enlarge a
+            // request: the original client ceiling still bounds every page, so
+            // a wider provider never makes this client ask for more.
+            max_page_size: max_page_size.min(crate::memory_provider::policy::MAX_PAGE_SIZE_BOUND),
             port: Arc::clone(&adapter) as Arc<dyn MemoryPort + Send + Sync>,
             local: None,
             remote: Some(adapter),
@@ -100,7 +103,8 @@ impl MemoryProviderBinding {
         &self.space_id
     }
 
-    /// The provider's advertised `max_page_size` (§7.0.7), pinned at open.
+    /// The page bound this binding serves: the smaller of the client's own
+    /// ceiling and the provider's advertised maximum (§7.0.7).
     pub(crate) const fn page_size(&self) -> NonZeroU64 {
         self.max_page_size
     }

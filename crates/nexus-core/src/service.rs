@@ -21,6 +21,7 @@ use sqlx::SqlitePool;
 
 use crate::actor_fence::ActorFenceTable;
 use crate::changes::read_changes;
+use crate::config_lock::with_config_lock;
 use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::memory_binding::MemoryProviderBinding;
 use crate::memory_provider::LocalMemoryProvider;
@@ -204,6 +205,30 @@ pub struct CoreService {
     pub(crate) inner: Arc<CoreInner>,
 }
 
+/// The one disk snapshot of `[memory_provider]` an open takes.
+///
+/// The read runs under the same daemon-home `config.toml` advisory lock every
+/// writer holds: a read-modify-write truncated by `std::fs::write` can otherwise
+/// be observed as an empty document, which the layout reports as "no
+/// `[memory_provider]`" — the implicit local default — silently replacing a
+/// stored remote selection. The lock is taken and released synchronously here,
+/// before the open awaits anything (its own residual stale-steal heuristic is
+/// unchanged).
+///
+/// # Errors
+///
+/// [`CoreError::Internal`] for an unreadable document or an unavailable lock,
+/// and the mapped [`CoreError::InvalidInput`] of a stored remote reference that
+/// fails validation — a malformed table never degrades to local silently.
+fn selection_snapshot(nexus_home: &Path) -> CoreResult<MemoryProviderSelection> {
+    let config = with_config_lock(nexus_home, || {
+        read_memory_provider_config(nexus_home).map_err(|error| CoreError::Internal {
+            category: format!("config_load: {error}"),
+        })
+    })?;
+    MemoryProviderSelection::from_config(config)
+}
+
 impl CoreService {
     /// Open a [`CoreService`] against the active workspace state DB under
     /// `options.user_home`.
@@ -269,11 +294,7 @@ impl CoreService {
         let selection = if let Some(selection) = &options.memory {
             selection.clone()
         } else {
-            let config =
-                read_memory_provider_config(nexus_home).map_err(|error| CoreError::Internal {
-                    category: format!("config_load: {error}"),
-                })?;
-            MemoryProviderSelection::from_config(config)?
+            selection_snapshot(nexus_home)?
         };
         selection.validate()?;
         match selection {
@@ -322,7 +343,54 @@ impl CoreService {
         }
     }
 
-    #[allow(clippy::too_many_lines)] // one linear open: home, config, fences, pool, binding
+    /// Open the pool and, for a writer access level, the admission it owns.
+    async fn open_admissions(
+        db_path: &Path,
+        creator_id: &str,
+        access: CoreAccess,
+    ) -> CoreResult<(SqlitePool, Option<GuardedPool>)> {
+        match access {
+            CoreAccess::ReadOnly => {
+                let pool = open_pool_read_only(db_path).await.map_err(local_db_err)?;
+                Ok((pool, None))
+            }
+            CoreAccess::DirectWriter => {
+                let guarded = init_guarded_pool(db_path, creator_id)
+                    .await
+                    .map_err(local_db_err)?;
+                let pool = guarded.clone_pool();
+                Ok((pool, Some(guarded)))
+            }
+            CoreAccess::EngineOwner => {
+                let options = GuardedPoolOptions::default();
+                let joined =
+                    nexus_local_db::writer_protocol::join_live_engine_pool(db_path, options)
+                        .await
+                        .map_err(local_db_err)?;
+                let guarded = match joined {
+                    Some(guarded) => guarded,
+                    None => init_engine_pool(db_path, creator_id, options)
+                        .await
+                        .map_err(local_db_err)?,
+                };
+                let pool = guarded.clone_pool();
+                Ok((pool, Some(guarded)))
+            }
+        }
+    }
+
+    /// Give up THIS open's claim only: the retained entry (and the OS admission
+    /// behind it) survives while another open still serves it, so a creator's
+    /// failed pin can never evict a successful concurrent joiner. The pool is
+    /// already closed, so this claim is the only one the handle holds.
+    async fn release_failed_open(pool: SqlitePool, guarded: Option<GuardedPool>) {
+        pool.close().await;
+        if let Some(guarded) = guarded.as_ref() {
+            guarded.release_retained_admission();
+        }
+        drop(guarded);
+    }
+
     async fn open_impl(options: CoreOpenOptions, expected: Option<&Path>) -> CoreResult<Self> {
         let nexus_home = nexus_home_layout::nexus_root_from_home(&options.user_home);
         let cfg = CliConfigSnapshot::load(&nexus_home).map_err(|e| CoreError::Internal {
@@ -361,34 +429,7 @@ impl CoreService {
             Ok(None)
         };
 
-        let (pool, guarded) = match options.access {
-            CoreAccess::ReadOnly => {
-                let pool = open_pool_read_only(&db_path).await.map_err(local_db_err)?;
-                (pool, None)
-            }
-            CoreAccess::DirectWriter => {
-                let guarded = init_guarded_pool(&db_path, &creator_id)
-                    .await
-                    .map_err(local_db_err)?;
-                let pool = guarded.clone_pool();
-                (pool, Some(guarded))
-            }
-            CoreAccess::EngineOwner => {
-                let options = GuardedPoolOptions::default();
-                let joined =
-                    nexus_local_db::writer_protocol::join_live_engine_pool(&db_path, options)
-                        .await
-                        .map_err(local_db_err)?;
-                let guarded = match joined {
-                    Some(guarded) => guarded,
-                    None => init_engine_pool(&db_path, &creator_id, options)
-                        .await
-                        .map_err(local_db_err)?,
-                };
-                let pool = guarded.clone_pool();
-                (pool, Some(guarded))
-            }
-        };
+        let (pool, guarded) = Self::open_admissions(&db_path, &creator_id, options.access).await?;
 
         // Pin the one provider authority this open serves the memory family
         // from (NXM-5 Task 2, N3 Task 3), built HERE beside the pool admission
@@ -404,16 +445,7 @@ impl CoreService {
             {
                 Ok(binding) => Some(binding),
                 Err(error) => {
-                    pool.close().await;
-                    // Give up THIS open's claim only: the retained entry (and the
-                    // OS admission behind it) survives while another open still
-                    // serves it, so a creator's failed pin can never evict a
-                    // successful concurrent joiner. The pool above is already
-                    // closed, so this claim is the only one this handle holds.
-                    if let Some(guarded) = guarded.as_ref() {
-                        guarded.release_retained_admission();
-                    }
-                    drop(guarded);
+                    Self::release_failed_open(pool, guarded).await;
                     return Err(error);
                 }
             };
@@ -945,5 +977,84 @@ const fn interrupted_close_report() -> CoreCloseReport {
         cleanup_confirmed: false,
         pending_operations: Vec::new(),
         reason: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::*;
+    use crate::memory_selection::RemoteMemoryProviderSelection;
+
+    /// A valid stored remote selection: the only selection an empty document
+    /// cannot be confused with, because the layout reads "no table" as local.
+    fn remote_selection() -> MemoryProviderSelection {
+        MemoryProviderSelection::Remote(RemoteMemoryProviderSelection {
+            space_id: "spc_writer_race".to_string(),
+            credential_id: "cred_writer_race".to_string(),
+            connect_endpoint: "ws://127.0.0.1:7519/spoke".to_string(),
+            remote_pubkey_hex: "11".repeat(32),
+            allowlist: vec!["peer_writer_race".to_string()],
+        })
+    }
+
+    /// The exact document the home writer produces for that selection.
+    fn config_document(selection: &MemoryProviderSelection) -> String {
+        let mut table = toml::Table::new();
+        table.insert(
+            "memory_provider".to_string(),
+            toml::Value::try_from(selection.to_config()).expect("provider table"),
+        );
+        toml::to_string(&table).expect("config document")
+    }
+
+    /// A config writer truncates `config.toml` before it writes the replacement,
+    /// so a snapshot read that does not take the writer's lock can observe an
+    /// empty document — which the layout reports as the implicit local default,
+    /// silently replacing the stored remote selection. The open's snapshot takes
+    /// that lock, so it waits for the writer instead of accepting the torn read.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_selection_snapshot_does_not_observe_a_truncated_config() {
+        let home = tempfile::tempdir().expect("home");
+        let nexus_home = home.path().to_path_buf();
+        let document = config_document(&remote_selection());
+        std::fs::write(nexus_home.join("config.toml"), &document).expect("initial config");
+        // Positive control: the un-contended snapshot reads the stored selection.
+        assert_eq!(
+            selection_snapshot(&nexus_home).expect("the stored selection is readable"),
+            remote_selection()
+        );
+
+        let (held_tx, held_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let writer_home = nexus_home.clone();
+        let writer_document = document;
+        let writer = tokio::task::spawn_blocking(move || {
+            let _lock = nexus_home_layout::config_lock::acquire(&writer_home).expect("writer lock");
+            std::fs::write(writer_home.join("config.toml"), "").expect("truncate");
+            held_tx.send(()).expect("signal the hold");
+            release_rx.recv().expect("release signal");
+            std::fs::write(writer_home.join("config.toml"), writer_document).expect("rewrite");
+        });
+        held_rx.recv().expect("the writer holds the lock");
+
+        let read_home = nexus_home.clone();
+        let mut snapshot = tokio::task::spawn_blocking(move || selection_snapshot(&read_home));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(250), &mut snapshot)
+                .await
+                .is_err(),
+            "the snapshot read ran while a config writer held the lock",
+        );
+        release_tx.send(()).expect("release the writer");
+        writer.await.expect("writer task");
+
+        let selection = snapshot
+            .await
+            .expect("reader task")
+            .expect("the stored selection is readable");
+        assert_eq!(selection, remote_selection());
     }
 }

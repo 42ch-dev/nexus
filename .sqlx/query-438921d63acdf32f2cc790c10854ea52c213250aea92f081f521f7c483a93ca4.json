@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO remote_binding_memory_admissions\n          (admission_id, owner_creator_id, character_id, binding_id, authority_host_id,\n           authority_generation, space_id, client_identity, created_at)\n          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "438921d63acdf32f2cc790c10854ea52c213250aea92f081f521f7c483a93ca4"
+}

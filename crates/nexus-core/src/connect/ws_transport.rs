@@ -316,7 +316,6 @@ impl<S> Transport for WsTransport<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
-    #[allow(clippy::significant_drop_tightening)] // the sink guard spans one poll, never an await
     async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
         // Serialise whole sends without owning a physical half, and never wait
         // on that serialisation past a close.
@@ -347,7 +346,7 @@ where
                 // Named positively: the already-staged path below is the
                 // exceptional one, and the comment reads top-down.
                 let unstaged = !staged;
-                if unstaged {
+                let polled = if unstaged {
                     match pinned.as_mut().poll_ready(&mut context) {
                         Poll::Ready(Ok(())) => {
                             let message = message.take().expect("one message per send");
@@ -363,7 +362,11 @@ where
                     }
                 } else {
                     poll_flush(&mut pinned, &mut context)
-                }
+                };
+                // Release the half before the await below, explicitly: the
+                // teardown must never wait for a retained caller.
+                drop(sink_guard);
+                polled
             };
             if let Poll::Ready(outcome) = outcome {
                 return outcome;
@@ -372,7 +375,6 @@ where
         }
     }
 
-    #[allow(clippy::significant_drop_tightening)] // the stream guard spans one poll, never an await
     async fn recv(&self) -> Result<Vec<u8>, TransportError> {
         // Serialise whole receives without owning a physical half, and never
         // wait on that serialisation past a close.
@@ -393,7 +395,10 @@ where
                 let stream = stream_guard.as_mut().ok_or(TransportError::Closed)?;
                 let waker = Waker::from(Arc::clone(&self.io_wake));
                 let mut context = Context::from_waker(&waker);
-                Pin::new(stream).poll_next(&mut context)
+                let polled = Pin::new(stream).poll_next(&mut context);
+                // Release the half before the await below, explicitly.
+                drop(stream_guard);
+                polled
             };
             match polled {
                 Poll::Ready(Some(Ok(Message::Binary(bytes)))) => return Ok(bytes.to_vec()),
