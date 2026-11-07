@@ -665,7 +665,7 @@ fn acquire_shared_lock(path: &Path) -> Result<File, LocalDbError> {
     Ok(file)
 }
 
-fn acquire_exclusive_lock(path: &Path) -> Result<File, LocalDbError> {
+async fn acquire_exclusive_lock(path: &Path) -> Result<File, LocalDbError> {
     let file = open_lock_file(path)?;
     let start = Instant::now();
     while file.try_lock().is_err() {
@@ -674,7 +674,7 @@ fn acquire_exclusive_lock(path: &Path) -> Result<File, LocalDbError> {
                 resource: path.display().to_string(),
             });
         }
-        std::thread::sleep(Duration::from_millis(25));
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
     Ok(file)
 }
@@ -1250,7 +1250,7 @@ async fn acquire_claimed_guard(
     let engine_lock_path = engine_lock_path(db_path);
 
     let (migration_lock, engine_lock) = match mode {
-        WriterMode::Migration => (acquire_exclusive_lock(&migration_lock_path)?, None),
+        WriterMode::Migration => (acquire_exclusive_lock(&migration_lock_path).await?, None),
         WriterMode::Direct => (acquire_shared_lock(&migration_lock_path)?, None),
         WriterMode::Engine => (
             acquire_shared_lock(&migration_lock_path)?,
@@ -1445,7 +1445,7 @@ pub async fn run_guarded_migrations(db_path: &Path) -> Result<(), LocalDbError> 
         });
     }
     release_retained_guards(db_path);
-    let _migration_lock = acquire_exclusive_lock(&migration_lock_path(db_path))?;
+    let _migration_lock = acquire_exclusive_lock(&migration_lock_path(db_path)).await?;
     let writer_id = Uuid::new_v4().to_string();
     let workspace_identity = workspace_identity(db_path);
     let ctx = writer_context(
@@ -1697,6 +1697,33 @@ mod tests {
     use std::future::Future;
 
     use super::*;
+
+    /// A lock releaser on this runtime must progress while migration admission waits.
+    #[tokio::test(flavor = "current_thread")]
+    async fn migration_lock_wait_allows_runtime_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        run_guarded_migrations(&db_path).await.unwrap();
+        let shared = acquire_shared_lock(&migration_lock_path(&db_path)).unwrap();
+        // This task cannot release the real lock until the acquirer yields.
+        let releaser = tokio::spawn(async move { drop(shared) });
+
+        let (guard, _claim) =
+            acquire_claimed_guard(&db_path, BOOTSTRAP_CREATOR_ID, WriterMode::Migration)
+                .await
+                .expect("migration admission lets its lock releaser run");
+        releaser.await.unwrap();
+        assert!(
+            matches!(
+                acquire_store_reset_fence(&db_path),
+                Err(LocalDbError::OwnerBusy { .. })
+            ),
+            "the acquired migration admission must exclude another exclusive owner"
+        );
+        drop(guard);
+        let _released = acquire_store_reset_fence(&db_path)
+            .expect("dropping the migration owner releases the real lock");
+    }
 
     /// A creator whose open fails after another open already joined gives up
     /// only its OWN claim: the adopter keeps the admission, a third open still
