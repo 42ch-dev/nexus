@@ -1137,9 +1137,12 @@ mod tests {
             rendered.starts_with(&primary.to_string()),
             "the primary message is retained: {rendered}"
         );
+        let suffix = rendered
+            .strip_prefix(&primary.to_string())
+            .expect("the primary message is the prefix");
         assert!(
-            rendered.contains(&cleanup.to_string()),
-            "the cleanup failure is reported: {rendered}"
+            suffix.contains(&cleanup.to_string()),
+            "the cleanup failure is reported after the primary message: {rendered}"
         );
         assert!(
             rendered.contains(&staging_directory.display().to_string()),

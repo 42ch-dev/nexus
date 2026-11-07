@@ -1038,7 +1038,7 @@ mod tests {
         )
         .expect("config");
 
-        let error = selection_snapshot(home.path()).err().expect("refused");
+        let error = selection_snapshot(home.path()).expect_err("refused");
         assert!(
             matches!(error, CoreError::Internal { .. }),
             "the malformed table is refused, not read as local: {error:?}"
