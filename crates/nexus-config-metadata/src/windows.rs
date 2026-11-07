@@ -140,18 +140,31 @@ pub fn apply(policy: &WindowsPolicy, file: &File) -> io::Result<()> {
     let mut control: u16 = 0;
     let mut revision = 0_u32;
 
-    // SAFETY: every pointer comes from the captured self-relative descriptor,
-    // which stays alive for this call, and the out-parameters are valid locals.
+    // SAFETY: `descriptor_pointer` points at the captured self-relative
+    // descriptor owned by `policy`, which stays alive for this call, and
+    // `owner`/`defaulted` are valid local out-parameters.
     let read = unsafe {
         GetSecurityDescriptorOwner(descriptor_pointer, &raw mut owner, &raw mut defaulted)
-            & GetSecurityDescriptorGroup(descriptor_pointer, &raw mut group, &raw mut defaulted)
-            & GetSecurityDescriptorDacl(
-                descriptor_pointer,
-                &raw mut dacl_present,
-                &raw mut dacl,
-                &raw mut defaulted,
-            )
-            & GetSecurityDescriptorControl(descriptor_pointer, &raw mut control, &raw mut revision)
+    }
+    // SAFETY: the same captured descriptor stays alive for this call, and
+    // `group`/`defaulted` are valid local out-parameters.
+    & unsafe {
+        GetSecurityDescriptorGroup(descriptor_pointer, &raw mut group, &raw mut defaulted)
+    }
+    // SAFETY: the same captured descriptor stays alive for this call, and
+    // `dacl_present`/`dacl`/`defaulted` are valid local out-parameters.
+    & unsafe {
+        GetSecurityDescriptorDacl(
+            descriptor_pointer,
+            &raw mut dacl_present,
+            &raw mut dacl,
+            &raw mut defaulted,
+        )
+    }
+    // SAFETY: the same captured descriptor stays alive for this call, and
+    // `control`/`revision` are valid local out-parameters.
+    & unsafe {
+        GetSecurityDescriptorControl(descriptor_pointer, &raw mut control, &raw mut revision)
     };
     if read == 0 {
         return Err(io::Error::last_os_error());
