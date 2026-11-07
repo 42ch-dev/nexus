@@ -107,7 +107,8 @@ use spoke_connect::remote::{
 use spoke_operations::spoke_schemas::{
     Finding, HostCapabilityManifest, KnowledgeEntry, MemoryGrantsGrantRequest,
     MemoryProfileUpdateRequest, MemoryRecallRequest, MemoryRecordsCreateRequest,
-    MemorySubjectsEnsureRequest, Principal as MemoryPrincipal, Relation, Rule, Scope, TimelineEvent,
+    MemorySubjectsEnsureRequest, Principal as MemoryPrincipal, Relation, Rule, Scope,
+    TimelineEvent,
 };
 use spoke_operations::{
     FindingPort, HostManifestPort, KnowledgeEntryPort, MemoryPort, RelationPort, RuleQueryPort,
@@ -292,7 +293,13 @@ fn peer_id(seed: &[u8; 32]) -> String {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    use std::fmt::Write as _;
+
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(text, "{byte:02x}").expect("writing into a String cannot fail");
+    }
+    text
 }
 
 /// Bind a real `127.0.0.1:0` listener whose first accepted WebSocket becomes
@@ -519,12 +526,8 @@ impl Provider {
         &self,
         service: Arc<dyn RemoteMemoryService>,
     ) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
-        self.serve_service_for(
-            service,
-            peer_id(&CLIENT_SEED),
-            pubkey(&CLIENT_SEED),
-        )
-        .await
+        self.serve_service_for(service, peer_id(&CLIENT_SEED), pubkey(&CLIENT_SEED))
+            .await
     }
 
     async fn serve_service_for(
@@ -603,7 +606,7 @@ impl Provider {
     /// The operator principal the authenticated peer maps to, as the memory
     /// port's own request carrier: the fixture authorizes the request's
     /// principal id against the operator grant.
-    fn memory_principal(&self) -> MemoryPrincipal {
+    fn memory_principal() -> MemoryPrincipal {
         serde_json::from_value(json!({
             "principal_id": format!("prn_{}", peer_id(&CLIENT_SEED)),
             "extensions": {},
@@ -733,8 +736,7 @@ impl ServiceProbe {
     /// Rewrite the next real refusal's peer-controlled message/details with
     /// this sentinel; `None` disarms.
     fn arm_refusal_sentinel(&self, sentinel: Option<&str>) {
-        *self.refusal_sentinel.lock().expect("refusal sentinel") =
-            sentinel.map(str::to_string);
+        *self.refusal_sentinel.lock().expect("refusal sentinel") = sentinel.map(str::to_string);
     }
 
     /// Count only reads addressed to this subject.
@@ -758,7 +760,11 @@ impl ServiceProbe {
 #[async_trait]
 impl RemoteMemoryService for ServiceProbe {
     async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
-        let watched = self.watched_subject.lock().expect("watched subject").clone();
+        let watched = self
+            .watched_subject
+            .lock()
+            .expect("watched subject")
+            .clone();
         let addressed = watched.is_some()
             && watched.as_deref() == payload.get("subject_id").and_then(Value::as_str);
         match op {
@@ -776,7 +782,11 @@ impl RemoteMemoryService for ServiceProbe {
         let result = self.inner.invoke(peer_id, op, payload).await;
         let result = match result {
             SpokeResult::Reject(mut reject) => {
-                let sentinel = self.refusal_sentinel.lock().expect("refusal sentinel").clone();
+                let sentinel = self
+                    .refusal_sentinel
+                    .lock()
+                    .expect("refusal sentinel")
+                    .clone();
                 if let Some(sentinel) = sentinel {
                     reject.message = format!("{sentinel}: {}", reject.message);
                     reject
@@ -786,7 +796,7 @@ impl RemoteMemoryService for ServiceProbe {
                 }
                 SpokeResult::Reject(reject)
             }
-            ok => ok,
+            ok @ SpokeResult::Ok(_) => ok,
         };
         result
     }
@@ -899,7 +909,10 @@ async fn assert_no_local_memory(env: &Env) {
             "character_memory_pending_review",
             "the legacy Character queue",
         ),
-        ("character_memory_fragments", "the legacy Character fragments"),
+        (
+            "character_memory_fragments",
+            "the legacy Character fragments",
+        ),
         ("memory_records", "the local provider's own record table"),
         ("memory_receipts", "the local provider's own receipt table"),
         ("memory_subjects", "the local provider's own subject table"),
@@ -1041,7 +1054,13 @@ async fn capture(
 /// peer's message: `(code, retry_class, family, wire_code, conflict_code)`.
 fn classified_refusal(
     error: &CoreError,
-) -> (&str, &str, MemoryProviderRefusal, Option<&str>, Option<&str>) {
+) -> (
+    &str,
+    &str,
+    MemoryProviderRefusal,
+    Option<&str>,
+    Option<&str>,
+) {
     match error {
         CoreError::MemoryProviderRefused {
             code,
@@ -1125,8 +1144,9 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     let probe = Arc::new(ServiceProbe::over(
         provider.inner.server(provider.directory.admission()),
     ));
-    let (core, responder) =
-        provider.open_core_serving(&env, probe.clone(), CoreAccess::EngineOwner).await;
+    let (core, responder) = provider
+        .open_core_serving(&env, probe.clone(), CoreAccess::EngineOwner)
+        .await;
     let principal = core.active_principal().await.expect("active principal");
     let subject_id = legacy::creator_subject_id(&env.creator_id);
 
@@ -1155,7 +1175,11 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
         .expect("the created document is served");
     assert_eq!(soul.document.body, SOUL_BODY);
     assert_eq!(soul.revision.get(), 1);
-    assert_eq!(probe.profile_updates(), 1, "one profile write reached the provider");
+    assert_eq!(
+        probe.profile_updates(),
+        1,
+        "one profile write reached the provider"
+    );
 
     // The durable effect is the provider's own row in the pinned space.
     let pool = provider.pool().await;
@@ -1179,8 +1203,11 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
         .await
         .expect_err("the stale revision is refused");
     probe.arm_refusal_sentinel(None);
-    let (code, retry_class, family, wire_code, conflict_code) = classified_refusal(&stale);
-    assert_eq!((code, retry_class), ("REVISION_CONFLICT", "terminal"));
+    let (refusal_code, retry_class, family, wire_code, conflict_code) = classified_refusal(&stale);
+    assert_eq!(
+        (refusal_code, retry_class),
+        ("REVISION_CONFLICT", "terminal")
+    );
     assert_eq!(family, MemoryProviderRefusal::Conflict);
     assert_eq!(wire_code, None);
     assert_eq!(conflict_code, Some("version_mismatch"));
@@ -1235,8 +1262,9 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     // before any provider call. Its own signed connection is served through the
     // SAME observation decorator, so the counter around the refused call proves
     // that the actual read-only session sent nothing.
-    let (read_only, ro_responder) =
-        provider.open_core_serving(&env, probe.clone(), CoreAccess::ReadOnly).await;
+    let (read_only, ro_responder) = provider
+        .open_core_serving(&env, probe.clone(), CoreAccess::ReadOnly)
+        .await;
     let ro_principal = read_only
         .active_principal()
         .await
@@ -1265,7 +1293,10 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     let (_, unchanged, revision) = provider_personality(&pool, &subject_id)
         .await
         .expect("the provider still stores the edited document");
-    assert_eq!(unchanged, EDITED_SOUL_BODY, "the read-only refusal wrote nothing");
+    assert_eq!(
+        unchanged, EDITED_SOUL_BODY,
+        "the read-only refusal wrote nothing"
+    );
     assert_eq!(revision, 2);
     assert_eq!(
         provider_receipts(&pool, "memory.profile.update").await,
@@ -1321,18 +1352,16 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
 
     // Two shared records through the real product path (which also ensures the
     // provider subject), then one binding-local record through the SDK session.
-    assert!(
-        core.create_creator_memory(&principal, "r4-recall-one", "story_summary", RECALL_ONE)
-            .await
-            .expect("create the first shared memory")
-    );
-    assert!(
-        core.create_creator_memory(&principal, "r4-recall-two", "story_summary", RECALL_TWO)
-            .await
-            .expect("create the second shared memory")
-    );
+    assert!(core
+        .create_creator_memory(&principal, "r4-recall-one", "story_summary", RECALL_ONE)
+        .await
+        .expect("create the first shared memory"));
+    assert!(core
+        .create_creator_memory(&principal, "r4-recall-two", "story_summary", RECALL_TWO)
+        .await
+        .expect("create the second shared memory"));
     let (adapter, sdk_responder) = provider.sdk_session().await;
-    let memory_principal = provider.memory_principal();
+    let memory_principal = Provider::memory_principal();
 
     // Independently captured facts for every seeded record: id, placement and
     // exact text. Recall is compared against THESE, never against another
@@ -1477,7 +1506,12 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         dto::<MemoryRecallRequest>(request)
     };
     let selected = |selection: Value| {
-        recall(selection, json!({ "max_items": 10 }), Some("alliance"), None)
+        recall(
+            selection,
+            json!({ "max_items": 10 }),
+            Some("alliance"),
+            None,
+        )
     };
 
     // SELECTION: every selection's exact (id, placement, text) triples must equal
@@ -1583,7 +1617,11 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         seen.push(record_triple(&records[0]));
         let next = page["next_cursor"].as_str().map(str::to_string);
         if page_index == 3 {
-            assert_eq!(page["truncated"], json!(false), "the last page ends the set");
+            assert_eq!(
+                page["truncated"],
+                json!(false),
+                "the last page ends the set"
+            );
             assert_eq!(next, None, "the last page carries no cursor");
         } else {
             assert_eq!(page["truncated"], json!(true));
@@ -1703,7 +1741,11 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
 
     let second_page = recall_ok(&adapter, &memory_principal, byte_recall(Some(&byte_cursor))).await;
     let second_records = second_page["records"].as_array().expect("second byte page");
-    assert_eq!(second_records.len(), 1, "the deferred item is surfaced whole");
+    assert_eq!(
+        second_records.len(),
+        1,
+        "the deferred item is surfaced whole"
+    );
     assert_eq!(second_records[0]["record_id"], json!(large_id));
     assert_eq!(
         second_records[0]["content"]["text"],
@@ -1932,8 +1974,9 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         SpokeResult::Ok(_) => {}
         SpokeResult::Reject(reject) => panic!("the scoped recall grant is issued: {reject:?}"),
     }
-    let (scoped, scoped_responder) =
-        provider.sdk_session_as(SCOPED_SEED, "r4-scoped-client").await;
+    let (scoped, scoped_responder) = provider
+        .sdk_session_as(SCOPED_SEED, "r4-scoped-client")
+        .await;
     let scoped_principal = provider.scoped_memory_principal();
 
     let scoped_only = recall_ok(
@@ -1958,7 +2001,10 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
     );
 
     for (why, selection) in [
-        ("shared visibility is not granted", json!({ "mode": "shared_only" })),
+        (
+            "shared visibility is not granted",
+            json!({ "mode": "shared_only" }),
+        ),
         (
             "subject-wide recall is not granted",
             json!({ "mode": "subject_all" }),
@@ -1983,7 +2029,12 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         let reject = recall_reject(
             &scoped,
             &scoped_principal,
-            recall(selection, json!({ "max_items": 10 }), Some("alliance"), None),
+            recall(
+                selection,
+                json!({ "max_items": 10 }),
+                Some("alliance"),
+                None,
+            ),
         )
         .await;
         assert_eq!(reject.code, SpokeRejectCode::NotAuthorized, "{why}");
@@ -2179,7 +2230,7 @@ impl ProviderAdapter for MindFixtureAdapter {
             .into_iter()
             .filter_map(|block| match block {
                 HostContentBlock::Text { text } => Some(text),
-                _ => None,
+                HostContentBlock::ResourceLink { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -2193,7 +2244,11 @@ impl ProviderAdapter for MindFixtureAdapter {
         )])))
     }
 
-    async fn cancel(&self, _session: &ManagedSessionHandle, _op: HostOperationId) -> HostResult<()> {
+    async fn cancel(
+        &self,
+        _session: &ManagedSessionHandle,
+        _op: HostOperationId,
+    ) -> HostResult<()> {
         Ok(())
     }
 
@@ -2250,8 +2305,9 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
     let probe = Arc::new(ServiceProbe::over(
         provider.inner.server(provider.directory.admission()),
     ));
-    let (core, responder) =
-        provider.open_core_serving(&env, probe.clone(), CoreAccess::EngineOwner).await;
+    let (core, responder) = provider
+        .open_core_serving(&env, probe.clone(), CoreAccess::EngineOwner)
+        .await;
     let principal = core.active_principal().await.expect("principal");
 
     let world = create_world(&core, &principal, "R4 Host World").await;
@@ -2263,9 +2319,15 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
     // One binding-local memory through the real public review path: the
     // provider's binding-local fragment `fact` record the projection must
     // serve. This write also ensures the Character provider subject.
-    capture(&core, &principal, &character_id, &binding_id, "pend_r4_mind")
-        .await
-        .expect("capture the binding-local digest");
+    capture(
+        &core,
+        &principal,
+        &character_id,
+        &binding_id,
+        "pend_r4_mind",
+    )
+    .await
+    .expect("capture the binding-local digest");
     core.review_character_memory(
         &principal,
         character_id.clone(),
@@ -2277,7 +2339,7 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
     // The Character's authored SOUL document through the SDK's own signed
     // session: a real provider profile object, never a local file.
     let (adapter, sdk_responder) = provider.sdk_session().await;
-    let memory_principal = provider.memory_principal();
+    let memory_principal = Provider::memory_principal();
     match adapter
         .update_profile(
             &memory_principal,
@@ -2317,8 +2379,10 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
     // admitted Character creative root this open pinned, so it is the user
     // home — the root the production native boot hands the manager.
     let workspace_root = env.user_home.clone();
-    let mut host_config = nexus_agent_host::config::AgentHostConfig::default();
-    host_config.max_ops_per_session = 4;
+    let host_config = nexus_agent_host::config::AgentHostConfig {
+        max_ops_per_session: 4,
+        ..Default::default()
+    };
     manager
         .start(HostStartConfig {
             config_path: nexus_agent_host::config::agent_host_config_path(&env.user_home),

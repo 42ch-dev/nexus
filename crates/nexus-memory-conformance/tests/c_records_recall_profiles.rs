@@ -83,7 +83,8 @@ fn record_list_request(
     limit: Option<u64>,
     cursor: Option<&str>,
 ) -> Value {
-    let mut request = json!({ "subject_id": SUBJECT, "selection": selection });
+    let mut request = json!({ "subject_id": SUBJECT });
+    request["selection"] = selection;
     if let Some(filter) = filter {
         request["filter"] = json!({ "source_context_ids": filter });
     }
@@ -107,9 +108,9 @@ fn recall_request(
 ) -> Value {
     let mut request = json!({
         "subject_id": subject,
-        "selection": selection,
         "budget": { "max_items": max_items },
     });
+    request["selection"] = selection;
     if let Some(max_bytes) = max_bytes {
         request["budget"]["max_bytes"] = json!(max_bytes);
     }
@@ -133,13 +134,14 @@ fn profile_document_request(
     body: &str,
     key: &str,
 ) -> Value {
-    json!({
+    let mut request = json!({
         "subject_id": subject,
         "profile_kind": kind,
-        "expected_revision": expected_revision,
         "document": { "format": format, "body": body },
         "idempotency_key": key,
-    })
+    });
+    request["expected_revision"] = expected_revision;
+    request
 }
 
 fn subject_all() -> Value {
@@ -168,12 +170,7 @@ fn page_ids(body: &Value) -> Vec<String> {
         .as_array()
         .unwrap_or_else(|| panic!("a record page names its rows: {body}"))
         .iter()
-        .map(|record| {
-            record["record_id"]
-                .as_str()
-                .expect("record id")
-                .to_owned()
-        })
+        .map(|record| record["record_id"].as_str().expect("record id").to_owned())
         .collect()
 }
 
@@ -251,7 +248,10 @@ fn assert_refused_with(body: &Value, allowed: &[&str]) {
 
 async fn create_record(actor: &Actor<'_>, body: Value) -> String {
     let committed = actor.create_record(body).await;
-    assert!(is_committed(&committed), "the record write commits: {committed}");
+    assert!(
+        is_committed(&committed),
+        "the record write commits: {committed}"
+    );
     result(&committed)["record_id"]
         .as_str()
         .expect("a committed create names its record")
@@ -312,7 +312,15 @@ async fn read_state(
             .list_records(record_list_request(subject_all(), None, None, None))
             .await,
         admin
-            .recall(recall_request(SUBJECT, subject_all(), 10, None, None, None, None))
+            .recall(recall_request(
+                SUBJECT,
+                subject_all(),
+                10,
+                None,
+                None,
+                None,
+                None,
+            ))
             .await,
         admin.get_profile(json!({ "subject_id": SUBJECT })).await,
         admin.get_receipt(receipt_id).await,
@@ -349,10 +357,16 @@ async fn record_crud_and_stale_cas(matrix: Matrix) {
 
     let read = record_of(&admin.get_record(&record_id).await).clone();
     assert_eq!(read["record_id"], json!(record_id));
-    assert_eq!(read["content"]["text"], json!("first draft of the harbor promise"));
+    assert_eq!(
+        read["content"]["text"],
+        json!("first draft of the harbor promise")
+    );
     assert_eq!(read["scope"], shared_scope());
     assert_eq!(read["revision"], json!(1));
-    assert_eq!(read["provenance"]["captured_by"], json!(admin.principal_id()));
+    assert_eq!(
+        read["provenance"]["captured_by"],
+        json!(admin.principal_id())
+    );
     assert_eq!(
         read["provenance"]["source_context_ids"],
         json!(["src-draft"]),
@@ -405,7 +419,7 @@ async fn record_crud_and_stale_cas(matrix: Matrix) {
     let mut observer = matrix
         .durable_observer(
             SUBJECT,
-            &[record_id.clone()],
+            std::slice::from_ref(&record_id),
             None,
             Some(receipt_id(&created)),
             None,
@@ -421,7 +435,10 @@ async fn record_crud_and_stale_cas(matrix: Matrix) {
             "idempotency_key": "k-c040-noop",
         }))
         .await;
-    assert!(is_committed(&no_op), "the no-op still commits a receipt: {no_op}");
+    assert!(
+        is_committed(&no_op),
+        "the no-op still commits a receipt: {no_op}"
+    );
     assert_eq!(result(&no_op)["record_id"], json!(record_id));
     assert_eq!(
         result(&no_op)["revision"],
@@ -509,10 +526,18 @@ async fn record_crud_and_stale_cas(matrix: Matrix) {
         .await;
     assert_eq!(listing["total_authorized"], json!(0), "{listing}");
     let recalled = admin
-        .recall(recall_request(SUBJECT, subject_all(), 10, None, None, None, None))
+        .recall(recall_request(
+            SUBJECT,
+            subject_all(),
+            10,
+            None,
+            None,
+            None,
+            None,
+        ))
         .await;
     assert_eq!(recalled["total_authorized"], json!(0), "{recalled}");
-    assert!(recalled_records(&recalled).is_empty());
+    assert_eq!(recalled_records(&recalled).len(), 0);
     matrix.shutdown().await;
 }
 
@@ -534,7 +559,14 @@ async fn revision_changes_once_per_real_update(matrix: Matrix) {
     let admin = matrix.admin();
     let record_id = create_record(
         &admin,
-        record_create_body(SUBJECT, "k-c041-create", "note", "revision one", &shared_scope(), &[]),
+        record_create_body(
+            SUBJECT,
+            "k-c041-create",
+            "note",
+            "revision one",
+            &shared_scope(),
+            &[],
+        ),
     )
     .await;
     let created = record_of(&admin.get_record(&record_id).await).clone();
@@ -565,8 +597,15 @@ async fn revision_changes_once_per_real_update(matrix: Matrix) {
             "idempotency_key": "k-c041-noop",
         }))
         .await;
-    assert!(is_committed(&no_op), "the no-op commits its receipt: {no_op}");
-    assert_eq!(result(&no_op)["revision"], json!(2), "no spurious bump: {no_op}");
+    assert!(
+        is_committed(&no_op),
+        "the no-op commits its receipt: {no_op}"
+    );
+    assert_eq!(
+        result(&no_op)["revision"],
+        json!(2),
+        "no spurious bump: {no_op}"
+    );
     let no_op_replay = admin
         .update_record(json!({
             "record_id": record_id,
@@ -790,28 +829,45 @@ async fn record_pages_are_bounded_and_stable(matrix: Matrix) {
     );
 
     let grant = admin
-        .grant(scoped_grant(&["records_read"], &peer_id, SUBJECT, &[CONTEXT], false, "k-c043-grant"))
+        .grant(scoped_grant(
+            &["records_read"],
+            &peer_id,
+            SUBJECT,
+            &[CONTEXT],
+            false,
+            "k-c043-grant",
+        ))
         .await;
     assert!(is_committed(&grant), "{grant}");
     let selection = || selected_contexts(&[CONTEXT], false);
 
     let (first_pages, first_ids) = restricted_traversal(&matrix.peer(), selection(), 2, 5).await;
     assert_eq!(first_pages.len(), 3, "five rows at two per page");
-    assert_eq!(first_pages.iter().map(Vec::len).collect::<Vec<_>>(), vec![2, 2, 1]);
+    assert_eq!(
+        first_pages.iter().map(Vec::len).collect::<Vec<_>>(),
+        vec![2, 2, 1]
+    );
 
     // Every served row: seeded content, the subject's placement, and the exact
     // expected id. Later pages are checked as strictly as the first.
     let expected = |id: &str| {
-        allowed
-            .iter()
-            .find(|(seeded, _)| seeded == id)
-            .map(|(_, text)| text.as_str())
-            .unwrap_or_else(|| panic!("the page served a row outside the authorized set: {id}"))
+        allowed.iter().find(|(seeded, _)| seeded == id).map_or_else(
+            || panic!("the page served a row outside the authorized set: {id}"),
+            |(_, text)| text.as_str(),
+        )
     };
     for page in &first_pages {
         for (id, text, scope) in page {
-            assert_eq!(text.as_str(), expected(id), "page row {id} carries its seeded content");
-            assert_eq!(scope, &context_scope(CONTEXT), "page row {id} keeps its placement");
+            assert_eq!(
+                text.as_str(),
+                expected(id),
+                "page row {id} carries its seeded content"
+            );
+            assert_eq!(
+                scope,
+                &context_scope(CONTEXT),
+                "page row {id} keeps its placement"
+            );
         }
     }
 
@@ -824,7 +880,10 @@ async fn record_pages_are_bounded_and_stable(matrix: Matrix) {
 
     // A complete second traversal is identical, not just its first page.
     let (second_pages, second_ids) = restricted_traversal(&matrix.peer(), selection(), 2, 5).await;
-    assert_eq!(first_pages, second_pages, "the ordered traversal repeats exactly");
+    assert_eq!(
+        first_pages, second_pages,
+        "the ordered traversal repeats exactly"
+    );
     assert_eq!(first_ids, second_ids);
 
     let serialized = serde_json::to_string(&first_pages).expect("pages serialize");
@@ -902,14 +961,20 @@ async fn record_promote_checks_grant_and_freeze(matrix: Matrix) {
             "idempotency_key": "k-c044-frozen",
         }))
         .await;
-    assert_eq!(error_code(&frozen_promote), "SPACE_FROZEN", "{frozen_promote}");
+    assert_eq!(
+        error_code(&frozen_promote),
+        "SPACE_FROZEN",
+        "{frozen_promote}"
+    );
     assert_eq!(retry_class(&frozen_promote), "terminal");
     assert_eq!(
         current_record(&matrix, &record_id).await,
         seeded,
         "a frozen-space refusal leaves the entire record unchanged"
     );
-    let unfrozen = admin.unfreeze_space("k-c044-unfreeze", frozen_revision).await;
+    let unfrozen = admin
+        .unfreeze_space("k-c044-unfreeze", frozen_revision)
+        .await;
     assert!(is_committed(&unfrozen), "{unfrozen}");
 
     // (c) Split capabilities: two individually insufficient grants whose union
@@ -1035,7 +1100,10 @@ async fn record_promote_checks_grant_and_freeze(matrix: Matrix) {
         "the accepted promotion keeps the entire provenance, every declared field"
     );
     // The declared provenance fields are actually present and typed.
-    assert_eq!(moved["provenance"]["captured_by"], json!(admin.principal_id()));
+    assert_eq!(
+        moved["provenance"]["captured_by"],
+        json!(admin.principal_id())
+    );
     assert!(
         moved["provenance"]["captured_at"].is_string(),
         "captured_at is a provider-stamped timestamp: {moved}"
@@ -1112,7 +1180,8 @@ async fn advertised_content_bounds_are_enforced(matrix: Matrix) {
     // The published measure is the canonical serialization of the complete
     // `content` object: `{"text":"..."}` costs 11 bytes of framing.
     let framing = 11_u64;
-    let at_bound = "a".repeat(usize::try_from(max_content_bytes - framing).expect("bound fits usize"));
+    let at_bound =
+        "a".repeat(usize::try_from(max_content_bytes - framing).expect("bound fits usize"));
     let created = admin
         .create_record(record_create_body(
             SUBJECT,
@@ -1127,7 +1196,10 @@ async fn advertised_content_bounds_are_enforced(matrix: Matrix) {
         is_committed(&created),
         "content exactly at the advertised bound is admitted: {created}"
     );
-    let record_id = result(&created)["record_id"].as_str().expect("record id").to_owned();
+    let record_id = result(&created)["record_id"]
+        .as_str()
+        .expect("record id")
+        .to_owned();
     let stored = record_of(&admin.get_record(&record_id).await).clone();
     assert_eq!(
         stored["content"]["text"].as_str().expect("stored text"),
@@ -1136,7 +1208,8 @@ async fn advertised_content_bounds_are_enforced(matrix: Matrix) {
     );
 
     // One byte over the advertised bound refuses before any effect.
-    let over_bound = "b".repeat(usize::try_from(max_content_bytes - framing).expect("bound fits usize") + 1);
+    let over_bound =
+        "b".repeat(usize::try_from(max_content_bytes - framing).expect("bound fits usize") + 1);
     let refused = admin
         .create_record(record_create_body(
             SUBJECT,
@@ -1149,7 +1222,11 @@ async fn advertised_content_bounds_are_enforced(matrix: Matrix) {
         .await;
     assert_eq!(error_code(&refused), "INVALID_INPUT", "{refused}");
     assert_eq!(retry_class(&refused), "terminal", "{refused}");
-    assert_eq!(error_details(&refused)["field"], json!("content"), "{refused}");
+    assert_eq!(
+        error_details(&refused)["field"],
+        json!("content"),
+        "{refused}"
+    );
     assert_eq!(
         error_details(&refused)["limit"],
         json!("max_content_bytes"),
@@ -1173,7 +1250,11 @@ async fn advertised_content_bounds_are_enforced(matrix: Matrix) {
             "idempotency_key": "k-c045-update-over",
         }))
         .await;
-    assert_eq!(error_code(&update_refused), "INVALID_INPUT", "{update_refused}");
+    assert_eq!(
+        error_code(&update_refused),
+        "INVALID_INPUT",
+        "{update_refused}"
+    );
     assert_eq!(retry_class(&update_refused), "terminal");
     assert_eq!(
         error_details(&update_refused)["field"],
@@ -1186,7 +1267,11 @@ async fn advertised_content_bounds_are_enforced(matrix: Matrix) {
         "§7.0.7 requires the exceeded bound to name itself: {update_refused}"
     );
     let unchanged = record_of(&admin.get_record(&record_id).await).clone();
-    assert_eq!(unchanged["revision"], json!(1), "no partial update: {unchanged}");
+    assert_eq!(
+        unchanged["revision"],
+        json!(1),
+        "no partial update: {unchanged}"
+    );
     assert_eq!(
         unchanged["content"]["text"].as_str().expect("text"),
         at_bound.as_str(),
@@ -1213,7 +1298,14 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
     let admin = matrix.admin();
     let shared = create_record(
         &admin,
-        record_create_body(SUBJECT, "k-c046-shared", "note", "shared read row", &shared_scope(), &[]),
+        record_create_body(
+            SUBJECT,
+            "k-c046-shared",
+            "note",
+            "shared read row",
+            &shared_scope(),
+            &[],
+        ),
     )
     .await;
     let contextual = create_record(
@@ -1240,7 +1332,11 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
         .await;
     assert!(is_committed(&profile), "{profile}");
     let captured = admin
-        .capture(capture_body("k-c046-capture", "pending read row", &shared_scope()))
+        .capture(capture_body(
+            "k-c046-capture",
+            "pending read row",
+            &shared_scope(),
+        ))
         .await;
     assert!(is_committed(&captured), "{captured}");
     let receipt_id = receipt_id(&captured).to_owned();
@@ -1287,7 +1383,11 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
     assert_eq!(before.4, after.4, "candidates.list is a pure read");
     assert_eq!(before.5, after.5, "records.get is a pure read");
     assert_eq!(before.6, after.6);
-    assert_eq!(before.7, after.7, "records.list is a pure read: {:?}", after.7);
+    assert_eq!(
+        before.7, after.7,
+        "records.list is a pure read: {:?}",
+        after.7
+    );
     assert_eq!(before.8, after.8, "recall is a pure read: {:?}", after.8);
     assert_eq!(before.9, after.9, "profile.get is a pure read");
     assert_eq!(before.10, after.10, "receipts.get is a pure read");
@@ -1339,7 +1439,10 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
         .map(|(path, _)| path.clone())
         .collect();
     observer.close().await;
-    assert!(updated_committed, "the in-place control write commits: {updated}");
+    assert!(
+        updated_committed,
+        "the in-place control write commits: {updated}"
+    );
     assert_ne!(
         control_after.data_version, control_before.data_version,
         "an in-place commit on the provider connection moves data_version"
@@ -1374,17 +1477,34 @@ async fn by_id_reads_recheck_current_authorization(matrix: Matrix) {
     let peer_id = matrix.peer_principal().principal_id.as_str().to_owned();
     let shared = create_record(
         &admin,
-        record_create_body(SUBJECT, "k-c047-shared", "note", "shared by-id row", &shared_scope(), &[]),
+        record_create_body(
+            SUBJECT,
+            "k-c047-shared",
+            "note",
+            "shared by-id row",
+            &shared_scope(),
+            &[],
+        ),
     )
     .await;
 
     // Positive control: the peer reads the shared record under a grant that
     // covers shared placement.
     let grant = admin
-        .grant(scoped_grant(&["records_read"], &peer_id, SUBJECT, &[], false, "k-c047-grant"))
+        .grant(scoped_grant(
+            &["records_read"],
+            &peer_id,
+            SUBJECT,
+            &[],
+            false,
+            "k-c047-grant",
+        ))
         .await;
     assert!(is_committed(&grant), "{grant}");
-    let grant_id = result(&grant)["grant_id"].as_str().expect("grant id").to_owned();
+    let grant_id = result(&grant)["grant_id"]
+        .as_str()
+        .expect("grant id")
+        .to_owned();
     let visible = record_of(&matrix.peer().get_record(&shared).await).clone();
     assert_eq!(visible["record_id"], json!(shared));
     assert_eq!(visible["content"]["text"], json!("shared by-id row"));
@@ -1416,7 +1536,14 @@ async fn by_id_reads_recheck_current_authorization(matrix: Matrix) {
     )
     .await;
     let scoped = admin
-        .grant(scoped_grant(&["records_read"], &peer_id, SUBJECT, &[CONTEXT], false, "k-c047-scoped"))
+        .grant(scoped_grant(
+            &["records_read"],
+            &peer_id,
+            SUBJECT,
+            &[CONTEXT],
+            false,
+            "k-c047-scoped",
+        ))
         .await;
     assert!(is_committed(&scoped), "{scoped}");
     let before_move = record_of(&matrix.peer().get_record(&placed).await).clone();
@@ -1517,13 +1644,24 @@ async fn subject_all_requires_unrestricted_grant(matrix: Matrix) {
 
     let recalled = matrix
         .peer()
-        .recall(recall_request(SUBJECT, subject_all(), 10, None, None, None, None))
+        .recall(recall_request(
+            SUBJECT,
+            subject_all(),
+            10,
+            None,
+            None,
+            None,
+            None,
+        ))
         .await;
     let ids = page_ids(&recalled);
     assert_eq!(recalled["total_authorized"], json!(3), "{recalled}");
     assert_eq!(ids.len(), 3);
     for wanted in [&shared, &context, &other] {
-        assert!(ids.contains(wanted), "the authorized row {wanted} is recalled: {ids:?}");
+        assert!(
+            ids.contains(wanted),
+            "the authorized row {wanted} is recalled: {ids:?}"
+        );
     }
     assert!(
         !ids.contains(&foreign),
@@ -1564,12 +1702,22 @@ async fn shared_only_excludes_context_records(matrix: Matrix) {
 
     let recalled = matrix
         .peer()
-        .recall(recall_request(SUBJECT, shared_only(), 10, None, None, None, None))
+        .recall(recall_request(
+            SUBJECT,
+            shared_only(),
+            10,
+            None,
+            None,
+            None,
+            None,
+        ))
         .await;
     assert_eq!(recalled["total_authorized"], json!(1), "{recalled}");
     assert_eq!(page_ids(&recalled), vec![shared.clone()]);
     let texts = recalled_texts(&recalled);
-    assert!(texts.iter().any(|text| text.contains("c051 shared placement")));
+    assert!(texts
+        .iter()
+        .any(|text| text.contains("c051 shared placement")));
     for excluded in [&context, &other] {
         assert!(
             !page_ids(&recalled).contains(excluded),
@@ -1625,7 +1773,10 @@ async fn selected_contexts_can_include_shared(matrix: Matrix) {
     ids.sort();
     let mut wanted = vec![shared.clone(), context.clone()];
     wanted.sort();
-    assert_eq!(ids, wanted, "the union is exactly the named context plus shared");
+    assert_eq!(
+        ids, wanted,
+        "the union is exactly the named context plus shared"
+    );
     assert!(
         !page_ids(&recalled).contains(&other),
         "the unselected context stays excluded: {recalled}"
@@ -1718,9 +1869,15 @@ async fn recall_never_returns_candidates(matrix: Matrix) {
         (selected_contexts(&[CONTEXT], false), 1),
     ] {
         let recalled = admin
-            .recall(recall_request(SUBJECT, selection, 10, None, None, None, None))
+            .recall(recall_request(
+                SUBJECT, selection, 10, None, None, None, None,
+            ))
             .await;
-        assert_eq!(recalled["total_authorized"], json!(expected_total), "{recalled}");
+        assert_eq!(
+            recalled["total_authorized"],
+            json!(expected_total),
+            "{recalled}"
+        );
         let serialized = recalled.to_string();
         assert!(
             !serialized.contains(&candidates[0]),
@@ -1796,7 +1953,15 @@ async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
     // The unbudgeted page establishes the provider's own rank order; its
     // contents and byte sizes are then checked against the independent seed.
     let full = admin
-        .recall(recall_request(SUBJECT, subject_all(), 10, None, None, None, None))
+        .recall(recall_request(
+            SUBJECT,
+            subject_all(),
+            10,
+            None,
+            None,
+            None,
+            None,
+        ))
         .await;
     assert_eq!(recalled_records(&full).len(), 3);
     assert_eq!(full["truncated"], json!(false));
@@ -1826,7 +1991,9 @@ async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
     // only checked each row on its own would serve two and pass a weaker test.
     let budget = u64::try_from(size_of[0].1).expect("size fits u64") * 2 - 1;
     assert!(
-        size_of.iter().all(|(_, size, _)| *size <= usize::try_from(budget).expect("budget")),
+        size_of
+            .iter()
+            .all(|(_, size, _)| *size <= usize::try_from(budget).expect("budget")),
         "each seeded row fits the budget individually"
     );
     let mut collected: Vec<String> = Vec::new();
@@ -1904,12 +2071,18 @@ async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
         }
     }
     assert_eq!(pages, 3, "one row per page under this budget");
-    assert_eq!(collected, order, "pages follow the same rank order, once each");
+    assert_eq!(
+        collected, order,
+        "pages follow the same rank order, once each"
+    );
     let mut served: Vec<String> = collected.clone();
     served.sort();
     let mut wanted = seeded.clone();
     wanted.sort();
-    assert_eq!(served, wanted, "the traversal covers exactly the seeded rows");
+    assert_eq!(
+        served, wanted,
+        "the traversal covers exactly the seeded rows"
+    );
 
     // Bytes > budget while characters fit: a single multibyte body larger than
     // the budget is returned WHOLE and flagged, not dropped or truncated.
@@ -1931,7 +2104,15 @@ async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
     )
     .await;
     let single = admin
-        .recall(recall_request(OTHER_SUBJECT, subject_all(), 10, None, None, None, None))
+        .recall(recall_request(
+            OTHER_SUBJECT,
+            subject_all(),
+            10,
+            None,
+            None,
+            None,
+            None,
+        ))
         .await;
     assert_eq!(page_ids(&single), vec![record_id.clone()]);
     let bytes = content_bytes(&recalled_records(&single)[0]);
@@ -1954,13 +2135,22 @@ async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
         ))
         .await;
     let records = recalled_records(&overflowed);
-    assert_eq!(records.len(), 1, "the oversized row is surfaced whole: {overflowed}");
+    assert_eq!(
+        records.len(),
+        1,
+        "the oversized row is surfaced whole: {overflowed}"
+    );
     assert_eq!(records[0]["record_id"], json!(record_id));
     assert_eq!(
-        records[0]["content"]["text"], json!(multibyte),
+        records[0]["content"]["text"],
+        json!(multibyte),
         "the whole body is served, never truncated: {overflowed}"
     );
-    assert_eq!(overflowed["overflow_record_id"], json!(record_id), "{overflowed}");
+    assert_eq!(
+        overflowed["overflow_record_id"],
+        json!(record_id),
+        "{overflowed}"
+    );
     assert_eq!(overflowed["total_authorized"], json!(1));
     assert_eq!(overflowed["truncated"], json!(false));
     matrix.shutdown().await;
@@ -2041,16 +2231,27 @@ async fn cursor_invalid_after_grant_or_state_change(matrix: Matrix) {
         ))
         .await;
     assert!(is_committed(&wide), "{wide}");
-    let wide_grant = result(&wide)["grant_id"].as_str().expect("grant id").to_owned();
+    let wide_grant = result(&wide)["grant_id"]
+        .as_str()
+        .expect("grant id")
+        .to_owned();
     let selection = || selected_contexts(&[CONTEXT], false);
 
     // Continuation under identical state succeeds.
     let page = list_page(&matrix.peer(), selection(), Some(1), None).await;
     assert_eq!(page["total_authorized"], json!(5), "{page}");
-    let cursor = page["next_cursor"].as_str().expect("more rows remain").to_owned();
+    let cursor = page["next_cursor"]
+        .as_str()
+        .expect("more rows remain")
+        .to_owned();
     let continued = matrix
         .peer()
-        .list_records(record_list_request(selection(), None, Some(1), Some(&cursor)))
+        .list_records(record_list_request(
+            selection(),
+            None,
+            Some(1),
+            Some(&cursor),
+        ))
         .await;
     assert_eq!(page_ids(&continued).len(), 1, "{continued}");
     assert_ne!(page_ids(&continued), page_ids(&page));
@@ -2066,7 +2267,11 @@ async fn cursor_invalid_after_grant_or_state_change(matrix: Matrix) {
             Some(&cursor),
         ))
         .await;
-    assert_eq!(error_code(&scope_changed), "CURSOR_INVALID", "{scope_changed}");
+    assert_eq!(
+        error_code(&scope_changed),
+        "CURSOR_INVALID",
+        "{scope_changed}"
+    );
     assert_eq!(retry_class(&scope_changed), "terminal");
 
     // A real change of the peer's effective records_read coverage: the wide
@@ -2095,7 +2300,12 @@ async fn cursor_invalid_after_grant_or_state_change(matrix: Matrix) {
     assert!(is_committed(&narrow), "{narrow}");
     let after_narrowing = matrix
         .peer()
-        .list_records(record_list_request(selection(), None, Some(1), Some(&cursor)))
+        .list_records(record_list_request(
+            selection(),
+            None,
+            Some(1),
+            Some(&cursor),
+        ))
         .await;
     assert_eq!(
         error_code(&after_narrowing),
@@ -2136,7 +2346,12 @@ async fn cursor_invalid_after_grant_or_state_change(matrix: Matrix) {
     .await;
     let after_state = matrix
         .peer()
-        .list_records(record_list_request(selection(), None, Some(1), Some(&cursor)))
+        .list_records(record_list_request(
+            selection(),
+            None,
+            Some(1),
+            Some(&cursor),
+        ))
         .await;
     assert_eq!(error_code(&after_state), "CURSOR_INVALID", "{after_state}");
     let fresh = list_page(&matrix.peer(), selection(), Some(10), None).await;
@@ -2167,7 +2382,14 @@ async fn missing_or_null_selection_is_invalid_input(matrix: Matrix) {
     let admin = matrix.admin();
     let record_id = create_record(
         &admin,
-        record_create_body(SUBJECT, "k-c057-row", "note", "selection shape row", &shared_scope(), &[]),
+        record_create_body(
+            SUBJECT,
+            "k-c057-row",
+            "note",
+            "selection shape row",
+            &shared_scope(),
+            &[],
+        ),
     )
     .await;
 
@@ -2192,7 +2414,11 @@ async fn missing_or_null_selection_is_invalid_input(matrix: Matrix) {
     );
     let served = &valid["payload"];
     assert_eq!(served["total_authorized"], json!(1), "{valid}");
-    assert_eq!(served["records"][0]["record_id"], json!(record_id), "{valid}");
+    assert_eq!(
+        served["records"][0]["record_id"],
+        json!(record_id),
+        "{valid}"
+    );
     assert_eq!(
         served["records"][0]["content"]["text"],
         json!("selection shape row"),
@@ -2217,7 +2443,11 @@ async fn missing_or_null_selection_is_invalid_input(matrix: Matrix) {
             .get("error")
             .unwrap_or_else(|| panic!("a malformed recall is refused: {response}"));
         assert_eq!(error["code"], json!("INVALID_INPUT"), "{response}");
-        assert_eq!(error["details"]["retry_class"], json!("terminal"), "{response}");
+        assert_eq!(
+            error["details"]["retry_class"],
+            json!("terminal"),
+            "{response}"
+        );
         assert_ne!(
             error["code"],
             json!("NOT_AUTHORIZED"),
@@ -2228,7 +2458,15 @@ async fn missing_or_null_selection_is_invalid_input(matrix: Matrix) {
 
     // The typed positive control remains additional, not a replacement.
     let served = admin
-        .recall(recall_request(SUBJECT, subject_all(), 10, None, None, None, None))
+        .recall(recall_request(
+            SUBJECT,
+            subject_all(),
+            10,
+            None,
+            None,
+            None,
+            None,
+        ))
         .await;
     assert_eq!(served["total_authorized"], json!(1), "{served}");
     matrix.shutdown().await;
@@ -2253,18 +2491,30 @@ async fn scoped_grant_cannot_widen_recall(matrix: Matrix) {
     let peer_id = matrix.peer_principal().principal_id.as_str().to_owned();
     let (shared, context, other) = seed_placements(&admin, "c057a").await;
     let grant = admin
-        .grant(scoped_grant(&["recall"], &peer_id, SUBJECT, &[CONTEXT], false, "k-c057a-grant"))
+        .grant(scoped_grant(
+            &["recall"],
+            &peer_id,
+            SUBJECT,
+            &[CONTEXT],
+            false,
+            "k-c057a-grant",
+        ))
         .await;
     assert!(is_committed(&grant), "{grant}");
 
     for (selection, name) in [
         (subject_all(), "subject_all"),
         (shared_only(), "shared_only"),
-        (selected_contexts(&[OTHER_CONTEXT], false), "an uncovered context"),
+        (
+            selected_contexts(&[OTHER_CONTEXT], false),
+            "an uncovered context",
+        ),
     ] {
         let refused = matrix
             .peer()
-            .recall(recall_request(SUBJECT, selection, 10, None, None, None, None))
+            .recall(recall_request(
+                SUBJECT, selection, 10, None, None, None, None,
+            ))
             .await;
         assert_eq!(
             error_code(&refused),
@@ -2337,17 +2587,37 @@ async fn ranking_is_deterministic_per_provider(matrix: Matrix) {
     }
 
     let first = admin
-        .recall(recall_request(SUBJECT, subject_all(), 10, None, Some("gate"), None, None))
+        .recall(recall_request(
+            SUBJECT,
+            subject_all(),
+            10,
+            None,
+            Some("gate"),
+            None,
+            None,
+        ))
         .await;
     let second = admin
-        .recall(recall_request(SUBJECT, subject_all(), 10, None, Some("gate"), None, None))
+        .recall(recall_request(
+            SUBJECT,
+            subject_all(),
+            10,
+            None,
+            Some("gate"),
+            None,
+            None,
+        ))
         .await;
-    assert_eq!(page_ids(&first), page_ids(&second), "identical inputs rank identically");
+    assert_eq!(
+        page_ids(&first),
+        page_ids(&second),
+        "identical inputs rank identically"
+    );
     assert_eq!(first, second);
     let policy = first["engine_policy_version"]
         .as_str()
         .expect("recall stamps its engine policy version");
-    assert!(!policy.is_empty());
+    assert_ne!(policy, "");
     assert_eq!(page_ids(&first).len(), 3);
     let mut sorted = page_ids(&first);
     sorted.sort();
@@ -2367,7 +2637,15 @@ async fn ranking_is_deterministic_per_provider(matrix: Matrix) {
 
     // A budget never changes the ranking of the rows it does serve.
     let budgeted = admin
-        .recall(recall_request(SUBJECT, subject_all(), 1, None, Some("gate"), None, None))
+        .recall(recall_request(
+            SUBJECT,
+            subject_all(),
+            1,
+            None,
+            Some("gate"),
+            None,
+            None,
+        ))
         .await;
     assert_eq!(page_ids(&budgeted), vec![page_ids(&first)[0].clone()]);
     matrix.shutdown().await;
@@ -2383,7 +2661,7 @@ async fn c_058_ranking_is_deterministic_per_provider_remote() {
     ranking_is_deterministic_per_provider(Matrix::remote().await).await;
 }
 
-/// C-059 / §6.13: the provenance filter is ANDed with the placement selection —
+/// C-059 / §6.13: the provenance filter is `ANDed` with the placement selection —
 /// a provenance match never widens visibility, and placement membership alone
 /// never survives a non-matching filter.
 async fn provenance_filter_is_anded_with_placement(matrix: Matrix) {
@@ -2439,7 +2717,14 @@ async fn provenance_filter_is_anded_with_placement(matrix: Matrix) {
     )
     .await;
     let grant = admin
-        .grant(scoped_grant(&["recall"], &peer_id, SUBJECT, &[CONTEXT], true, "k-c059-grant"))
+        .grant(scoped_grant(
+            &["recall"],
+            &peer_id,
+            SUBJECT,
+            &[CONTEXT],
+            true,
+            "k-c059-grant",
+        ))
         .await;
     assert!(is_committed(&grant), "{grant}");
 
@@ -2460,7 +2745,10 @@ async fn provenance_filter_is_anded_with_placement(matrix: Matrix) {
     ids.sort();
     let mut wanted = vec![shared_w1.clone(), context_w1.clone()];
     wanted.sort();
-    assert_eq!(ids, wanted, "placement and provenance are both required: {both}");
+    assert_eq!(
+        ids, wanted,
+        "placement and provenance are both required: {both}"
+    );
     assert!(
         !page_ids(&both).contains(&other_w1),
         "a provenance match never widens placement: {both}"
@@ -2536,7 +2824,9 @@ async fn profile_content_is_byte_preserved(matrix: Matrix) {
     assert_eq!(profiles[0]["profile_kind"], json!("personality"));
     assert_eq!(profiles[0]["document"]["format"], json!("markdown"));
     assert_eq!(
-        profiles[0]["document"]["body"].as_str().expect("profile body"),
+        profiles[0]["document"]["body"]
+            .as_str()
+            .expect("profile body"),
         markdown,
         "the authored body is served byte for byte"
     );
@@ -2711,7 +3001,7 @@ async fn profile_and_capability_admission_are_distinct(matrix: Matrix) {
         required_page.get("error").is_none(),
         "an absent required kind is honest-empty on a plain read: {required_page}"
     );
-    assert!(profiles_of(&required_page).is_empty());
+    assert_eq!(profiles_of(&required_page).len(), 0);
 
     // (2) An actually non-required kind that is also absent — derived from the
     // provider's own declaration, never a hardcoded name claimed to be all.
@@ -2726,7 +3016,7 @@ async fn profile_and_capability_admission_are_distinct(matrix: Matrix) {
         optional_page.get("error").is_none(),
         "an absent optional kind is honest-empty: {optional_page}"
     );
-    assert!(profiles_of(&optional_page).is_empty());
+    assert_eq!(profiles_of(&optional_page).len(), 0);
 
     // (3) Missing coverage is a typed authorization refusal, not empty data.
     let denied = matrix
@@ -2815,7 +3105,15 @@ async fn capture_never_mutates_profile(matrix: Matrix) {
 
     // Recall is equally uninvolved: capture alone retains no record.
     let recalled = admin
-        .recall(recall_request(SUBJECT, subject_all(), 10, None, None, None, None))
+        .recall(recall_request(
+            SUBJECT,
+            subject_all(),
+            10,
+            None,
+            None,
+            None,
+            None,
+        ))
         .await;
     assert_eq!(recalled["total_authorized"], json!(0), "{recalled}");
     matrix.shutdown().await;
@@ -2847,7 +3145,10 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
 
     // Fresh provider: all-kinds and capability-kind reads are honest-empty.
     let all = admin.get_profile(json!({ "subject_id": SUBJECT })).await;
-    assert!(profiles_of(&all).is_empty(), "no profile is invented: {all}");
+    assert!(
+        profiles_of(&all).is_empty(),
+        "no profile is invented: {all}"
+    );
     let fake = admin
         .get_profile(json!({ "subject_id": SUBJECT, "profile_kinds": capability_kinds }))
         .await;
@@ -2861,7 +3162,11 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         ("personality", "# Mira\nauthored personality"),
         ("preferences", "{\"tone\": \"terse\"}"),
     ] {
-        let format = if kind == "preferences" { "json" } else { "markdown" };
+        let format = if kind == "preferences" {
+            "json"
+        } else {
+            "markdown"
+        };
         let written = admin
             .update_profile(profile_document_request(
                 SUBJECT,
@@ -2876,7 +3181,10 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
     }
     let mut kinds = profile_kinds(&admin.get_profile(json!({ "subject_id": SUBJECT })).await);
     kinds.sort();
-    assert_eq!(kinds, vec!["personality".to_owned(), "preferences".to_owned()]);
+    assert_eq!(
+        kinds,
+        vec!["personality".to_owned(), "preferences".to_owned()]
+    );
     let after = admin
         .get_profile(json!({ "subject_id": SUBJECT, "profile_kinds": capability_kinds }))
         .await;

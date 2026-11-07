@@ -11,7 +11,10 @@ fn database_path(home: &TempDir) -> PathBuf {
 async fn open_creates_a_file_backed_space() {
     let home = TempDir::new().expect("temp home");
     let database = database_path(&home);
-    assert!(!database.exists(), "a fresh scenario starts without a store");
+    assert!(
+        !database.exists(),
+        "a fresh scenario starts without a store"
+    );
 
     let provider = FixtureMemoryProvider::open(&database)
         .await
@@ -45,7 +48,9 @@ async fn reopen_same_file_reads_the_persisted_space_and_authority() {
     let first = provider.identity().clone();
     provider.close().await;
 
-    let reopened = FixtureMemoryProvider::open(&database).await.expect("reopen");
+    let reopened = FixtureMemoryProvider::open(&database)
+        .await
+        .expect("reopen");
     assert_eq!(
         reopened.identity(),
         &first,

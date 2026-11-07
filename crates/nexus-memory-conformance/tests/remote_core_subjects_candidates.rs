@@ -79,18 +79,14 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{Duration as ChronoDuration, Utc};
-use serde_json::Map;
 use ed25519_dalek::SigningKey;
+use serde_json::Map;
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Row, SqlitePool};
 use tempfile::TempDir;
 use tokio::net::TcpListener;
 
-use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
-use nexus_contracts::daemon_api::characters::memory::review_character_memory_request::ReviewCharacterMemoryRequest;
-use nexus_contracts::daemon_api::memory::create_pending_review_request::CreatePendingReviewRequest;
-use nexus_contracts::generated::core::CoreCharacterTransitionRequest;
 use nexus_agent_host::capability::model::{
     CapabilityDescriptor, FinishReason, HostContentBlock, HostEvent, HostEventStream,
     HostOperation, HostStartConfig, LaunchSpec, ManagedSessionHandle, OperationFinishedEvent,
@@ -100,10 +96,16 @@ use nexus_agent_host::{
     HostError, HostFacade, HostManager, HostOperationId, HostResult, HostSessionId, LaunchStrategy,
     ProviderAdapter, ProviderId,
 };
+use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
+use nexus_contracts::daemon_api::characters::memory::review_character_memory_request::ReviewCharacterMemoryRequest;
+use nexus_contracts::daemon_api::memory::create_pending_review_request::CreatePendingReviewRequest;
+use nexus_contracts::generated::core::CoreCharacterTransitionRequest;
 use nexus_contracts::generated::daemon_api::agent_host::create_session_request::CreateSessionRequest;
 use nexus_contracts::generated::daemon_api::agent_host::execute_operation_request::ExecuteOperationRequest;
-use nexus_contracts::{CoreRegisterCreatorRequest, ProviderCall, ProviderEventBatch, ProviderReply, SetActiveWorkspaceRequest};
-use nexus_provider_ports::{ProviderPort, ProviderResult};
+use nexus_contracts::{
+    CoreRegisterCreatorRequest, ProviderCall, ProviderEventBatch, ProviderReply,
+    SetActiveWorkspaceRequest,
+};
 use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_core::memory_provider::legacy;
 use nexus_core::{
@@ -111,9 +113,10 @@ use nexus_core::{
     MemoryProviderRefusal, MemoryProviderSelection, Principal, RemoteMemoryProviderSelection,
 };
 use nexus_memory_conformance::{
-    FixtureFaults, FixtureMemoryProvider, PeerDirectory, RetentionSweep,
-    DEDUP_RETENTION_SECONDS, IDEMPOTENCY_RETENTION_SECONDS, RECEIPT_RETENTION_SECONDS,
+    FixtureFaults, FixtureMemoryProvider, PeerDirectory, RetentionSweep, DEDUP_RETENTION_SECONDS,
+    IDEMPOTENCY_RETENTION_SECONDS, RECEIPT_RETENTION_SECONDS,
 };
+use nexus_provider_ports::{ProviderPort, ProviderResult};
 use spoke_connect::core::derive_peer_id_from_ed25519_pubkey;
 use spoke_connect::remote::{
     connect_remote_adapter, connect_responder, ConnectResponder, ConnectResponderOptions,
@@ -269,7 +272,13 @@ fn peer_id(seed: &[u8; 32]) -> String {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    use std::fmt::Write as _;
+
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(text, "{byte:02x}").expect("writing into a String cannot fail");
+    }
+    text
 }
 
 /// Bind a real `127.0.0.1:0` listener whose first accepted WebSocket becomes
@@ -472,9 +481,7 @@ impl Provider {
             _home: home,
             db,
             inner,
-            directory: Arc::new(
-                PeerDirectory::new().with_peer(client_peer.clone(), principal_id),
-            ),
+            directory: Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id)),
             space_id,
         }
     }
@@ -556,7 +563,7 @@ impl Provider {
     /// The operator principal the authenticated peer maps to, as the memory
     /// port's own request carrier: the fixture authorizes the request's
     /// principal id against the operator grant.
-    fn memory_principal(&self) -> MemoryPrincipal {
+    fn memory_principal() -> MemoryPrincipal {
         serde_json::from_value(json!({
             "principal_id": format!("prn_{}", peer_id(&CLIENT_SEED)),
             "extensions": {},
@@ -607,13 +614,10 @@ impl Provider {
     /// given one instant past `body_expires_at + dedup_retention_seconds`, so a
     /// later identical key is free again.
     async fn sweep_beyond_retention(&self) -> RetentionSweep {
-        let beyond = u64::try_from(
-            IDEMPOTENCY_RETENTION_SECONDS
-                .saturating_add(DEDUP_RETENTION_SECONDS)
-                .saturating_add(RECEIPT_RETENTION_SECONDS)
-                .saturating_add(1),
-        )
-        .expect("bounded retention windows");
+        let beyond = IDEMPOTENCY_RETENTION_SECONDS
+            .saturating_add(DEDUP_RETENTION_SECONDS)
+            .saturating_add(RECEIPT_RETENTION_SECONDS)
+            .saturating_add(1);
         let now = Utc::now() + ChronoDuration::seconds(i64::try_from(beyond).expect("bounded"));
         self.inner
             .sweep_retained(&self.space_id, now)
@@ -693,11 +697,7 @@ async fn assert_remote_memory_holds(
     binding_id: &str,
 ) {
     let refused = core
-        .remove_binding(
-            principal,
-            character_id.to_string(),
-            binding_id.to_string(),
-        )
+        .remove_binding(principal, character_id.to_string(), binding_id.to_string())
         .await
         .expect_err("an open remote dependency must keep the binding");
     assert!(
@@ -803,13 +803,10 @@ async fn provider_receipts(pool: &SqlitePool, op: &str) -> i64 {
 // ---------------------------------------------------------------------------
 
 async fn create_world(core: &CoreService, principal: &Principal, title: &str) -> String {
-    core.create_world(
-        principal,
-        dto(json!({ "title": title })),
-    )
-    .await
-    .expect("create an owned World")
-    .world_id
+    core.create_world(principal, dto(json!({ "title": title })))
+        .await
+        .expect("create an owned World")
+        .world_id
 }
 
 async fn create_character(
@@ -855,7 +852,7 @@ async fn add_binding(
 fn capture_request(binding_id: Option<&str>, pending_id: &str, digest: &str) -> Value {
     let mut request = json!({
         "pending_id": pending_id,
-        "session_id": format!("sess_{pending_id}"),
+        "session_id": format!("sess_{}", pending_id),
         "task_kind": "brainstorm",
         "raw_digest": digest,
         "created_at": "2026-01-01T00:00:01Z",
@@ -1062,17 +1059,28 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         )
         .await
         .expect("binding-local queue");
-    assert_eq!(local.items.len(), 1, "the binding scope sees only its own row");
+    assert_eq!(
+        local.items.len(),
+        1,
+        "the binding scope sees only its own row"
+    );
     assert_eq!(local.items[0].pending_id.as_str(), "pend_local");
     assert_eq!(
-        local.items[0].binding_id.as_deref().map(|id| id.as_str().to_string()),
+        local.items[0]
+            .binding_id
+            .as_deref()
+            .map(|id| id.as_str().to_string()),
         Some(binding_a.clone())
     );
     assert_eq!(
-        core.count_character_pending_reviews(&principal, character_id.clone(), Some(binding_a.clone()))
-            .await
-            .expect("binding-local count")
-            .count,
+        core.count_character_pending_reviews(
+            &principal,
+            character_id.clone(),
+            Some(binding_a.clone())
+        )
+        .await
+        .expect("binding-local count")
+        .count,
         1
     );
 
@@ -1100,7 +1108,10 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         )
         .await
         .expect_err("a consumed row is no longer queued");
-    assert!(matches!(repeated, CoreError::NotFound { .. }), "got {repeated:?}");
+    assert!(
+        matches!(repeated, CoreError::NotFound { .. }),
+        "got {repeated:?}"
+    );
     assert_eq!(
         core.count_character_pending_reviews(&principal, character_id.clone(), None)
             .await
@@ -1174,7 +1185,10 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         )
         .await
         .expect("review drains the binding scope");
-    assert_eq!(reviewed.fragmented, 1, "the binding-local promote is coerced");
+    assert_eq!(
+        reviewed.fragmented, 1,
+        "the binding-local promote is coerced"
+    );
     assert_eq!(reviewed.promoted, 0);
     assert_eq!(reviewed.dropped, 0);
     let pool = provider.pool().await;
@@ -1192,13 +1206,12 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
                 && context.as_deref() == Some(binding_b.as_str())),
         "the other binding's queue is not consumed by this scope's review"
     );
-    let fragment = sqlx::query(
-        "SELECT record_id, kind, scope_context_id FROM records WHERE subject_id = ?",
-    )
-    .bind(&subject_id)
-    .fetch_one(&pool)
-    .await
-    .expect("the reviewed fragment record");
+    let fragment =
+        sqlx::query("SELECT record_id, kind, scope_context_id FROM records WHERE subject_id = ?")
+            .bind(&subject_id)
+            .fetch_one(&pool)
+            .await
+            .expect("the reviewed fragment record");
     assert_eq!(fragment.get::<String, _>("kind"), "fact");
     assert_eq!(
         fragment.get::<Option<String>, _>("scope_context_id"),
@@ -1254,7 +1267,8 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     }
     let pool = provider.pool().await;
     let committed = provider_receipts(&pool, "memory.candidates.dismiss").await - dismiss_before
-        + provider_receipts(&pool, "memory.candidates.review").await - review_before;
+        + provider_receipts(&pool, "memory.candidates.review").await
+        - review_before;
     assert_eq!(
         committed, 1,
         "exactly one of the two raced mutations committed a durable effect"
@@ -1292,7 +1306,10 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     assert_eq!(listed.items.len(), 1);
     assert_eq!(listed.items[0].pending_id.as_str(), "pend_creator");
     assert_eq!(
-        core.count_pending_reviews(&principal).await.expect("count").count,
+        core.count_pending_reviews(&principal)
+            .await
+            .expect("count")
+            .count,
         1
     );
     let pool = provider.pool().await;
@@ -1339,7 +1356,11 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         "the legacy Creator queue was never written"
     );
     assert_eq!(
-        scalar(&nexus, "SELECT COUNT(*) FROM character_memory_pending_review").await,
+        scalar(
+            &nexus,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
         0,
         "the legacy Character queue stays write-idle"
     );
@@ -1386,7 +1407,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     // the `memory.subjects.get` Core's adapter issues, observed at the protocol
     // boundary, and it can fail on a wrong response or a wrong subject.
     let (adapter, sdk_responder) = provider.sdk_session().await;
-    let memory_principal = provider.memory_principal();
+    let memory_principal = Provider::memory_principal();
     let got = match adapter
         .get_subject(
             &memory_principal,
@@ -1476,8 +1497,8 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     )
     .await
     .expect_err("an archived subject refuses a fresh capture");
-    let (code, retry_class, family, _) = provider_refusal(&refused);
-    assert_eq!(code, "SUBJECT_FENCED");
+    let (refusal_code, retry_class, family, _) = provider_refusal(&refused);
+    assert_eq!(refusal_code, "SUBJECT_FENCED");
     assert_eq!(retry_class, "terminal");
     assert_eq!(family, MemoryProviderRefusal::Conflict);
     // Scoped to THIS binding: the archived attempt's definite refusal settles
@@ -1545,7 +1566,11 @@ async fn binding_removal_follows_known_remote_dependencies() {
         "a committed capture retires exactly its own admission"
     );
     let published = object_facts(&nexus, &dismissed).await;
-    assert_eq!(published.len(), 1, "the receipt published one known candidate");
+    assert_eq!(
+        published.len(),
+        1,
+        "the receipt published one known candidate"
+    );
     assert_eq!(published[0].0, "candidate");
     assert_eq!(published[0].2, "live");
     let candidate_id = published[0].1.clone();
@@ -1634,7 +1659,9 @@ async fn binding_removal_follows_known_remote_dependencies() {
         "the promotion released the record while the review consumed the candidate: {facts:?}"
     );
     assert!(
-        facts.iter().any(|(kind, _, state)| kind == "record" && state == "released"),
+        facts
+            .iter()
+            .any(|(kind, _, state)| kind == "record" && state == "released"),
         "the promotion's own record fact is released: {facts:?}"
     );
     nexus.close().await;
@@ -1657,11 +1684,17 @@ async fn binding_removal_follows_known_remote_dependencies() {
         )
         .await
         .expect_err("the provider refuses a payload over its own bound");
-    let (code, retry_class, family, wire_code) = provider_refusal(&refused);
-    assert_eq!(code, "INVALID_INPUT", "the provider's invalid input code");
+    let (refusal_code, retry_class, family, wire_code) = provider_refusal(&refused);
+    assert_eq!(
+        refusal_code, "INVALID_INPUT",
+        "the provider's invalid input code"
+    );
     assert_eq!(retry_class, "terminal", "a proven pre-effect refusal");
     assert_eq!(family, MemoryProviderRefusal::InvalidInput);
-    assert_eq!(wire_code, None, "a known memory code needs no wire code");
+    assert_eq!(
+        wire_code, None,
+        "a known memory refusal_code needs no wire code"
+    );
     let nexus = core_db(&env).await;
     assert_eq!(
         admission_count(&nexus, &no_effect).await,
@@ -1720,7 +1753,11 @@ async fn binding_removal_follows_known_remote_dependencies() {
     let nexus = core_db(&env).await;
     assert_eq!(
         object_facts(&nexus, &replayed).await,
-        vec![("candidate".to_string(), candidate.clone(), "released".to_string())],
+        vec![(
+            "candidate".to_string(),
+            candidate.clone(),
+            "released".to_string()
+        )],
         "the replayed receipt published the same candidate and could not revive it"
     );
     nexus.close().await;
@@ -1966,8 +2003,8 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
     )
     .await
     .expect_err("a lost post-commit response is not a success");
-    let (code, retry_class, family, wire_code) = provider_refusal(&lost);
-    assert_eq!(code, "OUTCOME_UNCERTAIN");
+    let (refusal_code, retry_class, family, wire_code) = provider_refusal(&lost);
+    assert_eq!(refusal_code, "OUTCOME_UNCERTAIN");
     assert_eq!(retry_class, "uncertain");
     assert_eq!(family, MemoryProviderRefusal::Unavailable);
     assert_eq!(wire_code, None);
@@ -2025,7 +2062,11 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
     let nexus = core_db(&env).await;
     assert_eq!(
         object_facts(&nexus, &uncertain).await,
-        vec![("candidate".to_string(), candidate.clone(), "released".to_string())],
+        vec![(
+            "candidate".to_string(),
+            candidate.clone(),
+            "released".to_string()
+        )],
         "the acknowledgement is the first fact recorded for this candidate"
     );
     assert_eq!(
@@ -2191,15 +2232,23 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
     // calling task is abandoned, and the admission survives that loss.
     // A generous hold bound: the in-flight assertions below run BEFORE the
     // caller is abandoned, so the provider must stay parked across them.
-    let mut hold = provider
-        .faults()
-        .hold_next_bounded(nexus_memory_conformance::FaultPoint::ResponseDrop, Duration::from_secs(60));
+    let mut hold = provider.faults().hold_next_bounded(
+        nexus_memory_conformance::FaultPoint::ResponseDrop,
+        Duration::from_secs(60),
+    );
     let caller = reopened.clone();
     let caller_principal = reopened_principal.clone();
     let character = character_id.clone();
     let binding = abandoned.clone();
     let flying = tokio::spawn(async move {
-        capture(&caller, &caller_principal, &character, Some(&binding), "pend_abandoned").await
+        capture(
+            &caller,
+            &caller_principal,
+            &character,
+            Some(&binding),
+            "pend_abandoned",
+        )
+        .await
     });
     hold.wait_reached()
         .await
@@ -2230,7 +2279,10 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
 
     flying.abort();
     assert!(
-        flying.await.expect_err("the caller task was abandoned").is_cancelled(),
+        flying
+            .await
+            .expect_err("the caller task was abandoned")
+            .is_cancelled(),
         "the caller itself was lost, not answered"
     );
     let nexus = core_db(&env).await;
@@ -2342,7 +2394,7 @@ async fn shaped_candidate_identity_guards_precede_the_provider_cas() {
     // The SDK session is only the address proof: it serves the staged row at
     // exactly the id the public dismissal derives and looks up.
     let (adapter, sdk_responder) = provider.sdk_session().await;
-    let memory_principal = provider.memory_principal();
+    let memory_principal = Provider::memory_principal();
     let baseline = provider.pool().await;
     let dismissals_before = provider_receipts(&baseline, "memory.candidates.dismiss").await;
     baseline.close().await;
@@ -2455,17 +2507,19 @@ async fn shaped_candidate_identity_guards_precede_the_provider_cas() {
     let ok_id = legacy::character_pending_review_candidate_id(ok_pending);
     provider
         .inner
-        .stage_pending_candidate(&ok_id, &subject_id, Some(&binding_id), ok_pending, PROMOTE_DIGEST)
+        .stage_pending_candidate(
+            &ok_id,
+            &subject_id,
+            Some(&binding_id),
+            ok_pending,
+            PROMOTE_DIGEST,
+        )
         .await
         .expect("stage the matching candidate");
     assert_served_at(&adapter, &memory_principal, &provider.space_id, &ok_id).await;
-    core.delete_character_pending_review(
-        &principal,
-        character_id.clone(),
-        ok_pending.to_string(),
-    )
-    .await
-    .expect("the matching row is dismissed through the shaped-id branch");
+    core.delete_character_pending_review(&principal, character_id.clone(), ok_pending.to_string())
+        .await
+        .expect("the matching row is dismissed through the shaped-id branch");
     let pool = provider.pool().await;
     assert_eq!(
         provider_candidate(&pool, &ok_id).await,
@@ -2572,7 +2626,7 @@ impl ProviderAdapter for MindFixtureAdapter {
             .into_iter()
             .filter_map(|block| match block {
                 HostContentBlock::Text { text } => Some(text),
-                _ => None,
+                HostContentBlock::ResourceLink { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -2586,7 +2640,11 @@ impl ProviderAdapter for MindFixtureAdapter {
         )])))
     }
 
-    async fn cancel(&self, _session: &ManagedSessionHandle, _op: HostOperationId) -> HostResult<()> {
+    async fn cancel(
+        &self,
+        _session: &ManagedSessionHandle,
+        _op: HostOperationId,
+    ) -> HostResult<()> {
         Ok(())
     }
 
@@ -2752,8 +2810,10 @@ async fn host_mind_projection_reads_the_remote_subject() {
     // admitted Character creative root this open pinned, so it is the user
     // home — the root the production native boot hands the manager.
     let workspace_root = env.user_home.clone();
-    let mut host_config = nexus_agent_host::config::AgentHostConfig::default();
-    host_config.max_ops_per_session = 4;
+    let host_config = nexus_agent_host::config::AgentHostConfig {
+        max_ops_per_session: 4,
+        ..Default::default()
+    };
     manager
         .start(HostStartConfig {
             config_path: nexus_agent_host::config::agent_host_config_path(&env.user_home),
@@ -2821,8 +2881,8 @@ async fn host_mind_projection_reads_the_remote_subject() {
         .execute(&principal, session.session_id.clone(), prompt())
         .await
         .expect_err("the selected subject get refusal aborts the Host execution");
-    let (code, retry_class, family, _) = provider_refusal(&refused);
-    assert_eq!(code, "NOT_AUTHORIZED");
+    let (refusal_code, retry_class, family, _) = provider_refusal(&refused);
+    assert_eq!(refusal_code, "NOT_AUTHORIZED");
     assert_eq!(retry_class, "terminal");
     assert_eq!(family, MemoryProviderRefusal::Forbidden);
     assert!(
@@ -2852,7 +2912,7 @@ async fn host_mind_projection_reads_the_remote_subject() {
     // (SDK get), and the writable projection meets that lifecycle at
     // `ensure_subject` and fails closed — no prompt is assembled.
     let (sdk, sdk_responder) = provider.sdk_session().await;
-    let memory_principal = provider.memory_principal();
+    let memory_principal = Provider::memory_principal();
     let current = match sdk
         .get_subject(
             &memory_principal,
@@ -2905,8 +2965,8 @@ async fn host_mind_projection_reads_the_remote_subject() {
         .execute(&principal, session.session_id.clone(), prompt())
         .await
         .expect_err("the archived subject's projection is refused");
-    let (code, retry_class, family, _) = provider_refusal(&failed);
-    assert_eq!(code, "SUBJECT_FENCED");
+    let (refusal_code, retry_class, family, _) = provider_refusal(&failed);
+    assert_eq!(refusal_code, "SUBJECT_FENCED");
     assert_eq!(retry_class, "terminal");
     assert_eq!(family, MemoryProviderRefusal::Conflict);
     assert_eq!(
@@ -2932,6 +2992,14 @@ async fn host_mind_projection_reads_the_remote_subject() {
 // Review entry: an externally captured candidate must not lose protection
 // ---------------------------------------------------------------------------
 
+/// The pending candidate one external capture commits: its identity and the
+/// payload the capture carries.
+struct ExternalCandidate<'a> {
+    pending_id: &'a str,
+    digest: &'a str,
+    task_kind: &'a str,
+}
+
 /// One genuinely external signed capture of a binding-local, legacy-shaped
 /// pending candidate over the real provider protocol (never through Core's own
 /// capture arm). Returns the committed candidate id.
@@ -2941,9 +3009,7 @@ async fn external_capture(
     space_id: &str,
     subject_id: &str,
     binding_id: &str,
-    pending_id: &str,
-    digest: &str,
-    task_kind: &str,
+    candidate: ExternalCandidate<'_>,
 ) -> String {
     let result = adapter
         .capture(
@@ -2952,13 +3018,13 @@ async fn external_capture(
                 "space_id": space_id,
                 "subject_id": subject_id,
                 "content": {
-                    "text": digest,
+                    "text": candidate.digest,
                     "structured": {
                         "nexus_legacy": {
-                            "pending_id": pending_id,
-                            "session_id": format!("sess_{pending_id}"),
-                            "task_kind": task_kind,
-                            "raw_digest": digest,
+                            "pending_id": candidate.pending_id,
+                            "session_id": format!("sess_{}", candidate.pending_id),
+                            "task_kind": candidate.task_kind,
+                            "raw_digest": candidate.digest,
                             "actor_world_binding_id": binding_id,
                             "created_at": "2026-03-01T00:00:01Z",
                         },
@@ -2967,7 +3033,7 @@ async fn external_capture(
                 "capture_scope": { "visibility": "context", "context_id": binding_id },
                 "source_context_ids": [binding_id],
                 "kind_hint": "story_summary",
-                "idempotency_key": format!("external-capture:{pending_id}"),
+                "idempotency_key": format!("external-capture:{}", candidate.pending_id),
             })),
         )
         .await;
@@ -3087,7 +3153,8 @@ impl RemoteMemoryService for ReviewLossProbe {
                 details: Some(details),
             });
         }
-        match self.mangle.lock().expect("mangle mode").clone() {
+        let mangle = self.mangle.lock().expect("mangle mode").clone();
+        match mangle {
             Some(ReviewMangle::EmptyIds) => body["result"]["record_ids"] = json!([]),
             Some(ReviewMangle::DropOutcome) => body["result"]["outcome"] = json!("dropped"),
             Some(ReviewMangle::EmptyIdString) => body["result"]["record_ids"] = json!([""]),
@@ -3134,7 +3201,7 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
     // The external signed writer: the same authenticated peer, but capturing
     // directly over the protocol instead of through Core's capture arm.
     let (external, external_responder) = provider.sdk_session().await;
-    let memory_principal = provider.memory_principal();
+    let memory_principal = Provider::memory_principal();
 
     // Core's writable adapter ensures the Character's provider subject; the
     // external writer then only supplies the candidate, never the subject.
@@ -3157,9 +3224,11 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
         &provider.space_id,
         &subject,
         &protective,
-        "pend_external",
-        PROMOTE_DIGEST,
-        "brainstorm",
+        ExternalCandidate {
+            pending_id: "pend_external",
+            digest: PROMOTE_DIGEST,
+            task_kind: "brainstorm",
+        },
     )
     .await;
     let nexus = core_db(&env).await;
@@ -3189,8 +3258,16 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
         )
         .await
         .expect("the drain reports its bounded batch");
-    assert_eq!(response.processed, Some(1), "the drain consumed the candidate");
-    assert_eq!(probe.committed_losses(), 1, "the loss followed a real commit");
+    assert_eq!(
+        response.processed,
+        Some(1),
+        "the drain consumed the candidate"
+    );
+    assert_eq!(
+        probe.committed_losses(),
+        1,
+        "the loss followed a real commit"
+    );
 
     // The provider really holds the consumed candidate and the binding record.
     let pool = provider.pool().await;
@@ -3205,15 +3282,13 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
         "the provider committed the review"
     );
     assert_eq!(
-        sqlx::query(
-            "SELECT COUNT(*) FROM records WHERE subject_id = ? AND scope_context_id = ?",
-        )
-        .bind(&subject)
-        .bind(&protective)
-        .fetch_one(&pool)
-        .await
-        .expect("record count")
-        .get::<i64, _>(0),
+        sqlx::query("SELECT COUNT(*) FROM records WHERE subject_id = ? AND scope_context_id = ?",)
+            .bind(&subject)
+            .bind(&protective)
+            .fetch_one(&pool)
+            .await
+            .expect("record count")
+            .get::<i64, _>(0),
         1,
         "the provider holds a binding-scoped record"
     );
@@ -3238,9 +3313,11 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
         &provider.space_id,
         &subject,
         &protective,
-        "pend_external_two",
-        PROMOTE_DIGEST,
-        "brainstorm",
+        ExternalCandidate {
+            pending_id: "pend_external_two",
+            digest: PROMOTE_DIGEST,
+            task_kind: "brainstorm",
+        },
     )
     .await;
     probe.watch(&second);
@@ -3268,9 +3345,11 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
         &provider.space_id,
         &subject,
         &keeper,
-        "pend_external_control",
-        PROMOTE_DIGEST,
-        "brainstorm",
+        ExternalCandidate {
+            pending_id: "pend_external_control",
+            digest: PROMOTE_DIGEST,
+            task_kind: "brainstorm",
+        },
     )
     .await;
     probe.watch(&control_candidate);
@@ -3359,7 +3438,7 @@ async fn malformed_review_receipt_keeps_binding_protection() {
     );
 
     let (external, external_responder) = provider.sdk_session().await;
-    let memory_principal = provider.memory_principal();
+    let memory_principal = Provider::memory_principal();
 
     let mut expected_admissions = 0;
     for (mode, pending) in [
@@ -3373,9 +3452,11 @@ async fn malformed_review_receipt_keeps_binding_protection() {
             &provider.space_id,
             &subject,
             &protective,
-            pending,
-            PROMOTE_DIGEST,
-            "brainstorm",
+            ExternalCandidate {
+                pending_id: pending,
+                digest: PROMOTE_DIGEST,
+                task_kind: "brainstorm",
+            },
         )
         .await;
         probe.watch(&candidate);
@@ -3443,9 +3524,11 @@ async fn malformed_review_receipt_keeps_binding_protection() {
         &provider.space_id,
         &subject,
         &keeper,
-        "pend_drop_control",
-        DROP_DIGEST,
-        "unknown",
+        ExternalCandidate {
+            pending_id: "pend_drop_control",
+            digest: DROP_DIGEST,
+            task_kind: "unknown",
+        },
     )
     .await;
     probe.watch(&drop_candidate);
@@ -3523,7 +3606,7 @@ async fn stale_review_receipt_keeps_binding_protection() {
     );
 
     let (external, external_responder) = provider.sdk_session().await;
-    let memory_principal = provider.memory_principal();
+    let memory_principal = Provider::memory_principal();
     let review = async |binding: String| {
         core.review_character_memory(
             &principal,
@@ -3541,17 +3624,29 @@ async fn stale_review_receipt_keeps_binding_protection() {
         &provider.space_id,
         &subject,
         &protective,
-        "pend_stale_old",
-        PROMOTE_DIGEST,
-        "brainstorm",
+        ExternalCandidate {
+            pending_id: "pend_stale_old",
+            digest: PROMOTE_DIGEST,
+            task_kind: "brainstorm",
+        },
     )
     .await;
     probe.watch(&old_candidate);
     probe.mangle(None);
-    review(protective.clone()).await.expect("the old review settles");
-    let old_receipt = probe.captured().expect("the real review receipt was observed");
+    review(protective.clone())
+        .await
+        .expect("the old review settles");
+    let old_receipt = probe
+        .captured()
+        .expect("the real review receipt was observed");
     let old_fragment = core
-        .list_character_memory_fragments(&principal, character.clone(), Some(protective.clone()), 50, 0)
+        .list_character_memory_fragments(
+            &principal,
+            character.clone(),
+            Some(protective.clone()),
+            50,
+            0,
+        )
         .await
         .expect("old fragments")
         .fragments
@@ -3582,9 +3677,11 @@ async fn stale_review_receipt_keeps_binding_protection() {
         &provider.space_id,
         &subject,
         &protective,
-        "pend_stale_new",
-        PROMOTE_DIGEST,
-        "brainstorm",
+        ExternalCandidate {
+            pending_id: "pend_stale_new",
+            digest: PROMOTE_DIGEST,
+            task_kind: "brainstorm",
+        },
     )
     .await;
     probe.watch(&new_candidate);
@@ -3642,9 +3739,11 @@ async fn stale_review_receipt_keeps_binding_protection() {
         &provider.space_id,
         &subject,
         &spare,
-        "pend_stale_space",
-        PROMOTE_DIGEST,
-        "brainstorm",
+        ExternalCandidate {
+            pending_id: "pend_stale_space",
+            digest: PROMOTE_DIGEST,
+            task_kind: "brainstorm",
+        },
     )
     .await;
     probe.watch(&foreign_candidate);
@@ -3689,14 +3788,18 @@ async fn stale_review_receipt_keeps_binding_protection() {
         &provider.space_id,
         &subject,
         &keeper,
-        "pend_stale_control",
-        PROMOTE_DIGEST,
-        "brainstorm",
+        ExternalCandidate {
+            pending_id: "pend_stale_control",
+            digest: PROMOTE_DIGEST,
+            task_kind: "brainstorm",
+        },
     )
     .await;
     probe.watch(&control_candidate);
     probe.mangle(None);
-    review(keeper.clone()).await.expect("the control review settles");
+    review(keeper.clone())
+        .await
+        .expect("the control review settles");
     let control_receipt = probe.captured().expect("the control receipt");
     assert_ne!(
         control_receipt["receipt_id"], old_receipt["receipt_id"],
@@ -3780,15 +3883,12 @@ async fn remote_refusals_stay_static_without_peer_text() {
         )
         .await
         .expect_err("the oversized capture is refused");
-    let (code, retry_class, family, wire_code) = provider_refusal(&refused);
-    assert_eq!(code, "INVALID_INPUT");
+    let (refusal_code, retry_class, family, wire_code) = provider_refusal(&refused);
+    assert_eq!(refusal_code, "INVALID_INPUT");
     assert_eq!(retry_class, "terminal");
     assert_eq!(family, MemoryProviderRefusal::InvalidInput);
     assert_eq!(wire_code, None);
-    for rendered in [
-        format!("{refused}"),
-        format!("{refused:?}"),
-    ] {
+    for rendered in [format!("{refused}"), format!("{refused:?}")] {
         assert!(
             !rendered.contains(secret),
             "the request content never travels: {rendered}"
@@ -3804,13 +3904,14 @@ async fn remote_refusals_stay_static_without_peer_text() {
     }
 
     // A local-only extension keeps its own retained contract on a remote
-    // binding: the structured `not_supported` code, not a peer-echoing error.
+    // binding: the structured `not_supported` refusal_code, not a peer-echoing error.
     let migration = core
         .migrate_legacy_content(&principal)
         .await
         .expect_err("legacy migration is local-only");
     assert!(
-        matches!(&migration, CoreError::Coded { code, .. } if code == "not_supported"),
+        matches!(&migration, CoreError::Coded {
+            code: refusal_code, .. } if refusal_code == "not_supported"),
         "got {migration:?}"
     );
 

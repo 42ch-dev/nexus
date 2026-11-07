@@ -35,8 +35,8 @@ use serde_json::{json, Value};
 
 use support::{
     assert_no_receipt_disclosure, bootstrap, capture_body, context_scope, error_code, is_committed,
-    receipt_id, result, retry_class, run_matrix_scenario, shared_scope, DurableState, Kind,
-    Matrix, OwnedResources, TaskSet, CONTEXT, SUBJECT, TEXT,
+    receipt_id, result, retry_class, run_matrix_scenario, shared_scope, DurableState, Kind, Matrix,
+    OwnedResources, TaskSet, CONTEXT, SUBJECT, TEXT,
 };
 
 fn candidates(body: &Value) -> Vec<String> {
@@ -114,9 +114,7 @@ fn assert_receipt_tuple(body: &Value, op: &str, requester: &str) {
     assert_eq!(body["op"], json!(op), "{body}");
     assert_eq!(body["requester_principal_id"], json!(requester), "{body}");
     assert!(
-        body["receipt_id"]
-            .as_str()
-            .is_some_and(|id| !id.is_empty()),
+        body["receipt_id"].as_str().is_some_and(|id| !id.is_empty()),
         "{body}"
     );
     let digest = body["payload_digest"].as_str().expect("payload digest");
@@ -238,20 +236,16 @@ async fn supported_error_envelopes_and_retry_classes(
         .peer()
         .capture(capture_body("k-c100-lost", TEXT, &context_scope(CONTEXT)))
         .await;
-    assert!(is_committed(&replayed), "same-key replay resolves: {replayed}");
+    assert!(
+        is_committed(&replayed),
+        "same-key replay resolves: {replayed}"
+    );
     assert_receipt_tuple(&replayed, "memory.capture", peer_id.as_str());
     let candidate = support::candidate_ids(&replayed)[0].clone();
     let receipt = receipt_id(&replayed).to_owned();
 
     let effect = resources
-        .open_observer(
-            matrix,
-            SUBJECT,
-            &[],
-            Some(&candidate),
-            Some(&receipt),
-            None,
-        )
+        .open_observer(matrix, SUBJECT, &[], Some(&candidate), Some(&receipt), None)
         .await;
     let state = resources.observe(effect).await;
     let candidate_row = observed(&state, &format!("candidate:{candidate}"));
@@ -365,7 +359,11 @@ async fn local_retryable_over_the_same_signed_provider(
             "idempotency_key": "k-c100-update",
         }))
         .await;
-    assert_eq!(error_code(&lost_update), "OUTCOME_UNCERTAIN", "{lost_update}");
+    assert_eq!(
+        error_code(&lost_update),
+        "OUTCOME_UNCERTAIN",
+        "{lost_update}"
+    );
     assert_eq!(retry_class(&lost_update), "uncertain");
 
     let target = operator.file_root().join(format!("records/{record_id}.md"));
@@ -374,7 +372,14 @@ async fn local_retryable_over_the_same_signed_provider(
     std::fs::write(&target, foreign).expect("foreign target bytes");
 
     let window = resources
-        .open_observer(matrix, SUBJECT, &[record_id.clone()], None, None, None)
+        .open_observer(
+            matrix,
+            SUBJECT,
+            std::slice::from_ref(&record_id),
+            None,
+            None,
+            None,
+        )
         .await;
     let before = resources.observe(window).await;
     let deletes_before = resources
@@ -477,8 +482,15 @@ async fn unknown_op_and_missing_capability_are_distinct(
             &json!({ "space_id": matrix.space_id(), "idempotency_key": "k-c101" }),
         )
         .await;
-    assert_eq!(missing["error"]["code"], json!("capability_missing"), "{missing}");
-    assert_eq!(missing["error"]["details"]["retry_class"], json!("terminal"));
+    assert_eq!(
+        missing["error"]["code"],
+        json!("capability_missing"),
+        "{missing}"
+    );
+    assert_eq!(
+        missing["error"]["details"]["retry_class"],
+        json!("terminal")
+    );
     resources
         .close_raw(without_memory)
         .await
@@ -495,7 +507,11 @@ async fn unknown_op_and_missing_capability_are_distinct(
         unknown["error"]["code"], missing["error"]["code"],
         "unknown op and missing capability are distinct: {unknown} {missing}"
     );
-    assert_eq!(unknown["error"]["code"], json!("op_unsupported"), "{unknown}");
+    assert_eq!(
+        unknown["error"]["code"],
+        json!("op_unsupported"),
+        "{unknown}"
+    );
 
     let after = resources.observe(window).await;
     assert_eq!(after.rows, before.rows);
@@ -508,7 +524,7 @@ async fn unknown_op_and_missing_capability_are_distinct(
         .close_observer(window)
         .await
         .expect("the C-101 observer closes");
-    assert!(pending_candidates(&admin).await.is_empty());
+    assert_eq!(pending_candidates(&admin).await.len(), 0);
 
     // Protocol §14.2:750–758; spoke-connect 0.15.2 attaches this metadata to
     // the unknown-op denial (upstream #149, I-000271).
@@ -707,19 +723,16 @@ async fn internal_error_reports_effect_honesty(
     assert!(is_committed(&replayed), "{replayed}");
     assert_receipt_tuple(&replayed, "memory.capture", peer_id.as_str());
     let durable = support::candidate_ids(&replayed);
-    assert_eq!(durable.len(), 1, "the replay resolves exactly one candidate");
+    assert_eq!(
+        durable.len(),
+        1,
+        "the replay resolves exactly one candidate"
+    );
     let candidate = durable[0].clone();
     let receipt = receipt_id(&replayed).to_owned();
 
     let effect = resources
-        .open_observer(
-            matrix,
-            SUBJECT,
-            &[],
-            Some(&candidate),
-            Some(&receipt),
-            None,
-        )
+        .open_observer(matrix, SUBJECT, &[], Some(&candidate), Some(&receipt), None)
         .await;
     let state = resources.observe(effect).await;
     let candidate_row = observed(&state, &format!("candidate:{candidate}"));
@@ -778,14 +791,7 @@ async fn receipt_read_rechecks_revoked_authorization(
     assert_eq!(result(&revoked)["revoked"], json!(true), "{revoked}");
 
     let window = resources
-        .open_observer(
-            matrix,
-            SUBJECT,
-            &[],
-            Some(&candidate),
-            Some(&receipt),
-            None,
-        )
+        .open_observer(matrix, SUBJECT, &[], Some(&candidate), Some(&receipt), None)
         .await;
     let before = resources.observe(window).await;
     let second = matrix.peer().get_receipt(&receipt).await;
@@ -856,7 +862,10 @@ async fn reflection_reads_refuse_without_capability(
             json!("capability_missing"),
             "{op} is not served by an N3 provider: {response}"
         );
-        assert_eq!(response["error"]["details"]["retry_class"], json!("terminal"));
+        assert_eq!(
+            response["error"]["details"]["retry_class"],
+            json!("terminal")
+        );
         assert!(
             response.get("payload").is_none(),
             "{op} never fabricates a reflection payload: {response}"
@@ -885,7 +894,7 @@ async fn reflection_reads_refuse_without_capability(
         spaces_before["spaces"],
         "the refused reads did not mutate the space projection"
     );
-    assert!(pending_candidates(&admin).await.is_empty());
+    assert_eq!(pending_candidates(&admin).await.len(), 0);
 }
 
 #[tokio::test]
@@ -1037,7 +1046,7 @@ fn refusal_projection_control_separates_existence_from_request_diagnostics() {
         security_projection(&retryable, &trusted)
     );
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        assert_terminal_refusal(&retryable, "control")
+        assert_terminal_refusal(&retryable, "control");
     }));
     assert!(
         outcome.is_err(),
@@ -1198,9 +1207,9 @@ async fn task_set_join_cancellation_keeps_the_handle_owned() {
 
 /// H2 (I270) owning-runner cancellation control: cancelling the WHOLE
 /// `run_matrix_scenario` future while a spawned operation is pending drops the
-/// last owning TaskSet, and the abort-on-drop slot aborts the task instead of
+/// last owning `TaskSet`, and the abort-on-drop slot aborts the task instead of
 /// detaching it. The abort guard inside the task proves the abort actually
-/// reached it; a plain last JoinHandle would only detach and the guard would
+/// reached it; a plain last `JoinHandle` would only detach and the guard would
 /// stay unset until the test runtime shut down.
 #[tokio::test]
 async fn runner_cancellation_aborts_pending_owned_tasks() {
