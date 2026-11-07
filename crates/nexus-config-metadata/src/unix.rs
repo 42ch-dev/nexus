@@ -35,11 +35,19 @@ pub fn create_staging_directory(directory: &Path) -> io::Result<()> {
     std::fs::DirBuilder::new().mode(0o700).create(directory)
 }
 
-/// Make the staging directory unable to pass an inherited ACL to its child.
+/// Make the staging directory private before its child exists.
 ///
-/// The directory is created before the document file, so clearing its ACLs here
+/// The directory is created before the document file, so removing its ACLs here
 /// means the file is created without any inherited grant: no other principal can
 /// reach the staged bytes, regardless of the target directory's policy.
+///
+/// Clearing an inherited ACL does not undo a mode change another principal
+/// already completed through the inherited authority: the directory would stay
+/// writable and could have its child pathname replaced before the rename. The
+/// owner-only mode is therefore established again after the removal and then
+/// validated, together with the creator's ownership, before any staged byte can
+/// exist. A directory this process no longer owns, or whose mode cannot be
+/// narrowed, refuses the publication.
 pub fn seal_staging_directory(directory: &Path) -> io::Result<()> {
     let file = File::open(directory)?;
     #[cfg(target_os = "macos")]
@@ -51,6 +59,30 @@ pub fn seal_staging_directory(directory: &Path) -> io::Result<()> {
         remove_xattr(descriptor, name)?;
         name = c"system.posix_acl_default";
         remove_xattr(descriptor, name)?;
+    }
+
+    let descriptor = file.as_raw_fd();
+    // SAFETY: `descriptor` is owned by `file` for the duration of this call, and
+    // `0o700` is the owner-only staging contract this directory must carry.
+    if unsafe { libc::fchmod(descriptor, 0o700) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let metadata = file.metadata()?;
+    // SAFETY: geteuid takes no arguments and cannot fail.
+    let creator = unsafe { libc::geteuid() };
+    if metadata.uid() != creator {
+        return Err(io::Error::other(format!(
+            "refusing the staging directory {}: owned by uid {} instead of the creator uid {creator}",
+            directory.display(),
+            metadata.uid()
+        )));
+    }
+    let mode = metadata.mode() & 0o7777;
+    if mode != 0o700 {
+        return Err(io::Error::other(format!(
+            "refusing the staging directory {}: mode {mode:04o} is not owner-only",
+            directory.display()
+        )));
     }
     Ok(())
 }
@@ -399,5 +431,68 @@ fn clear_acl(descriptor: RawFd) -> io::Result<()> {
         Ok(())
     } else {
         Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{access_policy_blob, seal_staging_directory};
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+
+    fn scratch_directory() -> PathBuf {
+        let unique = NEXT.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "nexus-config-metadata-seal-{}-{unique}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir(&path).expect("scratch directory");
+        path
+    }
+
+    fn mode(directory: &std::path::Path) -> u32 {
+        std::fs::metadata(directory)
+            .expect("directory metadata")
+            .permissions()
+            .mode()
+            & 0o7777
+    }
+
+    /// SEC-01: a mode another principal widened through inherited authority
+    /// before sealing must not survive it, and sealing must refuse a directory
+    /// it can no longer make owner-only rather than publishing from it.
+    #[test]
+    fn a_mode_widened_before_sealing_does_not_survive() {
+        let directory = scratch_directory();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o777))
+            .expect("the directory is widened as inherited authority allows");
+        #[cfg(target_os = "macos")]
+        {
+            let status = std::process::Command::new("chmod")
+                .arg("+a")
+                .arg("nobody allow read")
+                .arg(&directory)
+                .status()
+                .expect("run chmod");
+            assert!(status.success(), "the inherited-authority ACL is installed");
+            assert!(
+                !access_policy_blob(&directory).expect("acl").is_empty(),
+                "the directory really carries an ACL before sealing"
+            );
+        }
+
+        seal_staging_directory(&directory).expect("sealing succeeds");
+
+        assert_eq!(mode(&directory), 0o700, "the widened mode does not survive");
+        #[cfg(target_os = "macos")]
+        assert!(
+            access_policy_blob(&directory).expect("acl").is_empty(),
+            "the ACL that granted the inherited authority is gone"
+        );
+        std::fs::remove_dir(&directory).expect("scratch directory removed");
     }
 }

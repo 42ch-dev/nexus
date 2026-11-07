@@ -20,9 +20,10 @@ group, mode, ACL and extended access attributes it had.
   (`libc` on Unix including the macOS `acl_*` family, `windows-sys`
   `GetFileSecurityW`/`SetSecurityInfo` on Windows).
 - Staging happens in a private directory that is created and sealed before the
-  staging file: on Unix the directory's inherited ACL/default ACL is cleared, on
-  Windows the file is opened with no sharing, so no staged byte is exposed
-  before the captured policy is applied.
+  staging file: on Unix the directory's inherited ACL/default ACL is cleared and
+  its owner-only mode is re-established and validated, on Windows the file is
+  opened with no sharing, so no staged byte is exposed before the captured
+  policy is applied.
 - Dependencies stay at the already-locked `libc`/`windows-sys` versions; no new
   native library, runtime option or third-party wrapper.
 - A platform with neither contract must fail closed rather than publish without

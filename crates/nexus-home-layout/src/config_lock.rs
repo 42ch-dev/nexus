@@ -1020,6 +1020,10 @@ mod tests {
     /// A failure after the staging file exists must keep the old document and
     /// remove the staged file and its directory: ordinary cleanup, at a real
     /// publication boundary instead of an injected error.
+    ///
+    /// The original document stays a regular file with its old bytes: a cleanup
+    /// branch that unlinked the target instead of the owned stage is then
+    /// observable, which a fixture that replaces the target cannot show.
     #[cfg(unix)]
     #[test]
     fn a_post_staging_failure_keeps_the_old_document_and_removes_the_stage() {
@@ -1041,16 +1045,23 @@ mod tests {
         arrived
             .recv_timeout(Duration::from_secs(30))
             .expect("the publisher reached the staging boundary");
-        // Replace the target with a directory so the rename is the only failure.
-        std::fs::remove_file(&path).expect("remove target");
-        std::fs::create_dir(&path).expect("directory at the target");
+        // The staged file disappears under the publisher, so the rename is the
+        // failing operation while the original document is still in place.
+        let staging_directory = only_staging_directory(&home);
+        std::fs::remove_file(staging_directory.join("config.toml"))
+            .expect("the staged file was removed at the boundary");
         release.send(()).expect("release the publisher");
 
-        let _error = publisher
+        let error = publisher
             .join()
             .expect("publisher thread")
-            .expect_err("the rename cannot replace a directory");
-        assert!(path.is_dir(), "the target was not replaced");
+            .expect_err("the rename has no staged file to publish");
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("document"),
+            "active_creator_id = \"ctr_old\"\n",
+            "the original document keeps its bytes"
+        );
         let entries: Vec<_> = std::fs::read_dir(&home)
             .expect("home listing")
             .filter_map(Result::ok)
@@ -1059,12 +1070,17 @@ mod tests {
         assert_eq!(
             entries,
             ["config.toml"],
-            "the staging directory was removed"
+            "the original document survives and the owned staging directory was removed"
         );
     }
 
     /// A post-staging failure whose cleanup also fails reports both, at a real
     /// publication boundary instead of constructed errors.
+    ///
+    /// The directory stops accepting writes, so the rename fails on the
+    /// destination and removing the owned staging directory fails too. The
+    /// original document stays a regular file: the reported error must keep the
+    /// primary kind and message and still name the leftover path.
     #[cfg(unix)]
     #[test]
     fn a_post_staging_failure_reports_a_failed_cleanup() {
@@ -1089,24 +1105,159 @@ mod tests {
             .recv_timeout(Duration::from_secs(30))
             .expect("the publisher reached the staging boundary");
         let staging_directory = only_staging_directory(&home);
-        std::fs::set_permissions(&staging_directory, std::fs::Permissions::from_mode(0o500))
-            .expect("the staging directory becomes read-only");
-        std::fs::remove_file(&path).expect("remove target");
-        std::fs::create_dir(&path).expect("directory at the target");
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o500))
+            .expect("the home stops accepting directory writes");
         release.send(()).expect("release the publisher");
 
         let error = publisher
             .join()
             .expect("publisher thread")
-            .expect_err("the rename cannot replace a directory");
+            .expect_err("the rename cannot write into the home");
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755))
+            .expect("restore the home");
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::PermissionDenied,
+            "the primary failure keeps its kind"
+        );
         let rendered = error.to_string();
+        assert!(rendered.contains("Permission denied"), "{rendered}");
         assert!(rendered.contains("could not be removed"), "{rendered}");
         assert!(
             rendered.contains(&staging_directory.display().to_string()),
             "{rendered}"
         );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("document"),
+            "active_creator_id = \"ctr_old\"\n",
+            "the original document keeps its bytes"
+        );
+        assert!(
+            staging_directory.is_dir(),
+            "the staging directory is the reported leftover"
+        );
+        assert!(
+            !staging_directory.join("config.toml").exists(),
+            "the staged file was removed"
+        );
+    }
 
-        std::fs::set_permissions(&staging_directory, std::fs::Permissions::from_mode(0o700))
-            .expect("restore the staging directory");
+    /// A symlink chain of exactly the allowed length publishes; one more hop and
+    /// a loop are refused before any staged byte exists.
+    #[cfg(unix)]
+    #[test]
+    fn the_symlink_hop_limit_is_enforced_at_its_boundary() {
+        use std::os::unix::fs::symlink;
+
+        /// Build `links` symlinks, `config.toml` first, ending at `real.toml`.
+        fn chain(home: &Path, links: usize) {
+            for index in 0..links {
+                let name = if index == 0 {
+                    "config.toml".to_string()
+                } else {
+                    format!("link-{index}")
+                };
+                let target = if index + 1 == links {
+                    "real.toml".to_string()
+                } else {
+                    format!("link-{}", index + 1)
+                };
+                symlink(target, home.join(name)).expect("chain link");
+            }
+        }
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let at_limit = tmp.path().join("at-limit");
+        std::fs::create_dir_all(&at_limit).expect("home");
+        std::fs::write(
+            at_limit.join("real.toml"),
+            "active_creator_id = \"ctr_old\"\n",
+        )
+        .expect("document");
+        chain(&at_limit, super::MAX_SYMLINK_HOPS);
+
+        super::publish_document(&at_limit, "active_creator_id = \"ctr_new\"\n")
+            .expect("a chain at the hop limit is followed");
+        assert_eq!(
+            std::fs::read_to_string(at_limit.join("real.toml")).expect("document"),
+            "active_creator_id = \"ctr_new\"\n"
+        );
+
+        let beyond = tmp.path().join("beyond");
+        std::fs::create_dir_all(&beyond).expect("home");
+        std::fs::write(
+            beyond.join("real.toml"),
+            "active_creator_id = \"ctr_old\"\n",
+        )
+        .expect("document");
+        chain(&beyond, super::MAX_SYMLINK_HOPS + 1);
+
+        let error = super::publish_document(&beyond, "active_creator_id = \"ctr_new\"\n")
+            .expect_err("one hop past the limit is refused");
+        assert!(
+            error.to_string().contains("too many symbolic links"),
+            "{error}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(beyond.join("real.toml")).expect("document"),
+            "active_creator_id = \"ctr_old\"\n",
+            "the document past an over-long chain keeps its bytes"
+        );
+
+        let looping = tmp.path().join("loop");
+        std::fs::create_dir_all(&looping).expect("home");
+        symlink("a.toml", looping.join("config.toml")).expect("first link");
+        symlink("config.toml", looping.join("a.toml")).expect("second link");
+
+        let error = super::publish_document(&looping, "active_creator_id = \"ctr_new\"\n")
+            .expect_err("a link loop is refused");
+        assert!(
+            error.to_string().contains("too many symbolic links"),
+            "{error}"
+        );
+        assert_eq!(
+            std::fs::read_dir(&looping).expect("home listing").count(),
+            2,
+            "the loop is refused without creating a document or staging directory"
+        );
+    }
+
+    /// SEC-01: an inheritance-only `writesecurity` grant on the containing
+    /// directory must not leave the staging directory writable. Sealing removes
+    /// the inherited authority and re-establishes the owner-only mode before the
+    /// child file exists.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_inherited_writesecurity_grant_does_not_leave_the_stage_writable() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path();
+        let status = std::process::Command::new("chmod")
+            .arg("+a")
+            .arg("everyone allow read,writesecurity,file_inherit,directory_inherit")
+            .arg(home)
+            .status()
+            .expect("run chmod");
+        assert!(status.success(), "the inheritable grant is installed");
+
+        let staging = nexus_config_metadata::create_staging(&home.join(".nexus42-test.tmp"))
+            .expect("staging file");
+
+        assert_eq!(
+            std::fs::metadata(staging.directory())
+                .expect("staging directory metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700,
+            "the inherited grant cannot leave the staging directory writable"
+        );
+        assert!(
+            nexus_config_metadata::access_policy_blob(staging.directory())
+                .expect("staging ACL")
+                .is_empty(),
+            "the inherited ACE was removed before the child existed"
+        );
     }
 }
