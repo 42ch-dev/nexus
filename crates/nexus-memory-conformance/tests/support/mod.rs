@@ -31,14 +31,14 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use futures_util::FutureExt as _;
 use base64::Engine as _;
 use chrono::{Duration as ChronoDuration, Utc};
 use ed25519_dalek::{Signer, SigningKey};
+use futures_util::FutureExt as _;
 use serde_json::{json, Value};
 use tempfile::TempDir;
 use tokio::net::TcpListener;
@@ -46,25 +46,27 @@ use tokio::sync::{Barrier, Notify};
 
 use sqlx::Connection as _;
 
+use nexus_contracts::{CoreRegisterCreatorRequest, SetActiveWorkspaceRequest};
 use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_core::memory_provider::LocalMemoryProvider;
 use nexus_core::{CoreAccess, CoreHomeService, CoreOpenOptions, CoreService};
-use nexus_contracts::{CoreRegisterCreatorRequest, SetActiveWorkspaceRequest};
 use nexus_memory_conformance::{
     FaultHold, FaultHoldLost, FaultPoint, FixtureMemoryProvider, PeerDirectory, RetentionSweep,
     TargetHold,
 };
 use spoke_connect::core::{
-    derive_peer_id_from_ed25519_pubkey, sign_hello_ed25519, verify_hello_ed25519,
+    derive_peer_id_from_ed25519_pubkey, sign_hello_ed25519, verify_hello_ed25519, CoreError,
 };
 use spoke_connect::remote::{
     connect_remote_adapter, connect_responder, ConnectResponder, ConnectResponderOptions,
-    ConnectResponderState, MemoryPortService, RemoteAdapter, RemoteAdapterOptions, RemoteIdentity, RemoteMemoryService,
-    RemoteServePorts, RemoteServePortsComposite, Transport,
+    ConnectResponderState, MemoryPortService, RemoteAdapter, RemoteAdapterError,
+    RemoteAdapterOptions, RemoteIdentity, RemoteMemoryService, RemoteServePorts,
+    RemoteServePortsComposite, Transport, TransportError,
 };
 use spoke_operations::spoke_schemas::connect::{ConnectHello, ConnectSession};
 use spoke_operations::spoke_schemas::{
-    Finding, HostCapabilityManifest, KnowledgeEntry, Principal, Relation, Rule, Scope, TimelineEvent,
+    Finding, HostCapabilityManifest, KnowledgeEntry, Principal, Relation, Rule, Scope,
+    TimelineEvent,
 };
 use spoke_operations::{
     FindingPort, HostManifestPort, KnowledgeEntryPort, MemoryPort, RelationPort, RuleQueryPort,
@@ -260,7 +262,7 @@ pub struct Endpoint {
 
 impl Endpoint {
     /// A typed session on this endpoint's authenticated client.
-    pub fn actor<'a>(&'a self, principal: &'a Principal, space_id: &'a str) -> Actor<'a> {
+    pub const fn actor<'a>(&'a self, principal: &'a Principal, space_id: &'a str) -> Actor<'a> {
         Actor {
             client: &self.client,
             principal,
@@ -285,9 +287,13 @@ impl Endpoint {
             Ok(Err(error)) => {
                 return Err(format!(
                     "the session transport close failed within the bound: {error}"
-                ))
+                ));
             }
-            Err(_) => return Err("the session transport close did not finish within the bound".to_owned()),
+            Err(_) => {
+                return Err(
+                    "the session transport close did not finish within the bound".to_owned(),
+                );
+            }
         }
         if self.responder.state() != ConnectResponderState::Closed {
             return Err(format!(
@@ -319,7 +325,96 @@ pub async fn open_endpoint(
     host_id: &str,
     seed: [u8; 32],
 ) -> Endpoint {
-    open_endpoint_expecting(service, host_id, seed, pubkey(&HOST_SEED)).await
+    open_endpoint_expecting(service, host_id, seed, pubkey(&HOST_SEED))
+        .await
+        .expect("the endpoint establishes with the published host key")
+}
+
+/// A real client transport that only forwards to the real `WsTransport` and
+/// retains the first inbound envelope (the signed responder hello) for
+/// independent protocol-level verification.
+struct ObservedTransport {
+    inner: Arc<dyn Transport>,
+    first_inbound: Arc<std::sync::Mutex<Option<Vec<u8>>>>,
+}
+
+#[async_trait]
+impl Transport for ObservedTransport {
+    async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
+        self.inner.send(envelope).await
+    }
+
+    async fn recv(&self) -> Result<Vec<u8>, TransportError> {
+        let envelope = self.inner.recv().await?;
+        let mut first = self
+            .first_inbound
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if first.is_none() {
+            *first = Some(envelope.clone());
+        }
+        Ok(envelope)
+    }
+
+    async fn close(&self) -> Result<(), TransportError> {
+        self.inner.close().await
+    }
+}
+
+/// The evidence of one real typed dial attempt that failed.
+struct DialAttemptFailure {
+    error: RemoteAdapterError,
+    first_inbound: Arc<std::sync::Mutex<Option<Vec<u8>>>>,
+    client_socket: Weak<ObservedTransport>,
+}
+
+/// A real setup stage that fails before an endpoint exists. Only the SDK's
+/// signed-dial rejection is modelled; every other setup failure still panics,
+/// so an `Err` proves the signed stage was reached and rejected.
+#[derive(Debug)]
+enum EndpointSetupFailure {
+    /// The SDK's own dial error from signed responder-hello verification, with
+    /// the observation that the responder hello really arrived and both socket
+    /// owners observed by the listener side.
+    Dial {
+        attempt: DialAttemptFailure,
+        server_socket: Weak<WsTransport<tokio::net::TcpStream>>,
+    },
+}
+
+impl std::fmt::Debug for DialAttemptFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DialAttemptFailure")
+            .field("error", &self.error)
+            .field(
+                "first_inbound_received",
+                &self
+                    .first_inbound
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_some(),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+impl EndpointSetupFailure {
+    /// A rejected host key is the SDK's handshake classification after the
+    /// responder hello was really received: the dial reached signed
+    /// responder-hello verification and that verification refused the key.
+    fn is_signed_dial_rejection(&self) -> bool {
+        match self {
+            Self::Dial { attempt, .. } => {
+                let received = attempt
+                    .first_inbound
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_some();
+                received && matches!(attempt.error, RemoteAdapterError::Handshake(_))
+            }
+        }
+    }
 }
 
 /// The real setup primitive behind [`open_endpoint`]: the same listener,
@@ -332,12 +427,74 @@ async fn open_endpoint_expecting(
     host_id: &str,
     seed: [u8; 32],
     expected_host_pubkey: [u8; 32],
-) -> Endpoint {
+) -> Result<Endpoint, EndpointSetupFailure> {
+    let (addr, host) = spawn_expected_endpoint_listener(service, host_id, seed).await;
+    let port = addr.port();
+    // The listener task is owned until the client side succeeds. A connect or
+    // dial failure settles that exact task (abort + bounded join, closing a
+    // responder/socket it already returned) and confirms the port release
+    // before the original failure is re-raised; a join the bound did not
+    // confirm is reported, never claimed.
+    let client_side = std::panic::AssertUnwindSafe(dial_expected_endpoint(
+        addr,
+        seed,
+        host_id,
+        expected_host_pubkey,
+    ))
+    .catch_unwind()
+    .await;
+    let (socket, client) = match client_side {
+        Ok(Ok(established)) => established,
+        Ok(Err(attempt)) => {
+            let server_socket = match settle_endpoint_listener(host, port).await {
+                Ok(server_socket) => server_socket,
+                Err(problem) => panic!(
+                    "the endpoint setup failed ({attempt:?}) and its listener settlement also failed: {problem}"
+                ),
+            };
+            return Err(EndpointSetupFailure::Dial {
+                attempt,
+                server_socket,
+            });
+        }
+        Err(payload) => match settle_endpoint_listener(host, port).await {
+            Ok(_) => std::panic::resume_unwind(payload),
+            Err(problem) => {
+                let original = panic_message(&*payload);
+                panic!(
+                    "the endpoint setup panicked ({original}) and its listener settlement also failed: {problem}"
+                );
+            }
+        },
+    };
+    let served = host.await.expect("the listener task");
+    Ok(Endpoint {
+        client,
+        responder: served.responder,
+        socket,
+    })
+}
+
+/// The listener-side owners and the weak observation of the server socket.
+struct ServedEndpoint {
+    socket: Arc<dyn Transport>,
+    responder: Arc<ConnectResponder>,
+    socket_weak: Weak<WsTransport<tokio::net::TcpStream>>,
+}
+
+/// Bind the ephemeral loopback listener and serve one signed responder task.
+async fn spawn_expected_endpoint_listener(
+    service: Arc<dyn RemoteMemoryService>,
+    host_id: &str,
+    seed: [u8; 32],
+) -> (
+    std::net::SocketAddr,
+    tokio::task::JoinHandle<ServedEndpoint>,
+) {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .expect("bind an ephemeral localhost port");
     let addr = listener.local_addr().expect("listener address");
-    let port = addr.port();
     let peer = peer_id(&seed);
     let host_manifest = manifest(host_id);
     let host = tokio::spawn(async move {
@@ -345,7 +502,10 @@ async fn open_endpoint_expecting(
             .await
             .expect("a client connects to the localhost listener")
             .expect("accept the localhost peer");
-        assert!(address.ip().is_loopback(), "the listener serves localhost only");
+        assert!(
+            address.ip().is_loopback(),
+            "the listener serves localhost only"
+        );
         let ws = tokio::time::timeout(
             BOUND,
             tokio_tungstenite::accept_async_with_config(
@@ -356,7 +516,9 @@ async fn open_endpoint_expecting(
         .await
         .expect("the websocket upgrade is bounded")
         .expect("websocket upgrade");
-        let socket: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+        let typed = Arc::new(WsTransport::new(ws));
+        let socket_weak = Arc::downgrade(&typed);
+        let socket: Arc<dyn Transport> = typed;
         let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
             RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None)
                 .with_memory(service),
@@ -371,57 +533,58 @@ async fn open_endpoint_expecting(
             invoke_timeout_ms: None,
         })
         .await;
-        (socket, responder)
+        ServedEndpoint {
+            socket,
+            responder,
+            socket_weak,
+        }
     });
-    // The listener task is owned until the client side succeeds. A connect or
-    // dial failure settles that exact task (abort + bounded join, closing a
-    // responder/socket it already returned) and confirms the port release
-    // before the original failure is re-raised; a join the bound did not
-    // confirm is reported, never claimed.
-    let client_side = std::panic::AssertUnwindSafe(async {
-        let (ws, _response) = tokio::time::timeout(
-            BOUND,
-            tokio_tungstenite::connect_async(format!("ws://{addr}")),
-        )
+    (addr, host)
+}
+
+/// Connect the local signed client and dial it against `expected_host_pubkey`.
+/// The allowlist is derived from that same expected key, so a wrong key passes
+/// the SDK's fail-closed precheck and reaches signed responder-hello
+/// verification; the observed transport records that the hello really arrived.
+async fn dial_expected_endpoint(
+    addr: std::net::SocketAddr,
+    seed: [u8; 32],
+    host_id: &str,
+    expected_host_pubkey: [u8; 32],
+) -> Result<(Arc<dyn Transport>, Arc<RemoteAdapter>), DialAttemptFailure> {
+    let (ws, _response) = tokio::time::timeout(
+        BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the localhost websocket connect is bounded")
+    .expect("connect the localhost websocket");
+    let first_inbound = Arc::new(std::sync::Mutex::new(None));
+    let inner: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let observed = Arc::new(ObservedTransport {
+        inner,
+        first_inbound: Arc::clone(&first_inbound),
+    });
+    let client_socket = Arc::downgrade(&observed);
+    let expected_peer = derive_peer_id_from_ed25519_pubkey(&expected_host_pubkey);
+    let dialed = connect_remote_adapter(RemoteAdapterOptions {
+        transport: Arc::clone(&observed) as Arc<dyn Transport>,
+        local_identity: RemoteIdentity { seed },
+        local_manifest: manifest(&format!("{host_id}-client")),
+        remote_pubkey: expected_host_pubkey,
+        allowlist: vec![expected_peer],
+        invoke_timeout_ms: None,
+        capability_token: None,
+    });
+    let client = tokio::time::timeout(BOUND, dialed)
         .await
-        .expect("the localhost websocket connect is bounded")
-        .expect("connect the localhost websocket");
-        let socket: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
-        let dialed = connect_remote_adapter(RemoteAdapterOptions {
-            transport: Arc::clone(&socket),
-            local_identity: RemoteIdentity { seed },
-            local_manifest: manifest(&format!("{host_id}-client")),
-            remote_pubkey: expected_host_pubkey,
-            allowlist: vec![peer_id(&HOST_SEED)],
-            invoke_timeout_ms: None,
-            capability_token: None,
-        });
-        let client = tokio::time::timeout(BOUND, dialed)
-            .await
-            .expect("the signed dial is bounded")
-            .expect("the signed dial succeeds");
-        (socket, client)
-    })
-    .catch_unwind()
-    .await;
-    let (socket, client) = match client_side {
-        Ok(established) => established,
-        Err(payload) => match settle_endpoint_listener(host, port).await {
-            Ok(()) => std::panic::resume_unwind(payload),
-            Err(problem) => {
-                let original = panic_message(payload);
-                panic!(
-                    "the endpoint setup failed ({original}) and its listener settlement also failed: {problem}"
-                );
-            }
-        },
-    };
-    let (_server_socket, responder) = host.await.expect("the listener task");
-    Endpoint {
-        client,
-        responder,
-        socket,
-    }
+        .expect("the signed dial is bounded")
+        .map_err(|error| DialAttemptFailure {
+            error,
+            first_inbound: Arc::clone(&first_inbound),
+            client_socket: client_socket.clone(),
+        })?;
+    Ok((observed as Arc<dyn Transport>, client))
 }
 
 /// Settle the exact endpoint listener task after a client-side setup failure:
@@ -429,23 +592,26 @@ async fn open_endpoint_expecting(
 /// and confirm the listening port is released. An unconfirmed join is an
 /// error, never a claimed join.
 async fn settle_endpoint_listener(
-    host: tokio::task::JoinHandle<(Arc<dyn Transport>, Arc<ConnectResponder>)>,
+    host: tokio::task::JoinHandle<ServedEndpoint>,
     port: u16,
-) -> Result<(), String> {
+) -> Result<Weak<WsTransport<tokio::net::TcpStream>>, String> {
+    let mut server_socket: Weak<WsTransport<tokio::net::TcpStream>> = Weak::new();
     host.abort();
     match tokio::time::timeout(BOUND, host).await {
-        Ok(Ok((socket, responder))) => {
+        Ok(Ok(served)) => {
             // The listener completed before the abort: close BOTH owners it
             // created (each bounded, every failure preserved) instead of
             // letting one close failure skip the other.
             let mut failures: Vec<String> = Vec::new();
-            if let Err(error) = close_responder(responder).await {
-                failures.push(format!("the setup listener responder close failed: {error}"));
+            if let Err(error) = close_responder(served.responder).await {
+                failures.push(format!(
+                    "the setup listener responder close failed: {error}"
+                ));
             }
-            match tokio::time::timeout(BOUND, socket.close()).await {
+            match tokio::time::timeout(BOUND, served.socket.close()).await {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
-                    failures.push(format!("the setup listener socket close failed: {error}"))
+                    failures.push(format!("the setup listener socket close failed: {error}"));
                 }
                 Err(_) => failures.push(
                     "the setup listener socket close did not finish within the bound".to_owned(),
@@ -454,6 +620,7 @@ async fn settle_endpoint_listener(
             if !failures.is_empty() {
                 return Err(failures.join("; "));
             }
+            server_socket = served.socket_weak;
         }
         Ok(Err(error)) if error.is_cancelled() => {}
         Ok(Err(error)) => return Err(format!("the setup listener task failed: {error}")),
@@ -461,11 +628,11 @@ async fn settle_endpoint_listener(
             return Err(
                 "the setup listener task did not join within the bound; settlement unconfirmed"
                     .to_owned(),
-            )
+            );
         }
     }
     match TcpListener::bind(("127.0.0.1", port)).await {
-        Ok(_) => Ok(()),
+        Ok(_) => Ok(server_socket),
         Err(error) => Err(format!(
             "the setup listener's port is not rebindable after settlement: {error}"
         )),
@@ -478,14 +645,8 @@ async fn settle_endpoint_listener(
 
 /// Where a matrix run's durable state lives.
 enum Home {
-    Local {
-        _home: TempDir,
-        user_home: PathBuf,
-    },
-    Remote {
-        _home: TempDir,
-        db: PathBuf,
-    },
+    Local { _home: TempDir, user_home: PathBuf },
+    Remote { _home: TempDir, db: PathBuf },
 }
 
 enum Provider {
@@ -511,21 +672,15 @@ fn build_service(
 async fn open_provider(home: &Home) -> Provider {
     match home {
         Home::Local { user_home, .. } => Provider::Local(Arc::new(
-            LocalMemoryProvider::open(
-                user_home.clone(),
-                LOCAL_ADMIN_ID,
-                LOCAL_WORKSPACE,
-            )
-            .await
-            .expect("open the local provider"),
+            LocalMemoryProvider::open(user_home.clone(), LOCAL_ADMIN_ID, LOCAL_WORKSPACE)
+                .await
+                .expect("open the local provider"),
         )),
-        Home::Remote { db, .. } => {
-            Provider::Fixture(Arc::new(
-                FixtureMemoryProvider::open(db)
-                    .await
-                    .expect("open the durable fixture provider"),
-            ))
-        }
+        Home::Remote { db, .. } => Provider::Fixture(Arc::new(
+            FixtureMemoryProvider::open(db)
+                .await
+                .expect("open the durable fixture provider"),
+        )),
     }
 }
 
@@ -579,15 +734,88 @@ pub struct Matrix {
     advanced: AtomicI64,
 }
 
+/// Open the real local provider and its operator/peer mapping over a prepared
+/// home (the migration/character preparation stayed with the caller).
+async fn open_local_workspace(
+    home_dir: TempDir,
+    creator_id: Option<String>,
+) -> (
+    Home,
+    Provider,
+    String,
+    Arc<PeerDirectory>,
+    Principal,
+    Principal,
+) {
+    let user_home = home_dir.path().to_path_buf();
+    let admin_id = creator_id.unwrap_or_else(|| LOCAL_ADMIN_ID.to_owned());
+    let provider = LocalMemoryProvider::open(user_home.clone(), &admin_id, LOCAL_WORKSPACE)
+        .await
+        .expect("open the local provider");
+    let space_id = provider.space_id().to_owned();
+    let directory = Arc::new(
+        PeerDirectory::new()
+            .with_peer(peer_id(&ADMIN_SEED), admin_id.as_str())
+            .with_peer(peer_id(&PEER_SEED), LOCAL_PEER_ID),
+    );
+    (
+        Home::Local {
+            _home: home_dir,
+            user_home,
+        },
+        Provider::Local(Arc::new(provider)),
+        space_id,
+        directory,
+        principal(&admin_id),
+        principal(LOCAL_PEER_ID),
+    )
+}
+
+/// Open the durable fixture provider and its operator/peer mapping over a
+/// prepared home.
+async fn open_remote_workspace(
+    home_dir: TempDir,
+) -> (
+    Home,
+    Provider,
+    String,
+    Arc<PeerDirectory>,
+    Principal,
+    Principal,
+) {
+    let db = home_dir.path().join("fixture.sqlite");
+    let provider = FixtureMemoryProvider::open(&db)
+        .await
+        .expect("open the durable fixture provider");
+    let admin_id = format!("prn_{}", peer_id(&ADMIN_SEED));
+    let second_id = format!("prn_{}", peer_id(&PEER_SEED));
+    provider
+        .provision_operator_admin(&admin_id)
+        .await
+        .expect("operator provisions the admin grant");
+    let space_id = provider.identity().space_id.clone();
+    let directory = Arc::new(
+        PeerDirectory::new()
+            .with_peer(peer_id(&ADMIN_SEED), admin_id.clone())
+            .with_peer(peer_id(&PEER_SEED), second_id.clone()),
+    );
+    (
+        Home::Remote {
+            _home: home_dir,
+            db,
+        },
+        Provider::Fixture(Arc::new(provider)),
+        space_id,
+        directory,
+        principal(&admin_id),
+        principal(&second_id),
+    )
+}
+
 impl Matrix {
     /// A fresh run over the requested provider implementation.
     pub async fn start(kind: Kind) -> Self {
-        Self::assemble(
-            kind,
-            TempDir::new().expect("temporary matrix home"),
-            None,
-        )
-        .await
+        Self::assemble(kind, TempDir::new().expect("temporary matrix home"), None).await
     }
 
     /// A local run whose workspace already holds a real Character and its
@@ -619,63 +847,8 @@ impl Matrix {
         }
         .to_owned();
         let (home, provider, space_id, directory, admin_principal, peer_principal) = match kind {
-            Kind::Local => {
-                let user_home = home_dir.path().to_path_buf();
-                let admin_id = creator_id.unwrap_or_else(|| LOCAL_ADMIN_ID.to_owned());
-                let provider = LocalMemoryProvider::open(
-                    user_home.clone(),
-                    &admin_id,
-                    LOCAL_WORKSPACE,
-                )
-                .await
-                .expect("open the local provider");
-                let space_id = provider.space_id().to_owned();
-                let directory = Arc::new(
-                    PeerDirectory::new()
-                        .with_peer(peer_id(&ADMIN_SEED), admin_id.as_str())
-                        .with_peer(peer_id(&PEER_SEED), LOCAL_PEER_ID),
-                );
-                (
-                    Home::Local {
-                        _home: home_dir,
-                        user_home,
-                    },
-                    Provider::Local(Arc::new(provider)),
-                    space_id,
-                    directory,
-                    principal(&admin_id),
-                    principal(LOCAL_PEER_ID),
-                )
-            }
-            Kind::Remote => {
-                let db = home_dir.path().join("fixture.sqlite");
-                let provider = FixtureMemoryProvider::open(&db)
-                    .await
-                    .expect("open the durable fixture provider");
-                let admin_id = format!("prn_{}", peer_id(&ADMIN_SEED));
-                let second_id = format!("prn_{}", peer_id(&PEER_SEED));
-                provider
-                    .provision_operator_admin(&admin_id)
-                    .await
-                    .expect("operator provisions the admin grant");
-                let space_id = provider.identity().space_id.clone();
-                let directory = Arc::new(
-                    PeerDirectory::new()
-                        .with_peer(peer_id(&ADMIN_SEED), admin_id.clone())
-                        .with_peer(peer_id(&PEER_SEED), second_id.clone()),
-                );
-                (
-                    Home::Remote {
-                        _home: home_dir,
-                        db,
-                    },
-                    Provider::Fixture(Arc::new(provider)),
-                    space_id,
-                    directory,
-                    principal(&admin_id),
-                    principal(&second_id),
-                )
-            }
+            Kind::Local => open_local_workspace(home_dir, creator_id).await,
+            Kind::Remote => open_remote_workspace(home_dir).await,
         };
         let service = build_service(&provider, &directory);
         // One owner at a time: if the admin endpoint fails, the provider is
@@ -697,7 +870,7 @@ impl Matrix {
                 match settle_provider_setup(provider).await {
                     Ok(()) => std::panic::resume_unwind(payload),
                     Err(problem) => {
-                        let original = panic_message(payload);
+                        let original = panic_message(&*payload);
                         panic!(
                             "the admin endpoint setup failed ({original}) and the provider settlement also failed: {problem}"
                         );
@@ -729,7 +902,7 @@ impl Matrix {
                 if problems.is_empty() {
                     std::panic::resume_unwind(payload);
                 }
-                let original = panic_message(payload);
+                let original = panic_message(&*payload);
                 panic!(
                     "the peer endpoint setup failed ({original}) and cleanup also failed: {}",
                     problems.join("; ")
@@ -770,11 +943,11 @@ impl Matrix {
         &self.space_id
     }
 
-    pub fn admin_principal(&self) -> &Principal {
+    pub const fn admin_principal(&self) -> &Principal {
         &self.admin_principal
     }
 
-    pub fn peer_principal(&self) -> &Principal {
+    pub const fn peer_principal(&self) -> &Principal {
         &self.peer_principal
     }
 
@@ -852,7 +1025,7 @@ impl Matrix {
                 match settle_provider_setup(provider).await {
                     Ok(()) => std::panic::resume_unwind(payload),
                     Err(problem) => {
-                        let original = panic_message(payload);
+                        let original = panic_message(&*payload);
                         panic!(
                             "the restarted admin endpoint setup failed ({original}) and the provider settlement also failed: {problem}"
                         );
@@ -881,7 +1054,7 @@ impl Matrix {
                 if problems.is_empty() {
                     std::panic::resume_unwind(payload);
                 }
-                let original = panic_message(payload);
+                let original = panic_message(&*payload);
                 panic!(
                     "the restarted peer endpoint setup failed ({original}) and cleanup also failed: {}",
                     problems.join("; ")
@@ -1078,7 +1251,8 @@ async fn close_fixture_bounded(provider: Arc<FixtureMemoryProvider>) -> Result<(
             Err(shared) => {
                 if Instant::now() >= deadline {
                     return Err(
-                        "the fixture provider is still shared after the session teardown".to_owned(),
+                        "the fixture provider is still shared after the session teardown"
+                            .to_owned(),
                     );
                 }
                 provider = shared;
@@ -1127,17 +1301,17 @@ pub struct TaskSet {
 type TaskSlot = Arc<tokio::sync::Mutex<Option<AbortOnDropHandle>>>;
 
 /// A scenario task handle whose drop requests abort. When the last owner of a
-/// slot (including a cancelled `run_matrix_scenario` future and every TaskSet
+/// slot (including a cancelled `run_matrix_scenario` future and every `TaskSet`
 /// clone) is dropped, the task is aborted instead of being detach-by-drop; an
 /// explicit bounded join still observes and clears it.
 struct AbortOnDropHandle(Option<tokio::task::JoinHandle<Value>>);
 
 impl AbortOnDropHandle {
-    fn new(handle: tokio::task::JoinHandle<Value>) -> Self {
+    const fn new(handle: tokio::task::JoinHandle<Value>) -> Self {
         Self(Some(handle))
     }
 
-    fn handle(&mut self) -> Option<&mut tokio::task::JoinHandle<Value>> {
+    const fn handle(&mut self) -> Option<&mut tokio::task::JoinHandle<Value>> {
         self.0.as_mut()
     }
 
@@ -1192,7 +1366,7 @@ impl TaskSet {
         let handle = owner
             .handle()
             .ok_or_else(|| format!("{what} has no owned task"))?;
-        match tokio::time::timeout(BOUND, &mut *handle).await {
+        let joined = match tokio::time::timeout(BOUND, &mut *handle).await {
             Ok(Ok(value)) => {
                 owner.clear();
                 Ok(value)
@@ -1227,7 +1401,9 @@ impl TaskSet {
                     )),
                 }
             }
-        }
+        };
+        drop(guard);
+        joined
     }
 
     /// Abort and bounded-join every still-owned task, attempting all of them.
@@ -1266,6 +1442,7 @@ impl TaskSet {
                     "{what}: a task ({index}) did not settle after abort within the bound; settlement unconfirmed"
                 )),
             }
+            drop(guard);
         }
         if failures.is_empty() {
             Ok(())
@@ -1324,7 +1501,13 @@ impl OwnedResources {
     ) -> usize {
         self.observers.push(Some(
             matrix
-                .durable_observer(subject_id, record_ids, candidate_id, receipt_id, profile_kind)
+                .durable_observer(
+                    subject_id,
+                    record_ids,
+                    candidate_id,
+                    receipt_id,
+                    profile_kind,
+                )
                 .await,
         ));
         self.observers.len() - 1
@@ -1385,7 +1568,7 @@ impl OwnedResources {
                 if let Err(payload) = outcome {
                     failures.push(format!(
                         "durable observer close: {}",
-                        panic_message(payload)
+                        panic_message(&*payload)
                     ));
                 }
             }
@@ -1398,13 +1581,95 @@ impl OwnedResources {
     }
 }
 
-fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
-    if let Some(text) = payload.downcast_ref::<&str>() {
-        (*text).to_owned()
-    } else if let Some(text) = payload.downcast_ref::<String>() {
-        text.clone()
-    } else {
-        "non-string panic payload".to_owned()
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload.downcast_ref::<&str>().map_or_else(
+        || {
+            payload
+                .downcast_ref::<String>()
+                .map_or_else(|| "non-string panic payload".to_owned(), Clone::clone)
+        },
+        |text| (*text).to_owned(),
+    )
+}
+
+/// Every string value of length >= 4 anywhere in `value`.
+fn collect_receipt_strings(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::String(text) => {
+            if text.len() >= 4 {
+                out.push(text.clone());
+            }
+        }
+        Value::Object(map) => {
+            for child in map.values() {
+                collect_receipt_strings(child, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_receipt_strings(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The sensitive result identifiers (keys ending `_id`/`_ids`) of a receipt.
+fn collect_result_identifiers(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                if key.ends_with("_id") || key.ends_with("_ids") {
+                    collect_receipt_strings(child, out);
+                } else if child.is_object() || child.is_array() {
+                    collect_result_identifiers(child, out);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_result_identifiers(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The refusal never renders a sensitive authorized-receipt value that this
+/// request did not itself supply.
+fn assert_no_sensitive_receipt_values(
+    response: &Value,
+    authorized_receipt: &Value,
+    allowed: &[String],
+) {
+    let mut sensitive: Vec<String> = Vec::new();
+    for path in [
+        "payload_digest",
+        "created_at",
+        "completed_at",
+        "idempotency_key",
+    ] {
+        if let Some(value) = authorized_receipt.get(path).and_then(Value::as_str) {
+            if value.len() >= 4 {
+                sensitive.push(value.to_owned());
+            }
+        }
+    }
+    // The result is op-specific: its identifiers are sensitive values even under
+    // another key, while its booleans/enums are not banned as such.
+    if let Some(result) = authorized_receipt.get("result") {
+        collect_result_identifiers(result, &mut sensitive);
+    }
+
+    let rendered = response.to_string();
+    for value in sensitive {
+        if allowed.iter().any(|permitted| permitted == &value) {
+            continue;
+        }
+        assert!(
+            !rendered.contains(&value),
+            "the refusal discloses the authorized receipt value {value}: {response}"
+        );
     }
 }
 
@@ -1427,47 +1692,6 @@ pub fn assert_no_receipt_disclosure(
     authorized_receipt: &Value,
     current_request: &Value,
 ) {
-    fn collect_strings(value: &Value, out: &mut Vec<String>) {
-        match value {
-            Value::String(text) => {
-                if text.len() >= 4 {
-                    out.push(text.clone());
-                }
-            }
-            Value::Object(map) => {
-                for child in map.values() {
-                    collect_strings(child, out);
-                }
-            }
-            Value::Array(items) => {
-                for item in items {
-                    collect_strings(item, out);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn collect_result_identifiers(value: &Value, out: &mut Vec<String>) {
-        match value {
-            Value::Object(map) => {
-                for (key, child) in map {
-                    if key.ends_with("_id") || key.ends_with("_ids") {
-                        collect_strings(child, out);
-                    } else if child.is_object() || child.is_array() {
-                        collect_result_identifiers(child, out);
-                    }
-                }
-            }
-            Value::Array(items) => {
-                for item in items {
-                    collect_result_identifiers(item, out);
-                }
-            }
-            _ => {}
-        }
-    }
-
     fn is_allowed(value: &Value, allowed: &[String]) -> bool {
         matches!(value, Value::String(text) if allowed.iter().any(|permitted| permitted == text))
     }
@@ -1485,9 +1709,6 @@ pub fn assert_no_receipt_disclosure(
         }
         !is_allowed(value, allowed)
     }
-
-    let mut allowed: Vec<String> = Vec::new();
-    collect_strings(current_request, &mut allowed);
 
     fn walk(value: &Value, meaning: &str, receipt: &Value, allowed: &[String]) {
         match value {
@@ -1521,37 +1742,11 @@ pub fn assert_no_receipt_disclosure(
             _ => {}
         }
     }
+
+    let mut allowed: Vec<String> = Vec::new();
+    collect_receipt_strings(current_request, &mut allowed);
     walk(response, "$response", authorized_receipt, &allowed);
-
-    let mut sensitive: Vec<String> = Vec::new();
-    for path in [
-        "payload_digest",
-        "created_at",
-        "completed_at",
-        "idempotency_key",
-    ] {
-        if let Some(value) = authorized_receipt.get(path).and_then(Value::as_str) {
-            if value.len() >= 4 {
-                sensitive.push(value.to_owned());
-            }
-        }
-    }
-    // The result is op-specific: its identifiers are sensitive values even under
-    // another key, while its booleans/enums are not banned as such.
-    if let Some(result) = authorized_receipt.get("result") {
-        collect_result_identifiers(result, &mut sensitive);
-    }
-
-    let rendered = response.to_string();
-    for value in sensitive {
-        if allowed.iter().any(|permitted| permitted == &value) {
-            continue;
-        }
-        assert!(
-            !rendered.contains(&value),
-            "the refusal discloses the authorized receipt value {value}: {response}"
-        );
-    }
+    assert_no_sensitive_receipt_values(response, authorized_receipt, &allowed);
 }
 
 /// Run one scenario body over `matrix` with runner-owned tasks/resources, then
@@ -1563,20 +1758,17 @@ pub fn assert_no_receipt_disclosure(
 pub async fn run_matrix_scenario<F>(matrix: Matrix, body: F)
 where
     F: for<'a> FnOnce(
-        &'a Matrix,
-        &'a mut OwnedResources,
-        TaskSet,
-    ) -> Pin<Box<dyn Future<Output = ()> + 'a>>,
+            &'a Matrix,
+            &'a mut OwnedResources,
+            TaskSet,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+        + Send,
 {
     let mut resources = OwnedResources::default();
     let tasks = TaskSet::default();
-    let scenario = std::panic::AssertUnwindSafe(body(
-        &matrix,
-        &mut resources,
-        tasks.clone(),
-    ))
-    .catch_unwind()
-    .await;
+    let scenario = std::panic::AssertUnwindSafe(body(&matrix, &mut resources, tasks.clone()))
+        .catch_unwind()
+        .await;
     let mut cleanup: Vec<String> = Vec::new();
     if let Err(error) = tasks.settle("scenario tasks").await {
         cleanup.push(error);
@@ -1589,7 +1781,10 @@ where
     }
     match (scenario, cleanup.is_empty()) {
         (Ok(()), true) => {}
-        (Ok(()), false) => panic!("cleanup failed after a passing scenario: {}", cleanup.join("; ")),
+        (Ok(()), false) => panic!(
+            "cleanup failed after a passing scenario: {}",
+            cleanup.join("; ")
+        ),
         (Err(payload), true) => std::panic::resume_unwind(payload),
         (Err(payload), false) => {
             eprintln!("cleanup also failed: {}", cleanup.join("; "));
@@ -1613,24 +1808,63 @@ pub async fn prove_failed_endpoint_settles() {
     );
     let directory = Arc::new(PeerDirectory::new());
     let service = build_service(&Provider::Fixture(Arc::clone(&provider)), &directory);
-    let outcome = std::panic::AssertUnwindSafe(open_endpoint_expecting(
+    let Err(failure) = open_endpoint_expecting(
         Arc::clone(&service),
         "c-matrix-setup-control",
         ADMIN_SEED,
         // A wrong host key: a deterministic genuine dial failure after the
         // real listener accepted and its responder started.
         pubkey(&PEER_SEED),
-    ))
-    .catch_unwind()
-    .await;
-    let failure = match outcome {
-        Err(payload) => panic_message(payload),
-        Ok(_) => panic!("the wrong host key must fail the real signed dial"),
+    )
+    .await
+    else {
+        panic!("the wrong host key must fail the real signed dial");
     };
     assert!(
-        failure.contains("the signed dial succeeds"),
-        "the observed failure is the genuine wrong-key dial, not another setup step: {failure}"
+        failure.is_signed_dial_rejection(),
+        "the setup failed in the SDK's signed responder-hello verification after receiving the real hello, not another step: {failure:?}"
     );
+    let EndpointSetupFailure::Dial {
+        attempt,
+        server_socket,
+    } = &failure;
+    let inbound = attempt
+        .first_inbound
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+        .expect("the typed dial received the responder envelope before verification");
+    let hello: ConnectHello = serde_json::from_slice(&inbound)
+        .expect("the observed inbound envelope decodes as a ConnectHello");
+    let host_pubkey = pubkey(&HOST_SEED);
+    let host_peer = peer_id(&HOST_SEED);
+    assert_eq!(
+        hello.peer_id.as_str(),
+        host_peer,
+        "the observed envelope is the real host's responder hello"
+    );
+    verify_hello_ed25519(&host_pubkey, &host_peer, &hello, None).expect(
+        "the observed envelope carries a valid signature and identity for the real host key",
+    );
+    let wrong_pubkey = pubkey(&PEER_SEED);
+    let wrong_peer = derive_peer_id_from_ed25519_pubkey(&wrong_pubkey);
+    let rejected = verify_hello_ed25519(&wrong_pubkey, &wrong_peer, &hello, None);
+    assert!(
+        matches!(rejected, Err(CoreError::HandshakeFailed { .. })),
+        "the supplied wrong expected key is rejected by hello verification of the decodable envelope: {rejected:?}"
+    );
+    // The listener settlement above already bounded-awaited responder and
+    // server-transport close and the port release. This poll proves the test's
+    // observed client transport object and the listener-side socket object have
+    // no remaining owners; it does not by itself claim that the SDK's internal
+    // detached teardown task has completed.
+    tokio::time::timeout(BOUND, async {
+        while attempt.client_socket.upgrade().is_some() || server_socket.upgrade().is_some() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("no owner of the observed client transport or the listener socket remains");
     drop(service);
     close_fixture_bounded(provider)
         .await
@@ -1652,23 +1886,21 @@ pub async fn prove_raw_setup_failure_settles() {
     );
     let directory = Arc::new(PeerDirectory::new());
     let service = build_service(&Provider::Fixture(Arc::clone(&provider)), &directory);
-    let outcome = std::panic::AssertUnwindSafe(RawSession::open_expecting(
+    let Err(failure) = RawSession::open_expecting(
         Arc::clone(&service),
         "c-matrix-raw-setup-control",
         ADMIN_SEED,
         &MEMORY_CAPABILITIES,
         // A wrong host key: a deterministic genuine signed-hello failure.
         pubkey(&PEER_SEED),
-    ))
-    .catch_unwind()
-    .await;
-    let failure = match outcome {
-        Err(payload) => panic_message(payload),
-        Ok(_) => panic!("the wrong host key must fail the raw signed hello"),
+    )
+    .await
+    else {
+        panic!("the wrong host key must fail the raw signed hello");
     };
     assert!(
-        failure.contains("the responder hello verifies"),
-        "the observed failure is the genuine raw hello verification, not another setup step: {failure}"
+        failure.is_signed_hello_rejection(),
+        "the setup failed in the SDK's signed responder-hello verification, not another step: {failure:?}"
     );
     drop(service);
     close_fixture_bounded(provider)
@@ -1690,11 +1922,10 @@ pub struct ReceiptWindows {
 /// The advertised receipt/dedup retention windows.
 pub fn receipt_windows(described: &Value) -> ReceiptWindows {
     let limit = |name: &str| -> i64 {
-        described["limits"][name]
-            .as_u64()
-            .map_or_else(|| panic!("describe advertises {name}: {described}"), |value| {
-                i64::try_from(value).unwrap_or(i64::MAX)
-            })
+        described["limits"][name].as_u64().map_or_else(
+            || panic!("describe advertises {name}: {described}"),
+            |value| i64::try_from(value).unwrap_or(i64::MAX),
+        )
     };
     ReceiptWindows {
         receipt: limit("receipt_retention_seconds"),
@@ -1740,7 +1971,10 @@ const RELEASE_BOUND: Duration = Duration::from_secs(1);
 
 impl Drop for CaptureHold {
     fn drop(&mut self) {
-        if let Self::Local { provider, token, .. } = self {
+        if let Self::Local {
+            provider, token, ..
+        } = self
+        {
             provider.disarm_next_admission(*token);
         }
     }
@@ -1750,7 +1984,7 @@ impl CaptureHold {
     /// Wait, bounded, until the parked capture reached its point.
     pub fn wait_reached(
         &mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<(), FaultHoldLost>> + '_>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), FaultHoldLost>> + Send + '_>> {
         self.wait_reached_within(BOUND)
     }
 
@@ -1761,7 +1995,7 @@ impl CaptureHold {
     pub fn wait_reached_within(
         &mut self,
         window: Duration,
-    ) -> Pin<Box<dyn Future<Output = Result<(), FaultHoldLost>> + '_>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), FaultHoldLost>> + Send + '_>> {
         match self {
             Self::Local {
                 provider,
@@ -1814,7 +2048,9 @@ impl Matrix {
         match &self.provider {
             Provider::Local(provider) => provider.inject_commit_fault(true),
             Provider::Fixture(provider) => {
-                provider.faults().fail_next(FaultPoint::AfterCommitBeforeResponse);
+                provider
+                    .faults()
+                    .fail_next(FaultPoint::AfterCommitBeforeResponse);
             }
         }
     }
@@ -1932,7 +2168,7 @@ pub struct Actor<'a> {
 }
 
 impl Actor<'_> {
-    pub fn space(&self) -> &str {
+    pub const fn space(&self) -> &str {
         self.space_id
     }
 
@@ -1945,7 +2181,12 @@ impl Actor<'_> {
     }
 
     pub async fn list_spaces(&self) -> Value {
-        wire(&self.client.list_spaces(self.principal, dto(json!({}))).await)
+        wire(
+            &self
+                .client
+                .list_spaces(self.principal, dto(json!({})))
+                .await,
+        )
     }
 
     /// `memory.spaces.list` with an explicit page bound.
@@ -2082,7 +2323,12 @@ impl Actor<'_> {
     pub async fn list_candidates(&self, request: Value) -> Value {
         let mut request = request;
         request["space_id"] = json!(self.space_id);
-        wire(&self.client.list_candidates(self.principal, dto(request)).await)
+        wire(
+            &self
+                .client
+                .list_candidates(self.principal, dto(request))
+                .await,
+        )
     }
 
     pub async fn get_candidate(&self, candidate_id: &str) -> Value {
@@ -2100,19 +2346,34 @@ impl Actor<'_> {
     pub async fn dismiss_candidate(&self, request: Value) -> Value {
         let mut request = request;
         request["space_id"] = json!(self.space_id);
-        wire(&self.client.dismiss_candidate(self.principal, dto(request)).await)
+        wire(
+            &self
+                .client
+                .dismiss_candidate(self.principal, dto(request))
+                .await,
+        )
     }
 
     pub async fn review_candidate(&self, request: Value) -> Value {
         let mut request = request;
         request["space_id"] = json!(self.space_id);
-        wire(&self.client.review_candidate(self.principal, dto(request)).await)
+        wire(
+            &self
+                .client
+                .review_candidate(self.principal, dto(request))
+                .await,
+        )
     }
 
     pub async fn create_record(&self, request: Value) -> Value {
         let mut request = request;
         request["space_id"] = json!(self.space_id);
-        wire(&self.client.create_record(self.principal, dto(request)).await)
+        wire(
+            &self
+                .client
+                .create_record(self.principal, dto(request))
+                .await,
+        )
     }
 
     pub async fn get_record(&self, record_id: &str) -> Value {
@@ -2130,13 +2391,23 @@ impl Actor<'_> {
     pub async fn update_record(&self, request: Value) -> Value {
         let mut request = request;
         request["space_id"] = json!(self.space_id);
-        wire(&self.client.update_record(self.principal, dto(request)).await)
+        wire(
+            &self
+                .client
+                .update_record(self.principal, dto(request))
+                .await,
+        )
     }
 
     pub async fn delete_record(&self, request: Value) -> Value {
         let mut request = request;
         request["space_id"] = json!(self.space_id);
-        wire(&self.client.delete_record(self.principal, dto(request)).await)
+        wire(
+            &self
+                .client
+                .delete_record(self.principal, dto(request))
+                .await,
+        )
     }
 
     pub async fn list_records(&self, request: Value) -> Value {
@@ -2148,7 +2419,12 @@ impl Actor<'_> {
     pub async fn promote_record(&self, request: Value) -> Value {
         let mut request = request;
         request["space_id"] = json!(self.space_id);
-        wire(&self.client.promote_record(self.principal, dto(request)).await)
+        wire(
+            &self
+                .client
+                .promote_record(self.principal, dto(request))
+                .await,
+        )
     }
 
     pub async fn recall(&self, request: Value) -> Value {
@@ -2166,7 +2442,12 @@ impl Actor<'_> {
     pub async fn update_profile(&self, request: Value) -> Value {
         let mut request = request;
         request["space_id"] = json!(self.space_id);
-        wire(&self.client.update_profile(self.principal, dto(request)).await)
+        wire(
+            &self
+                .client
+                .update_profile(self.principal, dto(request))
+                .await,
+        )
     }
 
     pub async fn get_receipt(&self, receipt_id: &str) -> Value {
@@ -2180,7 +2461,6 @@ impl Actor<'_> {
                 .await,
         )
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -2199,6 +2479,88 @@ pub struct RawSession {
     port: u16,
 }
 
+/// A raw setup stage that fails before a session exists. Only the SDK's
+/// signed-hello verification is modelled; every other setup failure still
+/// panics, so an `Err` proves the signed hello was received and rejected.
+#[derive(Debug)]
+enum RawSetupFailure {
+    /// The SDK's own hello-verification error for the expected host key.
+    Hello(CoreError),
+}
+
+impl RawSetupFailure {
+    /// A rejected host key is the SDK's handshake classification: the raw
+    /// exchange reached signed responder-hello verification and that
+    /// verification refused the expected key.
+    const fn is_signed_hello_rejection(&self) -> bool {
+        matches!(self, Self::Hello(CoreError::HandshakeFailed { .. }))
+    }
+}
+
+/// Connect the raw client, send its signed initiator hello, verify the signed
+/// responder hello against `expected_host_pubkey` and read the session snapshot.
+async fn dial_raw_hello(
+    addr: std::net::SocketAddr,
+    seed: [u8; 32],
+    host_id: &str,
+    client_capabilities: &[&str],
+    expected_host_pubkey: [u8; 32],
+) -> Result<
+    (
+        Arc<WsTransport<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>,
+        String,
+    ),
+    RawSetupFailure,
+> {
+    let (ws, _response) = tokio::time::timeout(
+        BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the localhost websocket connect is bounded")
+    .expect("connect the localhost websocket");
+    let socket = Arc::new(WsTransport::new(ws));
+    let hello = sign_hello_ed25519(
+        &seed,
+        &format!(
+            "c-matrix-raw-{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ),
+        &connect_manifest_with(&format!("{host_id}-raw-client"), client_capabilities),
+        None,
+    )
+    .expect("sign the initiator hello");
+    socket
+        .send(&serde_json::to_vec(&hello).expect("hello bytes"))
+        .await
+        .expect("hello send");
+    let responder_hello: ConnectHello = serde_json::from_slice(
+        &tokio::time::timeout(BOUND, socket.recv())
+            .await
+            .expect("the responder hello is bounded")
+            .expect("responder hello"),
+    )
+    .expect("decode the responder hello");
+    verify_hello_ed25519(
+        &expected_host_pubkey,
+        &peer_id(&HOST_SEED),
+        &responder_hello,
+        None,
+    )
+    .map_err(RawSetupFailure::Hello)?;
+    let session: ConnectSession = serde_json::from_slice(
+        &tokio::time::timeout(BOUND, socket.recv())
+            .await
+            .expect("the session snapshot is bounded")
+            .expect("session snapshot"),
+    )
+    .expect("decode the session snapshot");
+    Ok((socket, session.session_id.to_string()))
+}
+
 impl RawSession {
     async fn open(
         service: Arc<dyn RemoteMemoryService>,
@@ -2214,6 +2576,7 @@ impl RawSession {
             pubkey(&HOST_SEED),
         )
         .await
+        .expect("the raw session establishes with the published host key")
     }
 
     /// The real raw setup primitive: the same listener/responder/hello path,
@@ -2227,122 +2590,51 @@ impl RawSession {
         seed: [u8; 32],
         client_capabilities: &[&str],
         expected_host_pubkey: [u8; 32],
-    ) -> Self {
-        let listener = TcpListener::bind(("127.0.0.1", 0))
-            .await
-            .expect("bind an ephemeral localhost port");
-        let addr = listener.local_addr().expect("listener address");
-        let peer = peer_id(&seed);
-        let host_manifest = manifest(host_id);
-        let host = tokio::spawn(async move {
-            let (tcp, address) = tokio::time::timeout(BOUND, listener.accept())
-                .await
-                .expect("the raw client connects")
-                .expect("accept the raw client");
-            assert!(address.ip().is_loopback(), "the listener serves localhost only");
-            let ws = tokio::time::timeout(
-                BOUND,
-                tokio_tungstenite::accept_async_with_config(
-                    tcp,
-                    Some(ws_config(DEFAULT_MAX_ENVELOPE_BYTES)),
-                ),
-            )
-            .await
-            .expect("the websocket upgrade is bounded")
-            .expect("websocket upgrade");
-            let socket: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
-            let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
-                RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None)
-                    .with_memory(service),
-            );
-            let responder = connect_responder(ConnectResponderOptions {
-                transport: Arc::clone(&socket),
-                identity: RemoteIdentity { seed: HOST_SEED },
-                manifest: host_manifest,
-                allowlist: vec![peer.clone()],
-                peer_keys: HashMap::from([(peer, pubkey(&seed))]),
-                ports: Some(ports),
-                invoke_timeout_ms: None,
-            })
-            .await;
-            (socket, responder)
-        });
+    ) -> Result<Self, RawSetupFailure> {
+        let (addr, host) = spawn_expected_endpoint_listener(service, host_id, seed).await;
         let port = addr.port();
         // The listener task is owned until the hello/session exchange succeeds;
         // a failure aborts and bounded-joins it before re-raising.
-        let client_side = std::panic::AssertUnwindSafe(async {
-            let (ws, _response) = tokio::time::timeout(
-                BOUND,
-                tokio_tungstenite::connect_async(format!("ws://{addr}")),
-            )
-            .await
-            .expect("the localhost websocket connect is bounded")
-            .expect("connect the localhost websocket");
-            let socket = Arc::new(WsTransport::new(ws));
-            let hello = sign_hello_ed25519(
-                &seed,
-                &format!("c-matrix-raw-{:x}", std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .expect("system clock")
-                    .as_nanos()),
-                &connect_manifest_with(&format!("{host_id}-raw-client"), client_capabilities),
-                None,
-            )
-            .expect("sign the initiator hello");
-            socket
-                .send(&serde_json::to_vec(&hello).expect("hello bytes"))
-                .await
-                .expect("hello send");
-            let responder_hello: ConnectHello = serde_json::from_slice(
-                &tokio::time::timeout(BOUND, socket.recv())
-                    .await
-                    .expect("the responder hello is bounded")
-                    .expect("responder hello"),
-            )
-            .expect("decode the responder hello");
-            verify_hello_ed25519(
-                &expected_host_pubkey,
-                &peer_id(&HOST_SEED),
-                &responder_hello,
-                None,
-            )
-            .expect("the responder hello verifies against the expected host key");
-            let session: ConnectSession = serde_json::from_slice(
-                &tokio::time::timeout(BOUND, socket.recv())
-                    .await
-                    .expect("the session snapshot is bounded")
-                    .expect("session snapshot"),
-            )
-            .expect("decode the session snapshot");
-            (socket, session.session_id.to_string())
-        })
+        let client_side = std::panic::AssertUnwindSafe(dial_raw_hello(
+            addr,
+            seed,
+            host_id,
+            client_capabilities,
+            expected_host_pubkey,
+        ))
         .catch_unwind()
         .await;
         let (socket, session_id) = match client_side {
-            Ok(established) => established,
+            Ok(Ok(established)) => established,
+            Ok(Err(failure)) => match settle_endpoint_listener(host, port).await {
+                Ok(_) => return Err(failure),
+                Err(problem) => panic!(
+                    "the raw endpoint setup failed ({failure:?}) and its listener settlement also failed: {problem}"
+                ),
+            },
             Err(payload) => match settle_endpoint_listener(host, port).await {
-                Ok(()) => std::panic::resume_unwind(payload),
+                Ok(_) => std::panic::resume_unwind(payload),
                 Err(problem) => {
-                    let original = panic_message(payload);
+                    let original = panic_message(&*payload);
                     panic!(
-                        "the raw endpoint setup failed ({original}) and its listener settlement also failed: {problem}"
+                        "the raw endpoint setup panicked ({original}) and its listener settlement also failed: {problem}"
                     );
                 }
             },
         };
-        let (server_socket, responder) = host.await.expect("the listener task");
-        Self {
+        let served = host.await.expect("the listener task");
+        Ok(Self {
             socket,
             session_id,
-            responder,
-            server_socket,
+            responder: served.responder,
+            server_socket: served.socket,
             sequence: 0,
             port,
-        }
+        })
     }
 
     /// The ephemeral loopback port this session's listener accepted on.
-    pub fn port(&self) -> u16 {
+    pub const fn port(&self) -> u16 {
         self.port
     }
 
@@ -2398,17 +2690,19 @@ impl RawSession {
         }
         match client {
             Ok(Ok(())) => {}
-            Ok(Err(error)) => failures.push(format!("the raw client transport close failed: {error}")),
-            Err(_) => failures.push(
-                "the raw client transport close did not finish within the bound".to_owned(),
-            ),
+            Ok(Err(error)) => {
+                failures.push(format!("the raw client transport close failed: {error}"));
+            }
+            Err(_) => failures
+                .push("the raw client transport close did not finish within the bound".to_owned()),
         }
         match server {
             Ok(Ok(())) => {}
-            Ok(Err(error)) => failures.push(format!("the raw server transport close failed: {error}")),
-            Err(_) => failures.push(
-                "the raw server transport close did not finish within the bound".to_owned(),
-            ),
+            Ok(Err(error)) => {
+                failures.push(format!("the raw server transport close failed: {error}"));
+            }
+            Err(_) => failures
+                .push("the raw server transport close did not finish within the bound".to_owned()),
         }
         if failures.is_empty() {
             Ok(())
@@ -2574,7 +2868,7 @@ pub fn subject_all(space_id: &str) -> Value {
     })
 }
 
-pub fn recall_request(space_id: &str, selection: Value, max_items: u64) -> Value {
+pub fn recall_request(space_id: &str, selection: &Value, max_items: u64) -> Value {
     json!({
         "space_id": space_id,
         "subject_id": SUBJECT,
@@ -2591,12 +2885,7 @@ pub fn grant_body(capability: &str, grantee: &str, key: &str) -> Value {
     })
 }
 
-pub fn subject_grant_body(
-    capability: &str,
-    grantee: &str,
-    subject: &str,
-    key: &str,
-) -> Value {
+pub fn subject_grant_body(capability: &str, grantee: &str, subject: &str, key: &str) -> Value {
     json!({
         "subject_id": subject,
         "principal_id": grantee,
@@ -2634,9 +2923,7 @@ pub async fn bootstrap(matrix: &Matrix, capabilities: &[&str]) {
     let peer_id = matrix.peer_principal().principal_id.as_str();
     for (index, capability) in capabilities.iter().enumerate() {
         let key = format!("c-bootstrap-{index}-{capability}");
-        let granted = admin
-            .grant(grant_body(capability, peer_id, &key))
-            .await;
+        let granted = admin.grant(grant_body(capability, peer_id, &key)).await;
         assert!(
             is_committed(&granted),
             "the bootstrap {capability} grant commits: {granted}"
@@ -2694,13 +2981,7 @@ pub async fn fence_with(
     subject_id: &'static str,
 ) -> Value {
     fence_action_with(
-        client,
-        principal,
-        space_id,
-        key,
-        revision,
-        "fence",
-        subject_id,
+        client, principal, space_id, key, revision, "fence", subject_id,
     )
     .await
 }
@@ -2743,7 +3024,6 @@ pub async fn review_with(
     body["space_id"] = json!(space_id);
     wire(&client.review_candidate(&principal, dto(body)).await)
 }
-
 
 // ---------------------------------------------------------------------------
 // The real Character/binding fixture (public Core actor surface)
@@ -2862,21 +3142,33 @@ pub struct DurableObserver {
 fn published_files(root: &std::path::Path) -> Vec<(String, Vec<u8>)> {
     fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String, Vec<u8>)>) {
         let entries = std::fs::read_dir(dir).unwrap_or_else(|error| {
-            panic!("the provider projection directory {dir:?} is enumerable: {error}")
+            panic!(
+                "the provider projection directory {} is enumerable: {error}",
+                dir.display()
+            )
         });
         for entry in entries {
             let entry = entry.unwrap_or_else(|error| {
-                panic!("an entry under the provider projection {dir:?} is readable: {error}")
+                panic!(
+                    "an entry under the provider projection {} is readable: {error}",
+                    dir.display()
+                )
             });
             let path = entry.path();
             let file_type = entry.file_type().unwrap_or_else(|error| {
-                panic!("the provider projection entry {path:?} reports its type: {error}")
+                panic!(
+                    "the provider projection entry {} reports its type: {error}",
+                    path.display()
+                )
             });
             if file_type.is_dir() {
                 walk(root, &path, out);
             } else {
                 let bytes = std::fs::read(&path).unwrap_or_else(|error| {
-                    panic!("the published provider file {path:?} is readable: {error}")
+                    panic!(
+                        "the published provider file {} is readable: {error}",
+                        path.display()
+                    )
                 });
                 let relative = path
                     .strip_prefix(root)
@@ -2914,9 +3206,7 @@ impl Matrix {
                 Store::Local,
                 Some(provider.file_root()),
             ),
-            (Home::Remote { db, .. }, Provider::Fixture(_)) => {
-                (db.clone(), Store::Fixture, None)
-            }
+            (Home::Remote { db, .. }, Provider::Fixture(_)) => (db.clone(), Store::Fixture, None),
             _ => panic!("the provider kind and its durable home must agree"),
         };
         let options = sqlx::sqlite::SqliteConnectOptions::new()
@@ -2999,7 +3289,11 @@ impl DurableObserver {
                 format!("profile:{profile_kind}"),
                 self.row(
                     profile,
-                    &[space_id.as_str(), subject_id.as_str(), profile_kind.as_str()],
+                    &[
+                        space_id.as_str(),
+                        subject_id.as_str(),
+                        profile_kind.as_str(),
+                    ],
                 )
                 .await,
             ));
@@ -3091,7 +3385,9 @@ impl DurableObserver {
         match tokio::time::timeout(BOUND, self.conn.close()).await {
             Ok(Ok(())) => {}
             Ok(Err(error)) => panic!("the held read-only connection closes: {error}"),
-            Err(_) => panic!("the held read-only connection close is bounded"),
+            Err(tokio::time::error::Elapsed { .. }) => {
+                panic!("the held read-only connection close is bounded");
+            }
         }
     }
 }
@@ -3132,7 +3428,12 @@ pub const SELECTION_CLIENT_SEED: [u8; 32] = [0x61; 32];
 pub const SELECTION_CREDENTIAL_ID: &str = "cred-c-matrix-selection";
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(out, "{byte:02x}").expect("a String write never fails");
+    }
+    out
 }
 
 /// A one-shot signed host for a real `CoreService` remote open: the endpoint,
@@ -3210,7 +3511,7 @@ impl SelectionHost {
     }
 
     /// The listener's port, so a caller can verify it was released.
-    pub fn port(&self) -> u16 {
+    pub const fn port(&self) -> u16 {
         self.addr.port()
     }
 }
@@ -3239,12 +3540,12 @@ pub async fn serve_selection_host(
         let (tcp, address) = match accepted {
             Ok(Ok(accepted)) => accepted,
             Ok(Err(error)) => {
-                return Err(format!("the selection listener accepts the open: {error}"))
+                return Err(format!("the selection listener accepts the open: {error}"));
             }
             Err(_) => {
                 return Err(
                     "the selection listener received no connection within the bound".to_owned(),
-                )
+                );
             }
         };
         if !address.ip().is_loopback() {
@@ -3411,12 +3712,14 @@ pub async fn open_selected_local(subject: &str, profile_kinds: &[&str]) -> Local
                     Ok((described, profiles, pending))
                 }
                 (Err(error), _) => Err(error),
-                (_, Err(error)) => {
-                    Err(format!("the local selection pins the local provider: {error}"))
-                }
+                (_, Err(error)) => Err(format!(
+                    "the local selection pins the local provider: {error}"
+                )),
             }
         }
-        Err(error) => Err(format!("the local selection has an active principal: {error}")),
+        Err(error) => Err(format!(
+            "the local selection has an active principal: {error}"
+        )),
     };
     let closed = core
         .close()

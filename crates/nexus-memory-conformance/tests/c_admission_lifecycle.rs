@@ -15,8 +15,6 @@
 //! session that never negotiated the memory capability) go through a real
 //! signed raw session, because the typed client cannot express those shapes.
 
-#![allow(clippy::too_many_lines)] // one end-to-end scenario per row
-
 mod support;
 
 use std::time::Duration;
@@ -24,9 +22,9 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use support::{
-    bootstrap, capture_body, context_scope, error_code, error_details, grant_body,
-    is_committed, receipt_id, result, retry_class, shared_scope, Actor, Kind, Matrix, CONTEXT,
-    OTHER_CONTEXT, OTHER_SUBJECT, SUBJECT, TEXT,
+    bootstrap, capture_body, context_scope, error_code, error_details, grant_body, is_committed,
+    receipt_id, result, retry_class, shared_scope, Actor, Kind, Matrix, CONTEXT, OTHER_CONTEXT,
+    OTHER_SUBJECT, SUBJECT, TEXT,
 };
 
 /// The pending candidate ids a real listing page names.
@@ -125,7 +123,12 @@ fn candidate_ids(body: &Value) -> Vec<String> {
         .as_array()
         .unwrap_or_else(|| panic!("a candidate page names its rows: {body}"))
         .iter()
-        .map(|candidate| candidate["candidate_id"].as_str().expect("candidate id").to_owned())
+        .map(|candidate| {
+            candidate["candidate_id"]
+                .as_str()
+                .expect("candidate id")
+                .to_owned()
+        })
         .collect()
 }
 
@@ -158,7 +161,9 @@ async fn describe_contract(matrix: Matrix) {
         "idempotency_retention_seconds",
     ] {
         assert!(
-            body["limits"][limit].as_u64().is_some_and(|value| value >= 1),
+            body["limits"][limit]
+                .as_u64()
+                .is_some_and(|value| value >= 1),
             "describe advertises a positive {limit}: {body}"
         );
     }
@@ -199,7 +204,9 @@ async fn known_and_unknown_ops_fail_closed(matrix: Matrix) {
     let peer = matrix.peer();
 
     // A known op whose grant is absent refuses; it never answers a success.
-    let denied = peer.capture(capture_body("k-c002-denied", TEXT, &shared_scope())).await;
+    let denied = peer
+        .capture(capture_body("k-c002-denied", TEXT, &shared_scope()))
+        .await;
     assert_eq!(error_code(&denied), "NOT_AUTHORIZED", "{denied}");
     assert_eq!(retry_class(&denied), "terminal");
 
@@ -217,7 +224,8 @@ async fn known_and_unknown_ops_fail_closed(matrix: Matrix) {
             .await;
         let error = response.get("error").expect("dispatch-deny envelope");
         assert_eq!(
-            error["code"], json!("capability_missing"),
+            error["code"],
+            json!("capability_missing"),
             "{op} on a capability-less session: {response}"
         );
         assert_eq!(error["details"]["retry_class"], json!("terminal"), "{op}");
@@ -475,7 +483,10 @@ async fn freeze_allowlist_base_operations(matrix: Matrix) {
     let issued = admin
         .grant(grant_body("recall", &peer_id, "k-c011-pre"))
         .await;
-    let grant_id = result(&issued)["grant_id"].as_str().expect("grant id").to_owned();
+    let grant_id = result(&issued)["grant_id"]
+        .as_str()
+        .expect("grant id")
+        .to_owned();
 
     let frozen = admin.freeze_space("k-c011-freeze", 1).await;
     assert_eq!(result(&frozen)["status"], "frozen");
@@ -487,15 +498,13 @@ async fn freeze_allowlist_base_operations(matrix: Matrix) {
         .await;
     assert_eq!(error_code(&capture), "SPACE_FROZEN", "{capture}");
     let created = admin
-        .create_record(
-            json!({
-                "subject_id": SUBJECT,
-                "kind": "nexus.world_building",
-                "content": { "text": TEXT },
-                "scope": shared_scope(),
-                "idempotency_key": "k-c011-record",
-            }),
-        )
+        .create_record(json!({
+            "subject_id": SUBJECT,
+            "kind": "nexus.world_building",
+            "content": { "text": TEXT },
+            "scope": shared_scope(),
+            "idempotency_key": "k-c011-record",
+        }))
         .await;
     assert_eq!(error_code(&created), "SPACE_FROZEN", "{created}");
     let granted = admin
@@ -524,7 +533,9 @@ async fn freeze_allowlist_base_operations(matrix: Matrix) {
     assert_eq!(spaces["spaces"][0]["status"], "frozen");
     let subject = admin.get_subject(SUBJECT).await;
     assert_eq!(subject["subject"]["subject_id"], json!(SUBJECT));
-    let revoked = admin.revoke_grant(grant_id.as_str(), 1, "k-c011-revoke").await;
+    let revoked = admin
+        .revoke_grant(grant_id.as_str(), 1, "k-c011-revoke")
+        .await;
     assert_eq!(result(&revoked)["revoked"], json!(true));
     let receipt_view = admin.get_receipt(receipt_id(&frozen)).await;
     assert_eq!(receipt_view["receipt"]["receipt_id"], receipt_id(&frozen));
@@ -538,7 +549,10 @@ async fn freeze_allowlist_base_operations(matrix: Matrix) {
     let after = admin
         .capture(capture_body("k-c011-after", TEXT, &shared_scope()))
         .await;
-    assert!(is_committed(&after), "unfreezing restores the write: {after}");
+    assert!(
+        is_committed(&after),
+        "unfreezing restores the write: {after}"
+    );
     assert_eq!(
         candidate_ids(&candidates(&admin).await).len(),
         1,
@@ -686,8 +700,26 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
 /// provider takes it disarms only that arm, and an older handle can never clear
 /// a newer arm. Asserted inside the existing C-012 selector, not a new one.
 async fn admission_control_is_token_owned(matrix: &Matrix) {
-    // Drop before take: the stale arm is gone and a later write is admitted
-    // without pausing.
+    // Drop before take and replacement arms are token-owned.
+    stale_and_replaced_arms_do_not_park_writes(matrix).await;
+
+    // Retained handle: an observation timeout and an unpolled cancelled future
+    // both disarm their own token while the handle stays alive.
+    timed_out_and_cancelled_observations_disarm_at_call(matrix).await;
+
+    // Controller LOSS after the provider took the arm: the same key must return
+    // that same effect, never a fresh second one.
+    controller_loss_keeps_one_effect(matrix, "k-c012-loss").await;
+
+    // Controller RETAINED past the provider's own bound (expiry, not loss).
+    if matrix.kind() == Kind::Local {
+        provider_expiry_keeps_one_effect(matrix, "k-c012-expiry").await;
+    }
+}
+
+/// Drop-before-take and replacement arms are token-owned: a later write is
+/// admitted without pausing, and a stale handle never clears the newer arm.
+async fn stale_and_replaced_arms_do_not_park_writes(matrix: &Matrix) {
     let stale = matrix.park_next_admission();
     drop(stale);
     let after_drop = tokio::time::timeout(
@@ -721,7 +753,11 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
         is_committed(&outcome) || error_code(&outcome) == "OUTCOME_UNCERTAIN",
         "the rearmed write reached the provider: {outcome}"
     );
+}
 
+/// A retained handle whose observation times out or whose unpolled future is
+/// cancelled disarms its own token at the call, so the next write is admitted.
+async fn timed_out_and_cancelled_observations_disarm_at_call(matrix: &Matrix) {
     // Retained handle, observation timeout. The handle stays ALIVE across the
     // next real write: if the observation did not disarm at its own timeout, the
     // write would park on the live arm until the provider's bound (a 2 s guard
@@ -768,18 +804,18 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
     .expect("a cancelled observation leaves no stale arm while its handle lives");
     assert!(is_committed(&after_cancel), "{after_cancel}");
     drop(observation);
+}
 
-    // Controller LOSS after the provider took the arm. The controller is really
-    // dropped, then the original operation is awaited boundedly: its own
-    // terminal result and its actual effect are observed BEFORE any replay, and
-    // the same key must return that same effect, never a fresh second one.
-    let before = pending_now(&matrix).await;
+/// The controller is really dropped after the take; the original operation
+/// terminates boundedly, observes its effect, and the same key replays it.
+async fn controller_loss_keeps_one_effect(matrix: &Matrix, key: &str) {
+    let before = pending_now(matrix).await;
     let mut loss = matrix.park_next_admission();
     let write = tokio::spawn(support::capture_with(
         matrix.admin_client(),
         matrix.admin_principal().clone(),
         matrix.space_id().to_owned(),
-        capture_body("k-c012-loss", TEXT, &shared_scope()),
+        capture_body(key, TEXT, &shared_scope()),
     ));
     loss.wait_reached()
         .await
@@ -794,11 +830,15 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
         terminal_after_controller_loss(&first),
         "the original operation's terminal result: {first}"
     );
-    let effect = new_pending(&matrix, &before).await;
-    assert_eq!(effect.len(), 1, "the original operation has exactly one effect");
+    let effect = new_pending(matrix, &before).await;
+    assert_eq!(
+        effect.len(),
+        1,
+        "the original operation has exactly one effect"
+    );
     let replay = matrix
         .admin()
-        .capture(capture_body("k-c012-loss", TEXT, &shared_scope()))
+        .capture(capture_body(key, TEXT, &shared_scope()))
         .await;
     assert!(is_committed(&replay), "the same key replays: {replay}");
     assert_eq!(
@@ -819,32 +859,30 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
         );
     }
     assert_eq!(
-        pending_delta_now(&matrix, &before).await,
+        pending_delta_now(matrix, &before).await,
         effect,
         "the replay creates no second effect"
     );
-    let read = matrix.admin().get_receipt(&receipt_id(&replay)).await;
+    let read = matrix.admin().get_receipt(receipt_id(&replay)).await;
     assert_eq!(read["receipt"]["status"], json!("committed"), "{read}");
     assert_eq!(
         read["receipt"]["receipt_id"],
         json!(receipt_id(&replay)),
         "the terminal receipt read is the replay's own receipt"
     );
+}
 
-    // Controller RETAINED past the provider's own bound (expiry, not loss): the
-    // original still reaches its terminal result boundedly; its effect is
-    // observed before any replay; and a late release from the retained handle is
-    // bounded instead of waiting on an abandoned barrier. The local provider
-    // bounds this at 5 s; the fixture's own arm bound is exercised through a
-    // real fence in the C-matrix fixture family.
-    if matrix.kind() == Kind::Local {
-    let before = pending_now(&matrix).await;
+/// The controller is retained past the provider's own bound (expiry, not loss):
+/// the original terminates boundedly, its effect is observed first, and a late
+/// release is bounded.
+async fn provider_expiry_keeps_one_effect(matrix: &Matrix, key: &str) {
+    let before = pending_now(matrix).await;
     let mut expiry = matrix.park_next_admission();
     let write = tokio::spawn(support::capture_with(
         matrix.admin_client(),
         matrix.admin_principal().clone(),
         matrix.space_id().to_owned(),
-        capture_body("k-c012-expiry", TEXT, &shared_scope()),
+        capture_body(key, TEXT, &shared_scope()),
     ));
     expiry
         .wait_reached()
@@ -859,11 +897,15 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
         terminal_after_controller_loss(&first),
         "the original operation's terminal result: {first}"
     );
-    let effect = new_pending(&matrix, &before).await;
-    assert_eq!(effect.len(), 1, "the original operation has exactly one effect");
+    let effect = new_pending(matrix, &before).await;
+    assert_eq!(
+        effect.len(),
+        1,
+        "the original operation has exactly one effect"
+    );
     let replay = matrix
         .admin()
-        .capture(capture_body("k-c012-expiry", TEXT, &shared_scope()))
+        .capture(capture_body(key, TEXT, &shared_scope()))
         .await;
     assert!(is_committed(&replay), "the same key replays: {replay}");
     assert_eq!(
@@ -884,11 +926,11 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
         );
     }
     assert_eq!(
-        pending_delta_now(&matrix, &before).await,
+        pending_delta_now(matrix, &before).await,
         effect,
         "the replay creates no second effect"
     );
-    let read = matrix.admin().get_receipt(&receipt_id(&replay)).await;
+    let read = matrix.admin().get_receipt(receipt_id(&replay)).await;
     assert_eq!(read["receipt"]["status"], json!("committed"), "{read}");
     assert_eq!(
         read["receipt"]["receipt_id"],
@@ -898,7 +940,6 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
     tokio::time::timeout(Duration::from_secs(3), expiry.release())
         .await
         .expect("a late release after provider expiry is bounded");
-    }
 }
 
 #[tokio::test]
@@ -918,7 +959,13 @@ async fn subject_fence_applies_across_clients(matrix: Matrix) {
     let peer = matrix.peer();
 
     let fenced = admin
-        .fence_subject(SUBJECT, json!({ "type": "subject" }), "fence", 1, "k-c013-fence")
+        .fence_subject(
+            SUBJECT,
+            json!({ "type": "subject" }),
+            "fence",
+            1,
+            "k-c013-fence",
+        )
         .await;
     assert_eq!(result(&fenced)["status"], "fenced");
     assert_eq!(result(&fenced)["revision"], json!(2));
@@ -931,7 +978,10 @@ async fn subject_fence_applies_across_clients(matrix: Matrix) {
 
     let ensured = peer.ensure_subject(SUBJECT).await;
     assert_eq!(error_code(&ensured), "SUBJECT_FENCED", "{ensured}");
-    assert_eq!(admin.get_subject(SUBJECT).await["subject"]["status"], json!("fenced"));
+    assert_eq!(
+        admin.get_subject(SUBJECT).await["subject"]["status"],
+        json!("fenced")
+    );
     assert!(
         candidate_ids(&candidates(&admin).await).is_empty(),
         "the fenced write left no candidate"
@@ -960,29 +1010,36 @@ async fn reversible_archive_fence_survives_restart(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let admin = matrix.admin();
     let created = admin
-        .create_record(
-            json!({
-                "subject_id": SUBJECT,
-                "kind": "nexus.world_building",
-                "content": { "text": TEXT },
-                "scope": shared_scope(),
-                "idempotency_key": "k-c014-retained",
-            }),
+        .create_record(json!({
+            "subject_id": SUBJECT,
+            "kind": "nexus.world_building",
+            "content": { "text": TEXT },
+            "scope": shared_scope(),
+            "idempotency_key": "k-c014-retained",
+        }))
+        .await;
+    let record_id = result(&created)["record_id"]
+        .as_str()
+        .expect("record id")
+        .to_owned();
+    let fenced = admin
+        .fence_subject(
+            SUBJECT,
+            json!({ "type": "subject" }),
+            "fence",
+            1,
+            "k-c014-fence",
         )
         .await;
-    let record_id = result(&created)["record_id"].as_str().expect("record id").to_owned();
-    let fenced = admin
-        .fence_subject(SUBJECT, json!({ "type": "subject" }), "fence", 1, "k-c014-fence")
-        .await;
     assert_eq!(result(&fenced)["status"], "fenced");
-    drop(admin);
 
     // The fence itself survives the restart.
     let matrix = matrix.restart().await;
     let admin = matrix.admin();
     let read = admin.get_subject(SUBJECT).await;
     assert_eq!(
-        read["subject"]["status"], json!("fenced"),
+        read["subject"]["status"],
+        json!("fenced"),
         "the reversible fence survives the restart: {read}"
     );
     assert_eq!(read["subject"]["revision"], json!(2));
@@ -1012,26 +1069,56 @@ async fn reversible_archive_fence_survives_restart(matrix: Matrix) {
 
     // Unfence after the restart restores writability.
     let unfenced = admin
-        .fence_subject(SUBJECT, json!({ "type": "subject" }), "unfence", 2, "k-c014-unfence")
+        .fence_subject(
+            SUBJECT,
+            json!({ "type": "subject" }),
+            "unfence",
+            2,
+            "k-c014-unfence",
+        )
         .await;
     assert_eq!(result(&unfenced)["status"], "active");
     let restored = admin
         .capture(capture_body("k-c014-restored", TEXT, &shared_scope()))
         .await;
-    assert!(is_committed(&restored), "unfence restores the write: {restored}");
-    drop(admin);
+    assert!(
+        is_committed(&restored),
+        "unfence restores the write: {restored}"
+    );
 
     // Additional evidence: the terminal archive is durable too.
+    archived_subject_is_terminal_after_restart(matrix).await;
+}
+
+/// The terminal archive survives a further restart and a resurrect is the
+/// retained invalid transition.
+async fn archived_subject_is_terminal_after_restart(matrix: Matrix) {
     let matrix = matrix.restart().await;
     let admin = matrix.admin();
     let archived = admin
-        .fence_subject(SUBJECT, json!({ "type": "subject" }), "archive", 3, "k-c014-archive")
+        .fence_subject(
+            SUBJECT,
+            json!({ "type": "subject" }),
+            "archive",
+            3,
+            "k-c014-archive",
+        )
         .await;
     assert_eq!(result(&archived)["status"], "archived");
     let resurrect = admin
-        .fence_subject(SUBJECT, json!({ "type": "subject" }), "unfence", 4, "k-c014-resurrect")
+        .fence_subject(
+            SUBJECT,
+            json!({ "type": "subject" }),
+            "unfence",
+            4,
+            "k-c014-resurrect",
+        )
         .await;
-    assert_eq!(error_code(&resurrect), "INVALID_STATUS_TRANSITION", "{resurrect}");
+    assert_eq!(
+        error_code(&resurrect),
+        "INVALID_STATUS_TRANSITION",
+        "{resurrect}"
+    );
     matrix.shutdown().await;
 }
 
@@ -1065,7 +1152,11 @@ async fn context_fence_does_not_collateral_fence(matrix: Matrix) {
 
     // The second authenticated client performs every write below.
     let denied = peer
-        .capture(capture_body("k-c016-blocked", TEXT, &context_scope(CONTEXT)))
+        .capture(capture_body(
+            "k-c016-blocked",
+            TEXT,
+            &context_scope(CONTEXT),
+        ))
         .await;
     assert_eq!(error_code(&denied), "SUBJECT_FENCED", "{denied}");
     assert_eq!(
@@ -1076,7 +1167,11 @@ async fn context_fence_does_not_collateral_fence(matrix: Matrix) {
     assert_eq!(retry_class(&denied), "terminal");
 
     let sibling = peer
-        .capture(capture_body("k-c016-sibling", TEXT, &context_scope(OTHER_CONTEXT)))
+        .capture(capture_body(
+            "k-c016-sibling",
+            TEXT,
+            &context_scope(OTHER_CONTEXT),
+        ))
         .await;
     assert_eq!(result(&sibling)["classified"], json!(1));
     let shared = peer
@@ -1099,7 +1194,11 @@ async fn context_fence_does_not_collateral_fence(matrix: Matrix) {
         )
         .await;
     let restored = peer
-        .capture(capture_body("k-c016-restored", TEXT, &context_scope(CONTEXT)))
+        .capture(capture_body(
+            "k-c016-restored",
+            TEXT,
+            &context_scope(CONTEXT),
+        ))
         .await;
     assert_eq!(result(&restored)["classified"], json!(1));
     matrix.shutdown().await;
@@ -1133,6 +1232,21 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
     let space_id = matrix.space_id().to_owned();
 
     // Phase 1 (additional): the same-revision fence/fence race.
+    same_revision_fences_commit_exactly_one(&matrix, &space_id).await;
+
+    // Phase 2 (required): concurrent unfence at the current revision and a STALE
+    // fence, with the unfence held at the admission boundary first.
+    unfence_races_a_stale_fence(&matrix, &space_id).await;
+
+    // Phase 3 (required): a write in flight at the provider admission boundary
+    // when the fence commits is refused with no effect.
+    in_flight_write_is_refused_after_the_fence_commits(&matrix, &space_id).await;
+    matrix.shutdown().await;
+}
+
+/// Phase 1: the same-revision fence/fence race commits exactly one transition
+/// and writes no context fence.
+async fn same_revision_fences_commit_exactly_one(matrix: &Matrix, space_id: &str) {
     let mut arrival = match matrix.kind() {
         Kind::Local => matrix.park_next_admission(),
         Kind::Remote => matrix.park_next_target("memory.subjects.fence"),
@@ -1140,7 +1254,7 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
     let first = tokio::spawn(support::fence_with(
         matrix.admin_client(),
         matrix.admin_principal().clone(),
-        space_id.clone(),
+        space_id.to_owned(),
         "k-c017-first",
         1,
         SUBJECT,
@@ -1152,7 +1266,7 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
     let second = support::fence_with(
         matrix.peer_client(),
         matrix.peer_principal().clone(),
-        space_id.clone(),
+        space_id.to_owned(),
         "k-c017-second",
         1,
         SUBJECT,
@@ -1174,16 +1288,22 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
 
     let admin = matrix.admin();
     let read = admin.get_subject(SUBJECT).await;
-    assert_eq!(read["subject"]["status"], json!("fenced"), "no lost update: {read}");
+    assert_eq!(
+        read["subject"]["status"],
+        json!("fenced"),
+        "no lost update: {read}"
+    );
     assert_eq!(read["subject"]["revision"], json!(2));
     assert_eq!(
         read["subject"]["fenced_contexts"],
         json!([]),
         "neither racing request wrote a context fence: {read}"
     );
+}
 
-    // Phase 2 (required): concurrent unfence at the current revision and a STALE
-    // fence, with the unfence held at the admission boundary first.
+/// Phase 2: the current-revision unfence commits and the stale fence loses
+/// deterministically.
+async fn unfence_races_a_stale_fence(matrix: &Matrix, space_id: &str) {
     let mut arrival = match matrix.kind() {
         Kind::Local => matrix.park_next_admission(),
         Kind::Remote => matrix.park_next_target("memory.subjects.fence"),
@@ -1191,7 +1311,7 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
     let unfence = tokio::spawn(support::fence_action_with(
         matrix.admin_client(),
         matrix.admin_principal().clone(),
-        space_id.clone(),
+        space_id.to_owned(),
         "k-c017-unfence",
         2,
         "unfence",
@@ -1204,7 +1324,7 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
     let stale = support::fence_with(
         matrix.peer_client(),
         matrix.peer_principal().clone(),
-        space_id.clone(),
+        space_id.to_owned(),
         "k-c017-stale",
         1,
         SUBJECT,
@@ -1232,19 +1352,18 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
         "the latest transition wins with no lost state: {read}"
     );
     assert_eq!(read["subject"]["revision"], json!(3));
+}
 
-    // Phase 3 (required): a write in flight at the provider admission boundary
-    // when the fence commits is refused with no effect.
+/// Phase 3: a write in flight at the provider admission boundary when the fence
+/// commits is refused with no effect.
+async fn in_flight_write_is_refused_after_the_fence_commits(matrix: &Matrix, space_id: &str) {
     let before = candidate_ids(&candidates(&matrix.admin()).await).len();
-    let mut arrival = match matrix.kind() {
-        // The fixture's capture path keeps its own bounded admission point.
-        Kind::Local => matrix.park_next_admission(),
-        Kind::Remote => matrix.park_next_admission(),
-    };
+    // Both providers park the write at their capture admission point.
+    let mut arrival = matrix.park_next_admission();
     let write = tokio::spawn(support::capture_with(
         matrix.admin_client(),
         matrix.admin_principal().clone(),
-        space_id.clone(),
+        space_id.to_owned(),
         capture_body("k-c017-write", TEXT, &shared_scope()),
     ));
     arrival
@@ -1280,7 +1399,6 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
         matrix.admin().get_subject(SUBJECT).await["subject"]["status"],
         json!("fenced")
     );
-    matrix.shutdown().await;
 }
 
 #[tokio::test]

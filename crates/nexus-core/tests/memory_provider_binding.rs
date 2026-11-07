@@ -15,7 +15,9 @@ use nexus_core::{
     CoreAccess, CoreError, CoreOpenOptions, CoreService, MemoryProviderSelection,
     RemoteMemoryProviderSelection,
 };
-use nexus_local_db::writer_protocol::{init_guarded_pool, join_live_engine_pool, GuardedPoolOptions};
+use nexus_local_db::writer_protocol::{
+    init_guarded_pool, join_live_engine_pool, GuardedPoolOptions,
+};
 use tempfile::TempDir;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -120,7 +122,8 @@ impl Env {
 }
 
 fn local_provider(core: &CoreService) -> std::sync::Arc<LocalMemoryProvider> {
-    core.memory_provider_for_test().expect("pinned local provider")
+    core.memory_provider_for_test()
+        .expect("pinned local provider")
 }
 
 /// A home with no `[memory_provider]` table keeps the byte-equivalent local
@@ -128,13 +131,24 @@ fn local_provider(core: &CoreService) -> std::sync::Arc<LocalMemoryProvider> {
 #[tokio::test]
 async fn absent_provider_table_pins_the_local_default() {
     let env = Env::new(None);
-    let core = CoreService::open(env.options(None)).await.expect("local default");
+    let core = CoreService::open(env.options(None))
+        .await
+        .expect("local default");
     let principal = core.active_principal().await.expect("principal");
 
     let provider = local_provider(&core);
     assert_eq!(provider.space_id(), DEFAULT_SPACE_ID);
-    assert!(provider.is_writable(), "an engine owner pins a writable local provider");
-    assert_eq!(core.count_pending_reviews(&principal).await.expect("provider read").count, 0);
+    assert!(
+        provider.is_writable(),
+        "an engine owner pins a writable local provider"
+    );
+    assert_eq!(
+        core.count_pending_reviews(&principal)
+            .await
+            .expect("provider read")
+            .count,
+        0
+    );
 
     let report = core.close().await.expect("close");
     assert!(report.cleanup_confirmed);
@@ -180,9 +194,17 @@ async fn explicit_local_never_reads_the_provider_table() {
 #[tokio::test]
 async fn provider_selection_is_pinned_for_the_open_and_reread_between_opens() {
     let env = Env::new(None);
-    let core = CoreService::open(env.options(None)).await.expect("local default");
+    let core = CoreService::open(env.options(None))
+        .await
+        .expect("local default");
     let principal = core.active_principal().await.expect("principal");
-    assert_eq!(core.count_pending_reviews(&principal).await.expect("provider read").count, 0);
+    assert_eq!(
+        core.count_pending_reviews(&principal)
+            .await
+            .expect("provider read")
+            .count,
+        0
+    );
 
     env.write_config(Some(&remote_table()));
     assert_eq!(
@@ -191,7 +213,10 @@ async fn provider_selection_is_pinned_for_the_open_and_reread_between_opens() {
         "a live open never re-reads or retargets its provider"
     );
     assert_eq!(
-        core.count_pending_reviews(&principal).await.expect("provider read").count,
+        core.count_pending_reviews(&principal)
+            .await
+            .expect("provider read")
+            .count,
         0,
         "the pinned local binding keeps serving reads after the table changed"
     );
@@ -205,7 +230,10 @@ async fn provider_selection_is_pinned_for_the_open_and_reread_between_opens() {
         "expected the mode-correct remote refusal, got {error:?}"
     );
     assert_eq!(
-        core.count_pending_reviews(&principal).await.expect("provider read").count,
+        core.count_pending_reviews(&principal)
+            .await
+            .expect("provider read")
+            .count,
         0,
         "the failed sibling open released only its own admissions"
     );
@@ -272,7 +300,9 @@ async fn remote_selection_is_refused_and_releases_its_own_guards() {
 #[tokio::test]
 async fn close_is_idempotent_and_releases_the_binding() {
     let env = Env::new(None);
-    let core = CoreService::open(env.options(None)).await.expect("local default");
+    let core = CoreService::open(env.options(None))
+        .await
+        .expect("local default");
 
     let first = core.close().await.expect("first close");
     let second = core.close().await.expect("second close");
@@ -321,7 +351,10 @@ async fn confirmed_close_releases_the_local_providers_direct_admission() {
             .expect("local default");
         let principal = core.active_principal().await.expect("principal");
         assert_eq!(
-            core.count_pending_reviews(&principal).await.expect("read").count,
+            core.count_pending_reviews(&principal)
+                .await
+                .expect("read")
+                .count,
             0
         );
         assert!(core.close().await.expect("close").cleanup_confirmed);
@@ -392,58 +425,18 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
 
     let opening_home = home.clone();
     let mut opening =
-        tokio::spawn(async move { LocalMemoryProvider::open(opening_home, CREATOR, "default").await });
+        tokio::spawn(
+            async move { LocalMemoryProvider::open(opening_home, CREATOR, "default").await },
+        );
 
     // Step 1: the measured open registers a writer id that did not exist before
     // the spawn, so every following observation is about this invocation. A
     // finished task here means the lease did not hold it, which must fail.
-    let mut measured_writer = None;
-    for _ in 0..200_000 {
-        let rows: Vec<(String,)> = sqlx::query_as("SELECT writer_id FROM core_writer_registration")
-            .fetch_all(&mut *observer)
-            .await
-            .expect("read the writer registry");
-        if let Some(writer_id) = rows
-            .into_iter()
-            .map(|row| row.0)
-            .find(|writer_id| !known_writers.contains(writer_id))
-        {
-            measured_writer = Some(writer_id);
-            break;
-        }
-        assert!(
-            !opening.is_finished(),
-            "the measured open returned while the publication lease was held"
-        );
-        tokio::task::yield_now().await;
-    }
-    let measured_writer = measured_writer.expect("the measured open registered itself");
+    let measured_writer = open_registered_writer(&mut observer, &opening, &known_writers).await;
 
     // Step 2: the seed write, proven by the change row only this writer id
     // produces for workspace_meta.
-    let mut seeded = false;
-    for _ in 0..200_000 {
-        let (changes,): (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM core_changes WHERE resource_kind = 'workspace_meta' AND writer_id = ?",
-        )
-        .bind(&measured_writer)
-        .fetch_one(&mut *observer)
-        .await
-        .expect("read the change log");
-        if changes > 0 {
-            seeded = true;
-            break;
-        }
-        assert!(
-            !opening.is_finished(),
-            "the measured open returned while the publication lease was held"
-        );
-        tokio::task::yield_now().await;
-    }
-    assert!(
-        seeded,
-        "the measured open reached its own seed write (writer {measured_writer})"
-    );
+    opened_seed_write(&mut observer, &opening, &measured_writer).await;
 
     // Step 3 — the stage itself, by construction. The seeded open cannot pass
     // `provision`'s publication-lease wait while this test holds it, so the
@@ -465,9 +458,8 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         spaces, 0,
         "the required provisioning write still sits behind the held publication lease"
     );
-    let fencing = match nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path) {
-        Ok(_) => panic!("the parked open still holds its shared admission"),
-        Err(error) => error,
+    let Err(fencing) = nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path) else {
+        panic!("the parked open still holds its shared admission");
     };
     assert!(
         matches!(fencing, nexus_local_db::LocalDbError::OwnerBusy { .. }),
@@ -475,9 +467,8 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
     );
 
     opening.abort();
-    let join_error = match opening.await {
-        Ok(_) => panic!("the aborted task must not have completed"),
-        Err(join_error) => join_error,
+    let Err(join_error) = opening.await else {
+        panic!("the aborted task must not have completed");
     };
     assert!(
         join_error.is_cancelled(),
@@ -517,6 +508,60 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         eventual_fence(&db_path).await,
         "the reopened provider's admission is released too"
     );
+}
+
+/// Poll the registry until the measured open registers a writer id that did not
+/// exist before the spawn. A finished task here means the lease did not hold it.
+async fn open_registered_writer(
+    observer: &mut sqlx::SqliteConnection,
+    opening: &tokio::task::JoinHandle<nexus_core::CoreResult<LocalMemoryProvider>>,
+    known_writers: &[String],
+) -> String {
+    for _ in 0..200_000 {
+        let rows: Vec<(String,)> = sqlx::query_as("SELECT writer_id FROM core_writer_registration")
+            .fetch_all(&mut *observer)
+            .await
+            .expect("read the writer registry");
+        if let Some(writer_id) = rows
+            .into_iter()
+            .map(|row| row.0)
+            .find(|writer_id| !known_writers.contains(writer_id))
+        {
+            return writer_id;
+        }
+        assert!(
+            !opening.is_finished(),
+            "the measured open returned while the publication lease was held"
+        );
+        tokio::task::yield_now().await;
+    }
+    panic!("the measured open registered itself")
+}
+
+/// Poll the change log for the seed write only `measured_writer` produces.
+async fn opened_seed_write(
+    observer: &mut sqlx::SqliteConnection,
+    opening: &tokio::task::JoinHandle<nexus_core::CoreResult<LocalMemoryProvider>>,
+    measured_writer: &str,
+) {
+    for _ in 0..200_000 {
+        let (changes,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM core_changes WHERE resource_kind = 'workspace_meta' AND writer_id = ?",
+        )
+        .bind(measured_writer)
+        .fetch_one(&mut *observer)
+        .await
+        .expect("read the change log");
+        if changes > 0 {
+            return;
+        }
+        assert!(
+            !opening.is_finished(),
+            "the measured open returned while the publication lease was held"
+        );
+        tokio::task::yield_now().await;
+    }
+    panic!("the measured open reached its own seed write (writer {measured_writer})")
 }
 
 /// Every writer id registered in this workspace.
@@ -574,7 +619,11 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
         .expect("live engine owner");
     let principal = engine.active_principal().await.expect("principal");
     assert_eq!(
-        engine.count_pending_reviews(&principal).await.expect("read").count,
+        engine
+            .count_pending_reviews(&principal)
+            .await
+            .expect("read")
+            .count,
         0
     );
 
@@ -591,9 +640,9 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
     .expect("reject grants");
     raw.close().await;
 
-    let error = match LocalMemoryProvider::open(env.user_home.clone(), CREATOR, "default").await {
-        Ok(_) => panic!("provisioning must fail on the rejected grant insert"),
-        Err(error) => error,
+    let Err(error) = LocalMemoryProvider::open(env.user_home.clone(), CREATOR, "default").await
+    else {
+        panic!("provisioning must fail on the rejected grant insert");
     };
     let rendered = format!("{error:?}");
     assert!(
@@ -604,7 +653,11 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
     // The failed open took nothing from the adopted user: it still reads and
     // still holds its own admission.
     assert_eq!(
-        engine.count_pending_reviews(&principal).await.expect("read").count,
+        engine
+            .count_pending_reviews(&principal)
+            .await
+            .expect("read")
+            .count,
         0,
         "the adopted engine user is untouched"
     );
@@ -633,19 +686,19 @@ async fn pending_guarded_migration_runs_after_a_normal_provider_close() {
         .expect("local default");
     let principal = core.active_principal().await.expect("principal");
     assert_eq!(
-        core.count_pending_reviews(&principal).await.expect("read").count,
+        core.count_pending_reviews(&principal)
+            .await
+            .expect("read")
+            .count,
         0
     );
     assert!(core.close().await.expect("close").cleanup_confirmed);
 
     // Make a real migration pending: drop one applied row the embedded
     // migrator re-applies (its SQL is idempotent).
-    let pool = sqlx::SqlitePool::connect(&format!(
-        "sqlite://{}?mode=rwc",
-        env.db_path().display()
-    ))
-    .await
-    .expect("raw pool");
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=rwc", env.db_path().display()))
+        .await
+        .expect("raw pool");
     let dropped = sqlx::query("DELETE FROM _sqlx_migrations WHERE version = ?")
         .bind(20_260_914_000_001_i64)
         .execute(&pool)
@@ -670,7 +723,14 @@ async fn failed_direct_writer_pin_keeps_a_live_engine_owner_joinable() {
         .await
         .expect("live engine owner");
     let principal = engine.active_principal().await.expect("principal");
-    assert_eq!(engine.count_pending_reviews(&principal).await.expect("read").count, 0);
+    assert_eq!(
+        engine
+            .count_pending_reviews(&principal)
+            .await
+            .expect("read")
+            .count,
+        0
+    );
 
     env.write_config(Some(&remote_table()));
     let direct = CoreOpenOptions {
@@ -693,12 +753,20 @@ async fn failed_direct_writer_pin_keeps_a_live_engine_owner_joinable() {
         .expect("the live engine owner is still joinable after the failed open");
     let joined_principal = joined.active_principal().await.expect("principal");
     assert_eq!(
-        joined.count_pending_reviews(&joined_principal).await.expect("read").count,
+        joined
+            .count_pending_reviews(&joined_principal)
+            .await
+            .expect("read")
+            .count,
         0
     );
     assert!(joined.close().await.expect("close").cleanup_confirmed);
     assert_eq!(
-        engine.count_pending_reviews(&principal).await.expect("read").count,
+        engine
+            .count_pending_reviews(&principal)
+            .await
+            .expect("read")
+            .count,
         0,
         "the failed direct open did not disturb the live engine owner"
     );
@@ -714,7 +782,14 @@ async fn successful_direct_writer_close_keeps_a_live_engine_owner_joinable() {
         .await
         .expect("live engine owner");
     let principal = engine.active_principal().await.expect("principal");
-    assert_eq!(engine.count_pending_reviews(&principal).await.expect("read").count, 0);
+    assert_eq!(
+        engine
+            .count_pending_reviews(&principal)
+            .await
+            .expect("read")
+            .count,
+        0
+    );
 
     let direct = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
@@ -730,12 +805,20 @@ async fn successful_direct_writer_close_keeps_a_live_engine_owner_joinable() {
         .expect("a confirmed direct close must not erase the live engine admission");
     let joined_principal = joined.active_principal().await.expect("principal");
     assert_eq!(
-        joined.count_pending_reviews(&joined_principal).await.expect("read").count,
+        joined
+            .count_pending_reviews(&joined_principal)
+            .await
+            .expect("read")
+            .count,
         0
     );
     assert!(joined.close().await.expect("close").cleanup_confirmed);
     assert_eq!(
-        engine.count_pending_reviews(&principal).await.expect("read").count,
+        engine
+            .count_pending_reviews(&principal)
+            .await
+            .expect("read")
+            .count,
         0,
         "the live engine owner still serves memory after the direct close"
     );
@@ -756,7 +839,11 @@ async fn creator_close_keeps_a_joined_adopter_and_a_third_join() {
         .expect("a second engine open joins the live admission");
     let adopter_principal = adopter.active_principal().await.expect("principal");
     assert_eq!(
-        adopter.count_pending_reviews(&adopter_principal).await.expect("read").count,
+        adopter
+            .count_pending_reviews(&adopter_principal)
+            .await
+            .expect("read")
+            .count,
         0
     );
 
@@ -768,7 +855,11 @@ async fn creator_close_keeps_a_joined_adopter_and_a_third_join() {
         .expect("a third open still joins the surviving admission");
     let third_principal = third.active_principal().await.expect("principal");
     assert_eq!(
-        third.count_pending_reviews(&third_principal).await.expect("read").count,
+        third
+            .count_pending_reviews(&third_principal)
+            .await
+            .expect("read")
+            .count,
         0
     );
 
