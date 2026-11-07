@@ -18,7 +18,11 @@ group, mode, ACL and extended access attributes it had.
   returned so the caller refuses and leaves the old document unchanged.
 - No hand-rolled security parsing: use the platform facilities directly
   (`libc` on Unix including the macOS `acl_*` family, `windows-sys`
-  `GetFileSecurityW`/`SetFileSecurityW` on Windows).
+  `GetFileSecurityW`/`SetSecurityInfo` on Windows).
+- Staging happens in a private directory that is created and sealed before the
+  staging file: on Unix the directory's inherited ACL/default ACL is cleared, on
+  Windows the file is opened with no sharing, so no staged byte is exposed
+  before the captured policy is applied.
 - Dependencies stay at the already-locked `libc`/`windows-sys` versions; no new
   native library, runtime option or third-party wrapper.
 - A platform with neither contract must fail closed rather than publish without

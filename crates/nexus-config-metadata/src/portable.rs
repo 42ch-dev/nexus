@@ -20,6 +20,10 @@ pub fn apply(_policy: &PortablePolicy, _file: &File, _path: &Path) -> io::Result
     Err(unsupported())
 }
 
+pub fn link_count(_target: &Path) -> io::Result<u64> {
+    Err(unsupported())
+}
+
 pub fn access_policy_blob(_target: &Path) -> io::Result<Vec<u8>> {
     Err(unsupported())
 }

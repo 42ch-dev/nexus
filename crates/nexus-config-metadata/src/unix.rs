@@ -1,5 +1,5 @@
-//! Unix access policy: owner, group, mode, extended attributes and the macOS
-//! access ACL.
+//! Unix access policy: a private staging directory, owner, group, mode,
+//! extended attributes and the macOS access ACL.
 //!
 //! Every `unsafe` block below wraps exactly one documented OS call
 //! (`fchown`, `f*listxattr`/`f*getxattr`/`f*setxattr`/`f*removexattr`, and the
@@ -9,7 +9,7 @@ use std::ffi::{CStr, CString};
 use std::fs::{File, Permissions};
 use std::io;
 use std::os::fd::{AsRawFd, RawFd};
-use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
 use std::path::Path;
 use std::ptr;
 
@@ -29,6 +29,36 @@ const NO_ATTR: libc::c_int = libc::ENODATA;
 /// The "no such attribute" errno of this platform.
 #[cfg(target_os = "macos")]
 const NO_ATTR: libc::c_int = libc::ENOATTR;
+
+/// Create the staging directory owner-only.
+pub fn create_staging_directory(directory: &Path) -> io::Result<()> {
+    std::fs::DirBuilder::new().mode(0o700).create(directory)
+}
+
+/// Make the staging directory unable to pass an inherited ACL to its child.
+///
+/// The directory is created before the document file, so clearing its ACLs here
+/// means the file is created without any inherited grant: no other principal can
+/// reach the staged bytes, regardless of the target directory's policy.
+pub fn seal_staging_directory(directory: &Path) -> io::Result<()> {
+    let file = File::open(directory)?;
+    #[cfg(target_os = "macos")]
+    clear_acl(file.as_raw_fd())?;
+    #[cfg(target_os = "linux")]
+    {
+        let descriptor = file.as_raw_fd();
+        let mut name = c"system.posix_acl_access";
+        remove_xattr(descriptor, name)?;
+        name = c"system.posix_acl_default";
+        remove_xattr(descriptor, name)?;
+    }
+    Ok(())
+}
+
+/// The document's hard-link count.
+pub fn link_count(target: &Path) -> io::Result<u64> {
+    Ok(std::fs::metadata(target)?.nlink())
+}
 
 pub fn capture(target: &Path) -> io::Result<UnixPolicy> {
     let file = File::open(target)?;
@@ -56,8 +86,9 @@ pub fn apply(policy: &UnixPolicy, file: &File, _path: &Path) -> io::Result<()> {
         }
     }
 
-    file.set_permissions(Permissions::from_mode(policy.mode))?;
-
+    // Replace the inherited ACL/extended policy *before* restoring group bits:
+    // widening the mode first would reopen a named ACE inherited from the
+    // target directory for the rest of the window.
     for (name, value) in &policy.xattrs {
         if read_xattr(descriptor, name)?.is_some_and(|existing| existing == *value) {
             continue;
@@ -89,12 +120,14 @@ pub fn apply(policy: &UnixPolicy, file: &File, _path: &Path) -> io::Result<()> {
                 }
             }
             // The target had no extended ACL: clear any ACL the staging file
-            // inherited from its directory so the replacement cannot grant more.
+            // inherited so the replacement cannot grant more.
             None => clear_acl(descriptor)?,
         }
     }
 
-    Ok(())
+    // The mode is applied last: on Linux this records the captured ACL mask,
+    // on macOS it records the captured mode beside the explicit ACL entries.
+    file.set_permissions(Permissions::from_mode(policy.mode))
 }
 
 pub fn access_policy_blob(target: &Path) -> io::Result<Vec<u8>> {
@@ -349,8 +382,7 @@ fn read_acl(descriptor: RawFd) -> io::Result<Option<AclHandle>> {
     Ok(Some(AclHandle(acl)))
 }
 
-/// Clear the staging file's ACL so a replacement of an ACL-less document does
-/// not inherit one from its directory.
+/// Clear the object's ACL (an empty ACL grants nothing).
 #[cfg(target_os = "macos")]
 fn clear_acl(descriptor: RawFd) -> io::Result<()> {
     // SAFETY: acl_init returns an owned, empty handle (or null).
@@ -359,7 +391,7 @@ fn clear_acl(descriptor: RawFd) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     // SAFETY: `empty` is a valid handle and `descriptor` is owned by the caller;
-    // acl_set_fd copies the ACL into the document.
+    // acl_set_fd copies the ACL into the object.
     let result = unsafe { acl_set_fd(descriptor, empty) };
     // SAFETY: `empty` was allocated by acl_init above and is freed exactly once.
     unsafe { acl_free(empty) };
