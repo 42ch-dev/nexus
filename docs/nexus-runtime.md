@@ -251,6 +251,8 @@ refused without changing its bytes. Hard-linked documents, unsupported security
 policies and paths that cannot be updated atomically are refused; safe existing
 or creatable symlink targets remain supported without replacing the link.
 New Unix configuration documents use owner-only mode `0600`.
+On Windows, nonempty mandatory-label, resource-attribute or scoped-policy data is
+refused rather than discarded; ACL entry counts use the Win32 information API.
 
 ## Coexistence with the creator app
 
