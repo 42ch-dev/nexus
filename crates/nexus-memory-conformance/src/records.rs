@@ -3034,8 +3034,12 @@ mod tests {
     async fn foreign_and_missing_record_ids_have_no_existence_oracle() {
         let scenario = Scenario::open().await;
         let created = seed_foreign_and_owned_records(&scenario).await;
+        // Sample the private marker after seeding and before any probe, so a
+        // refused probe that advanced it cannot hide behind its own baseline.
+        let marker_before = marker(&scenario).await;
         by_id_refusals_are_indistinguishable(&scenario, &created).await;
-        refusals_leave_no_effect_and_authorized_ops_answer(&scenario, &created).await;
+        refusals_leave_no_effect_and_authorized_ops_answer(&scenario, &created, marker_before)
+            .await;
     }
 
     async fn seed_foreign_and_owned_records(scenario: &Scenario) -> RecordRevision {
@@ -3161,9 +3165,9 @@ mod tests {
     async fn refusals_leave_no_effect_and_authorized_ops_answer(
         scenario: &Scenario,
         created: &RecordRevision,
+        marker_before: u64,
     ) {
         let space = scenario.space_id.clone();
-        let before = marker(scenario).await;
         let missing = "rec_00000000000000000000000000000000";
         // A principal with no grants observes the same single refusal.
         assert_same_refusal(
@@ -3182,7 +3186,7 @@ mod tests {
         );
 
         // Refusals leave the record and the private snapshot untouched.
-        assert_eq!(marker(scenario).await, before);
+        assert_eq!(marker(scenario).await, marker_before);
         let (_, revision, tombstone) = stored_row(scenario, &created.record_id).await;
         assert_eq!(revision, 1);
         assert!(tombstone.is_none());

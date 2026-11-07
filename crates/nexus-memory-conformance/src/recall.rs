@@ -2131,8 +2131,8 @@ mod tests {
         profile_reads_without_a_grant_are_refused(&scenario).await;
         profile_reads_follow_the_grant_coverage(&scenario).await;
         context_limited_shared_facet_widens_the_read(&scenario).await;
-        profile_writes_require_shared_document_access(&scenario).await;
-        disjoint_contexts_are_never_unioned(&scenario).await;
+        let document = profile_writes_require_shared_document_access(&scenario).await;
+        disjoint_contexts_are_never_unioned(&scenario, &document).await;
         the_shared_facet_admits_the_write(&scenario).await;
     }
 
@@ -2271,7 +2271,10 @@ mod tests {
         assert!(page.profiles.is_empty());
     }
 
-    async fn profile_writes_require_shared_document_access(scenario: &Scenario) {
+    /// Returns the stored document sampled before the first refused write so the
+    /// later disjoint-grant phase can compare raw bytes against a pre-grant
+    /// baseline rather than one it re-read after issuing a grant.
+    async fn profile_writes_require_shared_document_access(scenario: &Scenario) -> String {
         // profile_write on the same principal admits the update.
         scenario.grant(CLIENT, &["profile_write"], None, None).await;
         let change = scenario
@@ -2354,18 +2357,15 @@ mod tests {
                 .get(),
             2
         );
+        document
     }
 
-    async fn disjoint_contexts_are_never_unioned(scenario: &Scenario) {
+    async fn disjoint_contexts_are_never_unioned(scenario: &Scenario, document: &str) {
         // Two partial grants on disjoint contexts are never unioned into
         // shared coverage.
         scenario
             .grant(LIMITED, &["profile_write"], Some(&["ctx-b"]), None)
             .await;
-        let document = scenario
-            .raw_profile("personality")
-            .await
-            .expect("stored document");
         let union_marker = scenario.marker().await;
         let refused = scenario
             .provider
@@ -2383,9 +2383,10 @@ mod tests {
             .await;
         assert_eq!(reject_code(refused), SpokeRejectCode::NotAuthorized);
         assert_eq!(scenario.marker().await, union_marker);
+        // Raw bytes, compared against the baseline sampled before this grant.
         assert_eq!(
             scenario.raw_profile("personality").await.as_deref(),
-            Some(document.as_str())
+            Some(document)
         );
     }
 
@@ -2463,8 +2464,16 @@ mod tests {
             .await
             .expect("authored profile");
 
+        // Both raw baselines are sampled before the first recall and profile
+        // read, so a read that rewrote the stored bytes would still be caught.
+        let record_before = scenario.raw_record("rec_captured").await;
+        let profile_before = scenario
+            .raw_profile("personality")
+            .await
+            .expect("stored profile");
+
         captured_text_and_profiles_never_bleed(&scenario).await;
-        authoring_and_recall_never_cross_write(&scenario).await;
+        authoring_and_recall_never_cross_write(&scenario, &record_before, &profile_before).await;
     }
 
     async fn captured_text_and_profiles_never_bleed(scenario: &Scenario) {
@@ -2500,14 +2509,13 @@ mod tests {
         assert!(!serialized.contains("captured-marker-7f3"));
     }
 
-    async fn authoring_and_recall_never_cross_write(scenario: &Scenario) {
+    async fn authoring_and_recall_never_cross_write(
+        scenario: &Scenario,
+        record_before: &str,
+        profile_before: &str,
+    ) {
         // Authoring a new profile document never rewrote captured text, and a
         // recall never rewrote an authored document.
-        let record_before = scenario.raw_record("rec_captured").await;
-        let profile_before = scenario
-            .raw_profile("personality")
-            .await
-            .expect("stored profile");
         scenario
             .provider
             .profile_update(
