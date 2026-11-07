@@ -5,9 +5,11 @@
 //! creator, no live provider. Credential fixtures are synthetic — no real auth
 //! material is read or logged.
 
+#[cfg(unix)]
+use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
 use nexus_core::{
-    CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreService, MemoryCredential,
-    MemoryProviderConfig, MemoryProviderSelection, RemoteMemoryProviderSelection,
+    CoreError, CoreHomeService, MemoryCredential, MemoryProviderConfig, MemoryProviderSelection,
+    RemoteMemoryProviderSelection,
 };
 use nexus_home_layout::active_context::{
     read_active_creator_id, read_active_workspace_slug, read_memory_provider_config,
