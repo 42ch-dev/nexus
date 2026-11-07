@@ -6406,17 +6406,11 @@ mod tests {
             retry_class,
             family,
             conflict_code,
-        } = &error
+        } = error
         else {
             panic!("a remote refusal keeps its structured carrier: {error:?}");
         };
-        (
-            code.clone(),
-            wire_code.clone(),
-            retry_class.clone(),
-            *family,
-            conflict_code.clone(),
-        )
+        (code, wire_code, retry_class, family, conflict_code)
     }
 
     /// I-000202/I-000204: the safe carrier keeps the effective classification,
