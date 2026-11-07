@@ -1,6 +1,7 @@
 # Spoke Memory Provider Binding
 
 > **Status:** Active architecture contract.
+> **Document class:** Master
 > **Scope:** Nexus memory-provider selection, open-scoped authority binding, secure remote Connect admission, local/remote behavior separation, and conservative remote-binding removal protection.
 > **Related:** [Spoke Adapter Architecture](spoke-adapter-architecture.md) and [Spoke Memory Conformance Staging](spoke-memory-conformance-staging.md).
 

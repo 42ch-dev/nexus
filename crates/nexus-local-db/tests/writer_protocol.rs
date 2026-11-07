@@ -1598,6 +1598,8 @@ async fn open_pool_keeps_its_admission_with_zero_connections() {
         "a joining open reuses the published identity"
     );
     drop(joined_conn);
+    // Drain the independent joined pool's native pins before closing the original pool.
+    joined.pool().close().await;
     drop(joined);
 
     // Close-start retirement: the closed handle stays referenced below.
