@@ -2775,14 +2775,15 @@ async fn an_independently_signed_writer_competes_at_both_causal_windows() {
 
     // (a) Pre-CAS window: the writer advances the record after Core's validated
     // read and before the promotion, so the promotion meets the real provider
-    // CAS.
-    let cas_refused =
+    // CAS. The provider/D18 observations run before any session cleanup.
+    let (cas_refused, cas_handles) =
         run_writer_before_promotion_cas(&env, &provider, character_id, cas_record).await;
     assert_pre_cas_window_refusal(&env, &provider, cas_record, binding_id, &cas_refused).await;
+    close_race_handles(&provider, cas_handles).await;
 
     // (b) Post-commit window: the writer rewrites the record after the promotion
     // committed and before the original response returns.
-    let promoted =
+    let (promoted, commit_handles) =
         run_writer_after_promotion_commit(&env, &provider, character_id, commit_record).await;
     assert_committed_promotion_state(
         &env,
@@ -2793,6 +2794,7 @@ async fn an_independently_signed_writer_competes_at_both_causal_windows() {
         &promoted,
     )
     .await;
+    close_race_handles(&provider, commit_handles).await;
 }
 
 /// The reviewed fragments the race scenarios promote, with their sessions.
@@ -2872,6 +2874,45 @@ async fn race_setup_fragments(env: &Env, provider: &Provider) -> RaceSetup {
     }
 }
 
+/// The still-open owners of one raced window; closed only after the
+/// provider/D18 observations, as the original inline ordering did.
+struct RaceHandles {
+    writer: Arc<RemoteAdapter>,
+    core: CoreService,
+    listeners: tokio::task::JoinHandle<Vec<Arc<ConnectResponder>>>,
+}
+
+/// Close the raced session owners after the observations. Every close/settle
+/// check of the original inline flow is preserved.
+async fn close_race_handles(provider: &Provider, handles: RaceHandles) {
+    let RaceHandles {
+        writer,
+        core,
+        listeners,
+    } = handles;
+    writer.close();
+    assert!(
+        core.close().await.expect("close").cleanup_confirmed,
+        "the raced open releases its own admission"
+    );
+    let responders = tokio::time::timeout(BOUND, listeners)
+        .await
+        .expect("the two-connection listener is bounded")
+        .expect("both signed sessions completed");
+    let peers: Vec<String> = responders
+        .iter()
+        .filter_map(|responder| responder.remote_peer_id())
+        .collect();
+    assert!(
+        peers.contains(&peer_id(&CLIENT_SEED)),
+        "Core's own signed session served the call: {peers:?}"
+    );
+    assert!(
+        peers.contains(&provider.writer_peer),
+        "the independently signed writer session served the racing operation: {peers:?}"
+    );
+}
+
 /// Run the pre-CAS window and return the refused promotion; the writer's update
 /// commits between Core's validated read and the promotion.
 async fn run_writer_before_promotion_cas(
@@ -2879,7 +2920,7 @@ async fn run_writer_before_promotion_cas(
     provider: &Provider,
     character_id: &str,
     cas_record: &str,
-) -> CoreError {
+) -> (CoreError, RaceHandles) {
     let cas_probe = Arc::new(HeldBoundaryProbe::over(
         provider.inner.server(provider.directory.admission()),
         ProbeBoundary::AfterFragmentRead,
@@ -2933,28 +2974,14 @@ async fn run_writer_before_promotion_cas(
         "Core's validated read was held for the competing window"
     );
     let cas_refused = cas_refused.expect_err("the promotion loses the real provider CAS");
-    cas_writer.close();
-    assert!(
-        cas_core.close().await.expect("close").cleanup_confirmed,
-        "the raced open releases its own admission"
-    );
-    let cas_responders = tokio::time::timeout(BOUND, cas_listeners)
-        .await
-        .expect("the two-connection listener is bounded")
-        .expect("both signed sessions completed");
-    let cas_peers: Vec<String> = cas_responders
-        .iter()
-        .filter_map(|responder| responder.remote_peer_id())
-        .collect();
-    assert!(
-        cas_peers.contains(&peer_id(&CLIENT_SEED)),
-        "Core's own signed session served the call: {cas_peers:?}"
-    );
-    assert!(
-        cas_peers.contains(&provider.writer_peer),
-        "the independently signed writer session served the competing update: {cas_peers:?}"
-    );
-    cas_refused
+    (
+        cas_refused,
+        RaceHandles {
+            writer: cas_writer,
+            core: cas_core,
+            listeners: cas_listeners,
+        },
+    )
 }
 
 /// The refused promotion is the real provider CAS, and neither provider nor D18
@@ -3022,7 +3049,10 @@ async fn run_writer_after_promotion_commit(
     provider: &Provider,
     character_id: &str,
     commit_record: &str,
-) -> nexus_contracts::generated::daemon_api::characters::memory::promote_character_fragment_response::PromoteCharacterFragmentResponse{
+) -> (
+    nexus_contracts::generated::daemon_api::characters::memory::promote_character_fragment_response::PromoteCharacterFragmentResponse,
+    RaceHandles,
+){
     let commit_probe = Arc::new(HeldBoundaryProbe::over(
         provider.inner.server(provider.directory.admission()),
         ProbeBoundary::AfterPromoteCommit,
@@ -3078,28 +3108,14 @@ async fn run_writer_after_promotion_commit(
         "the committed promotion response was held for the competing window"
     );
     let promoted = commit_result.expect("the committed promotion answers truthfully");
-    commit_writer.close();
-    assert!(
-        commit_core.close().await.expect("close").cleanup_confirmed,
-        "the committed open releases its own admission"
-    );
-    let commit_responders = tokio::time::timeout(BOUND, commit_listeners)
-        .await
-        .expect("the two-connection listener is bounded")
-        .expect("both signed sessions completed");
-    let commit_peers: Vec<String> = commit_responders
-        .iter()
-        .filter_map(|responder| responder.remote_peer_id())
-        .collect();
-    assert!(
-        commit_peers.contains(&peer_id(&CLIENT_SEED)),
-        "Core's own signed session served the call: {commit_peers:?}"
-    );
-    assert!(
-        commit_peers.contains(&provider.writer_peer),
-        "the independently signed writer session served the rewrite: {commit_peers:?}"
-    );
-    promoted
+    (
+        promoted,
+        RaceHandles {
+            writer: commit_writer,
+            core: commit_core,
+            listeners: commit_listeners,
+        },
+    )
 }
 
 /// The committed promotion answers truthfully: cleared placement, retained step,

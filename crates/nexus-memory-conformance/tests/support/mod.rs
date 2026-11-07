@@ -30,8 +30,8 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -61,7 +61,7 @@ use spoke_connect::remote::{
     connect_remote_adapter, connect_responder, ConnectResponder, ConnectResponderOptions,
     ConnectResponderState, MemoryPortService, RemoteAdapter, RemoteAdapterError,
     RemoteAdapterOptions, RemoteIdentity, RemoteMemoryService, RemoteServePorts,
-    RemoteServePortsComposite, Transport,
+    RemoteServePortsComposite, Transport, TransportError,
 };
 use spoke_operations::spoke_schemas::connect::{ConnectHello, ConnectSession};
 use spoke_operations::spoke_schemas::{
@@ -330,21 +330,75 @@ pub async fn open_endpoint(
         .expect("the endpoint establishes with the published host key")
 }
 
+/// A real client transport that only forwards to the real `WsTransport` and
+/// records whether an inbound envelope (the signed responder hello) arrived.
+struct ObservedTransport {
+    inner: Arc<dyn Transport>,
+    received_inbound: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl Transport for ObservedTransport {
+    async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
+        self.inner.send(envelope).await
+    }
+
+    async fn recv(&self) -> Result<Vec<u8>, TransportError> {
+        let envelope = self.inner.recv().await?;
+        self.received_inbound.store(true, Ordering::SeqCst);
+        Ok(envelope)
+    }
+
+    async fn close(&self) -> Result<(), TransportError> {
+        self.inner.close().await
+    }
+}
+
+/// The evidence of one real typed dial attempt that failed.
+struct DialAttemptFailure {
+    error: RemoteAdapterError,
+    received_inbound: Arc<AtomicBool>,
+    client_socket: Weak<ObservedTransport>,
+}
+
 /// A real setup stage that fails before an endpoint exists. Only the SDK's
 /// signed-dial rejection is modelled; every other setup failure still panics,
 /// so an `Err` proves the signed stage was reached and rejected.
 #[derive(Debug)]
 enum EndpointSetupFailure {
-    /// The SDK's own dial error from signed responder-hello verification.
-    Dial(RemoteAdapterError),
+    /// The SDK's own dial error from signed responder-hello verification, with
+    /// the observation that the responder hello really arrived and both socket
+    /// owners observed by the listener side.
+    Dial {
+        attempt: DialAttemptFailure,
+        server_socket: Weak<WsTransport<tokio::net::TcpStream>>,
+    },
+}
+
+impl std::fmt::Debug for DialAttemptFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DialAttemptFailure")
+            .field("error", &self.error)
+            .field(
+                "received_inbound",
+                &self.received_inbound.load(Ordering::SeqCst),
+            )
+            .finish_non_exhaustive()
+    }
 }
 
 impl EndpointSetupFailure {
-    /// A rejected host key is the SDK's handshake classification: the dial
-    /// reached signed responder-hello verification and that verification
-    /// refused the expected key.
-    const fn is_signed_dial_rejection(&self) -> bool {
-        matches!(self, Self::Dial(RemoteAdapterError::Handshake(_)))
+    /// A rejected host key is the SDK's handshake classification after the
+    /// responder hello was really received: the dial reached signed
+    /// responder-hello verification and that verification refused the key.
+    fn is_signed_dial_rejection(&self) -> bool {
+        match self {
+            Self::Dial { attempt, .. } => {
+                attempt.received_inbound.load(Ordering::SeqCst)
+                    && matches!(attempt.error, RemoteAdapterError::Handshake(_))
+            }
+        }
     }
 }
 
@@ -376,14 +430,20 @@ async fn open_endpoint_expecting(
     .await;
     let (socket, client) = match client_side {
         Ok(Ok(established)) => established,
-        Ok(Err(failure)) => match settle_endpoint_listener(host, port).await {
-            Ok(()) => return Err(failure),
-            Err(problem) => panic!(
-                "the endpoint setup failed ({failure:?}) and its listener settlement also failed: {problem}"
-            ),
-        },
+        Ok(Err(attempt)) => {
+            let server_socket = match settle_endpoint_listener(host, port).await {
+                Ok(server_socket) => server_socket,
+                Err(problem) => panic!(
+                    "the endpoint setup failed ({attempt:?}) and its listener settlement also failed: {problem}"
+                ),
+            };
+            return Err(EndpointSetupFailure::Dial {
+                attempt,
+                server_socket,
+            });
+        }
         Err(payload) => match settle_endpoint_listener(host, port).await {
-            Ok(()) => std::panic::resume_unwind(payload),
+            Ok(_) => std::panic::resume_unwind(payload),
             Err(problem) => {
                 let original = panic_message(&*payload);
                 panic!(
@@ -392,12 +452,19 @@ async fn open_endpoint_expecting(
             }
         },
     };
-    let (_server_socket, responder) = host.await.expect("the listener task");
+    let served = host.await.expect("the listener task");
     Ok(Endpoint {
         client,
-        responder,
+        responder: served.responder,
         socket,
     })
+}
+
+/// The listener-side owners and the weak observation of the server socket.
+struct ServedEndpoint {
+    socket: Arc<dyn Transport>,
+    responder: Arc<ConnectResponder>,
+    socket_weak: Weak<WsTransport<tokio::net::TcpStream>>,
 }
 
 /// Bind the ephemeral loopback listener and serve one signed responder task.
@@ -407,7 +474,7 @@ async fn spawn_expected_endpoint_listener(
     seed: [u8; 32],
 ) -> (
     std::net::SocketAddr,
-    tokio::task::JoinHandle<(Arc<dyn Transport>, Arc<ConnectResponder>)>,
+    tokio::task::JoinHandle<ServedEndpoint>,
 ) {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
@@ -434,7 +501,9 @@ async fn spawn_expected_endpoint_listener(
         .await
         .expect("the websocket upgrade is bounded")
         .expect("websocket upgrade");
-        let socket: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+        let typed = Arc::new(WsTransport::new(ws));
+        let socket_weak = Arc::downgrade(&typed);
+        let socket: Arc<dyn Transport> = typed;
         let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
             RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None)
                 .with_memory(service),
@@ -449,18 +518,25 @@ async fn spawn_expected_endpoint_listener(
             invoke_timeout_ms: None,
         })
         .await;
-        (socket, responder)
+        ServedEndpoint {
+            socket,
+            responder,
+            socket_weak,
+        }
     });
     (addr, host)
 }
 
 /// Connect the local signed client and dial it against `expected_host_pubkey`.
+/// The allowlist is derived from that same expected key, so a wrong key passes
+/// the SDK's fail-closed precheck and reaches signed responder-hello
+/// verification; the observed transport records that the hello really arrived.
 async fn dial_expected_endpoint(
     addr: std::net::SocketAddr,
     seed: [u8; 32],
     host_id: &str,
     expected_host_pubkey: [u8; 32],
-) -> Result<(Arc<dyn Transport>, Arc<RemoteAdapter>), EndpointSetupFailure> {
+) -> Result<(Arc<dyn Transport>, Arc<RemoteAdapter>), DialAttemptFailure> {
     let (ws, _response) = tokio::time::timeout(
         BOUND,
         tokio_tungstenite::connect_async(format!("ws://{addr}")),
@@ -468,21 +544,32 @@ async fn dial_expected_endpoint(
     .await
     .expect("the localhost websocket connect is bounded")
     .expect("connect the localhost websocket");
-    let socket: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let received_inbound = Arc::new(AtomicBool::new(false));
+    let inner: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let observed = Arc::new(ObservedTransport {
+        inner,
+        received_inbound: Arc::clone(&received_inbound),
+    });
+    let client_socket = Arc::downgrade(&observed);
+    let expected_peer = derive_peer_id_from_ed25519_pubkey(&expected_host_pubkey);
     let dialed = connect_remote_adapter(RemoteAdapterOptions {
-        transport: Arc::clone(&socket),
+        transport: Arc::clone(&observed) as Arc<dyn Transport>,
         local_identity: RemoteIdentity { seed },
         local_manifest: manifest(&format!("{host_id}-client")),
         remote_pubkey: expected_host_pubkey,
-        allowlist: vec![peer_id(&HOST_SEED)],
+        allowlist: vec![expected_peer],
         invoke_timeout_ms: None,
         capability_token: None,
     });
     let client = tokio::time::timeout(BOUND, dialed)
         .await
         .expect("the signed dial is bounded")
-        .map_err(EndpointSetupFailure::Dial)?;
-    Ok((socket, client))
+        .map_err(|error| DialAttemptFailure {
+            error,
+            received_inbound: Arc::clone(&received_inbound),
+            client_socket: client_socket.clone(),
+        })?;
+    Ok((observed as Arc<dyn Transport>, client))
 }
 
 /// Settle the exact endpoint listener task after a client-side setup failure:
@@ -490,22 +577,23 @@ async fn dial_expected_endpoint(
 /// and confirm the listening port is released. An unconfirmed join is an
 /// error, never a claimed join.
 async fn settle_endpoint_listener(
-    host: tokio::task::JoinHandle<(Arc<dyn Transport>, Arc<ConnectResponder>)>,
+    host: tokio::task::JoinHandle<ServedEndpoint>,
     port: u16,
-) -> Result<(), String> {
+) -> Result<Weak<WsTransport<tokio::net::TcpStream>>, String> {
+    let mut server_socket: Weak<WsTransport<tokio::net::TcpStream>> = Weak::new();
     host.abort();
     match tokio::time::timeout(BOUND, host).await {
-        Ok(Ok((socket, responder))) => {
+        Ok(Ok(served)) => {
             // The listener completed before the abort: close BOTH owners it
             // created (each bounded, every failure preserved) instead of
             // letting one close failure skip the other.
             let mut failures: Vec<String> = Vec::new();
-            if let Err(error) = close_responder(responder).await {
+            if let Err(error) = close_responder(served.responder).await {
                 failures.push(format!(
                     "the setup listener responder close failed: {error}"
                 ));
             }
-            match tokio::time::timeout(BOUND, socket.close()).await {
+            match tokio::time::timeout(BOUND, served.socket.close()).await {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
                     failures.push(format!("the setup listener socket close failed: {error}"));
@@ -517,6 +605,7 @@ async fn settle_endpoint_listener(
             if !failures.is_empty() {
                 return Err(failures.join("; "));
             }
+            server_socket = served.socket_weak;
         }
         Ok(Err(error)) if error.is_cancelled() => {}
         Ok(Err(error)) => return Err(format!("the setup listener task failed: {error}")),
@@ -528,7 +617,7 @@ async fn settle_endpoint_listener(
         }
     }
     match TcpListener::bind(("127.0.0.1", port)).await {
-        Ok(_) => Ok(()),
+        Ok(_) => Ok(server_socket),
         Err(error) => Err(format!(
             "the setup listener's port is not rebindable after settlement: {error}"
         )),
@@ -1718,8 +1807,23 @@ pub async fn prove_failed_endpoint_settles() {
     };
     assert!(
         failure.is_signed_dial_rejection(),
-        "the setup failed in the SDK's signed responder-hello verification, not another step: {failure:?}"
+        "the setup failed in the SDK's signed responder-hello verification after receiving the real hello, not another step: {failure:?}"
     );
+    let EndpointSetupFailure::Dial {
+        attempt,
+        server_socket,
+    } = &failure;
+    assert!(
+        attempt.received_inbound.load(Ordering::SeqCst),
+        "the real responder hello was received before its signature/identity was rejected"
+    );
+    tokio::time::timeout(BOUND, async {
+        while attempt.client_socket.upgrade().is_some() || server_socket.upgrade().is_some() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("both real socket owners are released after the failed signed setup");
     drop(service);
     close_fixture_bounded(provider)
         .await
@@ -2462,13 +2566,13 @@ impl RawSession {
         let (socket, session_id) = match client_side {
             Ok(Ok(established)) => established,
             Ok(Err(failure)) => match settle_endpoint_listener(host, port).await {
-                Ok(()) => return Err(failure),
+                Ok(_) => return Err(failure),
                 Err(problem) => panic!(
                     "the raw endpoint setup failed ({failure:?}) and its listener settlement also failed: {problem}"
                 ),
             },
             Err(payload) => match settle_endpoint_listener(host, port).await {
-                Ok(()) => std::panic::resume_unwind(payload),
+                Ok(_) => std::panic::resume_unwind(payload),
                 Err(problem) => {
                     let original = panic_message(&*payload);
                     panic!(
@@ -2477,12 +2581,12 @@ impl RawSession {
                 }
             },
         };
-        let (server_socket, responder) = host.await.expect("the listener task");
+        let served = host.await.expect("the listener task");
         Ok(Self {
             socket,
             session_id,
-            responder,
-            server_socket,
+            responder: served.responder,
+            server_socket: served.socket,
             sequence: 0,
             port,
         })

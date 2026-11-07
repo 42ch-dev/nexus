@@ -54,6 +54,33 @@ async fn recalled(actor: &Actor<'_>, selection: Value) -> Value {
         .await
 }
 
+fn sorted(mut values: Vec<String>) -> Vec<String> {
+    values.sort();
+    values
+}
+
+/// Every candidate of the subject, whatever its status.
+async fn all_candidate_ids(actor: &Actor<'_>) -> Vec<String> {
+    ids(&actor
+        .list_candidates(json!({ "subject_id": SUBJECT }))
+        .await)
+}
+
+/// Every record of the subject under `subject_all`.
+async fn all_record_ids(actor: &Actor<'_>) -> Vec<String> {
+    actor
+        .list_records(json!({
+            "subject_id": SUBJECT,
+            "selection": { "mode": "subject_all" },
+        }))
+        .await["records"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a record page names its rows"))
+        .iter()
+        .map(|record| record["record_id"].as_str().expect("record id").to_owned())
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // C. Capture, idempotency and receipts
 // ---------------------------------------------------------------------------
@@ -333,7 +360,10 @@ async fn foreign_capture_persists_nothing(matrix: &Matrix, resources: &mut Owned
     let observer = resources
         .open_observer(matrix, SUBJECT, &[], None, None, None)
         .await;
-    let captures_before = resources.receipt_ids_for(observer, "memory.capture").await;
+    let captures_before = sorted(resources.receipt_ids_for(observer, "memory.capture").await);
+    let admin = matrix.admin();
+    let candidates_before = sorted(all_candidate_ids(&admin).await);
+    let records_before = sorted(all_record_ids(&admin).await);
 
     let peer = matrix.peer();
     let denied = peer
@@ -341,7 +371,16 @@ async fn foreign_capture_persists_nothing(matrix: &Matrix, resources: &mut Owned
         .await;
     assert_eq!(error_code(&denied), "NOT_AUTHORIZED", "{denied}");
     assert_eq!(retry_class(&denied), "terminal");
-    let admin = matrix.admin();
+    assert_eq!(
+        sorted(all_candidate_ids(&admin).await),
+        candidates_before,
+        "the refused capture added no candidate of any status"
+    );
+    assert_eq!(
+        sorted(all_record_ids(&admin).await),
+        records_before,
+        "the refused capture added no record"
+    );
     assert_eq!(ids(&pending(&admin).await), [] as [std::string::String; 0]);
     let recalled_page = recalled(&admin, json!({ "mode": "subject_all" })).await;
     assert_eq!(
@@ -350,13 +389,13 @@ async fn foreign_capture_persists_nothing(matrix: &Matrix, resources: &mut Owned
         "{recalled_page}"
     );
     assert_eq!(
-        resources.receipt_ids_for(observer, "memory.capture").await,
+        sorted(resources.receipt_ids_for(observer, "memory.capture").await),
         captures_before,
         "the refused foreign capture created no durable receipt for its key"
     );
 
     // The refused request consumed nothing: once coverage exists the SAME key
-    // commits and owns the one new durable receipt.
+    // commits and owns exactly the one new durable receipt and candidate.
     let peer_id = matrix.peer_principal().principal_id.clone();
     admin
         .grant(grant_body("capture", &peer_id, "k-c025-grant"))
@@ -368,15 +407,25 @@ async fn foreign_capture_persists_nothing(matrix: &Matrix, resources: &mut Owned
         is_committed(&admitted),
         "the refusal never consumed the original key: {admitted}"
     );
-    let captures_after = resources.receipt_ids_for(observer, "memory.capture").await;
+    let mut candidates_expected = candidates_before.clone();
+    candidates_expected.extend(candidate_ids(&admitted));
     assert_eq!(
-        captures_after.len(),
-        captures_before.len() + 1,
-        "the admitted retry created exactly one durable receipt: {captures_after:?}"
+        sorted(all_candidate_ids(&admin).await),
+        sorted(candidates_expected),
+        "the retry contributed exactly its own candidate"
     );
-    assert!(
-        captures_after.contains(&receipt_id(&admitted).to_owned()),
-        "the durable receipt is the committed retry's: {captures_after:?}"
+    assert_eq!(
+        sorted(all_record_ids(&admin).await),
+        records_before,
+        "the capture retry created no record"
+    );
+    let receipts_after = sorted(resources.receipt_ids_for(observer, "memory.capture").await);
+    let mut receipts_expected = captures_before.clone();
+    receipts_expected.push(receipt_id(&admitted).to_owned());
+    assert_eq!(
+        receipts_after,
+        sorted(receipts_expected),
+        "the exact durable receipt set is the prior set plus the committed retry: {receipts_after:?}"
     );
     resources
         .close_observer(observer)
@@ -418,7 +467,9 @@ async fn capture_to_fenced_target_has_no_effect(matrix: &Matrix, resources: &mut
     let observer = resources
         .open_observer(matrix, SUBJECT, &[], None, None, None)
         .await;
-    let captures_before = resources.receipt_ids_for(observer, "memory.capture").await;
+    let captures_before = sorted(resources.receipt_ids_for(observer, "memory.capture").await);
+    let candidates_before = sorted(all_candidate_ids(&admin).await);
+    let records_before = sorted(all_record_ids(&admin).await);
     let denied = admin
         .capture(capture_body("k-c026", TEXT, &context_scope(CONTEXT)))
         .await;
@@ -431,6 +482,16 @@ async fn capture_to_fenced_target_has_no_effect(matrix: &Matrix, resources: &mut
     assert_eq!(retry_class(&denied), "terminal");
 
     // Protocol-visible absence of every effect the refused write could have had.
+    assert_eq!(
+        sorted(all_candidate_ids(&admin).await),
+        candidates_before,
+        "the fenced refusal added no candidate of any status"
+    );
+    assert_eq!(
+        sorted(all_record_ids(&admin).await),
+        records_before,
+        "the fenced refusal added no record"
+    );
     assert_eq!(ids(&pending(&admin).await), [] as [std::string::String; 0]);
     let recalled_page = recalled(&admin, json!({ "mode": "subject_all" })).await;
     assert_eq!(
@@ -439,13 +500,13 @@ async fn capture_to_fenced_target_has_no_effect(matrix: &Matrix, resources: &mut
         "{recalled_page}"
     );
     assert_eq!(
-        resources.receipt_ids_for(observer, "memory.capture").await,
+        sorted(resources.receipt_ids_for(observer, "memory.capture").await),
         captures_before,
         "the fenced refusal created no durable receipt for its key"
     );
 
     // Clearing the fence leaves the key unconsumed: the SAME key now commits
-    // and owns the one new durable receipt.
+    // and owns exactly the one new durable receipt and candidate.
     admin
         .fence_subject(
             SUBJECT,
@@ -462,15 +523,25 @@ async fn capture_to_fenced_target_has_no_effect(matrix: &Matrix, resources: &mut
         is_committed(&admitted),
         "the fenced refusal never consumed the original key: {admitted}"
     );
-    let captures_after = resources.receipt_ids_for(observer, "memory.capture").await;
+    let mut candidates_expected = candidates_before.clone();
+    candidates_expected.extend(candidate_ids(&admitted));
     assert_eq!(
-        captures_after.len(),
-        captures_before.len() + 1,
-        "the admitted retry created exactly one durable receipt: {captures_after:?}"
+        sorted(all_candidate_ids(&admin).await),
+        sorted(candidates_expected),
+        "the retry contributed exactly its own candidate"
     );
-    assert!(
-        captures_after.contains(&receipt_id(&admitted).to_owned()),
-        "the durable receipt is the committed retry's: {captures_after:?}"
+    assert_eq!(
+        sorted(all_record_ids(&admin).await),
+        records_before,
+        "the capture retry created no record"
+    );
+    let receipts_after = sorted(resources.receipt_ids_for(observer, "memory.capture").await);
+    let mut receipts_expected = captures_before.clone();
+    receipts_expected.push(receipt_id(&admitted).to_owned());
+    assert_eq!(
+        receipts_after,
+        sorted(receipts_expected),
+        "the exact durable receipt set is the prior set plus the committed retry: {receipts_after:?}"
     );
     resources
         .close_observer(observer)
