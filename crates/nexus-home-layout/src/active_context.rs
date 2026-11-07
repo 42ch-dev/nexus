@@ -79,7 +79,10 @@ impl CliConfigSnapshot {
             match serde_json::from_str::<Self>(&text) {
                 Ok(cfg) => {
                     let toml_str = toml::to_string_pretty(&cfg)?;
-                    std::fs::write(&toml_path, toml_str)?;
+                    // Publish atomically: a concurrent reader (including the
+                    // lock-free `ReadOnly` snapshot, I-000291) must never see a
+                    // truncated `config.toml` from this legacy migration.
+                    crate::config_lock::publish_document(nexus_root, &toml_str)?;
                     std::fs::rename(&json_path, nexus_root.join("config.json.migrated"))?;
                     return Ok(cfg);
                 }
@@ -172,10 +175,7 @@ pub fn read_memory_provider_config(
         return Ok(None);
     };
     table.clone().try_into().map(Some).map_err(|error| {
-        anyhow::anyhow!(
-            "invalid [memory_provider] in {}: {error}",
-            path.display()
-        )
+        anyhow::anyhow!("invalid [memory_provider] in {}: {error}", path.display())
     })
 }
 

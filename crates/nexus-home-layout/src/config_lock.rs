@@ -14,6 +14,14 @@
 //! The protocol lives here — the lowest crate every writer can depend on —
 //! rather than in `nexus-core` (which depends on this crate): the startup
 //! writer needs it too.
+//!
+//! I-000291: mutual exclusion alone is not enough. A reader that could not
+//! create the lock (a readable but not writable `.nexus42`) used to fail the
+//! whole open, while an in-place `std::fs::write` exposed a truncated document
+//! to any reader that skipped the lock. [`publish_document`] is the second half
+//! of the contract: every whole-document writer replaces `config.toml` by an
+//! atomic rename, so a reader always opens one complete version — the old or
+//! the new one — and needs no directory write of its own.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -72,26 +80,54 @@ fn release(path: &Path, token: &str) {
     }
 }
 
-/// Take the lock for a snapshot read, or establish that no writer can take it.
+/// Publish the complete `config.toml` document atomically.
 ///
-/// I-000291: a `ReadOnly` open must still work on an already-provisioned home
-/// whose `.nexus42` is readable but not writable. Every writer's FIRST step is
-/// this same exclusive create, so a create the filesystem denies
-/// (`EACCES`/`EPERM`) means no protocol writer can enter its read-modify-write
-/// on that home, and the document cannot be rewritten while it is read.
+/// I-000291: readers must see one whole document without taking the lock or
+/// writing anything, so an already-provisioned but not writable `.nexus42` can
+/// still serve a `ReadOnly` open. Writing a sibling temporary file and renaming
+/// it over `config.toml` makes the replacement atomic: a reader opens either
+/// the previous complete version or the new one, never a truncated document
+/// that would read as "no `[memory_provider]`" (the implicit local default).
 ///
-/// `Ok(None)` is that proven no-writer case. Every other acquisition error is
-/// returned unchanged: the lock is never skipped because it is busy, stale or
-/// unreadable.
+/// The temporary file lives in the same directory (same filesystem, so the
+/// rename cannot degrade into a copy) and inherits the current document's mode
+/// when one exists, so an existing owner/mode is preserved instead of being
+/// silently loosened. The caller still holds [`acquire`]: publication replaces
+/// in-place truncation, it does not replace writer exclusion (read-modify-write
+/// lost-update safety).
 ///
 /// # Errors
-/// Every acquisition error except a write-denied exclusive create.
-pub fn acquire_for_read(nexus_home: &Path) -> std::io::Result<Option<ConfigLock>> {
-    match acquire(nexus_home) {
-        Ok(lock) => Ok(Some(lock)),
-        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Ok(None),
-        Err(error) => Err(error),
+/// The I/O error that prevented the write, sync or rename. The temporary file
+/// is removed on every failure path.
+pub fn publish_document(nexus_home: &Path, contents: &str) -> std::io::Result<()> {
+    let target = nexus_home.join("config.toml");
+    let temp = nexus_home.join(format!(".config.toml.{}.tmp", uuid::Uuid::new_v4()));
+    // A new document keeps `std::fs::write`'s creation mode (0666 under the
+    // umask); an existing document keeps its own mode.
+    let existing_mode = std::fs::metadata(&target)
+        .ok()
+        .map(|meta| meta.permissions());
+
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
+        if let Some(mode) = existing_mode {
+            std::fs::set_permissions(&temp, mode)?;
+        }
+        file.write_all(contents.as_bytes())?;
+        // Complete the bytes before the rename publishes them: a crash after
+        // the rename must not leave a shorter, empty-looking document.
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temp, &target)
+    })();
+
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
     }
+    result
 }
 
 #[cfg(test)]
@@ -454,75 +490,43 @@ mod tests {
         );
     }
 
-    /// I-000291: a home whose directory denies the exclusive create also denies
-    /// every writer's first step, so the read path may proceed without the lock
-    /// instead of failing the whole read-only open.
+    /// I-000291: the publication half replaces the whole document by an atomic
+    /// rename, keeps the existing mode instead of loosening it, and leaves no
+    /// temporary file behind for a reader to mistake for the document.
     #[cfg(unix)]
     #[test]
-    fn a_read_snapshot_proceeds_only_when_the_home_denies_writer_entry() {
+    fn a_published_document_replaces_the_whole_file_and_keeps_its_mode() {
         use std::os::unix::fs::PermissionsExt as _;
 
         let tmp = tempfile::tempdir().expect("temp home");
         let home = tmp.path().to_path_buf();
         std::fs::create_dir_all(&home).expect("home");
-        std::fs::write(config_path(&home), "active_creator_id = \"ctr_kept\"\n").expect("config");
-        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o555)).expect("seal");
+        let path = config_path(&home);
+        std::fs::write(&path, "active_creator_id = \"ctr_old\"\n").expect("old document");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).expect("mode");
 
-        // The writer cannot enter its read-modify-write here...
-        let writer = super::acquire(&home).err();
-        // ...which is exactly the case the read path may skip the lock for.
-        let reader = super::acquire_for_read(&home);
+        super::publish_document(&home, "active_creator_id = \"ctr_new\"\n").expect("publish");
 
-        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).expect("unseal");
-
-        let writer_error = writer.expect("a writer cannot enter a write-denied home");
-        assert_eq!(writer_error.kind(), std::io::ErrorKind::PermissionDenied);
-        assert!(
-            reader.expect("the read path proceeds").is_none(),
-            "the read path must not hold a lock it could not create"
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("published document"),
+            "active_creator_id = \"ctr_new\"\n"
         );
-        assert!(!lock_path(&home).exists(), "no lock was created");
-        assert!(
-            std::fs::read_to_string(config_path(&home))
-                .expect("config")
-                .contains("ctr_kept"),
-            "the readable document is untouched"
+        let mode = std::fs::metadata(&path)
+            .expect("published metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o640, "the existing document mode is preserved");
+        let mut entries: Vec<_> = std::fs::read_dir(&home)
+            .expect("home listing")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        entries.sort();
+        assert_eq!(
+            entries,
+            ["config.toml"],
+            "only the published document remains"
         );
-    }
-
-    /// The read path only skips the lock for a write-denied create; a live
-    /// holder still blocks it, exactly like a writer.
-    #[test]
-    fn a_read_snapshot_waits_for_a_live_holder() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::Arc;
-
-        let tmp = tempfile::tempdir().expect("temp home");
-        let home = tmp.path().to_path_buf();
-        let lock = lock_path(&home);
-        std::fs::create_dir_all(&home).expect("home");
-        std::fs::write(&lock, format!("{} foreign\n", std::process::id())).expect("foreign lock");
-
-        let done = Arc::new(AtomicBool::new(false));
-        let reader = {
-            let done = Arc::clone(&done);
-            let home = home.clone();
-            std::thread::spawn(move || {
-                let guard = super::acquire_for_read(&home).expect("read acquisition");
-                assert!(guard.is_some(), "a held lock is not a write-denied home");
-                done.store(true, Ordering::SeqCst);
-            })
-        };
-
-        std::thread::sleep(Duration::from_millis(200));
-        assert!(
-            !done.load(Ordering::SeqCst),
-            "the snapshot read must wait for a live holder, not skip it"
-        );
-
-        std::fs::remove_file(&lock).expect("release foreign lock");
-        reader.join().expect("reader thread");
-        assert!(done.load(Ordering::SeqCst));
-        assert!(!lock.exists(), "the reader released its own lock");
     }
 }

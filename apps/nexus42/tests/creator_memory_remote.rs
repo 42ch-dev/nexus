@@ -88,14 +88,14 @@ fn run_cli_with(home: &Path, args: &[&str], bound: Duration) -> Result<Output, S
             Err(error) => {
                 return Err(settle_failed_child(
                     &mut child,
-                    format!("wait nexus42 {args:?}: {error}"),
+                    &format!("wait nexus42 {args:?}: {error}"),
                 ));
             }
         }
         if Instant::now() >= deadline {
             return Err(settle_failed_child(
                 &mut child,
-                format!("nexus42 {args:?} exceeded {bound:?}"),
+                &format!("nexus42 {args:?} exceeded {bound:?}"),
             ));
         }
         std::thread::sleep(Duration::from_millis(25));
@@ -126,7 +126,7 @@ fn run_cli_with(home: &Path, args: &[&str], bound: Duration) -> Result<Output, S
 /// `wait()`. `kill` and every later `try_wait` are checked; the message never
 /// claims "reaped" unless an exit status was actually observed, and an OS
 /// failure is preserved verbatim.
-fn settle_failed_child(child: &mut std::process::Child, context: String) -> String {
+fn settle_failed_child(child: &mut std::process::Child, context: &str) -> String {
     let kill_error = child.kill().err().map(|error| error.to_string());
     let deadline = Instant::now() + SETTLE_BOUND;
     let mut exit_seen = false;
@@ -193,7 +193,14 @@ async fn c_111_creator_cli_uses_pinned_provider_local() {
     cli_ok(
         home,
         &[
-            "creator", "memory", "create", SLUG, "--kind", KIND, "--content", BODY,
+            "creator",
+            "memory",
+            "create",
+            SLUG,
+            "--kind",
+            KIND,
+            "--content",
+            BODY,
         ],
     );
 
@@ -201,10 +208,20 @@ async fn c_111_creator_cli_uses_pinned_provider_local() {
     // long-term memory file: the provider owns the record projection.
     let store = provider_store(home, creator);
     let projections = walk_markdown(&store);
-    assert_eq!(projections.len(), 1, "one provider record projection: {projections:?}");
+    assert_eq!(
+        projections.len(),
+        1,
+        "one provider record projection: {projections:?}"
+    );
     let published = std::fs::read_to_string(store.join(&projections[0])).expect("readable");
-    assert!(published.contains(BODY), "the projection carries the body: {published}");
-    assert!(published.contains("kind:"), "the projection has kind frontmatter");
+    assert!(
+        published.contains(BODY),
+        "the projection carries the body: {published}"
+    );
+    assert!(
+        published.contains("kind:"),
+        "the projection has kind frontmatter"
+    );
     assert!(
         !legacy_memory_dir(home, creator).exists(),
         "the CLI writes no legacy long-term memory file"
@@ -213,12 +230,21 @@ async fn c_111_creator_cli_uses_pinned_provider_local() {
     let list = stdout(&cli_ok(home, &["creator", "memory", "list"]));
     assert!(list.contains(SLUG), "list shows the provider row: {list}");
     assert!(list.contains(KIND), "list shows the kind: {list}");
-    assert!(list.contains("1 memories"), "list counts one provider row: {list}");
+    assert!(
+        list.contains("1 memories"),
+        "list counts one provider row: {list}"
+    );
 
     let show = stdout(&cli_ok(home, &["creator", "memory", "show", SLUG]));
     assert!(show.contains(&format!("slug: {SLUG}")), "show: {show}");
-    assert!(show.contains(&format!("memory_kind: {KIND}")), "show: {show}");
-    assert!(show.contains("memory_id: "), "show carries the provider id: {show}");
+    assert!(
+        show.contains(&format!("memory_kind: {KIND}")),
+        "show: {show}"
+    );
+    assert!(
+        show.contains("memory_id: "),
+        "show carries the provider id: {show}"
+    );
     assert!(show.contains(BODY), "show serves the provider body: {show}");
 }
 
@@ -337,12 +363,7 @@ mod remote {
 
     #[async_trait]
     impl RemoteMemoryService for CountingService {
-        async fn invoke(
-            &self,
-            peer_id: &str,
-            op: &str,
-            payload: Value,
-        ) -> SpokeResult<Value> {
+        async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
             match op {
                 "memory.records.list" => {
                     self.lists.fetch_add(1, Ordering::SeqCst);
@@ -519,10 +540,7 @@ mod remote {
                     invoke_timeout_ms: Some(5_000),
                 })
                 .await;
-                responders
-                    .lock()
-                    .expect("responder list")
-                    .push(responder);
+                responders.lock().expect("responder list").push(responder);
             }
         })
     }
@@ -530,9 +548,7 @@ mod remote {
     /// Close every responder through the SDK's supported `close()` and wait,
     /// bounded, for its public state to report `Closed`. The SDK's internal
     /// runner task is not publicly joinable (disclosed in the report).
-    async fn close_responders(
-        responders: &[Arc<ConnectResponder>],
-    ) -> Result<(), String> {
+    async fn close_responders(responders: &[Arc<ConnectResponder>]) -> Result<(), String> {
         for responder in responders {
             responder.close();
         }
@@ -567,8 +583,7 @@ mod remote {
                 Err(_) => failures.push("accept task did not settle after abort".to_string()),
             }
         }
-        let list: Vec<Arc<ConnectResponder>> =
-            responders.lock().expect("responder list").clone();
+        let list: Vec<Arc<ConnectResponder>> = responders.lock().expect("responder list").clone();
         if let Err(error) = close_responders(&list).await {
             failures.push(error);
         }
@@ -677,7 +692,11 @@ mod remote {
                 .unwrap_or_else(|| panic!("the seeded fixture record id: {value}"))
                 .to_string(),
             SpokeResult::Reject(reject) => {
-                panic!("the fixture seeds its own row: {} {}", reject.code.as_str(), reject.message)
+                panic!(
+                    "the fixture seeds its own row: {} {}",
+                    reject.code.as_str(),
+                    reject.message
+                )
             }
         }
     }
@@ -700,8 +719,7 @@ mod remote {
             .provision_operator_admin(&principal_id)
             .await
             .expect("operator provisions the admin grant");
-        let directory =
-            Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id));
+        let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id));
 
         let actor = DirectActor::new().await;
         let home = actor.home().to_path_buf();
@@ -710,9 +728,7 @@ mod remote {
 
         // The fixture's real service, wrapped only to count its record list/get
         // boundary. The seeded row exists in no local store.
-        let counting = Arc::new(CountingService::new(
-            provider.server(directory.admission()),
-        ));
+        let counting = Arc::new(CountingService::new(provider.server(directory.admission())));
         let service: Arc<dyn RemoteMemoryService> = counting.clone();
         let seeded_id = seed_fixture_row(&service, &client_peer, &space_id, &creator).await;
 
@@ -790,13 +806,22 @@ mod remote {
 
             let shown =
                 stdout(&cli_ok_remote(&home, &["creator", "memory", "show", SEED_SLUG]).await?);
-            ensure!(shown.contains(&format!("slug: {SEED_SLUG}")), "show: {shown}");
+            ensure!(
+                shown.contains(&format!("slug: {SEED_SLUG}")),
+                "show: {shown}"
+            );
             ensure!(
                 shown.contains(&format!("memory_id: {SEED_MEMORY_ID}")),
                 "show: {shown}"
             );
-            ensure!(shown.contains(SEED_BODY), "the fixture-only body is served: {shown}");
-            ensure!(!shown.contains(TRAP_BODY), "no local trap body is served: {shown}");
+            ensure!(
+                shown.contains(SEED_BODY),
+                "the fixture-only body is served: {shown}"
+            );
+            ensure!(
+                !shown.contains(TRAP_BODY),
+                "no local trap body is served: {shown}"
+            );
             ensure!(
                 counting.gets() > 0 || counting.lists() > 1,
                 "the CLI's show crossed the remote provider's record read boundary"
@@ -807,14 +832,30 @@ mod remote {
             cli_ok_remote(
                 &home,
                 &[
-                    "creator", "memory", "create", SLUG, "--kind", KIND, "--content", BODY,
+                    "creator",
+                    "memory",
+                    "create",
+                    SLUG,
+                    "--kind",
+                    KIND,
+                    "--content",
+                    BODY,
                 ],
             )
             .await?;
             let listed = stdout(&cli_ok_remote(&home, &["creator", "memory", "list"]).await?);
-            ensure!(listed.contains(SEED_SLUG), "the seeded row survives: {listed}");
-            ensure!(listed.contains(SLUG), "the CLI-created remote row is listed: {listed}");
-            ensure!(!listed.contains(TRAP_BODY), "no local trap body in list: {listed}");
+            ensure!(
+                listed.contains(SEED_SLUG),
+                "the seeded row survives: {listed}"
+            );
+            ensure!(
+                listed.contains(SLUG),
+                "the CLI-created remote row is listed: {listed}"
+            );
+            ensure!(
+                !listed.contains(TRAP_BODY),
+                "no local trap body in list: {listed}"
+            );
 
             ensure!(
                 !provider_store(&home, &creator).exists(),
@@ -924,7 +965,10 @@ mod remote {
         }
         .await;
         assert!(accept_wait.is_err(), "the accept wait must expire");
-        assert!(accept_task.is_some(), "the owned handle survives the timeout");
+        assert!(
+            accept_task.is_some(),
+            "the owned handle survives the timeout"
+        );
         let cleanup = teardown(&mut accept_task, &responders).await;
         assert!(
             cleanup.is_ok(),
@@ -998,7 +1042,9 @@ mod remote {
             match accepted {
                 Ok(Ok(())) => {}
                 Ok(Err(_)) => {
-                    return Err("the holder channel closed before any accepted connection".to_string());
+                    return Err(
+                        "the holder channel closed before any accepted connection".to_string()
+                    );
                 }
                 Err(_) => {
                     return Err("the real CLI never reached the held TCP handshake".to_string());
@@ -1126,7 +1172,14 @@ async fn c_111_remote_selection_without_client_refuses_and_never_reads_local() {
     cli_ok(
         home,
         &[
-            "creator", "memory", "create", SLUG, "--kind", KIND, "--content", BODY,
+            "creator",
+            "memory",
+            "create",
+            SLUG,
+            "--kind",
+            KIND,
+            "--content",
+            BODY,
         ],
     );
     assert_eq!(walk_markdown(&provider_store(home, creator)).len(), 1);
@@ -1153,8 +1206,8 @@ async fn c_111_remote_selection_without_client_refuses_and_never_reads_local() {
             "12D3KooWPeer",
         ],
     );
-    let refused = run_cli(home, &["creator", "memory", "list"])
-        .unwrap_or_else(|error| panic!("{error}"));
+    let refused =
+        run_cli(home, &["creator", "memory", "list"]).unwrap_or_else(|error| panic!("{error}"));
     assert!(!refused.status.success(), "the remote pin refuses");
     let err = stderr(&refused);
     assert!(err.contains("memory_remote_disabled"), "refusal: {err}");

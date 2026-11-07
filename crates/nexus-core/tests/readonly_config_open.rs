@@ -44,13 +44,31 @@ fn remote_selection() -> MemoryProviderSelection {
 /// The refusal a stored remote selection produces in the mode this build
 /// selects. Its presence proves the open read the *remote* table: the implicit
 /// local default would have opened successfully instead.
-fn is_remote_open_refusal(error: &CoreError) -> bool {
-    match error {
-        CoreError::Coded { code, .. } => {
-            code == "memory_remote_disabled" || code == "memory_credential_invalid"
-        }
-        _ => false,
+///
+/// Feature on: the real signed provider factory runs and refuses at its
+/// credential loader (these homes hold no credential file) — the
+/// `memory_remote_disabled` static branch is not taken.
+/// Feature off: the static `memory_remote_disabled` refusal is the behavior.
+const fn remote_refusal_code() -> &'static str {
+    #[cfg(feature = "memory-remote")]
+    {
+        "memory_credential_invalid"
     }
+    #[cfg(not(feature = "memory-remote"))]
+    {
+        "memory_remote_disabled"
+    }
+}
+
+fn assert_remote_open_refusal(error: &CoreError) {
+    let CoreError::Coded { code, .. } = error else {
+        panic!("expected the stored remote refusal, got {error:?}");
+    };
+    assert_eq!(
+        code,
+        remote_refusal_code(),
+        "the open read the stored remote table (not the local default)"
+    );
 }
 
 struct Home {
@@ -167,19 +185,48 @@ async fn a_readonly_open_still_refuses_a_malformed_provider_table() {
     let error = opened
         .err()
         .expect("a malformed provider table is not local");
+    let CoreError::Internal { category } = &error else {
+        panic!("a malformed table is an internal config fault, got {error:?}");
+    };
     assert!(
-        !format!("{error:?}").contains("config_lock"),
-        "the read-only open failed on the lock, not the table: {error:?}"
-    );
-    assert!(
-        !matches!(error, CoreError::Coded { ref code, .. } if code == "memory_remote_disabled"),
-        "a malformed table must be refused before the provider mode: {error:?}"
+        category.starts_with("config_load:"),
+        "the snapshot really read the table: {error:?}"
     );
 }
 
+/// `memory: Some(..)` never reads the provider table, so a read-only home with
+/// a malformed table still serves the explicit override — and the override
+/// needs no home write either.
+#[tokio::test]
+async fn an_explicit_override_never_reads_the_provider_table_on_a_read_only_home() {
+    let home = Home::new(None);
+    home.provision().await;
+    home.write_config(Some(&malformed_provider_table()));
+
+    let sealed = home.seal_nexus_home();
+    let opened = CoreService::open(CoreOpenOptions {
+        user_home: home.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+        memory: Some(MemoryProviderSelection::Local),
+    })
+    .await;
+    drop(sealed);
+
+    let core = opened.expect("the explicit override does not read the malformed table");
+    let provider = core
+        .memory_provider_for_test()
+        .expect("the explicit local selection is pinned");
+    assert!(
+        !provider.is_writable(),
+        "the override keeps the read-only access"
+    );
+    core.close().await.expect("close");
+}
+
 /// A legitimate writer/open overlap never pins the local default while the disk
-/// document keeps the remote table: the open joins the writer's coordination
-/// instead of reading a truncated rewrite as "no table".
+/// document keeps the remote table: every publication is a whole document, so
+/// the open reads the stored remote selection instead of a truncated rewrite
+/// that would look like "no table".
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_writer_overlap_never_pins_the_local_default() {
     let home = Home::new(None);
@@ -189,7 +236,7 @@ async fn a_writer_overlap_never_pins_the_local_default() {
         .set_memory_provider_selection(&remote_selection())
         .expect("seed the remote selection");
 
-    for round in 0..25 {
+    for round in 0..40 {
         let writer_home = home.user_home.clone();
         let rewrite = std::thread::spawn(move || {
             let service = CoreHomeService::open(writer_home).expect("home service");
@@ -207,10 +254,18 @@ async fn a_writer_overlap_never_pins_the_local_default() {
                     "round {round}: the open pinned the local default, not the stored remote table"
                 );
             }
-            Err(error) => assert!(
-                is_remote_open_refusal(&error),
-                "round {round}: expected the stored remote refusal, got {error:?}"
-            ),
+            Err(error) => assert_remote_open_refusal(&error),
         }
     }
+
+    // Every failed open above released its own claim: after the overlap the home
+    // still serves a plain local open, so a leaked admission cannot hide an
+    // accidental Local pin either.
+    writer
+        .clear_memory_provider_selection()
+        .expect("clear the stored selection");
+    let core = CoreService::open(home.options(CoreAccess::ReadOnly))
+        .await
+        .expect("a clean local open after the overlap");
+    core.close().await.expect("close");
 }

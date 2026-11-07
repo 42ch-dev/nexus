@@ -61,7 +61,11 @@ fn use_local_then_show_persists_explicit_local() {
         .args(["creator", "memory", "provider", "use", "local"])
         .output()
         .expect("run provider use local");
-    assert!(use_output.status.success(), "stderr: {}", stderr(&use_output));
+    assert!(
+        use_output.status.success(),
+        "stderr: {}",
+        stderr(&use_output)
+    );
 
     let text = std::fs::read_to_string(config_path(&home)).expect("config written");
     assert!(text.contains("[memory_provider]"), "{text}");
@@ -71,7 +75,11 @@ fn use_local_then_show_persists_explicit_local() {
         .args(["creator", "memory", "provider", "show"])
         .output()
         .expect("run provider show");
-    assert!(show_output.status.success(), "stderr: {}", stderr(&show_output));
+    assert!(
+        show_output.status.success(),
+        "stderr: {}",
+        stderr(&show_output)
+    );
     assert!(
         stdout(&show_output).contains("memory_provider: local"),
         "stdout: {}",
@@ -141,7 +149,13 @@ fn use_remote_persists_non_secret_selection_and_preserves_other_keys() {
         stderr(&show_output)
     );
     let shown = stdout(&show_output);
-    for expected in ["memory_provider: remote", SPACE_ID, CREDENTIAL_ID, PUBKEY_HEX, PEER] {
+    for expected in [
+        "memory_provider: remote",
+        SPACE_ID,
+        CREDENTIAL_ID,
+        PUBKEY_HEX,
+        PEER,
+    ] {
         assert!(shown.contains(expected), "missing {expected}: {shown}");
     }
 }
