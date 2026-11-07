@@ -115,6 +115,45 @@ fn missing_memory_provider_table_selects_local() {
     assert!(config_path(home.path()).exists());
 }
 
+/// I-000304: only a genuinely absent `config.toml` is the implicit local
+/// default. A metadata failure must reach the caller as an error, so a remote
+/// configured home can never silently fall through to the local provider.
+#[test]
+fn unreadable_provider_config_is_an_error_not_the_local_default() {
+    let home = home();
+
+    // Genuine absence stays the documented default.
+    assert!(read_memory_provider_config(&nexus_dir(home.path()))
+        .expect("an absent config is not an error")
+        .is_none());
+
+    // A readable config still yields its remote selection.
+    std::fs::create_dir_all(nexus_dir(home.path())).expect("nexus dir");
+    let service = CoreHomeService::open(home.path().to_path_buf()).expect("home entry");
+    let selection = MemoryProviderSelection::Remote(remote(
+        CREDENTIAL_ID,
+        "ws://127.0.0.1:8420/memory",
+        PUBKEY_HEX,
+    ));
+    service
+        .set_memory_provider_selection(&selection)
+        .expect("write remote selection");
+    assert_eq!(read_selection(home.path()), selection);
+
+    // The config path's parent is a regular file, so metadata fails with a
+    // real non-`NotFound` error (ENOTDIR on Unix). `Path::exists()` used to
+    // fold that into "absent", which pinned Local for a config the reader
+    // could not inspect.
+    let not_a_dir = home.path().join("not-a-dir");
+    std::fs::write(&not_a_dir, "regular file").expect("parent file");
+    let error = read_memory_provider_config(&not_a_dir)
+        .expect_err("an uninspectable config must not read as absent");
+    assert!(
+        !error.to_string().is_empty(),
+        "the filesystem error reaches the caller: {error}"
+    );
+}
+
 #[test]
 fn explicit_local_selection_round_trips() {
     let home = home();
