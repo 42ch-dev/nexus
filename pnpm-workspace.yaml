@@ -8,7 +8,13 @@ packages:
 # (2026-08-19). Lowered to 720 (12h) per user decision so first-party
 # lockstep can follow spoke releases within 12h while keeping a freshness
 # gate for third-party. Defenses that remain: frozen lockfile + allowBuilds + overrides.
-minimumReleaseAge: 720
+#
+# 2026-11-07 owner decision: the freshness gate is removed entirely — installs
+# and tests must succeed without waiting on package publish age. Note this MUST
+# stay an explicit 0: deleting the key falls back to pnpm 11's default of
+# 1440 minutes (24h), which is stricter than the 720 it replaces.
+# Defenses that remain: frozen lockfile + allowBuilds + overrides.
+minimumReleaseAge: 0
 
 # pnpm 10+ reads settings (overrides, etc.) from pnpm-workspace.yaml;
 # pnpm 11 stopped reading the package.json `pnpm` field entirely.
