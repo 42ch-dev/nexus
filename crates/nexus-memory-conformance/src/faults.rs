@@ -257,7 +257,7 @@ impl FaultHold {
     /// [`FaultHoldLost::Unreached`] when no operation reached the point in time,
     /// [`FaultHoldLost::Disarmed`] when the arm was released, replaced or
     /// dropped first.
-    pub fn wait_reached(&mut self) -> impl Future<Output = Result<(), FaultHoldLost>> + '_ {
+    pub fn wait_reached(&mut self) -> impl Future<Output = Result<(), FaultHoldLost>> + Send + '_ {
         // Cancellation ownership is established at the CALL, before the future
         // can be polled: an observation future that is created and dropped
         // without a first poll still retires this handle's own still-armed
@@ -1236,7 +1236,7 @@ impl TargetHold {
     /// The returned future yields [`FaultHoldLost::Disarmed`] when the arm was
     /// retired before this handle observed it, and [`FaultHoldLost::Unreached`]
     /// when the bound elapsed first.
-    pub fn wait_reached(&mut self) -> impl Future<Output = Result<(), FaultHoldLost>> + '_ {
+    pub fn wait_reached(&mut self) -> impl Future<Output = Result<(), FaultHoldLost>> + Send + '_ {
         let guard = TargetReachGuard {
             control: Arc::clone(&self.control),
             token: self.token,
