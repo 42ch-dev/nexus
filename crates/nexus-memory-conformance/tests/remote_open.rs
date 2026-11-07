@@ -221,7 +221,13 @@ fn peer_id(seed: &[u8; 32]) -> String {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    use std::fmt::Write as _;
+
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(text, "{byte:02x}").expect("writing into a String cannot fail");
+    }
+    text
 }
 
 /// Bind a real `127.0.0.1:0` listener whose first accepted WebSocket becomes
@@ -505,153 +511,187 @@ async fn responder_of(
 }
 
 // ---------------------------------------------------------------------------
+// The durable provider fixture every signed session is served from
+// ---------------------------------------------------------------------------
+
+/// The durable provider fixture one scenario is served from: the provider's own
+/// database, the one served space with its authority, the dialer identity the
+/// signed session is admitted as, and the operator-provisioned principal that
+/// dialer maps to.
+struct Fixture {
+    /// Keeps the provider database file alive for the whole scenario.
+    provider_home: TempDir,
+    provider: Arc<FixtureMemoryProvider>,
+    directory: Arc<PeerDirectory>,
+    served_space: String,
+    authority_host_id: String,
+    principal_id: String,
+    client_peer: String,
+    client_pubkey: [u8; 32],
+    host_pubkey: [u8; 32],
+    host_peer: String,
+}
+
+impl Fixture {
+    /// The fixture admitting the `CLIENT_SEED` dialer.
+    async fn new() -> Self {
+        Self::for_seed(&CLIENT_SEED).await
+    }
+
+    /// The same fixture admitting the public identity derived from `seed`: the
+    /// operator provisions exactly that peer's principal, so a session it signs
+    /// is admitted, and the credential file the home holds carries that seed.
+    async fn for_seed(seed: &[u8; 32]) -> Self {
+        let fixture_home = TempDir::new().expect("fixture home");
+        let provider = Arc::new(
+            FixtureMemoryProvider::open(&provider_database(&fixture_home))
+                .await
+                .expect("open the durable fixture"),
+        );
+        let client_peer = peer_id(seed);
+        let principal_id = format!("prn_{client_peer}");
+        provider
+            .provision_operator_admin(&principal_id)
+            .await
+            .expect("operator provisions the admin grant");
+        let directory =
+            Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id.clone()));
+        Self {
+            served_space: provider.identity().space_id.clone(),
+            authority_host_id: provider.identity().authority_host_id.clone(),
+            client_pubkey: pubkey(seed),
+            host_pubkey: pubkey(&HOST_SEED),
+            host_peer: peer_id(&HOST_SEED),
+            provider_home: fixture_home,
+            provider,
+            directory,
+            principal_id,
+            client_peer,
+        }
+    }
+
+    /// A pool on this fixture's own provider database.
+    async fn pool(&self) -> SqlitePool {
+        provider_pool(&self.provider_home).await
+    }
+
+    /// One listener serving this fixture's durable service under `host_manifest`
+    /// and admitting exactly the fixture's own dialer.
+    async fn listener(
+        &self,
+        host_manifest: HostCapabilityManifest,
+    ) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
+        start_listener(
+            self.provider.server(self.directory.admission()),
+            host_manifest,
+            self.client_peer.clone(),
+            self.client_pubkey,
+            5_000,
+        )
+        .await
+    }
+
+    /// The served space's own authoritative manifest.
+    fn served_manifest(&self) -> HostCapabilityManifest {
+        manifest(&self.authority_host_id)
+    }
+
+    /// The same fixture whose admission table additionally admits `seed`'s peer
+    /// under its own principal, which is not operator-provisioned.
+    fn admitting(mut self, seed: &[u8; 32]) -> Self {
+        let peer = peer_id(seed);
+        self.directory = Arc::new(
+            PeerDirectory::new()
+                .with_peer(self.client_peer.clone(), self.principal_id.clone())
+                .with_peer(peer.clone(), format!("prn_{peer}")),
+        );
+        self
+    }
+
+    /// One listener serving this fixture's durable service and admitting
+    /// `seed`'s peer instead of the fixture's own dialer.
+    async fn listener_for(
+        &self,
+        seed: &[u8; 32],
+        host_manifest: HostCapabilityManifest,
+    ) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
+        start_listener(
+            self.provider.server(self.directory.admission()),
+            host_manifest,
+            peer_id(seed),
+            pubkey(seed),
+            5_000,
+        )
+        .await
+    }
+
+    /// The selection an admitted open dials for `space_id`.
+    fn selection(&self, space_id: &str, addr: SocketAddr) -> MemoryProviderSelection {
+        selection(space_id, addr, &self.host_pubkey)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The pinning test
 // ---------------------------------------------------------------------------
 
-#[tokio::test]
-async fn remote_open_pins_space_and_authority() {
-    let host_pubkey = pubkey(&HOST_SEED);
-    let client_pubkey = pubkey(&CLIENT_SEED);
-    let client_peer = peer_id(&CLIENT_SEED);
-
-    // A credential failure fails the whole open before any socket is dialed:
-    // the static category is returned and no local provider appears.
-    let uncredentialed = Env::new();
+/// A credential the loader cannot read fails the whole open before any socket is
+/// dialed: the static category is returned and no local provider appears.
+async fn assert_credential_refusal(env: &Env, host_pubkey: &[u8; 32]) {
     let dead_endpoint: SocketAddr = "127.0.0.1:9".parse().expect("dead endpoint");
-    let error = open(
-        &uncredentialed,
-        selection("spc_unserved", dead_endpoint, &host_pubkey),
-    )
-    .await
-    .err()
-    .expect("a missing credential fails the open");
+    let error = open(env, selection("spc_unserved", dead_endpoint, host_pubkey))
+        .await
+        .err()
+        .expect("a missing credential fails the open");
     assert_eq!(
         coded(&error),
         "memory_credential_invalid",
         "the credential refusal is static and precedes the dial"
     );
     assert!(
-        !uncredentialed.local_provider_store().exists(),
+        !env.local_provider_store().exists(),
         "a refused credential never constructs the local provider"
     );
+}
 
-    // The durable fixture: one space, one authority, one operator-provisioned
-    // admin grant for the principal the dialing peer maps to.
-    let fixture_home = TempDir::new().expect("fixture home");
-    let provider = Arc::new(
-        FixtureMemoryProvider::open(&fixture_home.path().join("memory.sqlite"))
-            .await
-            .expect("open the durable fixture"),
-    );
-    let served_space = provider.identity().space_id.clone();
-    let authority_host_id = provider.identity().authority_host_id.clone();
-    let principal_id = format!("prn_{client_peer}");
-    provider
-        .provision_operator_admin(&principal_id)
-        .await
-        .expect("operator provisions the admin grant");
-    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id));
-
-    let env = Env::new();
-    env.write_credential(&CLIENT_SEED);
-    let legacy = env.legacy_bearer();
-    fs::create_dir_all(legacy.parent().expect("legacy dir")).expect("legacy bearer dir");
-    fs::write(&legacy, b"# legacy long-term memory\n").expect("seed the legacy bearer");
-
-    // A space the provider does not serve: the signed session opens, the exact
-    // space is absent from discovery, and the open fails instead of taking the
-    // provider's advertised space.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let error = open(
-        &env,
-        selection("spc_not_served_by_this_provider", addr, &host_pubkey),
-    )
-    .await
-    .err()
-    .expect("an unserved space fails the open");
-    assert_eq!(
-        coded(&error),
-        "memory_remote_space",
-        "the configured space must be discovered exactly once"
-    );
-    responder_of(task).await;
-    assert!(
-        !env.local_provider_store().exists(),
-        "a space refusal never falls back to the local provider"
-    );
-
-    // The host does not negotiate the memory family at all.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest_without_memory(&authority_host_id),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let error = open(&env, selection(&served_space, addr, &host_pubkey))
+/// One refused open against a freshly served listener: the signed session is
+/// established, the open fails with its static class, the host session closes,
+/// and no local provider appears.
+async fn assert_refused_open(
+    fixture: &Fixture,
+    env: &Env,
+    host_manifest: HostCapabilityManifest,
+    space_id: &str,
+    expected_code: &str,
+    context: &str,
+) {
+    let (addr, task) = fixture.listener(host_manifest).await;
+    let error = open(env, fixture.selection(space_id, addr))
         .await
         .err()
-        .expect("a host without the memory family fails the open");
-    assert_eq!(
-        coded(&error),
-        "memory_remote_capability",
-        "the negotiated family is required even when the space would match"
-    );
-    responder_of(task).await;
+        .expect(context);
+    assert_eq!(coded(&error), expected_code, "{context}");
+    let responder = responder_of(task).await;
+    wait_for_closed(&responder).await;
     assert!(
         !env.local_provider_store().exists(),
-        "a capability refusal never falls back to the local provider"
+        "{context}: no refusal falls back to the local provider"
     );
+}
 
-    // The space is discovered, but its authority is not the authenticated host.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest("fixture-not-the-space-authority"),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let error = open(&env, selection(&served_space, addr, &host_pubkey))
-        .await
-        .err()
-        .expect("an authority mismatch fails the open");
-    assert_eq!(
-        coded(&error),
-        "memory_remote_authority",
-        "the manifest host must own the discovered space authority"
-    );
-    responder_of(task).await;
-    assert!(
-        !env.local_provider_store().exists(),
-        "an authority refusal never falls back to the local provider"
-    );
-
-    // The exact space on its authenticated authority opens, and the binding
-    // serves the provider.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let core = open(&env, selection(&served_space, addr, &host_pubkey))
+/// The served selection opens against the served space, and the binding really
+/// serves the provider: the host authenticated the loaded credential's public
+/// peer identity, its session reached Established, and no local provider was
+/// constructed.
+async fn assert_served_open(fixture: &Fixture, env: &Env) -> (CoreService, Arc<ConnectResponder>) {
+    let (addr, task) = fixture.listener(fixture.served_manifest()).await;
+    let core = open(env, fixture.selection(&fixture.served_space, addr))
         .await
         .expect("the exact selection opens against the served space");
     let responder = responder_of(task).await;
     assert_eq!(
         responder.remote_peer_id().as_deref(),
-        Some(client_peer.as_str()),
+        Some(fixture.client_peer.as_str()),
         "the host authenticated the loaded credential's public peer identity"
     );
     assert!(
@@ -662,10 +702,105 @@ async fn remote_open_pins_space_and_authority() {
         !env.local_provider_store().exists(),
         "the remote binding constructed no local provider"
     );
+    (core, responder)
+}
 
-    // A real product read runs through the pinned binding: opening the Creator
-    // memory adapter ensures the subject and lists candidates in the pinned
-    // space over the signed session (the fixture refuses any other space).
+/// Legacy migration is a local-only operation: the nonlocal binding refuses with
+/// the structured code and leaves the seeded legacy bearer byte-identical.
+async fn assert_local_migration_refused(core: &CoreService, principal: &CorePrincipal, env: &Env) {
+    let refusal = core
+        .migrate_legacy_content(principal)
+        .await
+        .expect_err("legacy migration is not supported on a remote binding");
+    assert_eq!(
+        coded(&refusal),
+        "not_supported",
+        "the retained local-only migration refusal"
+    );
+    assert_eq!(
+        fs::read(env.legacy_bearer()).expect("the seeded legacy bearer"),
+        b"# legacy long-term memory\n",
+        "the remote refusal left the local legacy bearer untouched"
+    );
+    assert!(
+        !env.local_provider_store().exists(),
+        "the remote refusal created no local provider store"
+    );
+}
+
+/// The owned close releases the binding: the closed open serves no memory and a
+/// repeated close is idempotent.
+async fn assert_close_releases(core: &CoreService, principal: &CorePrincipal) {
+    assert!(
+        core.close().await.expect("close").cleanup_confirmed,
+        "the close confirmed its own admission release"
+    );
+    assert!(
+        matches!(
+            core.count_pending_reviews(principal).await,
+            Err(CoreError::Closing)
+        ),
+        "a closed open serves no memory"
+    );
+    core.close().await.expect("idempotent close");
+}
+
+#[tokio::test]
+async fn remote_open_pins_space_and_authority() {
+    let fixture = Fixture::new().await;
+
+    // A credential failure fails the whole open before any socket is dialed:
+    // the static category is returned and no local provider appears.
+    let uncredentialed = Env::new();
+    assert_credential_refusal(&uncredentialed, &fixture.host_pubkey).await;
+
+    let env = Env::new();
+    env.write_credential(&CLIENT_SEED);
+    let legacy = env.legacy_bearer();
+    fs::create_dir_all(legacy.parent().expect("legacy dir")).expect("legacy bearer dir");
+    fs::write(&legacy, b"# legacy long-term memory\n").expect("seed the legacy bearer");
+
+    // A space the provider does not serve: the signed session opens, the exact
+    // space is absent from discovery, and the open fails instead of taking the
+    // provider's advertised space.
+    assert_refused_open(
+        &fixture,
+        &env,
+        fixture.served_manifest(),
+        "spc_not_served_by_this_provider",
+        "memory_remote_space",
+        "the configured space must be discovered exactly once",
+    )
+    .await;
+
+    // The host does not negotiate the memory family at all.
+    assert_refused_open(
+        &fixture,
+        &env,
+        manifest_without_memory(&fixture.authority_host_id),
+        &fixture.served_space,
+        "memory_remote_capability",
+        "the negotiated family is required even when the space would match",
+    )
+    .await;
+
+    // The space is discovered, but its authority is not the authenticated host.
+    assert_refused_open(
+        &fixture,
+        &env,
+        manifest("fixture-not-the-space-authority"),
+        &fixture.served_space,
+        "memory_remote_authority",
+        "the manifest host must own the discovered space authority",
+    )
+    .await;
+
+    // The exact space on its authenticated authority opens, and the binding
+    // serves the provider. A real product read then runs through the pinned
+    // binding: opening the Creator memory adapter ensures the subject and lists
+    // candidates in the pinned space over the signed session (the fixture
+    // refuses any other space).
+    let (core, _responder) = assert_served_open(&fixture, &env).await;
     let principal = core.active_principal().await.expect("active principal");
     assert_eq!(
         core.count_pending_reviews(&principal)
@@ -676,42 +811,10 @@ async fn remote_open_pins_space_and_authority() {
         "the fixture holds no pending candidates"
     );
 
-    // Legacy migration is a local-only operation: the nonlocal binding refuses
-    // with the structured code and reads/writes no local legacy content.
-    let refusal = core
-        .migrate_legacy_content(&principal)
-        .await
-        .err()
-        .expect("legacy migration is not supported on a remote binding");
-    assert_eq!(
-        coded(&refusal),
-        "not_supported",
-        "the retained local-only migration refusal"
-    );
-    assert_eq!(
-        fs::read(&legacy).expect("the seeded legacy bearer"),
-        b"# legacy long-term memory\n",
-        "the remote refusal left the local legacy bearer untouched"
-    );
-    assert!(
-        !env.local_provider_store().exists(),
-        "the remote refusal created no local provider store"
-    );
-
-    // The owned close releases the binding; the closed open serves no memory
-    // and a repeated close is idempotent.
-    assert!(
-        core.close().await.expect("close").cleanup_confirmed,
-        "the close confirmed its own admission release"
-    );
-    assert!(
-        matches!(
-            core.count_pending_reviews(&principal).await,
-            Err(CoreError::Closing)
-        ),
-        "a closed open serves no memory"
-    );
-    core.close().await.expect("idempotent close");
+    // Legacy migration stays local-only, and the owned close releases the
+    // binding.
+    assert_local_migration_refused(&core, &principal, &env).await;
+    assert_close_releases(&core, &principal).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -844,9 +947,8 @@ async fn cancelled_open_closes_only_its_own_established_session() {
     // hold is reached: the SDK's own invoke budget is shorter than this test's
     // setup work, so the measured open must not wait behind another open.
     abandoned.abort();
-    let cancelled = match abandoned.await {
-        Ok(_) => panic!("the abandoned open completed instead of being cancelled"),
-        Err(join) => join,
+    let Err(cancelled) = abandoned.await else {
+        panic!("the abandoned open completed instead of being cancelled");
     };
     assert!(
         cancelled.is_cancelled(),
@@ -944,6 +1046,16 @@ async fn dropping_the_open_closes_its_established_session() {
 const SCOPED_SEED: [u8; 32] = [0x52; 32];
 /// A third seed, used only as an untrusted peer id/key.
 const OTHER_SEED: [u8; 32] = [0x63; 32];
+/// The capability proof issuer's Connect identity in the token scenarios.
+const ISSUER_SEED: [u8; 32] = [0x77; 32];
+/// Distinct sentinels for the credential-redaction scenario: the credential seed
+/// itself and the token's signature material. Both are unique text no incidental
+/// value can reproduce.
+const SEED_SENTINEL: [u8; 32] = [0xA7; 32];
+const SIGNATURE_SENTINEL: &str = "sig-sentinel-0f3c9a-never-public";
+/// The sentinel a corrupt stored document carries: it must never appear on the
+/// wire.
+const WIRE_CANARY: &str = "NEXUS-CANARY-3f9a";
 const SCOPED_CREDENTIAL_ID: &str = "cred-remote-scoped";
 const CAPTURE_PENDING: &str = "pend_remote_open";
 const CAPTURE_SESSION: &str = "sess_remote_open";
@@ -1234,10 +1346,23 @@ async fn provider_effect_snapshot(pool: &SqlitePool) -> Vec<String> {
 
 /// The binding's still-open D18 wire admissions, one tuple of the identity keys
 /// the actual pinned Core binding produced.
-async fn binding_admissions(
-    pool: &SqlitePool,
-    binding_id: &str,
-) -> Vec<(String, String, String, String, String, String, String)> {
+type BindingAdmissions = Vec<(String, String, String, String, String, String, String)>;
+
+/// The binding's D18 object facts: the eight identity keys plus the monotone
+/// state.
+type BindingFacts = Vec<(
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+)>;
+
+async fn binding_admissions(pool: &SqlitePool, binding_id: &str) -> BindingAdmissions {
     sqlx::query(
         "SELECT owner_creator_id, character_id, binding_id, authority_host_id, \
          authority_generation, space_id, client_identity \
@@ -1262,22 +1387,16 @@ async fn binding_admissions(
     .collect()
 }
 
-/// The binding's D18 object facts: the eight identity keys plus the monotone
-/// state, written from the actual pinned binding.
-async fn binding_object_facts(
-    pool: &SqlitePool,
-    binding_id: &str,
-) -> Vec<(
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-)> {
+/// The same admissions read from the workspace state database this home owns.
+async fn binding_admissions_now(env: &Env, binding_id: &str) -> BindingAdmissions {
+    let pool = core_db(env).await;
+    let admissions = binding_admissions(&pool, binding_id).await;
+    pool.close().await;
+    admissions
+}
+
+/// The binding's D18 object facts, written from the actual pinned binding.
+async fn binding_object_facts(pool: &SqlitePool, binding_id: &str) -> BindingFacts {
     sqlx::query(
         "SELECT authority_host_id, authority_generation, space_id, client_identity, \
          character_id, binding_id, object_kind, object_id, state \
@@ -1304,6 +1423,14 @@ async fn binding_object_facts(
     .collect()
 }
 
+/// The same object facts read from the workspace state database this home owns.
+async fn binding_facts_now(env: &Env, binding_id: &str) -> BindingFacts {
+    let pool = core_db(env).await;
+    let facts = binding_object_facts(&pool, binding_id).await;
+    pool.close().await;
+    facts
+}
+
 fn response_json<T: serde::Serialize>(value: &T) -> Value {
     serde_json::to_value(value).expect("the SDK response serializes")
 }
@@ -1326,11 +1453,20 @@ fn response_json<T: serde::Serialize>(value: &T) -> Value {
 /// Every transition happens under ONE lock, so observing and consuming are
 /// atomic and an overlap irreversibly poisons the observer: an overwritten or
 /// ambiguous observation is never kept, and no later observation can revive a
-/// poisoned session.
-enum ObserverState {
-    Empty,
-    Pending(ObservedInvoke),
-    Poisoned,
+/// poisoned session. One pending slot cannot misreport which of two overlapping
+/// invokes arrived first, so overlap is a permanent poison rather than a queue.
+struct ObserverState {
+    pending: Option<ObservedInvoke>,
+    poisoned: bool,
+}
+
+impl ObserverState {
+    const fn empty() -> Self {
+        Self {
+            pending: None,
+            poisoned: false,
+        }
+    }
 }
 
 struct EnvelopeObserver {
@@ -1350,7 +1486,7 @@ impl EnvelopeObserver {
     fn new(inner: Arc<dyn Transport>) -> Self {
         Self {
             inner,
-            state: Mutex::new(ObserverState::Empty),
+            state: Mutex::new(ObserverState::empty()),
         }
     }
 
@@ -1374,13 +1510,13 @@ impl EnvelopeObserver {
             auth: envelope.get("auth").filter(|auth| !auth.is_null()).cloned(),
         };
         let mut state = self.state.lock().expect("observer state");
-        match &*state {
-            ObserverState::Empty => *state = ObserverState::Pending(observed),
-            ObserverState::Pending(_) | ObserverState::Poisoned => {
-                // Two invokes overlapped (or this session was already poisoned):
-                // keep neither observation and stay poisoned forever.
-                *state = ObserverState::Poisoned;
-            }
+        if state.pending.is_none() && !state.poisoned {
+            state.pending = Some(observed);
+        } else {
+            // Two invokes overlapped (or this session was already poisoned):
+            // keep neither observation and stay poisoned forever.
+            state.pending = None;
+            state.poisoned = true;
         }
     }
 
@@ -1391,17 +1527,16 @@ impl EnvelopeObserver {
     /// it.
     fn take(&self) -> Result<ObservedInvoke, &'static str> {
         let mut state = self.state.lock().expect("observer state");
-        match std::mem::replace(&mut *state, ObserverState::Empty) {
-            ObserverState::Pending(observed) => Ok(observed),
-            ObserverState::Empty => {
-                *state = ObserverState::Poisoned;
-                Err("no received signed invocation to verify")
-            }
-            ObserverState::Poisoned => {
-                *state = ObserverState::Poisoned;
-                Err("the observed session is poisoned by an overlapping invocation")
-            }
+        if let Some(observed) = state.pending.take() {
+            return Ok(observed);
         }
+        let was_poisoned = std::mem::replace(&mut state.poisoned, true);
+        drop(state);
+        Err(if was_poisoned {
+            "the observed session is poisoned by an overlapping invocation"
+        } else {
+            "no received signed invocation to verify"
+        })
     }
 }
 
@@ -1595,38 +1730,11 @@ fn character_capture_request(binding_id: Option<&str>, pending_id: &str, digest:
 /// The stage's failure must have released exactly the guards that open took:
 /// this open has to acquire fresh, serve, and close with the host observing its
 /// own session ending.
-#[allow(clippy::too_many_arguments)]
-async fn assert_home_reopens(
-    provider: &Arc<FixtureMemoryProvider>,
-    directory: &Arc<PeerDirectory>,
-    env: &Env,
-    space: &str,
-    host_pubkey: &[u8; 32],
-    authority_host_id: &str,
-    client_peer: &str,
-    client_pubkey: [u8; 32],
-    credential_id: &str,
-) {
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest(authority_host_id),
-        client_peer.to_string(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let core = open(
-        env,
-        selection_for(
-            space,
-            addr,
-            host_pubkey,
-            credential_id,
-            vec![peer_id(&HOST_SEED)],
-        ),
-    )
-    .await
-    .expect("the same home reopens legitimately after the failed stage");
+async fn assert_home_reopens(fixture: &Fixture, env: &Env) {
+    let (addr, task) = fixture.listener(fixture.served_manifest()).await;
+    let core = open(env, fixture.selection(&fixture.served_space, addr))
+        .await
+        .expect("the same home reopens legitimately after the failed stage");
     let responder = responder_of(task).await;
     assert!(
         core.close().await.expect("close").cleanup_confirmed,
@@ -1664,6 +1772,286 @@ async fn settle_listener(mut task: tokio::task::JoinHandle<Arc<ConnectResponder>
     }
 }
 
+/// The refused-admission run: the shared fixture, its provider pool and the
+/// provider effect set every refused stage must leave untouched.
+struct Admission {
+    fixture: Fixture,
+    pool: SqlitePool,
+    effects_before: Vec<String>,
+}
+
+/// The dialer identity one stage's listener admits, when it is not the
+/// fixture's own dialer.
+struct Admitted {
+    peer: String,
+    pubkey: [u8; 32],
+}
+
+/// How the host side of a refused stage must settle.
+enum Settle {
+    /// The handshake never established, so the listener returns on its own.
+    Handshake,
+    /// The signed session established, and the refused open closed it.
+    Established,
+}
+
+/// What one refused stage must produce.
+struct Refusal {
+    code: &'static str,
+    settle: Settle,
+    context: &'static str,
+}
+
+impl Admission {
+    async fn new() -> Self {
+        let fixture = Fixture::new().await;
+        let pool = fixture.pool().await;
+        let effects_before = provider_effect_snapshot(&pool).await;
+        Self {
+            fixture,
+            pool,
+            effects_before,
+        }
+    }
+
+    /// The fixture's own admitted dialer.
+    fn dialer(&self) -> Admitted {
+        Admitted {
+            peer: self.fixture.client_peer.clone(),
+            pubkey: self.fixture.client_pubkey,
+        }
+    }
+
+    async fn assert_untouched(&self, context: &str) {
+        assert_eq!(
+            provider_effect_snapshot(&self.pool).await,
+            self.effects_before,
+            "{context}: the provider's complete effect set is untouched"
+        );
+    }
+
+    /// A stage whose open is refused before any socket is dialed.
+    async fn pre_dial(&self, env: &Env, expected_code: &str, context: &str) {
+        let dead_endpoint: SocketAddr = "127.0.0.1:9".parse().expect("dead endpoint");
+        let error = open(
+            env,
+            self.fixture
+                .selection(&self.fixture.served_space, dead_endpoint),
+        )
+        .await
+        .err()
+        .expect(context);
+        assert_eq!(coded(&error), expected_code, "{context}");
+        self.assert_untouched(context).await;
+        assert!(
+            !env.local_provider_store().exists(),
+            "{context}: no refusal falls back to the local provider"
+        );
+    }
+
+    /// One refused stage against a freshly admitted listener: its static class,
+    /// the settled host session, the untouched effect set and the legitimate
+    /// reopen of the same home.
+    async fn stage(
+        &self,
+        env: &Env,
+        admitted: Admitted,
+        host_manifest: HostCapabilityManifest,
+        build_selection: impl FnOnce(SocketAddr) -> MemoryProviderSelection,
+        refusal: Refusal,
+    ) {
+        let (addr, task) = start_listener(
+            self.fixture
+                .provider
+                .server(self.fixture.directory.admission()),
+            host_manifest,
+            admitted.peer,
+            admitted.pubkey,
+            5_000,
+        )
+        .await;
+        let context = refusal.context;
+        let error = open(env, build_selection(addr)).await.err().expect(context);
+        assert_eq!(coded(&error), refusal.code, "{context}");
+        match refusal.settle {
+            Settle::Handshake => settle_listener(task).await,
+            Settle::Established => {
+                let responder = responder_of(task).await;
+                wait_for_closed(&responder).await;
+            }
+        }
+        self.assert_untouched(context).await;
+        assert!(
+            !env.local_provider_store().exists(),
+            "{context}: no refusal falls back to the local provider"
+        );
+        assert_home_reopens(&self.fixture, env).await;
+    }
+}
+
+/// Stages 1 and 2: a capability token that is not the published proof shape, and
+/// an unreachable endpoint. Both refuse before the dial, each on its own home,
+/// which then reopens legitimately. (§3.1 is structural validation, so a
+/// well-formed proof — even an expired one — never produces a local credential
+/// refusal; the real verifier lives in the token scenario below.)
+async fn pre_dial_stages(run: &Admission) {
+    let malformed = Env::new();
+    malformed.write_credential_with_token(&CLIENT_SEED, Some(&json!({ "v": 1 })));
+    run.pre_dial(
+        &malformed,
+        "memory_credential_invalid",
+        "a malformed token refuses the open before any socket is dialed",
+    )
+    .await;
+    malformed.write_credential(&CLIENT_SEED);
+    assert_home_reopens(&run.fixture, &malformed).await;
+
+    let unreachable = Env::new();
+    unreachable.write_credential(&CLIENT_SEED);
+    run.pre_dial(
+        &unreachable,
+        "memory_remote_unavailable",
+        "a dead endpoint fails the open",
+    )
+    .await;
+    assert_home_reopens(&run.fixture, &unreachable).await;
+}
+
+/// Stages 3-5: the client's pinned host key is not the host's, the pinned host is
+/// not on the allowlist, and the dialer's own key is not trusted by the host. All
+/// three fail the handshake, so none reaches an established session.
+async fn handshake_stages(run: &Admission, env: &Env) {
+    let served = &run.fixture.served_space;
+    let host_peer = run.fixture.host_peer.clone();
+    let host_pubkey = run.fixture.host_pubkey;
+    let wrong_host = pubkey(&OTHER_SEED);
+
+    // The client's pinned host key is not the host's.
+    run.stage(
+        env,
+        run.dialer(),
+        run.fixture.served_manifest(),
+        |addr| {
+            selection_for(
+                served,
+                addr,
+                &wrong_host,
+                CREDENTIAL_ID,
+                vec![host_peer.clone()],
+            )
+        },
+        Refusal {
+            code: "memory_remote_handshake",
+            settle: Settle::Handshake,
+            context: "a mismatched host key fails the handshake",
+        },
+    )
+    .await;
+
+    // The host's key is pinned but it is not on the allowlist.
+    run.stage(
+        env,
+        run.dialer(),
+        run.fixture.served_manifest(),
+        |addr| {
+            selection_for(
+                served,
+                addr,
+                &host_pubkey,
+                CREDENTIAL_ID,
+                vec![peer_id(&OTHER_SEED)],
+            )
+        },
+        Refusal {
+            code: "memory_remote_handshake",
+            settle: Settle::Handshake,
+            context: "an unlisted host fails the handshake",
+        },
+    )
+    .await;
+
+    // The dialer's own key is not trusted by the host.
+    run.stage(
+        env,
+        Admitted {
+            peer: peer_id(&OTHER_SEED),
+            pubkey: pubkey(&OTHER_SEED),
+        },
+        run.fixture.served_manifest(),
+        |addr| {
+            selection_for(
+                served,
+                addr,
+                &host_pubkey,
+                CREDENTIAL_ID,
+                vec![host_peer.clone()],
+            )
+        },
+        Refusal {
+            code: "memory_remote_handshake",
+            settle: Settle::Handshake,
+            context: "an untrusted dialer fails the handshake",
+        },
+    )
+    .await;
+}
+
+/// Stages 6-8: `spoke-memory` is the required umbrella family, the configured
+/// space must be served, and its authority must be the authenticated host. Each
+/// establishes a signed session that the refusing open then closes.
+async fn discovery_stages(run: &Admission, env: &Env) {
+    let served = &run.fixture.served_space;
+
+    // A host declaring only the sub-families negotiates nothing this client
+    // speaks.
+    run.stage(
+        env,
+        run.dialer(),
+        manifest_with(
+            &run.fixture.authority_host_id,
+            &["spoke-memory-reflection", "spoke-memory-transfer"],
+        ),
+        |addr| run.fixture.selection(served, addr),
+        Refusal {
+            code: "memory_remote_capability",
+            settle: Settle::Established,
+            context: "sub-families without the umbrella fail the open",
+        },
+    )
+    .await;
+
+    // The configured space is not served.
+    run.stage(
+        env,
+        run.dialer(),
+        run.fixture.served_manifest(),
+        |addr| {
+            run.fixture
+                .selection("spc_not_served_by_this_provider", addr)
+        },
+        Refusal {
+            code: "memory_remote_space",
+            settle: Settle::Established,
+            context: "an unserved space fails the open",
+        },
+    )
+    .await;
+
+    // The discovered space's authority is not the authenticated host.
+    run.stage(
+        env,
+        run.dialer(),
+        manifest("fixture-not-the-space-authority"),
+        |addr| run.fixture.selection(served, addr),
+        Refusal {
+            code: "memory_remote_authority",
+            settle: Settle::Established,
+            context: "an authority mismatch fails the open",
+        },
+    )
+    .await;
+}
+
 /// The client-side admission boundaries, stage by stage: a credential that is
 /// not the published proof shape, an unreachable endpoint, an unpinned or
 /// unlisted host, an untrusted dialer, a host without the umbrella family, an
@@ -1672,312 +2060,20 @@ async fn settle_listener(mut task: tokio::task::JoinHandle<Arc<ConnectResponder>
 /// listener settles, and the provider's effect set is unchanged.
 #[tokio::test]
 async fn connect_admission_refuses_untrusted_credentials_keys_and_families() {
-    let host_pubkey = pubkey(&HOST_SEED);
-    let client_pubkey = pubkey(&CLIENT_SEED);
-    let client_peer = peer_id(&CLIENT_SEED);
-    let host_peer = peer_id(&HOST_SEED);
-
-    let fixture_home = TempDir::new().expect("fixture home");
-    let provider = Arc::new(
-        FixtureMemoryProvider::open(&provider_database(&fixture_home))
-            .await
-            .expect("open the durable fixture"),
-    );
-    let served_space = provider.identity().space_id.clone();
-    let authority_host_id = provider.identity().authority_host_id.clone();
-    let principal_id = format!("prn_{client_peer}");
-    provider
-        .provision_operator_admin(&principal_id)
-        .await
-        .expect("operator provisions the admin grant");
-    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id));
-    let pool = provider_pool(&fixture_home).await;
-    let effects_before = provider_effect_snapshot(&pool).await;
-    let dead_endpoint: SocketAddr = "127.0.0.1:9".parse().expect("dead endpoint");
-
-    // Stage 1 — a capability token that is not the published `{v, claims, sig}`
-    // shape: the loader refuses before any socket is dialed.
-    let malformed = Env::new();
-    malformed.write_credential_with_token(&CLIENT_SEED, Some(&json!({ "v": 1 })));
-    let error = open(
-        &malformed,
-        selection(&served_space, dead_endpoint, &host_pubkey),
-    )
-    .await
-    .err()
-    .expect("a malformed token refuses the open");
-    assert_eq!(
-        coded(&error),
-        "memory_credential_invalid",
-        "the credential refusal is static and precedes the dial"
-    );
-    assert!(!malformed.local_provider_store().exists());
-    malformed.write_credential(&CLIENT_SEED);
-    assert_home_reopens(
-        &provider,
-        &directory,
-        &malformed,
-        &served_space,
-        &host_pubkey,
-        &authority_host_id,
-        &client_peer,
-        client_pubkey,
-        CREDENTIAL_ID,
-    )
-    .await;
-
-    // Stage 2 — the endpoint is unreachable. (§3.1 is structural validation, so
-    // a well-formed proof — even an expired one — never produces a local
-    // credential refusal; the real verifier lives in the token scenario below.)
-    let unreachable = Env::new();
-    unreachable.write_credential(&CLIENT_SEED);
-    let error = open(
-        &unreachable,
-        selection(&served_space, dead_endpoint, &host_pubkey),
-    )
-    .await
-    .err()
-    .expect("a dead endpoint fails the open");
-    assert_eq!(coded(&error), "memory_remote_unavailable");
-    assert_home_reopens(
-        &provider,
-        &directory,
-        &unreachable,
-        &served_space,
-        &host_pubkey,
-        &authority_host_id,
-        &client_peer,
-        client_pubkey,
-        CREDENTIAL_ID,
-    )
-    .await;
-
+    let run = Admission::new().await;
     let env = Env::new();
     env.write_credential(&CLIENT_SEED);
 
-    // Stage 3 — the client's pinned host key is not the host's.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let wrong_host = pubkey(&OTHER_SEED);
-    let error = open(
-        &env,
-        selection_for(
-            &served_space,
-            addr,
-            &wrong_host,
-            CREDENTIAL_ID,
-            vec![host_peer.clone()],
-        ),
-    )
-    .await
-    .err()
-    .expect("a mismatched host key fails the handshake");
-    assert_eq!(coded(&error), "memory_remote_handshake");
-    settle_listener(task).await;
-    assert_eq!(provider_effect_snapshot(&pool).await, effects_before);
-    assert!(!env.local_provider_store().exists());
-    assert_home_reopens(
-        &provider,
-        &directory,
-        &env,
-        &served_space,
-        &host_pubkey,
-        &authority_host_id,
-        &client_peer,
-        client_pubkey,
-        CREDENTIAL_ID,
-    )
-    .await;
-
-    // Stage 4 — the host's key is pinned but it is not on the allowlist.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let error = open(
-        &env,
-        selection_for(
-            &served_space,
-            addr,
-            &host_pubkey,
-            CREDENTIAL_ID,
-            vec![peer_id(&OTHER_SEED)],
-        ),
-    )
-    .await
-    .err()
-    .expect("an unlisted host fails the handshake");
-    assert_eq!(coded(&error), "memory_remote_handshake");
-    settle_listener(task).await;
-    assert_eq!(provider_effect_snapshot(&pool).await, effects_before);
-    assert_home_reopens(
-        &provider,
-        &directory,
-        &env,
-        &served_space,
-        &host_pubkey,
-        &authority_host_id,
-        &client_peer,
-        client_pubkey,
-        CREDENTIAL_ID,
-    )
-    .await;
-
-    // Stage 5 — the dialer's own key is not trusted by the host.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        peer_id(&OTHER_SEED),
-        pubkey(&OTHER_SEED),
-        5_000,
-    )
-    .await;
-    let error = open(
-        &env,
-        selection_for(
-            &served_space,
-            addr,
-            &host_pubkey,
-            CREDENTIAL_ID,
-            vec![host_peer.clone()],
-        ),
-    )
-    .await
-    .err()
-    .expect("an untrusted dialer fails the handshake");
-    assert_eq!(coded(&error), "memory_remote_handshake");
-    settle_listener(task).await;
-    assert_eq!(provider_effect_snapshot(&pool).await, effects_before);
-    assert_home_reopens(
-        &provider,
-        &directory,
-        &env,
-        &served_space,
-        &host_pubkey,
-        &authority_host_id,
-        &client_peer,
-        client_pubkey,
-        CREDENTIAL_ID,
-    )
-    .await;
-
-    // Stage 6 — `spoke-memory` is the required umbrella; a host declaring only
-    // the sub-families negotiates nothing this client speaks.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest_with(
-            &authority_host_id,
-            &["spoke-memory-reflection", "spoke-memory-transfer"],
-        ),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let error = open(&env, selection(&served_space, addr, &host_pubkey))
-        .await
-        .err()
-        .expect("sub-families without the umbrella fail the open");
-    assert_eq!(coded(&error), "memory_remote_capability");
-    let responder = responder_of(task).await;
-    wait_for_closed(&responder).await;
-    assert_eq!(provider_effect_snapshot(&pool).await, effects_before);
-    assert_home_reopens(
-        &provider,
-        &directory,
-        &env,
-        &served_space,
-        &host_pubkey,
-        &authority_host_id,
-        &client_peer,
-        client_pubkey,
-        CREDENTIAL_ID,
-    )
-    .await;
-
-    // Stage 7 — space discovery: the configured space is not served.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let error = open(
-        &env,
-        selection("spc_not_served_by_this_provider", addr, &host_pubkey),
-    )
-    .await
-    .err()
-    .expect("an unserved space fails the open");
-    assert_eq!(coded(&error), "memory_remote_space");
-    let responder = responder_of(task).await;
-    wait_for_closed(&responder).await;
-    assert_eq!(provider_effect_snapshot(&pool).await, effects_before);
-    assert_home_reopens(
-        &provider,
-        &directory,
-        &env,
-        &served_space,
-        &host_pubkey,
-        &authority_host_id,
-        &client_peer,
-        client_pubkey,
-        CREDENTIAL_ID,
-    )
-    .await;
-
-    // Stage 8 — the discovered space's authority is not the authenticated host.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest("fixture-not-the-space-authority"),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let error = open(&env, selection(&served_space, addr, &host_pubkey))
-        .await
-        .err()
-        .expect("an authority mismatch fails the open");
-    assert_eq!(coded(&error), "memory_remote_authority");
-    let responder = responder_of(task).await;
-    wait_for_closed(&responder).await;
-    assert_eq!(provider_effect_snapshot(&pool).await, effects_before);
-    assert!(
-        !env.local_provider_store().exists(),
-        "no refusal falls back to the local provider"
-    );
-    assert_home_reopens(
-        &provider,
-        &directory,
-        &env,
-        &served_space,
-        &host_pubkey,
-        &authority_host_id,
-        &client_peer,
-        client_pubkey,
-        CREDENTIAL_ID,
-    )
-    .await;
+    pre_dial_stages(&run).await;
+    handshake_stages(&run, &env).await;
+    discovery_stages(&run, &env).await;
 
     assert_eq!(
-        provider_effect_snapshot(&pool).await,
-        effects_before,
+        provider_effect_snapshot(&run.pool).await,
+        run.effects_before,
         "every refused stage left the provider's complete effect set untouched"
     );
-    pool.close().await;
+    run.pool.close().await;
 }
 
 /// The optional reflection and transfer families are neither negotiated nor
@@ -2080,61 +2176,90 @@ async fn unavailable_reflection_and_transfer_ops_refuse_explicitly_on_the_signed
     pool.close().await;
 }
 
-/// An UNEXPECTED transport loss (the provider's socket is torn down under a
-/// live, open Core binding — the client never asked to close), then a reconnect
-/// with the SAME persisted seed.
-///
-/// The signed consumer receives the ORIGINAL receipt tuple and the ORIGINAL
-/// candidate both from the same-key replay response and from `memory.receipts.get`;
-/// the product Core path is kept as complementary evidence, and the client pin
-/// is read from the D18 namespace facts the actual `MemoryProviderBinding`
-/// produced (provider rows alone are not the client pin). No C-089 cutover is
-/// claimed.
-#[tokio::test]
-async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt() {
-    let host_pubkey = pubkey(&HOST_SEED);
-    let client_pubkey = pubkey(&CLIENT_SEED);
-    let client_peer = peer_id(&CLIENT_SEED);
-    let fixture_home = TempDir::new().expect("fixture home");
-    let provider = Arc::new(
-        FixtureMemoryProvider::open(&provider_database(&fixture_home))
-            .await
-            .expect("open the durable fixture"),
-    );
-    let served_space = provider.identity().space_id.clone();
-    let authority_host_id = provider.identity().authority_host_id.clone();
-    let principal_id = format!("prn_{client_peer}");
-    provider
-        .provision_operator_admin(&principal_id)
-        .await
-        .expect("operator provisions the admin grant");
-    let directory =
-        Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id.clone()));
-    let env = Env::boot("R5 Loss Owner").await;
-    env.write_credential(&CLIENT_SEED);
-    let pool = provider_pool(&fixture_home).await;
-    let generator_before = provider_generation(&pool).await;
+/// The product session of the loss scenario: its binding-scoped capture is what
+/// pins the D18 fact from the actual binding.
+struct ProductSession {
+    core: CoreService,
+    responder: Arc<ConnectResponder>,
+    control: std::net::TcpStream,
+    principal: CorePrincipal,
+    character_id: String,
+    binding_id: String,
+    character_body: Value,
+    facts_before: BindingFacts,
+}
 
-    // The product Core session, with a control clone of its accepted socket.
-    let (addr, task, core_control) = start_listener_with_control(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        HashMap::from([(client_peer.clone(), client_pubkey)]),
+/// The signed consumer's own session and the original capture it committed.
+struct ConsumerSession {
+    adapter: Arc<RemoteAdapter>,
+    responder: Arc<ConnectResponder>,
+    control: std::net::TcpStream,
+    principal: Principal,
+    request: MemoryCaptureRequest,
+    tuple: (String, String, String, String),
+    candidates: Value,
+}
+
+/// One transport-loss scenario: both live bindings, the evidence the reconnect
+/// must reproduce, and the fixture they are served from.
+struct Loss {
+    fixture: Fixture,
+    env: Env,
+    pool: SqlitePool,
+    generation_before: i64,
+    product: ProductSession,
+    consumer: ConsumerSession,
+    effects_before: Vec<String>,
+    admissions_before: BindingAdmissions,
+}
+
+/// The one live candidate fact carries the pin the actual binding produced.
+fn assert_pinned_facts(
+    facts: &BindingFacts,
+    fixture: &Fixture,
+    character_id: &str,
+    binding_id: &str,
+) {
+    assert_eq!(facts.len(), 1, "one candidate fact");
+    assert_eq!(
+        facts[0].0,
+        fixture.authority_host_id.as_str(),
+        "pinned authority host"
+    );
+    assert_eq!(facts[0].1, "1", "pinned authority generation");
+    assert_eq!(facts[0].2, fixture.served_space.as_str(), "pinned space");
+    assert_eq!(
+        facts[0].3,
+        fixture.client_peer.as_str(),
+        "pinned public client identity"
+    );
+    assert_eq!(facts[0].4, character_id, "pinned Character bearer");
+    assert_eq!(facts[0].5, binding_id, "pinned binding");
+    assert_eq!(facts[0].6, "candidate", "fact kind");
+    assert_eq!(facts[0].8, "live", "the committed candidate is live");
+}
+
+/// The product Core session, with a control clone of its accepted socket, and a
+/// real owned World/Character/binding: the binding-scoped capture's D18 fact is
+/// written from the actual pinned binding.
+async fn product_session(fixture: &Fixture, env: &Env) -> ProductSession {
+    let (addr, task, control) = start_listener_with_control(
+        fixture.provider.server(fixture.directory.admission()),
+        fixture.served_manifest(),
+        HashMap::from([(fixture.client_peer.clone(), fixture.client_pubkey)]),
         5_000,
     )
     .await;
-    let core = open(&env, selection(&served_space, addr, &host_pubkey))
+    let core = open(env, fixture.selection(&fixture.served_space, addr))
         .await
         .expect("the exact selection opens");
-    let core_responder = responder_of(task).await;
-    let core_control = core_control.await.expect("the accepted socket control");
+    let responder = responder_of(task).await;
+    let control = control.await.expect("the accepted socket control");
     assert_eq!(
-        core_responder.remote_peer_id().as_deref(),
-        Some(client_peer.as_str())
+        responder.remote_peer_id().as_deref(),
+        Some(fixture.client_peer.as_str())
     );
 
-    // A real owned World/Character/binding and a binding-scoped capture: its
-    // D18 fact is written from the actual pinned binding.
     let principal = core.active_principal().await.expect("active principal");
     assert_eq!(principal.creator_id(), env.creator_id);
     let world = create_world(&core, &principal, "R5 Loss World").await;
@@ -2152,180 +2277,72 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
     )
     .await
     .expect("the binding-scoped capture");
-    let facts_db = core_db(&env).await;
-    let facts_before = binding_object_facts(&facts_db, &binding_id).await;
-    facts_db.close().await;
-    assert_eq!(facts_before.len(), 1, "one candidate fact");
-    assert_eq!(
-        facts_before[0].0, authority_host_id,
-        "pinned authority host"
-    );
-    assert_eq!(facts_before[0].1, "1", "pinned authority generation");
-    assert_eq!(facts_before[0].2, served_space, "pinned space");
-    assert_eq!(
-        facts_before[0].3, client_peer,
-        "pinned public client identity"
-    );
-    assert_eq!(facts_before[0].4, character_id, "pinned Character bearer");
-    assert_eq!(facts_before[0].5, binding_id, "pinned binding");
-    assert_eq!(facts_before[0].6, "candidate", "fact kind");
-    assert_eq!(facts_before[0].8, "live", "the committed candidate is live");
 
-    let character_subject = legacy::character_subject_id(&character_id);
-    let consumer_request = dto::<MemoryCaptureRequest>(json!({
-        "space_id": served_space,
-        "subject_id": character_subject,
+    let facts_before = binding_facts_now(env, &binding_id).await;
+    assert_pinned_facts(&facts_before, fixture, &character_id, &binding_id);
+    ProductSession {
+        core,
+        responder,
+        control,
+        principal,
+        character_id,
+        binding_id,
+        character_body,
+        facts_before,
+    }
+}
+
+/// The signed consumer's own session and its original capture of the same
+/// Character subject.
+async fn consumer_session(fixture: &Fixture, character_id: &str) -> ConsumerSession {
+    let (addr, task, control) = start_listener_with_control(
+        fixture.provider.server(fixture.directory.admission()),
+        fixture.served_manifest(),
+        HashMap::from([(fixture.client_peer.clone(), fixture.client_pubkey)]),
+        5_000,
+    )
+    .await;
+    let adapter = dial_adapter(addr, CLIENT_SEED).await;
+    let responder = responder_of(task).await;
+    let control = control.await.expect("the consumer socket control");
+    let principal = principal_label(&fixture.principal_id);
+    let request = dto::<MemoryCaptureRequest>(json!({
+        "space_id": fixture.served_space,
+        "subject_id": legacy::character_subject_id(character_id),
         "content": { "text": "A second, consumer-owned capture for the same subject." },
         "capture_scope": { "visibility": "shared" },
         "idempotency_key": "r5-consumer-capture",
     }));
-
-    // The signed consumer's own session and its original capture.
-    let (consumer_addr, consumer_task, consumer_control) = start_listener_with_control(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        HashMap::from([(client_peer.clone(), client_pubkey)]),
-        5_000,
-    )
-    .await;
-    let consumer = dial_adapter(consumer_addr, CLIENT_SEED).await;
-    let consumer_responder = responder_of(consumer_task).await;
-    let consumer_control = consumer_control.await.expect("the consumer socket control");
-    let consumer_principal = principal_label(&principal_id);
-    let original = match consumer
-        .capture(&consumer_principal, consumer_request.clone())
-        .await
-    {
+    let original = match adapter.capture(&principal, request.clone()).await {
         SpokeResult::Ok(response) => response_json(&response),
         SpokeResult::Reject(reject) => panic!("the consumer capture commits: {reject:?}"),
     };
-    let original_tuple = receipt_tuple(&original);
-    let original_candidates = original["result"]["candidate_ids"].clone();
+    let tuple = receipt_tuple(&original);
+    let candidates = original["result"]["candidate_ids"].clone();
     assert_eq!(
-        original_candidates.as_array().map(Vec::len),
+        candidates.as_array().map(Vec::len),
         Some(1),
         "one original candidate"
     );
-
-    // The provider's complete effect set and the client-pin namespace.
-    let effects_before = provider_effect_snapshot(&pool).await;
-    assert_eq!(
-        committed_receipts(&pool, "memory.capture").await.len(),
-        2,
-        "one product receipt and one consumer receipt"
-    );
-    let admissions_db = core_db(&env).await;
-    let admissions_before = binding_admissions(&admissions_db, &binding_id).await;
-    admissions_db.close().await;
-    assert!(
-        admissions_before.is_empty(),
-        "a definite committed capture retires exactly its own admission"
-    );
-
-    // UNEXPECTED LOSS: the provider's accepted sockets are torn down under the
-    // still-open client bindings. The test never calls a client close here.
-    assert!(!core.is_closing(), "the client did not begin closing");
-    core_control
-        .shutdown(Shutdown::Both)
-        .expect("tear down the core socket");
-    consumer_control
-        .shutdown(Shutdown::Both)
-        .expect("tear down the consumer socket");
-    wait_for_closed(&core_responder).await;
-    wait_for_closed(&consumer_responder).await;
-
-    // The live bindings now observe a broken transport instead of a graceful
-    // client shutdown.
-    let after_loss = core
-        .list_pending_reviews(&principal, None, 50)
-        .await
-        .err()
-        .expect("the product binding observes the broken transport");
-    assert!(
-        matches!(after_loss, CoreError::MemoryProviderRefused { .. }),
-        "the broken transport reaches the product as a classified refusal: {after_loss:?}"
-    );
-    assert!(!core.is_closing(), "the client still did not begin closing");
-    match consumer
-        .get_receipt(
-            &consumer_principal,
-            dto::<MemoryReceiptsGetRequest>(json!({
-                "space_id": served_space,
-                "receipt_id": original_tuple.0,
-            })),
-        )
-        .await
-    {
-        SpokeResult::Reject(reject) => {
-            assert_eq!(
-                reject.code,
-                SpokeRejectCode::InternalError,
-                "the broken transport fails closed"
-            );
-            let kind = reject
-                .details
-                .as_ref()
-                .and_then(|details| details.get("kind"))
-                .and_then(Value::as_str);
-            assert!(
-                matches!(kind, Some("transport" | "session_closed")),
-                "the SDK classifies the loss as a broken session: {kind:?}"
-            );
-        }
-        SpokeResult::Ok(_) => panic!("the dead consumer session cannot answer"),
+    ConsumerSession {
+        adapter,
+        responder,
+        control,
+        principal,
+        request,
+        tuple,
+        candidates,
     }
-    assert!(core.close().await.expect("close").cleanup_confirmed);
-    consumer.close();
+}
 
-    // Reconnect with the SAME persisted seed: same peer, same generation.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let reopened = open(&env, selection(&served_space, addr, &host_pubkey))
-        .await
-        .expect("the reconnect opens a fresh binding");
-    let reopened_responder = responder_of(task).await;
-    assert_eq!(
-        reopened_responder.remote_peer_id().as_deref(),
-        Some(client_peer.as_str()),
-        "session ids are never identity: the same seed is"
-    );
-    assert_eq!(
-        provider_generation(&pool).await,
-        generator_before,
-        "the same authority generation is served by the reconnect"
-    );
-
-    // Product path (complementary): the same binding-scoped capture replays.
-    let reopened_principal = reopened.active_principal().await.expect("principal");
-    reopened
-        .capture_character_pending_review(
-            &reopened_principal,
-            character_id.clone(),
-            dto::<CaptureCharacterPendingReviewRequest>(character_body),
-        )
-        .await
-        .expect("the product replay is answered");
-
-    // Signed consumer path: the same-key replay returns the ORIGINAL receipt
-    // and the ORIGINAL candidate, and `receipts.get` serves the same tuple.
-    let (consumer_addr, consumer_task) = start_listener(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let consumer = dial_adapter(consumer_addr, CLIENT_SEED).await;
-    let consumer_responder = responder_of(consumer_task).await;
-    let replay = match consumer
-        .capture(&consumer_principal, consumer_request.clone())
+/// The signed consumer's same-key replay and `receipts.get`, each answered with
+/// the ORIGINAL receipt tuple and the ORIGINAL candidate.
+async fn assert_signed_replay(fixture: &Fixture, consumer: &ConsumerSession) {
+    let (addr, task) = fixture.listener(fixture.served_manifest()).await;
+    let adapter = dial_adapter(addr, CLIENT_SEED).await;
+    let responder = responder_of(task).await;
+    let replay = match adapter
+        .capture(&consumer.principal, consumer.request.clone())
         .await
     {
         SpokeResult::Ok(response) => response_json(&response),
@@ -2333,19 +2350,19 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
     };
     assert_eq!(
         receipt_tuple(&replay),
-        original_tuple,
+        consumer.tuple,
         "the replay response carries the ORIGINAL receipt tuple"
     );
     assert_eq!(
-        replay["result"]["candidate_ids"], original_candidates,
+        replay["result"]["candidate_ids"], consumer.candidates,
         "the replay names the ORIGINAL candidate"
     );
-    let read_back = match consumer
+    let read_back = match adapter
         .get_receipt(
-            &consumer_principal,
+            &consumer.principal,
             dto::<MemoryReceiptsGetRequest>(json!({
-                "space_id": served_space,
-                "receipt_id": original_tuple.0,
+                "space_id": fixture.served_space,
+                "receipt_id": consumer.tuple.0,
             })),
         )
         .await
@@ -2355,43 +2372,205 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
     };
     assert_eq!(
         read_back["receipt"]["receipt_id"],
-        json!(original_tuple.0),
+        json!(consumer.tuple.0),
         "receipts.get serves the original receipt id"
     );
     assert_eq!(
-        read_back["receipt"]["result"]["candidate_ids"], original_candidates,
+        read_back["receipt"]["result"]["candidate_ids"], consumer.candidates,
         "receipts.get names the original candidate"
     );
+    adapter.close();
+    wait_for_closed(&responder).await;
+}
 
-    // Neither path committed a second effect, and the client pin stayed the
-    // same namespace across the reconnect.
+impl Loss {
+    /// Tear the provider's accepted sockets down under the still-open client
+    /// bindings. The test never calls a client close here, so both live bindings
+    /// have to observe a broken transport instead of a graceful shutdown.
+    async fn break_the_transport(&self) {
+        assert!(
+            !self.product.core.is_closing(),
+            "the client did not begin closing"
+        );
+        self.product
+            .control
+            .shutdown(Shutdown::Both)
+            .expect("tear down the core socket");
+        self.consumer
+            .control
+            .shutdown(Shutdown::Both)
+            .expect("tear down the consumer socket");
+        wait_for_closed(&self.product.responder).await;
+        wait_for_closed(&self.consumer.responder).await;
+
+        let after_loss = self
+            .product
+            .core
+            .list_pending_reviews(&self.product.principal, None, 50)
+            .await
+            .expect_err("the product binding observes the broken transport");
+        assert!(
+            matches!(after_loss, CoreError::MemoryProviderRefused { .. }),
+            "the broken transport reaches the product as a classified refusal: {after_loss:?}"
+        );
+        assert!(
+            !self.product.core.is_closing(),
+            "the client still did not begin closing"
+        );
+
+        match self
+            .consumer
+            .adapter
+            .get_receipt(
+                &self.consumer.principal,
+                dto::<MemoryReceiptsGetRequest>(json!({
+                    "space_id": self.fixture.served_space,
+                    "receipt_id": self.consumer.tuple.0,
+                })),
+            )
+            .await
+        {
+            SpokeResult::Reject(reject) => {
+                assert_eq!(
+                    reject.code,
+                    SpokeRejectCode::InternalError,
+                    "the broken transport fails closed"
+                );
+                let kind = reject
+                    .details
+                    .as_ref()
+                    .and_then(|details| details.get("kind"))
+                    .and_then(Value::as_str);
+                assert!(
+                    matches!(kind, Some("transport" | "session_closed")),
+                    "the SDK classifies the loss as a broken session: {kind:?}"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("the dead consumer session cannot answer"),
+        }
+        assert!(
+            self.product
+                .core
+                .close()
+                .await
+                .expect("close")
+                .cleanup_confirmed
+        );
+        self.consumer.adapter.close();
+    }
+
+    /// Reconnect with the SAME persisted seed — same peer, same generation — and
+    /// replay both paths: the product binding-scoped capture and the signed
+    /// consumer's same-key capture, which must answer with the ORIGINAL receipt
+    /// tuple and candidate.
+    async fn reconnect_and_replay(self) {
+        let (addr, task) = self.fixture.listener(self.fixture.served_manifest()).await;
+        let reopened = open(
+            &self.env,
+            self.fixture.selection(&self.fixture.served_space, addr),
+        )
+        .await
+        .expect("the reconnect opens a fresh binding");
+        let reopened_responder = responder_of(task).await;
+        assert_eq!(
+            reopened_responder.remote_peer_id().as_deref(),
+            Some(self.fixture.client_peer.as_str()),
+            "session ids are never identity: the same seed is"
+        );
+        assert_eq!(
+            provider_generation(&self.pool).await,
+            self.generation_before,
+            "the same authority generation is served by the reconnect"
+        );
+
+        // Product path (complementary): the same binding-scoped capture replays.
+        let reopened_principal = reopened.active_principal().await.expect("principal");
+        reopened
+            .capture_character_pending_review(
+                &reopened_principal,
+                self.product.character_id.clone(),
+                dto::<CaptureCharacterPendingReviewRequest>(self.product.character_body.clone()),
+            )
+            .await
+            .expect("the product replay is answered");
+
+        // Signed consumer path: the same-key replay returns the ORIGINAL receipt
+        // and the ORIGINAL candidate, and `receipts.get` serves the same tuple.
+        assert_signed_replay(&self.fixture, &self.consumer).await;
+
+        // Neither path committed a second effect, and the client pin stayed the
+        // same namespace across the reconnect.
+        assert_eq!(
+            provider_effect_snapshot(&self.pool).await,
+            self.effects_before,
+            "the replays added no receipt, candidate or record"
+        );
+        assert_eq!(
+            binding_facts_now(&self.env, &self.product.binding_id).await,
+            self.product.facts_before,
+            "the D18 fact namespace (authority, generation, space, client identity) is unchanged"
+        );
+        assert_eq!(
+            binding_admissions_now(&self.env, &self.product.binding_id).await,
+            self.admissions_before,
+            "the lost attempt's admission is unchanged; no new pin namespace appeared"
+        );
+        assert!(
+            !self.env.local_provider_store().exists(),
+            "no reconnect fell back to the local provider"
+        );
+        assert!(reopened.close().await.expect("close").cleanup_confirmed);
+        wait_for_closed(&reopened_responder).await;
+        self.pool.close().await;
+    }
+}
+
+/// An UNEXPECTED transport loss (the provider's socket is torn down under a
+/// live, open Core binding — the client never asked to close), then a reconnect
+/// with the SAME persisted seed.
+///
+/// The signed consumer receives the ORIGINAL receipt tuple and the ORIGINAL
+/// candidate both from the same-key replay response and from `memory.receipts.get`;
+/// the product Core path is kept as complementary evidence, and the client pin
+/// is read from the D18 namespace facts the actual `MemoryProviderBinding`
+/// produced (provider rows alone are not the client pin). No C-089 cutover is
+/// claimed.
+#[tokio::test]
+async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt() {
+    let fixture = Fixture::new().await;
+    let env = Env::boot("R5 Loss Owner").await;
+    env.write_credential(&CLIENT_SEED);
+    let pool = fixture.pool().await;
+    let generation_before = provider_generation(&pool).await;
+
+    let product = product_session(&fixture, &env).await;
+    let consumer = consumer_session(&fixture, &product.character_id).await;
+
+    // The provider's complete effect set and the client-pin namespace.
+    let effects_before = provider_effect_snapshot(&pool).await;
     assert_eq!(
-        provider_effect_snapshot(&pool).await,
-        effects_before,
-        "the replays added no receipt, candidate or record"
+        committed_receipts(&pool, "memory.capture").await.len(),
+        2,
+        "one product receipt and one consumer receipt"
     );
-    let state = core_db(&env).await;
-    assert_eq!(
-        binding_object_facts(&state, &binding_id).await,
-        facts_before,
-        "the D18 fact namespace (authority, generation, space, client identity) is unchanged"
-    );
-    let admissions_after = binding_admissions(&state, &binding_id).await;
-    assert_eq!(
-        admissions_after, admissions_before,
-        "the lost attempt's admission is unchanged; no new pin namespace appeared"
-    );
-    state.close().await;
+    let admissions_before = binding_admissions_now(&env, &product.binding_id).await;
     assert!(
-        !env.local_provider_store().exists(),
-        "no reconnect fell back to the local provider"
+        admissions_before.is_empty(),
+        "a definite committed capture retires exactly its own admission"
     );
 
-    assert!(reopened.close().await.expect("close").cleanup_confirmed);
-    wait_for_closed(&reopened_responder).await;
-    consumer.close();
-    wait_for_closed(&consumer_responder).await;
-    pool.close().await;
+    let loss = Loss {
+        fixture,
+        env,
+        pool,
+        generation_before,
+        product,
+        consumer,
+        effects_before,
+        admissions_before,
+    };
+    loss.break_the_transport().await;
+    loss.reconnect_and_replay().await;
 }
 
 /// The stable identity of one receipt body: id, idempotency key, payload
@@ -2417,235 +2596,402 @@ fn receipt_tuple(receipt: &Value) -> (String, String, String, String) {
     )
 }
 
+/// The admin's signed session and the scoped identity's own binding, plus the
+/// provider state every grant decision is measured against.
+struct Grants {
+    /// Keeps the provider database alive for the whole scenario.
+    _provider_home: TempDir,
+    env: Env,
+    pool: SqlitePool,
+    space: String,
+    admin: Arc<RemoteAdapter>,
+    admin_responder: Arc<ConnectResponder>,
+    admin_principal: String,
+    scoped: CoreService,
+    scoped_responder: Arc<ConnectResponder>,
+    scoped_principal: String,
+    scoped_label: CorePrincipal,
+}
+
+impl Grants {
+    /// The admin's own signed session — a grant is what makes the space visible
+    /// at all, so the scoped identity cannot even complete admission before it
+    /// holds one — and, after that first read grant, the scoped identity's own
+    /// binding.
+    async fn open() -> Self {
+        let fixture = Fixture::new().await.admitting(&SCOPED_SEED);
+        let env = Env::new();
+        env.write_credential(&CLIENT_SEED);
+        env.write_credential_named(SCOPED_CREDENTIAL_ID, &SCOPED_SEED, None);
+        let pool = fixture.pool().await;
+        let scoped_peer = peer_id(&SCOPED_SEED);
+        let scoped_principal = format!("prn_{scoped_peer}");
+
+        let (addr, task) = fixture.listener(fixture.served_manifest()).await;
+        let admin = dial_adapter(addr, CLIENT_SEED).await;
+        let admin_responder = responder_of(task).await;
+        issue_grant(
+            &admin,
+            &fixture.principal_id,
+            json!({
+                "space_id": fixture.served_space.clone(),
+                "principal_id": scoped_principal.clone(),
+                "capabilities": ["records_read"],
+                "idempotency_key": "scoped-read-grant",
+            }),
+        )
+        .await;
+
+        // Admission is per authenticated peer, and its grant state decides every
+        // operation.
+        let (addr, task) = fixture
+            .listener_for(&SCOPED_SEED, fixture.served_manifest())
+            .await;
+        let scoped = open(
+            &env,
+            selection_for(
+                &fixture.served_space,
+                addr,
+                &fixture.host_pubkey,
+                SCOPED_CREDENTIAL_ID,
+                vec![fixture.host_peer.clone()],
+            ),
+        )
+        .await
+        .expect("the scoped identity opens its binding");
+        let scoped_responder = responder_of(task).await;
+        assert_eq!(
+            scoped_responder.remote_peer_id().as_deref(),
+            Some(scoped_peer.as_str())
+        );
+        let scoped_label = scoped.active_principal().await.expect("principal");
+        assert_eq!(
+            scoped_label.creator_id(),
+            CREATOR,
+            "the scoped open serves the selected creator; provider identity comes from the authenticated peer"
+        );
+        Self {
+            _provider_home: fixture.provider_home,
+            admin_principal: fixture.principal_id.clone(),
+            space: fixture.served_space.clone(),
+            env,
+            pool,
+            admin,
+            admin_responder,
+            scoped,
+            scoped_responder,
+            scoped_principal,
+            scoped_label,
+        }
+    }
+
+    /// The read-only grant never becomes capture: the provider answers with its
+    /// own typed refusal and commits nothing.
+    async fn assert_read_only_refuses_capture(&self) {
+        let effects_before = provider_effect_snapshot(&self.pool).await;
+        let ungranted = self
+            .scoped
+            .create_pending_review(&self.scoped_label, capture_body(CAPTURE_PENDING))
+            .await
+            .expect_err("a read-only principal cannot capture");
+        match &ungranted {
+            CoreError::MemoryProviderRefused {
+                code,
+                family,
+                retry_class,
+                ..
+            } => {
+                assert_eq!(code, "NOT_AUTHORIZED");
+                assert_eq!(*family, MemoryProviderRefusal::Forbidden);
+                assert_eq!(retry_class, "terminal");
+            }
+            other => panic!("expected the classified provider refusal, got {other:?}"),
+        }
+        assert_eq!(
+            provider_effect_snapshot(&self.pool).await,
+            effects_before,
+            "the read-only refusal changed no receipt, candidate or record"
+        );
+    }
+
+    /// The capture-only grant admits exactly one capture: one candidate and one
+    /// receipt, whose requester is the authenticated scoped principal.
+    async fn capture_once(&self) {
+        let captured = self
+            .scoped
+            .create_pending_review(&self.scoped_label, capture_body(CAPTURE_PENDING))
+            .await
+            .expect("the scoped capture grant admits the capture");
+        assert!(captured.success);
+        let candidates = provider_candidates(&self.pool).await;
+        assert_eq!(
+            candidates.len(),
+            1,
+            "the granted capture produced one candidate"
+        );
+        let receipts = committed_receipts(&self.pool, "memory.capture").await;
+        assert_eq!(
+            receipts.len(),
+            1,
+            "the granted capture committed one receipt"
+        );
+        assert_eq!(
+            receipts[0].requester, self.scoped_principal,
+            "the receipt requester is the authenticated scoped principal"
+        );
+        assert_eq!(
+            receipt_candidate_ids(&receipts[0]),
+            vec![candidates[0].0.clone()],
+            "the committed receipt names the original candidate it produced"
+        );
+    }
+
+    /// Review is outside the grant: the dismissal is refused by the provider and
+    /// the candidate stays pending with no receipt of its own.
+    ///
+    /// The FIRST denied attempt is a warm-up that materializes the adapter's own
+    /// idempotent `memory.subjects.ensure` (a legitimate provider write, not the
+    /// denied operation); the measured second attempt replays it and must add
+    /// nothing at all.
+    async fn assert_review_outside_the_grant(&self) {
+        let warm = self
+            .scoped
+            .delete_pending_review(&self.scoped_label, CAPTURE_PENDING.to_string())
+            .await
+            .expect_err("a capture-only grant cannot dismiss a candidate");
+        assert!(
+            matches!(warm, CoreError::MemoryProviderRefused { .. }),
+            "the warm-up dismissal is the same typed refusal: {warm:?}"
+        );
+        let before = provider_effect_snapshot(&self.pool).await;
+        let dismissal = self
+            .scoped
+            .delete_pending_review(&self.scoped_label, CAPTURE_PENDING.to_string())
+            .await
+            .expect_err("a capture-only grant cannot dismiss a candidate");
+        match &dismissal {
+            CoreError::MemoryProviderRefused { code, family, .. } => {
+                assert_eq!(code, "NOT_AUTHORIZED");
+                assert_eq!(*family, MemoryProviderRefusal::Forbidden);
+            }
+            other => panic!("expected the classified provider refusal, got {other:?}"),
+        }
+        let after = provider_effect_snapshot(&self.pool).await;
+        let added: Vec<&String> = after.iter().filter(|row| !before.contains(row)).collect();
+        let removed: Vec<&String> = before.iter().filter(|row| !after.contains(row)).collect();
+        assert!(
+            added.is_empty() && removed.is_empty(),
+            "the refused dismissal changed no receipt, candidate or record: added {added:?}, removed {removed:?}"
+        );
+        assert_eq!(
+            provider_receipts(&self.pool, "memory.candidates.dismiss").await,
+            0,
+            "the refused dismissal committed no receipt"
+        );
+    }
+
+    /// A payload creator is not the requester: the product refuses the foreign
+    /// creator before any wire attempt, and nothing changes on the provider.
+    async fn assert_payload_identity_is_not_authority(&self) {
+        let before = provider_effect_snapshot(&self.pool).await;
+        let spoofed = self
+            .scoped
+            .create_pending_review(
+                &self.scoped_label,
+                capture_body_as("pend_spoofed", "ctr_ffffffffffffffffffffffffffffffff"),
+            )
+            .await
+            .expect_err("a payload creator is never authority");
+        assert!(
+            matches!(spoofed, CoreError::ForbiddenReason { .. }),
+            "got {spoofed:?}"
+        );
+        assert_eq!(
+            provider_effect_snapshot(&self.pool).await,
+            before,
+            "the payload-identity refusal changed no receipt, candidate or record"
+        );
+    }
+
+    async fn close(self) {
+        assert!(self.scoped.close().await.expect("close").cleanup_confirmed);
+        wait_for_closed(&self.scoped_responder).await;
+        self.admin.close();
+        wait_for_closed(&self.admin_responder).await;
+        self.pool.close().await;
+        assert!(
+            !self.env.local_provider_store().exists(),
+            "no scoped binding fell back to the local provider"
+        );
+    }
+}
+
 /// A scoped grant cannot be amplified by the client, and neither the payload's
 /// creator nor a session label is authority: every refusal leaves the provider's
 /// receipts and candidates exactly as they were.
 #[tokio::test]
 async fn scoped_grants_and_payload_identity_cannot_be_amplified() {
-    let host_pubkey = pubkey(&HOST_SEED);
-    let admin_peer = peer_id(&CLIENT_SEED);
-    let scoped_peer = peer_id(&SCOPED_SEED);
-    let fixture_home = TempDir::new().expect("fixture home");
-    let provider = Arc::new(
-        FixtureMemoryProvider::open(&provider_database(&fixture_home))
-            .await
-            .expect("open the durable fixture"),
-    );
-    let space = provider.identity().space_id.clone();
-    let authority_host_id = provider.identity().authority_host_id.clone();
-    let admin_principal = format!("prn_{admin_peer}");
-    let scoped_principal = format!("prn_{scoped_peer}");
-    provider
-        .provision_operator_admin(&admin_principal)
-        .await
-        .expect("operator provisions the admin grant");
-    let directory = Arc::new(
-        PeerDirectory::new()
-            .with_peer(admin_peer.clone(), admin_principal.clone())
-            .with_peer(scoped_peer.clone(), scoped_principal.clone()),
-    );
-    let env = Env::new();
-    env.write_credential(&CLIENT_SEED);
-    env.write_credential_named(SCOPED_CREDENTIAL_ID, &SCOPED_SEED, None);
-    let pool = provider_pool(&fixture_home).await;
-
-    // The admin opens its own signed session first: a grant is what makes the
-    // space visible at all, so the scoped identity cannot even complete
-    // admission before it holds one.
-    let (admin_addr, admin_task) = start_listener(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        admin_peer.clone(),
-        pubkey(&CLIENT_SEED),
-        5_000,
-    )
-    .await;
-    let admin = dial_adapter(admin_addr, CLIENT_SEED).await;
-    let admin_responder = responder_of(admin_task).await;
-    issue_grant(
-        &admin,
-        &admin_principal,
-        json!({
-            "space_id": space,
-            "principal_id": scoped_principal,
-            "capabilities": ["records_read"],
-            "idempotency_key": "scoped-read-grant",
-        }),
-    )
-    .await;
-
-    // The scoped identity opens its own binding: admission is per authenticated
-    // peer, and its grant state decides every operation.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        scoped_peer.clone(),
-        pubkey(&SCOPED_SEED),
-        5_000,
-    )
-    .await;
-    let scoped = open(
-        &env,
-        selection_for(
-            &space,
-            addr,
-            &host_pubkey,
-            SCOPED_CREDENTIAL_ID,
-            vec![peer_id(&HOST_SEED)],
-        ),
-    )
-    .await
-    .expect("the scoped identity opens its binding");
-    let scoped_responder = responder_of(task).await;
-    assert_eq!(
-        scoped_responder.remote_peer_id().as_deref(),
-        Some(scoped_peer.as_str())
-    );
-    let scoped_label = scoped.active_principal().await.expect("principal");
-    assert_eq!(
-        scoped_label.creator_id(),
-        CREATOR,
-        "the scoped open serves the selected creator; provider identity comes from the authenticated peer"
-    );
-
-    // Its read-only grant never becomes capture: the provider answers with its
-    // own typed refusal and commits nothing.
-    let effects_before_reading = provider_effect_snapshot(&pool).await;
-    let ungranted = scoped
-        .create_pending_review(&scoped_label, capture_body(CAPTURE_PENDING))
-        .await
-        .expect_err("a read-only principal cannot capture");
-    match &ungranted {
-        CoreError::MemoryProviderRefused {
-            code,
-            family,
-            retry_class,
-            ..
-        } => {
-            assert_eq!(code, "NOT_AUTHORIZED");
-            assert_eq!(*family, MemoryProviderRefusal::Forbidden);
-            assert_eq!(retry_class, "terminal");
-        }
-        other => panic!("expected the classified provider refusal, got {other:?}"),
-    }
-    assert_eq!(
-        provider_effect_snapshot(&pool).await,
-        effects_before_reading,
-        "the read-only refusal changed no receipt, candidate or record"
-    );
+    let grants = Grants::open().await;
+    grants.assert_read_only_refuses_capture().await;
 
     // The admin adds the one capture-only space grant over the same session; no
     // review capability travels with it.
     issue_grant(
-        &admin,
-        &admin_principal,
+        &grants.admin,
+        &grants.admin_principal,
         json!({
-            "space_id": space,
-            "principal_id": scoped_principal,
+            "space_id": grants.space.clone(),
+            "principal_id": grants.scoped_principal.clone(),
             "capabilities": ["capture"],
             "idempotency_key": "scoped-capture-grant",
         }),
     )
     .await;
 
-    // The granted capture runs exactly once...
-    let captured = scoped
-        .create_pending_review(&scoped_label, capture_body(CAPTURE_PENDING))
+    grants.capture_once().await;
+    grants.assert_review_outside_the_grant().await;
+    grants.assert_payload_identity_is_not_authority().await;
+    grants.close().await;
+}
+
+/// The real public credential value, loaded through the public API: its `Debug`
+/// must expose neither secret. This is the actual secret-bearing value, not a
+/// stand-in selection.
+fn assert_credential_debug_is_clean(env: &Env, seed_text: &str, signature: &str) {
+    let credential = MemoryCredential::load(&env.user_home, CREDENTIAL_ID)
+        .expect("the operator credential loads through the public API");
+    let debug = format!("{credential:?}");
+    assert!(!debug.contains(seed_text));
+    assert!(!debug.contains(signature));
+}
+
+/// A real signed refusal *after* the credential was loaded and the signed session
+/// established: the discovered space is not authoritative on this authenticated
+/// host, and the classified error carries no credential material either way it is
+/// rendered.
+async fn assert_signed_refusal_is_clean(
+    fixture: &Fixture,
+    env: &Env,
+    seed_text: &str,
+    signature: &str,
+) {
+    let (addr, task) = fixture
+        .listener(manifest("fixture-not-the-space-authority"))
+        .await;
+    let error = open(env, fixture.selection(&fixture.served_space, addr))
         .await
-        .expect("the scoped capture grant admits the capture");
-    assert!(captured.success);
-    let candidates_after_capture = provider_candidates(&pool).await;
-    assert_eq!(
-        candidates_after_capture.len(),
-        1,
-        "the granted capture produced one candidate"
+        .err()
+        .expect("an authority mismatch fails the open");
+    assert_eq!(coded(&error), "memory_remote_authority");
+    let rendered = format!("{error} {error:?}");
+    assert!(!rendered.contains(seed_text));
+    assert!(!rendered.contains(signature));
+    let responder = responder_of(task).await;
+    wait_for_closed(&responder).await;
+}
+
+/// The real configuration writer persists the remote selection (the real reader
+/// loads it in the next check) without either secret.
+fn assert_persisted_selection_is_clean(
+    fixture: &Fixture,
+    env: &Env,
+    seed_text: &str,
+    signature: &str,
+) {
+    let remote = selection(
+        &fixture.served_space,
+        "127.0.0.1:1".parse().expect("port"),
+        &fixture.host_pubkey,
     );
-    let capture_receipts = committed_receipts(&pool, "memory.capture").await;
-    assert_eq!(
-        capture_receipts.len(),
-        1,
-        "the granted capture committed one receipt"
+    CoreHomeService::open(env.user_home.clone())
+        .expect("open the real home service")
+        .set_memory_provider_selection(&remote)
+        .expect("the product config writer persists the selection");
+    let persisted = fs::read_to_string(env.user_home.join(".nexus42").join("config.toml"))
+        .expect("read the persisted configuration");
+    assert!(
+        persisted.contains("kind = \"remote\""),
+        "the remote table persisted"
     );
-    assert_eq!(
-        capture_receipts[0].requester, scoped_principal,
-        "the receipt requester is the authenticated scoped principal"
+    assert!(!persisted.contains(seed_text));
+    assert!(!persisted.contains(signature));
+}
+
+/// The admitted session really captures, so the provider's receipt and candidate
+/// bodies, the complete public receipt read back over the same authenticated
+/// identity's signed session, and the workspace state database are all
+/// meaningful sinks for both sentinels.
+async fn assert_provider_sinks_are_clean(
+    fixture: &Fixture,
+    env: &Env,
+    pool: &SqlitePool,
+    seed_text: &str,
+    signature: &str,
+) {
+    let (addr, task) = fixture.listener(fixture.served_manifest()).await;
+    CoreHomeService::open(env.user_home.clone())
+        .expect("open the real home service")
+        .set_memory_provider_selection(&fixture.selection(&fixture.served_space, addr))
+        .expect("persist the served selection");
+    let core = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::EngineOwner,
+        memory: None,
+    })
+    .await
+    .expect("the persisted selection opens through the real reader");
+    let responder = responder_of(task).await;
+    let principal = core.active_principal().await.expect("principal");
+    core.create_pending_review(&principal, capture_body(CAPTURE_PENDING))
+        .await
+        .expect("the admitted capture");
+
+    let bodies = provider_body_text(pool).await;
+    assert!(
+        !bodies.is_empty(),
+        "the receipt/candidate sink is populated"
     );
-    assert_eq!(
-        receipt_candidate_ids(&capture_receipts[0]),
-        vec![candidates_after_capture[0].0.clone()],
-        "the committed receipt names the original candidate it produced"
+    assert!(
+        !bodies.contains(seed_text),
+        "the seed never entered a receipt"
+    );
+    assert!(
+        !bodies.contains(signature),
+        "the proof signature never entered a receipt"
     );
 
-    // ...but review is outside the grant: the dismissal is refused by the
-    // provider and the candidate stays pending with no receipt of its own.
-    // The FIRST denied attempt is a warm-up that materializes the adapter s own
-    // idempotent `memory.subjects.ensure` (a legitimate provider write, not the
-    // denied operation); the measured second attempt replays it and must add
-    // nothing at all.
-    let warm = scoped
-        .delete_pending_review(&scoped_label, CAPTURE_PENDING.to_string())
-        .await
-        .expect_err("a capture-only grant cannot dismiss a candidate");
-    assert!(
-        matches!(warm, CoreError::MemoryProviderRefused { .. }),
-        "the warm-up dismissal is the same typed refusal: {warm:?}"
-    );
-    let effects_before_dismissal = provider_effect_snapshot(&pool).await;
-    let dismissal = scoped
-        .delete_pending_review(&scoped_label, CAPTURE_PENDING.to_string())
-        .await
-        .expect_err("a capture-only grant cannot dismiss a candidate");
-    match &dismissal {
-        CoreError::MemoryProviderRefused { code, family, .. } => {
-            assert_eq!(code, "NOT_AUTHORIZED");
-            assert_eq!(*family, MemoryProviderRefusal::Forbidden);
-        }
-        other => panic!("expected the classified provider refusal, got {other:?}"),
-    }
-    let after_dismissal = provider_effect_snapshot(&pool).await;
-    let added: Vec<&String> = after_dismissal
-        .iter()
-        .filter(|row| !effects_before_dismissal.contains(row))
-        .collect();
-    let removed: Vec<&String> = effects_before_dismissal
-        .iter()
-        .filter(|row| !after_dismissal.contains(row))
-        .collect();
-    assert!(
-        added.is_empty() && removed.is_empty(),
-        "the refused dismissal changed no receipt, candidate or record: added {added:?}, removed {removed:?}"
-    );
-    assert_eq!(
-        provider_receipts(&pool, "memory.candidates.dismiss").await,
-        0,
-        "the refused dismissal committed no receipt"
-    );
-
-    // A payload creator is not the requester: the product refuses the foreign
-    // creator before any wire attempt, and nothing changes on the provider.
-    let effects_before_spoof = provider_effect_snapshot(&pool).await;
-    let spoofed = scoped
-        .create_pending_review(
-            &scoped_label,
-            capture_body_as("pend_spoofed", "ctr_ffffffffffffffffffffffffffffffff"),
+    let committed = committed_receipts(pool, "memory.capture").await;
+    assert_eq!(committed.len(), 1);
+    assert_eq!(committed[0].requester, fixture.principal_id);
+    let (consumer_addr, consumer_task) = fixture.listener(fixture.served_manifest()).await;
+    let consumer = dial_adapter(consumer_addr, SEED_SENTINEL).await;
+    let consumer_responder = responder_of(consumer_task).await;
+    let receipt = match consumer
+        .get_receipt(
+            &principal_label(&fixture.principal_id),
+            dto::<MemoryReceiptsGetRequest>(json!({
+                "space_id": fixture.served_space,
+                "receipt_id": committed[0].receipt_id,
+            })),
         )
         .await
-        .expect_err("a payload creator is never authority");
-    assert!(
-        matches!(spoofed, CoreError::ForbiddenReason { .. }),
-        "got {spoofed:?}"
-    );
-    assert_eq!(
-        provider_effect_snapshot(&pool).await,
-        effects_before_spoof,
-        "the payload-identity refusal changed no receipt, candidate or record"
-    );
+    {
+        SpokeResult::Ok(receipt) => receipt,
+        SpokeResult::Reject(reject) => panic!("the receipt is readable: {reject:?}"),
+    };
+    let receipt_text = response_json(&receipt).to_string();
+    assert!(!receipt_text.contains(seed_text));
+    assert!(!receipt_text.contains(signature));
 
-    assert!(scoped.close().await.expect("close").cleanup_confirmed);
-    wait_for_closed(&scoped_responder).await;
-    admin.close();
-    wait_for_closed(&admin_responder).await;
-    pool.close().await;
+    let state_db = fs::read(env.state_db()).expect("read the workspace state database");
+    let state_text = String::from_utf8_lossy(&state_db);
+    assert!(!state_text.contains(seed_text));
+    assert!(!state_text.contains(signature));
+
+    assert!(core.close().await.expect("close").cleanup_confirmed);
+    wait_for_closed(&responder).await;
+    consumer.close();
+    wait_for_closed(&consumer_responder).await;
 }
 
 /// The credential seed and the capability proof never reach a public surface:
@@ -2661,173 +3007,154 @@ async fn scoped_grants_and_payload_identity_cannot_be_amplified() {
 /// scoped statement, not a claim that Core logging is absent everywhere.
 #[tokio::test]
 async fn credential_sentinels_never_reach_config_errors_or_receipts() {
-    // Distinct sentinels: the credential seed itself and the token's signature
-    // material. Both are unique text no incidental value can reproduce.
-    const SEED_SENTINEL: [u8; 32] = [0xA7; 32];
-    const SIGNATURE_SENTINEL: &str = "sig-sentinel-0f3c9a-never-public";
-
-    let host_pubkey = pubkey(&HOST_SEED);
-    let client_pubkey = pubkey(&SEED_SENTINEL);
-    let client_peer = peer_id(&SEED_SENTINEL);
-    let fixture_home = TempDir::new().expect("fixture home");
-    let provider = Arc::new(
-        FixtureMemoryProvider::open(&provider_database(&fixture_home))
-            .await
-            .expect("open the durable fixture"),
-    );
-    let served_space = provider.identity().space_id.clone();
-    let authority_host_id = provider.identity().authority_host_id.clone();
-    let principal_id = format!("prn_{client_peer}");
-    provider
-        .provision_operator_admin(&principal_id)
-        .await
-        .expect("operator provisions the admin grant");
-    let directory =
-        Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id.clone()));
+    let fixture = Fixture::for_seed(&SEED_SENTINEL).await;
     let env = Env::new();
-    let mut token = expired_token(&client_peer, &peer_id(&HOST_SEED));
+    let mut token = expired_token(&fixture.client_peer, &fixture.host_peer);
     token["sig"] = json!(SIGNATURE_SENTINEL);
     env.write_credential_with_token(&SEED_SENTINEL, Some(&token));
     let seed_text = hex(&SEED_SENTINEL);
-    let pool = provider_pool(&fixture_home).await;
+    let pool = fixture.pool().await;
 
-    // The real public credential value, loaded through the public API: its
-    // `Debug` must expose neither secret. This is the actual secret-bearing
-    // value, not a stand-in selection.
-    let credential = MemoryCredential::load(&env.user_home, CREDENTIAL_ID)
-        .expect("the operator credential loads through the public API");
-    let credential_debug = format!("{credential:?}");
-    assert!(!credential_debug.contains(&seed_text));
-    assert!(!credential_debug.contains(SIGNATURE_SENTINEL));
+    assert_credential_debug_is_clean(&env, &seed_text, SIGNATURE_SENTINEL);
+    assert_signed_refusal_is_clean(&fixture, &env, &seed_text, SIGNATURE_SENTINEL).await;
+    assert_persisted_selection_is_clean(&fixture, &env, &seed_text, SIGNATURE_SENTINEL);
+    assert_provider_sinks_are_clean(&fixture, &env, &pool, &seed_text, SIGNATURE_SENTINEL).await;
+    pool.close().await;
+}
 
-    // A real signed refusal *after* the credential was loaded and the signed
-    // session established: the discovered space is not authoritative on this
-    // authenticated host, and the classified error carries no credential
-    // material either way it is rendered.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest("fixture-not-the-space-authority"),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
+/// One token-gated listener serving the fixture's durable service: every
+/// admission decision uses the proof carried by the invocation the SDK actually
+/// received, verified against `trusted_issuer` for this host.
+async fn token_gated_listener(
+    fixture: &Fixture,
+    trusted_issuer: &str,
+) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
+    start_listener_token_gated(
+        &fixture.provider,
+        &fixture.directory,
+        fixture.served_manifest(),
+        HashMap::from([(fixture.client_peer.clone(), fixture.client_pubkey)]),
+        vec![trusted_issuer.to_string()],
+        fixture.host_peer.clone(),
     )
-    .await;
-    let error = open(&env, selection(&served_space, addr, &host_pubkey))
+    .await
+}
+
+/// The host verifier refuses one invalid proof: the whole open fails with the
+/// static classification, the client error carries no peer text, the host
+/// session closes, and the provider's effect set is untouched.
+async fn assert_proof_refused(
+    fixture: &Fixture,
+    env: &Env,
+    pool: &SqlitePool,
+    effects_before: &[String],
+    issuer_peer: &str,
+    name: &str,
+) {
+    let (addr, task) = token_gated_listener(fixture, issuer_peer).await;
+    let error = open(env, fixture.selection(&fixture.served_space, addr))
         .await
         .err()
-        .expect("an authority mismatch fails the open");
-    assert_eq!(coded(&error), "memory_remote_authority");
-    let rendered = format!("{error} {error:?}");
-    assert!(!rendered.contains(&seed_text));
-    assert!(!rendered.contains(SIGNATURE_SENTINEL));
+        .expect("the host verifier refuses the proof");
+    assert_eq!(
+        coded(&error),
+        "memory_remote_capability",
+        "{name} must be refused by the real verifier"
+    );
+    assert!(
+        !format!("{error} {error:?}").contains("token"),
+        "{name}: the static client classification carries no peer text"
+    );
     let responder = responder_of(task).await;
     wait_for_closed(&responder).await;
-
-    // The real configuration writer persists the remote selection; the real
-    // reader (an open with no override) is what loads it below.
-    let remote = selection(
-        &served_space,
-        "127.0.0.1:1".parse().expect("port"),
-        &host_pubkey,
+    assert_eq!(
+        provider_effect_snapshot(pool).await,
+        effects_before,
+        "{name} left the provider's effect set untouched"
     );
-    CoreHomeService::open(env.user_home.clone())
-        .expect("open the real home service")
-        .set_memory_provider_selection(&remote)
-        .expect("the product config writer persists the selection");
-    let persisted = fs::read_to_string(env.user_home.join(".nexus42").join("config.toml"))
-        .expect("read the persisted configuration");
-    assert!(
-        persisted.contains("kind = \"remote\""),
-        "the remote table persisted"
-    );
-    assert!(!persisted.contains(&seed_text));
-    assert!(!persisted.contains(SIGNATURE_SENTINEL));
+    assert!(!env.local_provider_store().exists());
+}
 
-    // The admitted session really captures, so the provider's receipt and
-    // candidate bodies and the public receipt are meaningful sinks.
-    let (addr, task) = start_listener(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let remote = selection(&served_space, addr, &host_pubkey);
-    CoreHomeService::open(env.user_home.clone())
-        .expect("open the real home service")
-        .set_memory_provider_selection(&remote)
-        .expect("persist the served selection");
-    let core = CoreService::open(CoreOpenOptions {
-        user_home: env.user_home.clone(),
-        access: CoreAccess::EngineOwner,
-        memory: None,
-    })
-    .await
-    .expect("the persisted selection opens through the real reader");
-    let responder = responder_of(task).await;
-    let principal = core.active_principal().await.expect("principal");
-    core.create_pending_review(&principal, capture_body(CAPTURE_PENDING))
+/// Positive control on the SAME home: the valid proof opens and the signed
+/// session closes its own admission.
+async fn assert_valid_proof_opens(
+    fixture: &Fixture,
+    env: &Env,
+    issuer_peer: &str,
+    valid_json: &Value,
+    name: &str,
+) {
+    env.write_credential_with_token(&CLIENT_SEED, Some(valid_json));
+    let (addr, task) = token_gated_listener(fixture, issuer_peer).await;
+    let core = open(env, fixture.selection(&fixture.served_space, addr))
         .await
-        .expect("the admitted capture");
+        .expect("the valid proof opens");
+    let responder = responder_of(task).await;
+    assert!(
+        core.close().await.expect("close").cleanup_confirmed,
+        "{name}: the valid open closes its own admission"
+    );
+    wait_for_closed(&responder).await;
+}
 
-    let bodies = provider_body_text(&pool).await;
-    assert!(
-        !bodies.is_empty(),
-        "the receipt/candidate sink is populated"
-    );
-    assert!(
-        !bodies.contains(&seed_text),
-        "the seed never entered a receipt"
-    );
-    assert!(
-        !bodies.contains(SIGNATURE_SENTINEL),
-        "the proof signature never entered a receipt"
-    );
-
-    // The complete public receipt, read by the same authenticated identity over
-    // its own signed session.
-    let committed = committed_receipts(&pool, "memory.capture").await;
-    assert_eq!(committed.len(), 1);
-    assert_eq!(committed[0].requester, principal_id);
-    let (consumer_addr, consumer_task) = start_listener(
-        provider.server(directory.admission()),
-        manifest(&authority_host_id),
-        client_peer.clone(),
-        client_pubkey,
-        5_000,
-    )
-    .await;
-    let consumer = dial_adapter(consumer_addr, SEED_SENTINEL).await;
-    let consumer_responder = responder_of(consumer_task).await;
-    let receipt = match consumer
-        .get_receipt(
-            &principal_label(&principal_id),
-            dto::<MemoryReceiptsGetRequest>(json!({
-                "space_id": served_space,
-                "receipt_id": committed[0].receipt_id,
+/// The verifier must see the ACTUAL forwarded proof: an authenticated session
+/// that carries none is refused, so removing or changing client proof forwarding
+/// cannot leave this scenario green.
+async fn assert_no_token_refused(
+    fixture: &Fixture,
+    pool: &SqlitePool,
+    effects_before: &[String],
+    issuer_peer: &str,
+) {
+    let (addr, task) = token_gated_listener(fixture, issuer_peer).await;
+    let no_token = dial_adapter(addr, CLIENT_SEED).await;
+    let responder = responder_of(task).await;
+    match no_token
+        .capture(
+            &principal_label(&fixture.principal_id),
+            dto::<MemoryCaptureRequest>(json!({
+                "space_id": fixture.served_space,
+                "subject_id": legacy::creator_subject_id(CREATOR),
+                "content": { "text": "A tokenless capture is refused by the host gate." },
+                "capture_scope": { "visibility": "shared" },
+                "idempotency_key": "r5-tokenless-capture",
             })),
         )
         .await
     {
-        SpokeResult::Ok(receipt) => receipt,
-        SpokeResult::Reject(reject) => panic!("the receipt is readable: {reject:?}"),
-    };
-    let receipt_text = response_json(&receipt).to_string();
-    assert!(!receipt_text.contains(&seed_text));
-    assert!(!receipt_text.contains(SIGNATURE_SENTINEL));
+        SpokeResult::Reject(reject) => {
+            assert_eq!(reject.code, SpokeRejectCode::NotAuthorized);
+        }
+        SpokeResult::Ok(_) => panic!("a tokenless invocation must be refused"),
+    }
+    assert_eq!(provider_effect_snapshot(pool).await, effects_before);
+    no_token.close();
+    wait_for_closed(&responder).await;
+}
 
-    // Neither did the workspace state database grow a copy of the secret.
-    let state_db = fs::read(env.state_db()).expect("read the workspace state database");
-    let state_text = String::from_utf8_lossy(&state_db);
-    assert!(!state_text.contains(&seed_text));
-    assert!(!state_text.contains(SIGNATURE_SENTINEL));
-
+/// The valid proof also admits a real mutation, so "positive" is a served
+/// operation rather than a no-throw open.
+async fn assert_valid_proof_captures(
+    fixture: &Fixture,
+    pool: &SqlitePool,
+    issuer_peer: &str,
+    valid_json: &Value,
+) {
+    let env = Env::new();
+    env.write_credential_with_token(&CLIENT_SEED, Some(valid_json));
+    let (addr, task) = token_gated_listener(fixture, issuer_peer).await;
+    let core = open(&env, fixture.selection(&fixture.served_space, addr))
+        .await
+        .expect("the valid proof opens");
+    let responder = responder_of(task).await;
+    let principal = core.active_principal().await.expect("principal");
+    core.create_pending_review(&principal, capture_body(CAPTURE_PENDING))
+        .await
+        .expect("the verified session serves a real capture");
+    assert_eq!(provider_receipts(pool, "memory.capture").await, 1);
+    assert_eq!(provider_candidates(pool).await.len(), 1);
     assert!(core.close().await.expect("close").cleanup_confirmed);
     wait_for_closed(&responder).await;
-    consumer.close();
-    wait_for_closed(&consumer_responder).await;
-    pool.close().await;
 }
 
 /// The pinned SDK's own capability-token authority: a minimal test-host
@@ -2841,46 +3168,53 @@ async fn credential_sentinels_never_reach_config_errors_or_receipts() {
 /// refusal is the verifier's, not a local shape rule or a fabricated class.
 #[tokio::test]
 async fn capability_token_verification_refuses_expired_and_forged_proofs() {
-    const ISSUER_SEED: [u8; 32] = [0x77; 32];
-
-    let host_pubkey = pubkey(&HOST_SEED);
-    let host_peer = peer_id(&HOST_SEED);
-    let client_pubkey = pubkey(&CLIENT_SEED);
-    let client_peer = peer_id(&CLIENT_SEED);
-    let principal_id = format!("prn_{client_peer}");
+    let fixture = Fixture::new().await;
     let issuer_peer = peer_id(&ISSUER_SEED);
     let other_peer = peer_id(&OTHER_SEED);
     let now = now_seconds();
-
-    let fixture_home = TempDir::new().expect("fixture home");
-    let provider = Arc::new(
-        FixtureMemoryProvider::open(&provider_database(&fixture_home))
-            .await
-            .expect("open the durable fixture"),
-    );
-    let served_space = provider.identity().space_id.clone();
-    let authority_host_id = provider.identity().authority_host_id.clone();
-    provider
-        .provision_operator_admin(&principal_id)
-        .await
-        .expect("operator provisions the admin grant");
-    let directory =
-        Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id.clone()));
-    let pool = provider_pool(&fixture_home).await;
+    let pool = fixture.pool().await;
     let effects_before = provider_effect_snapshot(&pool).await;
 
-    let valid = capability_proof_at(&ISSUER_SEED, &client_peer, &host_peer, now + 600, now);
+    let valid = capability_proof_at(
+        &ISSUER_SEED,
+        &fixture.client_peer,
+        &fixture.host_peer,
+        now + 600,
+        now,
+    );
     // Expired but otherwise validly signed: issued at epoch 0 with a 1000s exp,
     // so issuance succeeded and only the verifier's clock check rejects it.
-    let expired = capability_proof_at(&ISSUER_SEED, &client_peer, &host_peer, 1_000, 0);
+    let expired = capability_proof_at(
+        &ISSUER_SEED,
+        &fixture.client_peer,
+        &fixture.host_peer,
+        1_000,
+        0,
+    );
     // Valid signature, wrong session subject.
-    let wrong_subject = capability_proof_at(&ISSUER_SEED, &other_peer, &host_peer, now + 600, now);
+    let wrong_subject = capability_proof_at(
+        &ISSUER_SEED,
+        &other_peer,
+        &fixture.host_peer,
+        now + 600,
+        now,
+    );
     // Valid signature, wrong verifying node.
-    let wrong_audience =
-        capability_proof_at(&ISSUER_SEED, &client_peer, &other_peer, now + 600, now);
+    let wrong_audience = capability_proof_at(
+        &ISSUER_SEED,
+        &fixture.client_peer,
+        &other_peer,
+        now + 600,
+        now,
+    );
     // Valid signature from an issuer this host does not trust.
-    let untrusted_issuer =
-        capability_proof_at(&OTHER_SEED, &client_peer, &host_peer, now + 600, now);
+    let untrusted_issuer = capability_proof_at(
+        &OTHER_SEED,
+        &fixture.client_peer,
+        &fixture.host_peer,
+        now + 600,
+        now,
+    );
     // Valid signature over different claims than the ones presented.
     let mut forged = valid.clone();
     forged.claims.capabilities.push("admin".to_string());
@@ -2899,122 +3233,164 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
         let env = Env::new();
         let proof_json = serde_json::to_value(proof).expect("the proof serializes");
         env.write_credential_with_token(&CLIENT_SEED, Some(&proof_json));
-        let (addr, task) = start_listener_token_gated(
-            &provider,
-            &directory,
-            manifest(&authority_host_id),
-            HashMap::from([(client_peer.clone(), client_pubkey)]),
-            vec![issuer_peer.clone()],
-            host_peer.clone(),
-        )
-        .await;
-        let error = open(&env, selection(&served_space, addr, &host_pubkey))
-            .await
-            .err()
-            .expect("the host verifier refuses the proof");
-        assert_eq!(
-            coded(&error),
-            "memory_remote_capability",
-            "{name} must be refused by the real verifier"
-        );
-        assert!(
-            !format!("{error} {error:?}").contains("token"),
-            "{name}: the static client classification carries no peer text"
-        );
-        let responder = responder_of(task).await;
-        wait_for_closed(&responder).await;
-        assert_eq!(
-            provider_effect_snapshot(&pool).await,
-            effects_before,
-            "{name} left the provider's effect set untouched"
-        );
-        assert!(!env.local_provider_store().exists());
-
-        // Positive control on the SAME home: the valid proof opens and the
-        // signed session proceeds.
-        env.write_credential_with_token(&CLIENT_SEED, Some(&valid_json));
-        let (addr, task) = start_listener_token_gated(
-            &provider,
-            &directory,
-            manifest(&authority_host_id),
-            HashMap::from([(client_peer.clone(), client_pubkey)]),
-            vec![issuer_peer.clone()],
-            host_peer.clone(),
-        )
-        .await;
-        let core = open(&env, selection(&served_space, addr, &host_pubkey))
-            .await
-            .expect("the valid proof opens");
-        let responder = responder_of(task).await;
-        assert!(
-            core.close().await.expect("close").cleanup_confirmed,
-            "{name}: the valid open closes its own admission"
-        );
-        wait_for_closed(&responder).await;
+        assert_proof_refused(&fixture, &env, &pool, &effects_before, &issuer_peer, name).await;
+        assert_valid_proof_opens(&fixture, &env, &issuer_peer, &valid_json, name).await;
     }
 
-    // The verifier must see the ACTUAL forwarded proof: an authenticated
-    // session that carries none is refused, so removing or changing client
-    // proof forwarding cannot leave this scenario green.
-    let (addr, task) = start_listener_token_gated(
-        &provider,
-        &directory,
-        manifest(&authority_host_id),
-        HashMap::from([(client_peer.clone(), client_pubkey)]),
-        vec![issuer_peer.clone()],
-        host_peer.clone(),
-    )
-    .await;
-    let no_token = dial_adapter(addr, CLIENT_SEED).await;
-    let responder = responder_of(task).await;
-    match no_token
-        .capture(
-            &principal_label(&principal_id),
-            dto::<MemoryCaptureRequest>(json!({
-                "space_id": served_space,
-                "subject_id": legacy::creator_subject_id(CREATOR),
-                "content": { "text": "A tokenless capture is refused by the host gate." },
-                "capture_scope": { "visibility": "shared" },
-                "idempotency_key": "r5-tokenless-capture",
-            })),
+    assert_no_token_refused(&fixture, &pool, &effects_before, &issuer_peer).await;
+    assert_valid_proof_captures(&fixture, &pool, &issuer_peer, &valid_json).await;
+    pool.close().await;
+}
+
+/// One observed invoke envelope: the test host's view of a received request.
+fn observed_envelope(op: &str, nonce: &str, payload: &Value, auth: &Value) -> Value {
+    json!({
+        "op": op,
+        "session_id": "sess_observer_regression",
+        "request_id": nonce,
+        "payload": payload,
+        "auth": auth,
+    })
+}
+
+/// The proofs and payload the observer scenario drives.
+struct SeamCase {
+    payload: Value,
+    expired: Value,
+    valid: Value,
+}
+
+/// A directly exercised observer/gate pair over one loopback transport pair,
+/// trusting the proof issuer. This is the test host's own observation seam, not
+/// SDK-authenticated wire evidence.
+struct Seam {
+    observer: Arc<EnvelopeObserver>,
+    gate: TokenGate,
+}
+
+impl Seam {
+    /// The seam in front of `fixture`'s durable service.
+    fn new(fixture: &Fixture) -> Self {
+        let loopback = loopback_transport_pair();
+        let observer = Arc::new(EnvelopeObserver::new(
+            Arc::new(loopback.client) as Arc<dyn Transport>
+        ));
+        Self {
+            gate: TokenGate {
+                inner: fixture.provider.server(fixture.directory.admission()),
+                observer: Arc::clone(&observer),
+                trusted: vec![peer_id(&ISSUER_SEED)],
+                host_peer: fixture.host_peer.clone(),
+            },
+            observer,
+        }
+    }
+
+    fn record(&self, op: &str, nonce: &str, payload: &Value, auth: &Value) {
+        self.observer
+            .record(&observed_envelope(op, nonce, payload, auth));
+    }
+}
+
+/// Two observations with the same op/payload but different proofs irreversibly
+/// poison the seam: the first admission denies, no later consume can reach the
+/// real fixture, and a third observation cannot revive it.
+async fn assert_overlap_poisons_the_seam(
+    fixture: &Fixture,
+    pool: &SqlitePool,
+    effects_before: &[String],
+    case: &SeamCase,
+) {
+    let seam = Seam::new(fixture);
+    // The defect under test left the VALID observation behind after the first
+    // refusal, so a later admission could consume it.
+    seam.record(
+        "memory.capture",
+        "req_expired",
+        &case.payload,
+        &case.expired,
+    );
+    seam.record("memory.capture", "req_valid", &case.payload, &case.valid);
+    for attempt in 0..2 {
+        match seam
+            .gate
+            .invoke(&fixture.client_peer, "memory.capture", case.payload.clone())
+            .await
+        {
+            SpokeResult::Reject(reject) => assert_eq!(
+                reject.code,
+                SpokeRejectCode::NotAuthorized,
+                "attempt {attempt} is refused"
+            ),
+            SpokeResult::Ok(_) => panic!("attempt {attempt} reached the provider"),
+        }
+    }
+    // A later observation cannot revive the poisoned session.
+    seam.record("memory.capture", "req_third", &case.payload, &case.valid);
+    match seam
+        .gate
+        .invoke(&fixture.client_peer, "memory.capture", case.payload.clone())
+        .await
+    {
+        SpokeResult::Reject(reject) => assert_eq!(reject.code, SpokeRejectCode::NotAuthorized),
+        SpokeResult::Ok(_) => panic!("a later observation revived the poisoned session"),
+    }
+    assert_eq!(
+        provider_effect_snapshot(pool).await,
+        effects_before,
+        "no ambiguous admission committed a receipt, candidate or record"
+    );
+}
+
+/// A FRESH observer/session still serves one sequential valid invocation, and the
+/// effect the poisoned path did not produce is observable.
+async fn assert_fresh_seam_serves_one_invocation(
+    fixture: &Fixture,
+    pool: &SqlitePool,
+    case: &SeamCase,
+) {
+    let seam = Seam::new(fixture);
+    let ensure_payload = json!({
+        "space_id": fixture.served_space,
+        "subject_id": "sbj_observer_regression",
+    });
+    seam.record(
+        "memory.subjects.ensure",
+        "req_ensure",
+        &ensure_payload,
+        &case.valid,
+    );
+    match seam
+        .gate
+        .invoke(
+            &fixture.client_peer,
+            "memory.subjects.ensure",
+            ensure_payload,
         )
         .await
     {
-        SpokeResult::Reject(reject) => {
-            assert_eq!(reject.code, SpokeRejectCode::NotAuthorized);
-        }
-        SpokeResult::Ok(_) => panic!("a tokenless invocation must be refused"),
+        SpokeResult::Ok(_) => {}
+        SpokeResult::Reject(reject) => panic!("the sequential ensure is admitted: {reject:?}"),
     }
-    assert_eq!(provider_effect_snapshot(&pool).await, effects_before);
-    no_token.close();
-    wait_for_closed(&responder).await;
-
-    // The valid proof also admits a real mutation, so "positive" is a served
-    // operation rather than a no-throw open.
-    let env = Env::new();
-    env.write_credential_with_token(&CLIENT_SEED, Some(&valid_json));
-    let (addr, task) = start_listener_token_gated(
-        &provider,
-        &directory,
-        manifest(&authority_host_id),
-        HashMap::from([(client_peer.clone(), client_pubkey)]),
-        vec![issuer_peer.clone()],
-        host_peer.clone(),
-    )
-    .await;
-    let core = open(&env, selection(&served_space, addr, &host_pubkey))
+    seam.record("memory.capture", "req_fresh", &case.payload, &case.valid);
+    match seam
+        .gate
+        .invoke(&fixture.client_peer, "memory.capture", case.payload.clone())
         .await
-        .expect("the valid proof opens");
-    let responder = responder_of(task).await;
-    let principal = core.active_principal().await.expect("principal");
-    core.create_pending_review(&principal, capture_body(CAPTURE_PENDING))
-        .await
-        .expect("the verified session serves a real capture");
-    assert_eq!(provider_receipts(&pool, "memory.capture").await, 1);
-    assert_eq!(provider_candidates(&pool).await.len(), 1);
-    assert!(core.close().await.expect("close").cleanup_confirmed);
-    wait_for_closed(&responder).await;
-    pool.close().await;
+    {
+        SpokeResult::Ok(_) => {}
+        SpokeResult::Reject(reject) => panic!("the sequential capture is admitted: {reject:?}"),
+    }
+    assert_eq!(
+        provider_receipts(pool, "memory.capture").await,
+        1,
+        "the fresh sequential capture committed its receipt"
+    );
+    assert_eq!(
+        provider_candidates(pool).await.len(),
+        1,
+        "the fresh sequential capture produced its candidate"
+    );
 }
 
 /// Two DIRECTLY EXERCISED observer events with the same op/payload but different
@@ -3028,157 +3404,39 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
 /// above supply that independent path.
 #[tokio::test]
 async fn overlapping_observations_poison_the_seam_without_provider_effect() {
-    const ISSUER_SEED: [u8; 32] = [0x77; 32];
-    let host_peer = peer_id(&HOST_SEED);
-    let client_peer = peer_id(&CLIENT_SEED);
-    let principal_id = format!("prn_{client_peer}");
-    let issuer_peer = peer_id(&ISSUER_SEED);
+    let fixture = Fixture::new().await;
     let now = now_seconds();
-
-    let fixture_home = TempDir::new().expect("fixture home");
-    let provider = Arc::new(
-        FixtureMemoryProvider::open(&provider_database(&fixture_home))
-            .await
-            .expect("open the durable fixture"),
-    );
-    let space = provider.identity().space_id.clone();
-    provider
-        .provision_operator_admin(&principal_id)
-        .await
-        .expect("operator provisions the admin grant");
-    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id));
-    let pool = provider_pool(&fixture_home).await;
+    let pool = fixture.pool().await;
     let effects_before = provider_effect_snapshot(&pool).await;
 
-    let valid = capability_proof_at(&ISSUER_SEED, &client_peer, &host_peer, now + 600, now);
-    let expired = capability_proof_at(&ISSUER_SEED, &client_peer, &host_peer, 1_000, 0);
-    let valid_json = serde_json::to_value(&valid).expect("the proof serializes");
+    let valid = capability_proof_at(
+        &ISSUER_SEED,
+        &fixture.client_peer,
+        &fixture.host_peer,
+        now + 600,
+        now,
+    );
+    let expired = capability_proof_at(
+        &ISSUER_SEED,
+        &fixture.client_peer,
+        &fixture.host_peer,
+        1_000,
+        0,
+    );
+    let case = SeamCase {
+        payload: json!({
+            "space_id": fixture.served_space,
+            "subject_id": "sbj_observer_regression",
+            "content": { "text": "An ambiguous observation must never commit this capture." },
+            "capture_scope": { "visibility": "shared" },
+            "idempotency_key": "r5-observer-ambiguity",
+        }),
+        expired: serde_json::to_value(&expired).expect("the proof serializes"),
+        valid: serde_json::to_value(&valid).expect("the proof serializes"),
+    };
 
-    let capture_payload = json!({
-        "space_id": space,
-        "subject_id": "sbj_observer_regression",
-        "content": { "text": "An ambiguous observation must never commit this capture." },
-        "capture_scope": { "visibility": "shared" },
-        "idempotency_key": "r5-observer-ambiguity",
-    });
-    let envelope = |op: &str, nonce: &str, payload: &Value, proof: &Value| {
-        json!({
-            "op": op,
-            "session_id": "sess_observer_regression",
-            "request_id": nonce,
-            "payload": payload,
-            "auth": proof,
-        })
-    };
-    let loopback = loopback_transport_pair();
-    let observer = Arc::new(EnvelopeObserver::new(
-        Arc::new(loopback.client) as Arc<dyn Transport>
-    ));
-    // The defect under test left the VALID observation behind after the first
-    // refusal, so a later admission could consume it.
-    observer.record(&envelope(
-        "memory.capture",
-        "req_expired",
-        &capture_payload,
-        &serde_json::to_value(&expired).expect("the proof serializes"),
-    ));
-    observer.record(&envelope(
-        "memory.capture",
-        "req_valid",
-        &capture_payload,
-        &valid_json,
-    ));
-    let poisoned = TokenGate {
-        inner: provider.server(directory.admission()),
-        observer: Arc::clone(&observer),
-        trusted: vec![issuer_peer.clone()],
-        host_peer: host_peer.clone(),
-    };
-    for attempt in 0..2 {
-        match poisoned
-            .invoke(&client_peer, "memory.capture", capture_payload.clone())
-            .await
-        {
-            SpokeResult::Reject(reject) => assert_eq!(
-                reject.code,
-                SpokeRejectCode::NotAuthorized,
-                "attempt {attempt} is refused"
-            ),
-            SpokeResult::Ok(_) => panic!("attempt {attempt} reached the provider"),
-        }
-    }
-    // A later observation cannot revive the poisoned session.
-    observer.record(&envelope(
-        "memory.capture",
-        "req_third",
-        &capture_payload,
-        &valid_json,
-    ));
-    match poisoned
-        .invoke(&client_peer, "memory.capture", capture_payload.clone())
-        .await
-    {
-        SpokeResult::Reject(reject) => assert_eq!(reject.code, SpokeRejectCode::NotAuthorized),
-        SpokeResult::Ok(_) => panic!("a later observation revived the poisoned session"),
-    }
-    assert_eq!(
-        provider_effect_snapshot(&pool).await,
-        effects_before,
-        "no ambiguous admission committed a receipt, candidate or record"
-    );
-
-    // A FRESH observer/session still serves one sequential valid invocation,
-    // and the effect the poisoned path did not produce is observable.
-    let loopback = loopback_transport_pair();
-    let fresh = Arc::new(EnvelopeObserver::new(
-        Arc::new(loopback.client) as Arc<dyn Transport>
-    ));
-    let fresh_gate = TokenGate {
-        inner: provider.server(directory.admission()),
-        observer: Arc::clone(&fresh),
-        trusted: vec![issuer_peer],
-        host_peer,
-    };
-    let ensure_payload = json!({
-        "space_id": space,
-        "subject_id": "sbj_observer_regression",
-    });
-    fresh.record(&envelope(
-        "memory.subjects.ensure",
-        "req_ensure",
-        &ensure_payload,
-        &valid_json,
-    ));
-    match fresh_gate
-        .invoke(&client_peer, "memory.subjects.ensure", ensure_payload)
-        .await
-    {
-        SpokeResult::Ok(_) => {}
-        SpokeResult::Reject(reject) => panic!("the sequential ensure is admitted: {reject:?}"),
-    }
-    fresh.record(&envelope(
-        "memory.capture",
-        "req_fresh",
-        &capture_payload,
-        &valid_json,
-    ));
-    match fresh_gate
-        .invoke(&client_peer, "memory.capture", capture_payload)
-        .await
-    {
-        SpokeResult::Ok(_) => {}
-        SpokeResult::Reject(reject) => panic!("the sequential capture is admitted: {reject:?}"),
-    }
-    assert_eq!(
-        provider_receipts(&pool, "memory.capture").await,
-        1,
-        "the fresh sequential capture committed its receipt"
-    );
-    assert_eq!(
-        provider_candidates(&pool).await.len(),
-        1,
-        "the fresh sequential capture produced its candidate"
-    );
+    assert_overlap_poisons_the_seam(&fixture, &pool, &effects_before, &case).await;
+    assert_fresh_seam_serves_one_invocation(&fixture, &pool, &case).await;
     pool.close().await;
 }
 
@@ -3223,8 +3481,8 @@ async fn non_reading_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle
         tokio::time::timeout(SETUP_BOUND, async move {
             loop {
                 match ws.next().await {
-                    None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return true,
-                    Some(Ok(_)) => continue,
+                    None | Some(Err(_) | Ok(Message::Close(_))) => return true,
+                    Some(Ok(_)) => {}
                 }
             }
         })
@@ -3723,7 +3981,7 @@ async fn draining_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<Ve
                         order.push(*first);
                     }
                 }
-                Ok(Message::Close(_)) | Err(_) | Ok(Message::Text(_)) => break,
+                Ok(Message::Close(_) | Message::Text(_)) | Err(_) => break,
                 Ok(_) => {}
             }
         }
@@ -4077,12 +4335,60 @@ async fn a_mismatched_capture_receipt_keeps_the_binding_protected() {
     settle_listener(task).await;
 }
 
+/// Corrupt one stored document so the provider cannot decode it, then prove the
+/// signed client's refusal is a static `INTERNAL_ERROR` that carries no provider
+/// storage or decoder text.
+async fn assert_decoder_failure_is_opaque(
+    consumer: &RemoteAdapter,
+    principal: &Principal,
+    pool: &SqlitePool,
+    space: &str,
+    subject: &str,
+    request: MemoryCaptureRequest,
+) {
+    sqlx::query(
+        "UPDATE subjects SET fenced_contexts_json = ? WHERE space_id = ? AND subject_id = ?",
+    )
+    .bind(format!("{{\"sentinel\":\"{WIRE_CANARY}\"}}"))
+    .bind(space)
+    .bind(subject)
+    .execute(pool)
+    .await
+    .expect("corrupt one stored document");
+    let reject = match consumer.capture(principal, request).await {
+        SpokeResult::Reject(reject) => reject,
+        SpokeResult::Ok(body) => panic!("a decoder failure must not commit: {body:?}"),
+    };
+    let wire = json!({
+        "code": reject.code.as_str(),
+        "message": reject.message,
+        "details": reject.details,
+    })
+    .to_string();
+    assert_eq!(
+        reject.code.as_str(),
+        "INTERNAL_ERROR",
+        "a decoder failure is the fixture's retryable internal"
+    );
+    for leaked in [
+        WIRE_CANARY,
+        "sqlx",
+        "serde",
+        "invalid type",
+        "expected value",
+    ] {
+        assert!(
+            !wire.contains(leaked),
+            "the wire answer leaked provider internals ({leaked}): {wire}"
+        );
+    }
+}
+
 /// A reachable decoder failure becomes a static wire refusal: the signed client
 /// sees `INTERNAL_ERROR` with no provider storage or decoder text, while a
 /// legitimate capture on the same subject still commits.
 #[tokio::test]
 async fn a_malformed_stored_document_never_reaches_the_wire() {
-    const CANARY: &str = "NEXUS-CANARY-3f9a";
     let admin_peer = peer_id(&CLIENT_SEED);
     let fixture_home = TempDir::new().expect("fixture home");
     let provider = Arc::new(
@@ -4156,42 +4462,15 @@ async fn a_malformed_stored_document_never_reaches_the_wire() {
 
     // A stored document the provider cannot decode, carrying a sentinel that
     // must never appear on the wire.
-    sqlx::query(
-        "UPDATE subjects SET fenced_contexts_json = ? WHERE space_id = ? AND subject_id = ?",
+    assert_decoder_failure_is_opaque(
+        &consumer,
+        &consumer_principal,
+        &pool,
+        &space,
+        &subject,
+        capture("canary-corrupt", "This request reaches the decoder."),
     )
-    .bind(format!("{{\"sentinel\":\"{CANARY}\"}}"))
-    .bind(&space)
-    .bind(&subject)
-    .execute(&pool)
-    .await
-    .expect("corrupt one stored document");
-    let reject = match consumer
-        .capture(
-            &consumer_principal,
-            capture("canary-corrupt", "This request reaches the decoder."),
-        )
-        .await
-    {
-        SpokeResult::Reject(reject) => reject,
-        SpokeResult::Ok(body) => panic!("a decoder failure must not commit: {body:?}"),
-    };
-    let wire = json!({
-        "code": reject.code.as_str(),
-        "message": reject.message.clone(),
-        "details": reject.details.clone(),
-    })
-    .to_string();
-    assert_eq!(
-        reject.code.as_str(),
-        "INTERNAL_ERROR",
-        "a decoder failure is the fixture's retryable internal"
-    );
-    for leaked in [CANARY, "sqlx", "serde", "invalid type", "expected value"] {
-        assert!(
-            !wire.contains(leaked),
-            "the wire answer leaked provider internals ({leaked}): {wire}"
-        );
-    }
+    .await;
 
     pool.close().await;
     assert!(core.close().await.expect("close").cleanup_confirmed);

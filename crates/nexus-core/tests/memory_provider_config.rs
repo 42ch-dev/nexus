@@ -147,12 +147,22 @@ fn remote_selection_round_trips_and_preserves_other_writers_keys() {
         .expect("write remote selection");
 
     let text = std::fs::read_to_string(config_path(home.path())).expect("config read");
-    for preserved in ["active_creator_id = \"crt_alpha\"", "[agent_profile]", "model = \"m1\""] {
-        assert!(text.contains(preserved), "lost other writer key {preserved}: {text}");
+    for preserved in [
+        "active_creator_id = \"crt_alpha\"",
+        "[agent_profile]",
+        "model = \"m1\"",
+    ] {
+        assert!(
+            text.contains(preserved),
+            "lost other writer key {preserved}: {text}"
+        );
     }
     assert!(text.contains("kind = \"remote\""), "{text}");
     assert!(text.contains(CREDENTIAL_ID), "{text}");
-    assert!(!text.contains(SEED_HEX), "selection must never persist a seed: {text}");
+    assert!(
+        !text.contains(SEED_HEX),
+        "selection must never persist a seed: {text}"
+    );
     assert_eq!(read_selection(home.path()), selection);
 }
 
@@ -162,17 +172,17 @@ fn malformed_credential_id_is_rejected_without_writing() {
     let service = CoreHomeService::open(home.path().to_path_buf()).expect("home entry");
 
     for bad in ["../escape", "", "-leading", "a b", &"x".repeat(65)] {
-        let selection = MemoryProviderSelection::Remote(remote(
-            bad,
-            "ws://127.0.0.1:8420/memory",
-            PUBKEY_HEX,
-        ));
+        let selection =
+            MemoryProviderSelection::Remote(remote(bad, "ws://127.0.0.1:8420/memory", PUBKEY_HEX));
         let error = service
             .set_memory_provider_selection(&selection)
             .expect_err("malformed credential id must be refused");
         assert_invalid_field(error, "credential_id");
     }
-    assert!(!config_path(home.path()).exists(), "a refused selection writes nothing");
+    assert!(
+        !config_path(home.path()).exists(),
+        "a refused selection writes nothing"
+    );
 }
 
 #[test]
@@ -246,8 +256,16 @@ fn malformed_remote_references_are_rejected() {
         ("has space", PUBKEY_HEX, "space_id"),
         (SPACE_ID, "", "remote_pubkey_hex"),
         (SPACE_ID, "0123", "remote_pubkey_hex"),
-        (SPACE_ID, "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF", "remote_pubkey_hex"),
-        (SPACE_ID, "g123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "remote_pubkey_hex"),
+        (
+            SPACE_ID,
+            "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
+            "remote_pubkey_hex",
+        ),
+        (
+            SPACE_ID,
+            "g123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "remote_pubkey_hex",
+        ),
     ] {
         let config = MemoryProviderConfig::Remote {
             space_id: space_id.to_string(),
@@ -394,11 +412,17 @@ fn credential_errors_and_debug_never_echo_secret_material() {
         "{{\"identity_seed_hex\": \"{SEED_HEX}\", \"capability_token\": null, \"signature\": \"sig_{SEED_HEX}\"}}"
     );
     write_credential(home.path(), CREDENTIAL_ID, &malformed, 0o600);
-    let error =
-        MemoryCredential::load(home.path(), CREDENTIAL_ID).expect_err("unknown key must be refused");
+    let error = MemoryCredential::load(home.path(), CREDENTIAL_ID)
+        .expect_err("unknown key must be refused");
     let text = error.to_string();
-    assert!(!text.contains(SEED_HEX), "credential error leaked the seed: {text}");
-    assert!(!text.contains("sig_"), "credential error leaked the signature: {text}");
+    assert!(
+        !text.contains(SEED_HEX),
+        "credential error leaked the seed: {text}"
+    );
+    assert!(
+        !text.contains("sig_"),
+        "credential error leaked the signature: {text}"
+    );
 
     // Debug output of a successfully loaded credential is redacted.
     write_credential(home.path(), CREDENTIAL_ID, &valid_credential_json(), 0o600);
@@ -460,8 +484,9 @@ fn non_regular_credential_path_is_refused() {
         .expect("temp home");
     let dir = credentials_dir(home.path());
     std::fs::create_dir_all(&dir).expect("credential dir");
-    let _listener = std::os::unix::net::UnixListener::bind(dir.join(format!("{CREDENTIAL_ID}.json")))
-        .expect("socket at credential path");
+    let _listener =
+        std::os::unix::net::UnixListener::bind(dir.join(format!("{CREDENTIAL_ID}.json")))
+            .expect("socket at credential path");
 
     let error = MemoryCredential::load(home.path(), CREDENTIAL_ID)
         .expect_err("non-regular credential path must be refused");

@@ -27,9 +27,7 @@ use nexus_contracts::{
     SetActiveWorkspaceRequest,
 };
 use nexus_core::memory_provider::{legacy, LocalMemoryProvider};
-use nexus_core::{
-    CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreService, Principal,
-};
+use nexus_core::{CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreService, Principal};
 use nexus_home_layout::{creator_soul_md_path, operational_workspace_dir, workspace_state_db_path};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use serde_json::{json, Value};
@@ -69,7 +67,10 @@ fn seed_env() -> Env {
         ),
     )
     .expect("seed config");
-    Env { _tmp: tmp, user_home }
+    Env {
+        _tmp: tmp,
+        user_home,
+    }
 }
 
 async fn open_provider(env: &Env) -> LocalMemoryProvider {
@@ -129,7 +130,11 @@ fn create_request(key: &str, kind: &str, text: &str) -> schemas::MemoryRecordsCr
     }))
 }
 
-fn update_request(key: &str, record_id: &str, revision: u64) -> schemas::MemoryRecordsUpdateRequest {
+fn update_request(
+    key: &str,
+    record_id: &str,
+    revision: u64,
+) -> schemas::MemoryRecordsUpdateRequest {
     dto(json!({
         "space_id": SPACE,
         "record_id": record_id,
@@ -210,7 +215,11 @@ fn projections(env: &Env) -> Vec<String> {
         WORKSPACE,
     ))
     .into_iter()
-    .filter(|path| path.ends_with(".md"))
+    .filter(|path| {
+        std::path::Path::new(path)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+    })
     .collect()
 }
 
@@ -324,6 +333,116 @@ fn seed_legacy_artifacts(env: &Env) -> (PathBuf, PathBuf) {
     (soul_path, memory_path)
 }
 
+/// The same workspace's capture → review → promote pipeline.
+async fn c112_promote_candidate(provider: &LocalMemoryProvider) {
+    // The capture → review → promote pipeline on the same workspace.
+    let captured = wire(
+        &provider
+            .capture(
+                &admin(),
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "content": { "text": "C112PROMOTE a candidate through the review pipeline" },
+                    "capture_scope": { "visibility": "shared" },
+                    "source_context_ids": [],
+                    "idempotency_key": "c112-capture",
+                })),
+            )
+            .await,
+    );
+    let candidate_id = captured["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap_or_else(|| panic!("a captured candidate id: {captured}"))
+        .to_string();
+    let reviewed = wire(
+        &provider
+            .review_candidate(
+                &admin(),
+                dto(json!({
+                    "space_id": SPACE,
+                    "candidate_id": candidate_id,
+                    "expected_revision": 1,
+                    "decision": { "action": "promote" },
+                    "idempotency_key": "c112-review",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(reviewed["status"], "committed", "{reviewed}");
+}
+
+/// The protected author-visible bytes stay untouched by every operation, and the
+/// consumer-visible legacy bridge still serves the authored memory.
+async fn c112_verify_legacy_untouched(
+    provider: &LocalMemoryProvider,
+    env: &Env,
+    soul_path: &std::path::Path,
+    memory_path: &std::path::Path,
+    soul_before: &[u8],
+    memory_before: &[u8],
+) {
+    // The protected author-visible bytes are untouched by every operation.
+    assert_eq!(
+        std::fs::read(soul_path).expect("SOUL.md bytes").as_slice(),
+        soul_before,
+        "SOUL.md stayed byte-identical"
+    );
+    assert_eq!(
+        std::fs::read(memory_path)
+            .expect("long-term bytes")
+            .as_slice(),
+        memory_before,
+        "memory/long-term/{LEGACY_SLUG}.md stayed byte-identical"
+    );
+    assert_eq!(
+        std::fs::read_dir(legacy_memory_dir(env))
+            .expect("legacy long-term dir")
+            .count(),
+        1,
+        "no new file was written into the legacy layout"
+    );
+
+    // The consumer-visible bridge still serves the authored legacy memory with
+    // its kind and body: the bytes above are live, not orphaned.
+    let creator_subject = legacy::creator_subject_id(CREATOR);
+    let ensured = wire(
+        &provider
+            .ensure_subject(
+                &admin(),
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": creator_subject,
+                    "kind": { "ns": legacy::CREATOR_KIND_NS, "id": CREATOR },
+                })),
+            )
+            .await,
+    );
+    assert_eq!(ensured["status"], "committed", "{ensured}");
+    let bridged = wire(
+        &provider
+            .list_records(&admin(), list_request(&creator_subject))
+            .await,
+    );
+    let projected = bridged["records"]
+        .as_array()
+        .expect("records array")
+        .iter()
+        .find(|record| {
+            record["content"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains(LEGACY_BODY))
+        })
+        .unwrap_or_else(|| panic!("the legacy memory is still projected: {bridged}"));
+    assert_eq!(projected["kind"], KIND, "{projected}");
+    assert!(
+        projected["content"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("## User Notes") && text.contains("PUSHEDMARKER")),
+        "the projected legacy body keeps its authored sections: {projected}"
+    );
+}
+
 #[tokio::test]
 async fn c_112_local_layout_and_kind_frontmatter_preserved_local() {
     let env = seed_env();
@@ -403,108 +522,21 @@ async fn c_112_local_layout_and_kind_frontmatter_preserved_local() {
     }
     assert_eq!(body, UPDATED, "the projection body is the new record text");
 
-    let served = wire(
-        &provider
-            .get_record(&admin(), get_request(&record_id))
-            .await,
-    );
+    let served = wire(&provider.get_record(&admin(), get_request(&record_id)).await);
     assert_eq!(served["record"]["revision"], 2, "{served}");
     assert_eq!(served["record"]["content"]["text"], UPDATED, "{served}");
     assert_eq!(served["record"]["kind"], KIND, "{served}");
 
-    // The capture → review → promote pipeline on the same workspace.
-    let captured = wire(
-        &provider
-            .capture(
-                &admin(),
-                dto(json!({
-                    "space_id": SPACE,
-                    "subject_id": SUBJECT,
-                    "content": { "text": "C112PROMOTE a candidate through the review pipeline" },
-                    "capture_scope": { "visibility": "shared" },
-                    "source_context_ids": [],
-                    "idempotency_key": "c112-capture",
-                })),
-            )
-            .await,
-    );
-    let candidate_id = captured["result"]["candidate_ids"][0]
-        .as_str()
-        .unwrap_or_else(|| panic!("a captured candidate id: {captured}"))
-        .to_string();
-    let reviewed = wire(
-        &provider
-            .review_candidate(
-                &admin(),
-                dto(json!({
-                    "space_id": SPACE,
-                    "candidate_id": candidate_id,
-                    "expected_revision": 1,
-                    "decision": { "action": "promote" },
-                    "idempotency_key": "c112-review",
-                })),
-            )
-            .await,
-    );
-    assert_eq!(reviewed["status"], "committed", "{reviewed}");
-
-    // The protected author-visible bytes are untouched by every operation.
-    assert_eq!(
-        std::fs::read(&soul_path).expect("SOUL.md bytes"),
-        soul_before,
-        "SOUL.md stayed byte-identical"
-    );
-    assert_eq!(
-        std::fs::read(&memory_path).expect("long-term bytes"),
-        memory_before,
-        "memory/long-term/{LEGACY_SLUG}.md stayed byte-identical"
-    );
-    assert_eq!(
-        std::fs::read_dir(legacy_memory_dir(&env))
-            .expect("legacy long-term dir")
-            .count(),
-        1,
-        "no new file was written into the legacy layout"
-    );
-
-    // The consumer-visible bridge still serves the authored legacy memory with
-    // its kind and body: the bytes above are live, not orphaned.
-    let creator_subject = legacy::creator_subject_id(CREATOR);
-    let ensured = wire(
-        &provider
-            .ensure_subject(
-                &admin(),
-                dto(json!({
-                    "space_id": SPACE,
-                    "subject_id": creator_subject,
-                    "kind": { "ns": legacy::CREATOR_KIND_NS, "id": CREATOR },
-                })),
-            )
-            .await,
-    );
-    assert_eq!(ensured["status"], "committed", "{ensured}");
-    let bridged = wire(
-        &provider
-            .list_records(&admin(), list_request(&creator_subject))
-            .await,
-    );
-    let projected = bridged["records"]
-        .as_array()
-        .expect("records array")
-        .iter()
-        .find(|record| {
-            record["content"]["text"]
-                .as_str()
-                .is_some_and(|text| text.contains(LEGACY_BODY))
-        })
-        .unwrap_or_else(|| panic!("the legacy memory is still projected: {bridged}"));
-    assert_eq!(projected["kind"], KIND, "{projected}");
-    assert!(
-        projected["content"]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("## User Notes") && text.contains("PUSHEDMARKER")),
-        "the projected legacy body keeps its authored sections: {projected}"
-    );
+    c112_promote_candidate(&provider).await;
+    c112_verify_legacy_untouched(
+        &provider,
+        &env,
+        &soul_path,
+        &memory_path,
+        &soul_before,
+        &memory_before,
+    )
+    .await;
 }
 
 // ---------------------------------------------------------------------------
@@ -584,7 +616,10 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
     );
     let listed = wire(&provider.list_records(&admin(), list_request(SUBJECT)).await);
     assert_eq!(listed["total_authorized"], 1, "{listed}");
-    assert_eq!(listed["records"][0]["record_id"], original_record, "{listed}");
+    assert_eq!(
+        listed["records"][0]["record_id"], original_record,
+        "{listed}"
+    );
     let served = wire(
         &provider
             .get_record(&admin(), get_request(&original_record))
@@ -698,7 +733,7 @@ impl ProviderAdapter for MindFixtureAdapter {
             .into_iter()
             .filter_map(|block| match block {
                 HostContentBlock::Text { text } => Some(text),
-                _ => None,
+                HostContentBlock::ResourceLink { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -713,7 +748,11 @@ impl ProviderAdapter for MindFixtureAdapter {
         )])))
     }
 
-    async fn cancel(&self, _session: &ManagedSessionHandle, _op: HostOperationId) -> HostResult<()> {
+    async fn cancel(
+        &self,
+        _session: &ManagedSessionHandle,
+        _op: HostOperationId,
+    ) -> HostResult<()> {
         Ok(())
     }
 
@@ -834,7 +873,11 @@ async fn observe_subject(
     subject: &str,
     expected_body: &str,
 ) {
-    let records = wire(&provider.list_records(principal, list_request(subject)).await);
+    let records = wire(
+        &provider
+            .list_records(principal, list_request(subject))
+            .await,
+    );
     assert!(
         records["records"].as_array().is_some(),
         "the record read succeeded for {subject}: {records}"
@@ -878,11 +921,10 @@ async fn observe_actual_subjects(
     observe_subject(&provider, &principal, character_subject, CHARACTER_BODY).await;
 }
 
-#[tokio::test]
-async fn c_115_remember_true_refusal_unchanged_local() {
-    let tmp = TempDir::new().expect("temp home");
-    let user_home = tmp.path().to_path_buf();
-    let selector = CoreHomeService::open(user_home.clone()).expect("home entry opens");
+/// Seed the real home, Creator, owned World/Character (and their admitted
+/// subjects) this scenario's local core and Host then drive.
+async fn c115_seed(user_home: &std::path::Path) -> (String, String, String, String) {
+    let selector = CoreHomeService::open(user_home.to_path_buf()).expect("home entry opens");
     let creator = selector
         .register_creator(CoreRegisterCreatorRequest {
             display_name: Some("N3 Remember Author".parse().expect("valid display name")),
@@ -891,7 +933,7 @@ async fn c_115_remember_true_refusal_unchanged_local() {
         .await
         .expect("register the fixture creator");
     let creator_id = creator.creator_id;
-    std::fs::create_dir_all(operational_workspace_dir(&user_home, &creator_id, WORKSPACE))
+    std::fs::create_dir_all(operational_workspace_dir(user_home, &creator_id, WORKSPACE))
         .expect("materialize the workspace");
     selector
         .select_workspace(SetActiveWorkspaceRequest {
@@ -904,7 +946,7 @@ async fn c_115_remember_true_refusal_unchanged_local() {
     // Create the real World/Character first, then release the writer so the
     // provider fixtures can seed the ACTUAL admitted subjects.
     let core = CoreService::open(CoreOpenOptions {
-        user_home: user_home.clone(),
+        user_home: user_home.to_path_buf(),
         access: CoreAccess::EngineOwner,
         memory: None,
     })
@@ -912,7 +954,10 @@ async fn c_115_remember_true_refusal_unchanged_local() {
     .expect("open the local core");
     let first_principal = core.active_principal().await.expect("principal");
     let world = core
-        .create_world(&first_principal, dto(json!({ "title": "N3 remember world" })))
+        .create_world(
+            &first_principal,
+            dto(json!({ "title": "N3 remember world" })),
+        )
         .await
         .expect("create the owned World")
         .world_id;
@@ -925,12 +970,14 @@ async fn c_115_remember_true_refusal_unchanged_local() {
         .expect("create the owned Character with its initial binding");
     let character_id = character.character.character_id.as_str().to_string();
     let binding_id = character.binding.binding_id.as_str().to_string();
-    core.close().await.expect("the seed core releases its writer");
+    core.close()
+        .await
+        .expect("the seed core releases its writer");
 
     // Seed one record under each REAL subject the Core memory paths address.
     let creator_subject = legacy::creator_subject_id(&creator_id);
     let character_subject = legacy::character_subject_id(&character_id);
-    let seeded = LocalMemoryProvider::open(user_home.clone(), &creator_id, WORKSPACE)
+    let seeded = LocalMemoryProvider::open(user_home.to_path_buf(), &creator_id, WORKSPACE)
         .await
         .expect("provider open for the seed");
     let seed_principal = principal(&creator_id);
@@ -966,6 +1013,124 @@ async fn c_115_remember_true_refusal_unchanged_local() {
     }
     drop(seeded);
 
+    (creator_id, world, character_id, binding_id)
+}
+
+/// The admitted state one local refusal scenario observes: the attached Host,
+/// both sessions and the subjects whose durable state must not move.
+struct C115Admitted<'a> {
+    handle: &'a nexus_core::HostHandle,
+    principal: &'a Principal,
+    character_session: String,
+    legacy_session: String,
+    user_home: &'a std::path::Path,
+    creator_id: &'a str,
+    creator_subject: &'a str,
+    character_subject: &'a str,
+    adapter: &'a MindFixtureAdapter,
+}
+
+/// Every refusal is typed, precedes agent execution, leaves the admitted
+/// subjects unchanged, and a plain Character prompt still executes.
+async fn c115_refuse_and_control(admitted: &C115Admitted<'_>) {
+    // BEFORE / AFTER each refusal, the REAL admitted subjects are unchanged.
+    observe_actual_subjects(
+        admitted.user_home,
+        admitted.creator_id,
+        admitted.creator_subject,
+        admitted.character_subject,
+    )
+    .await;
+    expect_remember_refusal(
+        admitted.handle,
+        admitted.principal,
+        admitted.character_session.clone(),
+        "not_supported",
+    )
+    .await;
+    observe_actual_subjects(
+        admitted.user_home,
+        admitted.creator_id,
+        admitted.creator_subject,
+        admitted.character_subject,
+    )
+    .await;
+    expect_remember_refusal(
+        admitted.handle,
+        admitted.principal,
+        admitted.legacy_session.clone(),
+        "invalid_input",
+    )
+    .await;
+    observe_actual_subjects(
+        admitted.user_home,
+        admitted.creator_id,
+        admitted.creator_subject,
+        admitted.character_subject,
+    )
+    .await;
+
+    assert_eq!(
+        admitted.adapter.executions(),
+        0,
+        "both refusals precede agent execution"
+    );
+    assert_eq!(
+        admitted.adapter.completions(),
+        0,
+        "no operation completed on a refusal"
+    );
+
+    // A plain Character prompt is the positive control: the adapter really
+    // executes and completes one operation. The Host's public response is
+    // `started`; no per-operation terminal status is claimed beyond the
+    // adapter execution/completion this fixture observes.
+    let plain = admitted
+        .handle
+        .execute(
+            admitted.principal,
+            admitted.character_session.clone(),
+            execute_prompt(false),
+        )
+        .await
+        .expect("a plain Character prompt is still served");
+    assert_eq!(plain.status, "started", "the plain prompt was admitted");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while admitted.adapter.executions() == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the plain prompt reached the agent adapter"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        admitted.adapter.executions(),
+        1,
+        "exactly one adapter execution"
+    );
+    assert_eq!(
+        admitted.adapter.completions(),
+        1,
+        "the adapter emitted its completion event"
+    );
+
+    observe_actual_subjects(
+        admitted.user_home,
+        admitted.creator_id,
+        admitted.creator_subject,
+        admitted.character_subject,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn c_115_remember_true_refusal_unchanged_local() {
+    let tmp = TempDir::new().expect("temp home");
+    let user_home = tmp.path().to_path_buf();
+    let (creator_id, world, character_id, binding_id) = c115_seed(&user_home).await;
+    let creator_subject = legacy::creator_subject_id(&creator_id);
+    let character_subject = legacy::character_subject_id(&character_id);
+
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access: CoreAccess::EngineOwner,
@@ -988,8 +1153,10 @@ async fn c_115_remember_true_refusal_unchanged_local() {
             },
         )
         .await;
-    let mut host_config = nexus_agent_host::config::AgentHostConfig::default();
-    host_config.max_ops_per_session = 4;
+    let host_config = nexus_agent_host::config::AgentHostConfig {
+        max_ops_per_session: 4,
+        ..Default::default()
+    };
     manager
         .start(HostStartConfig {
             config_path: nexus_agent_host::config::agent_host_config_path(&user_home),
@@ -1032,45 +1199,16 @@ async fn c_115_remember_true_refusal_unchanged_local() {
         .await
         .expect("the admitted non-Character session is created");
 
-    // BEFORE / AFTER each refusal, the REAL admitted subjects are unchanged.
-    observe_actual_subjects(&user_home, &creator_id, &creator_subject, &character_subject).await;
-    expect_remember_refusal(
-        &handle,
-        &principal,
-        character_session.session_id.clone(),
-        "not_supported",
-    )
-    .await;
-    observe_actual_subjects(&user_home, &creator_id, &creator_subject, &character_subject).await;
-    expect_remember_refusal(&handle, &principal, legacy_session.session_id.clone(), "invalid_input").await;
-    observe_actual_subjects(&user_home, &creator_id, &creator_subject, &character_subject).await;
-
-    assert_eq!(adapter.executions(), 0, "both refusals precede agent execution");
-    assert_eq!(adapter.completions(), 0, "no operation completed on a refusal");
-
-    // A plain Character prompt is the positive control: the adapter really
-    // executes and completes one operation. The Host's public response is
-    // `started`; no per-operation terminal status is claimed beyond the
-    // adapter execution/completion this fixture observes.
-    let plain = handle
-        .execute(
-            &principal,
-            character_session.session_id.clone(),
-            execute_prompt(false),
-        )
-        .await
-        .expect("a plain Character prompt is still served");
-    assert_eq!(plain.status, "started", "the plain prompt was admitted");
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while adapter.executions() == 0 {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the plain prompt reached the agent adapter"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert_eq!(adapter.executions(), 1, "exactly one adapter execution");
-    assert_eq!(adapter.completions(), 1, "the adapter emitted its completion event");
-
-    observe_actual_subjects(&user_home, &creator_id, &creator_subject, &character_subject).await;
+    let admitted = C115Admitted {
+        handle: &handle,
+        principal: &principal,
+        character_session: character_session.session_id.clone(),
+        legacy_session: legacy_session.session_id.clone(),
+        user_home: &user_home,
+        creator_id: &creator_id,
+        creator_subject: &creator_subject,
+        character_subject: &character_subject,
+        adapter: &adapter,
+    };
+    c115_refuse_and_control(&admitted).await;
 }
