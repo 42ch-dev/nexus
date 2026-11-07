@@ -398,10 +398,7 @@ impl Env {
     }
 
     fn write_credential_named(&self, credential_id: &str, seed: &[u8; 32], token: Option<&Value>) {
-        let dir = self
-            .user_home
-            .join(".nexus42")
-            .join("memory-credentials");
+        let dir = self.user_home.join(".nexus42").join("memory-credentials");
         fs::create_dir_all(&dir).expect("credential dir");
         let path = dir.join(format!("{credential_id}.json"));
         let token = token.map_or_else(|| "null".to_string(), Value::to_string);
@@ -881,6 +878,62 @@ async fn cancelled_open_closes_only_its_own_established_session() {
     );
 }
 
+/// Dropping the last open without an explicit close still ends its session.
+///
+/// The SDK's receive task keeps its own `Arc` on the adapter, so only the
+/// binding's own cleanup can release a *delivered* remote session. A core that
+/// is dropped after an error — never closed — must therefore still let the
+/// authenticated host observe the session closing, exactly as the explicit
+/// close does.
+#[tokio::test]
+async fn dropping_the_open_closes_its_established_session() {
+    let host_pubkey = pubkey(&HOST_SEED);
+    let client_pubkey = pubkey(&CLIENT_SEED);
+    let client_peer = peer_id(&CLIENT_SEED);
+
+    let fixture_home = TempDir::new().expect("fixture home");
+    let provider = Arc::new(
+        FixtureMemoryProvider::open(&fixture_home.path().join("memory.sqlite"))
+            .await
+            .expect("open the durable fixture"),
+    );
+    let served_space = provider.identity().space_id.clone();
+    let authority_host_id = provider.identity().authority_host_id.clone();
+    let principal_id = format!("prn_{client_peer}");
+    provider
+        .provision_operator_admin(&principal_id)
+        .await
+        .expect("operator provisions the admin grant");
+    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id));
+
+    let home = Env::new();
+    home.write_credential(&CLIENT_SEED);
+    let (addr, host) = start_listener(
+        provider.server(directory.admission()),
+        manifest(&authority_host_id),
+        client_peer.clone(),
+        client_pubkey,
+        5_000,
+    )
+    .await;
+    let core = open(&home, selection(&served_space, addr, &host_pubkey))
+        .await
+        .expect("the exact selection opens against the served space");
+
+    // The delivered binding really serves the provider over the signed
+    // session, so the drop below releases a live one.
+    let principal = core.active_principal().await.expect("active principal");
+    core.count_pending_reviews(&principal)
+        .await
+        .expect("the pinned remote binding serves the memory family");
+
+    // No explicit close: dropping the last handle is the only thing that can
+    // end this session.
+    drop(core);
+    let responder = responder_of(host).await;
+    wait_for_closed(&responder).await;
+}
+
 // ---------------------------------------------------------------------------
 // Authenticated admission: refusals, reconnect replay and credential redaction
 // ---------------------------------------------------------------------------
@@ -1213,7 +1266,17 @@ async fn binding_admissions(
 async fn binding_object_facts(
     pool: &SqlitePool,
     binding_id: &str,
-) -> Vec<(String, String, String, String, String, String, String, String, String)> {
+) -> Vec<(
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+)> {
     sqlx::query(
         "SELECT authority_host_id, authority_generation, space_id, client_identity, \
          character_id, binding_id, object_kind, object_id, state \
@@ -1409,8 +1472,13 @@ impl RemoteMemoryService for TokenGate {
             Ok(proof) => proof,
             Err(_) => return Self::deny("the received auth is not the published proof shape"),
         };
-        match verify_capability_token(&proof, &self.trusted, &self.host_peer, peer_id, now_seconds())
-        {
+        match verify_capability_token(
+            &proof,
+            &self.trusted,
+            &self.host_peer,
+            peer_id,
+            now_seconds(),
+        ) {
             Ok(_capabilities) => self.inner.invoke(peer_id, op, payload).await,
             Err(_) => Self::deny("the received proof did not verify"),
         }
@@ -1476,7 +1544,6 @@ async fn start_listener_token_gated(
     (addr, task)
 }
 
-
 // ---------------------------------------------------------------------------
 // Real product actor fixture (owned World, Character and active binding)
 // ---------------------------------------------------------------------------
@@ -1521,7 +1588,6 @@ fn character_capture_request(binding_id: Option<&str>, pending_id: &str, digest:
     }
     request
 }
-
 
 /// A legitimate reopen on the same home after one failed-open stage.
 ///
@@ -1632,10 +1698,13 @@ async fn connect_admission_refuses_untrusted_credentials_keys_and_families() {
     // shape: the loader refuses before any socket is dialed.
     let malformed = Env::new();
     malformed.write_credential_with_token(&CLIENT_SEED, Some(&json!({ "v": 1 })));
-    let error = open(&malformed, selection(&served_space, dead_endpoint, &host_pubkey))
-        .await
-        .err()
-        .expect("a malformed token refuses the open");
+    let error = open(
+        &malformed,
+        selection(&served_space, dead_endpoint, &host_pubkey),
+    )
+    .await
+    .err()
+    .expect("a malformed token refuses the open");
     assert_eq!(
         coded(&error),
         "memory_credential_invalid",
@@ -1661,10 +1730,13 @@ async fn connect_admission_refuses_untrusted_credentials_keys_and_families() {
     // credential refusal; the real verifier lives in the token scenario below.)
     let unreachable = Env::new();
     unreachable.write_credential(&CLIENT_SEED);
-    let error = open(&unreachable, selection(&served_space, dead_endpoint, &host_pubkey))
-        .await
-        .err()
-        .expect("a dead endpoint fails the open");
+    let error = open(
+        &unreachable,
+        selection(&served_space, dead_endpoint, &host_pubkey),
+    )
+    .await
+    .err()
+    .expect("a dead endpoint fails the open");
     assert_eq!(coded(&error), "memory_remote_unavailable");
     assert_home_reopens(
         &provider,
@@ -1927,7 +1999,8 @@ async fn unavailable_reflection_and_transfer_ops_refuse_explicitly_on_the_signed
         .provision_operator_admin(&principal_id)
         .await
         .expect("operator provisions the admin grant");
-    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id.clone()));
+    let directory =
+        Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id.clone()));
     let (addr, task) = start_listener(
         provider.server(directory.admission()),
         manifest(&authority_host_id),
@@ -2034,7 +2107,8 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
         .provision_operator_admin(&principal_id)
         .await
         .expect("operator provisions the admin grant");
-    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id.clone()));
+    let directory =
+        Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id.clone()));
     let env = Env::boot("R5 Loss Owner").await;
     env.write_credential(&CLIENT_SEED);
     let pool = provider_pool(&fixture_home).await;
@@ -2081,10 +2155,16 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
     let facts_before = binding_object_facts(&facts_db, &binding_id).await;
     facts_db.close().await;
     assert_eq!(facts_before.len(), 1, "one candidate fact");
-    assert_eq!(facts_before[0].0, authority_host_id, "pinned authority host");
+    assert_eq!(
+        facts_before[0].0, authority_host_id,
+        "pinned authority host"
+    );
     assert_eq!(facts_before[0].1, "1", "pinned authority generation");
     assert_eq!(facts_before[0].2, served_space, "pinned space");
-    assert_eq!(facts_before[0].3, client_peer, "pinned public client identity");
+    assert_eq!(
+        facts_before[0].3, client_peer,
+        "pinned public client identity"
+    );
     assert_eq!(facts_before[0].4, character_id, "pinned Character bearer");
     assert_eq!(facts_before[0].5, binding_id, "pinned binding");
     assert_eq!(facts_before[0].6, "candidate", "fact kind");
@@ -2144,7 +2224,9 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
     // UNEXPECTED LOSS: the provider's accepted sockets are torn down under the
     // still-open client bindings. The test never calls a client close here.
     assert!(!core.is_closing(), "the client did not begin closing");
-    core_control.shutdown(Shutdown::Both).expect("tear down the core socket");
+    core_control
+        .shutdown(Shutdown::Both)
+        .expect("tear down the core socket");
     consumer_control
         .shutdown(Shutdown::Both)
         .expect("tear down the consumer socket");
@@ -2174,7 +2256,11 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
         .await
     {
         SpokeResult::Reject(reject) => {
-            assert_eq!(reject.code, SpokeRejectCode::InternalError, "the broken transport fails closed");
+            assert_eq!(
+                reject.code,
+                SpokeRejectCode::InternalError,
+                "the broken transport fails closed"
+            );
             let kind = reject
                 .details
                 .as_ref()
@@ -2267,7 +2353,8 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
         SpokeResult::Reject(reject) => panic!("receipts.get answers: {reject:?}"),
     };
     assert_eq!(
-        read_back["receipt"]["receipt_id"], json!(original_tuple.0),
+        read_back["receipt"]["receipt_id"],
+        json!(original_tuple.0),
         "receipts.get serves the original receipt id"
     );
     assert_eq!(
@@ -2310,9 +2397,18 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
 /// digest, requester and the candidate ids it names.
 fn receipt_tuple(receipt: &Value) -> (String, String, String, String) {
     (
-        receipt["receipt_id"].as_str().expect("receipt id").to_string(),
-        receipt["idempotency_key"].as_str().expect("receipt key").to_string(),
-        receipt["payload_digest"].as_str().expect("receipt digest").to_string(),
+        receipt["receipt_id"]
+            .as_str()
+            .expect("receipt id")
+            .to_string(),
+        receipt["idempotency_key"]
+            .as_str()
+            .expect("receipt key")
+            .to_string(),
+        receipt["payload_digest"]
+            .as_str()
+            .expect("receipt digest")
+            .to_string(),
         receipt["requester_principal_id"]
             .as_str()
             .expect("receipt requester")
@@ -2585,7 +2681,8 @@ async fn credential_sentinels_never_reach_config_errors_or_receipts() {
         .provision_operator_admin(&principal_id)
         .await
         .expect("operator provisions the admin grant");
-    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id.clone()));
+    let directory =
+        Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id.clone()));
     let env = Env::new();
     let mut token = expired_token(&client_peer, &peer_id(&HOST_SEED));
     token["sig"] = json!(SIGNATURE_SENTINEL);
@@ -2627,14 +2724,21 @@ async fn credential_sentinels_never_reach_config_errors_or_receipts() {
 
     // The real configuration writer persists the remote selection; the real
     // reader (an open with no override) is what loads it below.
-    let remote = selection(&served_space, "127.0.0.1:1".parse().expect("port"), &host_pubkey);
+    let remote = selection(
+        &served_space,
+        "127.0.0.1:1".parse().expect("port"),
+        &host_pubkey,
+    );
     CoreHomeService::open(env.user_home.clone())
         .expect("open the real home service")
         .set_memory_provider_selection(&remote)
         .expect("the product config writer persists the selection");
     let persisted = fs::read_to_string(env.user_home.join(".nexus42").join("config.toml"))
         .expect("read the persisted configuration");
-    assert!(persisted.contains("kind = \"remote\""), "the remote table persisted");
+    assert!(
+        persisted.contains("kind = \"remote\""),
+        "the remote table persisted"
+    );
     assert!(!persisted.contains(&seed_text));
     assert!(!persisted.contains(SIGNATURE_SENTINEL));
 
@@ -2667,8 +2771,14 @@ async fn credential_sentinels_never_reach_config_errors_or_receipts() {
         .expect("the admitted capture");
 
     let bodies = provider_body_text(&pool).await;
-    assert!(!bodies.is_empty(), "the receipt/candidate sink is populated");
-    assert!(!bodies.contains(&seed_text), "the seed never entered a receipt");
+    assert!(
+        !bodies.is_empty(),
+        "the receipt/candidate sink is populated"
+    );
+    assert!(
+        !bodies.contains(&seed_text),
+        "the seed never entered a receipt"
+    );
     assert!(
         !bodies.contains(SIGNATURE_SENTINEL),
         "the proof signature never entered a receipt"
@@ -2765,9 +2875,11 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
     // Valid signature, wrong session subject.
     let wrong_subject = capability_proof_at(&ISSUER_SEED, &other_peer, &host_peer, now + 600, now);
     // Valid signature, wrong verifying node.
-    let wrong_audience = capability_proof_at(&ISSUER_SEED, &client_peer, &other_peer, now + 600, now);
+    let wrong_audience =
+        capability_proof_at(&ISSUER_SEED, &client_peer, &other_peer, now + 600, now);
     // Valid signature from an issuer this host does not trust.
-    let untrusted_issuer = capability_proof_at(&OTHER_SEED, &client_peer, &host_peer, now + 600, now);
+    let untrusted_issuer =
+        capability_proof_at(&OTHER_SEED, &client_peer, &host_peer, now + 600, now);
     // Valid signature over different claims than the ones presented.
     let mut forged = valid.clone();
     forged.claims.capabilities.push("admin".to_string());
@@ -3257,7 +3369,9 @@ async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
         b"unrelated-session"
     );
     echo.close().await.expect("a normal close succeeds");
-    echo.close().await.expect("a repeated normal close succeeds");
+    echo.close()
+        .await
+        .expect("a repeated normal close succeeds");
     tokio::time::timeout(SETUP_BOUND, echo_peer)
         .await
         .expect("the echo peer ends")
@@ -3546,7 +3660,10 @@ async fn retained_pending_recv_does_not_block_the_close() {
         .await
         .expect("the close must settle while the recv future is retained")
         .expect("the close task must not panic");
-    assert!(report.is_ok(), "an idle close flushes cleanly, got {report:?}");
+    assert!(
+        report.is_ok(),
+        "an idle close flushes cleanly, got {report:?}"
+    );
 
     // The already-queued receive and a NEW post-close receive both observe
     // Closed BEFORE the retained holder is released — not a timeout.
@@ -3625,7 +3742,11 @@ async fn two_frame_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<(
         let (tcp, _) = listener.accept().await.expect("accept");
         let mut ws = tokio_tungstenite::accept_async(tcp).await.expect("upgrade");
         peer_probe.notified().await;
-        if ws.send(Message::Binary(b"one".to_vec().into())).await.is_err() {
+        if ws
+            .send(Message::Binary(b"one".to_vec().into()))
+            .await
+            .is_err()
+        {
             return;
         }
         tokio::time::sleep(Duration::from_millis(40)).await;

@@ -37,8 +37,8 @@ use std::num::NonZeroU64;
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde_json::{json, Map, Value};
-use sqlx::{Row, SqliteConnection};
 use sqlx::sqlite::SqliteRow;
+use sqlx::{Row, SqliteConnection};
 use uuid::Uuid;
 
 use spoke_operations::spoke_schemas::memory_candidates_list_request::Status as CandidateStatus;
@@ -59,39 +59,41 @@ use spoke_operations::{
 
 use crate::faults::FaultPoint;
 use crate::provider::FixtureMemoryProvider;
-use crate::FixtureError;
 use crate::spaces::{
-    bump_snapshot, internal, is_authorized, load_grants, requirement, snapshot_marker,
-    whole_scope_requirement, ENGINE_POLICY_VERSION, MAX_PAGE_SIZE,
+    bump_snapshot, internal, internal_failure, is_authorized, load_grants, requirement,
+    snapshot_marker, whole_scope_requirement, ENGINE_POLICY_VERSION, MAX_PAGE_SIZE,
 };
+use crate::FixtureError;
 
 /// Wire schema version carried by every fixture-served object (§6.1).
 const SCHEMA_VERSION: u64 = 1;
 
 /// `memory.describe.limits.max_content_bytes` for the fixture (§7.1); the
 /// assembly advertises this same value.
-pub(crate) const MAX_CONTENT_BYTES: usize = 64 * 1024;
+pub const MAX_CONTENT_BYTES: usize = 64 * 1024;
 
 /// Provider candidate retention: a pending candidate stops being listed after
 /// this window without being consumed (§6.7 `expires_at`, §8.1).
 const CANDIDATE_TTL_DAYS: i64 = 30;
 
-/// §7.1 `receipt_retention_seconds`: how long a receipt *body* is served once
-/// the receipt became terminal. The window starts at `completed_at`, never at
-/// admission, so work that stayed pending keeps its full body window after it
-/// settles. Past the window only the content-free dedup tombstone answers
-/// (§6.10/MEM-R021).
+/// §7.1 `receipt_retention_seconds`: how long a receipt *body* is served.
+///
+/// The window starts at `completed_at`, never at admission, so work that stayed
+/// pending keeps its full body window after it settles. Past the window only the
+/// content-free dedup tombstone answers (§6.10/MEM-R021).
 pub const RECEIPT_RETENTION_SECONDS: u64 = 2_592_000;
 
-/// §7.1 `idempotency_retention_seconds`: the stored receipt-body window. The
-/// fixture keeps it identical to `receipt_retention_seconds`, as the local
+/// §7.1 `idempotency_retention_seconds`: the stored receipt-body window.
+///
+/// The fixture keeps it identical to `receipt_retention_seconds`, as the local
 /// provider does, so there is one body lifetime for every terminal receipt.
 pub const IDEMPOTENCY_RETENTION_SECONDS: u64 = RECEIPT_RETENTION_SECONDS;
 
-/// §7.1 `dedup_retention_seconds`: how long the dedup tombstone (namespace key,
-/// payload digest, receipt id, last known status) is kept **after the body
-/// retires**, as §6.10 states. It is not counted from admission, so a long
-/// pending period never shortens it.
+/// §7.1 `dedup_retention_seconds`: how long the dedup tombstone is kept.
+///
+/// The tombstone (namespace key, payload digest, receipt id, last known status)
+/// is kept **after the body retires**, as §6.10 states. It is not counted from
+/// admission, so a long pending period never shortens it.
 pub const DEDUP_RETENTION_SECONDS: u64 = 5_184_000;
 
 const _: () = assert!(DEDUP_RETENTION_SECONDS >= IDEMPOTENCY_RETENTION_SECONDS);
@@ -127,7 +129,7 @@ const OP_CANDIDATES_REVIEW: &str = "memory.candidates.review";
 
 /// `memory.candidates.list` payload (§7.12).
 #[derive(Debug)]
-pub(crate) struct CandidatePage {
+pub struct CandidatePage {
     pub(crate) candidates: Vec<MemoryCandidate>,
     pub(crate) next_cursor: Option<String>,
 }
@@ -147,7 +149,7 @@ pub(crate) struct CandidatePage {
 /// versus an absent optional — stay distinguishable exactly as the protocol
 /// requires. Construction parses the payload, so the typed view can never
 /// describe a different request than the one being digested.
-pub(crate) struct Admitted<Request> {
+pub struct Admitted<Request> {
     payload_digest: String,
     request: Request,
 }
@@ -159,7 +161,7 @@ impl<Request> Admitted<Request> {
     /// reserialization, a normalized fallback or a client-supplied value, and it
     /// is crate-private so no untrusted caller can pair a digest with a request
     /// it did not produce.
-    pub(crate) fn from_scope(payload_digest: String, request: Request) -> Self {
+    pub(crate) const fn from_scope(payload_digest: String, request: Request) -> Self {
         Self {
             payload_digest,
             request,
@@ -172,7 +174,7 @@ impl<Request> Admitted<Request> {
     }
 
     /// The typed view parsed from that same object at admission.
-    pub(crate) fn request(&self) -> &Request {
+    pub(crate) const fn request(&self) -> &Request {
         &self.request
     }
 }
@@ -190,21 +192,19 @@ fn admit<Request>(
 }
 
 /// §7.11 `memory.capture` at the boundary.
-pub(crate) fn admit_capture(
-    payload: Value,
-) -> Result<Admitted<MemoryCaptureRequest>, SpokeReject> {
+pub fn admit_capture(payload: Value) -> Result<Admitted<MemoryCaptureRequest>, SpokeReject> {
     admit(payload, serde_json::from_value)
 }
 
 /// §7.14 `memory.candidates.dismiss` at the boundary.
-pub(crate) fn admit_candidates_dismiss(
+pub fn admit_candidates_dismiss(
     payload: Value,
 ) -> Result<Admitted<MemoryCandidatesDismissRequest>, SpokeReject> {
     admit(payload, serde_json::from_value)
 }
 
 /// §7.15 `memory.candidates.review` at the boundary.
-pub(crate) fn admit_candidates_review(
+pub fn admit_candidates_review(
     payload: Value,
 ) -> Result<Admitted<MemoryCandidatesReviewRequest>, SpokeReject> {
     admit(payload, serde_json::from_value)
@@ -315,7 +315,7 @@ fn outcome_uncertain() -> SpokeReject {
 /// A commit that failed may still have taken effect (§14.3): the caller cannot
 /// be told whether anything committed, so it is `OUTCOME_UNCERTAIN` — never a
 /// clean retryable internal error.
-fn commit_unknown(error: sqlx::Error) -> SpokeReject {
+fn commit_unknown(error: &sqlx::Error) -> SpokeReject {
     SpokeReject {
         code: SpokeRejectCode::OutcomeUncertain,
         message: format!(
@@ -401,25 +401,24 @@ fn timestamp_text(value: DateTime<Utc>) -> String {
 fn instant(raw: &str) -> Result<DateTime<Utc>, SpokeReject> {
     DateTime::parse_from_rfc3339(raw)
         .map(|parsed| parsed.with_timezone(&Utc))
-        .map_err(|error| internal(format!("stored timestamp {raw} is not RFC 3339: {error}")))
+        .map_err(internal_failure)
 }
 
 fn stored_json(raw: &str, field: &str) -> Result<Value, SpokeReject> {
-    serde_json::from_str(raw)
-        .map_err(|error| internal(format!("stored {field} is not valid JSON: {error}")))
+    serde_json::from_str(raw).map_err(|_| internal(format!("stored {field} is not valid JSON")))
 }
 
 fn encoded(value: &Value) -> Result<String, SpokeReject> {
-    serde_json::to_string(value).map_err(|error| internal(format!("value is not encodable: {error}")))
+    serde_json::to_string(value).map_err(internal_failure)
 }
 
 fn row_u64(row: &SqliteRow, column: &str) -> Result<u64, SpokeReject> {
-    let raw: i64 = row.try_get(column).map_err(internal)?;
-    u64::try_from(raw).map_err(internal)
+    let raw: i64 = row.try_get(column).map_err(internal_failure)?;
+    u64::try_from(raw).map_err(internal_failure)
 }
 
 fn row_i64(value: u64) -> Result<i64, SpokeReject> {
-    i64::try_from(value).map_err(internal)
+    i64::try_from(value).map_err(internal_failure)
 }
 
 /// The fixture serves exactly one space; any other id has no existence signal.
@@ -446,9 +445,9 @@ async fn require_space_admits(
         .bind(space_id)
         .fetch_optional(&mut *conn)
         .await
-        .map_err(internal)?
+        .map_err(internal_failure)?
         .ok_or_else(|| internal(format!("space {space_id} is not stored")))?;
-    let status: String = row.try_get("status").map_err(internal)?;
+    let status: String = row.try_get("status").map_err(internal_failure)?;
     if status != "frozen" || is_freeze_allowlisted(op) {
         return Ok(());
     }
@@ -477,13 +476,14 @@ async fn capture_target(
     .bind(subject_id)
     .fetch_optional(&mut *conn)
     .await
-    .map_err(internal)?
+    .map_err(internal_failure)?
     .ok_or_else(|| not_found(format!("subject {subject_id} does not exist in this space")))?;
-    let fenced: String = row.try_get("fenced_contexts_json").map_err(internal)?;
+    let fenced: String = row
+        .try_get("fenced_contexts_json")
+        .map_err(internal_failure)?;
     Ok(CaptureTarget {
-        status: row.try_get("status").map_err(internal)?,
-        fenced_contexts: serde_json::from_str(&fenced)
-            .map_err(|error| internal(format!("stored subject fences are not JSON: {error}")))?,
+        status: row.try_get("status").map_err(internal_failure)?,
+        fenced_contexts: serde_json::from_str(&fenced).map_err(internal_failure)?,
     })
 }
 
@@ -500,7 +500,11 @@ async fn require_write_target(
         return Err(subject_fenced(subject_id, "subject"));
     }
     if let Some(context_id) = context_id {
-        if target.fenced_contexts.iter().any(|fenced| fenced == context_id) {
+        if target
+            .fenced_contexts
+            .iter()
+            .any(|fenced| fenced == context_id)
+        {
             return Err(subject_fenced(subject_id, "context"));
         }
     }
@@ -589,7 +593,7 @@ fn require_one_grant(
 /// whichever grant happens to survive. It never carries payload, content,
 /// digest, seed or proof material.
 #[derive(Debug)]
-pub(crate) struct ReceiptTarget {
+pub struct ReceiptTarget {
     capabilities: Vec<String>,
     subject_id: Option<String>,
     context_ids: Vec<String>,
@@ -632,7 +636,9 @@ impl ReceiptTarget {
         if capabilities.is_empty() {
             return Err(invalid_target("at least one capability is required"));
         }
-        let unique = capabilities.iter().collect::<std::collections::HashSet<_>>();
+        let unique = capabilities
+            .iter()
+            .collect::<std::collections::HashSet<_>>();
         if unique.len() != capabilities.len() {
             return Err(invalid_target("the capability list must be unique"));
         }
@@ -649,7 +655,10 @@ impl ReceiptTarget {
             ));
         }
         Ok(Self {
-            capabilities: capabilities.iter().map(|value| (*value).to_owned()).collect(),
+            capabilities: capabilities
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect(),
             subject_id: subject_id.map(str::to_owned),
             context_ids: contexts,
             reads_shared,
@@ -666,9 +675,7 @@ impl ReceiptTarget {
     /// means the requirement names no context, which a context-restricted grant
     /// still satisfies. Use this constructor whenever the operation's real target
     /// is the whole space (whole-space export, space maintenance/admin ops).
-    pub(crate) fn whole_space(
-        capabilities: &'static [&'static str],
-    ) -> Result<Self, SpokeReject> {
+    pub(crate) fn whole_space(capabilities: &'static [&'static str]) -> Result<Self, SpokeReject> {
         Self::new(capabilities, None, &[], false, true)
     }
 
@@ -746,7 +753,7 @@ async fn store_receipt_target_in_tx(
     .bind(i64::from(target.subject_all))
     .execute(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     Ok(())
 }
 
@@ -761,20 +768,18 @@ async fn fetch_receipt_target(
     .bind(receipt_id)
     .fetch_optional(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     row.map(|row| {
-        let capabilities: String = row.try_get("capabilities_json").map_err(internal)?;
-        let context_ids: String = row.try_get("context_ids_json").map_err(internal)?;
-        let reads_shared: i64 = row.try_get("reads_shared").map_err(internal)?;
-        let subject_all: i64 = row.try_get("subject_all").map_err(internal)?;
+        let capabilities: String = row.try_get("capabilities_json").map_err(internal_failure)?;
+        let context_ids: String = row.try_get("context_ids_json").map_err(internal_failure)?;
+        let reads_shared: i64 = row.try_get("reads_shared").map_err(internal_failure)?;
+        let subject_all: i64 = row.try_get("subject_all").map_err(internal_failure)?;
         Ok(ReceiptTarget {
-            capabilities: serde_json::from_str(&capabilities).map_err(|error| {
-                internal(format!("stored receipt capabilities are not JSON: {error}"))
-            })?,
-            subject_id: row.try_get("subject_id").map_err(internal)?,
-            context_ids: serde_json::from_str(&context_ids).map_err(|error| {
-                internal(format!("stored receipt contexts are not JSON: {error}"))
-            })?,
+            capabilities: serde_json::from_str(&capabilities)
+                .map_err(|error| internal_failure(error))?,
+            subject_id: row.try_get("subject_id").map_err(internal_failure)?,
+            context_ids: serde_json::from_str(&context_ids)
+                .map_err(|error| internal_failure(error))?,
             reads_shared: reads_shared != 0,
             subject_all: subject_all != 0,
         })
@@ -786,7 +791,7 @@ async fn fetch_receipt_target(
 /// for an op string the published base table does not define. `admin` in a
 /// grant implies every capability within that grant's coverage (§6.5), so a
 /// grant that literally carries `admin` satisfies any requirement here.
-pub(crate) fn required_capabilities(op: &str) -> Option<&'static [&'static str]> {
+pub fn required_capabilities(op: &str) -> Option<&'static [&'static str]> {
     const ADMIN: &[&str] = &["admin"];
     const CAPTURE: &[&str] = &["capture"];
     const REVIEW: &[&str] = &["review"];
@@ -833,31 +838,40 @@ fn effective_authorization_digest(
 ) -> Result<String, SpokeReject> {
     let mut live = Vec::new();
     for grant in grants {
-        let (grant_id, grant_principal, grant_space, subject_id, capabilities, context_ids, shared_access, expires_at, revoked_at) =
-            match grant {
-                MemoryGrant::RestrictedGrant(grant) => (
-                    grant.grant_id.as_str(),
-                    grant.principal_id.as_str(),
-                    grant.space_id.as_str(),
-                    grant.subject_id.as_deref(),
-                    &grant.capabilities,
-                    Some(&grant.context_ids),
-                    grant.shared_access,
-                    grant.expires_at.as_deref(),
-                    grant.revoked_at.is_some(),
-                ),
-                MemoryGrant::UnrestrictedGrant(grant) => (
-                    grant.grant_id.as_str(),
-                    grant.principal_id.as_str(),
-                    grant.space_id.as_str(),
-                    grant.subject_id.as_deref(),
-                    &grant.capabilities,
-                    None,
-                    None,
-                    grant.expires_at.as_deref(),
-                    grant.revoked_at.is_some(),
-                ),
-            };
+        let (
+            grant_id,
+            grant_principal,
+            grant_space,
+            subject_id,
+            capabilities,
+            context_ids,
+            shared_access,
+            expires_at,
+            revoked_at,
+        ) = match grant {
+            MemoryGrant::RestrictedGrant(grant) => (
+                grant.grant_id.as_str(),
+                grant.principal_id.as_str(),
+                grant.space_id.as_str(),
+                grant.subject_id.as_deref(),
+                &grant.capabilities,
+                Some(&grant.context_ids),
+                grant.shared_access,
+                grant.expires_at.as_deref(),
+                grant.revoked_at.is_some(),
+            ),
+            MemoryGrant::UnrestrictedGrant(grant) => (
+                grant.grant_id.as_str(),
+                grant.principal_id.as_str(),
+                grant.space_id.as_str(),
+                grant.subject_id.as_deref(),
+                &grant.capabilities,
+                None,
+                None,
+                grant.expires_at.as_deref(),
+                grant.revoked_at.is_some(),
+            ),
+        };
         if grant_principal != principal_id || grant_space != space_id || revoked_at {
             continue;
         }
@@ -893,7 +907,7 @@ fn effective_authorization_digest(
 /// Crate-visible with [`resolve_replay`] and [`stage_receipt_in_tx`] so the
 /// assembly task can bind every other mutating op to this same namespace and
 /// commit its effect, receipt and dedup row together.
-pub(crate) struct Mutation {
+pub struct Mutation {
     op: &'static str,
     idempotency_key: Option<String>,
     payload_digest: String,
@@ -930,14 +944,14 @@ impl Mutation {
 /// The state one durable receipt row is written with (§6.10). `Committed`
 /// carries the content-free result summary; `Failed` carries the reject whose
 /// envelope is stored with its §14.2 retry class.
-pub(crate) enum ReceiptState {
+pub enum ReceiptState {
     Committed(Value),
     Pending,
     Failed(SpokeReject),
 }
 
 /// §14.2 retry classes for the memory codes this slice can store.
-fn retry_class(code: SpokeRejectCode) -> &'static str {
+const fn retry_class(code: SpokeRejectCode) -> &'static str {
     match code {
         SpokeRejectCode::OutcomeUncertain => "uncertain",
         SpokeRejectCode::InternalError => "retryable",
@@ -959,7 +973,7 @@ fn error_envelope(reject: &SpokeReject) -> Value {
     })
 }
 
-pub(crate) fn receipt_id() -> String {
+pub fn receipt_id() -> String {
     format!("rcpt_{}", Uuid::new_v4().simple())
 }
 
@@ -1028,21 +1042,23 @@ async fn fetch_receipt(
             .await
         }
     }
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     row.map(|row| {
         Ok(StoredReceipt {
-            space_id: row.try_get("space_id").map_err(internal)?,
-            receipt_id: row.try_get("receipt_id").map_err(internal)?,
-            requester_principal_id: row.try_get("requester_principal_id").map_err(internal)?,
-            op: row.try_get("op").map_err(internal)?,
-            idempotency_key: row.try_get("idempotency_key").map_err(internal)?,
-            payload_digest: row.try_get("payload_digest").map_err(internal)?,
-            status: row.try_get("status").map_err(internal)?,
-            result: row.try_get("result_json").map_err(internal)?,
-            error: row.try_get("error_json").map_err(internal)?,
-            created_at: row.try_get("created_at").map_err(internal)?,
-            completed_at: row.try_get("completed_at").map_err(internal)?,
-            body_expires_at: row.try_get("body_expires_at").map_err(internal)?,
+            space_id: row.try_get("space_id").map_err(internal_failure)?,
+            receipt_id: row.try_get("receipt_id").map_err(internal_failure)?,
+            requester_principal_id: row
+                .try_get("requester_principal_id")
+                .map_err(internal_failure)?,
+            op: row.try_get("op").map_err(internal_failure)?,
+            idempotency_key: row.try_get("idempotency_key").map_err(internal_failure)?,
+            payload_digest: row.try_get("payload_digest").map_err(internal_failure)?,
+            status: row.try_get("status").map_err(internal_failure)?,
+            result: row.try_get("result_json").map_err(internal_failure)?,
+            error: row.try_get("error_json").map_err(internal_failure)?,
+            created_at: row.try_get("created_at").map_err(internal_failure)?,
+            completed_at: row.try_get("completed_at").map_err(internal_failure)?,
+            body_expires_at: row.try_get("body_expires_at").map_err(internal_failure)?,
         })
     })
     .transpose()
@@ -1073,29 +1089,35 @@ async fn fetch_tombstone(
     requester: Option<&str>,
 ) -> Result<Option<StoredTombstone>, SpokeReject> {
     let row = match requester {
-        Some(requester) => sqlx::query(
-            "SELECT last_known_status, tombstone_expires_at FROM idempotency_namespace \
+        Some(requester) => {
+            sqlx::query(
+                "SELECT last_known_status, tombstone_expires_at FROM idempotency_namespace \
              WHERE space_id = ? AND requester_principal_id = ? AND receipt_id = ?",
-        )
-        .bind(space_id)
-        .bind(requester)
-        .bind(receipt_id)
-        .fetch_optional(&mut *conn)
-        .await,
-        None => sqlx::query(
-            "SELECT last_known_status, tombstone_expires_at FROM idempotency_namespace \
+            )
+            .bind(space_id)
+            .bind(requester)
+            .bind(receipt_id)
+            .fetch_optional(&mut *conn)
+            .await
+        }
+        None => {
+            sqlx::query(
+                "SELECT last_known_status, tombstone_expires_at FROM idempotency_namespace \
              WHERE space_id = ? AND receipt_id = ?",
-        )
-        .bind(space_id)
-        .bind(receipt_id)
-        .fetch_optional(&mut *conn)
-        .await,
+            )
+            .bind(space_id)
+            .bind(receipt_id)
+            .fetch_optional(&mut *conn)
+            .await
+        }
     }
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     row.map(|row| {
         Ok(StoredTombstone {
-            last_known_status: row.try_get("last_known_status").map_err(internal)?,
-            tombstone_expires_at: row.try_get("tombstone_expires_at").map_err(internal)?,
+            last_known_status: row.try_get("last_known_status").map_err(internal_failure)?,
+            tombstone_expires_at: row
+                .try_get("tombstone_expires_at")
+                .map_err(internal_failure)?,
         })
     })
     .transpose()
@@ -1176,8 +1198,10 @@ fn receipt_to_wire(stored: &StoredReceipt) -> Result<MemoryReceipt, SpokeReject>
     match stored.status.as_str() {
         "pending" => {}
         "committed" => {
-            value["result"] =
-                stored_json(stored.result.as_deref().unwrap_or_default(), "receipt result")?;
+            value["result"] = stored_json(
+                stored.result.as_deref().unwrap_or_default(),
+                "receipt result",
+            )?;
             value["completed_at"] = json!(stored.completed_at);
         }
         "failed" => {
@@ -1192,15 +1216,14 @@ fn receipt_to_wire(stored: &StoredReceipt) -> Result<MemoryReceipt, SpokeReject>
             )))
         }
     }
-    serde_json::from_value(value)
-        .map_err(|error| internal(format!("stored receipt row is not protocol-shaped: {error}")))
+    serde_json::from_value(value).map_err(internal_failure)
 }
 
 /// Stage one durable receipt plus its dedup row on the caller's connection and
 /// advance the private snapshot marker in the same transaction (§6.10, §8.5).
 /// Never commits, so an effect and its receipt commit together (MEM-R009).
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn stage_receipt_in_tx(
+pub async fn stage_receipt_in_tx(
     conn: &mut SqliteConnection,
     space_id: &str,
     principal_id: &str,
@@ -1249,7 +1272,7 @@ pub(crate) async fn stage_receipt_in_tx(
     .bind(&body_expires_at)
     .execute(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     // §7.0.5: the keyless mutation is the sole exemption and binds no dedup
     // namespace row, so nothing can ever replay it.
     if let Some(idempotency_key) = admission.idempotency_key.as_deref() {
@@ -1278,7 +1301,7 @@ pub(crate) async fn stage_receipt_in_tx(
         .await
         .map_err(|error| match error.as_database_error() {
             Some(database) if database.is_unique_violation() => idempotency_conflict(),
-            _ => internal(error),
+            _ => internal_failure(error),
         })?;
     }
     // The target is written with the receipt and independent of its body, so an
@@ -1295,7 +1318,7 @@ pub(crate) async fn stage_receipt_in_tx(
 /// `Pending` receipt, later settle it to `Committed` or `Failed` on the caller's
 /// connection and never return it to pending. The fault and retention slices
 /// drive this transition; a synchronous op skips it and commits directly.
-pub(crate) async fn settle_receipt_in_tx(
+pub async fn settle_receipt_in_tx(
     conn: &mut SqliteConnection,
     space_id: &str,
     receipt_id: &str,
@@ -1304,9 +1327,7 @@ pub(crate) async fn settle_receipt_in_tx(
 ) -> Result<MemoryReceipt, SpokeReject> {
     let (status, result, error) = match state {
         ReceiptState::Committed(result) => ("committed", Some(encoded(&result)?), None),
-        ReceiptState::Failed(reject) => {
-            ("failed", None, Some(encoded(&error_envelope(&reject))?))
-        }
+        ReceiptState::Failed(reject) => ("failed", None, Some(encoded(&error_envelope(&reject))?)),
         ReceiptState::Pending => {
             return Err(internal(
                 "a settled receipt cannot return to the pending state",
@@ -1332,7 +1353,7 @@ pub(crate) async fn settle_receipt_in_tx(
     .bind(receipt_id)
     .execute(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     if settled.rows_affected() != 1 {
         return Err(internal(format!(
             "receipt {receipt_id} was not pending and cannot be settled"
@@ -1348,7 +1369,7 @@ pub(crate) async fn settle_receipt_in_tx(
     .bind(receipt_id)
     .execute(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     bump_snapshot(conn, space_id).await?;
     let stored = fetch_receipt(conn, space_id, receipt_id, None)
         .await?
@@ -1357,8 +1378,11 @@ pub(crate) async fn settle_receipt_in_tx(
 }
 
 /// §7.0.5/MEM-R021 replay resolution at the supplied instant.
+// The replayed receipt is moved once per admitted replay; boxing would add an
+// allocation to the exact-once path clippy's size heuristic wants to shrink.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
-pub(crate) enum ReplayResolution {
+pub enum ReplayResolution {
     /// No binding: the operation executes like a first attempt.
     Fresh,
     /// The identical admitted replay returns the stored receipt.
@@ -1377,7 +1401,7 @@ pub(crate) enum ReplayResolution {
 /// The decision uses the supplied instant and the persisted lifecycle
 /// deadlines, so the caller-owned seam needs no prior maintenance pass and
 /// writes nothing.
-pub(crate) async fn resolve_replay(
+pub async fn resolve_replay(
     conn: &mut SqliteConnection,
     space_id: &str,
     principal_id: &str,
@@ -1400,14 +1424,16 @@ pub(crate) async fn resolve_replay(
     .bind(idempotency_key)
     .fetch_optional(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     let Some(row) = row else {
         return Ok(ReplayResolution::Fresh);
     };
-    let receipt_id: String = row.try_get("receipt_id").map_err(internal)?;
+    let receipt_id: String = row.try_get("receipt_id").map_err(internal_failure)?;
     let tombstone = StoredTombstone {
-        last_known_status: row.try_get("last_known_status").map_err(internal)?,
-        tombstone_expires_at: row.try_get("tombstone_expires_at").map_err(internal)?,
+        last_known_status: row.try_get("last_known_status").map_err(internal_failure)?,
+        tombstone_expires_at: row
+            .try_get("tombstone_expires_at")
+            .map_err(internal_failure)?,
     };
     // §7.0.5/MEM-R021: the whole lifetime is classified FIRST, independently of
     // any authority. A binding that has fully expired is no longer a receipt to
@@ -1433,16 +1459,14 @@ pub(crate) async fn resolve_replay(
     if !authorized {
         return Err(not_authorized(RECEIPT_UNAUTHORIZED));
     }
-    let digest: String = row.try_get("payload_digest").map_err(internal)?;
+    let digest: String = row.try_get("payload_digest").map_err(internal_failure)?;
     if digest != admission.payload_digest {
         return Err(idempotency_conflict());
     }
     let body = fetch_receipt(conn, space_id, &receipt_id, None).await?;
     match ReceiptRetention::of(Some(&tombstone), body.as_ref(), now)? {
         ReceiptRetention::Expired => Ok(ReplayResolution::KeyReusable { receipt_id }),
-        ReceiptRetention::Evicted { last_known_status } => {
-            Err(receipt_expired(&last_known_status))
-        }
+        ReceiptRetention::Evicted { last_known_status } => Err(receipt_expired(&last_known_status)),
         ReceiptRetention::Retained => {
             let body = body.ok_or_else(|| {
                 internal(format!("retained receipt {receipt_id} is not readable"))
@@ -1480,7 +1504,7 @@ async fn resolve_or_release(
 /// for reusing the key, executed inside the caller's transaction, so a refusal
 /// after this point rolls it back together with the refused effect. The body is
 /// already past its window and the target past its tombstone.
-pub(crate) async fn release_expired_binding_in_tx(
+pub async fn release_expired_binding_in_tx(
     conn: &mut SqliteConnection,
     space_id: &str,
     principal_id: &str,
@@ -1494,13 +1518,13 @@ pub(crate) async fn release_expired_binding_in_tx(
         .bind(receipt_id)
         .execute(&mut *conn)
         .await
-        .map_err(internal)?;
+        .map_err(internal_failure)?;
     sqlx::query("DELETE FROM receipts WHERE space_id = ? AND receipt_id = ?")
         .bind(space_id)
         .bind(receipt_id)
         .execute(&mut *conn)
         .await
-        .map_err(internal)?;
+        .map_err(internal_failure)?;
     sqlx::query(
         "DELETE FROM idempotency_namespace \
          WHERE space_id = ? AND requester_principal_id = ? AND op = ? AND idempotency_key = ?",
@@ -1511,7 +1535,7 @@ pub(crate) async fn release_expired_binding_in_tx(
     .bind(idempotency_key)
     .execute(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     Ok(())
 }
 
@@ -1545,7 +1569,7 @@ pub struct RetentionSweep {
 /// reclaimed: it is live work.
 ///
 /// This only removes rows; it never writes receipt state or the snapshot marker.
-pub(crate) async fn retention_sweep_in_tx(
+pub async fn retention_sweep_in_tx(
     conn: &mut SqliteConnection,
     space_id: &str,
     now: DateTime<Utc>,
@@ -1566,7 +1590,7 @@ pub(crate) async fn retention_sweep_in_tx(
     .bind(&now_text)
     .execute(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     let dedup = sqlx::query(
         "DELETE FROM idempotency_namespace \
          WHERE space_id = ? AND tombstone_expires_at IS NOT NULL \
@@ -1576,7 +1600,7 @@ pub(crate) async fn retention_sweep_in_tx(
     .bind(&now_text)
     .execute(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     sweep.targets_removed += dedup_targets.rows_affected();
     sweep.dedup_tombstones_evicted = dedup.rows_affected();
 
@@ -1592,7 +1616,7 @@ pub(crate) async fn retention_sweep_in_tx(
     .bind(&now_text)
     .execute(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     let keyless_bodies = sqlx::query(
         "DELETE FROM receipts \
          WHERE space_id = ? AND idempotency_key IS NULL AND status != 'pending' \
@@ -1602,7 +1626,7 @@ pub(crate) async fn retention_sweep_in_tx(
     .bind(&now_text)
     .execute(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     sweep.targets_removed += keyless_targets.rows_affected();
     sweep.keyless_bodies_evicted = keyless_bodies.rows_affected();
 
@@ -1617,7 +1641,7 @@ pub(crate) async fn retention_sweep_in_tx(
     .bind(&now_text)
     .execute(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     sweep.receipt_bodies_evicted = keyed_bodies.rows_affected();
     Ok(sweep)
 }
@@ -1646,21 +1670,27 @@ struct StoredCandidate {
 
 fn stored_candidate(row: &SqliteRow) -> Result<StoredCandidate, SpokeReject> {
     Ok(StoredCandidate {
-        candidate_id: row.try_get("candidate_id").map_err(internal)?,
-        subject_id: row.try_get("subject_id").map_err(internal)?,
-        capture_visibility: row.try_get("capture_visibility").map_err(internal)?,
-        capture_context_id: row.try_get("capture_context_id").map_err(internal)?,
-        kind: row.try_get("kind").map_err(internal)?,
-        content: row.try_get("content_json").map_err(internal)?,
-        provenance: row.try_get("provenance_json").map_err(internal)?,
-        classification: row.try_get("classification_json").map_err(internal)?,
-        status: row.try_get("status").map_err(internal)?,
-        consumed_by: row.try_get("consumed_by_json").map_err(internal)?,
-        content_digest: row.try_get("content_digest").map_err(internal)?,
-        occurred_at: row.try_get("occurred_at").map_err(internal)?,
-        expires_at: row.try_get("expires_at").map_err(internal)?,
+        candidate_id: row.try_get("candidate_id").map_err(internal_failure)?,
+        subject_id: row.try_get("subject_id").map_err(internal_failure)?,
+        capture_visibility: row
+            .try_get("capture_visibility")
+            .map_err(internal_failure)?,
+        capture_context_id: row
+            .try_get("capture_context_id")
+            .map_err(internal_failure)?,
+        kind: row.try_get("kind").map_err(internal_failure)?,
+        content: row.try_get("content_json").map_err(internal_failure)?,
+        provenance: row.try_get("provenance_json").map_err(internal_failure)?,
+        classification: row
+            .try_get("classification_json")
+            .map_err(internal_failure)?,
+        status: row.try_get("status").map_err(internal_failure)?,
+        consumed_by: row.try_get("consumed_by_json").map_err(internal_failure)?,
+        content_digest: row.try_get("content_digest").map_err(internal_failure)?,
+        occurred_at: row.try_get("occurred_at").map_err(internal_failure)?,
+        expires_at: row.try_get("expires_at").map_err(internal_failure)?,
         revision: row_u64(row, "revision")?,
-        created_at: row.try_get("created_at").map_err(internal)?,
+        created_at: row.try_get("created_at").map_err(internal_failure)?,
     })
 }
 
@@ -1679,7 +1709,7 @@ async fn fetch_candidate(
     .bind(candidate_id)
     .fetch_optional(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     row.map(|row| stored_candidate(&row)).transpose()
 }
 
@@ -1699,7 +1729,7 @@ async fn candidate_rows(
     .bind(subject_id)
     .fetch_all(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     rows.iter().map(stored_candidate).collect()
 }
 
@@ -1711,10 +1741,9 @@ impl StoredCandidate {
     /// §6.7/§7.12: only a pending candidate expires, and an expired pending
     /// candidate is excluded from lists rather than consumed.
     fn expires_at(&self) -> Result<Option<DateTime<Utc>>, SpokeReject> {
-        match self.expires_at.as_deref() {
-            Some(raw) => instant(raw).map(Some),
-            None => Ok(None),
-        }
+        self.expires_at
+            .as_deref()
+            .map_or(Ok(None), |raw| instant(raw).map(Some))
     }
 
     fn is_expired_at(&self, now: DateTime<Utc>) -> Result<bool, SpokeReject> {
@@ -1786,17 +1815,15 @@ fn candidate_to_wire(
             .content
             .as_deref()
             .ok_or_else(|| internal("a pending candidate carries no content"))?;
-        value["proposed"] =
-            json!({ "kind": candidate.kind, "content": stored_json(content, "candidate content")? });
+        value["proposed"] = json!({ "kind": candidate.kind, "content": stored_json(content, "candidate content")? });
         if let Some(expires_at) = &candidate.expires_at {
             value["expires_at"] = json!(expires_at);
         }
     }
-    serde_json::from_value(value)
-        .map_err(|error| internal(format!("candidate row is not protocol-shaped: {error}")))
+    serde_json::from_value(value).map_err(internal_failure)
 }
 
-fn status_name(status: &CandidateStatus) -> &'static str {
+const fn status_name(status: CandidateStatus) -> &'static str {
     match status {
         CandidateStatus::Pending => "pending",
         CandidateStatus::Consumed => "consumed",
@@ -1835,7 +1862,7 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let receipt = self
             .capture_in_tx(&mut transaction, principal_id, admitted, now)
             .await?;
@@ -1850,10 +1877,13 @@ impl FixtureMemoryProvider {
         // Loss before commit (§14.3): dropping the staged transaction leaves no
         // candidate, record, receipt, dedup row, target or marker behind.
         if self.faults().trip(FaultPoint::BeforeCommit) {
-            transaction.rollback().await.map_err(internal)?;
+            transaction.rollback().await.map_err(internal_failure)?;
             return Err(outcome_uncertain());
         }
-        transaction.commit().await.map_err(commit_unknown)?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| commit_unknown(&error))?;
         // Loss after commit, before the response: the effect is durable and the
         // caller must resolve the uncertainty through replay or receipts.get.
         if self.faults().trip(FaultPoint::AfterCommitBeforeResponse) {
@@ -1896,9 +1926,9 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let sweep = retention_sweep_in_tx(&mut transaction, space_id, now).await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(sweep)
     }
 
@@ -1962,8 +1992,8 @@ impl FixtureMemoryProvider {
         } else {
             "shared"
         };
-        let encoded_content = encoded(&content)
-            .map_err(|reject| stage_error(reject.code.as_str(), candidate_id))?;
+        let encoded_content =
+            encoded(&content).map_err(|reject| stage_error(reject.code.as_str(), candidate_id))?;
         let encoded_provenance = encoded(&provenance)
             .map_err(|reject| stage_error(reject.code.as_str(), candidate_id))?;
         let encoded_classification = encoded(&classification)
@@ -1993,7 +2023,7 @@ impl FixtureMemoryProvider {
             Err(error)
                 if error
                     .as_database_error()
-                    .is_some_and(|database| database.is_unique_violation()) =>
+                    .is_some_and(sqlx::error::DatabaseError::is_unique_violation) =>
             {
                 Err(stage_error("duplicate_candidate_id", candidate_id))
             }
@@ -2015,8 +2045,7 @@ impl FixtureMemoryProvider {
         require_served_space(self, space_id)?;
         let subject_id = request.subject_id.as_str();
         let (visibility, context_id) = placement(&request.capture_scope);
-        let admission =
-            Mutation::keyed(OP_CAPTURE, request.idempotency_key.as_str(), admitted);
+        let admission = Mutation::keyed(OP_CAPTURE, request.idempotency_key.as_str(), admitted);
         let target = ReceiptTarget::for_scope(
             required_capabilities(OP_CAPTURE)
                 .expect("memory.capture has a published capability list"),
@@ -2041,7 +2070,9 @@ impl FixtureMemoryProvider {
             principal_id,
             space_id,
             now,
-            &[scope_requirement("capture", subject_id, visibility, context_id)],
+            &[scope_requirement(
+                "capture", subject_id, visibility, context_id,
+            )],
         )?;
         require_space_admits(conn, OP_CAPTURE, space_id).await?;
         require_write_target(conn, space_id, subject_id, context_id).await?;
@@ -2067,13 +2098,15 @@ impl FixtureMemoryProvider {
             // Wire shape of `proposed.content` (§6.6): `structured` is present
             // only when the request carried it, matching the typed round trip
             // that the consumption digest is computed over.
-            let content = match &request.content.structured {
-                Some(structured) => json!({
-                    "text": request.content.text,
-                    "structured": structured,
-                }),
-                None => json!({ "text": request.content.text }),
-            };
+            let content = request.content.structured.as_ref().map_or_else(
+                || json!({ "text": request.content.text }),
+                |structured| {
+                    json!({
+                        "text": request.content.text,
+                        "structured": structured,
+                    })
+                },
+            );
             sqlx::query(
                 "INSERT INTO candidates (candidate_id, space_id, subject_id, capture_visibility, \
                  capture_context_id, kind, content_json, provenance_json, classification_json, \
@@ -2094,7 +2127,7 @@ impl FixtureMemoryProvider {
             .bind(timestamp_text(now))
             .execute(&mut *conn)
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
             candidate_ids.push(candidate_id);
         }
 
@@ -2127,16 +2160,22 @@ impl FixtureMemoryProvider {
         request: &MemoryCandidatesListRequest,
         now: DateTime<Utc>,
     ) -> Result<CandidatePage, SpokeReject> {
-        let mut transaction = self.store().pool().begin().await.map_err(internal)?;
+        let mut transaction = self
+            .store()
+            .pool()
+            .begin()
+            .await
+            .map_err(internal_failure)?;
         let page = self
             .candidates_list_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(page)
     }
 
     /// Whole page read on the caller's snapshot: space access, grants,
     /// candidates and the cursor marker all agree in one snapshot (MEM-R026).
+    #[allow(clippy::too_many_lines)] // one linear authorized read: the same snapshot bounds every step
     pub(crate) async fn candidates_list_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -2164,7 +2203,7 @@ impl FixtureMemoryProvider {
         }
         let target = capture_target(conn, space_id, subject_id).await?;
 
-        let status_filter = request.status.as_ref().map(status_name);
+        let status_filter = request.status.map(status_name);
         let mut visible = Vec::new();
         // §7.7: `archived` is terminal decommission and excludes the subject's
         // candidates from the listing; fence (`fenced`) still lists so the queue
@@ -2250,7 +2289,7 @@ impl FixtureMemoryProvider {
                 .limit
                 .map_or(MAX_PAGE_SIZE.get(), std::num::NonZeroU64::get),
         )
-        .map_err(internal)?;
+        .map_err(internal_failure)?;
         let remaining = &visible[start..];
         let page = &remaining[..remaining.len().min(limit)];
         let next_cursor = if remaining.len() > limit {
@@ -2275,11 +2314,16 @@ impl FixtureMemoryProvider {
         request: &MemoryCandidatesGetRequest,
         now: DateTime<Utc>,
     ) -> Result<MemoryCandidate, SpokeReject> {
-        let mut transaction = self.store().pool().begin().await.map_err(internal)?;
+        let mut transaction = self
+            .store()
+            .pool()
+            .begin()
+            .await
+            .map_err(internal_failure)?;
         let candidate = self
             .candidates_get_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(candidate)
     }
 
@@ -2298,7 +2342,7 @@ impl FixtureMemoryProvider {
         let candidate_id = request.candidate_id.as_str();
         let candidate = fetch_candidate(conn, space_id, candidate_id)
             .await?
-            .ok_or_else(|| candidate_unavailable())?;
+            .ok_or_else(candidate_unavailable)?;
         // Same refusal as a missing id: holding no coverage for an existing
         // candidate must not be observable (C-102).
         if !one_grant_covers(
@@ -2333,11 +2377,14 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let receipt = self
             .candidates_dismiss_in_tx(&mut transaction, principal_id, admitted, now)
             .await?;
-        transaction.commit().await.map_err(commit_unknown)?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| commit_unknown(&error))?;
         Ok(receipt)
     }
 
@@ -2356,7 +2403,7 @@ impl FixtureMemoryProvider {
         let grants = load_grants(conn, space_id).await?;
         let candidate = fetch_candidate(conn, space_id, candidate_id)
             .await?
-            .ok_or_else(|| candidate_unavailable())?;
+            .ok_or_else(candidate_unavailable)?;
         if !one_grant_covers(
             &grants,
             principal_id,
@@ -2446,17 +2493,21 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let receipt = self
             .candidates_review_in_tx(&mut transaction, principal_id, admitted, now)
             .await?;
-        transaction.commit().await.map_err(commit_unknown)?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| commit_unknown(&error))?;
         Ok(receipt)
     }
 
     /// [`Self::candidates_review`] on a caller-owned connection; never commits,
     /// so candidate consumption, every created record and the receipt are one
     /// atomic outcome (MEM-R009).
+    #[allow(clippy::too_many_lines)] // one linear atomic outcome: consumption, records and receipt
     pub(crate) async fn candidates_review_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -2472,7 +2523,7 @@ impl FixtureMemoryProvider {
         let grants = load_grants(conn, space_id).await?;
         let candidate = fetch_candidate(conn, space_id, candidate_id)
             .await?
-            .ok_or_else(|| candidate_unavailable())?;
+            .ok_or_else(candidate_unavailable)?;
         let subject_id = candidate.subject_id.clone();
         let visibility = candidate.capture_visibility.clone();
         let context_id = candidate.scope_context().map(str::to_owned);
@@ -2544,9 +2595,8 @@ impl FixtureMemoryProvider {
                 let (field, content) = match content_override {
                     Some(overridden) => (
                         "decision.content_override",
-                        serde_json::to_value(overridden).map_err(|error| {
-                            internal(format!("decision content is not encodable: {error}"))
-                        })?,
+                        serde_json::to_value(overridden)
+                            .map_err(|error| internal_failure(error))?,
                     ),
                     None => (
                         "content",
@@ -2566,9 +2616,8 @@ impl FixtureMemoryProvider {
             Decision::Fragment { fragments } => {
                 let mut planned = Vec::with_capacity(fragments.len());
                 for (index, fragment) in fragments.iter().enumerate() {
-                    let content = serde_json::to_value(&fragment.content).map_err(|error| {
-                        internal(format!("fragment content is not encodable: {error}"))
-                    })?;
+                    let content = serde_json::to_value(&fragment.content)
+                        .map_err(|error| internal_failure(error))?;
                     planned.push((
                         format!("decision.fragments[{index}].content"),
                         fragment.kind.as_str().to_owned(),
@@ -2627,11 +2676,16 @@ impl FixtureMemoryProvider {
         request: &MemoryReceiptsGetRequest,
         now: DateTime<Utc>,
     ) -> Result<MemoryReceipt, SpokeReject> {
-        let mut transaction = self.store().pool().begin().await.map_err(internal)?;
+        let mut transaction = self
+            .store()
+            .pool()
+            .begin()
+            .await
+            .map_err(internal_failure)?;
         let receipt = self
             .receipts_get_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(receipt)
     }
 
@@ -2707,9 +2761,7 @@ fn placement(scope: &CapturePlacement) -> (&'static str, Option<&str>) {
 
 /// One operator-staging failure, reported as fixture construction state.
 fn stage_error(code: &str, candidate_id: &str) -> FixtureError {
-    FixtureError::Bootstrap(format!(
-        "candidate {candidate_id} cannot be staged: {code}"
-    ))
+    FixtureError::Bootstrap(format!("candidate {candidate_id} cannot be staged: {code}"))
 }
 
 /// Deterministic advisory classification (§6.7): empty material is dropped
@@ -2751,7 +2803,7 @@ async fn consume_candidate(
     .bind(row_i64(candidate.revision)?)
     .execute(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     if consumed.rows_affected() != 1 {
         return Err(internal(format!(
             "candidate {} moved during consumption",
@@ -2798,7 +2850,7 @@ async fn insert_record(
     .bind(timestamp_text(now))
     .execute(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     Ok(record_id)
 }
 
@@ -2809,11 +2861,10 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
-
     use spoke_operations::spoke_schemas::memory_candidate::{ConsumedCandidate, PendingCandidate};
     use spoke_operations::spoke_schemas::{
         MemoryGrantsGrantRequest, MemoryGrantsRevokeRequest, MemorySpacesFreezeRequest,
-        MemorySubjectsFenceRequest, MemorySubjectsEnsureRequest,
+        MemorySubjectsEnsureRequest, MemorySubjectsFenceRequest,
     };
 
     const OPERATOR: &str = "principal-operator";
@@ -2865,17 +2916,17 @@ mod tests {
         }
 
         /// Capture one candidate and return its id.
-        async fn captured_candidate(&self, key: &str, text: &str, captured_at: DateTime<Utc>) -> String {
+        async fn captured_candidate(
+            &self,
+            key: &str,
+            text: &str,
+            captured_at: DateTime<Utc>,
+        ) -> String {
             let captured = self
                 .provider
                 .capture(
                     CLIENT,
-                    &capture_request(
-                        &self.space_id,
-                        text,
-                        context_scope(CONTEXT_A),
-                        key,
-                    ),
+                    &capture_request(&self.space_id, text, context_scope(CONTEXT_A), key),
                     captured_at,
                 )
                 .await
@@ -2895,10 +2946,7 @@ mod tests {
             now: DateTime<Utc>,
         ) -> String {
             let payload = json!({ "space_id": self.space_id, "probe": key });
-            let admitted = Admitted::from_scope(
-                digest(&payload).expect("payload digest"),
-                (),
-            );
+            let admitted = Admitted::from_scope(digest(&payload).expect("payload digest"), ());
             let admission = Mutation::keyed(op, key, &admitted);
             let mut transaction = self
                 .provider
@@ -3291,13 +3339,11 @@ mod tests {
     }
 
     async fn count_namespace_rows(provider: &FixtureMemoryProvider, op: &str) -> i64 {
-        let row = sqlx::query(
-            "SELECT COUNT(*) AS total FROM idempotency_namespace WHERE op = ?",
-        )
-        .bind(op)
-        .fetch_one(provider.store().pool())
-        .await
-        .expect("namespace count");
+        let row = sqlx::query("SELECT COUNT(*) AS total FROM idempotency_namespace WHERE op = ?")
+            .bind(op)
+            .fetch_one(provider.store().pool())
+            .await
+            .expect("namespace count");
         row.get("total")
     }
 
@@ -3317,7 +3363,12 @@ mod tests {
             .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
             .await;
         let secret = "Mira told Bo the gate key is hidden under the third barrel.";
-        let request = capture_request(&scenario.space_id, secret, context_scope(CONTEXT_A), "cap-1");
+        let request = capture_request(
+            &scenario.space_id,
+            secret,
+            context_scope(CONTEXT_A),
+            "cap-1",
+        );
 
         let first = scenario
             .provider
@@ -3334,7 +3385,10 @@ mod tests {
             .map(|id| id.as_str().expect("string id").to_owned())
             .collect();
         assert_eq!(ids.len(), 1, "one pending candidate is produced");
-        assert_no_secret(&serde_json::to_string(&first).expect("receipt encodes"), secret);
+        assert_no_secret(
+            &serde_json::to_string(&first).expect("receipt encodes"),
+            secret,
+        );
         assert_eq!(count_rows(&scenario.provider, "candidates").await, 1);
 
         let row = sqlx::query("SELECT payload_digest, idempotency_key FROM idempotency_namespace")
@@ -3394,7 +3448,12 @@ mod tests {
         let grant_id = scenario
             .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
             .await;
-        let request = capture_request(&scenario.space_id, "Kept draft.", context_scope(CONTEXT_A), "cap-1");
+        let request = capture_request(
+            &scenario.space_id,
+            "Kept draft.",
+            context_scope(CONTEXT_A),
+            "cap-1",
+        );
         let committed = scenario
             .provider
             .capture(CLIENT, &request, now)
@@ -3413,7 +3472,12 @@ mod tests {
         assert_eq!(receipt_id_of(&replay), receipt_id_of(&committed));
 
         // A new admission in the frozen space is refused, with no effect.
-        let fresh = capture_request(&scenario.space_id, "After freeze.", context_scope(CONTEXT_A), "cap-2");
+        let fresh = capture_request(
+            &scenario.space_id,
+            "After freeze.",
+            context_scope(CONTEXT_A),
+            "cap-2",
+        );
         assert_eq!(
             refusal(scenario.provider.capture(CLIENT, &fresh, now).await).code,
             SpokeRejectCode::SpaceFrozen
@@ -3429,7 +3493,11 @@ mod tests {
         let refused_read = refusal(
             scenario
                 .provider
-                .receipts_get(CLIENT, &receipts_request(&scenario.space_id, receipt_id_of(&committed)), now)
+                .receipts_get(
+                    CLIENT,
+                    &receipts_request(&scenario.space_id, receipt_id_of(&committed)),
+                    now,
+                )
                 .await,
         );
         assert_eq!(refused_read.code, SpokeRejectCode::NotAuthorized);
@@ -3455,7 +3523,12 @@ mod tests {
             .provider
             .capture(
                 CLIENT,
-                &capture_request(&scenario.space_id, secret, context_scope(CONTEXT_A), "cap-1"),
+                &capture_request(
+                    &scenario.space_id,
+                    secret,
+                    context_scope(CONTEXT_A),
+                    "cap-1",
+                ),
                 now,
             )
             .await
@@ -3494,7 +3567,10 @@ mod tests {
         );
         assert_eq!(consumed.content_digest.len(), 64);
         assert!(consumed.proposed.is_some(), "the shell keeps its kind");
-        assert_no_secret(&serde_json::to_string(&shell).expect("shell encodes"), secret);
+        assert_no_secret(
+            &serde_json::to_string(&shell).expect("shell encodes"),
+            secret,
+        );
 
         let stored: Option<String> =
             sqlx::query("SELECT content_json FROM candidates WHERE candidate_id = ?")
@@ -3555,13 +3631,21 @@ mod tests {
 
         let consumed_page = scenario
             .provider
-            .candidates_list(CLIENT, &list_request(&scenario.space_id, Some("consumed"), None, None), now)
+            .candidates_list(
+                CLIENT,
+                &list_request(&scenario.space_id, Some("consumed"), None, None),
+                now,
+            )
             .await
             .expect("consumed page");
         assert_eq!(candidate_ids(&consumed_page), vec![candidate_id.clone()]);
         let pending_page = scenario
             .provider
-            .candidates_list(CLIENT, &list_request(&scenario.space_id, Some("pending"), None, None), now)
+            .candidates_list(
+                CLIENT,
+                &list_request(&scenario.space_id, Some("pending"), None, None),
+                now,
+            )
             .await
             .expect("pending page");
         assert!(
@@ -3576,13 +3660,7 @@ mod tests {
         let now = now();
         scenario.subject(now).await;
         scenario
-            .grant(
-                CLIENT,
-                &["capture", "review"],
-                Some(SUBJECT),
-                None,
-                now,
-            )
+            .grant(CLIENT, &["capture", "review"], Some(SUBJECT), None, now)
             .await;
         scenario
             .grant(OTHER, &["records_write"], Some(SUBJECT), None, now)
@@ -3592,7 +3670,12 @@ mod tests {
             .provider
             .capture(
                 CLIENT,
-                &capture_request(&scenario.space_id, captured_text, context_scope(CONTEXT_A), "cap-1"),
+                &capture_request(
+                    &scenario.space_id,
+                    captured_text,
+                    context_scope(CONTEXT_A),
+                    "cap-1",
+                ),
                 now,
             )
             .await
@@ -3708,16 +3791,16 @@ mod tests {
             serde_json::to_value(&consumed.consumed_by.outcome).expect("outcome encodes"),
             json!("promoted")
         );
-        assert_eq!(
-            consumed.consumed_by.record_ids,
-            vec![record_ids[0].clone()]
-        );
+        assert_eq!(consumed.consumed_by.record_ids, vec![record_ids[0].clone()]);
         assert_eq!(
             consumed.content_digest.as_str(),
             digest(&json!({ "text": captured_text })).expect("digest"),
             "the shell keeps the digest of the scrubbed body"
         );
-        assert_no_secret(&serde_json::to_string(&shell).expect("shell encodes"), captured_text);
+        assert_no_secret(
+            &serde_json::to_string(&shell).expect("shell encodes"),
+            captured_text,
+        );
     }
 
     #[tokio::test]
@@ -3741,7 +3824,12 @@ mod tests {
             .provider
             .capture(
                 CLIENT,
-                &capture_request(&scenario.space_id, "Shared world fact.", shared_scope(), "cap-1"),
+                &capture_request(
+                    &scenario.space_id,
+                    "Shared world fact.",
+                    shared_scope(),
+                    "cap-1",
+                ),
                 now,
             )
             .await
@@ -3755,7 +3843,11 @@ mod tests {
         // a shared-placement candidate.
         let page = scenario
             .provider
-            .candidates_list(CLIENT, &list_request(&scenario.space_id, None, None, None), now)
+            .candidates_list(
+                CLIENT,
+                &list_request(&scenario.space_id, None, None, None),
+                now,
+            )
             .await
             .expect("scoped page");
         assert!(
@@ -3811,11 +3903,13 @@ mod tests {
             .as_str()
             .expect("record id")
             .to_owned();
-        let record = sqlx::query("SELECT scope_visibility, scope_context_id FROM records WHERE record_id = ?")
-            .bind(&record_id)
-            .fetch_one(scenario.provider.store().pool())
-            .await
-            .expect("created record");
+        let record = sqlx::query(
+            "SELECT scope_visibility, scope_context_id FROM records WHERE record_id = ?",
+        )
+        .bind(&record_id)
+        .fetch_one(scenario.provider.store().pool())
+        .await
+        .expect("created record");
         assert_eq!(record.get::<String, _>("scope_visibility"), "shared");
         assert!(
             record
@@ -3843,7 +3937,12 @@ mod tests {
             .provider
             .capture(
                 CLIENT,
-                &capture_request(&scenario.space_id, "Contended capture.", context_scope(CONTEXT_A), "cap-1"),
+                &capture_request(
+                    &scenario.space_id,
+                    "Contended capture.",
+                    context_scope(CONTEXT_A),
+                    "cap-1",
+                ),
                 now,
             )
             .await
@@ -3900,7 +3999,12 @@ mod tests {
             .provider
             .capture(
                 CLIENT,
-                &capture_request(&scenario.space_id, "Receipt subject text.", shared_scope(), "cap-1"),
+                &capture_request(
+                    &scenario.space_id,
+                    "Receipt subject text.",
+                    shared_scope(),
+                    "cap-1",
+                ),
                 now,
             )
             .await
@@ -3909,7 +4013,11 @@ mod tests {
 
         let read = scenario
             .provider
-            .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+            .receipts_get(
+                CLIENT,
+                &receipts_request(&scenario.space_id, &receipt_id),
+                now,
+            )
             .await
             .expect("the requester reads its own receipt");
         assert_eq!(receipt_status(&read), "committed");
@@ -3919,7 +4027,11 @@ mod tests {
         let foreign = refusal(
             scenario
                 .provider
-                .receipts_get(OTHER, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .receipts_get(
+                    OTHER,
+                    &receipts_request(&scenario.space_id, &receipt_id),
+                    now,
+                )
                 .await,
         );
         let missing = refusal(
@@ -3939,7 +4051,11 @@ mod tests {
         // The space admin may read another principal's receipt.
         let admin_read = scenario
             .provider
-            .receipts_get(OPERATOR, &receipts_request(&scenario.space_id, &receipt_id), now)
+            .receipts_get(
+                OPERATOR,
+                &receipts_request(&scenario.space_id, &receipt_id),
+                now,
+            )
             .await
             .expect("admin reads the receipt");
         assert_eq!(receipt_id_of(&admin_read), receipt_id);
@@ -3954,7 +4070,11 @@ mod tests {
         let expired = refusal(
             scenario
                 .provider
-                .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .receipts_get(
+                    CLIENT,
+                    &receipts_request(&scenario.space_id, &receipt_id),
+                    now,
+                )
                 .await,
         );
         assert_eq!(expired.code, SpokeRejectCode::ReceiptExpired);
@@ -4012,11 +4132,7 @@ mod tests {
 
         let pending_read = scenario
             .provider
-            .receipts_get(
-                CLIENT,
-                &receipts_request(&space, "rcpt_pending_probe"),
-                now,
-            )
+            .receipts_get(CLIENT, &receipts_request(&space, "rcpt_pending_probe"), now)
             .await
             .expect("pending receipt is durable");
         assert_eq!(receipt_status(&pending_read), "pending");
@@ -4061,7 +4177,10 @@ mod tests {
             page.spaces[0].pending_receipts, 0,
             "a settled receipt leaves the drain barrier"
         );
-        assert_eq!(tombstone(&scenario, "async-1").await.as_deref(), Some("committed"));
+        assert_eq!(
+            tombstone(&scenario, "async-1").await.as_deref(),
+            Some("committed")
+        );
 
         // A failed asynchronous receipt keeps a coded envelope with its retry
         // class and no result at all.
@@ -4125,23 +4244,21 @@ mod tests {
             .begin()
             .await
             .expect("reader transaction");
-        let replayed = match resolve_replay(
-            &mut transaction,
-            &space,
-            CLIENT,
-            &failed_admission,
-            now,
-        )
-        .await
-        .expect("replay resolves")
-        {
-            ReplayResolution::Replayed(receipt) => receipt,
-            other => panic!("expected the bound receipt, observed {other:?}"),
-        };
+        let replayed =
+            match resolve_replay(&mut transaction, &space, CLIENT, &failed_admission, now)
+                .await
+                .expect("replay resolves")
+            {
+                ReplayResolution::Replayed(receipt) => receipt,
+                other => panic!("expected the bound receipt, observed {other:?}"),
+            };
         transaction.commit().await.expect("read commits");
         assert_eq!(receipt_id_of(&replayed), "rcpt_failed_probe");
         assert_eq!(receipt_status(&replayed), "failed");
-        assert_eq!(tombstone(&scenario, "async-2").await.as_deref(), Some("failed"));
+        assert_eq!(
+            tombstone(&scenario, "async-2").await.as_deref(),
+            Some("failed")
+        );
 
         // Both receipts and the dedup tombstones survive a reopen.
         let scenario = scenario.reopen().await;
@@ -4206,11 +4323,18 @@ mod tests {
 
         let first = scenario
             .provider
-            .candidates_list(CLIENT, &list_request(&scenario.space_id, None, Some(2), None), now)
+            .candidates_list(
+                CLIENT,
+                &list_request(&scenario.space_id, None, Some(2), None),
+                now,
+            )
             .await
             .expect("first page");
         assert_eq!(first.candidates.len(), 2);
-        let cursor = first.next_cursor.clone().expect("a bounded page issues a cursor");
+        let cursor = first
+            .next_cursor
+            .clone()
+            .expect("a bounded page issues a cursor");
         for candidate in &first.candidates {
             assert_eq!(
                 serde_json::to_value(&pending_candidate(candidate).capture_scope)
@@ -4268,7 +4392,11 @@ mod tests {
         let expired_at = later(CANDIDATE_TTL_DAYS + 1);
         let expired = scenario
             .provider
-            .candidates_list(CLIENT, &list_request(&scenario.space_id, None, None, None), expired_at)
+            .candidates_list(
+                CLIENT,
+                &list_request(&scenario.space_id, None, None, None),
+                expired_at,
+            )
             .await
             .expect("expired page");
         assert_eq!(candidate_ids(&expired), vec![union[0].clone()]);
@@ -4290,7 +4418,12 @@ mod tests {
         let now = now();
         scenario.subject(now).await;
 
-        let ungranted = capture_request(&scenario.space_id, "Ungranted text.", context_scope(CONTEXT_A), "cap-1");
+        let ungranted = capture_request(
+            &scenario.space_id,
+            "Ungranted text.",
+            context_scope(CONTEXT_A),
+            "cap-1",
+        );
         assert_eq!(
             refusal(scenario.provider.capture(CLIENT, &ungranted, now).await).code,
             SpokeRejectCode::NotAuthorized
@@ -4303,9 +4436,7 @@ mod tests {
         );
 
         // A space-wide capture grant makes the subject-existence answer real.
-        scenario
-            .grant(CLIENT, &["capture"], None, None, now)
-            .await;
+        scenario.grant(CLIENT, &["capture"], None, None, now).await;
         let foreign = admit_capture(json!({
             "space_id": scenario.space_id,
             "subject_id": "subject-absent",
@@ -4319,14 +4450,24 @@ mod tests {
             SpokeRejectCode::NotFound
         );
 
-        let oversize = capture_request(&scenario.space_id, &"x".repeat(MAX_CONTENT_BYTES + 1), context_scope(CONTEXT_A), "cap-big");
+        let oversize = capture_request(
+            &scenario.space_id,
+            &"x".repeat(MAX_CONTENT_BYTES + 1),
+            context_scope(CONTEXT_A),
+            "cap-big",
+        );
         assert_eq!(
             refusal(scenario.provider.capture(CLIENT, &oversize, now).await).code,
             SpokeRejectCode::InvalidInput
         );
 
         scenario.fence_context(CONTEXT_A, now).await;
-        let fenced = capture_request(&scenario.space_id, "Fenced text.", context_scope(CONTEXT_A), "cap-fenced");
+        let fenced = capture_request(
+            &scenario.space_id,
+            "Fenced text.",
+            context_scope(CONTEXT_A),
+            "cap-fenced",
+        );
         let fenced_refusal = refusal(scenario.provider.capture(CLIENT, &fenced, now).await);
         assert_eq!(fenced_refusal.code, SpokeRejectCode::SubjectFenced);
         assert_eq!(
@@ -4342,7 +4483,12 @@ mod tests {
             .provider
             .capture(
                 CLIENT,
-                &capture_request(&scenario.space_id, "Sibling text.", context_scope(CONTEXT_B), "cap-sibling"),
+                &capture_request(
+                    &scenario.space_id,
+                    "Sibling text.",
+                    context_scope(CONTEXT_B),
+                    "cap-sibling",
+                ),
                 now,
             )
             .await
@@ -4351,7 +4497,12 @@ mod tests {
         assert_eq!(count_rows(&scenario.provider, "receipts").await, 1);
 
         scenario.freeze(now).await;
-        let frozen = capture_request(&scenario.space_id, "Frozen text.", context_scope(CONTEXT_B), "cap-frozen");
+        let frozen = capture_request(
+            &scenario.space_id,
+            "Frozen text.",
+            context_scope(CONTEXT_B),
+            "cap-frozen",
+        );
         assert_eq!(
             refusal(scenario.provider.capture(CLIENT, &frozen, now).await).code,
             SpokeRejectCode::SpaceFrozen
@@ -4379,7 +4530,12 @@ mod tests {
             .provider
             .capture(
                 CLIENT,
-                &capture_request(&scenario.space_id, secret, context_scope(CONTEXT_A), "cap-1"),
+                &capture_request(
+                    &scenario.space_id,
+                    secret,
+                    context_scope(CONTEXT_A),
+                    "cap-1",
+                ),
                 now,
             )
             .await
@@ -4426,13 +4582,19 @@ mod tests {
             )
             .await
             .expect("receipt still resolves");
-        assert_no_secret(&serde_json::to_string(&receipt).expect("receipt encodes"), secret);
+        assert_no_secret(
+            &serde_json::to_string(&receipt).expect("receipt encodes"),
+            secret,
+        );
         let shell = scenario
             .provider
             .candidates_get(CLIENT, &get_request(&scenario.space_id, &candidate_id), now)
             .await
             .expect("shell still resolves");
-        assert_no_secret(&serde_json::to_string(&shell).expect("shell encodes"), secret);
+        assert_no_secret(
+            &serde_json::to_string(&shell).expect("shell encodes"),
+            secret,
+        );
 
         // The dedup namespace as a whole carries no captured text either.
         let rows = sqlx::query("SELECT payload_digest, idempotency_key FROM idempotency_namespace")
@@ -4486,11 +4648,7 @@ mod tests {
         let get_missing = refusal(
             scenario
                 .provider
-                .candidates_get(
-                    CLIENT,
-                    &get_request(&scenario.space_id, "cand_absent"),
-                    now,
-                )
+                .candidates_get(CLIENT, &get_request(&scenario.space_id, "cand_absent"), now)
                 .await,
         );
         assert_eq!(get_foreign.code, SpokeRejectCode::NotFound);
@@ -4584,7 +4742,12 @@ mod tests {
             .provider
             .capture(
                 CLIENT,
-                &capture_request(&scenario.space_id, "Receipt body.", context_scope(CONTEXT_A), "cap-1"),
+                &capture_request(
+                    &scenario.space_id,
+                    "Receipt body.",
+                    context_scope(CONTEXT_A),
+                    "cap-1",
+                ),
                 now,
             )
             .await
@@ -4600,7 +4763,11 @@ mod tests {
         let denied_body = refusal(
             scenario
                 .provider
-                .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .receipts_get(
+                    CLIENT,
+                    &receipts_request(&scenario.space_id, &receipt_id),
+                    now,
+                )
                 .await,
         );
         assert_eq!(denied_body.code, SpokeRejectCode::NotAuthorized);
@@ -4616,7 +4783,11 @@ mod tests {
         let denied_tombstone = refusal(
             scenario
                 .provider
-                .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .receipts_get(
+                    CLIENT,
+                    &receipts_request(&scenario.space_id, &receipt_id),
+                    now,
+                )
                 .await,
         );
         assert_eq!(
@@ -4629,7 +4800,11 @@ mod tests {
         let denied_without_grants = refusal(
             scenario
                 .provider
-                .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .receipts_get(
+                    CLIENT,
+                    &receipts_request(&scenario.space_id, &receipt_id),
+                    now,
+                )
                 .await,
         );
         assert_eq!(denied_without_grants, denied_body);
@@ -4638,7 +4813,11 @@ mod tests {
         let admin = refusal(
             scenario
                 .provider
-                .receipts_get(OPERATOR, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .receipts_get(
+                    OPERATOR,
+                    &receipts_request(&scenario.space_id, &receipt_id),
+                    now,
+                )
                 .await,
         );
         assert_eq!(admin.code, SpokeRejectCode::ReceiptExpired);
@@ -4666,7 +4845,10 @@ mod tests {
             )
             .await;
         let mut candidate_ids = Vec::new();
-        for (index, text) in ["First queue item.", "Second queue item."].into_iter().enumerate() {
+        for (index, text) in ["First queue item.", "Second queue item."]
+            .into_iter()
+            .enumerate()
+        {
             let captured = scenario
                 .provider
                 .capture(
@@ -4753,7 +4935,11 @@ mod tests {
         // `fenced` still lists so the queue stays inspectable.
         let fenced_page = scenario
             .provider
-            .candidates_list(CLIENT, &list_request(&scenario.space_id, None, None, None), now)
+            .candidates_list(
+                CLIENT,
+                &list_request(&scenario.space_id, None, None, None),
+                now,
+            )
             .await
             .expect("fenced subject page");
         assert_eq!(fenced_page.candidates.len(), 2);
@@ -4762,7 +4948,11 @@ mod tests {
         scenario.fence_subject("archive", 2, now).await;
         let archived_page = scenario
             .provider
-            .candidates_list(CLIENT, &list_request(&scenario.space_id, None, None, None), now)
+            .candidates_list(
+                CLIENT,
+                &list_request(&scenario.space_id, None, None, None),
+                now,
+            )
             .await
             .expect("archived subject page");
         assert!(
@@ -4949,7 +5139,13 @@ mod tests {
             "the keyless exemption binds no dedup namespace row"
         );
         assert_eq!(count_rows(&scenario.provider, "subjects").await, 1);
-        let mut reader = scenario.provider.store().pool().begin().await.expect("reader");
+        let mut reader = scenario
+            .provider
+            .store()
+            .pool()
+            .begin()
+            .await
+            .expect("reader");
         assert!(
             matches!(
                 resolve_replay(&mut reader, &space, OPERATOR, &admission, now)
@@ -5056,7 +5252,11 @@ mod tests {
         let wrong_subject = refusal(
             scenario
                 .provider
-                .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .receipts_get(
+                    CLIENT,
+                    &receipts_request(&scenario.space_id, &receipt_id),
+                    now,
+                )
                 .await,
         );
         assert_eq!(wrong_subject.code, SpokeRejectCode::NotAuthorized);
@@ -5069,7 +5269,11 @@ mod tests {
             .await;
         let allowed = scenario
             .provider
-            .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+            .receipts_get(
+                CLIENT,
+                &receipts_request(&scenario.space_id, &receipt_id),
+                now,
+            )
             .await
             .expect("a covering grant reopens the receipt");
         assert_eq!(receipt_id_of(&allowed), receipt_id);
@@ -5085,7 +5289,11 @@ mod tests {
         let wrong_subject_tombstone = refusal(
             scenario
                 .provider
-                .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .receipts_get(
+                    CLIENT,
+                    &receipts_request(&scenario.space_id, &receipt_id),
+                    now,
+                )
                 .await,
         );
         assert_eq!(
@@ -5097,7 +5305,11 @@ mod tests {
         let admin = refusal(
             scenario
                 .provider
-                .receipts_get(OPERATOR, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .receipts_get(
+                    OPERATOR,
+                    &receipts_request(&scenario.space_id, &receipt_id),
+                    now,
+                )
                 .await,
         );
         assert_eq!(admin.code, SpokeRejectCode::ReceiptExpired);
@@ -5165,11 +5377,7 @@ mod tests {
                 refusal(
                     scenario
                         .provider
-                        .receipts_get(
-                            CLIENT,
-                            &receipts_request(&scenario.space_id, receipt),
-                            now,
-                        )
+                        .receipts_get(CLIENT, &receipts_request(&scenario.space_id, receipt), now,)
                         .await
                 )
                 .code,
@@ -5190,14 +5398,22 @@ mod tests {
             .await;
         scenario
             .provider
-            .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &context_id), now)
+            .receipts_get(
+                CLIENT,
+                &receipts_request(&scenario.space_id, &context_id),
+                now,
+            )
             .await
             .expect("the recorded context is covered");
         assert_eq!(
             refusal(
                 scenario
                     .provider
-                    .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &shared_id), now)
+                    .receipts_get(
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, &shared_id),
+                        now
+                    )
                     .await
             )
             .code,
@@ -5216,7 +5432,11 @@ mod tests {
             .await;
         scenario
             .provider
-            .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &shared_id), now)
+            .receipts_get(
+                CLIENT,
+                &receipts_request(&scenario.space_id, &shared_id),
+                now,
+            )
             .await
             .expect("shared access covers the shared placement");
     }
@@ -5255,7 +5475,11 @@ mod tests {
         let scoped_admin = refusal(
             scenario
                 .provider
-                .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .receipts_get(
+                    CLIENT,
+                    &receipts_request(&scenario.space_id, &receipt_id),
+                    now,
+                )
                 .await,
         );
         assert_eq!(scoped_admin.code, SpokeRejectCode::NotAuthorized);
@@ -5264,7 +5488,11 @@ mod tests {
         scenario.grant(CLIENT, &["admin"], None, None, now).await;
         let read = scenario
             .provider
-            .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+            .receipts_get(
+                CLIENT,
+                &receipts_request(&scenario.space_id, &receipt_id),
+                now,
+            )
             .await
             .expect("space admin reads the receipt");
         assert_eq!(receipt_id_of(&read), receipt_id);
@@ -5345,7 +5573,11 @@ mod tests {
         let admin = refusal(
             scenario
                 .provider
-                .receipts_get(OPERATOR, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .receipts_get(
+                    OPERATOR,
+                    &receipts_request(&scenario.space_id, &receipt_id),
+                    now,
+                )
                 .await,
         );
         assert_eq!(admin.code, SpokeRejectCode::ReceiptExpired);
@@ -5354,7 +5586,11 @@ mod tests {
             refusal(
                 scenario
                     .provider
-                    .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+                    .receipts_get(
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, &receipt_id),
+                        now
+                    )
                     .await
             )
             .code,
@@ -6004,8 +6240,7 @@ mod tests {
         // with two-byte characters and one ASCII byte to land exactly on the limit
         // (the `{"text":"…"}` framing is eleven bytes) while the character count
         // stays far below it.
-        let multibyte_at_limit =
-            format!("{}x", "é".repeat((MAX_CONTENT_BYTES - 12) / 2));
+        let multibyte_at_limit = format!("{}x", "é".repeat((MAX_CONTENT_BYTES - 12) / 2));
         assert_eq!(
             content_serialized_bytes(&json!({ "text": multibyte_at_limit })),
             MAX_CONTENT_BYTES
@@ -6078,7 +6313,13 @@ mod tests {
         // A space-wide grant that still restricts placement is not whole-space
         // coverage: the recorded target requires the unrestricted facet.
         let context_limited = scenario
-            .grant(CLIENT, &["transfer"], None, Some((&[CONTEXT_A], false)), now)
+            .grant(
+                CLIENT,
+                &["transfer"],
+                None,
+                Some((&[CONTEXT_A], false)),
+                now,
+            )
             .await;
         let denied_body = refusal(
             scenario
@@ -6124,7 +6365,13 @@ mod tests {
         // the body path did and discloses no terminal status.
         scenario.revoke(&unrestricted, now).await;
         let restricted_again = scenario
-            .grant(CLIENT, &["transfer"], None, Some((&[CONTEXT_A], false)), now)
+            .grant(
+                CLIENT,
+                &["transfer"],
+                None,
+                Some((&[CONTEXT_A], false)),
+                now,
+            )
             .await;
         sqlx::query("DELETE FROM receipts WHERE receipt_id = ?")
             .bind(&receipt)
@@ -6145,7 +6392,11 @@ mod tests {
         let admin = refusal(
             scenario
                 .provider
-                .receipts_get(OPERATOR, &receipts_request(&scenario.space_id, &receipt), now)
+                .receipts_get(
+                    OPERATOR,
+                    &receipts_request(&scenario.space_id, &receipt),
+                    now,
+                )
                 .await,
         );
         assert_eq!(admin.code, SpokeRejectCode::ReceiptExpired);
@@ -6248,8 +6499,8 @@ mod tests {
             "space_id": scenario.space_id,
             "subject_id": subject_id,
         });
-        let ensure: MemorySubjectsEnsureRequest = serde_json::from_value(payload.clone())
-            .expect("valid subjects.ensure request");
+        let ensure: MemorySubjectsEnsureRequest =
+            serde_json::from_value(payload.clone()).expect("valid subjects.ensure request");
         let mut transaction = scenario
             .provider
             .store()
@@ -6298,8 +6549,11 @@ mod tests {
         receipt_id: &str,
         now: DateTime<Utc>,
     ) {
-        let admission =
-            Mutation::keyed(OP_CAPTURE, admitted.request().idempotency_key.as_str(), admitted);
+        let admission = Mutation::keyed(
+            OP_CAPTURE,
+            admitted.request().idempotency_key.as_str(),
+            admitted,
+        );
         let target = capture_receipt_target(CONTEXT_A);
         let mut transaction = scenario
             .provider
@@ -6490,7 +6744,13 @@ mod tests {
             "refuse-2",
         );
         assert_eq!(
-            refusal(scenario.provider.capture(OTHER, &unauthorized, after_body).await).code,
+            refusal(
+                scenario
+                    .provider
+                    .capture(OTHER, &unauthorized, after_body)
+                    .await
+            )
+            .code,
             SpokeRejectCode::NotAuthorized
         );
         assert_eq!(
@@ -6507,7 +6767,13 @@ mod tests {
             "refuse-1",
         );
         assert_eq!(
-            refusal(scenario.provider.capture(CLIENT, &conflicting, after_body).await).code,
+            refusal(
+                scenario
+                    .provider
+                    .capture(CLIENT, &conflicting, after_body)
+                    .await
+            )
+            .code,
             SpokeRejectCode::IdempotencyConflict
         );
         assert_eq!(retention_rows(&scenario.provider).await, expired);
@@ -6521,7 +6787,13 @@ mod tests {
         }))
         .expect("valid dismissal request");
         assert_eq!(
-            refusal(scenario.provider.candidates_dismiss(CLIENT, &dismiss, after_body).await).code,
+            refusal(
+                scenario
+                    .provider
+                    .candidates_dismiss(CLIENT, &dismiss, after_body)
+                    .await
+            )
+            .code,
             SpokeRejectCode::RevisionConflict
         );
         assert_eq!(retention_rows(&scenario.provider).await, expired);
@@ -6539,7 +6811,13 @@ mod tests {
             "refuse-review",
         );
         assert_eq!(
-            refusal(scenario.provider.candidates_review(CLIENT, &review, after_body).await).code,
+            refusal(
+                scenario
+                    .provider
+                    .candidates_review(CLIENT, &review, after_body)
+                    .await
+            )
+            .code,
             SpokeRejectCode::InvalidInput
         );
         assert_eq!(retention_rows(&scenario.provider).await, expired);
@@ -6556,7 +6834,13 @@ mod tests {
             .faults()
             .fail_next(FaultPoint::BeforeCommit);
         assert_eq!(
-            refusal(scenario.provider.capture(CLIENT, &aborted, after_body).await).code,
+            refusal(
+                scenario
+                    .provider
+                    .capture(CLIENT, &aborted, after_body)
+                    .await
+            )
+            .code,
             SpokeRejectCode::OutcomeUncertain
         );
         assert_eq!(retention_rows(&scenario.provider).await, expired);
@@ -6668,7 +6952,13 @@ mod tests {
             "retention-1",
         );
         assert_eq!(
-            refusal(scenario.provider.capture(CLIENT, &conflicting, after_body).await).code,
+            refusal(
+                scenario
+                    .provider
+                    .capture(CLIENT, &conflicting, after_body)
+                    .await
+            )
+            .code,
             SpokeRejectCode::IdempotencyConflict
         );
         assert_eq!(
@@ -6898,7 +7188,13 @@ mod tests {
             SpokeRejectCode::NotAuthorized
         );
         assert_eq!(
-            refusal(scenario.provider.capture(CLIENT, &request, after_body).await).code,
+            refusal(
+                scenario
+                    .provider
+                    .capture(CLIENT, &request, after_body)
+                    .await
+            )
+            .code,
             SpokeRejectCode::NotAuthorized,
             "a revoked requester cannot replay either"
         );
@@ -7180,8 +7476,8 @@ mod tests {
         // Past the tombstone end the same seam releases the finished binding and
         // stages one fresh effect; a rollback restores the old binding, a commit
         // keeps exactly the new effect.
-        let after_all =
-            base + Duration::seconds((RECEIPT_RETENTION_SECONDS + DEDUP_RETENTION_SECONDS) as i64 + 1);
+        let after_all = base
+            + Duration::seconds((RECEIPT_RETENTION_SECONDS + DEDUP_RETENTION_SECONDS) as i64 + 1);
         let mut transaction = scenario
             .provider
             .store()

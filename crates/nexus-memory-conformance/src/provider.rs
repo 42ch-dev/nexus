@@ -62,7 +62,7 @@ impl FixtureMemoryProvider {
 
     /// The durable space/authority identity provisioned for this database.
     #[must_use]
-    pub fn identity(&self) -> &FixtureIdentity {
+    pub const fn identity(&self) -> &FixtureIdentity {
         &self.identity
     }
 
@@ -89,12 +89,12 @@ impl FixtureMemoryProvider {
     /// instance (C7 seam). Arming a point never changes durable state; the
     /// provider's mutation path observes it once.
     #[must_use]
-    pub fn faults(&self) -> &FixtureFaults {
+    pub const fn faults(&self) -> &FixtureFaults {
         &self.faults
     }
 
     /// Storage handle for the provider's operation slices.
-    pub(crate) fn store(&self) -> &FixtureStore {
+    pub(crate) const fn store(&self) -> &FixtureStore {
         &self.store
     }
 

@@ -9,7 +9,7 @@ use crate::FixtureError;
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 /// File-backed SQLite store owned outright by the fixture provider.
-pub(crate) struct FixtureStore {
+pub struct FixtureStore {
     pool: SqlitePool,
 }
 
@@ -33,7 +33,7 @@ impl FixtureStore {
     }
 
     /// The pool every fixture operation runs its SQL against.
-    pub(crate) fn pool(&self) -> &SqlitePool {
+    pub(crate) const fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 

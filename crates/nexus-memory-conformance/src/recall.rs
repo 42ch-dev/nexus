@@ -24,20 +24,20 @@ use std::num::NonZeroU64;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{json, Map, Value};
-use sqlx::{Row, SqliteConnection};
 use spoke_operations::spoke_schemas::memory_recall_request::{ProvenanceFilter, ReadSelection};
 use spoke_operations::spoke_schemas::{
     MemoryGrant, MemoryProfileGetRequest, MemoryProfileUpdateRequest, MemoryRecallRequest,
     ProfileDocument, RetainedRecord,
 };
 use spoke_operations::{
-    grant_covers, is_freeze_allowlisted, jcs_sha256_hex,
-    validate_memory_recall, GrantRequirement, SpokeReject, SpokeRejectCode, SpokeResult,
+    grant_covers, is_freeze_allowlisted, jcs_sha256_hex, validate_memory_recall, GrantRequirement,
+    SpokeReject, SpokeRejectCode, SpokeResult,
 };
+use sqlx::{Row, SqliteConnection};
 
 use crate::provider::FixtureMemoryProvider;
 use crate::spaces::{
-    bump_snapshot, internal, is_authorized, load_grants, snapshot_marker,
+    bump_snapshot, internal, internal_failure, is_authorized, load_grants, snapshot_marker,
     ENGINE_POLICY_VERSION, MAX_PAGE_SIZE,
 };
 
@@ -63,21 +63,20 @@ impl std::io::Write for ByteCounter {
 /// the response actually emits.
 ///
 /// The published JCS helper counts canonical ECMAScript number spelling
-/// (`1.0` as `1`), while the served response is serialized by serde_json and
+/// (`1.0` as `1`), while the served response is serialized by `serde_json` and
 /// emits `1.0`. Counting JCS bytes would understate the returned material, so
 /// the budget is measured by streaming the *same* `Value` the response carries
 /// through the serving serializer into a counting sink: no content is altered,
 /// no ranking input changes, and no temporary buffer is allocated.
 fn emitted_content_bytes(content: &Value) -> Result<usize, SpokeReject> {
     let mut counter = ByteCounter::default();
-    serde_json::to_writer(&mut counter, content)
-        .map_err(|error| internal(format!("recalled content is not serializable: {error}")))?;
+    serde_json::to_writer(&mut counter, content).map_err(internal_failure)?;
     Ok(counter.0)
 }
 
 /// `memory.recall` payload (§7.22/§9).
 #[derive(Debug)]
-pub(crate) struct RecallPage {
+pub struct RecallPage {
     pub(crate) records: Vec<RetainedRecord>,
     pub(crate) total_authorized: u64,
     pub(crate) truncated: bool,
@@ -88,13 +87,13 @@ pub(crate) struct RecallPage {
 
 /// `memory.profile.get` payload (§7.23).
 #[derive(Debug)]
-pub(crate) struct ProfilePage {
+pub struct ProfilePage {
     pub(crate) profiles: Vec<ProfileDocument>,
 }
 
 /// Content-free result of `memory.profile.update` (§7.24).
 #[derive(Debug)]
-pub(crate) struct ProfileChange {
+pub struct ProfileChange {
     pub(crate) profile_kind: String,
     pub(crate) revision: u64,
 }
@@ -190,7 +189,7 @@ fn checked(result: SpokeResult<()>) -> Result<(), SpokeReject> {
 fn timestamp(raw: &str) -> Result<DateTime<Utc>, SpokeReject> {
     DateTime::parse_from_rfc3339(raw)
         .map(|parsed| parsed.with_timezone(&Utc))
-        .map_err(|error| internal(format!("stored timestamp {raw} is not RFC 3339: {error}")))
+        .map_err(internal_failure)
 }
 
 fn timestamp_text(value: DateTime<Utc>) -> String {
@@ -202,13 +201,12 @@ fn optional_timestamp(raw: Option<String>) -> Result<Option<DateTime<Utc>>, Spok
 }
 
 fn json_field(raw: &str, field: &str) -> Result<Value, SpokeReject> {
-    serde_json::from_str(raw)
-        .map_err(|error| internal(format!("stored {field} is not valid JSON: {error}")))
+    serde_json::from_str(raw).map_err(|_| internal(format!("stored {field} is not valid JSON")))
 }
 
 fn row_u64(row: &sqlx::sqlite::SqliteRow, column: &str) -> Result<u64, SpokeReject> {
-    let raw: i64 = row.try_get(column).map_err(internal)?;
-    u64::try_from(raw).map_err(internal)
+    let raw: i64 = row.try_get(column).map_err(internal_failure)?;
+    u64::try_from(raw).map_err(internal_failure)
 }
 
 // ---------------------------------------------------------------------------
@@ -260,17 +258,14 @@ struct StoredProfile {
 // Loaders
 // ---------------------------------------------------------------------------
 
-async fn space_status(
-    conn: &mut SqliteConnection,
-    space_id: &str,
-) -> Result<String, SpokeReject> {
+async fn space_status(conn: &mut SqliteConnection, space_id: &str) -> Result<String, SpokeReject> {
     let row = sqlx::query("SELECT status FROM spaces WHERE space_id = ?")
         .bind(space_id)
         .fetch_optional(&mut *conn)
         .await
-        .map_err(internal)?
+        .map_err(internal_failure)?
         .ok_or_else(|| not_found(format!("space {space_id} is not served by this fixture")))?;
-    row.try_get("status").map_err(internal)
+    row.try_get("status").map_err(internal_failure)
 }
 
 async fn subject_status(
@@ -283,9 +278,9 @@ async fn subject_status(
         .bind(subject_id)
         .fetch_optional(&mut *conn)
         .await
-        .map_err(internal)?
+        .map_err(internal_failure)?
         .ok_or_else(|| not_found(format!("subject {subject_id} does not exist in this space")))?;
-    row.try_get("status").map_err(internal)
+    row.try_get("status").map_err(internal_failure)
 }
 
 /// Read the live records of one subject: the tombstone predicate keeps dead
@@ -307,36 +302,42 @@ async fn load_recall_rows(
     .bind(subject_id)
     .fetch_all(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     rows.into_iter()
         .map(|row| {
-            let import_ref_json: Option<String> = row.try_get("import_ref_json").map_err(internal)?;
+            let import_ref_json: Option<String> =
+                row.try_get("import_ref_json").map_err(internal_failure)?;
             Ok(RecallRow {
-                record_id: row.try_get("record_id").map_err(internal)?,
-                kind: row.try_get("kind").map_err(internal)?,
+                record_id: row.try_get("record_id").map_err(internal_failure)?,
+                kind: row.try_get("kind").map_err(internal_failure)?,
                 content: json_field(
-                    &row.try_get::<String, _>("content_json").map_err(internal)?,
+                    &row.try_get::<String, _>("content_json")
+                        .map_err(internal_failure)?,
                     "record content",
                 )?,
-                visibility: row.try_get("scope_visibility").map_err(internal)?,
-                context_id: row.try_get("scope_context_id").map_err(internal)?,
+                visibility: row.try_get("scope_visibility").map_err(internal_failure)?,
+                context_id: row.try_get("scope_context_id").map_err(internal_failure)?,
                 provenance: json_field(
                     &row.try_get::<String, _>("provenance_json")
-                        .map_err(internal)?,
+                        .map_err(internal_failure)?,
                     "record provenance",
                 )?,
                 import_ref: optional_json(import_ref_json.as_deref(), "record import_ref")?,
-                occurred_at: optional_timestamp(row.try_get("occurred_at").map_err(internal)?)?,
+                occurred_at: optional_timestamp(
+                    row.try_get("occurred_at").map_err(internal_failure)?,
+                )?,
                 revision: row_u64(&row, "revision")?,
                 created_at: timestamp(
-                    &row.try_get::<String, _>("created_at").map_err(internal)?,
+                    &row.try_get::<String, _>("created_at")
+                        .map_err(internal_failure)?,
                 )?,
                 updated_at: timestamp(
-                    &row.try_get::<String, _>("updated_at").map_err(internal)?,
+                    &row.try_get::<String, _>("updated_at")
+                        .map_err(internal_failure)?,
                 )?,
                 extensions: json_field(
                     &row.try_get::<String, _>("extensions_json")
-                        .map_err(internal)?,
+                        .map_err(internal_failure)?,
                     "record extensions",
                 )?,
                 query_rank: false,
@@ -363,27 +364,31 @@ async fn load_profiles(
     .bind(subject_id)
     .fetch_all(&mut *conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     rows.into_iter()
         .map(|row| {
             Ok(StoredProfile {
-                space_id: row.try_get("space_id").map_err(internal)?,
-                subject_id: row.try_get("subject_id").map_err(internal)?,
-                profile_kind: row.try_get("profile_kind").map_err(internal)?,
+                space_id: row.try_get("space_id").map_err(internal_failure)?,
+                subject_id: row.try_get("subject_id").map_err(internal_failure)?,
+                profile_kind: row.try_get("profile_kind").map_err(internal_failure)?,
                 document: json_field(
-                    &row.try_get::<String, _>("document_json").map_err(internal)?,
+                    &row.try_get::<String, _>("document_json")
+                        .map_err(internal_failure)?,
                     "profile document",
                 )?,
-                updated_by: row.try_get("updated_by").map_err(internal)?,
+                updated_by: row.try_get("updated_by").map_err(internal_failure)?,
                 revision: row_u64(&row, "revision")?,
                 created_at: timestamp(
-                    &row.try_get::<String, _>("created_at").map_err(internal)?,
+                    &row.try_get::<String, _>("created_at")
+                        .map_err(internal_failure)?,
                 )?,
                 updated_at: timestamp(
-                    &row.try_get::<String, _>("updated_at").map_err(internal)?,
+                    &row.try_get::<String, _>("updated_at")
+                        .map_err(internal_failure)?,
                 )?,
                 extensions: json_field(
-                    &row.try_get::<String, _>("extensions_json").map_err(internal)?,
+                    &row.try_get::<String, _>("extensions_json")
+                        .map_err(internal_failure)?,
                     "profile extensions",
                 )?,
             })
@@ -586,8 +591,7 @@ fn record_to_wire(
     if let Some(occurred_at) = row.occurred_at {
         value["occurred_at"] = json!(timestamp_text(occurred_at));
     }
-    let record = serde_json::from_value(value)
-        .map_err(|error| internal(format!("stored record is not protocol-shaped: {error}")))?;
+    let record = serde_json::from_value(value).map_err(internal_failure)?;
     Ok(RetainedRecord::LiveRecord(record))
 }
 
@@ -604,7 +608,7 @@ fn profile_to_wire(row: &StoredProfile) -> Result<ProfileDocument, SpokeReject> 
         "revision": row.revision,
         "extensions": row.extensions,
     }))
-    .map_err(|error| internal(format!("stored profile row is not protocol-shaped: {error}")))
+    .map_err(internal_failure)
 }
 
 // ---------------------------------------------------------------------------
@@ -637,11 +641,16 @@ impl FixtureMemoryProvider {
         request: &MemoryRecallRequest,
         now: DateTime<Utc>,
     ) -> Result<RecallPage, SpokeReject> {
-        let mut transaction = self.store().pool().begin().await.map_err(internal)?;
+        let mut transaction = self
+            .store()
+            .pool()
+            .begin()
+            .await
+            .map_err(internal_failure)?;
         let page = self
             .recall_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(page)
     }
 
@@ -676,13 +685,7 @@ impl FixtureMemoryProvider {
 
         let subject = subject_status(conn, space_id, subject_id).await?;
         let snapshot = snapshot_marker(conn, space_id).await?;
-        let binding_digest = recall_binding(
-            principal_id,
-            space_id,
-            subject_id,
-            request,
-            snapshot,
-        )?;
+        let binding_digest = recall_binding(principal_id, space_id, subject_id, request, snapshot)?;
 
         // §7.7/§11: an archived subject's records are excluded from recall;
         // reads on a merely fenced subject stay admitted. The exclusion is a
@@ -696,7 +699,7 @@ impl FixtureMemoryProvider {
                 && provenance_filter_admits(row, request.filter.as_ref())
         });
         rank(&mut rows, request.query.as_deref());
-        let total_authorized = u64::try_from(rows.len()).map_err(internal)?;
+        let total_authorized = u64::try_from(rows.len()).map_err(internal_failure)?;
 
         let start = match request.cursor.as_deref() {
             None => 0,
@@ -721,9 +724,9 @@ impl FixtureMemoryProvider {
         // in UTF-8 bytes of the serialized content. An oversized first item is
         // surfaced whole instead of being silently dropped; any later item that
         // does not fit is deferred to the next page.
-        let limit = usize::try_from(request.budget.max_items.get()).map_err(internal)?;
+        let limit = usize::try_from(request.budget.max_items.get()).map_err(internal_failure)?;
         let max_bytes = match request.budget.max_bytes {
-            Some(budget) => Some(usize::try_from(budget.get()).map_err(internal)?),
+            Some(budget) => Some(usize::try_from(budget.get()).map_err(internal_failure)?),
             None => None,
         };
         let mut used = 0_usize;
@@ -781,11 +784,16 @@ impl FixtureMemoryProvider {
         request: &MemoryProfileGetRequest,
         now: DateTime<Utc>,
     ) -> Result<ProfilePage, SpokeReject> {
-        let mut transaction = self.store().pool().begin().await.map_err(internal)?;
+        let mut transaction = self
+            .store()
+            .pool()
+            .begin()
+            .await
+            .map_err(internal_failure)?;
         let page = self
             .profile_get_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(page)
     }
 
@@ -817,9 +825,7 @@ impl FixtureMemoryProvider {
         let wanted = &request.profile_kinds;
         let profiles = rows
             .iter()
-            .filter(|row| {
-                wanted.is_empty() || wanted.iter().any(|kind| kind == &row.profile_kind)
-            })
+            .filter(|row| wanted.is_empty() || wanted.iter().any(|kind| kind == &row.profile_kind))
             .map(profile_to_wire)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(ProfilePage { profiles })
@@ -843,11 +849,11 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let change = self
             .profile_update_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(change)
     }
 
@@ -896,7 +902,7 @@ impl FixtureMemoryProvider {
             "format": &request.document.format,
             "body": &request.document.body,
         });
-        let document_json = serde_json::to_string(&document).map_err(internal)?;
+        let document_json = serde_json::to_string(&document).map_err(internal_failure)?;
         let stored: Option<i64> = sqlx::query(
             "SELECT revision FROM profiles \
              WHERE space_id = ? AND subject_id = ? AND profile_kind = ?",
@@ -906,10 +912,13 @@ impl FixtureMemoryProvider {
         .bind(&profile_kind)
         .fetch_optional(&mut *conn)
         .await
-        .map_err(internal)?
-        .map(|row| row.try_get("revision").map_err(internal))
+        .map_err(internal_failure)?
+        .map(|row| row.try_get("revision").map_err(internal_failure))
         .transpose()?;
-        let stored = stored.map(u64::try_from).transpose().map_err(internal)?;
+        let stored = stored
+            .map(u64::try_from)
+            .transpose()
+            .map_err(internal_failure)?;
 
         let revision = match (request.expected_revision, stored) {
             (None, None) => {
@@ -927,7 +936,7 @@ impl FixtureMemoryProvider {
                 .bind(timestamp_text(now))
                 .execute(&mut *conn)
                 .await
-                .map_err(internal)?;
+                .map_err(internal_failure)?;
                 1
             }
             (None, Some(actual)) => return Err(profile_create_conflict(actual)),
@@ -947,10 +956,10 @@ impl FixtureMemoryProvider {
                 .bind(space_id)
                 .bind(subject_id)
                 .bind(&profile_kind)
-                .bind(i64::try_from(actual).map_err(internal)?)
+                .bind(i64::try_from(actual).map_err(internal_failure)?)
                 .execute(&mut *conn)
                 .await
-                .map_err(internal)?;
+                .map_err(internal_failure)?;
                 if updated.rows_affected() != 1 {
                     return Err(internal(format!(
                         "profile {profile_kind} vanished inside its own transaction"
@@ -998,8 +1007,8 @@ fn recall_binding(
 
 #[cfg(test)]
 mod tests {
-    use spoke_operations::content_serialized_bytes;
     use super::*;
+    use spoke_operations::content_serialized_bytes;
     use std::path::PathBuf;
 
     use spoke_operations::spoke_schemas::{
@@ -1943,7 +1952,15 @@ mod tests {
         ];
         for (record_id, text, occurred_at, created_at) in records {
             scenario
-                .insert_record(record_id, "shared", None, text, &[], occurred_at, created_at)
+                .insert_record(
+                    record_id,
+                    "shared",
+                    None,
+                    text,
+                    &[],
+                    occurred_at,
+                    created_at,
+                )
                 .await;
         }
 
@@ -2076,7 +2093,13 @@ mod tests {
             None,
         );
         assert_eq!(
-            recalled_ids(&scenario.provider.recall(CLIENT, &request, now()).await.expect("live")),
+            recalled_ids(
+                &scenario
+                    .provider
+                    .recall(CLIENT, &request, now())
+                    .await
+                    .expect("live")
+            ),
             vec!["rec_archived"]
         );
 
@@ -2123,9 +2146,7 @@ mod tests {
     async fn profile_documents_preserve_bytes_and_enforce_revision_cas() {
         let scenario = Scenario::open().await;
         scenario.ensure_subject().await;
-        scenario
-            .grant(CLIENT, &["profile_write"], None, None)
-            .await;
+        scenario.grant(CLIENT, &["profile_write"], None, None).await;
         let first_body = "Naïve draft — \"quoted\", backslash \\ and a newline\nend 🐙";
         let second_body = "Second body\nwith two lines\tand a tab";
 
@@ -2217,10 +2238,7 @@ mod tests {
                 now(),
             )
             .await;
-        assert_eq!(
-            reject_code(create_only),
-            SpokeRejectCode::RevisionConflict
-        );
+        assert_eq!(reject_code(create_only), SpokeRejectCode::RevisionConflict);
 
         // An expectation on an absent document is the same lost-update refusal.
         let absent = scenario
@@ -2237,10 +2255,7 @@ mod tests {
                 now(),
             )
             .await;
-        assert_eq!(
-            reject_code(absent),
-            SpokeRejectCode::RevisionConflict
-        );
+        assert_eq!(reject_code(absent), SpokeRejectCode::RevisionConflict);
         assert!(scenario.raw_profile("preferences").await.is_none());
 
         // The accepted body survives a real close and reopen of the file.
@@ -2259,10 +2274,7 @@ mod tests {
     async fn profile_reads_need_shared_or_unrestricted_coverage_and_writes_need_profile_write() {
         let scenario = Scenario::open().await;
         scenario.ensure_subject().await;
-        for (kind, body) in [
-            ("personality", "calm"),
-            ("preferences", "concise"),
-        ] {
+        for (kind, body) in [("personality", "calm"), ("preferences", "concise")] {
             scenario
                 .provider
                 .profile_update(
@@ -2279,7 +2291,11 @@ mod tests {
             reject_code(
                 scenario
                     .provider
-                    .profile_get(STRANGER, &profile_get_request(&scenario.space_id, &[]), now())
+                    .profile_get(
+                        STRANGER,
+                        &profile_get_request(&scenario.space_id, &[]),
+                        now()
+                    )
                     .await
             ),
             SpokeRejectCode::NotAuthorized
@@ -2349,7 +2365,11 @@ mod tests {
             reject_code(
                 scenario
                     .provider
-                    .profile_get(LIMITED, &profile_get_request(&scenario.space_id, &[]), now())
+                    .profile_get(
+                        LIMITED,
+                        &profile_get_request(&scenario.space_id, &[]),
+                        now()
+                    )
                     .await
             ),
             SpokeRejectCode::NotAuthorized
@@ -2360,7 +2380,11 @@ mod tests {
         assert_eq!(
             scenario
                 .provider
-                .profile_get(LIMITED, &profile_get_request(&scenario.space_id, &[]), now())
+                .profile_get(
+                    LIMITED,
+                    &profile_get_request(&scenario.space_id, &[]),
+                    now()
+                )
                 .await
                 .expect("shared access reads profiles")
                 .profiles
@@ -2392,9 +2416,7 @@ mod tests {
         assert!(page.profiles.is_empty());
 
         // profile_write on the same principal admits the update.
-        scenario
-            .grant(CLIENT, &["profile_write"], None, None)
-            .await;
+        scenario.grant(CLIENT, &["profile_write"], None, None).await;
         let change = scenario
             .provider
             .profile_update(
@@ -2527,7 +2549,11 @@ mod tests {
         assert_eq!(
             scenario
                 .provider
-                .profile_get(LIMITED, &profile_get_request(&scenario.space_id, &[]), now())
+                .profile_get(
+                    LIMITED,
+                    &profile_get_request(&scenario.space_id, &[]),
+                    now()
+                )
                 .await
                 .expect("shared access reads the written document")
                 .profiles
@@ -2545,9 +2571,7 @@ mod tests {
         let scenario = Scenario::open().await;
         scenario.ensure_subject().await;
         scenario.grant(CLIENT, &["recall"], None, None).await;
-        scenario
-            .grant(CLIENT, &["profile_write"], None, None)
-            .await;
+        scenario.grant(CLIENT, &["profile_write"], None, None).await;
         scenario
             .insert_record(
                 "rec_captured",
@@ -2608,10 +2632,7 @@ mod tests {
             .await
             .expect("profile get");
         assert_eq!(profiles.profiles.len(), 1);
-        assert_eq!(
-            profiles.profiles[0].document.body,
-            "authored-marker-9c1"
-        );
+        assert_eq!(profiles.profiles[0].document.body, "authored-marker-9c1");
         let serialized = serde_json::to_string(&profiles.profiles).expect("profiles json");
         assert!(!serialized.contains("captured-marker-7f3"));
 

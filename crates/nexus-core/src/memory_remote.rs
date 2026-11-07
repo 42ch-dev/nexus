@@ -33,8 +33,8 @@ use spoke_connect::core::{
     derive_peer_id_from_ed25519_pubkey, CapabilityTokenProof, CAPABILITY_SPOKE_MEMORY,
 };
 use spoke_connect::remote::{
-    connect_remote_adapter, RemoteAdapter, RemoteAdapterError, RemoteAdapterOptions, RemoteIdentity,
-    Transport,
+    connect_remote_adapter, RemoteAdapter, RemoteAdapterError, RemoteAdapterOptions,
+    RemoteIdentity, Transport,
 };
 use spoke_operations::spoke_schemas::{
     HostCapabilityManifest, MemoryDescribeRequest, MemoryDescribeResponse, MemorySpacesListRequest,
@@ -113,7 +113,12 @@ pub(crate) async fn open_remote_binding(
         ),
     )
     .await
-    .map_err(|_| coded(UNAVAILABLE, "the remote memory endpoint did not connect in time"))?
+    .map_err(|_| {
+        coded(
+            UNAVAILABLE,
+            "the remote memory endpoint did not connect in time",
+        )
+    })?
     .map_err(|_| coded(UNAVAILABLE, "the remote memory endpoint is unreachable"))?;
     let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
 
@@ -144,12 +149,13 @@ pub(crate) async fn open_remote_binding(
 
     let admitted = admit(session.adapter(), &client_identity, selection).await;
     match admitted {
-        Ok((space_id, authority_host_id, authority_generation)) => {
+        Ok((space_id, authority_host_id, authority_generation, max_page_size)) => {
             Ok(MemoryProviderBinding::pin_remote(
                 session.into_adapter(),
                 space_id,
                 authority_host_id,
                 authority_generation,
+                max_page_size,
                 client_identity,
                 access != CoreAccess::ReadOnly,
             ))
@@ -207,10 +213,13 @@ async fn admit(
     adapter: &RemoteAdapter,
     client_identity: &str,
     selection: &RemoteMemoryProviderSelection,
-) -> CoreResult<(String, String, NonZeroU64)> {
-    let manifest = adapter
-        .remote_manifest()
-        .ok_or_else(|| coded(HANDSHAKE_REFUSED, "the signed hello carried no remote manifest"))?;
+) -> CoreResult<(String, String, NonZeroU64, NonZeroU64)> {
+    let manifest = adapter.remote_manifest().ok_or_else(|| {
+        coded(
+            HANDSHAKE_REFUSED,
+            "the signed hello carried no remote manifest",
+        )
+    })?;
     // The negotiated set is the intersection of the two authenticated hello
     // manifests. This dial's manifest advertises exactly the memory family it
     // is a client of, so the remote side must declare the same family.
@@ -269,7 +278,12 @@ async fn admit(
             "the discovered space is not authoritative on the authenticated host",
         ));
     }
-    Ok((space_id, authority_host_id, authority_generation))
+    Ok((
+        space_id,
+        authority_host_id,
+        authority_generation,
+        max_page_size,
+    ))
 }
 
 /// Find the exact configured space in bounded provider pages.
@@ -347,8 +361,12 @@ fn spaces_request(cursor: Option<&str>, limit: NonZeroU64) -> CoreResult<MemoryS
     if let Some(cursor) = cursor {
         body["cursor"] = json!(cursor);
     }
-    serde_json::from_value(body)
-        .map_err(|_| coded(SPACE_REFUSED, "the space discovery request is not protocol-shaped"))
+    serde_json::from_value(body).map_err(|_| {
+        coded(
+            SPACE_REFUSED,
+            "the space discovery request is not protocol-shaped",
+        )
+    })
 }
 
 /// The local hello manifest: this client's own identity and the one family it
@@ -363,7 +381,12 @@ fn client_manifest(client_identity: &str) -> CoreResult<HostCapabilityManifest> 
         "namespaces": [],
         "extensions": {},
     }))
-    .map_err(|_| coded(HANDSHAKE_REFUSED, "the client hello manifest is not protocol-shaped"))
+    .map_err(|_| {
+        coded(
+            HANDSHAKE_REFUSED,
+            "the client hello manifest is not protocol-shaped",
+        )
+    })
 }
 
 /// The public peer id of the loaded seed: the keypair the signed hello signs
@@ -382,7 +405,12 @@ fn client_principal(client_identity: &str) -> CoreResult<Principal> {
         "principal_id": client_identity,
         "extensions": {},
     }))
-    .map_err(|_| coded(HANDSHAKE_REFUSED, "the loaded client identity is not a principal label"))
+    .map_err(|_| {
+        coded(
+            HANDSHAKE_REFUSED,
+            "the loaded client identity is not a principal label",
+        )
+    })
 }
 
 /// Decode the selection's already-validated 32-byte peer key.

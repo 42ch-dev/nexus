@@ -223,9 +223,7 @@ fn review_result_record_ids(
     let key = body
         .get("idempotency_key")
         .and_then(Value::as_str)
-        .ok_or_else(|| {
-            malformed("the committed review result carries no idempotency key")
-        })?;
+        .ok_or_else(|| malformed("the committed review result carries no idempotency key"))?;
     if key != issued_key {
         return Err(malformed(
             "the committed review result echoes a different idempotency key than the issued request",
@@ -241,12 +239,9 @@ fn review_result_record_ids(
         .ok_or_else(|| malformed("the committed review result carries no record_ids"))?;
     let mut record_ids = Vec::with_capacity(ids.len());
     for id in ids {
-        let id = id
-            .as_str()
-            .filter(|id| !id.is_empty())
-            .ok_or_else(|| {
-                malformed("the committed review result names an empty or non-string record id")
-            })?;
+        let id = id.as_str().filter(|id| !id.is_empty()).ok_or_else(|| {
+            malformed("the committed review result names an empty or non-string record id")
+        })?;
         record_ids.push(id.to_string());
     }
     let (expected_outcome, expected_records) = match action {
@@ -257,9 +252,7 @@ fn review_result_record_ids(
                 .get("fragments")
                 .and_then(Value::as_array)
                 .filter(|fragments| !fragments.is_empty())
-                .ok_or_else(|| {
-                    malformed("the issued fragment decision carries no fragments")
-                })?;
+                .ok_or_else(|| malformed("the issued fragment decision carries no fragments"))?;
             ("fragmented", fragments.len())
         }
         _ => {
@@ -279,6 +272,107 @@ fn review_result_record_ids(
         ));
     }
     Ok(record_ids)
+}
+
+/// The candidate ids one committed capture receipt proves for THIS request.
+///
+/// A committed capture may legitimately produce no candidate, so an empty list
+/// is consistent. The receipt must still be *this* request's: its echoed
+/// `space_id` and `idempotency_key` are bound to the issued request and the
+/// pinned space, exactly as [`review_result_record_ids`] requires. A stale
+/// receipt for another key would otherwise publish its objects and retire the
+/// new attempt's admission, while that attempt's own candidates stay
+/// unprotected. Every mismatch is static: no peer-authored byte reaches a
+/// message.
+fn capture_result_candidate_ids(
+    body: &Value,
+    issued_space: &str,
+    issued_key: &str,
+) -> CoreResult<Vec<String>> {
+    let malformed = |reason: &'static str| internal_err("memory_capture_receipt", reason);
+    let space = body
+        .get("space_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed capture result carries no space"))?;
+    if space != issued_space {
+        return Err(malformed(
+            "the committed capture result space does not match the issued request",
+        ));
+    }
+    let key = body
+        .get("idempotency_key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed capture result carries no idempotency key"))?;
+    if key != issued_key {
+        return Err(malformed(
+            "the committed capture result echoes a different idempotency key than the issued request",
+        ));
+    }
+    let ids = body
+        .pointer("/result/candidate_ids")
+        .and_then(Value::as_array)
+        .ok_or_else(|| malformed("the committed capture result carries no candidate_ids"))?;
+    let mut candidate_ids = Vec::with_capacity(ids.len());
+    for id in ids {
+        let id = id.as_str().filter(|id| !id.is_empty()).ok_or_else(|| {
+            malformed("the committed capture result names an empty or non-string candidate id")
+        })?;
+        candidate_ids.push(id.to_string());
+    }
+    Ok(candidate_ids)
+}
+
+/// The record id one committed promotion receipt proves for THIS request.
+///
+/// D18: a committed promotion releases the record's binding dependency, so the
+/// receipt must prove this exact request — the echoed `space_id` and
+/// `idempotency_key`, the requested record, and the shared placement the
+/// request asked for. A stale or mismatched receipt would otherwise release
+/// another live record's protection. Every mismatch is static.
+fn promote_result_record_id(
+    body: &Value,
+    issued_space: &str,
+    issued_key: &str,
+    issued_record_id: &str,
+) -> CoreResult<String> {
+    let malformed = |reason: &'static str| internal_err("memory_promote_receipt", reason);
+    let space = body
+        .get("space_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed promotion result carries no space"))?;
+    if space != issued_space {
+        return Err(malformed(
+            "the committed promotion result space does not match the issued request",
+        ));
+    }
+    let key = body
+        .get("idempotency_key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed promotion result carries no idempotency key"))?;
+    if key != issued_key {
+        return Err(malformed(
+            "the committed promotion result echoes a different idempotency key than the issued request",
+        ));
+    }
+    let record = body
+        .pointer("/result/record_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed promotion result carries no record_id"))?;
+    if record != issued_record_id {
+        return Err(malformed(
+            "the committed promotion result names a different record than the issued request",
+        ));
+    }
+    let visibility = body
+        .pointer("/result/scope/visibility")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed promotion result carries no target scope"))?;
+    if visibility != "shared" {
+        return Err(malformed(
+            "the committed promotion result does not report the requested shared placement",
+        ));
+    }
+    Ok(record.to_string())
 }
 
 fn remote_capture_reject_proves_no_effect(reject: &SpokeReject) -> bool {
@@ -317,10 +411,6 @@ fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> ser
 // content alike. Legacy metadata rides in `content.structured.nexus_legacy`,
 // which is what lets the retained DTOs render the legacy display fields
 // (`pending_id`, `fragment_id`, `world_id`, keywords) rather than provider ids.
-
-/// Rows the adapter asks for per internal provider page: the provider's own
-/// advertised `max_page_size`, so a legacy DTO never names a bigger bound.
-const MEMORY_PAGE_SIZE: u64 = 100;
 
 /// The one authored profile kind (§4.2): the `SOUL.md` document.
 const SOUL_PROFILE_KIND: &str = "personality";
@@ -861,15 +951,14 @@ impl MemoryAdapter {
                 "space_id": self.binding.space_id(),
                 "subject_id": self.subject_id,
                 "status": "pending",
-                "limit": MEMORY_PAGE_SIZE,
+                "limit": self.binding.page_size().get(),
                 "cursor": cursor,
             }))?;
-            let body = self.ok(
-                self.binding
-                    .port()
-                    .list_candidates(&self.principal, request)
-                    .await,
-            )?;
+            let body = self.ok(self
+                .binding
+                .port()
+                .list_candidates(&self.principal, request)
+                .await)?;
             rows.extend(
                 body["candidates"]
                     .as_array()
@@ -913,15 +1002,14 @@ impl MemoryAdapter {
                 "space_id": self.binding.space_id(),
                 "subject_id": self.subject_id,
                 "status": "pending",
-                "limit": MEMORY_PAGE_SIZE,
+                "limit": self.binding.page_size().get(),
                 "cursor": cursor,
             }))?;
-            let body = self.ok(
-                self.binding
-                    .port()
-                    .list_candidates(&self.principal, request)
-                    .await,
-            )?;
+            let body = self.ok(self
+                .binding
+                .port()
+                .list_candidates(&self.principal, request)
+                .await)?;
             count += body["candidates"]
                 .as_array()
                 .into_iter()
@@ -1016,7 +1104,7 @@ impl MemoryAdapter {
             "selection": selection,
             "kinds": kinds,
             "filter": filter.map(|ids| json!({ "source_context_ids": ids })),
-            "limit": MEMORY_PAGE_SIZE,
+            "limit": self.binding.page_size().get(),
             "cursor": cursor,
         }))
     }
@@ -1033,18 +1121,15 @@ impl MemoryAdapter {
     ) -> CoreResult<Value> {
         if self.is_local() {
             let local = self.binding.local()?;
-            self.ok(
-                local
-                    .list_records_scoped(&self.principal, request, project_legacy)
-                    .await,
-            )
+            self.ok(local
+                .list_records_scoped(&self.principal, request, project_legacy)
+                .await)
         } else {
-            self.ok(
-                self.binding
-                    .port()
-                    .list_records(&self.principal, request)
-                    .await,
-            )
+            self.ok(self
+                .binding
+                .port()
+                .list_records(&self.principal, request)
+                .await)
         }
     }
 
@@ -1100,9 +1185,7 @@ impl MemoryAdapter {
                 let body = serde_json::to_value(&body).map_err(wire_err)?;
                 Ok(body["subject"]["status"].as_str() == Some("archived"))
             }
-            SpokeResult::Reject(reject)
-                if self.proves(&reject, &[SpokeRejectCode::NotFound]) =>
-            {
+            SpokeResult::Reject(reject) if self.proves(&reject, &[SpokeRejectCode::NotFound]) => {
                 Ok(false)
             }
             SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
@@ -1117,12 +1200,11 @@ impl MemoryAdapter {
             "subject_id": self.subject_id,
             "profile_kinds": [SOUL_PROFILE_KIND],
         }))?;
-        let body = self.ok(
-            self.binding
-                .port()
-                .get_profile(&self.principal, request)
-                .await,
-        )?;
+        let body = self.ok(self
+            .binding
+            .port()
+            .get_profile(&self.principal, request)
+            .await)?;
         Ok(body["profiles"]
             .as_array()
             .into_iter()
@@ -1149,9 +1231,7 @@ impl MemoryAdapter {
                 .map_err(wire_err)?
                 .get("candidate")
                 .cloned()),
-            SpokeResult::Reject(reject)
-                if self.proves(&reject, &[SpokeRejectCode::NotFound]) =>
-            {
+            SpokeResult::Reject(reject) if self.proves(&reject, &[SpokeRejectCode::NotFound]) => {
                 Ok(None)
             }
             SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
@@ -1408,8 +1488,13 @@ impl MemoryAdapter {
                     review_result_record_ids(&decision, &body, &issued_space, &issued_key)?;
                 // A settlement failure returns an error with the attempt still
                 // in place, so the binding stays protected.
-                self.record_remote_review(attempt.as_deref(), binding_id, candidate_id, &record_ids)
-                    .await?;
+                self.record_remote_review(
+                    attempt.as_deref(),
+                    binding_id,
+                    candidate_id,
+                    &record_ids,
+                )
+                .await?;
                 Ok(())
             }
             SpokeResult::Reject(reject) => {
@@ -1472,12 +1557,11 @@ impl MemoryAdapter {
             "subject_id": self.subject_id,
             "profile_kinds": [profile::SOUL_PROFILE_KIND],
         }))?;
-        let body = self.ok(
-            self.binding
-                .port()
-                .get_profile(&self.principal, request)
-                .await,
-        )?;
+        let body = self.ok(self
+            .binding
+            .port()
+            .get_profile(&self.principal, request)
+            .await)?;
         Ok(body["profiles"]
             .as_array()
             .and_then(|profiles| profiles.first())
@@ -1500,13 +1584,12 @@ impl MemoryAdapter {
             "source_context_ids": [],
             "idempotency_key": idempotency_key,
         }))?;
-        self.ok(
-            self.binding
-                .port()
-                .create_record(&self.principal, request)
-                .await,
-        )
-        .map(|_| ())
+        self.ok(self
+            .binding
+            .port()
+            .create_record(&self.principal, request)
+            .await)
+            .map(|_| ())
     }
 
     /// Replace one Creator record's content on the expected revision.
@@ -1532,18 +1615,15 @@ impl MemoryAdapter {
         }))?;
         if self.is_local() {
             let local = self.binding.local()?;
-            self.ok(
-                local
-                    .update_legacy_record(&self.principal, &self.subject_id, request)
-                    .await,
-            )
+            self.ok(local
+                .update_legacy_record(&self.principal, &self.subject_id, request)
+                .await)
         } else {
-            self.ok(
-                self.binding
-                    .port()
-                    .update_record(&self.principal, request)
-                    .await,
-            )
+            self.ok(self
+                .binding
+                .port()
+                .update_record(&self.principal, request)
+                .await)
         }
         .map(|_| ())
     }
@@ -1566,18 +1646,15 @@ impl MemoryAdapter {
         }))?;
         if self.is_local() {
             let local = self.binding.local()?;
-            self.ok(
-                local
-                    .delete_legacy_record(&self.principal, &self.subject_id, request)
-                    .await,
-            )
+            self.ok(local
+                .delete_legacy_record(&self.principal, &self.subject_id, request)
+                .await)
         } else {
-            self.ok(
-                self.binding
-                    .port()
-                    .delete_record(&self.principal, request)
-                    .await,
-            )
+            self.ok(self
+                .binding
+                .port()
+                .delete_record(&self.principal, request)
+                .await)
         }
         .map(|_| ())
     }
@@ -1624,13 +1701,12 @@ impl MemoryAdapter {
             "document": { "format": "markdown", "body": body },
             "idempotency_key": idempotency_key,
         }))?;
-        self.ok(
-            self.binding
-                .port()
-                .update_profile(&self.principal, request)
-                .await,
-        )
-        .map(|_| ())
+        self.ok(self
+            .binding
+            .port()
+            .update_profile(&self.principal, request)
+            .await)
+            .map(|_| ())
     }
 
     /// One provider record (a projected legacy row included) by id.
@@ -1649,9 +1725,7 @@ impl MemoryAdapter {
                 .map_err(wire_err)?
                 .get("record")
                 .cloned()),
-            SpokeResult::Reject(reject)
-                if self.proves(&reject, &[SpokeRejectCode::NotFound]) =>
-            {
+            SpokeResult::Reject(reject) if self.proves(&reject, &[SpokeRejectCode::NotFound]) => {
                 Ok(None)
             }
             SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
@@ -1694,6 +1768,7 @@ impl MemoryAdapter {
         binding_id: &str,
     ) -> CoreResult<()> {
         let key = idempotency_key("promote", record_id)?;
+        let issued_space = self.binding.space_id().to_string();
         let result = if self.is_local() {
             let local = self.binding.local()?;
             local
@@ -1707,11 +1782,11 @@ impl MemoryAdapter {
                 .await
         } else {
             let request: spoke_schemas::MemoryRecordsPromoteRequest = map_wire(json!({
-                "space_id": self.binding.space_id(),
+                "space_id": &issued_space,
                 "record_id": record_id,
                 "target_scope": { "visibility": "shared" },
                 "expected_revision": expected_revision,
-                "idempotency_key": key,
+                "idempotency_key": &key,
             }))?;
             self.binding
                 .port()
@@ -1722,21 +1797,18 @@ impl MemoryAdapter {
             SpokeResult::Ok(receipt) => {
                 if !self.is_local() {
                     // D18: a promotion to shared releases the record's binding
-                    // dependency; the receipt names the record it promoted.
+                    // dependency. Only a receipt that proves THIS promotion —
+                    // this space, key, record and the requested shared
+                    // placement — may release it; otherwise another live
+                    // record's protection would be cleared (or this record's
+                    // released while its real promotion is unknown), so the
+                    // mismatch returns with the fact untouched.
                     let body = serde_json::to_value(&receipt).map_err(wire_err)?;
-                    let promoted = body
-                        .pointer("/result/record_id")
-                        .and_then(Value::as_str)
-                        .ok_or_else(|| {
-                            internal_err(
-                                "memory_promote_receipt",
-                                "a committed promotion receipt carries no record_id",
-                            )
-                        })?;
+                    let promoted = promote_result_record_id(&body, &issued_space, &key, record_id)?;
                     self.record_remote_object(
                         Some(binding_id),
                         nexus_local_db::RemoteBindingObjectKind::Record,
-                        promoted,
+                        &promoted,
                         nexus_local_db::RemoteBindingObjectState::Released,
                     )
                     .await?;
@@ -1747,9 +1819,7 @@ impl MemoryAdapter {
                 // Only a proven absence takes the retained not-found answer; a
                 // remote `NotFound` with a missing or unknown outcome stays an
                 // honest unknown failure.
-                SpokeRejectCode::NotFound
-                    if self.proves(&reject, &[SpokeRejectCode::NotFound]) =>
-                {
+                SpokeRejectCode::NotFound if self.proves(&reject, &[SpokeRejectCode::NotFound]) => {
                     not_found("character memory fragment", &format!("'{record_id}'"))
                 }
                 // The local provider keeps its trusted message; a remote
@@ -1774,7 +1844,10 @@ impl MemoryAdapter {
         if !self.is_local() {
             return Ok(None);
         }
-        self.binding.local()?.soul_invalidation_binding(record_id).await
+        self.binding
+            .local()?
+            .soul_invalidation_binding(record_id)
+            .await
     }
 
     /// Clear that recovery row once the invalidation ran; a remote binding has
@@ -1783,7 +1856,10 @@ impl MemoryAdapter {
         if !self.is_local() {
             return Ok(());
         }
-        self.binding.local()?.finish_soul_invalidation(record_id).await
+        self.binding
+            .local()?
+            .finish_soul_invalidation(record_id)
+            .await
     }
 }
 
@@ -2384,13 +2460,11 @@ impl CoreService {
             "kind_hint": task_kind_to_memory_kind(&task_kind),
             "idempotency_key": format!("e4capture:{digest}"),
         }))?;
-        memory.ok(
-            memory
-                .binding
-                .port()
-                .capture(&memory.principal, capture)
-                .await,
-        )?;
+        memory.ok(memory
+            .binding
+            .port()
+            .capture(&memory.principal, capture)
+            .await)?;
         map_wire(json!({ "success": true, "pending_id": pending_id }))
     }
 
@@ -2862,8 +2936,11 @@ impl CoreService {
                     .await?;
                 }
                 None => {
-                    if let SpokeResult::Reject(reject) =
-                        memory.binding.port().capture(&memory.principal, capture).await
+                    if let SpokeResult::Reject(reject) = memory
+                        .binding
+                        .port()
+                        .capture(&memory.principal, capture)
+                        .await
                     {
                         return Err(memory.refuse(&reject));
                     }
@@ -2951,21 +3028,19 @@ impl CoreService {
         .map_err(map_local_db_error)?;
         admission.commit().await.map_err(sqlx_internal)?;
 
+        // The committed receipt must identify THIS request: a provider can
+        // answer with an older, still schema-valid receipt whose result belongs
+        // to another key (and another namespace), and publishing its objects
+        // while retiring this admission would leave this capture unprotected.
+        let issued_space = capture.space_id.as_str().to_string();
+        let issued_key = capture.idempotency_key.as_str().to_string();
         match binding.port().capture(&memory.principal, capture).await {
             SpokeResult::Ok(receipt) => {
                 let body = serde_json::to_value(&receipt).map_err(wire_err)?;
-                let candidate_ids: Vec<String> = body
-                    .pointer("/result/candidate_ids")
-                    .and_then(Value::as_array)
-                    .ok_or_else(|| {
-                        internal_err(
-                            "memory_capture_receipt",
-                            "a committed capture receipt carries no candidate_ids",
-                        )
-                    })?
-                    .iter()
-                    .filter_map(|candidate_id| candidate_id.as_str().map(str::to_string))
-                    .collect();
+                // A mismatched receipt returns here with the admission still in
+                // place, so the binding stays unremovable.
+                let candidate_ids =
+                    capture_result_candidate_ids(&body, &issued_space, &issued_key)?;
                 let published_at = now_iso();
                 let mut published = nexus_local_db::begin_immediate(&self.inner.pool)
                     .await
@@ -3035,13 +3110,9 @@ impl CoreService {
         let mut retired = nexus_local_db::begin_immediate(&self.inner.pool)
             .await
             .map_err(map_local_db_error)?;
-        nexus_local_db::retire_remote_binding_admission_tx(
-            &mut retired,
-            admission_id,
-            namespace,
-        )
-        .await
-        .map_err(map_local_db_error)?;
+        nexus_local_db::retire_remote_binding_admission_tx(&mut retired, admission_id, namespace)
+            .await
+            .map_err(map_local_db_error)?;
         retired.commit().await.map_err(sqlx_internal)?;
         Ok(())
     }
@@ -5772,8 +5843,8 @@ mod tests {
         let foreign_subject = legacy::creator_subject_id(FOREIGN_CREATOR);
         // The foreign bearer opt-in subject: capture admits a known subject
         // (the space-wide grant then covers the candidate operation).
-        memory.ok(
-            memory
+        memory
+            .ok(memory
                 .binding
                 .port()
                 .ensure_subject(
@@ -5785,9 +5856,8 @@ mod tests {
                     }))
                     .unwrap(),
                 )
-                .await,
-        )
-        .unwrap();
+                .await)
+            .unwrap();
         let request: spoke_schemas::MemoryCaptureRequest = map_wire(json!({
             "space_id": memory.binding.space_id(),
             "subject_id": foreign_subject,
@@ -5816,8 +5886,8 @@ mod tests {
             matches!(&captured, SpokeResult::Ok(_)),
             "the space grant must admit a foreign-subject capture"
         );
-        let listed = memory.ok(
-            memory
+        let listed = memory
+            .ok(memory
                 .binding
                 .port()
                 .list_candidates(
@@ -5831,9 +5901,8 @@ mod tests {
                     }))
                     .unwrap(),
                 )
-                .await,
-        )
-        .unwrap();
+                .await)
+            .unwrap();
         let foreign = listed["candidates"]
             .as_array()
             .unwrap()

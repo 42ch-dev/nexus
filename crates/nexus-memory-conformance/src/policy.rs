@@ -23,12 +23,12 @@ use crate::candidates::{
 use crate::spaces::{ENGINE_POLICY_VERSION, MAX_PAGE_SIZE};
 
 /// §3: the memory protocol revision this provider speaks.
-pub(crate) const MEMORY_PROTOCOL_VERSION: u64 = 1;
+pub const MEMORY_PROTOCOL_VERSION: u64 = 1;
 
 /// §4.1: the one family this fixture serves. `spoke-memory-reflection` and
 /// `spoke-memory-transfer` are never advertised because no reflection or
 /// transfer operation is served.
-pub(crate) const CAPABILITIES: [&str; 1] = ["spoke-memory"];
+pub const CAPABILITIES: [&str; 1] = ["spoke-memory"];
 
 /// §4.2: authored content kinds this provider requires before generation.
 ///
@@ -68,7 +68,7 @@ fn limits() -> Value {
 }
 
 /// §7.1 `memory.describe` success body.
-pub(crate) fn describe_body() -> Value {
+pub fn describe_body() -> Value {
     json!({
         "memory_protocol_version": non_zero(MEMORY_PROTOCOL_VERSION),
         "capabilities": CAPABILITIES,
@@ -102,7 +102,12 @@ impl PeerDirectory {
     /// A peer maps to one stable principal, so reconnecting or restarting the
     /// transport keeps the same memory identity and therefore the same grants,
     /// receipts and dedup namespace.
-    pub fn with_peer(mut self, peer_id: impl Into<String>, principal_id: impl Into<String>) -> Self {
+    #[must_use]
+    pub fn with_peer(
+        mut self,
+        peer_id: impl Into<String>,
+        principal_id: impl Into<String>,
+    ) -> Self {
         self.principals.insert(peer_id.into(), principal_id.into());
         self
     }
@@ -138,10 +143,12 @@ impl PeerDirectory {
     #[must_use]
     pub fn admission(self: &Arc<Self>) -> MemoryAdmission {
         let directory = Arc::clone(self);
-        Arc::new(move |peer_id: &str| match directory.principal_for(peer_id) {
-            Ok(principal) => SpokeResult::Ok(principal),
-            Err(reject) => SpokeResult::Reject(reject),
-        })
+        Arc::new(
+            move |peer_id: &str| match directory.principal_for(peer_id) {
+                Ok(principal) => SpokeResult::Ok(principal),
+                Err(reject) => SpokeResult::Reject(reject),
+            },
+        )
     }
 }
 

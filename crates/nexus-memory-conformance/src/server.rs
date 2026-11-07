@@ -34,7 +34,6 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Map, Value};
-use sqlx::{Row, SqliteConnection};
 use spoke_connect::remote::{MemoryAdmission, MemoryPortService, RemoteMemoryService};
 use spoke_operations::spoke_schemas::memory_records_create_request::PlacementScope as CreateScope;
 use spoke_operations::spoke_schemas::memory_records_promote_request::PlacementScope as PromoteScope;
@@ -43,15 +42,15 @@ use spoke_operations::spoke_schemas::{
     MemoryCandidatesDismissRequest, MemoryCandidatesDismissResponse, MemoryCandidatesGetRequest,
     MemoryCandidatesGetResponse, MemoryCandidatesListRequest, MemoryCandidatesListResponse,
     MemoryCandidatesReviewRequest, MemoryCandidatesReviewResponse, MemoryCaptureRequest,
-    MemoryCaptureResponse, MemoryDescribeRequest, MemoryDescribeResponse, MemoryExportsCreateRequest,
-    MemoryExportsCreateResponse, MemoryExportsGetRequest, MemoryExportsGetResponse,
-    MemoryGrantsGrantRequest, MemoryGrantsGrantResponse, MemoryGrantsListRequest,
-    MemoryGrantsListResponse, MemoryGrantsRevokeRequest, MemoryGrantsRevokeResponse,
-    MemoryImportsActivateRequest, MemoryImportsActivateResponse, MemoryImportsDiscardRequest,
-    MemoryImportsDiscardResponse, MemoryImportsStageRequest, MemoryImportsStageResponse,
-    MemoryProfileGetRequest, MemoryProfileGetResponse, MemoryProfileUpdateRequest,
-    MemoryProfileUpdateResponse, MemoryReceipt, MemoryReceiptsGetRequest,
-    MemoryReceiptsGetResponse, MemoryRecallRequest, MemoryRecallResponse,
+    MemoryCaptureResponse, MemoryDescribeRequest, MemoryDescribeResponse,
+    MemoryExportsCreateRequest, MemoryExportsCreateResponse, MemoryExportsGetRequest,
+    MemoryExportsGetResponse, MemoryGrant, MemoryGrantsGrantRequest, MemoryGrantsGrantResponse,
+    MemoryGrantsListRequest, MemoryGrantsListResponse, MemoryGrantsRevokeRequest,
+    MemoryGrantsRevokeResponse, MemoryImportsActivateRequest, MemoryImportsActivateResponse,
+    MemoryImportsDiscardRequest, MemoryImportsDiscardResponse, MemoryImportsStageRequest,
+    MemoryImportsStageResponse, MemoryProfileGetRequest, MemoryProfileGetResponse,
+    MemoryProfileUpdateRequest, MemoryProfileUpdateResponse, MemoryRecallRequest,
+    MemoryRecallResponse, MemoryReceipt, MemoryReceiptsGetRequest, MemoryReceiptsGetResponse,
     MemoryRecordsCreateRequest, MemoryRecordsCreateResponse, MemoryRecordsDeleteRequest,
     MemoryRecordsDeleteResponse, MemoryRecordsGetRequest, MemoryRecordsGetResponse,
     MemoryRecordsListRequest, MemoryRecordsListResponse, MemoryRecordsPromoteRequest,
@@ -62,11 +61,12 @@ use spoke_operations::spoke_schemas::{
     MemorySpacesListRequest, MemorySpacesListResponse, MemorySpacesUnfreezeRequest,
     MemorySpacesUnfreezeResponse, MemorySubjectsEnsureRequest, MemorySubjectsEnsureResponse,
     MemorySubjectsFenceRequest, MemorySubjectsFenceResponse, MemorySubjectsGetRequest,
-    MemorySubjectsGetResponse, MemoryGrant, Principal,
+    MemorySubjectsGetResponse, Principal,
 };
 use spoke_operations::{
     grant_covers, GrantRequirement, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult,
 };
+use sqlx::{Row, SqliteConnection};
 
 use crate::candidates::{
     receipt_id, release_expired_binding_in_tx, required_capabilities, resolve_replay,
@@ -75,7 +75,7 @@ use crate::candidates::{
 use crate::policy::describe_body;
 use crate::provider::FixtureMemoryProvider;
 use crate::raw_invoke;
-use crate::spaces::{internal, load_grants};
+use crate::spaces::{internal, internal_failure, load_grants};
 
 impl FixtureMemoryProvider {
     /// The signed Connect memory service for this provider: the unchanged
@@ -105,12 +105,7 @@ struct FixtureMemoryService {
 
 #[async_trait]
 impl RemoteMemoryService for FixtureMemoryService {
-    async fn invoke(
-        &self,
-        peer_id: &str,
-        op: &str,
-        payload: Value,
-    ) -> SpokeResult<Value> {
+    async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
         let scope = match raw_invoke::admission(&payload, op, &self.provider) {
             Ok(scope) => scope,
             // The digest could not be taken over the received object, so no
@@ -137,32 +132,27 @@ impl RemoteMemoryService for FixtureMemoryService {
 fn respond<T: DeserializeOwned>(body: Value) -> SpokeResult<T> {
     match serde_json::from_value(body) {
         Ok(value) => SpokeResult::Ok(value),
-        Err(error) => SpokeResult::Reject(internal(format!(
-            "provider answer is not protocol-shaped: {error}"
-        ))),
+        Err(error) => SpokeResult::Reject(internal_failure(error)),
     }
 }
 
 /// A mutation's wire answer is its content-free receipt (§7.0.2).
-fn respond_receipt<T: DeserializeOwned>(receipt: MemoryReceipt) -> SpokeResult<T> {
-    match serde_json::to_value(&receipt) {
+fn respond_receipt<T: DeserializeOwned>(receipt: &MemoryReceipt) -> SpokeResult<T> {
+    match serde_json::to_value(receipt) {
         Ok(body) => respond(body),
-        Err(error) => SpokeResult::Reject(internal(format!(
-            "staged receipt is not serializable: {error}"
-        ))),
+        Err(error) => SpokeResult::Reject(internal_failure(error)),
     }
 }
 
 /// A commit that failed may still have taken effect (§14.3): the caller cannot
 /// be told whether anything committed, so it is `OUTCOME_UNCERTAIN` — never a
-/// clean `retryable` internal error.
-fn commit_outcome_unknown(error: sqlx::Error) -> SpokeReject {
+/// clean `retryable` internal error, and never a driver message on the wire.
+fn commit_outcome_unknown() -> SpokeReject {
     SpokeReject {
         code: SpokeRejectCode::OutcomeUncertain,
-        message: format!(
-            "the transaction's commit state is unknown; resolve with the same idempotency \
-             key or memory.receipts.get: {error}"
-        ),
+        message: "the transaction's commit state is unknown; resolve with the same idempotency \
+                  key or memory.receipts.get"
+            .to_owned(),
         details: None,
     }
 }
@@ -244,7 +234,13 @@ impl OpTarget {
         context_id: Option<&str>,
     ) -> Self {
         match visibility {
-            "context" => Self::new(capabilities, Some(subject_id), &[context_id.unwrap_or_default()], false, false),
+            "context" => Self::new(
+                capabilities,
+                Some(subject_id),
+                &[context_id.unwrap_or_default()],
+                false,
+                false,
+            ),
             _ => Self::new(capabilities, Some(subject_id), &[], true, false),
         }
     }
@@ -327,6 +323,9 @@ impl PrecheckRefusal {
 }
 
 /// What the replay step decided for this admitted mutation.
+// The replayed receipt is moved once per admitted replay; boxing would add an
+// allocation to the exact-once path clippy's size heuristic wants to shrink.
+#[allow(clippy::large_enum_variant)]
 enum ReplayStep {
     /// No binding, or a stale one already released inside this transaction.
     Execute,
@@ -358,7 +357,7 @@ impl FixtureMemoryProvider {
     /// preconditions; a key whose whole lifetime ended is released inside this
     /// transaction, so a later refusal rolls that release back with it.
     #[allow(clippy::too_many_arguments)]
-    async fn replay_step<Request>(
+    async fn replay_step<Request: Sync>(
         &self,
         conn: &mut SqliteConnection,
         principal_id: &str,
@@ -380,14 +379,8 @@ impl FixtureMemoryProvider {
             // current entity is irrelevant to it and is never re-derived here.
             ReplayResolution::Replayed(receipt) => Ok(ReplayStep::Replayed(receipt)),
             ReplayResolution::KeyReusable { receipt_id } => {
-                release_expired_binding_in_tx(
-                    conn,
-                    space_id,
-                    principal_id,
-                    &mutation,
-                    &receipt_id,
-                )
-                .await?;
+                release_expired_binding_in_tx(conn, space_id, principal_id, &mutation, &receipt_id)
+                    .await?;
                 // A released key is a fresh execution: the current target must
                 // authorize it before the effect.
                 self.require_target_authority(conn, principal_id, space_id, target, refusal, now)
@@ -423,7 +416,7 @@ impl FixtureMemoryProvider {
     /// Stage one committed receipt, its dedup row and its target on the
     /// caller's transaction, so they commit with the effect exactly once.
     #[allow(clippy::too_many_arguments)]
-    async fn stage_committed<Request>(
+    async fn stage_committed<Request: Sync>(
         conn: &mut SqliteConnection,
         space_id: &str,
         principal_id: &str,
@@ -449,14 +442,12 @@ impl FixtureMemoryProvider {
     }
 
     /// Open the one writer transaction a mutation owns.
-    async fn begin_write(
-        &self,
-    ) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, SpokeReject> {
+    async fn begin_write(&self) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, SpokeReject> {
         self.store()
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)
+            .map_err(internal_failure)
     }
 
     /// Content-free placement of one stored record (`subject_id`,
@@ -482,12 +473,12 @@ impl FixtureMemoryProvider {
         .bind(record_id)
         .fetch_optional(conn)
         .await
-        .map_err(internal)?;
+        .map_err(internal_failure)?;
         row.map(|row| {
             Ok((
-                row.try_get("subject_id").map_err(internal)?,
-                row.try_get("scope_visibility").map_err(internal)?,
-                row.try_get("scope_context_id").map_err(internal)?,
+                row.try_get("subject_id").map_err(internal_failure)?,
+                row.try_get("scope_visibility").map_err(internal_failure)?,
+                row.try_get("scope_context_id").map_err(internal_failure)?,
             ))
         })
         .transpose()
@@ -565,7 +556,7 @@ impl MemoryPort for FixtureMemoryProvider {
         {
             Ok(ReplayStep::Replayed(receipt)) => {
                 let _ = transaction.rollback().await;
-                return respond_receipt(receipt);
+                return respond_receipt(&receipt);
             }
             Ok(ReplayStep::Execute) => {}
             Err(reject) => return SpokeResult::Reject(reject),
@@ -598,10 +589,10 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(receipt) => receipt,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(commit_outcome_unknown(error));
+        if transaction.commit().await.is_err() {
+            return SpokeResult::Reject(commit_outcome_unknown());
         }
-        respond_receipt(receipt)
+        respond_receipt(&receipt)
     }
 
     async fn unfreeze_space(
@@ -642,7 +633,7 @@ impl MemoryPort for FixtureMemoryProvider {
         {
             Ok(ReplayStep::Replayed(receipt)) => {
                 let _ = transaction.rollback().await;
-                return respond_receipt(receipt);
+                return respond_receipt(&receipt);
             }
             Ok(ReplayStep::Execute) => {}
             Err(reject) => return SpokeResult::Reject(reject),
@@ -675,10 +666,10 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(receipt) => receipt,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(commit_outcome_unknown(error));
+        if transaction.commit().await.is_err() {
+            return SpokeResult::Reject(commit_outcome_unknown());
         }
-        respond_receipt(receipt)
+        respond_receipt(&receipt)
     }
 
     async fn ensure_subject(
@@ -738,10 +729,10 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(receipt) => receipt,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(commit_outcome_unknown(error));
+        if transaction.commit().await.is_err() {
+            return SpokeResult::Reject(commit_outcome_unknown());
         }
-        respond_receipt(receipt)
+        respond_receipt(&receipt)
     }
 
     async fn get_subject(
@@ -775,9 +766,13 @@ impl MemoryPort for FixtureMemoryProvider {
             (Ok(capabilities), FenceTarget::Subject) => {
                 OpTarget::new(capabilities, Some(&subject_id), &[], false, true)
             }
-            (Ok(capabilities), FenceTarget::Context(context)) => {
-                OpTarget::new(capabilities, Some(&subject_id), &[context.as_str()], false, false)
-            }
+            (Ok(capabilities), FenceTarget::Context(context)) => OpTarget::new(
+                capabilities,
+                Some(&subject_id),
+                &[context.as_str()],
+                false,
+                false,
+            ),
             (Err(reject), _) => return SpokeResult::Reject(reject),
         };
         let admitted = match self.admitted(op, request) {
@@ -809,7 +804,7 @@ impl MemoryPort for FixtureMemoryProvider {
         {
             Ok(ReplayStep::Replayed(receipt)) => {
                 let _ = transaction.rollback().await;
-                return respond_receipt(receipt);
+                return respond_receipt(&receipt);
             }
             Ok(ReplayStep::Execute) => {}
             Err(reject) => return SpokeResult::Reject(reject),
@@ -843,10 +838,10 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(receipt) => receipt,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(commit_outcome_unknown(error));
+        if transaction.commit().await.is_err() {
+            return SpokeResult::Reject(commit_outcome_unknown());
         }
-        respond_receipt(receipt)
+        respond_receipt(&receipt)
     }
 
     async fn list_grants(
@@ -911,7 +906,7 @@ impl MemoryPort for FixtureMemoryProvider {
         {
             Ok(ReplayStep::Replayed(receipt)) => {
                 let _ = transaction.rollback().await;
-                return respond_receipt(receipt);
+                return respond_receipt(&receipt);
             }
             Ok(ReplayStep::Execute) => {}
             Err(reject) => return SpokeResult::Reject(reject),
@@ -943,12 +938,13 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(receipt) => receipt,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(commit_outcome_unknown(error));
+        if transaction.commit().await.is_err() {
+            return SpokeResult::Reject(commit_outcome_unknown());
         }
-        respond_receipt(receipt)
+        respond_receipt(&receipt)
     }
 
+    #[allow(clippy::too_many_lines)] // one linear admission -> replay -> effect -> receipt walk
     async fn revoke_grant(
         &self,
         principal: &Principal,
@@ -1033,7 +1029,7 @@ impl MemoryPort for FixtureMemoryProvider {
         {
             Ok(ReplayStep::Replayed(receipt)) => {
                 let _ = transaction.rollback().await;
-                return respond_receipt(receipt);
+                return respond_receipt(&receipt);
             }
             Ok(ReplayStep::Execute) => {}
             // Only an authorization refusal is translated into the revoke
@@ -1075,10 +1071,10 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(receipt) => receipt,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(commit_outcome_unknown(error));
+        if transaction.commit().await.is_err() {
+            return SpokeResult::Reject(commit_outcome_unknown());
         }
-        respond_receipt(receipt)
+        respond_receipt(&receipt)
     }
 
     async fn capture(
@@ -1091,10 +1087,8 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(admitted) => admitted,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        match FixtureMemoryProvider::capture(self, principal_id(principal), &admitted, Utc::now())
-            .await
-        {
-            Ok(receipt) => respond_receipt(receipt),
+        match Self::capture(self, principal_id(principal), &admitted, Utc::now()).await {
+            Ok(receipt) => respond_receipt(&receipt),
             Err(reject) => SpokeResult::Reject(reject),
         }
     }
@@ -1144,7 +1138,7 @@ impl MemoryPort for FixtureMemoryProvider {
             .candidates_dismiss(principal_id(principal), &admitted, Utc::now())
             .await
         {
-            Ok(receipt) => respond_receipt(receipt),
+            Ok(receipt) => respond_receipt(&receipt),
             Err(reject) => SpokeResult::Reject(reject),
         }
     }
@@ -1167,7 +1161,7 @@ impl MemoryPort for FixtureMemoryProvider {
             .candidates_review(principal_id(principal), &admitted, Utc::now())
             .await
         {
-            Ok(receipt) => respond_receipt(receipt),
+            Ok(receipt) => respond_receipt(&receipt),
             Err(reject) => SpokeResult::Reject(reject),
         }
     }
@@ -1187,12 +1181,9 @@ impl MemoryPort for FixtureMemoryProvider {
             CreateScope::Context(context) => ("context", Some(context.as_str())),
         };
         let target = match capabilities_of(op) {
-            Ok(capabilities) => OpTarget::placement(
-                capabilities,
-                &subject_id,
-                visibility,
-                context_id,
-            ),
+            Ok(capabilities) => {
+                OpTarget::placement(capabilities, &subject_id, visibility, context_id)
+            }
             Err(reject) => return SpokeResult::Reject(reject),
         };
         let admitted = match self.admitted(op, request) {
@@ -1220,7 +1211,7 @@ impl MemoryPort for FixtureMemoryProvider {
         {
             Ok(ReplayStep::Replayed(receipt)) => {
                 let _ = transaction.rollback().await;
-                return respond_receipt(receipt);
+                return respond_receipt(&receipt);
             }
             Ok(ReplayStep::Execute) => {}
             Err(reject) => return SpokeResult::Reject(reject),
@@ -1252,10 +1243,10 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(receipt) => receipt,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(commit_outcome_unknown(error));
+        if transaction.commit().await.is_err() {
+            return SpokeResult::Reject(commit_outcome_unknown());
         }
-        respond_receipt(receipt)
+        respond_receipt(&receipt)
     }
 
     async fn get_record(
@@ -1334,7 +1325,7 @@ impl MemoryPort for FixtureMemoryProvider {
         {
             Ok(ReplayStep::Replayed(receipt)) => {
                 let _ = transaction.rollback().await;
-                return respond_receipt(receipt);
+                return respond_receipt(&receipt);
             }
             Ok(ReplayStep::Execute) => {}
             Err(reject) => return SpokeResult::Reject(reject),
@@ -1366,10 +1357,10 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(receipt) => receipt,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(commit_outcome_unknown(error));
+        if transaction.commit().await.is_err() {
+            return SpokeResult::Reject(commit_outcome_unknown());
         }
-        respond_receipt(receipt)
+        respond_receipt(&receipt)
     }
 
     async fn delete_record(
@@ -1432,7 +1423,7 @@ impl MemoryPort for FixtureMemoryProvider {
         {
             Ok(ReplayStep::Replayed(receipt)) => {
                 let _ = transaction.rollback().await;
-                return respond_receipt(receipt);
+                return respond_receipt(&receipt);
             }
             Ok(ReplayStep::Execute) => {}
             Err(reject) => return SpokeResult::Reject(reject),
@@ -1464,10 +1455,10 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(receipt) => receipt,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(commit_outcome_unknown(error));
+        if transaction.commit().await.is_err() {
+            return SpokeResult::Reject(commit_outcome_unknown());
         }
-        respond_receipt(receipt)
+        respond_receipt(&receipt)
     }
 
     async fn list_records(
@@ -1488,6 +1479,7 @@ impl MemoryPort for FixtureMemoryProvider {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // one linear admission -> replay -> promote -> receipt walk
     async fn promote_record(
         &self,
         principal: &Principal,
@@ -1569,7 +1561,7 @@ impl MemoryPort for FixtureMemoryProvider {
         {
             Ok(ReplayStep::Replayed(receipt)) => {
                 let _ = transaction.rollback().await;
-                return respond_receipt(receipt);
+                return respond_receipt(&receipt);
             }
             Ok(ReplayStep::Execute) => {}
             Err(reject) => return SpokeResult::Reject(reject),
@@ -1602,10 +1594,10 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(receipt) => receipt,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(commit_outcome_unknown(error));
+        if transaction.commit().await.is_err() {
+            return SpokeResult::Reject(commit_outcome_unknown());
         }
-        respond_receipt(receipt)
+        respond_receipt(&receipt)
     }
 
     async fn recall(
@@ -1613,9 +1605,7 @@ impl MemoryPort for FixtureMemoryProvider {
         principal: &Principal,
         request: MemoryRecallRequest,
     ) -> SpokeResult<MemoryRecallResponse> {
-        match FixtureMemoryProvider::recall(self, principal_id(principal), &request, Utc::now())
-            .await
-        {
+        match Self::recall(self, principal_id(principal), &request, Utc::now()).await {
             Ok(page) => respond(json!({
                 "records": page.records,
                 "total_authorized": page.total_authorized,
@@ -1683,7 +1673,7 @@ impl MemoryPort for FixtureMemoryProvider {
         {
             Ok(ReplayStep::Replayed(receipt)) => {
                 let _ = transaction.rollback().await;
-                return respond_receipt(receipt);
+                return respond_receipt(&receipt);
             }
             Ok(ReplayStep::Execute) => {}
             Err(reject) => return SpokeResult::Reject(reject),
@@ -1715,10 +1705,10 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(receipt) => receipt,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(commit_outcome_unknown(error));
+        if transaction.commit().await.is_err() {
+            return SpokeResult::Reject(commit_outcome_unknown());
         }
-        respond_receipt(receipt)
+        respond_receipt(&receipt)
     }
 
     async fn get_reflection_state(
@@ -1945,7 +1935,7 @@ fn grant_facets(grant: &MemoryGrant) -> OpTarget {
 }
 
 impl OpTarget {
-    fn with_capabilities(mut self, capabilities: &'static [&'static str]) -> Self {
+    const fn with_capabilities(mut self, capabilities: &'static [&'static str]) -> Self {
         self.capabilities = capabilities;
         self
     }

@@ -23,24 +23,16 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use base64::Engine as _;
+use ed25519_dalek::{Signer, SigningKey};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
-use ed25519_dalek::{Signer, SigningKey};
 use serde::Serialize;
 use serde_json::{from_value, json, Value};
-use sqlx::sqlite::SqliteConnectOptions;
-use sqlx::{Row, SqlitePool};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
-use tokio::sync::{Mutex as AsyncMutex, Notify};
-use tokio_tungstenite::tungstenite::protocol::{Message, WebSocketConfig};
-use tokio_tungstenite::WebSocketStream;
 use spoke_connect::core::{derive_peer_id_from_ed25519_pubkey, sign_hello_ed25519};
 use spoke_connect::remote::{
-    connect_remote_adapter, connect_responder, ConnectResponder,
-    ConnectResponderOptions, ConnectResponderState, RemoteAdapter, RemoteAdapterOptions,
-    RemoteAdapterError,
-    RemoteIdentity, RemoteServePorts, RemoteServePortsComposite, Transport,
+    connect_remote_adapter, connect_responder, ConnectResponder, ConnectResponderOptions,
+    ConnectResponderState, RemoteAdapter, RemoteAdapterError, RemoteAdapterOptions, RemoteIdentity,
+    RemoteServePorts, RemoteServePortsComposite, Transport,
 };
 use spoke_operations::spoke_schemas::connect::{ConnectHello, ConnectSession};
 use spoke_operations::spoke_schemas::{
@@ -51,7 +43,14 @@ use spoke_operations::{
     jcs_sha256_hex, FindingPort, HostManifestPort, KnowledgeEntryPort, MemoryPort, RelationPort,
     RuleQueryPort, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult,
 };
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{Row, SqlitePool};
 use tempfile::TempDir;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpListener;
+use tokio::sync::{Mutex as AsyncMutex, Notify};
+use tokio_tungstenite::tungstenite::protocol::{Message, WebSocketConfig};
+use tokio_tungstenite::WebSocketStream;
 
 use nexus_memory_conformance::{FaultPoint, FixtureMemoryProvider, PeerDirectory};
 
@@ -337,7 +336,10 @@ enum CleanupFailure {
     /// call disposed nothing, claims nothing, and must not touch the other
     /// caller's ownership.
     GateBusy,
-    HalvesOwned { stream: bool, sink: bool },
+    HalvesOwned {
+        stream: bool,
+        sink: bool,
+    },
     CloseFrame(spoke_connect::remote::TransportError),
 }
 
@@ -380,9 +382,11 @@ fn ws_config() -> WebSocketConfig {
         .max_frame_size(Some(MAX_ENVELOPE_BYTES))
 }
 
-fn map_ws_error(error: tokio_tungstenite::tungstenite::Error) -> spoke_connect::remote::TransportError {
-    use tokio_tungstenite::tungstenite::Error as WsError;
+fn map_ws_error(
+    error: tokio_tungstenite::tungstenite::Error,
+) -> spoke_connect::remote::TransportError {
     use spoke_connect::remote::TransportError;
+    use tokio_tungstenite::tungstenite::Error as WsError;
     match error {
         WsError::ConnectionClosed | WsError::AlreadyClosed => TransportError::Closed,
         WsError::Io(io_error) => TransportError::Io(format!("ws io error: {io_error}")),
@@ -511,8 +515,7 @@ where
                     // Recorded the moment it happens: a partial attempt that
                     // keeps the other half must not erase what the close said.
                     Ok(Err(error)) => {
-                        let mut failure =
-                            self.close_failure.lock().expect("close failure lock");
+                        let mut failure = self.close_failure.lock().expect("close failure lock");
                         if failure.is_none() {
                             *failure = Some(map_ws_error(error));
                         }
@@ -656,7 +659,9 @@ where
     }
 
     async fn close(&self) -> Result<(), spoke_connect::remote::TransportError> {
-        self.release().await.map_err(CleanupFailure::into_transport_error)
+        self.release()
+            .await
+            .map_err(CleanupFailure::into_transport_error)
     }
 }
 
@@ -702,7 +707,10 @@ async fn start_listener(
             .await
             .expect("a client connects to the localhost listener")
             .expect("accept the localhost peer");
-        assert!(peer.ip().is_loopback(), "the listener only serves localhost");
+        assert!(
+            peer.ip().is_loopback(),
+            "the listener only serves localhost"
+        );
         let ws = tokio::time::timeout(
             SETUP_BOUND,
             tokio_tungstenite::accept_async_with_config(tcp, Some(ws_config())),
@@ -796,11 +804,7 @@ async fn observed_connect(
 /// A real peer that completes the WebSocket upgrade and then never reads a
 /// frame, so the dialer's writes hit genuine native backpressure instead of
 /// being drained by a live responder. The returned notify ends it.
-async fn silent_peer_listener() -> (
-    SocketAddr,
-    Arc<Notify>,
-    tokio::task::JoinHandle<()>,
-) {
+async fn silent_peer_listener() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .expect("bind an ephemeral localhost port");
@@ -812,7 +816,10 @@ async fn silent_peer_listener() -> (
             .await
             .expect("the stalled peer is accepted within the bound")
             .expect("accept the stalled peer");
-        assert!(peer.ip().is_loopback(), "the listener only serves localhost");
+        assert!(
+            peer.ip().is_loopback(),
+            "the listener only serves localhost"
+        );
         let ws = tokio::time::timeout(SETUP_BOUND, tokio_tungstenite::accept_async(tcp))
             .await
             .expect("the stalled upgrade is bounded")
@@ -828,11 +835,7 @@ async fn silent_peer_listener() -> (
 /// A peer that reads the session like a real remote: it reports the graceful
 /// close frame and then waits for the connection to end. Used where a test must
 /// observe the peer side of a disposal and does not need backpressure.
-async fn watched_peer_listener() -> (
-    SocketAddr,
-    Arc<Notify>,
-    tokio::task::JoinHandle<()>,
-) {
+async fn watched_peer_listener() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .expect("bind an ephemeral localhost port");
@@ -844,7 +847,10 @@ async fn watched_peer_listener() -> (
             .await
             .expect("the watched peer is accepted within the bound")
             .expect("accept the watched peer");
-        assert!(peer.ip().is_loopback(), "the listener only serves localhost");
+        assert!(
+            peer.ip().is_loopback(),
+            "the listener only serves localhost"
+        );
         let mut ws = tokio::time::timeout(SETUP_BOUND, tokio_tungstenite::accept_async(tcp))
             .await
             .expect("the watched upgrade is bounded")
@@ -863,11 +869,7 @@ async fn watched_peer_listener() -> (
 /// A peer that completes the upgrade, then aborts the connection with a TCP
 /// reset (zero linger) on request, so this end sees a real socket error on its
 /// next read and a real failure writing the close frame afterwards.
-async fn resetting_peer_listener() -> (
-    SocketAddr,
-    Arc<Notify>,
-    tokio::task::JoinHandle<()>,
-) {
+async fn resetting_peer_listener() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .expect("bind an ephemeral localhost port");
@@ -879,7 +881,10 @@ async fn resetting_peer_listener() -> (
             .await
             .expect("the resetting peer is accepted within the bound")
             .expect("accept the resetting peer");
-        assert!(peer.ip().is_loopback(), "the listener only serves localhost");
+        assert!(
+            peer.ip().is_loopback(),
+            "the listener only serves localhost"
+        );
         let ws = tokio::time::timeout(SETUP_BOUND, tokio_tungstenite::accept_async(tcp))
             .await
             .expect("the resetting upgrade is bounded")
@@ -928,9 +933,8 @@ impl Fixture {
             .provision_operator_admin(&principal_id)
             .await
             .expect("operator provisions the first admin");
-        let directory = Arc::new(
-            PeerDirectory::new().with_peer(peer_id(&CLIENT_SEED), principal_id.clone()),
-        );
+        let directory =
+            Arc::new(PeerDirectory::new().with_peer(peer_id(&CLIENT_SEED), principal_id.clone()));
         let provider = Arc::new(provider);
         let (addr, host) =
             start_listener(&provider, &directory, &[CLIENT_SEED], host_budget_ms).await;
@@ -1008,7 +1012,8 @@ impl Fixture {
 
     /// The signed client's receipt view of one mutation answer.
     async fn capture(&self, request: Value) -> Value {
-        let request: MemoryCaptureRequest = serde_json::from_value(request).expect("capture request");
+        let request: MemoryCaptureRequest =
+            serde_json::from_value(request).expect("capture request");
         let response = expect_ok(self.client.capture(&self.principal, request).await);
         wire(&response)
     }
@@ -1186,7 +1191,10 @@ async fn describe_and_unavailable_families_are_honest_over_the_signed_session() 
     let described = wire(&expect_ok(
         fixture
             .client
-            .describe(&fixture.principal, from_value(json!({})).expect("describe request"))
+            .describe(
+                &fixture.principal,
+                from_value(json!({})).expect("describe request"),
+            )
             .await,
     ));
     assert_eq!(described["capabilities"], json!(["spoke-memory"]));
@@ -1200,7 +1208,10 @@ async fn describe_and_unavailable_families_are_honest_over_the_signed_session() 
         "the fixture must not claim the local provider's policy identity"
     );
     assert_eq!(described["memory_protocol_version"], json!(1));
-    assert_eq!(described["limits"]["max_page_size"], json!(100));
+    // The fixture deliberately advertises a narrower page bound than a
+    // typical provider: a consumer must take the bound from `memory.describe`
+    // instead of assuming its own (Core read-path regression, PR #479).
+    assert_eq!(described["limits"]["max_page_size"], json!(25));
     assert_eq!(described["limits"]["max_content_bytes"], json!(65_536));
     assert_eq!(described["limits"]["max_candidates_per_capture"], json!(1));
     assert_eq!(
@@ -1344,7 +1355,11 @@ async fn all_twenty_five_base_operations_reach_the_durable_fixture() {
 
     // 8. memory.capture
     let captured = fixture
-        .capture(fixture.capture_request("cap-1", "The gate key is under the third barrel.", CONTEXT))
+        .capture(fixture.capture_request(
+            "cap-1",
+            "The gate key is under the third barrel.",
+            CONTEXT,
+        ))
         .await;
     assert_eq!(captured["status"], json!("committed"));
     assert_eq!(captured["op"], json!("memory.capture"));
@@ -1352,12 +1367,22 @@ async fn all_twenty_five_base_operations_reach_the_durable_fixture() {
         captured["requester_principal_id"],
         json!(fixture.principal_id)
     );
-    assert_eq!(captured["payload_digest"], json!(digest_of(&fixture.capture_request("cap-1", "The gate key is under the third barrel.", CONTEXT))));
+    assert_eq!(
+        captured["payload_digest"],
+        json!(digest_of(&fixture.capture_request(
+            "cap-1",
+            "The gate key is under the third barrel.",
+            CONTEXT
+        )))
+    );
     let candidate_id = captured["result"]["candidate_ids"][0]
         .as_str()
         .expect("first candidate id")
         .to_owned();
-    let capture_receipt_id = captured["receipt_id"].as_str().expect("receipt id").to_owned();
+    let capture_receipt_id = captured["receipt_id"]
+        .as_str()
+        .expect("receipt id")
+        .to_owned();
 
     // 9. memory.candidates.list
     let candidates_page = wire(&expect_ok(
@@ -1482,8 +1507,12 @@ async fn all_twenty_five_base_operations_reach_the_durable_fixture() {
         client
             .create_record(
                 &principal,
-                from_value(fixture.record_create_request("record-create-1", "Shared field note.", true))
-                    .expect("records.create request"),
+                from_value(fixture.record_create_request(
+                    "record-create-1",
+                    "Shared field note.",
+                    true,
+                ))
+                .expect("records.create request"),
             )
             .await,
     ));
@@ -1598,7 +1627,9 @@ async fn all_twenty_five_base_operations_reach_the_durable_fixture() {
         .filter_map(|record| record["content"]["text"].as_str())
         .collect();
     assert!(
-        recalled_texts.iter().any(|text| text.contains("fourth barrel")),
+        recalled_texts
+            .iter()
+            .any(|text| text.contains("fourth barrel")),
         "recall returns the promoted shared record: {recalled_texts:?}"
     );
     assert_eq!(
@@ -1743,7 +1774,11 @@ async fn all_twenty_five_base_operations_reach_the_durable_fixture() {
     // Replay of the first capture returns the original receipt and no second
     // candidate (MEM-R021), even after every later revision.
     let replayed = fixture
-        .capture(fixture.capture_request("cap-1", "The gate key is under the third barrel.", CONTEXT))
+        .capture(fixture.capture_request(
+            "cap-1",
+            "The gate key is under the third barrel.",
+            CONTEXT,
+        ))
         .await;
     assert_eq!(replayed["receipt_id"], json!(capture_receipt_id));
     assert_eq!(replayed["payload_digest"], captured["payload_digest"]);
@@ -1786,10 +1821,9 @@ async fn admission_is_the_explicit_peer_principal_table_only() {
         None,
     )
     .await;
-    let (unmapped_client, unmapped_client_leg) =
-        dial_localhost(unmapped_addr, UNMAPPED_SEED, None)
-            .await
-            .expect("dial with an allowlisted but unmapped peer");
+    let (unmapped_client, unmapped_client_leg) = dial_localhost(unmapped_addr, UNMAPPED_SEED, None)
+        .await
+        .expect("dial with an allowlisted but unmapped peer");
     let (unmapped_server_leg, unmapped_responder) =
         unmapped_host.await.expect("the localhost host task");
     let unmapped_refusal = expect_reject(
@@ -1922,7 +1956,10 @@ async fn raw_handshake(
     let hello = sign_hello_ed25519(
         &CLIENT_SEED,
         &format!("fixture-raw-nonce-{:x}", next_nonce()),
-        &connect_manifest(&manifest("fixture-conformance-client", &MEMORY_CAPABILITIES)),
+        &connect_manifest(&manifest(
+            "fixture-conformance-client",
+            &MEMORY_CAPABILITIES,
+        )),
         None,
     )
     .expect("sign the initiator hello");
@@ -1930,20 +1967,12 @@ async fn raw_handshake(
         .send(&serde_json::to_vec(&hello).expect("hello bytes"))
         .await
         .expect("hello send");
-    let _responder_hello: ConnectHello = serde_json::from_slice(
-        &client
-            .recv()
-            .await
-            .expect("responder hello"),
-    )
-    .expect("decode the responder hello");
-    let session: ConnectSession = serde_json::from_slice(
-        &client
-            .recv()
-            .await
-            .expect("session snapshot"),
-    )
-    .expect("decode the session snapshot");
+    let _responder_hello: ConnectHello =
+        serde_json::from_slice(&client.recv().await.expect("responder hello"))
+            .expect("decode the responder hello");
+    let session: ConnectSession =
+        serde_json::from_slice(&client.recv().await.expect("session snapshot"))
+            .expect("decode the session snapshot");
     session.session_id.to_string()
 }
 
@@ -1998,7 +2027,15 @@ async fn raw_empty_and_omitted_source_context_ids_conflict_at_the_signed_boundar
     assert_ne!(digest_of(&explicit), digest_of(&omitted));
 
     let receipts_before = fixture.count("receipts").await;
-    let first = raw_invoke(&transport, &session_id, 0, "d15-raw-1", "memory.capture", &explicit).await;
+    let first = raw_invoke(
+        &transport,
+        &session_id,
+        0,
+        "d15-raw-1",
+        "memory.capture",
+        &explicit,
+    )
+    .await;
     let receipt = first.get("payload").expect("committed receipt payload");
     assert_eq!(receipt["status"], json!("committed"));
     assert_eq!(
@@ -2007,7 +2044,15 @@ async fn raw_empty_and_omitted_source_context_ids_conflict_at_the_signed_boundar
         "the receipt binds the digest of the exact received object"
     );
 
-    let second = raw_invoke(&transport, &session_id, 1, "d15-raw-2", "memory.capture", &omitted).await;
+    let second = raw_invoke(
+        &transport,
+        &session_id,
+        1,
+        "d15-raw-2",
+        "memory.capture",
+        &omitted,
+    )
+    .await;
     let error = second.get("error").expect("conflict envelope");
     assert_eq!(error["code"], json!("IDEMPOTENCY_CONFLICT"));
     assert_eq!(error["details"]["retry_class"], json!("terminal"));
@@ -2155,7 +2200,10 @@ async fn retry_classes_and_details_survive_the_signed_boundary() {
     let refusal = expect_reject(
         fixture
             .client
-            .capture(&fixture.principal, from_value(wrong_space).expect("capture"))
+            .capture(
+                &fixture.principal,
+                from_value(wrong_space).expect("capture"),
+            )
             .await,
     );
     assert_eq!(refusal.code, SpokeRejectCode::NotFound);
@@ -2200,7 +2248,10 @@ async fn retry_classes_and_details_survive_the_signed_boundary() {
     // the original receipt is recoverable.
     let post_payload = fixture.capture_request("retry-postcommit", "postcommit proof", CONTEXT);
     let candidates_after_postcommit = {
-        fixture.provider.faults().fail_next(FaultPoint::AfterCommitBeforeResponse);
+        fixture
+            .provider
+            .faults()
+            .fail_next(FaultPoint::AfterCommitBeforeResponse);
         let refusal = expect_reject(
             fixture
                 .client
@@ -2668,10 +2719,7 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
         .expect("the parked receiver is released")
         .expect("the parked receiver task joins");
     assert!(
-        matches!(
-            released,
-            Err(spoke_connect::remote::TransportError::Closed)
-        ),
+        matches!(released, Err(spoke_connect::remote::TransportError::Closed)),
         "a parked recv wakes with Closed, never hangs: {released:?}"
     );
     let sent = tokio::time::timeout(SETUP_BOUND, sender)
@@ -2724,11 +2772,7 @@ async fn cleanup_that_cannot_take_a_half_fails_and_finishes_later() {
     let holder = tokio::spawn({
         let stalled = Arc::clone(&stalled);
         let release = Arc::clone(&release);
-        async move {
-            stalled
-                .hold_stream_until(release, held, owned_after)
-                .await
-        }
+        async move { stalled.hold_stream_until(release, held, owned_after).await }
     });
     held_rx.await.expect("a live owner holds the stream half");
 
@@ -2891,11 +2935,7 @@ async fn partial_cleanup_keeps_the_close_failure_it_observed() {
     let holder = tokio::spawn({
         let stalled = Arc::clone(&stalled);
         let release = Arc::clone(&release);
-        async move {
-            stalled
-                .hold_stream_until(release, held, owned_after)
-                .await
-        }
+        async move { stalled.hold_stream_until(release, held, owned_after).await }
     });
     held_rx.await.expect("a live owner holds the stream half");
 
@@ -2988,8 +3028,7 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
             .with_peer(peer_id(&CLIENT_SEED), fixture.principal_id.clone())
             .with_peer(peer_id(&SCOPED_SEED), scoped_id.clone()),
     );
-    let (addr, host) =
-        start_listener(&fixture.provider, &directory, &[SCOPED_SEED], None).await;
+    let (addr, host) = start_listener(&fixture.provider, &directory, &[SCOPED_SEED], None).await;
     let (scoped, scoped_client_leg) = dial_localhost(addr, SCOPED_SEED, None)
         .await
         .expect("dial the second mapped scoped peer");
@@ -3390,7 +3429,10 @@ async fn revoke_keeps_real_replay_errors_and_unserved_spaces_stay_not_found() {
             )
             .await,
     ));
-    let grant_id = issued["result"]["grant_id"].as_str().expect("grant id").to_owned();
+    let grant_id = issued["result"]["grant_id"]
+        .as_str()
+        .expect("grant id")
+        .to_owned();
     let first = wire(&expect_ok(
         fixture
             .client
@@ -3460,19 +3502,28 @@ async fn revoke_keeps_real_replay_errors_and_unserved_spaces_stay_not_found() {
             "freeze" => expect_reject(
                 fixture
                     .client
-                    .freeze_space(&fixture.principal, from_value(payload).expect("freeze request"))
+                    .freeze_space(
+                        &fixture.principal,
+                        from_value(payload).expect("freeze request"),
+                    )
                     .await,
             ),
             "grant" => expect_reject(
                 fixture
                     .client
-                    .grant(&fixture.principal, from_value(payload).expect("grant request"))
+                    .grant(
+                        &fixture.principal,
+                        from_value(payload).expect("grant request"),
+                    )
                     .await,
             ),
             _ => expect_reject(
                 fixture
                     .client
-                    .update_profile(&fixture.principal, from_value(payload).expect("profile request"))
+                    .update_profile(
+                        &fixture.principal,
+                        from_value(payload).expect("profile request"),
+                    )
                     .await,
             ),
         };
@@ -3608,7 +3659,10 @@ async fn commit_failures_on_all_three_delegated_mutations_are_uncertain() {
     assert_eq!(fixture.count("candidates").await, candidates_before);
     assert_eq!(fixture.count("receipts").await, receipts_before);
     assert_eq!(fixture.count("records").await, 0);
-    assert_eq!(fixture.count("idempotency_namespace").await, namespace_before);
+    assert_eq!(
+        fixture.count("idempotency_namespace").await,
+        namespace_before
+    );
 
     // Same keys recover once the real commit failure is removed — including the
     // exact capture request that failed, with its original key.
@@ -3722,8 +3776,11 @@ async fn recall_counts_the_emitted_numeric_representation() {
     let jcs_size = {
         // What the published canonical helper would budget for the same value.
         let jcs = serde_json::to_string(&json!({ "weight": 1 })).expect("canonical number");
-        emitted - (serde_json::to_string(&json!({ "weight": 1.0 })).expect("emitted number").len()
-            - jcs.len())
+        emitted
+            - (serde_json::to_string(&json!({ "weight": 1.0 }))
+                .expect("emitted number")
+                .len()
+                - jcs.len())
     };
     assert!(jcs_size < emitted, "the numeric spelling really differs");
 

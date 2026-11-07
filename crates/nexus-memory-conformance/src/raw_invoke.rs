@@ -25,9 +25,7 @@
 use std::future::Future;
 
 use serde_json::Value;
-use spoke_operations::{
-    jcs_sha256_hex, SpokeReject, SpokeRejectCode, SpokeResult,
-};
+use spoke_operations::{jcs_sha256_hex, SpokeReject, SpokeRejectCode, SpokeResult};
 
 use crate::candidates::{required_capabilities, Admitted};
 
@@ -38,7 +36,7 @@ tokio::task_local! {
 
 /// Digest and identity of the request object one `invoke` received.
 #[derive(Clone, Debug)]
-pub(crate) struct RequestScope {
+pub struct RequestScope {
     digest: String,
     op: String,
     provider: String,
@@ -49,7 +47,7 @@ pub(crate) struct RequestScope {
 /// The digest is JCS over the received object, taken once, and the object is
 /// left for the caller to move into the service. Read-only ops carry no
 /// receipt and therefore no digest.
-pub(crate) fn admission(
+pub fn admission(
     payload: &Value,
     op: &str,
     provider: &str,
@@ -71,7 +69,7 @@ pub(crate) fn admission(
 }
 
 /// Run `future` with `scope` as the task's admitted request.
-pub(crate) async fn with_scope<F: Future>(scope: RequestScope, future: F) -> F::Output {
+pub async fn with_scope<F: Future>(scope: RequestScope, future: F) -> F::Output {
     REQUEST.scope(scope, future).await
 }
 
@@ -80,7 +78,7 @@ pub(crate) async fn with_scope<F: Future>(scope: RequestScope, future: F) -> F::
 ///
 /// Fails closed: a call with no scope, or with the scope of another op or
 /// another provider, is refused before the caller can touch storage.
-pub(crate) fn admitted<Request>(
+pub fn admitted<Request>(
     op: &str,
     provider: &str,
     request: Request,
@@ -116,7 +114,7 @@ fn scope_missing(op: &str) -> SpokeReject {
 /// Only an explicitly unknown outcome is `uncertain`, and `INTERNAL_ERROR` is
 /// `retryable` only because this provider raises it for failures asserted to
 /// have committed nothing (§14.3 — post-commit loss is `OUTCOME_UNCERTAIN`).
-fn retry_class(code: SpokeRejectCode) -> &'static str {
+const fn retry_class(code: SpokeRejectCode) -> &'static str {
     match code {
         SpokeRejectCode::OutcomeUncertain => "uncertain",
         SpokeRejectCode::InternalError => "retryable",
@@ -131,7 +129,7 @@ fn retry_class(code: SpokeRejectCode) -> &'static str {
 /// producers deliberately carry no envelope class, and the dispatch layer only
 /// classifies its own denials, so the provider's answers reach the wire as
 /// §14.2 envelopes here.
-pub(crate) fn normalize<T>(result: SpokeResult<T>) -> SpokeResult<T> {
+pub fn normalize<T>(result: SpokeResult<T>) -> SpokeResult<T> {
     match result {
         SpokeResult::Reject(mut reject) => {
             let details = reject.details.get_or_insert_with(serde_json::Map::new);
@@ -141,7 +139,7 @@ pub(crate) fn normalize<T>(result: SpokeResult<T>) -> SpokeResult<T> {
             );
             SpokeResult::Reject(reject)
         }
-        ok => ok,
+        ok @ SpokeResult::Ok(_) => ok,
     }
 }
 

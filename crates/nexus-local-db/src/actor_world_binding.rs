@@ -681,6 +681,7 @@ async fn commit_binding_removal(
     }
 }
 
+#[allow(clippy::too_many_lines)] // one linear removal gate: dependencies, terminal clear and row
 async fn remove_binding_tx(
     tx: &mut Transaction<'_, Sqlite>,
     owner_creator_id: &str,

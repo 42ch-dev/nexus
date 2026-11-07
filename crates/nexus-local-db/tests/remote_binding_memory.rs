@@ -282,7 +282,11 @@ async fn acknowledgement_before_publication_cannot_resurrect() {
     .await;
     assert_eq!(
         fact_states(&pool, &seed.binding_id).await,
-        vec![("candidate".to_string(), "cand_acked".to_string(), "released".to_string())],
+        vec![(
+            "candidate".to_string(),
+            "cand_acked".to_string(),
+            "released".to_string()
+        )],
         "the late publication does not downgrade the terminal fact"
     );
     assert_eq!(dependencies(&pool, &seed.binding_id).await, (0, 0));
@@ -442,9 +446,9 @@ async fn late_acknowledgement_cannot_revive_a_deleted_binding() {
 /// never release the other's live dependency.
 #[tokio::test]
 async fn cross_generation_release_cannot_release_another_generation() {
+    const SIGNED_MAX: u64 = i64::MAX as u64;
     let (pool, _dir) = fresh_pool().await;
     let seed = seed(&pool).await;
-    const SIGNED_MAX: u64 = i64::MAX as u64;
     let at_signed_max = namespace_at(&seed, CLIENT, SIGNED_MAX);
     let just_past = namespace_at(&seed, CLIENT, SIGNED_MAX + 1);
     let at_unsigned_max = namespace_at(&seed, CLIENT, u64::MAX);
@@ -504,4 +508,3 @@ async fn cross_generation_release_cannot_release_another_generation() {
         "terminal facts are cleared with the binding"
     );
 }
-
