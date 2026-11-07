@@ -353,6 +353,7 @@ impl Transport for ObservedTransport {
         if first.is_none() {
             *first = Some(envelope.clone());
         }
+        drop(first);
         Ok(envelope)
     }
 
