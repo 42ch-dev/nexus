@@ -407,8 +407,28 @@ async fn foreign_capture_persists_nothing(matrix: &Matrix, resources: &mut Owned
         is_committed(&admitted),
         "the refusal never consumed the original key: {admitted}"
     );
+    let retried = candidate_ids(&admitted);
+    assert_eq!(
+        retried.len(),
+        1,
+        "this deterministic capture produces exactly one candidate: {admitted}"
+    );
+    let retried_id = &retried[0];
+    let pending_page = pending(&admin).await;
+    let retried_row = pending_page["candidates"]
+        .as_array()
+        .expect("pending candidates")
+        .iter()
+        .find(|candidate| candidate["candidate_id"].as_str() == Some(retried_id.as_str()))
+        .unwrap_or_else(|| panic!("the retried candidate is pending: {pending_page}"));
+    assert_eq!(retried_row["status"], json!("pending"));
+    assert_eq!(
+        retried_row["capture_scope"],
+        shared_scope(),
+        "the candidate keeps the requested shared placement"
+    );
     let mut candidates_expected = candidates_before.clone();
-    candidates_expected.extend(candidate_ids(&admitted));
+    candidates_expected.extend(retried);
     assert_eq!(
         sorted(all_candidate_ids(&admin).await),
         sorted(candidates_expected),
@@ -523,8 +543,28 @@ async fn capture_to_fenced_target_has_no_effect(matrix: &Matrix, resources: &mut
         is_committed(&admitted),
         "the fenced refusal never consumed the original key: {admitted}"
     );
+    let retried = candidate_ids(&admitted);
+    assert_eq!(
+        retried.len(),
+        1,
+        "this deterministic capture produces exactly one candidate: {admitted}"
+    );
+    let retried_id = &retried[0];
+    let pending_page = pending(&admin).await;
+    let retried_row = pending_page["candidates"]
+        .as_array()
+        .expect("pending candidates")
+        .iter()
+        .find(|candidate| candidate["candidate_id"].as_str() == Some(retried_id.as_str()))
+        .unwrap_or_else(|| panic!("the retried candidate is pending: {pending_page}"));
+    assert_eq!(retried_row["status"], json!("pending"));
+    assert_eq!(
+        retried_row["capture_scope"],
+        context_scope(CONTEXT),
+        "the candidate keeps the requested context placement"
+    );
     let mut candidates_expected = candidates_before.clone();
-    candidates_expected.extend(candidate_ids(&admitted));
+    candidates_expected.extend(retried);
     assert_eq!(
         sorted(all_candidate_ids(&admin).await),
         sorted(candidates_expected),

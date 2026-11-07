@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
@@ -331,10 +331,11 @@ pub async fn open_endpoint(
 }
 
 /// A real client transport that only forwards to the real `WsTransport` and
-/// records whether an inbound envelope (the signed responder hello) arrived.
+/// retains the first inbound envelope (the signed responder hello) for
+/// independent protocol-level verification.
 struct ObservedTransport {
     inner: Arc<dyn Transport>,
-    received_inbound: Arc<AtomicBool>,
+    first_inbound: Arc<std::sync::Mutex<Option<Vec<u8>>>>,
 }
 
 #[async_trait]
@@ -345,7 +346,13 @@ impl Transport for ObservedTransport {
 
     async fn recv(&self) -> Result<Vec<u8>, TransportError> {
         let envelope = self.inner.recv().await?;
-        self.received_inbound.store(true, Ordering::SeqCst);
+        let mut first = self
+            .first_inbound
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if first.is_none() {
+            *first = Some(envelope.clone());
+        }
         Ok(envelope)
     }
 
@@ -357,7 +364,7 @@ impl Transport for ObservedTransport {
 /// The evidence of one real typed dial attempt that failed.
 struct DialAttemptFailure {
     error: RemoteAdapterError,
-    received_inbound: Arc<AtomicBool>,
+    first_inbound: Arc<std::sync::Mutex<Option<Vec<u8>>>>,
     client_socket: Weak<ObservedTransport>,
 }
 
@@ -381,8 +388,12 @@ impl std::fmt::Debug for DialAttemptFailure {
             .debug_struct("DialAttemptFailure")
             .field("error", &self.error)
             .field(
-                "received_inbound",
-                &self.received_inbound.load(Ordering::SeqCst),
+                "first_inbound_received",
+                &self
+                    .first_inbound
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_some(),
             )
             .finish_non_exhaustive()
     }
@@ -395,8 +406,12 @@ impl EndpointSetupFailure {
     fn is_signed_dial_rejection(&self) -> bool {
         match self {
             Self::Dial { attempt, .. } => {
-                attempt.received_inbound.load(Ordering::SeqCst)
-                    && matches!(attempt.error, RemoteAdapterError::Handshake(_))
+                let received = attempt
+                    .first_inbound
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_some();
+                received && matches!(attempt.error, RemoteAdapterError::Handshake(_))
             }
         }
     }
@@ -544,11 +559,11 @@ async fn dial_expected_endpoint(
     .await
     .expect("the localhost websocket connect is bounded")
     .expect("connect the localhost websocket");
-    let received_inbound = Arc::new(AtomicBool::new(false));
+    let first_inbound = Arc::new(std::sync::Mutex::new(None));
     let inner: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
     let observed = Arc::new(ObservedTransport {
         inner,
-        received_inbound: Arc::clone(&received_inbound),
+        first_inbound: Arc::clone(&first_inbound),
     });
     let client_socket = Arc::downgrade(&observed);
     let expected_peer = derive_peer_id_from_ed25519_pubkey(&expected_host_pubkey);
@@ -566,7 +581,7 @@ async fn dial_expected_endpoint(
         .expect("the signed dial is bounded")
         .map_err(|error| DialAttemptFailure {
             error,
-            received_inbound: Arc::clone(&received_inbound),
+            first_inbound: Arc::clone(&first_inbound),
             client_socket: client_socket.clone(),
         })?;
     Ok((observed as Arc<dyn Transport>, client))
@@ -1813,17 +1828,43 @@ pub async fn prove_failed_endpoint_settles() {
         attempt,
         server_socket,
     } = &failure;
-    assert!(
-        attempt.received_inbound.load(Ordering::SeqCst),
-        "the real responder hello was received before its signature/identity was rejected"
+    let inbound = attempt
+        .first_inbound
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+        .expect("the typed dial received the responder envelope before verification");
+    let hello: ConnectHello = serde_json::from_slice(&inbound)
+        .expect("the observed inbound envelope decodes as a ConnectHello");
+    let host_pubkey = pubkey(&HOST_SEED);
+    let host_peer = peer_id(&HOST_SEED);
+    assert_eq!(
+        hello.peer_id.as_str(),
+        host_peer,
+        "the observed envelope is the real host's responder hello"
     );
+    verify_hello_ed25519(&host_pubkey, &host_peer, &hello, None).expect(
+        "the observed envelope carries a valid signature and identity for the real host key",
+    );
+    let wrong_pubkey = pubkey(&PEER_SEED);
+    let wrong_peer = derive_peer_id_from_ed25519_pubkey(&wrong_pubkey);
+    let rejected = verify_hello_ed25519(&wrong_pubkey, &wrong_peer, &hello, None);
+    assert!(
+        matches!(rejected, Err(CoreError::HandshakeFailed { .. })),
+        "the supplied wrong expected key is rejected by hello verification of the decodable envelope: {rejected:?}"
+    );
+    // The listener settlement above already bounded-awaited responder and
+    // server-transport close and the port release. This poll proves the test's
+    // observed client transport object and the listener-side socket object have
+    // no remaining owners; it does not by itself claim that the SDK's internal
+    // detached teardown task has completed.
     tokio::time::timeout(BOUND, async {
         while attempt.client_socket.upgrade().is_some() || server_socket.upgrade().is_some() {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     })
     .await
-    .expect("both real socket owners are released after the failed signed setup");
+    .expect("no owner of the observed client transport or the listener socket remains");
     drop(service);
     close_fixture_bounded(provider)
         .await
