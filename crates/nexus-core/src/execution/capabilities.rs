@@ -309,10 +309,11 @@ pub async fn execute_tool(
 /// `not_supported` must find it.
 fn err_code(err: &CoreError) -> &str {
     match err {
-        CoreError::Coded { code, .. } | CoreError::PeerDenied { code, .. } => code,
         // A remote memory-provider refusal reports its whitelisted effective
         // memory code, the same classification the caller receives.
-        CoreError::MemoryProviderRefused { code, .. } => code,
+        CoreError::Coded { code, .. }
+        | CoreError::PeerDenied { code, .. }
+        | CoreError::MemoryProviderRefused { code, .. } => code,
         CoreError::Forbidden { .. } | CoreError::WorldOwnerDenied { .. } => "forbidden",
         CoreError::NotFound { .. } => "not_found",
         CoreError::InvalidInput { .. } => "invalid_input",

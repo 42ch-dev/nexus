@@ -19,7 +19,7 @@ pub const MAX_CREDENTIAL_FILE_BYTES: u64 = 16 * 1024;
 /// Coded refusal category for every credential-file failure (§3.1). Shared with
 /// the remote dial, which refuses a proof that does not decode through the
 /// published type under the same category.
-pub(crate) const CREDENTIAL_INVALID_CODE: &str = "memory_credential_invalid";
+pub const CREDENTIAL_INVALID_CODE: &str = "memory_credential_invalid";
 
 /// File shape, verbatim from §3.1. Unknown keys are refused so an ambiguous
 /// document is never half-interpreted.
@@ -51,7 +51,9 @@ impl MemoryCredential {
     /// permissions, size or document shape is unacceptable.
     pub fn load(user_home: &Path, credential_id: &str) -> CoreResult<Self> {
         if !is_valid_credential_id(credential_id) {
-            return Err(invalid("credential_id must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}"));
+            return Err(invalid(
+                "credential_id must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}",
+            ));
         }
         let path = credential_file_path(user_home, credential_id);
         let bytes = read_protected_file(&path)?;
@@ -73,13 +75,13 @@ impl MemoryCredential {
 
     /// Raw Ed25519 seed for the remote identity.
     #[allow(dead_code)] // consumed by the remote dial path (dependent plan)
-    pub(crate) fn identity_seed(&self) -> &[u8; 32] {
+    pub(crate) const fn identity_seed(&self) -> &[u8; 32] {
         &self.identity_seed
     }
 
     /// Optional capability-token proof for outbound invokes.
     #[allow(dead_code)] // consumed by the remote dial path (dependent plan)
-    pub(crate) fn capability_token(&self) -> Option<&serde_json::Value> {
+    pub(crate) const fn capability_token(&self) -> Option<&serde_json::Value> {
         self.capability_token.as_ref()
     }
 }
@@ -187,16 +189,21 @@ fn parse_seed(identity_seed_hex: &str) -> CoreResult<[u8; 32]> {
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     {
-        return Err(invalid("identity_seed_hex must be 64 lowercase hex characters"));
+        return Err(invalid(
+            "identity_seed_hex must be 64 lowercase hex characters",
+        ));
     }
     let mut seed = [0_u8; 32];
-    for (slot, pair) in seed.iter_mut().zip(identity_seed_hex.as_bytes().chunks_exact(2)) {
+    for (slot, pair) in seed
+        .iter_mut()
+        .zip(identity_seed_hex.as_bytes().as_chunks::<2>().0)
+    {
         *slot = (hex_digit(pair[0]) << 4) | hex_digit(pair[1]);
     }
     Ok(seed)
 }
 
-fn hex_digit(byte: u8) -> u8 {
+const fn hex_digit(byte: u8) -> u8 {
     match byte {
         b'0'..=b'9' => byte - b'0',
         b'a'..=b'f' => byte - b'a' + 10,

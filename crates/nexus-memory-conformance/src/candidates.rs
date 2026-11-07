@@ -776,10 +776,10 @@ async fn fetch_receipt_target(
         let subject_all: i64 = row.try_get("subject_all").map_err(internal_failure)?;
         Ok(ReceiptTarget {
             capabilities: serde_json::from_str(&capabilities)
-                .map_err(|error| internal_failure(error))?,
+                .map_err(internal_failure)?,
             subject_id: row.try_get("subject_id").map_err(internal_failure)?,
             context_ids: serde_json::from_str(&context_ids)
-                .map_err(|error| internal_failure(error))?,
+                .map_err(internal_failure)?,
             reads_shared: reads_shared != 0,
             subject_all: subject_all != 0,
         })
@@ -2596,7 +2596,7 @@ impl FixtureMemoryProvider {
                     Some(overridden) => (
                         "decision.content_override",
                         serde_json::to_value(overridden)
-                            .map_err(|error| internal_failure(error))?,
+                            .map_err(internal_failure)?,
                     ),
                     None => (
                         "content",
@@ -2617,7 +2617,7 @@ impl FixtureMemoryProvider {
                 let mut planned = Vec::with_capacity(fragments.len());
                 for (index, fragment) in fragments.iter().enumerate() {
                     let content = serde_json::to_value(&fragment.content)
-                        .map_err(|error| internal_failure(error))?;
+                        .map_err(internal_failure)?;
                     planned.push((
                         format!("decision.fragments[{index}].content"),
                         fragment.kind.as_str().to_owned(),

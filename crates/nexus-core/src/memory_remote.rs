@@ -76,7 +76,7 @@ const AUTHORITY_REFUSED: &str = "memory_remote_authority";
 /// `memory_remote_authority` (the space authority is not the authenticated
 /// host). The partially opened session is closed before returning, and no
 /// local provider is constructed or substituted.
-pub(crate) async fn open_remote_binding(
+pub async fn open_remote_binding(
     user_home: &Path,
     selection: &RemoteMemoryProviderSelection,
     access: CoreAccess,
@@ -181,7 +181,7 @@ pub(crate) async fn open_remote_binding(
 struct UndeliveredSession(Option<Arc<RemoteAdapter>>);
 
 impl UndeliveredSession {
-    fn new(adapter: Arc<RemoteAdapter>) -> Self {
+    const fn new(adapter: Arc<RemoteAdapter>) -> Self {
         Self(Some(adapter))
     }
 
@@ -419,7 +419,7 @@ fn decode_pubkey_hex(text: &str) -> CoreResult<[u8; 32]> {
         return Err(invalid_pubkey());
     }
     let mut pubkey = [0_u8; 32];
-    for (slot, pair) in pubkey.iter_mut().zip(text.as_bytes().chunks_exact(2)) {
+    for (slot, pair) in pubkey.iter_mut().zip(text.as_bytes().as_chunks::<2>().0) {
         let high = hex_value(pair[0]).ok_or_else(invalid_pubkey)?;
         let low = hex_value(pair[1]).ok_or_else(invalid_pubkey)?;
         *slot = (high << 4) | low;

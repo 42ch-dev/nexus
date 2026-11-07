@@ -103,7 +103,7 @@ fn map_ws_error(error: WsError) -> TransportError {
 /// Only these conditions are "already closed"; every other write failure (TLS,
 /// protocol, capacity, permission or arbitrary I/O) is a real close error that
 /// must be surfaced instead of being reported as a clean close.
-fn is_peer_gone(kind: ErrorKind) -> bool {
+const fn is_peer_gone(kind: ErrorKind) -> bool {
     matches!(
         kind,
         ErrorKind::ConnectionReset
@@ -121,9 +121,10 @@ fn is_peer_gone(kind: ErrorKind) -> bool {
 /// terminal error and is surfaced.
 fn close_frame_outcome(error: WsError) -> Result<(), TransportError> {
     match error {
-        WsError::ConnectionClosed | WsError::AlreadyClosed => Ok(()),
         WsError::Io(io_error) if is_peer_gone(io_error.kind()) => Ok(()),
-        WsError::Protocol(
+        WsError::ConnectionClosed
+        | WsError::AlreadyClosed
+        | WsError::Protocol(
             tokio_tungstenite::tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
         ) => Ok(()),
         other => Err(map_ws_error(other)),
@@ -315,6 +316,7 @@ impl<S> Transport for WsTransport<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
+    #[allow(clippy::significant_drop_tightening)] // the sink guard spans one poll, never an await
     async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
         // Serialise whole sends without owning a physical half, and never wait
         // on that serialisation past a close.
@@ -342,7 +344,10 @@ where
                 let waker = Waker::from(Arc::clone(&self.io_wake));
                 let mut context = Context::from_waker(&waker);
                 let mut pinned = Pin::new(sink);
-                if !staged {
+                // Named positively: the already-staged path below is the
+                // exceptional one, and the comment reads top-down.
+                let unstaged = !staged;
+                if unstaged {
                     match pinned.as_mut().poll_ready(&mut context) {
                         Poll::Ready(Ok(())) => {
                             let message = message.take().expect("one message per send");
@@ -367,6 +372,7 @@ where
         }
     }
 
+    #[allow(clippy::significant_drop_tightening)] // the stream guard spans one poll, never an await
     async fn recv(&self) -> Result<Vec<u8>, TransportError> {
         // Serialise whole receives without owning a physical half, and never
         // wait on that serialisation past a close.
@@ -403,7 +409,7 @@ where
                 // (auto-pong); a close frame surfaces as stream end → Closed.
                 Poll::Ready(Some(Ok(
                     Message::Ping(_) | Message::Pong(_) | Message::Close(_) | Message::Frame(_),
-                ))) => continue,
+                ))) => {}
                 Poll::Ready(Some(Err(error))) => {
                     // Session poisoned (e.g. inbound envelope over the 2 MiB
                     // cap ⇒ tungstenite Capacity): fail-closed — no further
@@ -439,7 +445,11 @@ where
         self.closed.store(true, Ordering::SeqCst);
         self.closed_signal.notify_waiters();
         self.io_wake.notify.notify_waiters();
-        let mut state = self.teardown.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self
+            .teardown
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         if !matches!(*state, TeardownState::Idle) {
             return;
         }
@@ -475,7 +485,11 @@ where
             tokio::pin!(notified);
             notified.as_mut().enable();
             {
-                let state = self.teardown.state.lock().unwrap_or_else(PoisonError::into_inner);
+                let state = self
+                    .teardown
+                    .state
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
                 if let TeardownState::Settled(outcome) = &*state {
                     return outcome.clone();
                 }

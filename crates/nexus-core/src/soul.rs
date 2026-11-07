@@ -921,7 +921,7 @@ impl CoreCharacterMind {
     /// provider binding (the provider-host composition and the test seam).
     #[cfg(any(feature = "provider-host", feature = "test-hooks"))]
     #[must_use]
-    pub(crate) fn new(pool: SqlitePool, memory: Arc<MemoryProviderBinding>) -> Self {
+    pub(crate) const fn new(pool: SqlitePool, memory: Arc<MemoryProviderBinding>) -> Self {
         Self { pool, memory }
     }
 

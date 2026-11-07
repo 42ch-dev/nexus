@@ -19,7 +19,7 @@ use crate::memory_provider::{LocalMemoryProvider, LOCAL_AUTHORITY_HOST_ID};
 const LOCAL_AUTHORITY_GENERATION: NonZeroU64 = NonZeroU64::MIN;
 
 /// The single provider authority one `CoreService` open serves memory from.
-pub(crate) struct MemoryProviderBinding {
+pub struct MemoryProviderBinding {
     port: Arc<dyn MemoryPort + Send + Sync>,
     local: Option<Arc<LocalMemoryProvider>>,
     /// The established Connect session a remote binding serves through
@@ -144,13 +144,13 @@ impl MemoryProviderBinding {
     /// nothing. Use [`Self::local`] only where a local-only path actually needs
     /// the provider handle.
     #[must_use]
-    pub(crate) fn is_local(&self) -> bool {
+    pub(crate) const fn is_local(&self) -> bool {
         self.local.is_some()
     }
 
     /// Whether this open may mutate provider state.
     #[must_use]
-    pub(crate) fn is_writable(&self) -> bool {
+    pub(crate) const fn is_writable(&self) -> bool {
         self.writable
     }
 

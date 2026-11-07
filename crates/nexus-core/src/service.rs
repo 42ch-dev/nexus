@@ -266,16 +266,14 @@ impl CoreService {
         creator_id: &str,
         workspace_slug: &str,
     ) -> CoreResult<Arc<MemoryProviderBinding>> {
-        let selection = match &options.memory {
-            Some(selection) => selection.clone(),
-            None => {
-                let config = read_memory_provider_config(nexus_home).map_err(|error| {
-                    CoreError::Internal {
-                        category: format!("config_load: {error}"),
-                    }
+        let selection = if let Some(selection) = &options.memory {
+            selection.clone()
+        } else {
+            let config =
+                read_memory_provider_config(nexus_home).map_err(|error| CoreError::Internal {
+                    category: format!("config_load: {error}"),
                 })?;
-                MemoryProviderSelection::from_config(config)?
-            }
+            MemoryProviderSelection::from_config(config)?
         };
         selection.validate()?;
         match selection {
@@ -290,7 +288,9 @@ impl CoreService {
                         LocalMemoryProvider::open(user_home, creator_id, workspace_slug).await?
                     }
                 };
-                Ok(Arc::new(MemoryProviderBinding::pin_local(Arc::new(provider))))
+                Ok(Arc::new(MemoryProviderBinding::pin_local(Arc::new(
+                    provider,
+                ))))
             }
             MemoryProviderSelection::Remote(selection) => {
                 // Feature off: the static `memory_remote_disabled` refusal IS
@@ -322,6 +322,7 @@ impl CoreService {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // one linear open: home, config, fences, pool, binding
     async fn open_impl(options: CoreOpenOptions, expected: Option<&Path>) -> CoreResult<Self> {
         let nexus_home = nexus_home_layout::nexus_root_from_home(&options.user_home);
         let cfg = CliConfigSnapshot::load(&nexus_home).map_err(|e| CoreError::Internal {
@@ -397,29 +398,25 @@ impl CoreService {
         // admissions THIS open took — the same two halves the close drain
         // gives up — so the next open can acquire them instead of joining a
         // half-open service.
-        let memory = match Self::pin_memory_provider(
-            &options,
-            &nexus_home,
-            &creator_id,
-            &workspace_slug,
-        )
-        .await
-        {
-            Ok(binding) => Some(binding),
-            Err(error) => {
-                pool.close().await;
-                // Give up THIS open's claim only: the retained entry (and the
-                // OS admission behind it) survives while another open still
-                // serves it, so a creator's failed pin can never evict a
-                // successful concurrent joiner. The pool above is already
-                // closed, so this claim is the only one this handle holds.
-                if let Some(guarded) = guarded.as_ref() {
-                    guarded.release_retained_admission();
+        let memory =
+            match Self::pin_memory_provider(&options, &nexus_home, &creator_id, &workspace_slug)
+                .await
+            {
+                Ok(binding) => Some(binding),
+                Err(error) => {
+                    pool.close().await;
+                    // Give up THIS open's claim only: the retained entry (and the
+                    // OS admission behind it) survives while another open still
+                    // serves it, so a creator's failed pin can never evict a
+                    // successful concurrent joiner. The pool above is already
+                    // closed, so this claim is the only one this handle holds.
+                    if let Some(guarded) = guarded.as_ref() {
+                        guarded.release_retained_admission();
+                    }
+                    drop(guarded);
+                    return Err(error);
                 }
-                drop(guarded);
-                return Err(error);
-            }
-        };
+            };
 
         Ok(Self {
             inner: Arc::new(CoreInner {
@@ -901,12 +898,12 @@ async fn close_drain(inner: Arc<CoreInner>) {
     // released. When this was the last claim the entry is gone, so a later
     // open takes a new admission (a new epoch) instead of joining a settled
     // generation.
-    if let Some(guarded) = inner
+    let guarded = inner
         .guarded
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .take()
-    {
+        .take();
+    if let Some(guarded) = guarded {
         guarded.release_retained_admission();
     }
     // `take` returned the handle, so ownership is settled; release the
