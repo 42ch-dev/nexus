@@ -2464,8 +2464,6 @@ mod tests {
             .await
             .expect("authored profile");
 
-        // Both raw baselines are sampled before the first recall and profile
-        // read, so a read that rewrote the stored bytes would still be caught.
         let record_before = scenario.raw_record("rec_captured").await;
         let profile_before = scenario
             .raw_profile("personality")
