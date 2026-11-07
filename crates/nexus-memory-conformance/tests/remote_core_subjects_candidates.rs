@@ -142,6 +142,8 @@ const MEMORY_CAPABILITIES: [&str; 1] = ["spoke-memory"];
 const WORKSPACE: &str = "default";
 const CREDENTIAL_ID: &str = "cred-r2-subjects";
 const BOUND: Duration = Duration::from_secs(5);
+// Core opens its local database admission before dialing, outside the protocol deadline.
+const SETUP_BOUND: Duration = Duration::from_secs(30);
 /// A digest the deterministic classifier drops: shorter than its 50-character
 /// minimum, so the drain issues a legitimate `drop` decision.
 const DROP_DIGEST: &str = "short note";
@@ -294,7 +296,7 @@ async fn start_listener(
         .expect("bind an ephemeral localhost port");
     let addr = listener.local_addr().expect("listener address");
     let task = tokio::spawn(async move {
-        let (tcp, peer) = tokio::time::timeout(BOUND, listener.accept())
+        let (tcp, peer) = tokio::time::timeout(SETUP_BOUND, listener.accept())
             .await
             .expect("the client connects to the listener")
             .expect("accept the localhost peer");
