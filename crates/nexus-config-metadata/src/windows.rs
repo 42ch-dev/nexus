@@ -18,12 +18,12 @@ use std::ptr;
 use windows_sys::Win32::Foundation::{GENERIC_WRITE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Security::Authorization::{SetSecurityInfo, SE_FILE_OBJECT};
 use windows_sys::Win32::Security::{
-    GetFileSecurityW, GetSecurityDescriptorControl, GetSecurityDescriptorDacl,
-    GetSecurityDescriptorGroup, GetSecurityDescriptorOwner, GetSecurityDescriptorSacl, ACL,
-    ATTRIBUTE_SECURITY_INFORMATION, DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION,
-    LABEL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, SCOPE_SECURITY_INFORMATION, SE_DACL_PROTECTED,
-    UNPROTECTED_DACL_SECURITY_INFORMATION,
+    AclSizeInformation, GetAclInformation, GetFileSecurityW, GetSecurityDescriptorControl,
+    GetSecurityDescriptorDacl, GetSecurityDescriptorGroup, GetSecurityDescriptorOwner,
+    GetSecurityDescriptorSacl, ACL, ACL_SIZE_INFORMATION, ATTRIBUTE_SECURITY_INFORMATION,
+    DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, LABEL_SECURITY_INFORMATION,
+    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SCOPE_SECURITY_INFORMATION, SE_DACL_PROTECTED, UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, CREATE_NEW,
@@ -57,7 +57,7 @@ pub fn capture(target: &Path) -> io::Result<WindowsPolicy> {
             CAPTURE_INFORMATION,
             ptr::null_mut(),
             0,
-            &mut needed,
+            &raw mut needed,
         );
     }
     if needed == 0 {
@@ -77,7 +77,7 @@ pub fn capture(target: &Path) -> io::Result<WindowsPolicy> {
             CAPTURE_INFORMATION,
             descriptor.as_mut_ptr().cast(),
             length,
-            &mut needed,
+            &raw mut needed,
         )
     };
     if written == 0 {
@@ -93,17 +93,32 @@ pub fn capture(target: &Path) -> io::Result<WindowsPolicy> {
     let read = unsafe {
         GetSecurityDescriptorSacl(
             descriptor_pointer,
-            &mut sacl_present,
-            &mut sacl,
-            &mut defaulted,
+            &raw mut sacl_present,
+            &raw mut sacl,
+            &raw mut defaulted,
         )
     };
     if read == 0 {
         return Err(io::Error::last_os_error());
     }
     if sacl_present != 0 && !sacl.is_null() {
-        // SAFETY: `sacl` points inside the captured descriptor.
-        if unsafe { (*sacl).AceCount } > 0 {
+        let mut information = ACL_SIZE_INFORMATION::default();
+        let information_size = u32::try_from(std::mem::size_of::<ACL_SIZE_INFORMATION>())
+            .expect("ACL_SIZE_INFORMATION fits in a Win32 buffer");
+        // SAFETY: the non-null SACL was returned from the live descriptor;
+        // the aligned output buffer holds the requested information class.
+        let queried = unsafe {
+            GetAclInformation(
+                sacl,
+                (&raw mut information).cast(),
+                information_size,
+                AclSizeInformation,
+            )
+        };
+        if queried == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if information.AceCount > 0 {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "refusing to replace a document whose mandatory label, resource \
@@ -128,15 +143,15 @@ pub fn apply(policy: &WindowsPolicy, file: &File) -> io::Result<()> {
     // SAFETY: every pointer comes from the captured self-relative descriptor,
     // which stays alive for this call, and the out-parameters are valid locals.
     let read = unsafe {
-        GetSecurityDescriptorOwner(descriptor_pointer, &mut owner, &mut defaulted)
-            & GetSecurityDescriptorGroup(descriptor_pointer, &mut group, &mut defaulted)
+        GetSecurityDescriptorOwner(descriptor_pointer, &raw mut owner, &raw mut defaulted)
+            & GetSecurityDescriptorGroup(descriptor_pointer, &raw mut group, &raw mut defaulted)
             & GetSecurityDescriptorDacl(
                 descriptor_pointer,
-                &mut dacl_present,
-                &mut dacl,
-                &mut defaulted,
+                &raw mut dacl_present,
+                &raw mut dacl,
+                &raw mut defaulted,
             )
-            & GetSecurityDescriptorControl(descriptor_pointer, &mut control, &mut revision)
+            & GetSecurityDescriptorControl(descriptor_pointer, &raw mut control, &raw mut revision)
     };
     if read == 0 {
         return Err(io::Error::last_os_error());
@@ -186,7 +201,7 @@ pub fn link_count(target: &Path) -> io::Result<u64> {
     let mut information: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
     // SAFETY: the handle is owned by `file` and the out-structure is a valid
     // local for the call.
-    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) };
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut information) };
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }
