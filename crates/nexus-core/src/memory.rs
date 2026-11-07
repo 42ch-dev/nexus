@@ -5769,16 +5769,10 @@ mod tests {
         );
     }
 
-    /// I-000197 (Task 4 fix 3): the retained `pending_id` addresses a candidate
-    /// by the bridge's deterministic (opaque) id, and the provider authorizes a
-    /// candidate operation by grant coverage — the bootstrapped space-wide
-    /// `admin` grant satisfies it for **any** subject. The shared dismissal
-    /// therefore verifies the fetched candidate against the adapter's subject
-    /// and the requested retained pending id before the CAS: a candidate that
-    /// shares the id but names another bearer, or another pending row, is
-    /// refused without mutation, while the matched row still dismisses.
-    #[tokio::test]
-    async fn opaque_bridge_id_cannot_dismiss_another_bearers_candidate() {
+    /// Boot an `EngineOwner` core over a workspace whose state DB carries the
+    /// creator row; the home, service and principal stay owned by the caller so
+    /// the adapter's writer admission outlives every probe.
+    async fn boot_owner_core() -> (TempDir, CoreService, Principal) {
         let tmp = TempDir::new().unwrap();
         let user_home = tmp.path().to_path_buf();
         let nexus_home = user_home.join(".nexus42");
@@ -5819,27 +5813,15 @@ mod tests {
         .await
         .unwrap();
         let principal = core.active_principal().await.unwrap();
-        core.create_pending_review(
-            &principal,
-            capture(
-                "pend_identity_own",
-                "The chapter pivots from betrayal to alliance.",
-            ),
-        )
-        .await
-        .unwrap();
-        let memory = core.creator_memory(&principal).await.unwrap();
-        let own = memory
-            .pending_rows()
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|row| row.pending_id == "pend_identity_own")
-            .expect("the capture is queued under the creator subject");
+        (tmp, core, principal)
+    }
 
+    /// Capture a candidate under a second bearer's subject through the shared
+    /// space grant and return the provider candidate id addressing it.
+    async fn foreign_candidate(memory: &MemoryAdapter) -> String {
+        const FOREIGN_CREATOR: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         // The same opaque id can address another bearer's candidate; the row is
         // shared-scope, so the space-wide grant admits the capture and the read.
-        const FOREIGN_CREATOR: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         let foreign_subject = legacy::creator_subject_id(FOREIGN_CREATOR);
         // The foreign bearer opt-in subject: capture admits a known subject
         // (the space-wide grant then covers the candidate operation).
@@ -5913,7 +5895,39 @@ mod tests {
             })
             .cloned()
             .expect("the foreign capture is listed under its own subject");
-        let foreign_candidate_id = foreign["candidate_id"].as_str().unwrap().to_string();
+        foreign["candidate_id"].as_str().unwrap().to_string()
+    }
+
+    /// I-000197 (Task 4 fix 3): the retained `pending_id` addresses a candidate
+    /// by the bridge's deterministic (opaque) id, and the provider authorizes a
+    /// candidate operation by grant coverage — the bootstrapped space-wide
+    /// `admin` grant satisfies it for **any** subject. The shared dismissal
+    /// therefore verifies the fetched candidate against the adapter's subject
+    /// and the requested retained pending id before the CAS: a candidate that
+    /// shares the id but names another bearer, or another pending row, is
+    /// refused without mutation, while the matched row still dismisses.
+    #[tokio::test]
+    async fn opaque_bridge_id_cannot_dismiss_another_bearers_candidate() {
+        let (_home, core, principal) = boot_owner_core().await;
+        core.create_pending_review(
+            &principal,
+            capture(
+                "pend_identity_own",
+                "The chapter pivots from betrayal to alliance.",
+            ),
+        )
+        .await
+        .unwrap();
+        let memory = core.creator_memory(&principal).await.unwrap();
+        let own = memory
+            .pending_rows()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.pending_id == "pend_identity_own")
+            .expect("the capture is queued under the creator subject");
+
+        let foreign_candidate_id = foreign_candidate(&memory).await;
 
         // Another bearer's candidate under the opaque id: refused before the
         // CAS even though the provider grant allows the operation there.
@@ -6372,6 +6386,33 @@ mod tests {
         )));
     }
 
+    /// The classification one hostile rejection carries: the five fields each
+    /// case below asserts, read from the retained structured carrier.
+    fn refusal_fields(
+        code: SpokeRejectCode,
+        retry_class: Option<&str>,
+        wire_code: Option<&str>,
+    ) -> (
+        String,
+        Option<String>,
+        String,
+        MemoryProviderRefusal,
+        Option<String>,
+    ) {
+        let error = remote_refusal(&hostile_reject(code, retry_class, wire_code));
+        let CoreError::MemoryProviderRefused {
+            code,
+            wire_code,
+            retry_class,
+            family,
+            conflict_code,
+        } = error
+        else {
+            panic!("a remote refusal keeps its structured carrier: {error:?}");
+        };
+        (code, wire_code, retry_class, family, conflict_code)
+    }
+
     /// I-000202/I-000204: the safe carrier keeps the effective classification,
     /// the retained conflict code for a proven stale-revision conflict, and no
     /// peer-controlled text.
@@ -6379,92 +6420,52 @@ mod tests {
     fn remote_refusal_keeps_classification_and_drops_peer_text() {
         // An internal failure beside a contradictory `terminal` class is still
         // an unknown outcome, never a definite failure.
-        let error = remote_refusal(&hostile_reject(
+        let (code, wire_code, retry_class, family, conflict_code) = refusal_fields(
             SpokeRejectCode::InternalError,
             Some("terminal"),
             Some("INTERNAL_ERROR"),
-        ));
-        let CoreError::MemoryProviderRefused {
-            code,
-            wire_code,
-            retry_class,
-            family,
-            conflict_code,
-        } = &error
-        else {
-            panic!("a remote refusal keeps its structured carrier: {error:?}");
-        };
+        );
         assert_eq!(code, "INTERNAL_ERROR");
         assert_eq!(retry_class, "uncertain");
         assert_eq!(wire_code.as_deref(), Some("INTERNAL_ERROR"));
-        assert_eq!(*family, MemoryProviderRefusal::Unavailable);
+        assert_eq!(family, MemoryProviderRefusal::Unavailable);
         assert_eq!(conflict_code.as_deref(), None);
 
         // A proven definite refusal keeps its family and a known peer wire code.
-        let error = remote_refusal(&hostile_reject(
+        let (code, wire_code, retry_class, family, conflict_code) = refusal_fields(
             SpokeRejectCode::NotAuthorized,
             Some("terminal"),
             Some("NOT_AUTHORIZED"),
-        ));
-        let CoreError::MemoryProviderRefused {
-            code,
-            wire_code,
-            retry_class,
-            family,
-            conflict_code,
-        } = &error
-        else {
-            panic!("a remote refusal keeps its structured carrier: {error:?}");
-        };
+        );
         assert_eq!(code, "NOT_AUTHORIZED");
         assert_eq!(retry_class, "terminal");
         assert_eq!(wire_code.as_deref(), Some("NOT_AUTHORIZED"));
-        assert_eq!(*family, MemoryProviderRefusal::Forbidden);
+        assert_eq!(family, MemoryProviderRefusal::Forbidden);
         assert_eq!(conflict_code.as_deref(), None);
 
         // An uncertain outcome beside a validation code is not a definite 400,
         // and unknown peer strings never pass through.
-        let error = remote_refusal(&hostile_reject(
+        let (code, wire_code, retry_class, family, conflict_code) = refusal_fields(
             SpokeRejectCode::InvalidInput,
             Some("uncertain"),
             Some("NOT_A_MEMORY_CODE"),
-        ));
-        let CoreError::MemoryProviderRefused {
-            code,
-            wire_code,
-            retry_class,
-            family,
-            conflict_code,
-        } = &error
-        else {
-            panic!("a remote refusal keeps its structured carrier: {error:?}");
-        };
+        );
         assert_eq!(code, "INVALID_INPUT");
         assert_eq!(retry_class, "uncertain");
         assert_eq!(wire_code.as_deref(), None);
-        assert_eq!(*family, MemoryProviderRefusal::Unavailable);
+        assert_eq!(family, MemoryProviderRefusal::Unavailable);
         assert_eq!(conflict_code.as_deref(), None);
 
         // A proven definite stale-revision conflict retains the consumer-visible
         // `version_mismatch` code (I-000204) ...
-        let error = remote_refusal(&hostile_reject(
+        let (code, _, retry_class, family, conflict_code) = refusal_fields(
             SpokeRejectCode::RevisionConflict,
             Some("terminal"),
             Some("REVISION_CONFLICT"),
-        ));
-        let CoreError::MemoryProviderRefused {
-            code,
-            retry_class,
-            family,
-            conflict_code,
-            ..
-        } = &error
-        else {
-            panic!("a remote refusal keeps its structured carrier: {error:?}");
-        };
+        );
         assert_eq!(code, "REVISION_CONFLICT");
         assert_eq!(retry_class, "terminal");
-        assert_eq!(*family, MemoryProviderRefusal::Conflict);
+        assert_eq!(family, MemoryProviderRefusal::Conflict);
         assert_eq!(conflict_code.as_deref(), Some("version_mismatch"));
 
         // ... while an uncertain conflict never does.
