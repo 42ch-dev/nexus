@@ -31,10 +31,10 @@ use futures_util::FutureExt as _;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
+use nexus_contracts::{CoreRegisterCreatorRequest, SetActiveWorkspaceRequest};
 use nexus_core::{
     CoreAccess, CoreHomeService, CoreOpenOptions, CoreService, MemoryProviderSelection,
 };
-use nexus_contracts::{CoreRegisterCreatorRequest, SetActiveWorkspaceRequest};
 use spoke_connect::remote::RemoteAdapter;
 use spoke_operations::spoke_schemas::Principal;
 use spoke_operations::MemoryPort;
@@ -148,9 +148,7 @@ fn assert_receipt_tuple(body: &Value, op: &str, requester: &str) {
     assert_eq!(body["op"], json!(op), "{body}");
     assert_eq!(body["requester_principal_id"], json!(requester), "{body}");
     assert!(
-        body["receipt_id"]
-            .as_str()
-            .is_some_and(|id| !id.is_empty()),
+        body["receipt_id"].as_str().is_some_and(|id| !id.is_empty()),
         "{body}"
     );
     let digest = body["payload_digest"].as_str().expect("payload digest");
@@ -178,9 +176,17 @@ async fn seed_record(admin: &Actor<'_>, key: &str, scope: &Value) -> String {
     let captured = admin.capture(capture_body(key, TEXT, scope)).await;
     let candidate = support::candidate_ids(&captured)[0].clone();
     let reviewed = admin
-        .review_candidate(support::review_body(&candidate, 1, &format!("{key}-review")))
+        .review_candidate(support::review_body(
+            &candidate,
+            1,
+            &format!("{key}-review"),
+        ))
         .await;
-    assert_eq!(result(&reviewed)["outcome"], json!("promoted"), "{reviewed}");
+    assert_eq!(
+        result(&reviewed)["outcome"],
+        json!("promoted"),
+        "{reviewed}"
+    );
     record_ids(&reviewed)[0].clone()
 }
 
@@ -353,10 +359,7 @@ async fn grant_scope_covers_base_surfaces(
         peer.get_candidate(&c_a).await["candidate"]["candidate_id"],
         json!(c_a)
     );
-    assert_eq!(
-        error_code(&peer.get_candidate(&c_b).await),
-        "NOT_FOUND"
-    );
+    assert_eq!(error_code(&peer.get_candidate(&c_b).await), "NOT_FOUND");
 
     // 5. Selection counts: one per independently covered context.
     for (context, expected) in [(CONTEXT, &r_a), (OTHER_CONTEXT, &r_b)] {
@@ -425,24 +428,24 @@ async fn grant_scope_covers_base_surfaces(
     // 9. Allowed capture in A: bind the result candidate to its durable row and
     //    the receipt tuple before any later baseline.
     let allowed = peer
-        .capture(capture_body("k-c090-allowed", TEXT, &context_scope(CONTEXT)))
+        .capture(capture_body(
+            "k-c090-allowed",
+            TEXT,
+            &context_scope(CONTEXT),
+        ))
         .await;
     assert_receipt_tuple(&allowed, "memory.capture", peer_id.as_str());
     let candidate = support::candidate_ids(&allowed)[0].clone();
     let receipt = receipt_id(&allowed).to_owned();
     let effect = resources
-        .open_observer(
-            matrix,
-            SUBJECT,
-            &[],
-            Some(&candidate),
-            Some(&receipt),
-            None,
-        )
+        .open_observer(matrix, SUBJECT, &[], Some(&candidate), Some(&receipt), None)
         .await;
     let state = resources.observe(effect).await;
     let candidate_row = observed(&state, &format!("candidate:{candidate}"));
-    assert_eq!(column(candidate_row, "subject_id"), format!("text:{SUBJECT}"));
+    assert_eq!(
+        column(candidate_row, "subject_id"),
+        format!("text:{SUBJECT}")
+    );
     assert_eq!(column(candidate_row, "capture_visibility"), "text:context");
     assert_eq!(
         column(candidate_row, "capture_context_id"),
@@ -460,8 +463,7 @@ async fn grant_scope_covers_base_surfaces(
     );
     let durable_result = parsed_result_json(receipt_row);
     assert_eq!(
-        durable_result,
-        allowed["result"],
+        durable_result, allowed["result"],
         "the durable receipt result is the returned committed result structure: {state:?}"
     );
     assert!(!column(receipt_row, "result_json").contains(TEXT));
@@ -504,7 +506,14 @@ async fn grant_scope_covers_base_surfaces(
 
     // 11. No retained record was replaced or mutated by any probe.
     let final_observer = resources
-        .open_observer(matrix, SUBJECT, &[r_a, r_b, r_out, r_shared], None, None, None)
+        .open_observer(
+            matrix,
+            SUBJECT,
+            &[r_a, r_b, r_out, r_shared],
+            None,
+            None,
+            None,
+        )
         .await;
     let final_state = resources.observe(final_observer).await;
     assert_eq!(
@@ -564,10 +573,9 @@ async fn revoke_applies_at_admission_boundary(
                 grant_id.clone(),
                 "k-c091-revoke",
             ));
-            arrival
-                .wait_reached()
-                .await
-                .expect("the revoke reached the local admission machinery while the capture was held");
+            arrival.wait_reached().await.expect(
+                "the revoke reached the local admission machinery while the capture was held",
+            );
             arrival.release().await;
             revoke
         }
@@ -597,7 +605,10 @@ async fn revoke_applies_at_admission_boundary(
         .join(capture, "the admitted capture")
         .await
         .expect("the admitted capture settles");
-    assert!(is_committed(&admitted), "the admitted op completes: {admitted}");
+    assert!(
+        is_committed(&admitted),
+        "the admitted op completes: {admitted}"
+    );
     let admitted_receipt = receipt_id(&admitted).to_owned();
     let admitted_candidate = support::candidate_ids(&admitted)[0].clone();
     assert_receipt_tuple(&admitted, "memory.capture", peer_id.as_str());
@@ -616,7 +627,10 @@ async fn revoke_applies_at_admission_boundary(
         .await;
     let effect_state = resources.observe(effect).await;
     let candidate_row = observed(&effect_state, &format!("candidate:{admitted_candidate}"));
-    assert_eq!(column(candidate_row, "subject_id"), format!("text:{SUBJECT}"));
+    assert_eq!(
+        column(candidate_row, "subject_id"),
+        format!("text:{SUBJECT}")
+    );
     assert_eq!(column(candidate_row, "capture_visibility"), "text:shared");
     assert_eq!(column(candidate_row, "status"), "text:pending");
     assert_eq!(column(candidate_row, "revision"), "int:1");
@@ -660,13 +674,21 @@ async fn revoke_applies_at_admission_boundary(
         .peer()
         .capture(capture_body("k-c091-after", TEXT, &shared_scope()))
         .await;
-    assert_eq!(error_code(&after_revoke), "NOT_AUTHORIZED", "{after_revoke}");
+    assert_eq!(
+        error_code(&after_revoke),
+        "NOT_AUTHORIZED",
+        "{after_revoke}"
+    );
     assert_eq!(retry_class(&after_revoke), "terminal");
     let refused_list = matrix
         .peer()
         .list_candidates(json!({ "subject_id": SUBJECT, "status": "pending" }))
         .await;
-    assert_eq!(error_code(&refused_list), "NOT_AUTHORIZED", "{refused_list}");
+    assert_eq!(
+        error_code(&refused_list),
+        "NOT_AUTHORIZED",
+        "{refused_list}"
+    );
     let refusal_after = resources.observe(window).await;
     assert_eq!(
         resources.receipt_ids_for(window, "memory.capture").await,
@@ -749,7 +771,10 @@ async fn concurrent_record_update_has_one_winner(
         .to_owned();
     let baseline = admin.get_record(&record_id).await["record"].clone();
     assert_eq!(baseline["revision"], json!(1));
-    assert_eq!(baseline["content"]["structured"]["writer"], json!("baseline"));
+    assert_eq!(
+        baseline["content"]["structured"]["writer"],
+        json!("baseline")
+    );
 
     let admin_content = json!({
         "text": "written by the admin",
@@ -1020,26 +1045,29 @@ async fn revoke_or_fence_race_has_one_outcome(
         .join(fence, "the late fence")
         .await
         .expect("the late fence settles");
-    assert!(is_committed(&admitted), "the admitted write completes: {admitted}");
+    assert!(
+        is_committed(&admitted),
+        "the admitted write completes: {admitted}"
+    );
     assert_receipt_tuple(&admitted, "memory.capture", peer_id.as_str());
     let candidate = support::candidate_ids(&admitted)[0].clone();
     let receipt = receipt_id(&admitted).to_owned();
-    assert_eq!(result(&fenced_late)["status"], json!("fenced"), "{fenced_late}");
+    assert_eq!(
+        result(&fenced_late)["status"],
+        json!("fenced"),
+        "{fenced_late}"
+    );
     assert_eq!(result(&fenced_late)["revision"], json!(4));
 
     let effect = resources
-        .open_observer(
-            matrix,
-            SUBJECT,
-            &[],
-            Some(&candidate),
-            Some(&receipt),
-            None,
-        )
+        .open_observer(matrix, SUBJECT, &[], Some(&candidate), Some(&receipt), None)
         .await;
     let state = resources.observe(effect).await;
     let candidate_row = observed(&state, &format!("candidate:{candidate}"));
-    assert_eq!(column(candidate_row, "subject_id"), format!("text:{SUBJECT}"));
+    assert_eq!(
+        column(candidate_row, "subject_id"),
+        format!("text:{SUBJECT}")
+    );
     assert_eq!(column(candidate_row, "capture_visibility"), "text:shared");
     assert_eq!(column(candidate_row, "status"), "text:pending");
     assert_eq!(column(candidate_row, "revision"), "int:1");
@@ -1139,7 +1167,10 @@ async fn scoped_admin_cannot_amplify_grant(
             "idempotency_key": "k-c095-admin",
         }))
         .await;
-    assert!(is_committed(&scoped), "the scoped admin grant commits: {scoped}");
+    assert!(
+        is_committed(&scoped),
+        "the scoped admin grant commits: {scoped}"
+    );
     let peer = matrix.peer();
     let grants_before = admin.list_grants(json!({})).await["grants"].clone();
     let earlier = (chrono::Utc::now() + chrono::Duration::minutes(30))
@@ -1205,13 +1236,15 @@ async fn scoped_admin_cannot_amplify_grant(
         }))
         .await;
     assert!(is_committed(&legitimate), "{legitimate}");
-    let third_grants = admin
-        .list_grants(json!({ "principal_id": third }))
-        .await["grants"]
+    let third_grants = admin.list_grants(json!({ "principal_id": third })).await["grants"]
         .as_array()
         .expect("grant page")
         .clone();
-    assert_eq!(third_grants.len(), 1, "exactly the legitimate grant: {third_grants:?}");
+    assert_eq!(
+        third_grants.len(),
+        1,
+        "exactly the legitimate grant: {third_grants:?}"
+    );
     assert_eq!(third_grants[0]["capabilities"], json!(["capture"]));
     assert_eq!(third_grants[0]["context_ids"], json!([CONTEXT]));
     assert_eq!(third_grants[0]["shared_access"], json!(false));
@@ -1242,7 +1275,11 @@ async fn operator_bootstrap_is_callable_and_visible(
 ) {
     let admin = matrix.admin();
     let described = admin.describe().await;
-    assert_eq!(described["capabilities"], json!(["spoke-memory"]), "{described}");
+    assert_eq!(
+        described["capabilities"],
+        json!(["spoke-memory"]),
+        "{described}"
+    );
     assert_eq!(described["required_profile_kinds"], json!([]));
     let spaces = admin.list_spaces().await;
     let rows = spaces["spaces"].as_array().expect("space page");
@@ -1267,7 +1304,11 @@ async fn operator_bootstrap_is_callable_and_visible(
     // runner-owned and closed by the same settle path that owns the matrix.
     let raw = resources.open_raw_admin(matrix).await;
     let invented = resources
-        .invoke(raw, "memory.spaces.create", &json!({ "space_id": matrix.space_id() }))
+        .invoke(
+            raw,
+            "memory.spaces.create",
+            &json!({ "space_id": matrix.space_id() }),
+        )
         .await;
     assert_eq!(
         invented["error"]["code"],
@@ -1332,10 +1373,18 @@ async fn local_operator_bootstrap_through_core() {
         let space_id = provider.space_id().to_owned();
         assert!(!space_id.is_empty(), "Core provisioning created the space");
         let described = support::wire(&provider.describe(&operator, dto(json!({}))).await);
-        assert_eq!(described["capabilities"], json!(["spoke-memory"]), "{described}");
+        assert_eq!(
+            described["capabilities"],
+            json!(["spoke-memory"]),
+            "{described}"
+        );
         let spaces = support::wire(&provider.list_spaces(&operator, dto(json!({}))).await);
         let rows = spaces["spaces"].as_array().expect("space page");
-        assert_eq!(rows.len(), 1, "the Core open provisioned one space: {spaces}");
+        assert_eq!(
+            rows.len(),
+            1,
+            "the Core open provisioned one space: {spaces}"
+        );
         assert_eq!(rows[0]["space_id"], json!(space_id));
         assert_eq!(rows[0]["status"], json!("active"));
         let grants = support::wire(
@@ -1344,10 +1393,14 @@ async fn local_operator_bootstrap_through_core() {
                 .await,
         );
         assert!(
-            grants["grants"].as_array().expect("grant page").iter().any(|grant| {
-                grant["principal_id"] == json!(creator_id)
-                    && grant["capabilities"] == json!(["admin"])
-            }),
+            grants["grants"]
+                .as_array()
+                .expect("grant page")
+                .iter()
+                .any(|grant| {
+                    grant["principal_id"] == json!(creator_id)
+                        && grant["capabilities"] == json!(["admin"])
+                }),
             "the operator admin grant exists without a protocol issuance: {grants}"
         );
         drop(provider);
@@ -1358,9 +1411,15 @@ async fn local_operator_bootstrap_through_core() {
     drop(core);
     match (scenario, cleanup) {
         (Ok(()), Ok(report)) => {
-            assert!(report.cleanup_confirmed, "the Core close reports a confirmed cleanup");
+            assert!(
+                report.cleanup_confirmed,
+                "the Core close reports a confirmed cleanup"
+            );
             assert!(report.pending_operations.is_empty(), "{report:?}");
-            eprintln!("C-096 local: Core close report state={} confirmed={}", report.state, report.cleanup_confirmed);
+            eprintln!(
+                "C-096 local: Core close report state={} confirmed={}",
+                report.state, report.cleanup_confirmed
+            );
         }
         (Ok(()), Err(error)) => {
             panic!("the operator Core close failed after the bootstrap evidence: {error}")
@@ -1381,9 +1440,17 @@ async fn local_served_surface_refusal(
 ) {
     let raw = resources.open_raw_admin(matrix).await;
     let invented = resources
-        .invoke(raw, "memory.spaces.create", &json!({ "space_id": matrix.space_id() }))
+        .invoke(
+            raw,
+            "memory.spaces.create",
+            &json!({ "space_id": matrix.space_id() }),
+        )
         .await;
-    assert_eq!(invented["error"]["code"], json!("op_unsupported"), "{invented}");
+    assert_eq!(
+        invented["error"]["code"],
+        json!("op_unsupported"),
+        "{invented}"
+    );
     resources
         .close_raw(raw)
         .await

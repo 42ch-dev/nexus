@@ -343,6 +343,187 @@ impl Drop for FaultHold {
     }
 }
 
+/// One op-targeted admission arm: a bounded pause at the exact mutating
+/// handler entry named by `op`. It is test control only and outcome-neutral:
+/// releasing, expiring or losing control always lets the operation proceed.
+struct TargetArm {
+    token: u64,
+    op: String,
+    entered: Option<oneshot::Sender<()>>,
+    release: Option<oneshot::Receiver<()>>,
+    bound: Duration,
+}
+
+/// The test-side handle for one op-targeted admission arm.
+///
+/// Bounded and token-owned: dropping or cancelling the handle can only disarm
+/// its own arm, never a replacement; once the provider has taken the arm the
+/// handle's `release` resumes it, and a vanished handle only costs the provider
+/// its bounded wait.
+pub struct TargetHold {
+    control: Arc<Mutex<FaultState>>,
+    token: u64,
+    reached: oneshot::Receiver<()>,
+    release: Option<oneshot::Sender<()>>,
+    bound: Duration,
+}
+
+impl FixtureFaults {
+    /// Arm one op-targeted admission pause for the exact
+    /// review/fence/grant-revoke handler entry (replacing any previous target
+    /// arm). Only that op consumes it. Reads, other operation names and
+    /// malformed payloads (typed decode happens before the gate) never reach it;
+    /// an unauthorized request of the same op is delayed and then still
+    /// receives its ordinary refusal.
+    pub fn hold_next_for(&self, op: impl Into<String>) -> TargetHold {
+        self.hold_next_for_bounded(op, FAULT_HOLD_TIMEOUT)
+    }
+
+    /// [`Self::hold_next_for`] with an explicit bound.
+    pub fn hold_next_for_bounded(&self, op: impl Into<String>, bound: Duration) -> TargetHold {
+        let (reached_tx, reached_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let mut state = self.state();
+        let token = Self::next_token(&mut state);
+        state.target = Some(TargetArm {
+            token,
+            op: op.into(),
+            entered: Some(reached_tx),
+            release: Some(release_rx),
+            bound,
+        });
+        drop(state);
+        TargetHold {
+            control: Arc::clone(&self.inner),
+            token,
+            reached: reached_rx,
+            release: Some(release_tx),
+            bound,
+        }
+    }
+
+    /// The provider-side admission wait for one exact mutating operation.
+    ///
+    /// Takes the armed target only when it names this op, reports the arrival,
+    /// and waits for the release no longer than the arm's own bound. Every end
+    /// of that wait — release, expiry, a vanished handle — lets the operation
+    /// proceed, so the pause never changes an operation's outcome.
+    pub(crate) async fn wait_target(&self, op: &str) {
+        let arm = {
+            let mut state = self.state();
+            match state.target.take() {
+                Some(arm) if arm.op == op => Some(arm),
+                other => {
+                    state.target = other;
+                    None
+                }
+            }
+        };
+        let Some(mut arm) = arm else {
+            return;
+        };
+        if let Some(entered) = arm.entered.take() {
+            let _ = entered.send(());
+        }
+        if let Some(release) = arm.release.take() {
+            let _ = tokio::time::timeout(arm.bound, release).await;
+        }
+    }
+}
+
+impl TargetHold {
+    /// Wait, bounded, until the provider reached this exact op's admission.
+    ///
+    /// Ownership is established at the CALL, before the future can be polled, so
+    /// a created-but-unpolled or cancelled observation retires this handle's own
+    /// still-armed entry even if the handle is retained afterwards. A replacement
+    /// arm (different token) or an already-taken arm is untouched.
+    ///
+    /// # Errors
+    ///
+    /// The returned future yields [`FaultHoldLost::Disarmed`] when the arm was
+    /// retired before this handle observed it, and [`FaultHoldLost::Unreached`]
+    /// when the bound elapsed first.
+    pub fn wait_reached(&mut self) -> impl Future<Output = Result<(), FaultHoldLost>> + Send + '_ {
+        let guard = TargetReachGuard {
+            control: Arc::clone(&self.control),
+            token: self.token,
+        };
+        let bound = self.bound;
+        let reached = &mut self.reached;
+        async move {
+            let _guard = guard;
+            match tokio::time::timeout(bound, reached).await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(_)) => Err(FaultHoldLost::Disarmed),
+                Err(_) => Err(FaultHoldLost::Unreached),
+            }
+        }
+    }
+
+    /// Resume the held operation; before it is taken this disarms only its own
+    /// arm.
+    pub fn release(&mut self) {
+        let mut state = self
+            .control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state
+            .target
+            .as_ref()
+            .is_some_and(|arm| arm.token == self.token)
+        {
+            state.target = None;
+            return;
+        }
+        drop(state);
+        if let Some(release) = self.release.take() {
+            let _ = release.send(());
+        }
+    }
+}
+
+/// Disarms one still-armed target arm when its observation ends without a take.
+struct TargetReachGuard {
+    control: Arc<Mutex<FaultState>>,
+    token: u64,
+}
+
+impl Drop for TargetReachGuard {
+    fn drop(&mut self) {
+        let mut state = self
+            .control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state
+            .target
+            .as_ref()
+            .is_some_and(|arm| arm.token == self.token)
+        {
+            state.target = None;
+        }
+    }
+}
+
+impl Drop for TargetHold {
+    fn drop(&mut self) {
+        // Dropping an untaken handle disarms exactly its own arm; a taken arm is
+        // no longer in the slot and a replacement carries a different token, so
+        // neither is affected.
+        let mut state = self
+            .control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state
+            .target
+            .as_ref()
+            .is_some_and(|arm| arm.token == self.token)
+        {
+            state.target = None;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,7 +577,7 @@ mod tests {
         /// transaction), then serve the same file from a new provider instance.
         async fn close_and_reopen(self) -> Self {
             let Self {
-                _home,
+                _home: home,
                 path,
                 provider,
                 space_id,
@@ -407,7 +588,7 @@ mod tests {
                 .await
                 .expect("fixture reopens after the awaited close");
             Self {
-                _home,
+                _home: home,
                 path,
                 provider,
                 space_id,
@@ -528,7 +709,7 @@ mod tests {
         let mut operation = Box::pin(scenario.provider.capture(CLIENT, &request, now));
         tokio::select! {
             reached = hold.wait_reached() => {
-                reached.expect("the response drop point was reached")
+                reached.expect("the response drop point was reached");
             }
             result = operation.as_mut() => {
                 panic!("the response was not dropped: {result:?}")
@@ -575,10 +756,20 @@ mod tests {
         scenario.subject_and_capture_grant(now).await;
         let marker_before = marker(&scenario).await;
 
-        // Phase 0 — cancellation mid-commit. The capture is staged inside an
-        // open transaction and the caller drops the future; the provider's own
-        // async close then drains the connection (and its rollback) before the
-        // same file is reopened.
+        let scenario = midcommit_cancellation_rolls_back(scenario, now, marker_before).await;
+        precommit_abort_retries_once(&scenario, now, marker_before).await;
+        let scenario = postcommit_loss_resolves_from_receipt(scenario, now).await;
+        paused_admission_replays_the_winner(&scenario, now).await;
+    }
+
+    /// Cancellation mid-commit stages the capture inside an open transaction and
+    /// the caller drops the future; the provider's own async close then drains
+    /// the connection (and its rollback) before the same file is reopened.
+    async fn midcommit_cancellation_rolls_back(
+        scenario: Scenario,
+        now: DateTime<Utc>,
+        marker_before: i64,
+    ) -> Scenario {
         let mid_commit = capture_request(
             &scenario.space_id,
             "Staged inside an open transaction.",
@@ -591,7 +782,7 @@ mod tests {
         let mut operation = Box::pin(scenario.provider.capture(CLIENT, &mid_commit, now));
         tokio::select! {
             reached = hold.wait_reached() => {
-                reached.expect("the pre-commit point was reached")
+                reached.expect("the pre-commit point was reached");
             }
             result = operation.as_mut() => {
                 panic!("the pre-commit point was not reached: {result:?}")
@@ -613,9 +804,16 @@ mod tests {
             );
         }
         assert_eq!(marker(&scenario).await, marker_before);
+        scenario
+    }
 
-        // Phase 1 — a clean abort before commit. Same no-effect boundary, and
-        // the same-key retry commits exactly once.
+    /// A clean abort before commit keeps the no-effect boundary, and the
+    /// same-key retry commits exactly once.
+    async fn precommit_abort_retries_once(
+        scenario: &Scenario,
+        now: DateTime<Utc>,
+        marker_before: i64,
+    ) {
         let before_commit = capture_request(
             &scenario.space_id,
             "Staged but never committed.",
@@ -630,24 +828,29 @@ mod tests {
             rejected.code,
             spoke_operations::SpokeRejectCode::OutcomeUncertain
         );
-        assert_eq!(count_rows(&scenario, "candidates").await, 0);
-        assert_eq!(marker(&scenario).await, marker_before);
+        assert_eq!(count_rows(scenario, "candidates").await, 0);
+        assert_eq!(marker(scenario).await, marker_before);
         let committed = scenario
             .provider
             .capture(CLIENT, &before_commit, now)
             .await
             .expect("the retry after the abort commits once");
-        assert_eq!(count_rows(&scenario, "candidates").await, 1);
+        assert_eq!(count_rows(scenario, "candidates").await, 1);
         let replayed = scenario
             .provider
             .capture(CLIENT, &before_commit, now)
             .await
             .expect("the committed retry replays");
         assert_eq!(receipt_id_of(&replayed), receipt_id_of(&committed));
-        assert_eq!(count_rows(&scenario, "candidates").await, 1);
+        assert_eq!(count_rows(scenario, "candidates").await, 1);
+    }
 
-        // Phase 2 — commit succeeded, response lost. The durable receipt answers
-        // the retry after the awaited close and reopen.
+    /// A commit that succeeds while the response is lost still answers the retry
+    /// from the durable receipt after the awaited close and reopen.
+    async fn postcommit_loss_resolves_from_receipt(
+        scenario: Scenario,
+        now: DateTime<Utc>,
+    ) -> Scenario {
         let after_commit = capture_request(
             &scenario.space_id,
             "Committed but the answer was lost.",
@@ -677,9 +880,12 @@ mod tests {
             .expect("the committed receipt resolves the lost answer");
         assert_eq!(receipt_id_of(&replayed), stored_receipt);
         assert_eq!(count_rows(&scenario, "candidates").await, 2);
+        scenario
+    }
 
-        // Phase 3 — a paused admission replays the effect a competing identical
-        // retry committed while it was parked.
+    /// A paused admission replays the effect a competing identical retry
+    /// committed while it was parked.
+    async fn paused_admission_replays_the_winner(scenario: &Scenario, now: DateTime<Utc>) {
         let paused_request =
             capture_request(&scenario.space_id, "Two admissions, one effect.", "pause-1");
         let mut hold = scenario
@@ -689,7 +895,7 @@ mod tests {
         let mut paused = Box::pin(scenario.provider.capture(CLIENT, &paused_request, now));
         tokio::select! {
             reached = hold.wait_reached() => {
-                reached.expect("the admission pause was reached")
+                reached.expect("the admission pause was reached");
             }
             result = paused.as_mut() => {
                 panic!("the admission was not paused: {result:?}")
@@ -705,7 +911,7 @@ mod tests {
             .await
             .expect("the paused admission replays the committed receipt");
         assert_eq!(receipt_id_of(&resumed), receipt_id_of(&winner));
-        assert_eq!(count_rows(&scenario, "candidates").await, 3);
+        assert_eq!(count_rows(scenario, "candidates").await, 3);
     }
 
     /// §14.2/§14.3: a fault after the commit must never look like a clean
@@ -763,7 +969,7 @@ mod tests {
         let mut operation = Box::pin(scenario.provider.capture(CLIENT, &dropped_request, now));
         tokio::select! {
             reached = hold.wait_reached() => {
-                reached.expect("the response drop point was reached")
+                reached.expect("the response drop point was reached");
             }
             result = operation.as_mut() => {
                 panic!("the committed response was not held: {result:?}")
@@ -1022,7 +1228,7 @@ mod tests {
         let mut operation = Box::pin(scenario.provider.capture(CLIENT, &fourth, now));
         tokio::select! {
             observation = held.wait_reached() => {
-                observation.expect("the point was reached")
+                observation.expect("the point was reached");
             }
             result = operation.as_mut() => {
                 panic!("the admission was not paused: {result:?}")
@@ -1132,186 +1338,5 @@ mod tests {
         );
         assert_eq!(count_rows(&scenario, "candidates").await, 2);
         drop(retained);
-    }
-}
-
-/// One op-targeted admission arm: a bounded pause at the exact mutating
-/// handler entry named by `op`. It is test control only and outcome-neutral:
-/// releasing, expiring or losing control always lets the operation proceed.
-struct TargetArm {
-    token: u64,
-    op: String,
-    entered: Option<oneshot::Sender<()>>,
-    release: Option<oneshot::Receiver<()>>,
-    bound: Duration,
-}
-
-/// The test-side handle for one op-targeted admission arm.
-///
-/// Bounded and token-owned: dropping or cancelling the handle can only disarm
-/// its own arm, never a replacement; once the provider has taken the arm the
-/// handle's `release` resumes it, and a vanished handle only costs the provider
-/// its bounded wait.
-pub struct TargetHold {
-    control: Arc<Mutex<FaultState>>,
-    token: u64,
-    reached: oneshot::Receiver<()>,
-    release: Option<oneshot::Sender<()>>,
-    bound: Duration,
-}
-
-impl FixtureFaults {
-    /// Arm one op-targeted admission pause for the exact
-    /// review/fence/grant-revoke handler entry (replacing any previous target
-    /// arm). Only that op consumes it. Reads, other operation names and
-    /// malformed payloads (typed decode happens before the gate) never reach it;
-    /// an unauthorized request of the same op is delayed and then still
-    /// receives its ordinary refusal.
-    pub fn hold_next_for(&self, op: impl Into<String>) -> TargetHold {
-        self.hold_next_for_bounded(op, FAULT_HOLD_TIMEOUT)
-    }
-
-    /// [`Self::hold_next_for`] with an explicit bound.
-    pub fn hold_next_for_bounded(&self, op: impl Into<String>, bound: Duration) -> TargetHold {
-        let (reached_tx, reached_rx) = oneshot::channel();
-        let (release_tx, release_rx) = oneshot::channel();
-        let mut state = self.state();
-        let token = Self::next_token(&mut state);
-        state.target = Some(TargetArm {
-            token,
-            op: op.into(),
-            entered: Some(reached_tx),
-            release: Some(release_rx),
-            bound,
-        });
-        drop(state);
-        TargetHold {
-            control: Arc::clone(&self.inner),
-            token,
-            reached: reached_rx,
-            release: Some(release_tx),
-            bound,
-        }
-    }
-
-    /// The provider-side admission wait for one exact mutating operation.
-    ///
-    /// Takes the armed target only when it names this op, reports the arrival,
-    /// and waits for the release no longer than the arm's own bound. Every end
-    /// of that wait — release, expiry, a vanished handle — lets the operation
-    /// proceed, so the pause never changes an operation's outcome.
-    pub(crate) async fn wait_target(&self, op: &str) {
-        let arm = {
-            let mut state = self.state();
-            match state.target.take() {
-                Some(arm) if arm.op == op => Some(arm),
-                other => {
-                    state.target = other;
-                    None
-                }
-            }
-        };
-        let Some(mut arm) = arm else {
-            return;
-        };
-        if let Some(entered) = arm.entered.take() {
-            let _ = entered.send(());
-        }
-        if let Some(release) = arm.release.take() {
-            let _ = tokio::time::timeout(arm.bound, release).await;
-        }
-    }
-}
-
-impl TargetHold {
-    /// Wait, bounded, until the provider reached this exact op's admission.
-    ///
-    /// Ownership is established at the CALL, before the future can be polled, so
-    /// a created-but-unpolled or cancelled observation retires this handle's own
-    /// still-armed entry even if the handle is retained afterwards. A replacement
-    /// arm (different token) or an already-taken arm is untouched.
-    ///
-    /// # Errors
-    ///
-    /// The returned future yields [`FaultHoldLost::Disarmed`] when the arm was
-    /// retired before this handle observed it, and [`FaultHoldLost::Unreached`]
-    /// when the bound elapsed first.
-    pub fn wait_reached(&mut self) -> impl Future<Output = Result<(), FaultHoldLost>> + Send + '_ {
-        let guard = TargetReachGuard {
-            control: Arc::clone(&self.control),
-            token: self.token,
-        };
-        let bound = self.bound;
-        let reached = &mut self.reached;
-        async move {
-            let _guard = guard;
-            match tokio::time::timeout(bound, reached).await {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(_)) => Err(FaultHoldLost::Disarmed),
-                Err(_) => Err(FaultHoldLost::Unreached),
-            }
-        }
-    }
-
-    /// Resume the held operation; before it is taken this disarms only its own
-    /// arm.
-    pub fn release(&mut self) {
-        let mut state = self
-            .control
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if state
-            .target
-            .as_ref()
-            .is_some_and(|arm| arm.token == self.token)
-        {
-            state.target = None;
-            return;
-        }
-        drop(state);
-        if let Some(release) = self.release.take() {
-            let _ = release.send(());
-        }
-    }
-}
-
-/// Disarms one still-armed target arm when its observation ends without a take.
-struct TargetReachGuard {
-    control: Arc<Mutex<FaultState>>,
-    token: u64,
-}
-
-impl Drop for TargetReachGuard {
-    fn drop(&mut self) {
-        let mut state = self
-            .control
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if state
-            .target
-            .as_ref()
-            .is_some_and(|arm| arm.token == self.token)
-        {
-            state.target = None;
-        }
-    }
-}
-
-impl Drop for TargetHold {
-    fn drop(&mut self) {
-        // Dropping an untaken handle disarms exactly its own arm; a taken arm is
-        // no longer in the slot and a replacement carries a different token, so
-        // neither is affected.
-        let mut state = self
-            .control
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if state
-            .target
-            .as_ref()
-            .is_some_and(|arm| arm.token == self.token)
-        {
-            state.target = None;
-        }
     }
 }
