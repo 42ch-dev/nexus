@@ -775,6 +775,38 @@ async fn v1191_holder_writer() {
     release_retained_writer_guards(&db);
 }
 
+/// Remote dependency metadata rejects every mutation from an unregistered writer.
+#[tokio::test]
+async fn remote_dependency_tables_fence_raw_writers() {
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("remote_dependencies.db");
+    let bootstrap = init_pool(&db).await.expect("init_pool");
+    bootstrap.close().await;
+    release_retained_writer_guards(&db);
+
+    let raw = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
+        .await
+        .expect("raw connect");
+    for sql in [
+        "INSERT INTO remote_binding_memory_admissions \
+         (admission_id, owner_creator_id, character_id, binding_id, authority_host_id, \
+          authority_generation, space_id, client_identity, created_at) \
+         VALUES ('adm_raw', 'ctr_raw', 'chr_raw', 'bnd_raw', 'host', '1', 'space', 'client', 'now')",
+        "UPDATE remote_binding_memory_admissions SET created_at = 'changed'",
+        "DELETE FROM remote_binding_memory_admissions",
+        "INSERT INTO remote_binding_memory_objects \
+         (authority_host_id, authority_generation, space_id, client_identity, character_id, \
+          binding_id, object_kind, object_id, state, created_at, updated_at) \
+         VALUES ('host', '1', 'space', 'client', 'chr_raw', 'bnd_raw', \
+                 'candidate', 'cand_raw', 'live', 'now', 'now')",
+        "UPDATE remote_binding_memory_objects SET state = 'released'",
+        "DELETE FROM remote_binding_memory_objects",
+    ] {
+        assert_fenced(&raw, sql).await;
+    }
+    raw.close().await;
+}
+
 /// Every mutation of the new tables is fenced on a handle that never received
 /// the protocol scalars — the raw/pre-opened writer loophole.
 async fn assert_holder_tables_fenced_for_raw_writer(db: &Path) {
@@ -1697,6 +1729,7 @@ async fn raw_retention_keeps_the_published_identity() {
         "the retained/joined admission is the published identity, not the caller's"
     );
     drop(conn);
+    stale_pool.pool().close().await;
     drop(stale_pool);
     joined_pool.close().await;
     published.pool().close().await;
@@ -1704,6 +1737,12 @@ async fn raw_retention_keeps_the_published_identity() {
     drop(published);
     drop(joined);
     release_retained_writer_guards(&db);
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "stale_identity_held"),
+        "busy",
+        "the caller's stale guard still owns its admission after its pool closes"
+    );
+    drop(stale);
 
     assert_eq!(
         child_outcome(dir.path(), &db, "migration_fence", "identity_released"),

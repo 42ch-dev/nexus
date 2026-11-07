@@ -260,6 +260,9 @@ refused rather than discarded; ACL entry counts use the Win32 information API.
 workspace DB. Concurrency is governed by SQLite WAL (1 writer + N readers,
 `DbPool` busy timeout); the per-work `runtime_lock` is a Rust-host artifact and the Connect invoke path never acquires it. The
 Electron/TS service may run while the runtime serves invokes.
+Workspace mutations, including remote-binding admission and object metadata,
+require registered writer-protocol authority. Forward migrations add missing
+fences without rewriting already-applied migrations.
 
 ## Optional web UI serve (`apps/nexus-service`)
 
