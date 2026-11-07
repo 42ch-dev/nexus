@@ -10,8 +10,6 @@
 //! unavailable long-running families are proven only as refusals by C-003 and
 //! C-004. No ignored or placeholder test stands in for it.
 
-#![allow(clippy::too_many_lines)] // one end-to-end scenario per row
-
 mod support;
 
 use std::sync::Arc;
@@ -51,7 +49,7 @@ async fn recalled(actor: &Actor<'_>, selection: Value) -> Value {
         .recall(json!({
             "subject_id": SUBJECT,
             "selection": selection,
-            "budget": { "max_items": 10 },
+            "budget": { "max_items": 25 },
         }))
         .await
 }
@@ -932,6 +930,54 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
     // cancellation: with a live release sender, a stale arm would park the fence
     // until the arm bound, so a prompt refusal is causal. A dropped handle's
     // closed sender would proceed anyway and is therefore never used as proof.
+    stage_remote_target_arm_lifecycle(&matrix).await;
+
+    let captured = matrix
+        .admin()
+        .capture(capture_body("k-c033", TEXT, &shared_scope()))
+        .await;
+    let candidate_id = candidate_ids(&captured)[0].clone();
+
+    let (admin_outcome, peer_outcome) =
+        race_two_reviews_at_the_same_candidate(&matrix, &candidate_id).await;
+
+    let winners = [&admin_outcome, &peer_outcome]
+        .into_iter()
+        .filter(|body| is_committed(body))
+        .count();
+    assert_eq!(
+        winners, 1,
+        "exactly one of the two admitted clients commits: {admin_outcome} / {peer_outcome}"
+    );
+    let (winner, loser) = if is_committed(&admin_outcome) {
+        (&admin_outcome, &peer_outcome)
+    } else {
+        (&peer_outcome, &admin_outcome)
+    };
+    assert_eq!(
+        error_code(loser),
+        "CANDIDATE_CONSUMED",
+        "the competing review gets the retained historical loser code: {loser}"
+    );
+    assert_eq!(retry_class(loser), "terminal");
+    assert_eq!(record_ids(winner).len(), 1);
+
+    let observed = recalled(&matrix.admin(), json!({ "mode": "subject_all" })).await;
+    assert_eq!(
+        observed["total_authorized"],
+        json!(1),
+        "the pair produced exactly one record: {observed}"
+    );
+    assert_eq!(
+        matrix.admin().get_candidate(&candidate_id).await["candidate"]["status"],
+        json!("consumed")
+    );
+    matrix.shutdown().await;
+}
+
+/// The remote fixture's target-arm lifecycle on real stale fences, including
+/// observation cancellation, replacement, controller loss and arm expiry.
+async fn stage_remote_target_arm_lifecycle(matrix: &Matrix) {
     if matrix.kind() == Kind::Remote {
         // Unpolled observation cancelled, handle retained.
         let unpolled = matrix.park_next_target("memory.subjects.fence");
@@ -1026,14 +1072,14 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
             .await
             .expect("a late release after arm expiry is bounded");
     }
+}
 
-    let captured = matrix
-        .admin()
-        .capture(capture_body("k-c033", TEXT, &shared_scope()))
-        .await;
-    let candidate_id = candidate_ids(&captured)[0].clone();
-
-    // Both arrivals are established before the held request is released.
+/// Both reviews arrive before the held one is released; the held one commits and
+/// the other gets the retained historical loser code.
+async fn race_two_reviews_at_the_same_candidate(
+    matrix: &Matrix,
+    candidate_id: &str,
+) -> (Value, Value) {
     // - Local: the held review owns the candidate's disposition section. The
     //   peer review's disposition acquisition reports that it is really about to
     //   block on that section — a provider-side acknowledgment of ITS arrival,
@@ -1049,7 +1095,7 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
         matrix.admin_client(),
         matrix.admin_principal().clone(),
         matrix.space_id().to_owned(),
-        review_body(&candidate_id, 1, "k-c033-admin"),
+        review_body(candidate_id, 1, "k-c033-admin"),
     ));
     arrival
         .wait_reached()
@@ -1069,7 +1115,7 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
                 matrix.peer_client(),
                 matrix.peer_principal().clone(),
                 matrix.space_id().to_owned(),
-                review_body(&candidate_id, 1, "k-c033-peer"),
+                review_body(candidate_id, 1, "k-c033-peer"),
             )));
             tokio::time::timeout(support::BOUND, waiter.notified())
                 .await
@@ -1081,7 +1127,7 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
                     matrix.peer_client(),
                     matrix.peer_principal().clone(),
                     matrix.space_id().to_owned(),
-                    review_body(&candidate_id, 1, "k-c033-peer"),
+                    review_body(candidate_id, 1, "k-c033-peer"),
                 )
                 .await,
             );
@@ -1097,39 +1143,7 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
             .await
             .expect("the peer review completes"),
     };
-
-    let winners = [&admin_outcome, &peer_outcome]
-        .into_iter()
-        .filter(|body| is_committed(body))
-        .count();
-    assert_eq!(
-        winners, 1,
-        "exactly one of the two admitted clients commits: {admin_outcome} / {peer_outcome}"
-    );
-    let (winner, loser) = if is_committed(&admin_outcome) {
-        (&admin_outcome, &peer_outcome)
-    } else {
-        (&peer_outcome, &admin_outcome)
-    };
-    assert_eq!(
-        error_code(loser),
-        "CANDIDATE_CONSUMED",
-        "the competing review gets the retained historical loser code: {loser}"
-    );
-    assert_eq!(retry_class(loser), "terminal");
-    assert_eq!(record_ids(winner).len(), 1);
-
-    let observed = recalled(&matrix.admin(), json!({ "mode": "subject_all" })).await;
-    assert_eq!(
-        observed["total_authorized"],
-        json!(1),
-        "the pair produced exactly one record: {observed}"
-    );
-    assert_eq!(
-        matrix.admin().get_candidate(&candidate_id).await["candidate"]["status"],
-        json!("consumed")
-    );
-    matrix.shutdown().await;
+    (admin_outcome, peer_outcome)
 }
 
 #[tokio::test]
@@ -1154,8 +1168,29 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
     let candidate_id = candidate_ids(&captured)[0].clone();
     let peer_id = matrix.peer_principal().principal_id.clone();
 
-    // 1. `review` alone is not enough (the strong cause of the refusal is the
-    //    missing records_write coverage).
+    // 1-2. `review` alone and same-scope SEPARATE grants never admit.
+    separate_grants_are_not_a_review_admission(&matrix, &candidate_id, &peer_id).await;
+
+    // 3. ONE grant carrying both capabilities over the same scope is admitted
+    //    and the created record inherits the context placement verbatim.
+    let record_id =
+        dual_grant_promotes_with_inherited_context(&matrix, &candidate_id, &peer_id).await;
+
+    // 4. Shared visibility needs the explicit dual-authorized promote. The peer
+    //    may read the context-placed record but cannot promote it (no `promote`
+    //    coverage), and the state never widens.
+    shared_promotion_needs_dual_authority(&matrix, &record_id).await;
+    matrix.shutdown().await;
+}
+
+/// Phases 1-2: `review` alone and two same-scope grants never admit, and the
+/// candidate stays pending.
+async fn separate_grants_are_not_a_review_admission(
+    matrix: &Matrix,
+    candidate_id: &str,
+    peer_id: &str,
+) {
+    let admin = matrix.admin();
     let review_only = admin
         .grant(json!({
             "subject_id": SUBJECT,
@@ -1169,7 +1204,7 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
     assert!(is_committed(&review_only), "{review_only}");
     let refused = matrix
         .peer()
-        .review_candidate(review_body(&candidate_id, 1, "k-c034-review-only"))
+        .review_candidate(review_body(candidate_id, 1, "k-c034-review-only"))
         .await;
     assert!(
         !is_committed(&refused),
@@ -1181,13 +1216,11 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
         [] as [std::string::String; 0]
     );
     assert_eq!(
-        matrix.admin().get_candidate(&candidate_id).await["candidate"]["status"],
+        matrix.admin().get_candidate(candidate_id).await["candidate"]["status"],
         json!("pending"),
         "the refused review consumed nothing"
     );
 
-    // 2. Same-scope SEPARATE review + records_write grants never union into an
-    //    admission (protocol §6.5 single-grant rule); zero effect.
     let second_grant = admin
         .grant(json!({
             "subject_id": SUBJECT,
@@ -1201,7 +1234,7 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
     assert!(is_committed(&second_grant), "{second_grant}");
     let separate = matrix
         .peer()
-        .review_candidate(review_body(&candidate_id, 1, "k-c034-separate"))
+        .review_candidate(review_body(candidate_id, 1, "k-c034-separate"))
         .await;
     assert!(
         !is_committed(&separate),
@@ -1214,14 +1247,21 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
         [] as [std::string::String; 0]
     );
     assert_eq!(
-        matrix.admin().get_candidate(&candidate_id).await["candidate"]["status"],
+        matrix.admin().get_candidate(candidate_id).await["candidate"]["status"],
         json!("pending"),
         "the refused separate-grant review consumed nothing"
     );
+}
 
-    // 3. ONE grant carrying both capabilities over the same scope is admitted
-    //    and the created record inherits the context placement verbatim.
-    let combined = admin
+/// Phase 3: one grant carrying both capabilities admits the review, and the
+/// record inherits the candidate's context placement; returns its id.
+async fn dual_grant_promotes_with_inherited_context(
+    matrix: &Matrix,
+    candidate_id: &str,
+    peer_id: &str,
+) -> String {
+    let combined = matrix
+        .admin()
         .grant(json!({
             "subject_id": SUBJECT,
             "principal_id": peer_id,
@@ -1234,7 +1274,7 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
     assert!(is_committed(&combined), "{combined}");
     let promoted = matrix
         .peer()
-        .review_candidate(review_body(&candidate_id, 1, "k-c034-promote"))
+        .review_candidate(review_body(candidate_id, 1, "k-c034-promote"))
         .await;
     assert_eq!(
         result(&promoted)["outcome"],
@@ -1242,20 +1282,23 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
         "{promoted}"
     );
     let record_id = record_ids(&promoted)[0].clone();
-    let record = admin.get_record(&record_id).await;
+    let record = matrix.admin().get_record(&record_id).await;
     assert_eq!(
         record["record"]["scope"],
         context_scope(CONTEXT),
         "the record inherits the candidate's capture scope: {record}"
     );
+    record_id
+}
 
-    // 4. Shared visibility needs the explicit dual-authorized promote. The peer
-    //    may read the context-placed record but cannot promote it (no `promote`
-    //    coverage), and the state never widens.
+/// Phase 4: shared visibility needs the explicit dual-authorized promote; the
+/// context-limited reader never widens the placement.
+async fn shared_promotion_needs_dual_authority(matrix: &Matrix, record_id: &str) {
+    let admin = matrix.admin();
     let reader = admin
         .grant(json!({
             "subject_id": SUBJECT,
-            "principal_id": peer_id,
+            "principal_id": matrix.peer_principal().principal_id,
             "capabilities": ["records_read"],
             "context_ids": [CONTEXT],
             "shared_access": false,
@@ -1264,7 +1307,7 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
         .await;
     assert!(is_committed(&reader), "{reader}");
     assert_eq!(
-        matrix.peer().get_record(&record_id).await["record"]["record_id"],
+        matrix.peer().get_record(record_id).await["record"]["record_id"],
         json!(record_id),
         "the context-limited reader sees the binding-placed record"
     );
@@ -1282,7 +1325,7 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
         "the unauthorized promote is a classified terminal refusal: {unauthorized}"
     );
     assert_eq!(retry_class(&unauthorized), "terminal");
-    let unchanged = admin.get_record(&record_id).await;
+    let unchanged = admin.get_record(record_id).await;
     assert_eq!(
         unchanged["record"]["scope"],
         context_scope(CONTEXT),
@@ -1301,7 +1344,7 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
     assert_eq!(result(&widened)["scope"], shared_scope(), "{widened}");
     assert_eq!(result(&widened)["revision"], json!(2));
     assert_eq!(
-        error_code(&matrix.peer().get_record(&record_id).await),
+        error_code(&matrix.peer().get_record(record_id).await),
         "NOT_FOUND",
         "the context-limited reader loses the record once it becomes shared"
     );
@@ -1309,7 +1352,6 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
         recalled(&admin, json!({ "mode": "shared_only" })).await["total_authorized"],
         json!(1)
     );
-    matrix.shutdown().await;
 }
 
 fn record_ids_or_empty(body: &Value) -> Vec<String> {
@@ -1388,26 +1430,9 @@ async fn c_035_merge_review_action_is_explicitly_unsupported_remote() {
 /// capture still observes the fence. The review replay is additional evidence.
 async fn replay_does_not_recheck_current_fence_or_cas(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
+    let (body, candidate_id, captured, reviewed) =
+        commit_capture_and_review_before_fence(&matrix).await;
     let admin = matrix.admin();
-    let body = capture_body("k-c036-capture", TEXT, &shared_scope());
-    let captured = admin.capture(body.clone()).await;
-    assert!(is_committed(&captured), "{captured}");
-    let candidate_id = candidate_ids(&captured)[0].clone();
-    let reviewed = admin
-        .review_candidate(review_body(&candidate_id, 1, "k-c036-review"))
-        .await;
-    assert!(is_committed(&reviewed), "{reviewed}");
-
-    // The subject is fenced after both decisions were committed.
-    admin
-        .fence_subject(
-            SUBJECT,
-            json!({ "type": "subject" }),
-            "fence",
-            1,
-            "k-c036-fence",
-        )
-        .await;
 
     // The specified operation: a CAPTURE replay is the stored receipt.
     let replay = admin.capture(body).await;
@@ -1437,6 +1462,30 @@ async fn replay_does_not_recheck_current_fence_or_cas(matrix: Matrix) {
     matrix.shutdown().await;
 }
 
+/// Commit a capture and its review, then fence the subject, so both decisions
+/// are durable before the replay.
+async fn commit_capture_and_review_before_fence(matrix: &Matrix) -> (Value, String, Value, Value) {
+    let admin = matrix.admin();
+    let body = capture_body("k-c036-capture", TEXT, &shared_scope());
+    let captured = admin.capture(body.clone()).await;
+    assert!(is_committed(&captured), "{captured}");
+    let candidate_id = candidate_ids(&captured)[0].clone();
+    let reviewed = admin
+        .review_candidate(review_body(&candidate_id, 1, "k-c036-review"))
+        .await;
+    assert!(is_committed(&reviewed), "{reviewed}");
+    admin
+        .fence_subject(
+            SUBJECT,
+            json!({ "type": "subject" }),
+            "fence",
+            1,
+            "k-c036-fence",
+        )
+        .await;
+    (body, candidate_id, captured, reviewed)
+}
+
 #[tokio::test]
 async fn c_036_replay_does_not_recheck_current_fence_or_cas_local() {
     replay_does_not_recheck_current_fence_or_cas(Matrix::local().await).await;
@@ -1453,37 +1502,7 @@ async fn binding_local_review_cannot_widen_visibility(matrix: Matrix, character:
     let subject = character.subject_id.as_str();
     let binding = character.binding_id.as_str();
     let admin = matrix.admin();
-    let ensured = admin.ensure_subject(subject).await;
-    assert_eq!(result(&ensured)["created"], json!(true));
-
-    let captured = admin
-        .capture(json!({
-            "subject_id": subject,
-            "content": { "text": TEXT },
-            "capture_scope": { "visibility": "context", "context_id": binding },
-            "source_context_ids": [binding],
-            "kind_hint": "fact",
-            "idempotency_key": "k-c116",
-        }))
-        .await;
-    assert!(is_committed(&captured), "{captured}");
-    let candidate_id = candidate_ids(&captured)[0].clone();
-    let promoted = admin
-        .review_candidate(review_body(&candidate_id, 1, "k-c116-review"))
-        .await;
-    assert_eq!(
-        result(&promoted)["outcome"],
-        json!("promoted"),
-        "{promoted}"
-    );
-    let record_id = record_ids(&promoted)[0].clone();
-    let record = admin.get_record(&record_id).await;
-    assert_eq!(
-        record["record"]["scope"],
-        json!({ "visibility": "context", "context_id": binding }),
-        "the promoted record keeps the binding capture scope: {record}"
-    );
-    assert_eq!(record["record"]["subject_id"], json!(subject));
+    let record_id = binding_local_review_promotes_in_place(&admin, subject, binding).await;
 
     // Shared-only visibility never sees the binding-placed record.
     let shared_only = admin
@@ -1561,6 +1580,47 @@ async fn binding_local_review_cannot_widen_visibility(matrix: Matrix, character:
         "the binding-limited reader loses the record after the explicit promote"
     );
     matrix.shutdown().await;
+}
+
+/// Ensure the subject, capture into the binding and review it in place; the
+/// promoted record keeps that binding placement. Returns its record id.
+async fn binding_local_review_promotes_in_place(
+    admin: &Actor<'_>,
+    subject: &str,
+    binding: &str,
+) -> String {
+    let ensured = admin.ensure_subject(subject).await;
+    assert_eq!(result(&ensured)["created"], json!(true));
+
+    let captured = admin
+        .capture(json!({
+            "subject_id": subject,
+            "content": { "text": TEXT },
+            "capture_scope": { "visibility": "context", "context_id": binding },
+            "source_context_ids": [binding],
+            "kind_hint": "fact",
+            "idempotency_key": "k-c116",
+        }))
+        .await;
+    assert!(is_committed(&captured), "{captured}");
+    let candidate_id = candidate_ids(&captured)[0].clone();
+    let promoted = admin
+        .review_candidate(review_body(&candidate_id, 1, "k-c116-review"))
+        .await;
+    assert_eq!(
+        result(&promoted)["outcome"],
+        json!("promoted"),
+        "{promoted}"
+    );
+    let record_id = record_ids(&promoted)[0].clone();
+    let record = admin.get_record(&record_id).await;
+    assert_eq!(
+        record["record"]["scope"],
+        json!({ "visibility": "context", "context_id": binding }),
+        "the promoted record keeps the binding capture scope: {record}"
+    );
+    assert_eq!(record["record"]["subject_id"], json!(subject));
+    record_id
 }
 
 #[tokio::test]

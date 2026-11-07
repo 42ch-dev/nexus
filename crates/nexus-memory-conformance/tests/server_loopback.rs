@@ -499,7 +499,7 @@ where
         self.notify.notify_waiters();
         let stream_disposed = tokio::time::timeout_at(deadline, self.stream.lock())
             .await
-            .map_or(false, |mut stream| {
+            .is_ok_and(|mut stream| {
                 stream.take();
                 true
             });
@@ -1239,538 +1239,45 @@ async fn all_twenty_five_base_operations_reach_the_durable_fixture() {
     let principal = fixture.principal.clone();
     let space = fixture.space_id.clone();
 
-    // 1. memory.describe
-    let described = wire(&expect_ok(
-        client
-            .describe(&principal, from_value(json!({})).expect("describe request"))
-            .await,
-    ));
-    assert_eq!(described["capabilities"], json!(["spoke-memory"]));
+    // 1-4. describe, spaces.list and the subject lifecycle.
+    base_operations_describe_spaces_and_subject(&client, &principal, &space).await;
+    // 5-7. grants list/grant/revoke.
+    base_operations_grants(&fixture, &client, &principal, &space).await;
 
-    // 2. memory.spaces.list
-    let listed = wire(&expect_ok(
-        client
-            .list_spaces(
-                &principal,
-                from_value(json!({})).expect("spaces.list request"),
-            )
-            .await,
-    ));
-    assert_eq!(listed["spaces"].as_array().expect("spaces").len(), 1);
-    assert_eq!(listed["spaces"][0]["space_id"], json!(space));
-    assert_eq!(listed["spaces"][0]["status"], json!("active"));
-    assert_eq!(listed["spaces"][0]["revision"], json!(1));
-    assert_eq!(listed["spaces"][0]["pending_receipts"], json!(0));
+    // 8-10. capture, candidates.list and candidates.get.
+    let (candidate_id, capture_receipt_id, captured) =
+        base_operations_capture_and_candidate_read(&fixture, &client, &principal, &space).await;
+    // 11-13. review into a record, its read and update.
+    let promoted_record =
+        base_operations_review_and_record_reads(&client, &principal, &space, &candidate_id).await;
+    // 14-17. create, list, promote and delete a shared record.
+    base_operations_shared_record_lifecycle(
+        &fixture,
+        &client,
+        &principal,
+        &space,
+        &promoted_record,
+    )
+    .await;
 
-    // 3. memory.subjects.ensure — the sole keyless mutation.
-    let ensured = wire(&expect_ok(
-        client
-            .ensure_subject(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "subject_id": SUBJECT,
-                    "kind": { "ns": "toy_world", "id": "warden" },
-                }))
-                .expect("ensure request"),
-            )
-            .await,
-    ));
-    assert_eq!(ensured["status"], json!("committed"));
-    assert_eq!(ensured["result"]["created"], json!(true));
-    assert_eq!(ensured["result"]["status"], json!("active"));
-    assert_eq!(ensured["result"]["revision"], json!(1));
-    assert_eq!(ensured["result"]["subject_id"], json!(SUBJECT));
+    // 18. dismiss a second candidate captured in B.
+    let (second_candidate, dismissed) =
+        base_operations_dismiss(&fixture, &client, &principal, &space).await;
+    // 19-21. recall, profile update and profile get.
+    base_operations_recall_and_profiles(&client, &principal, &space).await;
 
-    // 4. memory.subjects.get
-    let subject = wire(&expect_ok(
-        client
-            .get_subject(
-                &principal,
-                from_value(json!({ "space_id": space, "subject_id": SUBJECT }))
-                    .expect("subject request"),
-            )
-            .await,
-    ));
-    assert_eq!(subject["subject"]["status"], json!("active"));
-    assert_eq!(subject["subject"]["revision"], json!(1));
-
-    // 5. memory.grants.list
-    let grants = wire(&expect_ok(
-        client
-            .list_grants(
-                &principal,
-                from_value(json!({ "space_id": space })).expect("grants.list request"),
-            )
-            .await,
-    ));
-    let admin_grant = grants["grants"]
-        .as_array()
-        .expect("grants")
-        .iter()
-        .find(|grant| grant["capabilities"] == json!(["admin"]))
-        .expect("the operator admin grant is visible")
-        .clone();
-    assert_eq!(admin_grant["principal_id"], json!(fixture.principal_id));
-
-    // 6. memory.grants.grant — a scoped grant for a different grantee.
-    let issued = wire(&expect_ok(
-        client
-            .grant(
-                &principal,
-                from_value(json!({
-                    "capabilities": ["capture", "review", "records_read", "records_write"],
-                    "context_ids": [CONTEXT],
-                    "idempotency_key": "grant-1",
-                    "principal_id": "prn_grantee",
-                    "space_id": space,
-                    "subject_id": SUBJECT,
-                }))
-                .expect("grant request"),
-            )
-            .await,
-    ));
-    let granted_id = issued["result"]["grant_id"]
-        .as_str()
-        .expect("grant id")
-        .to_owned();
-    assert_eq!(issued["result"]["revision"], json!(1));
-
-    // 7. memory.grants.revoke
-    let revoked = wire(&expect_ok(
-        client
-            .revoke_grant(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "grant_id": granted_id,
-                    "expected_revision": 1,
-                    "idempotency_key": "revoke-1",
-                }))
-                .expect("revoke request"),
-            )
-            .await,
-    ));
-    assert_eq!(revoked["result"]["revoked"], json!(true));
-    assert_eq!(revoked["result"]["revision"], json!(2));
-
-    // 8. memory.capture
-    let captured = fixture
-        .capture(fixture.capture_request(
-            "cap-1",
-            "The gate key is under the third barrel.",
-            CONTEXT,
-        ))
-        .await;
-    assert_eq!(captured["status"], json!("committed"));
-    assert_eq!(captured["op"], json!("memory.capture"));
-    assert_eq!(
-        captured["requester_principal_id"],
-        json!(fixture.principal_id)
-    );
-    assert_eq!(
-        captured["payload_digest"],
-        json!(digest_of(&fixture.capture_request(
-            "cap-1",
-            "The gate key is under the third barrel.",
-            CONTEXT
-        )))
-    );
-    let candidate_id = captured["result"]["candidate_ids"][0]
-        .as_str()
-        .expect("first candidate id")
-        .to_owned();
-    let capture_receipt_id = captured["receipt_id"]
-        .as_str()
-        .expect("receipt id")
-        .to_owned();
-
-    // 9. memory.candidates.list
-    let candidates_page = wire(&expect_ok(
-        client
-            .list_candidates(
-                &principal,
-                from_value(json!({ "space_id": space, "subject_id": SUBJECT }))
-                    .expect("candidates.list request"),
-            )
-            .await,
-    ));
-    let pending = candidates_page["candidates"]
-        .as_array()
-        .expect("candidates")
-        .clone();
-    assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0]["candidate_id"], json!(candidate_id));
-    assert_eq!(pending[0]["status"], json!("pending"));
-    assert_eq!(
-        pending[0]["capture_scope"],
-        json!({ "visibility": "context", "context_id": CONTEXT })
-    );
-
-    // 10. memory.candidates.get
-    let candidate = wire(&expect_ok(
-        client
-            .get_candidate(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "candidate_id": candidate_id,
-                }))
-                .expect("candidates.get request"),
-            )
-            .await,
-    ));
-    assert_eq!(candidate["candidate"]["proposed"]["kind"], json!("fact"));
-
-    // 11. memory.candidates.review
-    let reviewed = wire(&expect_ok(
-        client
-            .review_candidate(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "candidate_id": candidate_id,
-                    "expected_revision": 1,
-                    "decision": { "action": "promote" },
-                    "idempotency_key": "review-1",
-                }))
-                .expect("review request"),
-            )
-            .await,
-    ));
-    assert_eq!(reviewed["result"]["outcome"], json!("promoted"));
-    let record_ids = reviewed["result"]["record_ids"]
-        .as_array()
-        .expect("record ids")
-        .clone();
-    assert_eq!(record_ids.len(), 1);
-    let promoted_record = record_ids[0].as_str().expect("record id").to_owned();
-
-    // 12. memory.records.get
-    let record = wire(&expect_ok(
-        client
-            .get_record(
-                &principal,
-                from_value(json!({ "space_id": space, "record_id": promoted_record }))
-                    .expect("records.get request"),
-            )
-            .await,
-    ));
-    assert_eq!(record["record"]["revision"], json!(1));
-    assert_eq!(
-        record["record"]["scope"],
-        json!({ "visibility": "context", "context_id": CONTEXT })
-    );
-    assert!(record["record"]["content"]["text"]
-        .as_str()
-        .expect("record text")
-        .contains("third barrel"));
-
-    // 13. memory.records.update
-    let updated = wire(&expect_ok(
-        client
-            .update_record(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "record_id": promoted_record,
-                    "expected_revision": 1,
-                    "content": { "text": "The gate key moved under the fourth barrel." },
-                    "idempotency_key": "record-update-1",
-                }))
-                .expect("records.update request"),
-            )
-            .await,
-    ));
-    assert_eq!(updated["result"]["revision"], json!(2));
-
-    // A stale CAS precondition is a terminal refusal with no effect.
-    let stale = expect_reject(
-        client
-            .update_record(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "record_id": promoted_record,
-                    "expected_revision": 1,
-                    "content": { "text": "stale overwrite" },
-                    "idempotency_key": "record-update-stale",
-                }))
-                .expect("stale update request"),
-            )
-            .await,
-    );
-    assert_eq!(stale.code, SpokeRejectCode::RevisionConflict);
-    assert_eq!(retry_class(&stale).as_deref(), Some("terminal"));
-
-    // 14. memory.records.create
-    let created = wire(&expect_ok(
-        client
-            .create_record(
-                &principal,
-                from_value(fixture.record_create_request(
-                    "record-create-1",
-                    "Shared field note.",
-                    true,
-                ))
-                .expect("records.create request"),
-            )
-            .await,
-    ));
-    let shared_record = created["result"]["record_id"]
-        .as_str()
-        .expect("shared record id")
-        .to_owned();
-    assert_eq!(created["result"]["revision"], json!(1));
-
-    // 15. memory.records.list
-    let records_page = wire(&expect_ok(
-        client
-            .list_records(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "subject_id": SUBJECT,
-                    "selection": { "mode": "subject_all" },
-                }))
-                .expect("records.list request"),
-            )
-            .await,
-    ));
-    assert_eq!(records_page["total_authorized"], json!(2));
-
-    // 16. memory.records.promote
-    let promoted = wire(&expect_ok(
-        client
-            .promote_record(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "record_id": promoted_record,
-                    "expected_revision": 2,
-                    "target_scope": { "visibility": "shared" },
-                    "idempotency_key": "record-promote-1",
-                }))
-                .expect("records.promote request"),
-            )
-            .await,
-    ));
-    assert_eq!(promoted["result"]["revision"], json!(3));
-    assert_eq!(
-        promoted["result"]["scope"],
-        json!({ "visibility": "shared" })
-    );
-
-    // 17. memory.records.delete
-    let deleted = wire(&expect_ok(
-        client
-            .delete_record(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "record_id": shared_record,
-                    "expected_revision": 1,
-                    "reason": "superseded",
-                    "idempotency_key": "record-delete-1",
-                }))
-                .expect("records.delete request"),
-            )
-            .await,
-    ));
-    assert_eq!(deleted["result"]["tombstoned"], json!(true));
-
-    // 18. memory.candidates.dismiss — a second capture, then consumption
-    // without a review decision.
-    let second_capture = fixture
-        .capture(fixture.capture_request("cap-2", "Market gossip for dismissal.", OTHER_CONTEXT))
-        .await;
-    let second_candidate = second_capture["result"]["candidate_ids"][0]
-        .as_str()
-        .expect("second candidate id")
-        .to_owned();
-    let dismissed = wire(&expect_ok(
-        client
-            .dismiss_candidate(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "candidate_id": second_candidate,
-                    "expected_revision": 1,
-                    "idempotency_key": "dismiss-1",
-                }))
-                .expect("candidates.dismiss request"),
-            )
-            .await,
-    ));
-    assert_eq!(dismissed["result"]["outcome"], json!("dismissed"));
-    assert_eq!(dismissed["result"]["candidate_id"], json!(second_candidate));
-
-    // 19. memory.recall — the promoted record is now shared.
-    let recalled = wire(&expect_ok(
-        client
-            .recall(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "subject_id": SUBJECT,
-                    "selection": { "mode": "shared_only" },
-                    "query": "gate",
-                    "budget": { "max_items": 5 },
-                }))
-                .expect("recall request"),
-            )
-            .await,
-    ));
-    let recalled_texts: Vec<&str> = recalled["records"]
-        .as_array()
-        .expect("recalled records")
-        .iter()
-        .filter_map(|record| record["content"]["text"].as_str())
-        .collect();
-    assert!(
-        recalled_texts
-            .iter()
-            .any(|text| text.contains("fourth barrel")),
-        "recall returns the promoted shared record: {recalled_texts:?}"
-    );
-    assert_eq!(
-        recalled["engine_policy_version"],
-        json!("nexus-fixture-spoke-memory/0.15.1")
-    );
-    assert_eq!(recalled["truncated"], json!(false));
-
-    // 20. memory.profile.update
-    let profile = wire(&expect_ok(
-        client
-            .update_profile(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "subject_id": SUBJECT,
-                    "profile_kind": "personality",
-                    "expected_revision": null,
-                    "document": { "format": "markdown", "body": "# Warden\nCautious and precise." },
-                    "idempotency_key": "profile-1",
-                }))
-                .expect("profile.update request"),
-            )
-            .await,
-    ));
-    assert_eq!(profile["result"]["profile_kind"], json!("personality"));
-    assert_eq!(profile["result"]["revision"], json!(1));
-
-    // 21. memory.profile.get
-    let profiles = wire(&expect_ok(
-        client
-            .get_profile(
-                &principal,
-                from_value(json!({ "space_id": space, "subject_id": SUBJECT }))
-                    .expect("profile.get request"),
-            )
-            .await,
-    ));
-    assert_eq!(profiles["profiles"].as_array().expect("profiles").len(), 1);
-    assert_eq!(
-        profiles["profiles"][0]["document"]["body"],
-        json!("# Warden\nCautious and precise.")
-    );
-
-    // 22. memory.receipts.get — the capture receipt stays content-free.
-    let receipt = wire(&expect_ok(
-        client
-            .get_receipt(
-                &principal,
-                from_value(json!({ "space_id": space, "receipt_id": capture_receipt_id }))
-                    .expect("receipts.get request"),
-            )
-            .await,
-    ));
-    assert_eq!(receipt["receipt"]["status"], json!("committed"));
-    assert_eq!(receipt["receipt"]["op"], json!("memory.capture"));
-    assert_eq!(
-        receipt["receipt"]["result"]["candidate_ids"][0],
-        json!(candidate_id)
-    );
-    assert!(!receipt.to_string().contains("third barrel"));
-
-    // 23. memory.spaces.freeze — a frozen space refuses fresh writes and the
-    // refusal leaves the candidate rows untouched.
-    let candidates_before = fixture.count("candidates").await;
-    let frozen = wire(&expect_ok(
-        client
-            .freeze_space(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "expected_revision": 1,
-                    "idempotency_key": "freeze-1",
-                }))
-                .expect("freeze request"),
-            )
-            .await,
-    ));
-    assert_eq!(frozen["result"]["status"], json!("frozen"));
-    assert_eq!(frozen["result"]["revision"], json!(2));
-    let frozen_refusal = expect_reject(
-        client
-            .capture(
-                &principal,
-                from_value(fixture.capture_request("cap-frozen", "blocked", CONTEXT))
-                    .expect("capture request"),
-            )
-            .await,
-    );
-    assert_eq!(frozen_refusal.code, SpokeRejectCode::SpaceFrozen);
-    assert_eq!(retry_class(&frozen_refusal).as_deref(), Some("terminal"));
-    assert_eq!(fixture.count("candidates").await, candidates_before);
-
-    // 24. memory.spaces.unfreeze
-    let unfrozen = wire(&expect_ok(
-        client
-            .unfreeze_space(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "expected_revision": 2,
-                    "idempotency_key": "unfreeze-1",
-                }))
-                .expect("unfreeze request"),
-            )
-            .await,
-    ));
-    assert_eq!(unfrozen["result"]["status"], json!("active"));
-    assert_eq!(unfrozen["result"]["revision"], json!(3));
-
-    // 25. memory.subjects.fence — a fenced subject refuses fresh writes.
-    let fenced = wire(&expect_ok(
-        client
-            .fence_subject(
-                &principal,
-                from_value(json!({
-                    "space_id": space,
-                    "subject_id": SUBJECT,
-                    "target": { "type": "subject" },
-                    "action": "fence",
-                    "expected_revision": 1,
-                    "idempotency_key": "fence-1",
-                }))
-                .expect("fence request"),
-            )
-            .await,
-    ));
-    assert_eq!(fenced["result"]["status"], json!("fenced"));
-    assert_eq!(fenced["result"]["revision"], json!(2));
-    let fenced_refusal = expect_reject(
-        client
-            .capture(
-                &principal,
-                from_value(fixture.capture_request("cap-fenced", "blocked", CONTEXT))
-                    .expect("capture request"),
-            )
-            .await,
-    );
-    assert_eq!(fenced_refusal.code, SpokeRejectCode::SubjectFenced);
-    assert_eq!(retry_class(&fenced_refusal).as_deref(), Some("terminal"));
+    // 22. the capture receipt stays content-free.
+    base_operations_capture_receipt(
+        &client,
+        &principal,
+        &space,
+        &candidate_id,
+        &capture_receipt_id,
+    )
+    .await;
+    // 23-25. freeze/unfreeze/fence under the same authority.
+    let candidates_before =
+        base_operations_freeze_unfreeze_and_fence(&fixture, &client, &principal, &space).await;
 
     // Replay of the first capture returns the original receipt and no second
     // candidate (MEM-R021), even after every later revision.
@@ -1803,6 +1310,591 @@ async fn all_twenty_five_base_operations_reach_the_durable_fixture() {
     assert_eq!(dismissed_replay["receipt_id"], dismissed["receipt_id"]);
 
     fixture.shutdown().await;
+}
+
+/// 1-4: describe, spaces.list and the sole keyless subject mutation with its read.
+async fn base_operations_describe_spaces_and_subject(
+    client: &Arc<RemoteAdapter>,
+    principal: &Principal,
+    space: &str,
+) {
+    let described = wire(&expect_ok(
+        client
+            .describe(principal, from_value(json!({})).expect("describe request"))
+            .await,
+    ));
+    assert_eq!(described["capabilities"], json!(["spoke-memory"]));
+
+    let listed = wire(&expect_ok(
+        client
+            .list_spaces(
+                principal,
+                from_value(json!({})).expect("spaces.list request"),
+            )
+            .await,
+    ));
+    assert_eq!(listed["spaces"].as_array().expect("spaces").len(), 1);
+    assert_eq!(listed["spaces"][0]["space_id"], json!(space));
+    assert_eq!(listed["spaces"][0]["status"], json!("active"));
+    assert_eq!(listed["spaces"][0]["revision"], json!(1));
+    assert_eq!(listed["spaces"][0]["pending_receipts"], json!(0));
+
+    let ensured = wire(&expect_ok(
+        client
+            .ensure_subject(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "subject_id": SUBJECT,
+                    "kind": { "ns": "toy_world", "id": "warden" },
+                }))
+                .expect("ensure request"),
+            )
+            .await,
+    ));
+    assert_eq!(ensured["status"], json!("committed"));
+    assert_eq!(ensured["result"]["created"], json!(true));
+    assert_eq!(ensured["result"]["status"], json!("active"));
+    assert_eq!(ensured["result"]["revision"], json!(1));
+    assert_eq!(ensured["result"]["subject_id"], json!(SUBJECT));
+
+    let subject = wire(&expect_ok(
+        client
+            .get_subject(
+                principal,
+                from_value(json!({ "space_id": space, "subject_id": SUBJECT }))
+                    .expect("subject request"),
+            )
+            .await,
+    ));
+    assert_eq!(subject["subject"]["status"], json!("active"));
+    assert_eq!(subject["subject"]["revision"], json!(1));
+}
+
+/// 5-7: the visible admin grant, a scoped grant and its revoke.
+async fn base_operations_grants(
+    fixture: &Fixture,
+    client: &Arc<RemoteAdapter>,
+    principal: &Principal,
+    space: &str,
+) {
+    let grants = wire(&expect_ok(
+        client
+            .list_grants(
+                principal,
+                from_value(json!({ "space_id": space })).expect("grants.list request"),
+            )
+            .await,
+    ));
+    let admin_grant = grants["grants"]
+        .as_array()
+        .expect("grants")
+        .iter()
+        .find(|grant| grant["capabilities"] == json!(["admin"]))
+        .expect("the operator admin grant is visible")
+        .clone();
+    assert_eq!(admin_grant["principal_id"], json!(fixture.principal_id));
+
+    let issued = wire(&expect_ok(
+        client
+            .grant(
+                principal,
+                from_value(json!({
+                    "capabilities": ["capture", "review", "records_read", "records_write"],
+                    "context_ids": [CONTEXT],
+                    "idempotency_key": "grant-1",
+                    "principal_id": "prn_grantee",
+                    "space_id": space,
+                    "subject_id": SUBJECT,
+                }))
+                .expect("grant request"),
+            )
+            .await,
+    ));
+    let granted_id = issued["result"]["grant_id"]
+        .as_str()
+        .expect("grant id")
+        .to_owned();
+    assert_eq!(issued["result"]["revision"], json!(1));
+
+    let revoked = wire(&expect_ok(
+        client
+            .revoke_grant(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "grant_id": granted_id,
+                    "expected_revision": 1,
+                    "idempotency_key": "revoke-1",
+                }))
+                .expect("revoke request"),
+            )
+            .await,
+    ));
+    assert_eq!(revoked["result"]["revoked"], json!(true));
+    assert_eq!(revoked["result"]["revision"], json!(2));
+}
+
+/// 8-10: the durable capture, its pending candidate page and the by-id read.
+async fn base_operations_capture_and_candidate_read(
+    fixture: &Fixture,
+    client: &Arc<RemoteAdapter>,
+    principal: &Principal,
+    space: &str,
+) -> (String, String, Value) {
+    let captured = fixture
+        .capture(fixture.capture_request(
+            "cap-1",
+            "The gate key is under the third barrel.",
+            CONTEXT,
+        ))
+        .await;
+    assert_eq!(captured["status"], json!("committed"));
+    assert_eq!(captured["op"], json!("memory.capture"));
+    assert_eq!(
+        captured["requester_principal_id"],
+        json!(fixture.principal_id)
+    );
+    assert_eq!(
+        captured["payload_digest"],
+        json!(digest_of(&fixture.capture_request(
+            "cap-1",
+            "The gate key is under the third barrel.",
+            CONTEXT
+        )))
+    );
+    let candidate_id = captured["result"]["candidate_ids"][0]
+        .as_str()
+        .expect("first candidate id")
+        .to_owned();
+    let capture_receipt_id = captured["receipt_id"]
+        .as_str()
+        .expect("receipt id")
+        .to_owned();
+
+    let candidates_page = wire(&expect_ok(
+        client
+            .list_candidates(
+                principal,
+                from_value(json!({ "space_id": space, "subject_id": SUBJECT }))
+                    .expect("candidates.list request"),
+            )
+            .await,
+    ));
+    let pending = candidates_page["candidates"]
+        .as_array()
+        .expect("candidates")
+        .clone();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0]["candidate_id"], json!(candidate_id));
+    assert_eq!(pending[0]["status"], json!("pending"));
+    assert_eq!(
+        pending[0]["capture_scope"],
+        json!({ "visibility": "context", "context_id": CONTEXT })
+    );
+
+    let candidate = wire(&expect_ok(
+        client
+            .get_candidate(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "candidate_id": candidate_id,
+                }))
+                .expect("candidates.get request"),
+            )
+            .await,
+    ));
+    assert_eq!(candidate["candidate"]["proposed"]["kind"], json!("fact"));
+    (candidate_id, capture_receipt_id, captured)
+}
+
+/// 11-13: review into one record, its read and a revision-checked update plus a
+/// stale-CAS refusal.
+async fn base_operations_review_and_record_reads(
+    client: &Arc<RemoteAdapter>,
+    principal: &Principal,
+    space: &str,
+    candidate_id: &str,
+) -> String {
+    let reviewed = wire(&expect_ok(
+        client
+            .review_candidate(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "candidate_id": candidate_id,
+                    "expected_revision": 1,
+                    "decision": { "action": "promote" },
+                    "idempotency_key": "review-1",
+                }))
+                .expect("review request"),
+            )
+            .await,
+    ));
+    assert_eq!(reviewed["result"]["outcome"], json!("promoted"));
+    let record_ids = reviewed["result"]["record_ids"]
+        .as_array()
+        .expect("record ids")
+        .clone();
+    assert_eq!(record_ids.len(), 1);
+    let promoted_record = record_ids[0].as_str().expect("record id").to_owned();
+
+    let record = wire(&expect_ok(
+        client
+            .get_record(
+                principal,
+                from_value(json!({ "space_id": space, "record_id": promoted_record }))
+                    .expect("records.get request"),
+            )
+            .await,
+    ));
+    assert_eq!(record["record"]["revision"], json!(1));
+    assert_eq!(
+        record["record"]["scope"],
+        json!({ "visibility": "context", "context_id": CONTEXT })
+    );
+    assert!(record["record"]["content"]["text"]
+        .as_str()
+        .expect("record text")
+        .contains("third barrel"));
+
+    let updated = wire(&expect_ok(
+        client
+            .update_record(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "record_id": promoted_record,
+                    "expected_revision": 1,
+                    "content": { "text": "The gate key moved under the fourth barrel." },
+                    "idempotency_key": "record-update-1",
+                }))
+                .expect("records.update request"),
+            )
+            .await,
+    ));
+    assert_eq!(updated["result"]["revision"], json!(2));
+
+    let stale = expect_reject(
+        client
+            .update_record(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "record_id": promoted_record,
+                    "expected_revision": 1,
+                    "content": { "text": "stale overwrite" },
+                    "idempotency_key": "record-update-stale",
+                }))
+                .expect("stale update request"),
+            )
+            .await,
+    );
+    assert_eq!(stale.code, SpokeRejectCode::RevisionConflict);
+    assert_eq!(retry_class(&stale).as_deref(), Some("terminal"));
+    promoted_record
+}
+
+/// 14-17: create a shared record, list both, promote the reviewed record and
+/// delete the shared one.
+async fn base_operations_shared_record_lifecycle(
+    fixture: &Fixture,
+    client: &Arc<RemoteAdapter>,
+    principal: &Principal,
+    space: &str,
+    promoted_record: &str,
+) {
+    let created = wire(&expect_ok(
+        client
+            .create_record(
+                principal,
+                from_value(fixture.record_create_request(
+                    "record-create-1",
+                    "Shared field note.",
+                    true,
+                ))
+                .expect("records.create request"),
+            )
+            .await,
+    ));
+    let shared_record = created["result"]["record_id"]
+        .as_str()
+        .expect("shared record id")
+        .to_owned();
+    assert_eq!(created["result"]["revision"], json!(1));
+
+    let records_page = wire(&expect_ok(
+        client
+            .list_records(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "subject_id": SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                }))
+                .expect("records.list request"),
+            )
+            .await,
+    ));
+    assert_eq!(records_page["total_authorized"], json!(2));
+
+    let promoted = wire(&expect_ok(
+        client
+            .promote_record(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "record_id": promoted_record,
+                    "expected_revision": 2,
+                    "target_scope": { "visibility": "shared" },
+                    "idempotency_key": "record-promote-1",
+                }))
+                .expect("records.promote request"),
+            )
+            .await,
+    ));
+    assert_eq!(promoted["result"]["revision"], json!(3));
+    assert_eq!(
+        promoted["result"]["scope"],
+        json!({ "visibility": "shared" })
+    );
+
+    let deleted = wire(&expect_ok(
+        client
+            .delete_record(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "record_id": shared_record,
+                    "expected_revision": 1,
+                    "reason": "superseded",
+                    "idempotency_key": "record-delete-1",
+                }))
+                .expect("records.delete request"),
+            )
+            .await,
+    ));
+    assert_eq!(deleted["result"]["tombstoned"], json!(true));
+}
+
+/// 18: a second capture in B consumed by dismissal.
+async fn base_operations_dismiss(
+    fixture: &Fixture,
+    client: &Arc<RemoteAdapter>,
+    principal: &Principal,
+    space: &str,
+) -> (String, Value) {
+    let second_capture = fixture
+        .capture(fixture.capture_request("cap-2", "Market gossip for dismissal.", OTHER_CONTEXT))
+        .await;
+    let second_candidate = second_capture["result"]["candidate_ids"][0]
+        .as_str()
+        .expect("second candidate id")
+        .to_owned();
+    let dismissed = wire(&expect_ok(
+        client
+            .dismiss_candidate(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "candidate_id": second_candidate,
+                    "expected_revision": 1,
+                    "idempotency_key": "dismiss-1",
+                }))
+                .expect("candidates.dismiss request"),
+            )
+            .await,
+    ));
+    assert_eq!(dismissed["result"]["outcome"], json!("dismissed"));
+    assert_eq!(dismissed["result"]["candidate_id"], json!(second_candidate));
+    (second_candidate, dismissed)
+}
+
+/// 19-21: recall of the promoted shared record and the profile round trip.
+async fn base_operations_recall_and_profiles(
+    client: &Arc<RemoteAdapter>,
+    principal: &Principal,
+    space: &str,
+) {
+    let recalled = wire(&expect_ok(
+        client
+            .recall(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "subject_id": SUBJECT,
+                    "selection": { "mode": "shared_only" },
+                    "query": "gate",
+                    "budget": { "max_items": 5 },
+                }))
+                .expect("recall request"),
+            )
+            .await,
+    ));
+    let recalled_texts: Vec<&str> = recalled["records"]
+        .as_array()
+        .expect("recalled records")
+        .iter()
+        .filter_map(|record| record["content"]["text"].as_str())
+        .collect();
+    assert!(
+        recalled_texts
+            .iter()
+            .any(|text| text.contains("fourth barrel")),
+        "recall returns the promoted shared record: {recalled_texts:?}"
+    );
+    assert_eq!(
+        recalled["engine_policy_version"],
+        json!("nexus-fixture-spoke-memory/0.15.1")
+    );
+    assert_eq!(recalled["truncated"], json!(false));
+
+    let profile = wire(&expect_ok(
+        client
+            .update_profile(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "subject_id": SUBJECT,
+                    "profile_kind": "personality",
+                    "expected_revision": null,
+                    "document": { "format": "markdown", "body": "# Warden\nCautious and precise." },
+                    "idempotency_key": "profile-1",
+                }))
+                .expect("profile.update request"),
+            )
+            .await,
+    ));
+    assert_eq!(profile["result"]["profile_kind"], json!("personality"));
+    assert_eq!(profile["result"]["revision"], json!(1));
+
+    let profiles = wire(&expect_ok(
+        client
+            .get_profile(
+                principal,
+                from_value(json!({ "space_id": space, "subject_id": SUBJECT }))
+                    .expect("profile.get request"),
+            )
+            .await,
+    ));
+    assert_eq!(profiles["profiles"].as_array().expect("profiles").len(), 1);
+    assert_eq!(
+        profiles["profiles"][0]["document"]["body"],
+        json!("# Warden\nCautious and precise.")
+    );
+}
+
+/// 22: the capture receipt names ids only and never the captured text.
+async fn base_operations_capture_receipt(
+    client: &Arc<RemoteAdapter>,
+    principal: &Principal,
+    space: &str,
+    candidate_id: &str,
+    capture_receipt_id: &str,
+) {
+    let receipt = wire(&expect_ok(
+        client
+            .get_receipt(
+                principal,
+                from_value(json!({ "space_id": space, "receipt_id": capture_receipt_id }))
+                    .expect("receipts.get request"),
+            )
+            .await,
+    ));
+    assert_eq!(receipt["receipt"]["status"], json!("committed"));
+    assert_eq!(receipt["receipt"]["op"], json!("memory.capture"));
+    assert_eq!(
+        receipt["receipt"]["result"]["candidate_ids"][0],
+        json!(candidate_id)
+    );
+    assert!(!receipt.to_string().contains("third barrel"));
+}
+
+/// 23-25: a frozen space refuses writes without moving rows, unfreeze restores
+/// writability, and the subject fence refuses fresh writes. Returns the
+/// pre-freeze candidate count.
+async fn base_operations_freeze_unfreeze_and_fence(
+    fixture: &Fixture,
+    client: &Arc<RemoteAdapter>,
+    principal: &Principal,
+    space: &str,
+) -> u64 {
+    let candidates_before = fixture.count("candidates").await;
+    let frozen = wire(&expect_ok(
+        client
+            .freeze_space(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "expected_revision": 1,
+                    "idempotency_key": "freeze-1",
+                }))
+                .expect("freeze request"),
+            )
+            .await,
+    ));
+    assert_eq!(frozen["result"]["status"], json!("frozen"));
+    assert_eq!(frozen["result"]["revision"], json!(2));
+    let frozen_refusal = expect_reject(
+        client
+            .capture(
+                principal,
+                from_value(fixture.capture_request("cap-frozen", "blocked", CONTEXT))
+                    .expect("capture request"),
+            )
+            .await,
+    );
+    assert_eq!(frozen_refusal.code, SpokeRejectCode::SpaceFrozen);
+    assert_eq!(retry_class(&frozen_refusal).as_deref(), Some("terminal"));
+    assert_eq!(fixture.count("candidates").await, candidates_before);
+
+    let unfrozen = wire(&expect_ok(
+        client
+            .unfreeze_space(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "expected_revision": 2,
+                    "idempotency_key": "unfreeze-1",
+                }))
+                .expect("unfreeze request"),
+            )
+            .await,
+    ));
+    assert_eq!(unfrozen["result"]["status"], json!("active"));
+    assert_eq!(unfrozen["result"]["revision"], json!(3));
+
+    let fenced = wire(&expect_ok(
+        client
+            .fence_subject(
+                principal,
+                from_value(json!({
+                    "space_id": space,
+                    "subject_id": SUBJECT,
+                    "target": { "type": "subject" },
+                    "action": "fence",
+                    "expected_revision": 1,
+                    "idempotency_key": "fence-1",
+                }))
+                .expect("fence request"),
+            )
+            .await,
+    ));
+    assert_eq!(fenced["result"]["status"], json!("fenced"));
+    assert_eq!(fenced["result"]["revision"], json!(2));
+    let fenced_refusal = expect_reject(
+        client
+            .capture(
+                principal,
+                from_value(fixture.capture_request("cap-fenced", "blocked", CONTEXT))
+                    .expect("capture request"),
+            )
+            .await,
+    );
+    assert_eq!(fenced_refusal.code, SpokeRejectCode::SubjectFenced);
+    assert_eq!(retry_class(&fenced_refusal).as_deref(), Some("terminal"));
+    candidates_before
 }
 
 // ---------------------------------------------------------------------------
@@ -2672,52 +2764,7 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
 
     // Close races both real polls. It must finish, and a concurrent close must
     // wait for that cleanup instead of reporting completion while it runs.
-    let closing = tokio::spawn({
-        let stalled = Arc::clone(&stalled);
-        async move { stalled.close().await }
-    });
-    probe
-        .wait_for(&probe.cleanup_started, "the transport cleanup starts")
-        .await;
-    let concurrent = tokio::spawn({
-        let stalled = Arc::clone(&stalled);
-        let probe = Arc::clone(&probe);
-        async move {
-            let entry = Instant::now();
-            let outcome = stalled.release().await;
-            (
-                outcome,
-                entry.elapsed(),
-                probe.cleanup_finished.load(Ordering::SeqCst),
-            )
-        }
-    });
-
-    tokio::time::timeout(SETUP_BOUND, closing)
-        .await
-        .expect("the transport close is bounded")
-        .expect("the close task joins")
-        .expect("the transport closes");
-    let (second, waited, saw_cleanup_finish) = tokio::time::timeout(SETUP_BOUND, concurrent)
-        .await
-        .expect("the concurrent close is bounded")
-        .expect("the concurrent close task joins");
-    match second {
-        // It only got the gate after the first cleanup had really finished.
-        Ok(()) => assert!(
-            saw_cleanup_finish,
-            "a concurrent close must not report completion while the first cleanup is still running"
-        ),
-        // Its own entry budget was spent waiting, so it reports that and claims
-        // nothing about the cleanup it did not run.
-        Err(CleanupFailure::GateBusy) => {}
-        Err(other) => panic!("the concurrent cleanup reported {other:?}"),
-    }
-    assert!(
-        waited <= SHUTDOWN_BOUND + SHUTDOWN_BOUND / 2,
-        "a queued close is bounded from its own entry, not by a fresh bound after \
-         the one it waited for: {waited:?}"
-    );
+    close_races_live_polls_and_a_queued_close(&probe, &stalled).await;
 
     let released = tokio::time::timeout(SETUP_BOUND, waiting)
         .await
@@ -2757,6 +2804,60 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
         .await
         .expect("the stalled peer task ends")
         .expect("the stalled peer task joins");
+}
+
+/// Close races both live native polls: it must finish, and a concurrent close
+/// must wait for that cleanup instead of reporting completion while it runs.
+async fn close_races_live_polls_and_a_queued_close(
+    probe: &Arc<PollProbe>,
+    stalled: &Arc<WsTransport<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>,
+) {
+    let closing = tokio::spawn({
+        let stalled = Arc::clone(stalled);
+        async move { stalled.close().await }
+    });
+    probe
+        .wait_for(&probe.cleanup_started, "the transport cleanup starts")
+        .await;
+    let concurrent = tokio::spawn({
+        let stalled = Arc::clone(stalled);
+        let probe = Arc::clone(probe);
+        async move {
+            let entry = Instant::now();
+            let outcome = stalled.release().await;
+            (
+                outcome,
+                entry.elapsed(),
+                probe.cleanup_finished.load(Ordering::SeqCst),
+            )
+        }
+    });
+
+    tokio::time::timeout(SETUP_BOUND, closing)
+        .await
+        .expect("the transport close is bounded")
+        .expect("the close task joins")
+        .expect("the transport closes");
+    let (second, waited, saw_cleanup_finish) = tokio::time::timeout(SETUP_BOUND, concurrent)
+        .await
+        .expect("the concurrent close is bounded")
+        .expect("the concurrent close task joins");
+    match second {
+        // It only got the gate after the first cleanup had really finished.
+        Ok(()) => assert!(
+            saw_cleanup_finish,
+            "a concurrent close must not report completion while the first cleanup is still running"
+        ),
+        // Its own entry budget was spent waiting, so it reports that and claims
+        // nothing about the cleanup it did not run.
+        Err(CleanupFailure::GateBusy) => {}
+        Err(other) => panic!("the concurrent cleanup reported {other:?}"),
+    }
+    assert!(
+        waited <= SHUTDOWN_BOUND + SHUTDOWN_BOUND / 2,
+        "a queued close is bounded from its own entry, not by a fresh bound after \
+         the one it waited for: {waited:?}"
+    );
 }
 
 /// A cleanup that cannot take a half must fail rather than announce completion.
@@ -3040,65 +3141,148 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
     let (scoped_server_leg, scoped_responder) = host.await.expect("the scoped host task");
     let scoped_principal = principal(&scoped_id);
 
-    let admin_grant = |key: &'static str, context: &'static str| {
-        let admin = Arc::clone(&admin);
-        let admin_principal = admin_principal.clone();
-        let space = space.clone();
-        let scoped_id = scoped_id.clone();
-        async move {
-            let issued = wire(&expect_ok(
-                admin
-                    .grant(
-                        &admin_principal,
-                        from_value(json!({
-                            "capabilities": ["capture", "records_write"],
-                            "context_ids": [context],
-                            "idempotency_key": key,
-                            "principal_id": scoped_id,
-                            "space_id": space,
-                            "subject_id": SUBJECT,
-                        }))
-                        .expect("grant request"),
-                    )
-                    .await,
-            ));
-            issued["result"]["grant_id"]
-                .as_str()
-                .expect("grant id")
-                .to_owned()
-        }
-    };
-    let admin_revoke = |key: &'static str, grant_id: String| {
-        let admin = Arc::clone(&admin);
-        let admin_principal = admin_principal.clone();
-        let space = space.clone();
-        async move {
-            let revoked = wire(&expect_ok(
-                admin
-                    .revoke_grant(
-                        &admin_principal,
-                        from_value(json!({
-                            "space_id": space,
-                            "grant_id": grant_id,
-                            "expected_revision": 1,
-                            "idempotency_key": key,
-                        }))
-                        .expect("revoke request"),
-                    )
-                    .await,
-            ));
-            assert_eq!(revoked["result"]["revoked"], json!(true));
-        }
-    };
-
     // Scoped authority on CONTEXT only, for both operations used below.
-    let grant_a = admin_grant("scoped-grant-a", CONTEXT).await;
+    let grant_a = scoped_admin_grant(
+        &admin,
+        &admin_principal,
+        &space,
+        &scoped_id,
+        "scoped-grant-a",
+        CONTEXT,
+    )
+    .await;
 
-    // The scoped principal authors the record in A and updates it under key K.
+    let state = author_and_move_scoped_record(
+        &fixture,
+        &admin,
+        &admin_principal,
+        &scoped,
+        &scoped_principal,
+        &space,
+        &scoped_id,
+    )
+    .await;
+
+    let authority = ScopedAuthority {
+        fixture: &fixture,
+        admin: &admin,
+        admin_principal: &admin_principal,
+        scoped: &scoped,
+        scoped_principal: &scoped_principal,
+        space: &space,
+        scoped_id: &scoped_id,
+    };
+
+    // ── Direction 1: LOSE A / KEEP B ───────────────────────────────────────
+    let grant_b =
+        losing_original_context_refuses_without_effect(&authority, &grant_a, &state).await;
+
+    // ── Direction 2: KEEP A / NO B ─────────────────────────────────────────
+    keeping_original_context_replays_without_new_authority(&authority, grant_b, &state).await;
+
+    // ── The capture precedence bound under the same A-only authority ───────
+    retained_capture_target_decides_before_changed_target(
+        &fixture,
+        &scoped,
+        &scoped_principal,
+        &space,
+    )
+    .await;
+
+    scoped.close();
+    scoped_responder.close();
+    scoped_client_leg.release().await;
+    scoped_server_leg.release().await;
+    assert_eq!(
+        scoped_responder.state(),
+        ConnectResponderState::Closed,
+        "the scoped session is closed after its real transport cleanup"
+    );
+    fixture.shutdown().await;
+}
+
+/// The record the scoped principal authored in A, its original receipt and the
+/// durable state after the operator moved it to B.
+struct ScopedRecord {
+    record_id: String,
+    update: Value,
+    original_receipt: Value,
+    receipt_id: String,
+    moved_record: Value,
+    records_after_move: u64,
+}
+
+/// Issue one scoped grant from the operator and return its grant id.
+async fn scoped_admin_grant(
+    admin: &Arc<RemoteAdapter>,
+    admin_principal: &Principal,
+    space: &str,
+    scoped_id: &str,
+    key: &str,
+    context: &str,
+) -> String {
+    let issued = wire(&expect_ok(
+        admin
+            .grant(
+                admin_principal,
+                from_value(json!({
+                    "capabilities": ["capture", "records_write"],
+                    "context_ids": [context],
+                    "idempotency_key": key,
+                    "principal_id": scoped_id,
+                    "space_id": space,
+                    "subject_id": SUBJECT,
+                }))
+                .expect("grant request"),
+            )
+            .await,
+    ));
+    issued["result"]["grant_id"]
+        .as_str()
+        .expect("grant id")
+        .to_owned()
+}
+
+/// Revoke one grant from the operator under a distinct key.
+async fn scoped_admin_revoke(
+    admin: &Arc<RemoteAdapter>,
+    admin_principal: &Principal,
+    space: &str,
+    key: &str,
+    grant_id: String,
+) {
+    let revoked = wire(&expect_ok(
+        admin
+            .revoke_grant(
+                admin_principal,
+                from_value(json!({
+                    "space_id": space,
+                    "grant_id": grant_id,
+                    "expected_revision": 1,
+                    "idempotency_key": key,
+                }))
+                .expect("revoke request"),
+            )
+            .await,
+    ));
+    assert_eq!(revoked["result"]["revoked"], json!(true));
+}
+
+/// The scoped principal authors the record in A and updates it under key K; the
+/// operator then moves the record to B.
+async fn author_and_move_scoped_record(
+    fixture: &Fixture,
+    admin: &Arc<RemoteAdapter>,
+    admin_principal: &Principal,
+    scoped: &Arc<RemoteAdapter>,
+    scoped_principal: &Principal,
+    space: &str,
+    scoped_id: &str,
+) -> ScopedRecord {
     let created = wire(&expect_ok(
         scoped
             .create_record(
-                &scoped_principal,
+                scoped_principal,
                 from_value(json!({
                     "space_id": space,
                     "subject_id": SUBJECT,
@@ -3125,7 +3309,7 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
     let original_receipt = wire(&expect_ok(
         scoped
             .update_record(
-                &scoped_principal,
+                scoped_principal,
                 from_value(update.clone()).expect("update request"),
             )
             .await,
@@ -3143,7 +3327,7 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
     let moved = wire(&expect_ok(
         admin
             .promote_record(
-                &admin_principal,
+                admin_principal,
                 from_value(json!({
                     "space_id": space,
                     "record_id": record_id,
@@ -3165,101 +3349,184 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
     let moved_record = wire(&expect_ok(
         admin
             .get_record(
-                &admin_principal,
+                admin_principal,
                 from_value(json!({ "space_id": space, "record_id": record_id }))
                     .expect("record request"),
             )
             .await,
     ));
     assert_eq!(moved_record["record"]["revision"], json!(3));
+    ScopedRecord {
+        record_id,
+        update,
+        original_receipt,
+        receipt_id,
+        moved_record,
+        records_after_move,
+    }
+}
 
-    // ── Direction 1: LOSE A / KEEP B ───────────────────────────────────────
-    admin_revoke("scoped-revoke-a", grant_a.clone()).await;
-    let grant_b = admin_grant("scoped-grant-b", OTHER_CONTEXT).await;
+/// Common references for the moved-record scenario's scoped session.
+struct ScopedAuthority<'a> {
+    fixture: &'a Fixture,
+    admin: &'a Arc<RemoteAdapter>,
+    admin_principal: &'a Principal,
+    scoped: &'a Arc<RemoteAdapter>,
+    scoped_principal: &'a Principal,
+    space: &'a str,
+    scoped_id: &'a str,
+}
+
+/// Direction 1: losing A refuses the original key without an effect and leaves
+/// the stored receipt and moved record unchanged; returns the B grant id.
+async fn losing_original_context_refuses_without_effect(
+    authority: &ScopedAuthority<'_>,
+    grant_a: &str,
+    state: &ScopedRecord,
+) -> String {
+    scoped_admin_revoke(
+        authority.admin,
+        authority.admin_principal,
+        authority.space,
+        "scoped-revoke-a",
+        grant_a.to_owned(),
+    )
+    .await;
+    let grant_b = scoped_admin_grant(
+        authority.admin,
+        authority.admin_principal,
+        authority.space,
+        authority.scoped_id,
+        "scoped-grant-b",
+        OTHER_CONTEXT,
+    )
+    .await;
     // Baseline taken after the grant switch itself, so the refusal below is the
     // only thing that could move these rows.
     assert_eq!(
-        fixture.namespace_owner("scoped-record-update").await,
-        Some((scoped_id.clone(), receipt_id.clone())),
+        authority
+            .fixture
+            .namespace_owner("scoped-record-update")
+            .await,
+        Some((authority.scoped_id.to_owned(), state.receipt_id.clone())),
         "the same principal and key namespace survives the A->B switch"
     );
-    let receipts_before_refusal = fixture.count("receipts").await;
-    let namespace_before_refusal = fixture.count("idempotency_namespace").await;
+    let receipts_before_refusal = authority.fixture.count("receipts").await;
+    let namespace_before_refusal = authority.fixture.count("idempotency_namespace").await;
     let lost_a = expect_reject(
-        scoped
+        authority
+            .scoped
             .update_record(
-                &scoped_principal,
-                from_value(update.clone()).expect("update request"),
+                authority.scoped_principal,
+                from_value(state.update.clone()).expect("update request"),
             )
             .await,
     );
     assert_eq!(lost_a.code, SpokeRejectCode::NotAuthorized);
     assert_eq!(retry_class(&lost_a).as_deref(), Some("terminal"));
     // No effect, no new receipt, and the original receipt is untouched.
-    assert_eq!(fixture.count("receipts").await, receipts_before_refusal);
-    assert_eq!(fixture.count("records").await, records_after_move);
     assert_eq!(
-        fixture.count("idempotency_namespace").await,
+        authority.fixture.count("receipts").await,
+        receipts_before_refusal
+    );
+    assert_eq!(
+        authority.fixture.count("records").await,
+        state.records_after_move
+    );
+    assert_eq!(
+        authority.fixture.count("idempotency_namespace").await,
         namespace_before_refusal
     );
     let retained = wire(&expect_ok(
-        admin
+        authority
+            .admin
             .get_receipt(
-                &admin_principal,
-                from_value(json!({ "space_id": space, "receipt_id": receipt_id }))
+                authority.admin_principal,
+                from_value(json!({ "space_id": authority.space, "receipt_id": state.receipt_id }))
                     .expect("receipt request"),
             )
             .await,
     ));
     assert_eq!(
-        retained["receipt"], original_receipt,
+        retained["receipt"], state.original_receipt,
         "losing A leaves the stored receipt JSON unchanged"
     );
     assert_eq!(
         wire(&expect_ok(
-            admin
+            authority
+                .admin
                 .get_record(
-                    &admin_principal,
-                    from_value(json!({ "space_id": space, "record_id": record_id }))
-                        .expect("record request"),
+                    authority.admin_principal,
+                    from_value(
+                        json!({ "space_id": authority.space, "record_id": state.record_id })
+                    )
+                    .expect("record request"),
                 )
                 .await,
         )),
-        moved_record
+        state.moved_record
     );
+    grant_b
+}
 
-    // ── Direction 2: KEEP A / NO B ─────────────────────────────────────────
-    admin_revoke("scoped-revoke-b", grant_b).await;
-    admin_grant("scoped-grant-a2", CONTEXT).await;
+/// Direction 2: keeping A replays the original receipt without granting the
+/// record's new placement or re-running the effect.
+async fn keeping_original_context_replays_without_new_authority(
+    authority: &ScopedAuthority<'_>,
+    grant_b: String,
+    state: &ScopedRecord,
+) {
+    scoped_admin_revoke(
+        authority.admin,
+        authority.admin_principal,
+        authority.space,
+        "scoped-revoke-b",
+        grant_b,
+    )
+    .await;
+    scoped_admin_grant(
+        authority.admin,
+        authority.admin_principal,
+        authority.space,
+        authority.scoped_id,
+        "scoped-grant-a2",
+        CONTEXT,
+    )
+    .await;
     assert_eq!(
-        fixture.namespace_owner("scoped-record-update").await,
-        Some((scoped_id.clone(), receipt_id.clone())),
+        authority
+            .fixture
+            .namespace_owner("scoped-record-update")
+            .await,
+        Some((authority.scoped_id.to_owned(), state.receipt_id.clone())),
         "the same principal and key namespace survives the B->A switch"
     );
-    let receipts_before_replay = fixture.count("receipts").await;
-    let namespace_before_replay = fixture.count("idempotency_namespace").await;
+    let receipts_before_replay = authority.fixture.count("receipts").await;
+    let namespace_before_replay = authority.fixture.count("idempotency_namespace").await;
     let replayed = wire(&expect_ok(
-        scoped
+        authority
+            .scoped
             .update_record(
-                &scoped_principal,
-                from_value(update.clone()).expect("update request"),
+                authority.scoped_principal,
+                from_value(state.update.clone()).expect("update request"),
             )
             .await,
     ));
     assert_eq!(
-        replayed, original_receipt,
+        replayed, state.original_receipt,
         "keeping A replays a receipt equal to the original JSON receipt"
     );
     // ...without authorizing the record's new current placement or re-running
     // the effect: a fresh key for the same record is still refused, and the
     // durable rows are unchanged.
     let fresh = expect_reject(
-        scoped
+        authority
+            .scoped
             .update_record(
-                &scoped_principal,
+                authority.scoped_principal,
                 from_value(json!({
-                    "space_id": space,
-                    "record_id": record_id,
+                    "space_id": authority.space,
+                    "record_id": state.record_id,
                     "expected_revision": 3,
                     "content": { "text": "A fresh write on the moved record." },
                     "idempotency_key": "scoped-record-update-fresh",
@@ -3273,32 +3540,109 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
         SpokeRejectCode::NotFound,
         "the scoped caller holds no B authority, so a fresh write stays refused"
     );
-    assert_eq!(fixture.count("receipts").await, receipts_before_replay);
-    assert_eq!(fixture.count("records").await, records_after_move);
     assert_eq!(
-        fixture.count("idempotency_namespace").await,
+        authority.fixture.count("receipts").await,
+        receipts_before_replay
+    );
+    assert_eq!(
+        authority.fixture.count("records").await,
+        state.records_after_move
+    );
+    assert_eq!(
+        authority.fixture.count("idempotency_namespace").await,
         namespace_before_replay
     );
     assert_eq!(
         wire(&expect_ok(
-            admin
+            authority
+                .admin
                 .get_record(
-                    &admin_principal,
-                    from_value(json!({ "space_id": space, "record_id": record_id }))
-                        .expect("record request"),
+                    authority.admin_principal,
+                    from_value(
+                        json!({ "space_id": authority.space, "record_id": state.record_id })
+                    )
+                    .expect("record request"),
                 )
                 .await,
         )),
-        moved_record,
+        state.moved_record,
         "the replay performed no effect on the moved record"
     );
+}
 
-    // ── The capture precedence bound under the same A-only authority ───────
+/// The retained A capture target decides before the changed request's target:
+/// a changed payload conflicts, and the surviving tombstone answers expired.
+async fn retained_capture_target_decides_before_changed_target(
+    fixture: &Fixture,
+    scoped: &Arc<RemoteAdapter>,
+    scoped_principal: &Principal,
+    space: &str,
+) {
+    let state =
+        capture_conflict_under_the_retained_target(fixture, scoped, scoped_principal, space).await;
+
+    // The same live tombstone state the retention pass leaves behind: the body
+    // row is gone, the content-free dedup tombstone still protects the key.
+    fixture.evict_receipt_body(&state.capture_receipt_id).await;
+    let receipts_after_eviction = fixture.count("receipts").await;
+    assert_eq!(receipts_after_eviction, state.receipts_before - 1);
+    let tombstone_conflict = expect_reject(
+        scoped
+            .capture(
+                scoped_principal,
+                from_value(state.changed_b).expect("changed capture"),
+            )
+            .await,
+    );
+    assert_eq!(
+        tombstone_conflict.code,
+        SpokeRejectCode::IdempotencyConflict,
+        "the retained target still decides before the changed request's target"
+    );
+    let expired = expect_reject(
+        scoped
+            .capture(
+                scoped_principal,
+                from_value(state.original_capture).expect("same capture"),
+            )
+            .await,
+    );
+    assert_eq!(expired.code, SpokeRejectCode::ReceiptExpired);
+    assert_eq!(
+        expired
+            .details
+            .as_ref()
+            .and_then(|details| details.get("last_known_status")),
+        Some(&json!("committed")),
+        "the tombstone answers only after the retained A target authorized it"
+    );
+    assert_eq!(retry_class(&expired).as_deref(), Some("terminal"));
+    assert_eq!(fixture.count("candidates").await, state.candidates_before);
+    assert_eq!(fixture.count("receipts").await, receipts_after_eviction);
+}
+
+/// The scoped principal's first capture and the changed payload under its key.
+struct RetainedCapture {
+    original_capture: Value,
+    changed_b: Value,
+    capture_receipt_id: String,
+    candidates_before: u64,
+    receipts_before: u64,
+}
+
+/// A fresh capture in B is refused; the original A capture commits; a changed
+/// payload under the same key conflicts by the retained A target.
+async fn capture_conflict_under_the_retained_target(
+    fixture: &Fixture,
+    scoped: &Arc<RemoteAdapter>,
+    scoped_principal: &Principal,
+    space: &str,
+) -> RetainedCapture {
     // A fresh capture in B is refused, so this principal really is scoped.
     let refused_b = expect_reject(
         scoped
             .capture(
-                &scoped_principal,
+                scoped_principal,
                 from_value(fixture.capture_request(
                     "scoped-capture-b",
                     "Bell material that belongs in beta.",
@@ -3315,7 +3659,7 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
     let captured = wire(&expect_ok(
         scoped
             .capture(
-                &scoped_principal,
+                scoped_principal,
                 from_value(original_capture.clone()).expect("capture request"),
             )
             .await,
@@ -3342,7 +3686,7 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
     let conflict = expect_reject(
         scoped
             .capture(
-                &scoped_principal,
+                scoped_principal,
                 from_value(changed_b.clone()).expect("changed capture"),
             )
             .await,
@@ -3351,56 +3695,13 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
     assert_eq!(retry_class(&conflict).as_deref(), Some("terminal"));
     assert_eq!(fixture.count("candidates").await, candidates_before);
     assert_eq!(fixture.count("receipts").await, receipts_before);
-
-    // The same live tombstone state the retention pass leaves behind: the body
-    // row is gone, the content-free dedup tombstone still protects the key.
-    fixture.evict_receipt_body(&capture_receipt_id).await;
-    let receipts_after_eviction = fixture.count("receipts").await;
-    assert_eq!(receipts_after_eviction, receipts_before - 1);
-    let tombstone_conflict = expect_reject(
-        scoped
-            .capture(
-                &scoped_principal,
-                from_value(changed_b).expect("changed capture"),
-            )
-            .await,
-    );
-    assert_eq!(
-        tombstone_conflict.code,
-        SpokeRejectCode::IdempotencyConflict,
-        "the retained target still decides before the changed request's target"
-    );
-    let expired = expect_reject(
-        scoped
-            .capture(
-                &scoped_principal,
-                from_value(original_capture).expect("same capture"),
-            )
-            .await,
-    );
-    assert_eq!(expired.code, SpokeRejectCode::ReceiptExpired);
-    assert_eq!(
-        expired
-            .details
-            .as_ref()
-            .and_then(|details| details.get("last_known_status")),
-        Some(&json!("committed")),
-        "the tombstone answers only after the retained A target authorized it"
-    );
-    assert_eq!(retry_class(&expired).as_deref(), Some("terminal"));
-    assert_eq!(fixture.count("candidates").await, candidates_before);
-    assert_eq!(fixture.count("receipts").await, receipts_after_eviction);
-
-    scoped.close();
-    scoped_responder.close();
-    scoped_client_leg.release().await;
-    scoped_server_leg.release().await;
-    assert_eq!(
-        scoped_responder.state(),
-        ConnectResponderState::Closed,
-        "the scoped session is closed after its real transport cleanup"
-    );
-    fixture.shutdown().await;
+    RetainedCapture {
+        original_capture,
+        changed_b,
+        capture_receipt_id,
+        candidates_before,
+        receipts_before,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3475,6 +3776,13 @@ async fn revoke_keeps_real_replay_errors_and_unserved_spaces_stay_not_found() {
 
     // An unserved space keeps the producer's NOT_FOUND on the assembly-prechecked
     // operations, even for the correctly authenticated operator.
+    unserved_spaces_stay_not_found_on_assembly_prechecks(&fixture).await;
+    fixture.shutdown().await;
+}
+
+/// An unserved space keeps the producer's `NOT_FOUND` on every assembly-prechecked
+/// operation, even for the correctly authenticated operator.
+async fn unserved_spaces_stay_not_found_on_assembly_prechecks(fixture: &Fixture) {
     for (op, payload) in [
         (
             "freeze",
@@ -3539,7 +3847,6 @@ async fn revoke_keeps_real_replay_errors_and_unserved_spaces_stay_not_found() {
         );
         assert_eq!(retry_class(&refusal).as_deref(), Some("terminal"), "{op}");
     }
-    fixture.shutdown().await;
 }
 
 // ---------------------------------------------------------------------------
@@ -3671,6 +3978,28 @@ async fn commit_failures_on_all_three_delegated_mutations_are_uncertain() {
 
     // Same keys recover once the real commit failure is removed — including the
     // exact capture request that failed, with its original key.
+    same_keys_recover_after_the_commit_failure_is_removed(
+        &fixture,
+        &space,
+        &dismiss_candidate,
+        &review_candidate,
+        candidates_before,
+        receipts_before,
+    )
+    .await;
+    fixture.shutdown().await;
+}
+
+/// Same keys recover once the real commit failure is removed — including the
+/// exact capture request that failed, with its original key.
+async fn same_keys_recover_after_the_commit_failure_is_removed(
+    fixture: &Fixture,
+    space: &str,
+    dismiss_candidate: &str,
+    review_candidate: &str,
+    candidates_before: u64,
+    receipts_before: u64,
+) {
     remove_commit_failure(&fixture.db_path).await;
     let recovered_capture = wire(&expect_ok(
         fixture
@@ -3731,7 +4060,6 @@ async fn commit_failures_on_all_three_delegated_mutations_are_uncertain() {
     ));
     assert_eq!(reviewed["result"]["outcome"], json!("promoted"));
     assert_eq!(fixture.count("records").await, 1);
-    fixture.shutdown().await;
 }
 
 // ---------------------------------------------------------------------------

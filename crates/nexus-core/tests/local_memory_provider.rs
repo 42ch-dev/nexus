@@ -2827,8 +2827,23 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
     assert_eq!(error_code(&missing), "NOT_FOUND");
     assert_eq!(error_code(&separate), error_code(&missing));
 
-    // ONE grant carrying both capabilities over the same scope is admitted, and
-    // the created record inherits the candidate's placement.
+    dual_capability_grant_admits_with_inherited_placement(
+        &provider,
+        &admin,
+        &scoped,
+        &candidate_id,
+    )
+    .await;
+}
+
+/// ONE grant carrying both capabilities over the same scope is admitted, and the
+/// created record inherits the candidate's placement.
+async fn dual_capability_grant_admits_with_inherited_placement(
+    provider: &LocalMemoryProvider,
+    admin: &schemas::Principal,
+    scoped: &schemas::Principal,
+    candidate_id: &str,
+) {
     let dual: schemas::MemoryGrantsGrantRequest = dto(json!({
         "space_id": SPACE,
         "subject_id": SUBJECT,
@@ -2838,10 +2853,10 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
         "shared_access": false,
         "idempotency_key": "k-sg-dual",
     }));
-    wire(&provider.grant(&admin, dual).await);
+    wire(&provider.grant(admin, dual).await);
     let promoted = wire(
         &provider
-            .review_candidate(&scoped, review_request("k-sg-promote", &candidate_id, 1))
+            .review_candidate(scoped, review_request("k-sg-promote", candidate_id, 1))
             .await,
     );
     assert_eq!(receipt(&promoted)["result"]["outcome"], "promoted");
@@ -2851,7 +2866,7 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
         .to_owned();
     let record = wire(
         &provider
-            .get_record(&admin, record_get_request(&record_id))
+            .get_record(admin, record_get_request(&record_id))
             .await,
     );
     assert_eq!(record["record"]["scope"]["context_id"], "bnd_1");
@@ -4739,13 +4754,23 @@ async fn content_bound_refusals_name_the_exceeded_limit() {
     let over_bound =
         "a".repeat(usize::try_from(max_content_bytes - framing).expect("bound fits usize") + 1);
 
-    // capture
+    oversized_capture_is_refused_without_a_candidate(&provider, &admin, &over_bound).await;
+
+    // create: the exact bound is admitted and stored whole; one more byte refuses.
+    at_bound_create_and_oversize_update_bounds(&provider, &admin, &at_bound, &over_bound).await;
+
+    page_recall_and_shape_refusals_name_their_own_limits(&provider, &admin).await;
+}
+
+/// An oversized capture is refused naming its bound and leaves no candidate.
+async fn oversized_capture_is_refused_without_a_candidate(
+    provider: &LocalMemoryProvider,
+    admin: &schemas::Principal,
+    over_bound: &str,
+) {
     let refused = wire(
         &provider
-            .capture(
-                &admin,
-                capture_request("k-bound-capture", None, &over_bound),
-            )
+            .capture(admin, capture_request("k-bound-capture", None, over_bound))
             .await,
     );
     assert_eq!(error_code(&refused), "INVALID_INPUT");
@@ -4758,7 +4783,7 @@ async fn content_bound_refusals_name_the_exceeded_limit() {
     assert_eq!(retry_class(&refused), "terminal");
     let pending = wire(
         &provider
-            .list_candidates(&admin, candidates_list_request(Some("pending")))
+            .list_candidates(admin, candidates_list_request(Some("pending")))
             .await,
     );
     assert_eq!(
@@ -4766,17 +4791,25 @@ async fn content_bound_refusals_name_the_exceeded_limit() {
         0,
         "the refused oversize capture produced no candidate"
     );
+}
 
-    // create: the exact bound is admitted and stored whole; one more byte refuses.
+/// The exact content bound is admitted and stored whole; one more byte refuses
+/// without changing the stored record.
+async fn at_bound_create_and_oversize_update_bounds(
+    provider: &LocalMemoryProvider,
+    admin: &schemas::Principal,
+    at_bound: &str,
+    over_bound: &str,
+) -> String {
     let created = wire(
         &provider
             .create_record(
-                &admin,
+                admin,
                 record_create_request(
                     "k-bound-create",
                     "note",
                     &json!({ "visibility": "shared" }),
-                    &at_bound,
+                    at_bound,
                 ),
             )
             .await,
@@ -4788,7 +4821,7 @@ async fn content_bound_refusals_name_the_exceeded_limit() {
     assert_eq!(receipt(&created)["result"]["revision"], 1);
     let stored = wire(
         &provider
-            .get_record(&admin, record_get_request(&record_id))
+            .get_record(admin, record_get_request(&record_id))
             .await,
     );
     assert_eq!(
@@ -4800,7 +4833,7 @@ async fn content_bound_refusals_name_the_exceeded_limit() {
     let update_refused = wire(
         &provider
             .update_record(
-                &admin,
+                admin,
                 dto(json!({
                     "space_id": SPACE,
                     "record_id": record_id,
@@ -4820,7 +4853,7 @@ async fn content_bound_refusals_name_the_exceeded_limit() {
     );
     let unchanged = wire(
         &provider
-            .get_record(&admin, record_get_request(&record_id))
+            .get_record(admin, record_get_request(&record_id))
             .await,
     );
     assert_eq!(unchanged["record"]["revision"], 1);
@@ -4830,12 +4863,18 @@ async fn content_bound_refusals_name_the_exceeded_limit() {
             .expect("text"),
         at_bound
     );
+    record_id
+}
 
-    // A page bound names its own limit.
+/// Page and recall caps name `max_page_size`; a shape refusal invents no limiter.
+async fn page_recall_and_shape_refusals_name_their_own_limits(
+    provider: &LocalMemoryProvider,
+    admin: &schemas::Principal,
+) {
     let page_refused = wire(
         &provider
             .list_records(
-                &admin,
+                admin,
                 dto(json!({
                     "space_id": SPACE,
                     "subject_id": SUBJECT,
@@ -4848,11 +4887,10 @@ async fn content_bound_refusals_name_the_exceeded_limit() {
     assert_eq!(error_code(&page_refused), "INVALID_INPUT");
     assert_eq!(error_details(&page_refused)["limit"], "max_page_size");
 
-    // The recall budget cap names the same page limit.
     let recall_refused = wire(
         &provider
             .recall(
-                &admin,
+                admin,
                 dto(json!({
                     "space_id": SPACE,
                     "subject_id": SUBJECT,
@@ -4865,11 +4903,10 @@ async fn content_bound_refusals_name_the_exceeded_limit() {
     assert_eq!(error_code(&recall_refused), "INVALID_INPUT");
     assert_eq!(error_details(&recall_refused)["limit"], "max_page_size");
 
-    // A shape refusal is not a limiter error and invents no limiter key.
     let shape_refused = wire(
         &provider
             .grant(
-                &admin,
+                admin,
                 dto(json!({
                     "space_id": SPACE,
                     "principal_id": OTHER,
@@ -4991,11 +5028,21 @@ async fn record_kind_only_update_is_a_replayable_noop() {
     );
     assert_eq!(replay["receipt_id"], no_op["receipt_id"]);
 
-    // A changed kind is a real edit.
+    changed_kind_then_identical_content_advance(&provider, &admin, &record_id).await;
+    stale_and_unauthorized_updates_change_nothing(&provider, &admin, &stranger, &record_id).await;
+}
+
+/// A changed kind is a real edit; an explicit byte-identical content update is
+/// never a no-op either.
+async fn changed_kind_then_identical_content_advance(
+    provider: &LocalMemoryProvider,
+    admin: &schemas::Principal,
+    record_id: &str,
+) {
     let changed = wire(
         &provider
             .update_record(
-                &admin,
+                admin,
                 dto(json!({
                     "space_id": SPACE,
                     "record_id": record_id,
@@ -5008,11 +5055,10 @@ async fn record_kind_only_update_is_a_replayable_noop() {
     );
     assert_eq!(changed["result"]["revision"], 2);
 
-    // An explicit content update is never a no-op, even byte-identical content.
     let identical = wire(
         &provider
             .update_record(
-                &admin,
+                admin,
                 dto(json!({
                     "space_id": SPACE,
                     "record_id": record_id,
@@ -5024,12 +5070,19 @@ async fn record_kind_only_update_is_a_replayable_noop() {
             .await,
     );
     assert_eq!(identical["result"]["revision"], 3);
+}
 
-    // A stale CAS and an unauthorized principal both change nothing.
+/// A stale CAS and an unauthorized principal both change nothing.
+async fn stale_and_unauthorized_updates_change_nothing(
+    provider: &LocalMemoryProvider,
+    admin: &schemas::Principal,
+    stranger: &schemas::Principal,
+    record_id: &str,
+) {
     let stale = wire(
         &provider
             .update_record(
-                &admin,
+                admin,
                 dto(json!({
                     "space_id": SPACE,
                     "record_id": record_id,
@@ -5044,7 +5097,7 @@ async fn record_kind_only_update_is_a_replayable_noop() {
     let denied = wire(
         &provider
             .update_record(
-                &stranger,
+                stranger,
                 dto(json!({
                     "space_id": SPACE,
                     "record_id": record_id,
@@ -5058,7 +5111,7 @@ async fn record_kind_only_update_is_a_replayable_noop() {
     assert_eq!(error_code(&denied), "NOT_AUTHORIZED");
     let final_state = wire(
         &provider
-            .get_record(&admin, record_get_request(&record_id))
+            .get_record(admin, record_get_request(record_id))
             .await,
     )["record"]
         .clone();
