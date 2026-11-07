@@ -436,22 +436,30 @@ fn clear_acl(descriptor: RawFd) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{access_policy_blob, seal_staging_directory};
+    #[cfg(target_os = "macos")]
+    use super::access_policy_blob;
+    use super::seal_staging_directory;
     use std::os::unix::fs::PermissionsExt as _;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU32, Ordering};
 
     static NEXT: AtomicU32 = AtomicU32::new(0);
 
+    /// Take a fresh scratch directory by exclusive creation: a name this call
+    /// did not create is never removed.
     fn scratch_directory() -> PathBuf {
-        let unique = NEXT.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "nexus-config-metadata-seal-{}-{unique}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&path);
-        std::fs::create_dir(&path).expect("scratch directory");
-        path
+        loop {
+            let unique = NEXT.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "nexus-config-metadata-seal-{}-{unique}",
+                std::process::id()
+            ));
+            match std::fs::create_dir(&path) {
+                Ok(()) => return path,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => panic!("scratch directory: {error}"),
+            }
+        }
     }
 
     fn mode(directory: &std::path::Path) -> u32 {

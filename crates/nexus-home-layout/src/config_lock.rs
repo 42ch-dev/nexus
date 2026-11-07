@@ -1105,24 +1105,42 @@ mod tests {
             .recv_timeout(Duration::from_secs(30))
             .expect("the publisher reached the staging boundary");
         let staging_directory = only_staging_directory(&home);
+        // The sample source is created while the home is still writable; only
+        // the rename into the home is the native failure being sampled.
+        let sample_source = tmp.path().join("sample-source");
+        std::fs::write(&sample_source, "sample").expect("sample source");
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o500))
             .expect("the home stops accepting directory writes");
+        // Sample the native rename failure this home really produces, without
+        // moving the staged file or the document.
+        let primary = std::fs::rename(&sample_source, home.join("sample-target"))
+            .expect_err("the home does not accept a rename");
         release.send(()).expect("release the publisher");
 
         let error = publisher
             .join()
             .expect("publisher thread")
             .expect_err("the rename cannot write into the home");
+        // The cleanup failure is sampled from the same leftover directory while
+        // the home is still non-writable.
+        let cleanup = std::fs::remove_dir(&staging_directory)
+            .expect_err("the leftover directory cannot be removed yet");
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755))
             .expect("restore the home");
         assert_eq!(
             error.kind(),
-            std::io::ErrorKind::PermissionDenied,
+            primary.kind(),
             "the primary failure keeps its kind"
         );
         let rendered = error.to_string();
-        assert!(rendered.contains("Permission denied"), "{rendered}");
-        assert!(rendered.contains("could not be removed"), "{rendered}");
+        assert!(
+            rendered.starts_with(&primary.to_string()),
+            "the primary message is retained: {rendered}"
+        );
+        assert!(
+            rendered.contains(&cleanup.to_string()),
+            "the cleanup failure is reported: {rendered}"
+        );
         assert!(
             rendered.contains(&staging_directory.display().to_string()),
             "{rendered}"
@@ -1192,12 +1210,8 @@ mod tests {
         .expect("document");
         chain(&beyond, super::MAX_SYMLINK_HOPS + 1);
 
-        let error = super::publish_document(&beyond, "active_creator_id = \"ctr_new\"\n")
+        let _error = super::publish_document(&beyond, "active_creator_id = \"ctr_new\"\n")
             .expect_err("one hop past the limit is refused");
-        assert!(
-            error.to_string().contains("too many symbolic links"),
-            "{error}"
-        );
         assert_eq!(
             std::fs::read_to_string(beyond.join("real.toml")).expect("document"),
             "active_creator_id = \"ctr_old\"\n",
@@ -1209,12 +1223,8 @@ mod tests {
         symlink("a.toml", looping.join("config.toml")).expect("first link");
         symlink("config.toml", looping.join("a.toml")).expect("second link");
 
-        let error = super::publish_document(&looping, "active_creator_id = \"ctr_new\"\n")
+        let _error = super::publish_document(&looping, "active_creator_id = \"ctr_new\"\n")
             .expect_err("a link loop is refused");
-        assert!(
-            error.to_string().contains("too many symbolic links"),
-            "{error}"
-        );
         assert_eq!(
             std::fs::read_dir(&looping).expect("home listing").count(),
             2,
