@@ -21,9 +21,9 @@ use serde_json::{json, Value};
 
 use support::{
     bootstrap, candidate_ids, capture_body, context_scope, dismiss_body, error_code, error_details,
-    grant_body, is_committed, receipt_id, receipt_windows, record_ids, result,
-    retry_class, review_body, shared_scope, Actor, CharacterFixture, Kind, Matrix, CONTEXT,
-    OTHER_CONTEXT, SUBJECT, TEXT,
+    grant_body, is_committed, receipt_id, receipt_windows, record_ids, result, retry_class,
+    review_body, run_matrix_scenario, shared_scope, Actor, CharacterFixture, Kind, Matrix,
+    OwnedResources, CONTEXT, OTHER_CONTEXT, SUBJECT, TEXT,
 };
 
 async fn pending(actor: &Actor<'_>) -> Value {
@@ -51,7 +51,7 @@ async fn recalled(actor: &Actor<'_>, selection: Value) -> Value {
         .recall(json!({
             "subject_id": SUBJECT,
             "selection": selection,
-            "budget": { "max_items": 50 },
+            "budget": { "max_items": 10 },
         }))
         .await
 }
@@ -95,7 +95,10 @@ async fn capture_receipt_is_content_free(matrix: Matrix) {
 
     let read = admin.get_receipt(receipt_id(&committed)).await;
     assert_eq!(read["receipt"]["status"], json!("committed"));
-    assert_eq!(read["receipt"]["result"]["candidate_ids"][0], json!(candidate[0]));
+    assert_eq!(
+        read["receipt"]["result"]["candidate_ids"][0],
+        json!(candidate[0])
+    );
     assert!(
         !read.to_string().contains("northern gate"),
         "the receipt read is just as content-free: {read}"
@@ -188,7 +191,10 @@ async fn response_loss_replays_one_effect(matrix: Matrix) {
     assert_eq!(retry_class(&lost), "uncertain");
 
     let resolved = matrix.admin().capture(body).await;
-    assert!(is_committed(&resolved), "same-key replay resolves it: {resolved}");
+    assert!(
+        is_committed(&resolved),
+        "same-key replay resolves it: {resolved}"
+    );
     let listing = pending(&matrix.admin()).await;
     assert_eq!(
         ids(&listing).len(),
@@ -252,7 +258,6 @@ async fn midcommit_crash_resolves_uncertain_receipt(matrix: Matrix) {
         json!(0),
         "the rolled-back attempt left no pending receipt"
     );
-    drop(admin);
 
     // (B) Original committed uncertainty: the commit happened, the response did
     // not, so the original receipt and effect are durable before the restart.
@@ -278,7 +283,10 @@ async fn midcommit_crash_resolves_uncertain_receipt(matrix: Matrix) {
 
     // Resolution: same-key replay returns the ORIGINAL receipt and effect.
     let resolved = admin.capture(original.clone()).await;
-    assert!(is_committed(&resolved), "the same key resolves it: {resolved}");
+    assert!(
+        is_committed(&resolved),
+        "the same key resolves it: {resolved}"
+    );
     let resolved_id = receipt_id(&resolved).to_owned();
     assert_eq!(
         candidate_ids(&resolved),
@@ -287,7 +295,8 @@ async fn midcommit_crash_resolves_uncertain_receipt(matrix: Matrix) {
     );
     let read = admin.get_receipt(&resolved_id).await;
     assert_eq!(
-        read["receipt"]["status"], json!("committed"),
+        read["receipt"]["status"],
+        json!("committed"),
         "receipts.get resolves the uncertain key to its terminal receipt: {read}"
     );
     assert_eq!(
@@ -321,8 +330,13 @@ async fn c_024_midcommit_crash_resolves_uncertain_receipt_remote() {
 }
 
 /// C-025: a capture by a principal without capture coverage persists nothing.
-async fn foreign_capture_persists_nothing(matrix: Matrix) {
-    bootstrap(&matrix, &[]).await;
+async fn foreign_capture_persists_nothing(matrix: &Matrix, resources: &mut OwnedResources) {
+    bootstrap(matrix, &[]).await;
+    let observer = resources
+        .open_observer(matrix, SUBJECT, &[], None, None, None)
+        .await;
+    let captures_before = resources.receipt_ids_for(observer, "memory.capture").await;
+
     let peer = matrix.peer();
     let denied = peer
         .capture(capture_body("k-c025", TEXT, &shared_scope()))
@@ -330,42 +344,69 @@ async fn foreign_capture_persists_nothing(matrix: Matrix) {
     assert_eq!(error_code(&denied), "NOT_AUTHORIZED", "{denied}");
     assert_eq!(retry_class(&denied), "terminal");
     let admin = matrix.admin();
-    assert!(ids(&pending(&admin).await).is_empty());
+    assert_eq!(ids(&pending(&admin).await), [] as [std::string::String; 0]);
+    let recalled_page = recalled(&admin, json!({ "mode": "subject_all" })).await;
     assert_eq!(
-        recalled(&admin, json!({ "mode": "subject_all" })).await["total_authorized"],
-        json!(0)
+        recalled_page["total_authorized"],
+        json!(0),
+        "{recalled_page}"
     );
     assert_eq!(
-        admin.list_spaces().await["spaces"][0]["pending_receipts"],
-        json!(0),
-        "the refused foreign capture created no receipt"
+        resources.receipt_ids_for(observer, "memory.capture").await,
+        captures_before,
+        "the refused foreign capture created no durable receipt for its key"
     );
 
-    // The same request from the same principal is admitted once coverage exists.
+    // The refused request consumed nothing: once coverage exists the SAME key
+    // commits and owns the one new durable receipt.
     let peer_id = matrix.peer_principal().principal_id.clone();
     admin
         .grant(grant_body("capture", &peer_id, "k-c025-grant"))
         .await;
     let admitted = peer
-        .capture(capture_body("k-c025-admitted", TEXT, &shared_scope()))
+        .capture(capture_body("k-c025", TEXT, &shared_scope()))
         .await;
-    assert!(is_committed(&admitted), "{admitted}");
-    matrix.shutdown().await;
+    assert!(
+        is_committed(&admitted),
+        "the refusal never consumed the original key: {admitted}"
+    );
+    let captures_after = resources.receipt_ids_for(observer, "memory.capture").await;
+    assert_eq!(
+        captures_after.len(),
+        captures_before.len() + 1,
+        "the admitted retry created exactly one durable receipt: {captures_after:?}"
+    );
+    assert!(
+        captures_after.contains(&receipt_id(&admitted).to_owned()),
+        "the durable receipt is the committed retry's: {captures_after:?}"
+    );
+    resources
+        .close_observer(observer)
+        .await
+        .expect("the no-effect observer closes");
 }
 
 #[tokio::test]
 async fn c_025_foreign_capture_persists_nothing_local() {
-    foreign_capture_persists_nothing(Matrix::local().await).await;
+    let matrix = Matrix::local().await;
+    run_matrix_scenario(matrix, |m, r, _| {
+        Box::pin(async move { foreign_capture_persists_nothing(m, r).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_025_foreign_capture_persists_nothing_remote() {
-    foreign_capture_persists_nothing(Matrix::remote().await).await;
+    let matrix = Matrix::remote().await;
+    run_matrix_scenario(matrix, |m, r, _| {
+        Box::pin(async move { foreign_capture_persists_nothing(m, r).await })
+    })
+    .await;
 }
 
 /// C-026: a capture placed into a fenced context has no effect.
-async fn capture_to_fenced_target_has_no_effect(matrix: Matrix) {
-    bootstrap(&matrix, &[]).await;
+async fn capture_to_fenced_target_has_no_effect(matrix: &Matrix, resources: &mut OwnedResources) {
+    bootstrap(matrix, &[]).await;
     let admin = matrix.admin();
     admin
         .fence_subject(
@@ -376,6 +417,10 @@ async fn capture_to_fenced_target_has_no_effect(matrix: Matrix) {
             "k-c026-fence",
         )
         .await;
+    let observer = resources
+        .open_observer(matrix, SUBJECT, &[], None, None, None)
+        .await;
+    let captures_before = resources.receipt_ids_for(observer, "memory.capture").await;
     let denied = admin
         .capture(capture_body("k-c026", TEXT, &context_scope(CONTEXT)))
         .await;
@@ -388,26 +433,69 @@ async fn capture_to_fenced_target_has_no_effect(matrix: Matrix) {
     assert_eq!(retry_class(&denied), "terminal");
 
     // Protocol-visible absence of every effect the refused write could have had.
-    assert!(ids(&pending(&admin).await).is_empty());
+    assert_eq!(ids(&pending(&admin).await), [] as [std::string::String; 0]);
+    let recalled_page = recalled(&admin, json!({ "mode": "subject_all" })).await;
     assert_eq!(
-        recalled(&admin, json!({ "mode": "subject_all" })).await["total_authorized"],
-        json!(0)
+        recalled_page["total_authorized"],
+        json!(0),
+        "{recalled_page}"
     );
     assert_eq!(
-        admin.list_spaces().await["spaces"][0]["pending_receipts"],
-        json!(0)
+        resources.receipt_ids_for(observer, "memory.capture").await,
+        captures_before,
+        "the fenced refusal created no durable receipt for its key"
     );
-    matrix.shutdown().await;
+
+    // Clearing the fence leaves the key unconsumed: the SAME key now commits
+    // and owns the one new durable receipt.
+    admin
+        .fence_subject(
+            SUBJECT,
+            json!({ "type": "context", "context_id": CONTEXT }),
+            "unfence",
+            2,
+            "k-c026-unfence",
+        )
+        .await;
+    let admitted = admin
+        .capture(capture_body("k-c026", TEXT, &context_scope(CONTEXT)))
+        .await;
+    assert!(
+        is_committed(&admitted),
+        "the fenced refusal never consumed the original key: {admitted}"
+    );
+    let captures_after = resources.receipt_ids_for(observer, "memory.capture").await;
+    assert_eq!(
+        captures_after.len(),
+        captures_before.len() + 1,
+        "the admitted retry created exactly one durable receipt: {captures_after:?}"
+    );
+    assert!(
+        captures_after.contains(&receipt_id(&admitted).to_owned()),
+        "the durable receipt is the committed retry's: {captures_after:?}"
+    );
+    resources
+        .close_observer(observer)
+        .await
+        .expect("the no-effect observer closes");
 }
 
 #[tokio::test]
 async fn c_026_capture_to_fenced_target_has_no_effect_local() {
-    capture_to_fenced_target_has_no_effect(Matrix::local().await).await;
+    let matrix = Matrix::local().await;
+    run_matrix_scenario(matrix, |m, r, _| {
+        Box::pin(async move { capture_to_fenced_target_has_no_effect(m, r).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_026_capture_to_fenced_target_has_no_effect_remote() {
-    capture_to_fenced_target_has_no_effect(Matrix::remote().await).await;
+    let matrix = Matrix::remote().await;
+    run_matrix_scenario(matrix, |m, r, _| {
+        Box::pin(async move { capture_to_fenced_target_has_no_effect(m, r).await })
+    })
+    .await;
 }
 
 /// C-027: capture → review → delete; the OLD capture and review receipts still
@@ -522,7 +610,10 @@ async fn receipt_and_dedup_retention_windows(matrix: Matrix) {
     let absent = matrix.admin().get_receipt(&first_id).await;
     assert_eq!(error_code(&absent), "NOT_FOUND", "{absent}");
     let fresh = matrix.admin().capture(body).await;
-    assert!(is_committed(&fresh), "the freed key admits a new effect: {fresh}");
+    assert!(
+        is_committed(&fresh),
+        "the freed key admits a new effect: {fresh}"
+    );
     assert_ne!(receipt_id(&fresh), first_id);
     assert_eq!(
         ids(&pending(&matrix.admin()).await).len(),
@@ -612,7 +703,10 @@ async fn candidate_pages_are_bounded_and_scoped(matrix: Matrix) {
         let rows = ids(&page);
         assert!(rows.len() <= 1, "the page is bounded by the limit: {page}");
         if page["next_cursor"].is_string() {
-            assert!(!rows.is_empty(), "a page before the end is never empty: {page}");
+            assert!(
+                !rows.is_empty(),
+                "a page before the end is never empty: {page}"
+            );
         }
         seen.extend(rows);
         cursor = page["next_cursor"].as_str().map(str::to_owned);
@@ -625,7 +719,10 @@ async fn candidate_pages_are_bounded_and_scoped(matrix: Matrix) {
     let mut observed = seen.clone();
     observed.sort();
     observed.dedup();
-    assert_eq!(observed, expected, "the page union equals the authorized seeded set");
+    assert_eq!(
+        observed, expected,
+        "the page union equals the authorized seeded set"
+    );
     assert_eq!(seen.len(), seeded.len(), "no row is paged twice: {seen:?}");
 
     // A reviewer restricted to one context sees only the candidate it covers.
@@ -693,14 +790,17 @@ async fn review_consumes_and_creates_atomically(matrix: Matrix) {
     // Authoritative digest: §6.7 pins the JCS SHA-256 of the candidate content,
     // which the public pending projection exposes. Compute it before the body is
     // scrubbed; the consumed shell must retain exactly this value.
-    let expected_digest = match spoke_operations::jcs_sha256_hex(
-        &captured_shell["candidate"]["proposed"]["content"],
-    ) {
-        spoke_operations::SpokeResult::Ok(digest) => digest,
-        spoke_operations::SpokeResult::Reject(reject) => {
-            panic!("the public pending content canonicalizes: {}", reject.message)
-        }
-    };
+    let expected_digest =
+        match spoke_operations::jcs_sha256_hex(&captured_shell["candidate"]["proposed"]["content"])
+        {
+            spoke_operations::SpokeResult::Ok(digest) => digest,
+            spoke_operations::SpokeResult::Reject(reject) => {
+                panic!(
+                    "the public pending content canonicalizes: {}",
+                    reject.message
+                )
+            }
+        };
 
     let reviewed = admin
         .review_candidate(review_body(&candidate_id, 1, "k-c031-review"))
@@ -780,16 +880,16 @@ async fn dismiss_replay_never_resurrects(matrix: Matrix) {
         .dismiss_candidate(dismiss_body(&candidate_id, 2, "k-c032-again"))
         .await;
     assert_eq!(error_code(&second), "CANDIDATE_CONSUMED", "{second}");
-    drop(admin);
 
     let matrix = matrix.restart().await;
     let admin = matrix.admin();
     let shell = admin.get_candidate(&candidate_id).await;
     assert_eq!(
-        shell["candidate"]["status"], json!("consumed"),
+        shell["candidate"]["status"],
+        json!("consumed"),
         "the restart never resurrects the candidate: {shell}"
     );
-    assert!(ids(&pending(&admin).await).is_empty());
+    assert_eq!(ids(&pending(&admin).await), [] as [std::string::String; 0]);
     assert_eq!(
         recalled(&admin, json!({ "mode": "subject_all" })).await["total_authorized"],
         json!(0),
@@ -1043,7 +1143,7 @@ async fn c_033_concurrent_review_has_exactly_one_effect_remote() {
 }
 
 /// C-034: a review inherits the candidate's capture scope and needs BOTH the
-/// review and records_write coverage over it IN ONE GRANT; the later visibility
+/// review and `records_write` coverage over it IN ONE GRANT; the later visibility
 /// change is a separate, explicitly authorized `records.promote`.
 async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
@@ -1071,9 +1171,15 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
         .peer()
         .review_candidate(review_body(&candidate_id, 1, "k-c034-review-only"))
         .await;
-    assert!(!is_committed(&refused), "review alone cannot promote: {refused}");
+    assert!(
+        !is_committed(&refused),
+        "review alone cannot promote: {refused}"
+    );
     assert_eq!(retry_class(&refused), "terminal");
-    assert!(record_ids_or_empty(&refused).is_empty());
+    assert_eq!(
+        record_ids_or_empty(&refused),
+        [] as [std::string::String; 0]
+    );
     assert_eq!(
         matrix.admin().get_candidate(&candidate_id).await["candidate"]["status"],
         json!("pending"),
@@ -1097,10 +1203,16 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
         .peer()
         .review_candidate(review_body(&candidate_id, 1, "k-c034-separate"))
         .await;
-    assert!(!is_committed(&separate), "separate grants do not union: {separate}");
+    assert!(
+        !is_committed(&separate),
+        "separate grants do not union: {separate}"
+    );
     assert_eq!(retry_class(&separate), "terminal");
     assert_eq!(error_code(&separate), "NOT_FOUND", "{separate}");
-    assert!(record_ids_or_empty(&separate).is_empty());
+    assert_eq!(
+        record_ids_or_empty(&separate),
+        [] as [std::string::String; 0]
+    );
     assert_eq!(
         matrix.admin().get_candidate(&candidate_id).await["candidate"]["status"],
         json!("pending"),
@@ -1124,7 +1236,11 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
         .peer()
         .review_candidate(review_body(&candidate_id, 1, "k-c034-promote"))
         .await;
-    assert_eq!(result(&promoted)["outcome"], json!("promoted"), "{promoted}");
+    assert_eq!(
+        result(&promoted)["outcome"],
+        json!("promoted"),
+        "{promoted}"
+    );
     let record_id = record_ids(&promoted)[0].clone();
     let record = admin.get_record(&record_id).await;
     assert_eq!(
@@ -1236,14 +1352,17 @@ async fn merge_review_action_is_explicitly_unsupported(matrix: Matrix) {
             }),
         )
         .await;
-    let error = response.get("error").expect("typed-decode refusal envelope");
+    let error = response
+        .get("error")
+        .expect("typed-decode refusal envelope");
     assert_eq!(error["code"], json!("INVALID_INPUT"), "{response}");
     assert_eq!(error["details"]["retry_class"], json!("terminal"));
     raw.close().await.expect("the raw session settles");
 
     let shell = matrix.admin().get_candidate(&candidate_id).await;
     assert_eq!(
-        shell["candidate"]["status"], json!("pending"),
+        shell["candidate"]["status"],
+        json!("pending"),
         "the refused merge action consumed nothing: {shell}"
     );
     assert_eq!(shell["candidate"]["revision"], json!(1));
@@ -1281,7 +1400,13 @@ async fn replay_does_not_recheck_current_fence_or_cas(matrix: Matrix) {
 
     // The subject is fenced after both decisions were committed.
     admin
-        .fence_subject(SUBJECT, json!({ "type": "subject" }), "fence", 1, "k-c036-fence")
+        .fence_subject(
+            SUBJECT,
+            json!({ "type": "subject" }),
+            "fence",
+            1,
+            "k-c036-fence",
+        )
         .await;
 
     // The specified operation: a CAPTURE replay is the stored receipt.
@@ -1324,16 +1449,11 @@ async fn c_036_replay_does_not_recheck_current_fence_or_cas_remote() {
 
 /// C-116: a binding-local review of a real Character subject cannot widen
 /// visibility; shared placement needs the explicit dual-authorized promote.
-async fn binding_local_review_cannot_widen_visibility(
-    matrix: Matrix,
-    character: CharacterFixture,
-) {
+async fn binding_local_review_cannot_widen_visibility(matrix: Matrix, character: CharacterFixture) {
     let subject = character.subject_id.as_str();
     let binding = character.binding_id.as_str();
     let admin = matrix.admin();
-    let ensured = admin
-        .ensure_subject(subject)
-        .await;
+    let ensured = admin.ensure_subject(subject).await;
     assert_eq!(result(&ensured)["created"], json!(true));
 
     let captured = admin
@@ -1351,7 +1471,11 @@ async fn binding_local_review_cannot_widen_visibility(
     let promoted = admin
         .review_candidate(review_body(&candidate_id, 1, "k-c116-review"))
         .await;
-    assert_eq!(result(&promoted)["outcome"], json!("promoted"), "{promoted}");
+    assert_eq!(
+        result(&promoted)["outcome"],
+        json!("promoted"),
+        "{promoted}"
+    );
     let record_id = record_ids(&promoted)[0].clone();
     let record = admin.get_record(&record_id).await;
     assert_eq!(

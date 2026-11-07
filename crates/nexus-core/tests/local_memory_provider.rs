@@ -2744,11 +2744,16 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
     let admin = principal(CREATOR);
     let scoped = principal(OTHER);
     wire(
-        &provider.ensure_subject(&admin, ensure_request(SUBJECT)).await,
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
     );
     let captured = wire(
         &provider
-            .capture(&admin, capture_request("k-single-grant", Some("bnd_1"), TEXT))
+            .capture(
+                &admin,
+                capture_request("k-single-grant", Some("bnd_1"), TEXT),
+            )
             .await,
     );
     let candidate_id = receipt(&captured)["result"]["candidate_ids"][0]
@@ -2767,7 +2772,10 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
     );
     let review_only = wire(
         &provider
-            .review_candidate(&scoped, review_request("k-sg-review-only", &candidate_id, 1))
+            .review_candidate(
+                &scoped,
+                review_request("k-sg-review-only", &candidate_id, 1),
+            )
             .await,
     );
     assert_eq!(error_code(&review_only), "NOT_FOUND");
@@ -2810,7 +2818,10 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
     // the same refusal (C-102): no existence oracle.
     let missing = wire(
         &provider
-            .review_candidate(&scoped, review_request("k-sg-missing", "cnd_never_existed", 1))
+            .review_candidate(
+                &scoped,
+                review_request("k-sg-missing", "cnd_never_existed", 1),
+            )
             .await,
     );
     assert_eq!(error_code(&missing), "NOT_FOUND");
@@ -2839,7 +2850,9 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
         .unwrap()
         .to_owned();
     let record = wire(
-        &provider.get_record(&admin, record_get_request(&record_id)).await,
+        &provider
+            .get_record(&admin, record_get_request(&record_id))
+            .await,
     );
     assert_eq!(record["record"]["scope"]["context_id"], "bnd_1");
 }
@@ -4721,12 +4734,10 @@ async fn content_bound_refusals_name_the_exceeded_limit() {
         .as_u64()
         .expect("max_content_bytes");
     let framing = 11_u64;
-    let at_bound = "a".repeat(
-        usize::try_from(max_content_bytes - framing).expect("bound fits usize"),
-    );
-    let over_bound = "a".repeat(
-        usize::try_from(max_content_bytes - framing).expect("bound fits usize") + 1,
-    );
+    let at_bound =
+        "a".repeat(usize::try_from(max_content_bytes - framing).expect("bound fits usize"));
+    let over_bound =
+        "a".repeat(usize::try_from(max_content_bytes - framing).expect("bound fits usize") + 1);
 
     // capture
     let refused = wire(
@@ -4814,7 +4825,9 @@ async fn content_bound_refusals_name_the_exceeded_limit() {
     );
     assert_eq!(unchanged["record"]["revision"], 1);
     assert_eq!(
-        unchanged["record"]["content"]["text"].as_str().expect("text"),
+        unchanged["record"]["content"]["text"]
+            .as_str()
+            .expect("text"),
         at_bound
     );
 

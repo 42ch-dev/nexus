@@ -483,9 +483,8 @@ where
     /// its own budget and leaves the other caller's ownership untouched.
     async fn release(&self) -> Result<(), CleanupFailure> {
         let deadline = tokio::time::Instant::now() + SHUTDOWN_BOUND;
-        let _gate = match tokio::time::timeout_at(deadline, self.close_gate.lock()).await {
-            Ok(gate) => gate,
-            Err(_) => return Err(CleanupFailure::GateBusy),
+        let Ok(_gate) = tokio::time::timeout_at(deadline, self.close_gate.lock()).await else {
+            return Err(CleanupFailure::GateBusy);
         };
         if self.completed.load(Ordering::SeqCst) {
             return self.completed_outcome();
@@ -498,37 +497,41 @@ where
         // send each hold their mutex across the native poll, so a lock-first
         // release would wait for the very I/O it has to cancel.
         self.notify.notify_waiters();
-        let mut stream_disposed = false;
-        if let Ok(mut stream) = tokio::time::timeout_at(deadline, self.stream.lock()).await {
-            stream.take();
-            stream_disposed = true;
-        }
+        let stream_disposed = tokio::time::timeout_at(deadline, self.stream.lock())
+            .await
+            .map_or(false, |mut stream| {
+                stream.take();
+                true
+            });
         self.notify.notify_waiters();
-        let mut sink_disposed = false;
-        if let Ok(mut sink) = tokio::time::timeout_at(deadline, self.sink.lock()).await {
+        let sink_disposed = if let Ok(mut sink) =
+            tokio::time::timeout_at(deadline, self.sink.lock()).await
+        {
             if let Some(probe) = &self.probe {
                 probe.record_sink_acquired();
             }
             if let Some(sink) = sink.as_mut() {
                 match tokio::time::timeout_at(deadline, sink.close()).await {
-                    Ok(Ok(())) => {}
-                    // Recorded the moment it happens: a partial attempt that
-                    // keeps the other half must not erase what the close said.
+                    // The shared deadline is the forced-disposal path: a
+                    // peer that never drains cannot hold teardown open, and
+                    // the drop below still ends the socket. Graceful.
+                    Ok(Ok(())) | Err(_) => {}
+                    // Recorded the moment it happens: a partial attempt
+                    // that keeps the other half must not erase what the
+                    // close said.
                     Ok(Err(error)) => {
                         let mut failure = self.close_failure.lock().expect("close failure lock");
                         if failure.is_none() {
                             *failure = Some(map_ws_error(error));
                         }
                     }
-                    // The shared deadline is the forced-disposal path: a peer
-                    // that never drains cannot hold teardown open, and the drop
-                    // below still ends the socket.
-                    Err(_) => {}
                 }
             }
             sink.take();
-            sink_disposed = true;
-        }
+            true
+        } else {
+            false
+        };
         if !(stream_disposed && sink_disposed) {
             // Transient: completion stays unset so a later call retries. Any
             // close failure this attempt observed is already retained above.
@@ -548,15 +551,13 @@ where
     /// the first observed close failure if there was one, else graceful. Only the
     /// failure path copies anything.
     fn completed_outcome(&self) -> Result<(), CleanupFailure> {
-        match self
-            .close_failure
+        self.close_failure
             .lock()
             .expect("close failure lock")
             .as_ref()
-        {
-            Some(error) => Err(CleanupFailure::CloseFrame(error.clone())),
-            None => Ok(()),
-        }
+            .map_or(Ok(()), |error| {
+                Err(CleanupFailure::CloseFrame(error.clone()))
+            })
     }
 
     /// Fixture-only: take the stream half's mutex and hold it until `release`,
@@ -2529,7 +2530,7 @@ async fn server_scopes_overlap_with_independent_digests() {
     // Hold the first invocation inside its own serve scope, before its writer
     // transaction, and prove a second invocation runs to completion while the
     // first scope is still live.
-    let mut hold = fixture
+    let mut admission_hold = fixture
         .provider
         .faults()
         .hold_next(FaultPoint::AdmissionPause);
@@ -2537,8 +2538,9 @@ async fn server_scopes_overlap_with_independent_digests() {
     let principal = fixture.principal.clone();
     let held_request: MemoryCaptureRequest =
         from_value(held_payload.clone()).expect("held capture request");
-    let held = tokio::spawn(async move { client.capture(&principal, held_request).await });
-    hold.wait_reached()
+    let in_flight = tokio::spawn(async move { client.capture(&principal, held_request).await });
+    admission_hold
+        .wait_reached()
         .await
         .expect("the first admission is paused inside its scope");
 
@@ -2546,17 +2548,20 @@ async fn server_scopes_overlap_with_independent_digests() {
     assert_eq!(free["payload_digest"], json!(digest_of(&free_payload)));
     assert_eq!(free["status"], json!("committed"));
 
-    hold.release();
-    let held = wire(&expect_ok(held.await.expect("held invoke joined")));
-    assert_eq!(held["payload_digest"], json!(digest_of(&held_payload)));
-    assert_ne!(held["receipt_id"], free["receipt_id"]);
+    admission_hold.release();
+    let held_receipt = wire(&expect_ok(in_flight.await.expect("held invoke joined")));
+    assert_eq!(
+        held_receipt["payload_digest"],
+        json!(digest_of(&held_payload))
+    );
+    assert_ne!(held_receipt["receipt_id"], free["receipt_id"]);
     assert_ne!(
-        held["result"]["candidate_ids"], free["result"]["candidate_ids"],
+        held_receipt["result"]["candidate_ids"], free["result"]["candidate_ids"],
         "each overlapping scope produced its own candidate"
     );
     assert_eq!(fixture.count("receipts").await, 3);
     assert_eq!(fixture.count("candidates").await, 2);
-    for (receipt, payload) in [(&held, &held_payload), (&free, &free_payload)] {
+    for (receipt, payload) in [(&held_receipt, &held_payload), (&free, &free_payload)] {
         assert_eq!(
             receipt["payload_digest"],
             json!(digest_of(payload)),
@@ -2796,7 +2801,7 @@ async fn cleanup_that_cannot_take_a_half_fails_and_finishes_later() {
         .expect("the queued close is bounded by the join bound");
     let waited = entry.elapsed();
     match queued {
-        Err(CleanupFailure::GateBusy) | Err(CleanupFailure::HalvesOwned { .. }) => {}
+        Err(CleanupFailure::GateBusy | CleanupFailure::HalvesOwned { .. }) => {}
         Err(other) => panic!("the queued cleanup reported {other:?}"),
         Ok(()) => panic!("a queued cleanup must not report completion for a running one"),
     }
@@ -3157,7 +3162,7 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
     );
 
     let records_after_move = fixture.count("records").await;
-    let record_after_move = wire(&expect_ok(
+    let moved_record = wire(&expect_ok(
         admin
             .get_record(
                 &admin_principal,
@@ -3166,7 +3171,7 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
             )
             .await,
     ));
-    assert_eq!(record_after_move["record"]["revision"], json!(3));
+    assert_eq!(moved_record["record"]["revision"], json!(3));
 
     // ── Direction 1: LOSE A / KEEP B ───────────────────────────────────────
     admin_revoke("scoped-revoke-a", grant_a.clone()).await;
@@ -3220,7 +3225,7 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
                 )
                 .await,
         )),
-        record_after_move
+        moved_record
     );
 
     // ── Direction 2: KEEP A / NO B ─────────────────────────────────────────
@@ -3284,7 +3289,7 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
                 )
                 .await,
         )),
-        record_after_move,
+        moved_record,
         "the replay performed no effect on the moved record"
     );
 
@@ -3768,11 +3773,11 @@ async fn recall_counts_the_emitted_numeric_representation() {
     }))
     .expect("content serializes")
     .len();
-    let canonical = match jcs_sha256_hex(&json!({})) {
+    match jcs_sha256_hex(&json!({})) {
         SpokeResult::Ok(_) => (),
         SpokeResult::Reject(_) => panic!("jcs helper"),
-    };
-    let _ = canonical;
+    }
+    let () = ();
     let jcs_size = {
         // What the published canonical helper would budget for the same value.
         let jcs = serde_json::to_string(&json!({ "weight": 1 })).expect("canonical number");
@@ -3841,7 +3846,7 @@ async fn cross_provider_mixed_operation_overlap_keeps_each_digest() {
     let held_payload = first.capture_request("x-provider-held", "held material", CONTEXT);
     let mixed_payload = second.record_create_request("x-provider-record", "mixed material", true);
 
-    let mut hold = first
+    let mut admission_hold = first
         .provider
         .faults()
         .hold_next(FaultPoint::AdmissionPause);
@@ -3849,8 +3854,9 @@ async fn cross_provider_mixed_operation_overlap_keeps_each_digest() {
     let principal = first.principal.clone();
     let held_request: MemoryCaptureRequest =
         from_value(held_payload.clone()).expect("held capture request");
-    let held = tokio::spawn(async move { client.capture(&principal, held_request).await });
-    hold.wait_reached()
+    let in_flight = tokio::spawn(async move { client.capture(&principal, held_request).await });
+    admission_hold
+        .wait_reached()
         .await
         .expect("the first provider's admission is paused inside its scope");
 
@@ -3868,12 +3874,15 @@ async fn cross_provider_mixed_operation_overlap_keeps_each_digest() {
     assert_eq!(mixed["payload_digest"], json!(digest_of(&mixed_payload)));
     assert_eq!(mixed["space_id"], json!(second.space_id));
 
-    hold.release();
-    let held = wire(&expect_ok(held.await.expect("held invoke joined")));
-    assert_eq!(held["op"], json!("memory.capture"));
-    assert_eq!(held["payload_digest"], json!(digest_of(&held_payload)));
-    assert_eq!(held["space_id"], json!(first.space_id));
-    assert_ne!(held["receipt_id"], mixed["receipt_id"]);
+    admission_hold.release();
+    let held_receipt = wire(&expect_ok(in_flight.await.expect("held invoke joined")));
+    assert_eq!(held_receipt["op"], json!("memory.capture"));
+    assert_eq!(
+        held_receipt["payload_digest"],
+        json!(digest_of(&held_payload))
+    );
+    assert_eq!(held_receipt["space_id"], json!(first.space_id));
+    assert_ne!(held_receipt["receipt_id"], mixed["receipt_id"]);
 
     assert_eq!(first.count("candidates").await, 1);
     assert_eq!(first.count("records").await, 0);

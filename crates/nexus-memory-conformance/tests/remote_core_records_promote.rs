@@ -102,8 +102,8 @@ use spoke_connect::remote::{
 };
 use spoke_operations::spoke_schemas::{
     Finding, HostCapabilityManifest, KnowledgeEntry, MemoryRecallRequest,
-    MemoryRecordsCreateRequest, MemoryRecordsUpdateRequest, Principal as MemoryPrincipal,
-    Relation, Rule, Scope, TimelineEvent,
+    MemoryRecordsCreateRequest, MemoryRecordsUpdateRequest, Principal as MemoryPrincipal, Relation,
+    Rule, Scope, TimelineEvent,
 };
 use spoke_operations::{
     FindingPort, HostManifestPort, KnowledgeEntryPort, MemoryPort, RelationPort, RuleQueryPort,
@@ -264,7 +264,12 @@ fn peer_id(seed: &[u8; 32]) -> String {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(out, "{byte:02x}").expect("a String write never fails");
+    }
+    out
 }
 
 /// The signed peers this fixture admits, as `(peer id, public key)` pairs.
@@ -282,7 +287,7 @@ impl Peers {
 }
 
 /// Bind a real `127.0.0.1:0` listener whose first `connections` accepted
-/// WebSockets each become one signed responder over the same memory service.
+/// `WebSockets` each become one signed responder over the same memory service.
 ///
 /// Two connections are what the causal-window histories need: Core's own signed
 /// session and the independent writer's, each with its own socket, hello and
@@ -677,7 +682,7 @@ impl Provider {
     /// The operator principal the authenticated peer maps to, as the memory
     /// port's own request carrier: the fixture authorizes the request's
     /// principal id against the operator grant.
-    fn memory_principal(&self) -> MemoryPrincipal {
+    fn memory_principal() -> MemoryPrincipal {
         serde_json::from_value(json!({
             "principal_id": format!("prn_{}", peer_id(&CLIENT_SEED)),
             "extensions": {},
@@ -831,7 +836,10 @@ async fn assert_no_local_memory(env: &Env) {
             "character_memory_pending_review",
             "the legacy Character queue",
         ),
-        ("character_memory_fragments", "the legacy Character fragments"),
+        (
+            "character_memory_fragments",
+            "the legacy Character fragments",
+        ),
         ("memory_records", "the local provider's own record table"),
         ("memory_receipts", "the local provider's own receipt table"),
         ("memory_subjects", "the local provider's own subject table"),
@@ -879,9 +887,7 @@ async fn provider_record(pool: &SqlitePool, record_id: &str) -> Option<ProviderR
         visibility: row.get::<String, _>("scope_visibility"),
         context_id: row.get::<Option<String>, _>("scope_context_id"),
         revision: row.get::<i64, _>("revision"),
-        tombstoned: row
-            .get::<Option<String>, _>("tombstone_json")
-            .is_some(),
+        tombstoned: row.get::<Option<String>, _>("tombstone_json").is_some(),
     })
 }
 
@@ -902,9 +908,7 @@ async fn provider_records(pool: &SqlitePool, subject_id: &str) -> Vec<ProviderRe
         visibility: row.get::<String, _>("scope_visibility"),
         context_id: row.get::<Option<String>, _>("scope_context_id"),
         revision: row.get::<i64, _>("revision"),
-        tombstoned: row
-            .get::<Option<String>, _>("tombstone_json")
-            .is_some(),
+        tombstoned: row.get::<Option<String>, _>("tombstone_json").is_some(),
     })
     .collect()
 }
@@ -1016,7 +1020,13 @@ async fn capture(
 /// message: `(code, retry_class, family, wire_code, conflict_code)`.
 fn classified_refusal(
     error: &CoreError,
-) -> (&str, &str, MemoryProviderRefusal, Option<&str>, Option<&str>) {
+) -> (
+    &str,
+    &str,
+    MemoryProviderRefusal,
+    Option<&str>,
+    Option<&str>,
+) {
     match error {
         CoreError::MemoryProviderRefused {
             code,
@@ -1053,14 +1063,14 @@ async fn creator_record_reads_and_writes_run_on_the_remote_provider() {
 
     // CREATE: the standard `memory.records.create` in the pinned space, with the
     // authored identity the Creator family reads back.
-    assert!(
-        core.create_creator_memory(&principal, SLUG, "story_summary", BODY)
-            .await
-            .expect("create the Creator memory")
-    );
+    assert!(core
+        .create_creator_memory(&principal, SLUG, "story_summary", BODY)
+        .await
+        .expect("create the Creator memory"));
     // A taken slug is the retained `Ok(false)` answer and writes nothing.
     assert!(
-        !core.create_creator_memory(&principal, SLUG, "story_summary", BODY)
+        !core
+            .create_creator_memory(&principal, SLUG, "story_summary", BODY)
             .await
             .expect("the duplicate create is refused"),
         "the slug is already taken"
@@ -1149,11 +1159,10 @@ async fn creator_record_reads_and_writes_run_on_the_remote_provider() {
         record_id: created.record_id.clone(),
         revision: 1,
     };
-    assert!(
-        core.update_creator_memory(&principal, SLUG, EDITED_BODY, Some(&expected))
-            .await
-            .expect("update the record")
-    );
+    assert!(core
+        .update_creator_memory(&principal, SLUG, EDITED_BODY, Some(&expected))
+        .await
+        .expect("update the record"));
     let updated = provider_record(&pool, &created.record_id)
         .await
         .expect("the record row");
@@ -1162,10 +1171,7 @@ async fn creator_record_reads_and_writes_run_on_the_remote_provider() {
         provider_content(&pool, &created.record_id).await["text"],
         json!(EDITED_BODY)
     );
-    assert_eq!(
-        provider_receipts(&pool, "memory.records.update").await,
-        1
-    );
+    assert_eq!(provider_receipts(&pool, "memory.records.update").await, 1);
 
     // A caller whose read is stale is refused before the write, in the retained
     // `version_mismatch` shape, and the provider is untouched. (The provider's
@@ -1199,20 +1205,16 @@ async fn creator_record_reads_and_writes_run_on_the_remote_provider() {
     assert_eq!(edited["content"]["text"], json!(EDITED_BODY));
 
     // DELETE by slug (`memory.records.delete`) tombstones the provider record.
-    assert!(
-        core.delete_creator_memory(&principal, SLUG)
-            .await
-            .expect("delete the record")
-    );
+    assert!(core
+        .delete_creator_memory(&principal, SLUG)
+        .await
+        .expect("delete the record"));
     let tombstone = provider_record(&pool, &created.record_id)
         .await
         .expect("the record row");
     assert!(tombstone.tombstoned, "the provider tombstoned the record");
     assert_eq!(tombstone.revision, 3);
-    assert_eq!(
-        provider_receipts(&pool, "memory.records.delete").await,
-        1
-    );
+    assert_eq!(provider_receipts(&pool, "memory.records.delete").await, 1);
     assert!(
         core.get_creator_memory(&principal, SLUG)
             .await
@@ -1246,13 +1248,11 @@ async fn creator_record_reads_and_writes_run_on_the_remote_provider() {
         .active_principal()
         .await
         .expect("active principal");
-    assert!(
-        read_only
-            .list_creator_memories(&ro_principal)
-            .await
-            .expect("a read-only core serves the record read")
-            .is_empty()
-    );
+    assert!(read_only
+        .list_creator_memories(&ro_principal)
+        .await
+        .expect("a read-only core serves the record read")
+        .is_empty());
     let refused_create = read_only
         .create_creator_memory(&ro_principal, "r3-read-only", "story_summary", BODY)
         .await
@@ -1402,11 +1402,14 @@ async fn character_fragment_promotion_runs_on_the_remote_provider() {
     assert_eq!(fragment_ids, expected_ids);
     for fragment in &fragments.fragments {
         assert_eq!(
-            fragment.binding_id.as_deref().map(|id| id.as_str()),
+            fragment
+                .binding_id
+                .as_deref()
+                .map(std::string::String::as_str),
             Some(binding_id.as_str())
         );
         assert_eq!(fragment.revision, 0, "the retained DTO 0-based revision");
-        assert!(!fragment.summary.as_str().is_empty());
+        assert_ne!(fragment.summary, "");
     }
     let first = fragment_ids[0].clone();
     let second = fragment_ids[1].clone();
@@ -1437,11 +1440,11 @@ async fn character_fragment_promotion_runs_on_the_remote_provider() {
     let promoted_row = provider_record(&pool, &first).await.expect("the row");
     assert_eq!(promoted_row.visibility, "shared");
     assert_eq!(promoted_row.context_id, None);
-    assert_eq!(promoted_row.revision, 2, "the promotion bumped the revision");
     assert_eq!(
-        provider_receipts(&pool, "memory.records.promote").await,
-        1
+        promoted_row.revision, 2,
+        "the promotion bumped the revision"
     );
+    assert_eq!(provider_receipts(&pool, "memory.records.promote").await, 1);
     let untouched = provider_record(&pool, &second).await.expect("the row");
     assert_eq!(
         (untouched.visibility.as_str(), untouched.context_id.clone()),
@@ -1474,7 +1477,7 @@ async fn character_fragment_promotion_runs_on_the_remote_provider() {
     // edits the record's body and keeps the record's own authored block, which
     // is what any client editing a stored fragment writes.
     let (adapter, sdk_responder) = provider.sdk_session().await;
-    let memory_principal = provider.memory_principal();
+    let memory_principal = Provider::memory_principal();
     let stored = match adapter
         .get_record(
             &memory_principal,
@@ -1508,7 +1511,10 @@ async fn character_fragment_promotion_runs_on_the_remote_provider() {
     }
     let pool = provider.pool().await;
     assert_eq!(
-        provider_record(&pool, &second).await.expect("the row").revision,
+        provider_record(&pool, &second)
+            .await
+            .expect("the row")
+            .revision,
         2,
         "the second writer bumped the revision"
     );
@@ -1551,10 +1557,7 @@ async fn character_fragment_promotion_runs_on_the_remote_provider() {
     assert_eq!(retried_row.visibility, "shared");
     assert_eq!(retried_row.context_id, None);
     assert_eq!(retried_row.revision, 3);
-    assert_eq!(
-        provider_receipts(&pool, "memory.records.promote").await,
-        2
-    );
+    assert_eq!(provider_receipts(&pool, "memory.records.promote").await, 2);
     pool.close().await;
 
     // The per-Character activity lease is this branch's outer admission: an
@@ -1584,7 +1587,10 @@ async fn character_fragment_promotion_runs_on_the_remote_provider() {
         "the lease refusal reached no provider operation"
     );
     assert_eq!(
-        provider_record(&pool, &first).await.expect("the row").visibility,
+        provider_record(&pool, &first)
+            .await
+            .expect("the row")
+            .visibility,
         "shared",
         "the lease refusal left the promoted record alone"
     );
@@ -1636,8 +1642,7 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
     let principal = core.active_principal().await.expect("active principal");
 
     let world = create_world(&core, &principal, "R3 Family World").await;
-    let (character_id, binding_id, _) =
-        create_character(&core, &principal, "R3 Bea", &world).await;
+    let (character_id, binding_id, _) = create_character(&core, &principal, "R3 Bea", &world).await;
     let subject_id = legacy::character_subject_id(&character_id);
 
     // Two real reviewed fragments: the known family.
@@ -1697,7 +1702,7 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
         .expect("the control fragment is listed");
 
     let (adapter, sdk_responder) = provider.sdk_session().await;
-    let memory_principal = provider.memory_principal();
+    let memory_principal = Provider::memory_principal();
 
     // A generic provider-native `fact` under the same subject: a protocol record
     // with no authoritative Nexus origin. It must never be served or promoted as
@@ -1767,10 +1772,7 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
         (native_before.visibility.as_str(), native_before.revision),
         ("context", 1)
     );
-    assert_eq!(
-        provider_receipts(&pool, "memory.records.promote").await,
-        0
-    );
+    assert_eq!(provider_receipts(&pool, "memory.records.promote").await, 0);
     pool.close().await;
     let nexus = core_db(&env).await;
     let facts_before = object_facts(&nexus, &binding_id).await;
@@ -1928,10 +1930,7 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
         (control_row.visibility.as_str(), control_row.revision),
         ("shared", 3)
     );
-    assert_eq!(
-        provider_receipts(&pool, "memory.records.promote").await,
-        1
-    );
+    assert_eq!(provider_receipts(&pool, "memory.records.promote").await, 1);
     pool.close().await;
 
     adapter.close();
@@ -1990,7 +1989,7 @@ async fn fragment_page_windows_count_only_the_family() {
     assert_eq!(reviewed.fragmented, 3);
 
     let (adapter, sdk_responder) = provider.sdk_session().await;
-    let memory_principal = provider.memory_principal();
+    let memory_principal = Provider::memory_principal();
     let native = match adapter
         .create_record(
             &memory_principal,
@@ -2069,10 +2068,7 @@ async fn fragment_page_windows_count_only_the_family() {
             page.fragments[0].session_id.as_str().to_string(),
         ));
     }
-    let mut sessions: Vec<String> = served
-        .iter()
-        .map(|(_, session)| session.clone())
-        .collect();
+    let mut sessions: Vec<String> = served.iter().map(|(_, session)| session.clone()).collect();
     sessions.sort();
     assert_eq!(
         sessions,
@@ -2105,10 +2101,7 @@ async fn fragment_page_windows_count_only_the_family() {
         ),
         ("context", 1)
     );
-    assert_eq!(
-        provider_receipts(&pool, "memory.records.promote").await,
-        0
-    );
+    assert_eq!(provider_receipts(&pool, "memory.records.promote").await, 0);
     pool.close().await;
     let unrelated_refused = core
         .promote_character_fragment(&principal, character_id.clone(), unrelated_id.clone(), 0)
@@ -2127,10 +2120,7 @@ async fn fragment_page_windows_count_only_the_family() {
         1,
         "the retained refusal wrote nothing"
     );
-    assert_eq!(
-        provider_receipts(&pool, "memory.records.promote").await,
-        0
-    );
+    assert_eq!(provider_receipts(&pool, "memory.records.promote").await, 0);
     pool.close().await;
 
     // Binding B: a DAMAGED fragment-origin record older than two valid
@@ -2454,18 +2444,14 @@ async fn an_independently_signed_writer_competes_at_both_causal_windows() {
     ));
     cas_probe.watch(&cas_record);
     let (cas_addr, cas_listeners) = provider
-        .serve_connections(
-            Arc::clone(&cas_probe) as Arc<dyn RemoteMemoryService>,
-            2,
-        )
+        .serve_connections(Arc::clone(&cas_probe) as Arc<dyn RemoteMemoryService>, 2)
         .await;
-    let cas_core = CoreService::open(env.options(provider.selection(cas_addr), CoreAccess::EngineOwner))
-        .await
-        .expect("the selected remote provider opens");
+    let cas_core =
+        CoreService::open(env.options(provider.selection(cas_addr), CoreAccess::EngineOwner))
+            .await
+            .expect("the selected remote provider opens");
     let cas_principal = cas_core.active_principal().await.expect("principal");
-    let cas_writer = provider
-        .dial(cas_addr, WRITER_SEED, "r3-race-writer")
-        .await;
+    let cas_writer = provider.dial(cas_addr, WRITER_SEED, "r3-race-writer").await;
     let writer_principal = provider.writer_memory_principal();
     let (cas_reached_tx, cas_reached_rx) = oneshot::channel();
     let (cas_release_tx, cas_release_rx) = oneshot::channel();
@@ -2542,7 +2528,11 @@ async fn an_independently_signed_writer_competes_at_both_causal_windows() {
         "the refused promotion released nothing: {after:?}"
     );
     assert!(
-        !after.contains(&("record".to_string(), cas_record.clone(), "released".to_string())),
+        !after.contains(&(
+            "record".to_string(),
+            cas_record.clone(),
+            "released".to_string()
+        )),
         "no release fact was published for the refused promotion"
     );
     cas_writer.close();
@@ -2575,10 +2565,7 @@ async fn an_independently_signed_writer_competes_at_both_causal_windows() {
     ));
     commit_probe.watch(&commit_record);
     let (commit_addr, commit_listeners) = provider
-        .serve_connections(
-            Arc::clone(&commit_probe) as Arc<dyn RemoteMemoryService>,
-            2,
-        )
+        .serve_connections(Arc::clone(&commit_probe) as Arc<dyn RemoteMemoryService>, 2)
         .await;
     let commit_core =
         CoreService::open(env.options(provider.selection(commit_addr), CoreAccess::EngineOwner))
@@ -2674,11 +2661,7 @@ async fn an_independently_signed_writer_competes_at_both_causal_windows() {
     );
     commit_writer.close();
     assert!(
-        commit_core
-            .close()
-            .await
-            .expect("close")
-            .cleanup_confirmed,
+        commit_core.close().await.expect("close").cleanup_confirmed,
         "the committed open releases its own admission"
     );
     let commit_responders = tokio::time::timeout(BOUND, commit_listeners)
@@ -2713,11 +2696,10 @@ async fn recall_and_record_reads_use_the_pinned_remote_space() {
 
     let (trap, dirs) = arm_legacy_traps(&env, None).await;
 
-    assert!(
-        core.create_creator_memory(&principal, SLUG, "story_summary", BODY)
-            .await
-            .expect("create the Creator memory")
-    );
+    assert!(core
+        .create_creator_memory(&principal, SLUG, "story_summary", BODY)
+        .await
+        .expect("create the Creator memory"));
     let listed = core
         .list_creator_memories(&principal)
         .await
@@ -2732,7 +2714,7 @@ async fn recall_and_record_reads_use_the_pinned_remote_space() {
     // SDK's own signed session against the same durable provider: the pinned
     // space is the one the product's reads and writes above actually used.
     let (adapter, sdk_responder) = provider.sdk_session().await;
-    let memory_principal = provider.memory_principal();
+    let memory_principal = Provider::memory_principal();
 
     let got = match adapter
         .get_record(
@@ -2767,14 +2749,12 @@ async fn recall_and_record_reads_use_the_pinned_remote_space() {
         SpokeResult::Ok(body) => serde_json::to_value(&body).expect("recall body"),
         SpokeResult::Reject(reject) => panic!("the pinned space is recalled: {reject:?}"),
     };
-    let recalled_ids: Vec<&str> = recalled["records"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|record| record["record_id"].as_str())
-        .collect();
     assert!(
-        recalled_ids.contains(&record_id.as_str()),
+        recalled["records"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|record| record["record_id"].as_str() == Some(record_id.as_str())),
         "recall serves the record the product wrote in the pinned space: {recalled}"
     );
     assert!(
@@ -2861,8 +2841,9 @@ async fn remote_record_refusals_stay_static_without_peer_text() {
         .create_creator_memory(&principal, SLUG, "story_summary", &oversized)
         .await
         .expect_err("the provider's content bound refuses the body");
-    let (code, retry_class, family, wire_code, conflict_code) = classified_refusal(&refused);
-    assert_eq!((code, retry_class), ("INVALID_INPUT", "terminal"));
+    let (refusal_code, retry_class, family, wire_code, conflict_code) =
+        classified_refusal(&refused);
+    assert_eq!((refusal_code, retry_class), ("INVALID_INPUT", "terminal"));
     assert_eq!(family, MemoryProviderRefusal::InvalidInput);
     assert_eq!(wire_code, None);
     assert_eq!(conflict_code, None);
@@ -2879,12 +2860,11 @@ async fn remote_record_refusals_stay_static_without_peer_text() {
     // A record the provider has never seen is the proven definite absence, which
     // the retained slug read renders as `None` (the same whitelisted class drives
     // the shortcut), and a second miss writes nothing.
-    assert!(
-        core.get_creator_memory(&principal, "r3-never-written")
-            .await
-            .expect("the absent read is answered")
-            .is_none()
-    );
+    assert!(core
+        .get_creator_memory(&principal, "r3-never-written")
+        .await
+        .expect("the absent read is answered")
+        .is_none());
 
     let pool = provider.pool().await;
     assert!(
