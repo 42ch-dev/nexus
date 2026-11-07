@@ -375,6 +375,62 @@ fn promote_result_record_id(
     Ok(record.to_string())
 }
 
+/// The candidate one committed dismissal receipt proves for THIS request.
+///
+/// §7.14's atomic result is `{ candidate_id, outcome: "dismissed" }` (MEM-R009),
+/// and the peer's schema accepts another space, key, candidate or outcome, so
+/// shape alone is not proof. The receipt must be *this* dismissal's before the
+/// candidate's binding dependency is released
+/// ([`MemoryAdapter::dismiss_native`]): a provider can answer with an older,
+/// still schema-valid receipt for candidate A while B is the pending candidate,
+/// and releasing on it would stop counting B as live. Every mismatch is static:
+/// no peer-authored byte reaches a message.
+fn dismiss_result_candidate_id(
+    body: &Value,
+    issued_space: &str,
+    issued_key: &str,
+    issued_candidate: &str,
+) -> CoreResult<String> {
+    let malformed = |reason: &'static str| internal_err("memory_dismiss_receipt", reason);
+    let space = body
+        .get("space_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed dismissal result carries no space"))?;
+    if space != issued_space {
+        return Err(malformed(
+            "the committed dismissal result space does not match the issued request",
+        ));
+    }
+    let key = body
+        .get("idempotency_key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed dismissal result carries no idempotency key"))?;
+    if key != issued_key {
+        return Err(malformed(
+            "the committed dismissal result echoes a different idempotency key than the issued request",
+        ));
+    }
+    let candidate = body
+        .pointer("/result/candidate_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed dismissal result carries no candidate_id"))?;
+    if candidate != issued_candidate {
+        return Err(malformed(
+            "the committed dismissal result names a different candidate than the issued request",
+        ));
+    }
+    let outcome = body
+        .pointer("/result/outcome")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed dismissal result carries no outcome"))?;
+    if outcome != "dismissed" {
+        return Err(malformed(
+            "the committed dismissal outcome does not match the issued dismissal",
+        ));
+    }
+    Ok(candidate.to_string())
+}
+
 fn remote_capture_reject_proves_no_effect(reject: &SpokeReject) -> bool {
     refusal_proves(
         false,
@@ -1303,6 +1359,11 @@ impl MemoryAdapter {
     /// The write is monotone and conditional, so an acknowledgement that lands
     /// before the capture result is published is durable and a later result
     /// publication cannot resurrect it.
+    ///
+    /// Before the release, the committed result must be this request's receipt
+    /// (space, idempotency key, candidate and `dismissed` outcome); a
+    /// schema-valid but stale or mismatched receipt is refused as malformed and
+    /// the candidate fact stays live, so the binding stays unremovable.
     async fn dismiss_native(
         &self,
         candidate_id: &str,
@@ -1315,17 +1376,28 @@ impl MemoryAdapter {
             "expected_revision": revision,
             "idempotency_key": format!("e4dismiss-native:{candidate_id}"),
         }))?;
+        // The committed receipt must identify THIS dismissal: a provider can
+        // answer with an older, still schema-valid receipt for another
+        // candidate or key, and releasing on it would stop counting a pending
+        // candidate as live.
+        let issued_space = request.space_id.as_str().to_string();
+        let issued_key = request.idempotency_key.as_str().to_string();
         match self
             .binding
             .port()
             .dismiss_candidate(&self.principal, request)
             .await
         {
-            SpokeResult::Ok(_) => {
+            SpokeResult::Ok(receipt) => {
+                let body = serde_json::to_value(&receipt).map_err(wire_err)?;
+                // A mismatched receipt returns here with the candidate fact
+                // still live, so the binding stays protected.
+                let released =
+                    dismiss_result_candidate_id(&body, &issued_space, &issued_key, candidate_id)?;
                 self.record_remote_object(
                     binding_id,
                     nexus_local_db::RemoteBindingObjectKind::Candidate,
-                    candidate_id,
+                    &released,
                     nexus_local_db::RemoteBindingObjectState::Released,
                 )
                 .await?;
@@ -6647,6 +6719,61 @@ mod tests {
                 ),
                 other => panic!("expected the static promotion refusal for the {what}: {other:?}"),
             }
+        }
+    }
+
+    /// §7.14 (I-000303): a committed dismissal receipt only proves THIS
+    /// dismissal, and it is the gate `dismiss_native` passes before it releases
+    /// the candidate's binding dependency. A provider can answer with an older,
+    /// still schema-valid receipt for candidate A while B is the pending
+    /// candidate; releasing on it would stop counting B as live. `Ok` is the
+    /// only path that reaches the release, so a mismatch keeps that dependency
+    /// live.
+    #[test]
+    fn dismissal_receipts_prove_only_their_own_request() {
+        const KEY: &str = "e4dismiss-native:cand_issued";
+        let receipt = |space: &str, key: &str, candidate: &str, outcome: &str| {
+            json!({
+                "space_id": space,
+                "idempotency_key": key,
+                "result": { "candidate_id": candidate, "outcome": outcome },
+            })
+        };
+        let own = receipt("spc_a", KEY, "cand_issued", "dismissed");
+        assert_eq!(
+            dismiss_result_candidate_id(&own, "spc_a", KEY, "cand_issued")
+                .expect("this request's own dismissal"),
+            "cand_issued",
+        );
+        const SENTINEL: &str = "cand_forged\nMARKER-I303 token=abc";
+        for (body, what) in [
+            (receipt("spc_b", KEY, "cand_issued", "dismissed"), "space"),
+            (
+                receipt(
+                    "spc_a",
+                    "e4dismiss-native:cand_old",
+                    "cand_issued",
+                    "dismissed",
+                ),
+                "key",
+            ),
+            (receipt("spc_a", KEY, SENTINEL, "dismissed"), "candidate"),
+            (receipt("spc_a", KEY, "cand_issued", "dropped"), "outcome"),
+        ] {
+            let error = dismiss_result_candidate_id(&body, "spc_a", KEY, "cand_issued")
+                .expect_err("another request's receipt releases nothing");
+            let CoreError::Internal { category } = &error else {
+                panic!("expected the static dismissal refusal for the {what}: {error:?}");
+            };
+            assert!(
+                category.starts_with("memory_dismiss_receipt"),
+                "the static dismissal refusal for the {what}, got {category}"
+            );
+            let rendered = format!("{error} {error:?} {category}");
+            assert!(
+                !rendered.contains("MARKER-I303") && !rendered.contains("token=abc"),
+                "peer bytes must not escape the {what} refusal: {rendered}"
+            );
         }
     }
 }
