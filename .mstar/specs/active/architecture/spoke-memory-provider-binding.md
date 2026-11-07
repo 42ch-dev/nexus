@@ -59,7 +59,7 @@ Selection follows this order:
 
 1. `CoreOpenOptions.memory = Some(selection)` supplies a validated open-only override and neither reads nor writes provider configuration. `Some(Local)` therefore overrides a remote disk selection for that open.
 2. `None` reads `[memory_provider]` from `<user_home>/.nexus42/config.toml` exactly once while opening.
-3. An absent table or `kind = "local"` selects local. Existing homes retain local behavior.
+3. A genuinely absent table or `kind = "local"` selects local; existing homes retain local behavior. A config that cannot be inspected (any filesystem error other than absence) fails the open instead of selecting local.
 
 A remote table contains only:
 
@@ -216,7 +216,7 @@ Only the definite result of that exact wire attempt retires that admission:
 
 Uncertain mutation outcomes resolve only through a replay carrying the same provider-scoped idempotency key and identical payload, or through `memory.receipts.get`. A changed payload under the same key is an idempotency conflict. Nexus never invents a new key to settle an old attempt, force-clears an unknown admission, or replays a capture as part of binding removal.
 
-Known provider candidate/record dependencies are stored separately from unknown admissions. Facts are namespaced by actual provider authority, space, loaded public client identity, Nexus bearer, and binding. Live references and monotone consumed/released facts survive acknowledgement-before-publication ordering. Candidate review atomically transfers known dependencies to returned record ids; shared promotion releases the record. Acknowledgements are applied by the actual shared wire senders, not only a legacy-shaped route.
+Known provider candidate/record dependencies are stored separately from unknown admissions. Facts are namespaced by actual provider authority, space, loaded public client identity, Nexus bearer, and binding. Live references and monotone consumed/released facts survive acknowledgement-before-publication ordering. Candidate review atomically transfers known dependencies to returned record ids; shared promotion releases the record. Acknowledgements are applied by the actual shared wire senders, not only a legacy-shaped route. A committed dismissal acknowledgement is bound to its own request — the issued space, idempotency key, candidate and `dismissed` outcome — before the known candidate dependency is released; a mismatched or stale acknowledgement releases nothing.
 
 Removal may use positive provider object state to close a known reference. Negative, concealed, or refused reads prove neither absence nor settlement of an unknown admission. Positive-closure updates are monotone or snapshot-conditional. Final binding deletion checks both unknown admissions and live references in one transaction, then may discard terminal bookkeeping and delete the binding atomically. Existing local dependency checks, ownership/activity leases, and valid no-memory deletion remain intact. Stale outcome or acknowledgement writes cannot revive or erase another admission/reference.
 
