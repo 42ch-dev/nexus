@@ -8,6 +8,7 @@
 //! hand; the owner/group/DACL component pointers come from the documented
 //! `GetSecurityDescriptor*` accessors.
 
+use std::ffi::c_void;
 use std::fs::File;
 use std::io;
 use std::os::windows::ffi::OsStrExt as _;
@@ -15,19 +16,23 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle as _};
 use std::path::Path;
 use std::ptr;
 
-use windows_sys::Win32::Foundation::{GENERIC_WRITE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{
+    GENERIC_ALL, GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE,
+};
 use windows_sys::Win32::Security::Authorization::{SetSecurityInfo, SE_FILE_OBJECT};
 use windows_sys::Win32::Security::{
-    AclSizeInformation, GetAclInformation, GetFileSecurityW, GetSecurityDescriptorControl,
-    GetSecurityDescriptorDacl, GetSecurityDescriptorGroup, GetSecurityDescriptorOwner,
-    GetSecurityDescriptorSacl, ACL, ACL_SIZE_INFORMATION, ATTRIBUTE_SECURITY_INFORMATION,
-    DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, LABEL_SECURITY_INFORMATION,
-    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SCOPE_SECURITY_INFORMATION, SE_DACL_PROTECTED, UNPROTECTED_DACL_SECURITY_INFORMATION,
+    AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetFileSecurityW,
+    GetKernelObjectSecurity, GetSecurityDescriptorControl, GetSecurityDescriptorDacl,
+    GetSecurityDescriptorGroup, GetSecurityDescriptorOwner, GetSecurityDescriptorSacl,
+    IsWellKnownSid, WinBuiltinAdministratorsSid, WinLocalSystemSid, ACCESS_ALLOWED_ACE, ACE_HEADER,
+    ACL, ACL_SIZE_INFORMATION, ATTRIBUTE_SECURITY_INFORMATION, DACL_SECURITY_INFORMATION,
+    GROUP_SECURITY_INFORMATION, LABEL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SCOPE_SECURITY_INFORMATION,
+    SE_DACL_PROTECTED, UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, CREATE_NEW,
-    FILE_ATTRIBUTE_NORMAL, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
+    FILE_ATTRIBUTE_NORMAL, FILE_READ_DATA, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
 
 /// Owner, group and DACL is the access policy this writer reproduces; the
@@ -260,6 +265,168 @@ pub fn access_policy_blob(target: &Path) -> io::Result<Vec<u8>> {
         .iter()
         .flat_map(|word| word.to_ne_bytes())
         .collect())
+}
+
+/// The two documented ACE classes (`winnt.h`) the credential privacy gate can
+/// interpret; windows-sys 0.61 does not declare these `#define` values.
+const ACCESS_ALLOWED_ACE_TYPE: u8 = 0x0;
+const ACCESS_DENIED_ACE_TYPE: u8 = 0x1;
+
+/// Decide whether the open file's DACL grants the read-data right to any
+/// principal beyond the file's owner, LOCAL SYSTEM and the Administrators
+/// group.
+///
+/// `Ok(())` means every read grant belongs to one of those three principals.
+/// The memory credential loader calls this with its already-open handle before
+/// accepting the file's bytes, so a credential readable by anyone else — or a
+/// policy that cannot be interpreted — is refused: a read grant to any other
+/// SID, or a missing/null DACL or an owner that cannot be compared, is
+/// [`io::ErrorKind::PermissionDenied`]; a DACL carrying an ACE class this
+/// checker cannot interpret (object, callback, audit, alarm and label ACEs are
+/// not grants this loader can reason about) is [`io::ErrorKind::Unsupported`].
+/// Denied ACEs only narrow access and are not grants.
+///
+/// The query follows the documented `GetKernelObjectSecurity` two-call
+/// contract against the caller's handle, so no path is reopened between the
+/// open and the decision and nothing mutates the policy.
+pub fn grants_read_only_to_trusted_principals(file: &File) -> io::Result<()> {
+    let mut needed = 0_u32;
+    // SAFETY: the measuring form takes a null descriptor with a zero length and
+    // a valid out-parameter; it is expected to fail with the required size.
+    unsafe {
+        GetKernelObjectSecurity(
+            file.as_raw_handle(),
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            ptr::null_mut(),
+            0,
+            &raw mut needed,
+        );
+    }
+    if needed == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let words = usize::try_from(needed.div_ceil(8))
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "security descriptor length"))?;
+    let mut descriptor = vec![0_u64; words];
+    let length = needed;
+    // SAFETY: the buffer holds at least `length` bytes (rounded up to whole
+    // words) and the call writes at most that many, reporting them back
+    // through `needed`.
+    let written = unsafe {
+        GetKernelObjectSecurity(
+            file.as_raw_handle(),
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            descriptor.as_mut_ptr().cast(),
+            length,
+            &raw mut needed,
+        )
+    };
+    if written == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let descriptor_pointer: PSECURITY_DESCRIPTOR = descriptor.as_mut_ptr().cast();
+    let mut owner: PSID = ptr::null_mut();
+    let mut defaulted = 0_i32;
+    // SAFETY: `descriptor_pointer` addresses the captured self-relative
+    // descriptor and `owner`/`defaulted` are valid local out-parameters.
+    let owner_read = unsafe {
+        GetSecurityDescriptorOwner(descriptor_pointer, &raw mut owner, &raw mut defaulted)
+    };
+    let mut dacl: *mut ACL = ptr::null_mut();
+    let mut dacl_present = 0_i32;
+    // SAFETY: the same captured descriptor stays alive for this call, and
+    // `dacl_present`/`dacl`/`defaulted` are valid local out-parameters.
+    let dacl_read = unsafe {
+        GetSecurityDescriptorDacl(
+            descriptor_pointer,
+            &raw mut dacl_present,
+            &raw mut dacl,
+            &raw mut defaulted,
+        )
+    };
+    if owner_read & dacl_read == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if owner.is_null() || dacl_present == 0 || dacl.is_null() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "credential file has no verifiable owner or DACL",
+        ));
+    }
+
+    let mut information = ACL_SIZE_INFORMATION::default();
+    let information_size = u32::try_from(std::mem::size_of::<ACL_SIZE_INFORMATION>())
+        .expect("ACL_SIZE_INFORMATION fits in a Win32 buffer");
+    // SAFETY: the non-null DACL was returned from the live descriptor; the
+    // aligned output buffer holds the requested information class.
+    let queried = unsafe {
+        GetAclInformation(
+            dacl,
+            (&raw mut information).cast(),
+            information_size,
+            AclSizeInformation,
+        )
+    };
+    if queried == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    for index in 0..information.AceCount {
+        let mut ace: *mut c_void = ptr::null_mut();
+        // SAFETY: `index` is within the documented `AceCount` of the live DACL
+        // and the out-pointer is a valid local.
+        let got = unsafe { GetAce(dacl, index, &raw mut ace) };
+        if got == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `GetAce` addresses a live ACE whose leading `ACE_HEADER` is
+        // the documented layout.
+        let header = unsafe { &*ace.cast::<ACE_HEADER>() };
+        match header.AceType {
+            // A denied ACE only narrows access; it grants nobody anything.
+            ACCESS_DENIED_ACE_TYPE => {}
+            ACCESS_ALLOWED_ACE_TYPE => {
+                // SAFETY: an allowed ACE carries the documented
+                // `ACCESS_ALLOWED_ACE` layout; `SidStart` addresses the SID
+                // that follows the access mask inside it.
+                let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
+                let sid = ptr::from_ref(&allowed.SidStart).cast_mut().cast::<c_void>();
+                let grants_read =
+                    allowed.Mask & (FILE_READ_DATA | GENERIC_READ | GENERIC_ALL) != 0;
+                if grants_read && !sid_is_trusted(sid, owner) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "credential file grants read access beyond the owner, \
+                         SYSTEM and Administrators",
+                    ));
+                }
+            }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "credential file carries an access-control entry class this \
+                     checker cannot interpret",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether the SID is the file's owner, LOCAL SYSTEM or the Administrators
+/// group — the three principals a credential file may grant read.
+fn sid_is_trusted(sid: PSID, owner: PSID) -> bool {
+    // SAFETY: both pointers address valid SIDs inside the live captured
+    // descriptor.
+    unsafe { EqualSid(sid, owner) != 0 }
+        // SAFETY: the same live SID compared against the documented well-known
+        // SYSTEM SID class.
+        || unsafe { IsWellKnownSid(sid, WinLocalSystemSid) != 0 }
+        // SAFETY: the same live SID compared against the documented
+        // Administrators SID class.
+        || unsafe { IsWellKnownSid(sid, WinBuiltinAdministratorsSid) != 0 }
 }
 
 /// NUL-terminated UTF-16 form of a path for the wide Win32 APIs.

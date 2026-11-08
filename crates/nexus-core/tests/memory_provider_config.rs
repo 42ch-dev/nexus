@@ -162,6 +162,37 @@ if ($env:NEXUS_TEST_EVERYONE_READ -eq '1' -and -not ($rules | Where-Object { $_.
     );
 }
 
+/// Add one read-allow rule for an arbitrary SID to an already-trusted fixture,
+/// reusing the child-only PowerShell hygiene of the fixture writer above.
+#[cfg(windows)]
+fn grant_windows_credential_read(path: &Path, sid: &str) {
+    let script = r#"
+$ErrorActionPreference = 'Stop'
+$path = $env:NEXUS_TEST_CREDENTIAL_PATH
+$acl = Get-Acl -LiteralPath $path
+$rule = [System.Security.AccessControl.FileSystemAccessRule]::new($env:NEXUS_TEST_GRANT_SID, 'Read', 'Allow')
+$acl.SetAccessRule($rule)
+Set-Acl -LiteralPath $path -AclObject $acl
+$actual = Get-Acl -LiteralPath $path
+$granted = @($actual.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq $env:NEXUS_TEST_GRANT_SID -and ($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::ReadData) -ne 0 })
+if ($granted.Count -eq 0) {
+    throw 'fixture grant missing'
+}
+"#;
+    let output = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env_remove("PSModulePath")
+        .env("NEXUS_TEST_CREDENTIAL_PATH", path)
+        .env("NEXUS_TEST_GRANT_SID", sid)
+        .output()
+        .expect("start Windows ACL grant fixture setup");
+    assert!(
+        output.status.success(),
+        "Windows ACL grant fixture setup failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[cfg(windows)]
 fn windows_credential_fixture(home: &Path) -> PathBuf {
     let dir = credentials_dir(home);
@@ -206,6 +237,43 @@ fn windows_credential_acl_everyone_read_is_refused() {
     );
     let again = MemoryCredential::load(home.path(), CREDENTIAL_ID)
         .expect_err("Everyone read access must still be refused");
+    match again {
+        CoreError::Coded {
+            code: next_code,
+            message: next_message,
+        } => {
+            assert_eq!(next_code, code);
+            assert_eq!(next_message, message);
+        }
+        _ => panic!("expected coded credential refusal"),
+    }
+}
+
+/// D43/I313: the read gate is SID-generic, not an Everyone special case. A
+/// read grant to any principal beyond the file's owner, SYSTEM and
+/// Administrators — here Authenticated Users — refuses the credential with the
+/// same coded, secret-safe, deterministic refusal.
+#[cfg(windows)]
+#[test]
+fn windows_credential_acl_other_untrusted_principal_read_is_refused() {
+    let home = home();
+    let path = windows_credential_fixture(home.path());
+    grant_windows_credential_read(&path, "S-1-5-11");
+
+    let error = MemoryCredential::load(home.path(), CREDENTIAL_ID)
+        .expect_err("a read grant to Authenticated Users must be refused");
+    let text = error.to_string();
+    assert!(!text.contains(SEED_HEX), "credential error leaked the seed");
+    let CoreError::Coded { code, message } = error else {
+        panic!("expected coded credential refusal");
+    };
+    assert_eq!(code, "memory_credential_invalid");
+    assert!(
+        !message.contains(SEED_HEX),
+        "credential message leaked the seed"
+    );
+    let again = MemoryCredential::load(home.path(), CREDENTIAL_ID)
+        .expect_err("an untrusted read grant must still be refused");
     match again {
         CoreError::Coded {
             code: next_code,

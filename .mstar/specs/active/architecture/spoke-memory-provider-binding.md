@@ -100,6 +100,8 @@ Changing the disk table affects only subsequent opens. No open polls or retarget
 
 The id is validated before path construction. The loader refuses symlinks/reparse points, non-regular files, files larger than 16 KiB, and Unix permissions broader than `0600`. On platforms with a supported no-follow open, type, size, and permission checks use the opened descriptor; platforms without a race-free no-follow open fail closed. Reads remain bounded even if the file grows after metadata inspection.
 
+On Windows the opened handle's DACL is the permission check, so a credential the operator provisioned world-readable can never sign the remote identity. Before any byte is accepted, the loader requires every grant of the file's read-data right to belong to one of exactly three trusted principals: the file's owner, `LOCAL SYSTEM` (`S-1-5-18`), or the `Administrators` group (`S-1-5-32-544`). A read grant to any other principal, a missing or null DACL, an unverifiable owner, or an access-control entry class this checker cannot interpret is the static `memory_credential_invalid` refusal; denied ACEs only narrow access and are not grants. The query inspects the already-open handle through the audited `nexus-config-metadata` bridge (the workspace's only `unsafe` exception, the documented `GetKernelObjectSecurity` caller-buffer contract) and never reopens or follows the path, mutates or repairs the ACL, reads the SACL, or enables a privilege. Unix guarantees and non-Windows fail-closed behavior are unchanged.
+
 The operator provisions the JSON file out of band:
 
 ```json

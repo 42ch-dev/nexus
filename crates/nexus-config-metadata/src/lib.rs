@@ -15,7 +15,9 @@
 //! `Cargo.toml`). Every `unsafe` block names the documented OS call it wraps in a
 //! SAFETY comment, and the public surface is safe. Nothing here decides *whether*
 //! to publish: a failure is returned so the caller leaves the old document
-//! unchanged.
+//! unchanged. The same rule covers the Windows credential privacy gate the
+//! memory credential loader consumes: a failure is returned so the loader
+//! refuses the credential file.
 
 use std::fs::File;
 use std::io;
@@ -254,6 +256,26 @@ pub fn link_count(target: &Path) -> io::Result<u64> {
     {
         portable::link_count(target)
     }
+}
+
+/// The Windows credential privacy gate the memory credential loader consumes.
+///
+/// It reports whether the caller's already-open file handle is readable only by
+/// trusted principals: the file's owner, LOCAL SYSTEM and the Administrators
+/// group. `Ok(())` accepts the bytes behind the handle; any error refuses the
+/// credential file instead. Like every function here, a failure is returned,
+/// never repaired: the caller decides whether to keep the file.
+///
+/// # Errors
+///
+/// The native error the handle query reported,
+/// [`io::ErrorKind::PermissionDenied`] when a read grant belongs to a principal
+/// beyond the three trusted ones or the owner/DACL is missing or unverifiable,
+/// and [`io::ErrorKind::Unsupported`] when the DACL carries an access-control
+/// entry class this checker cannot interpret.
+#[cfg(windows)]
+pub fn grants_read_only_to_trusted_principals(file: &File) -> io::Result<()> {
+    windows::grants_read_only_to_trusted_principals(file)
 }
 
 /// Report a creation failure whose staging directory could not be removed.

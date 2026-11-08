@@ -180,6 +180,13 @@ nix = { version = "0.31.3", features = ["fs"], optional = true }
 # is already resolved in the workspace lock through `nix`.
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+# §3.1 credential-file privacy gate (I313/D43): the loader inspects the
+# already-open credential handle's DACL through the workspace's audited
+# native-access-policy bridge — the only crate whose `unsafe` exception covers
+# these OS calls — so this crate keeps its inherited `unsafe_code` forbid.
+nexus-config-metadata = { path = "../nexus-config-metadata" }
+
 [dev-dependencies]
 # Enable the gated execution test seams for this package's own tests without
 # exposing them in the production build.
