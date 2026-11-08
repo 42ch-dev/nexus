@@ -143,29 +143,32 @@ pub fn apply(policy: &WindowsPolicy, file: &File) -> io::Result<()> {
     // SAFETY: `descriptor_pointer` points at the captured self-relative
     // descriptor owned by `policy`, which stays alive for this call, and
     // `owner`/`defaulted` are valid local out-parameters.
-    let read = unsafe {
+    let owner_read = unsafe {
         GetSecurityDescriptorOwner(descriptor_pointer, &raw mut owner, &raw mut defaulted)
-    }
+    };
     // SAFETY: the same captured descriptor stays alive for this call, and
     // `group`/`defaulted` are valid local out-parameters.
-    & unsafe {
+    let group_read = unsafe {
         GetSecurityDescriptorGroup(descriptor_pointer, &raw mut group, &raw mut defaulted)
-    }
+    };
     // SAFETY: the same captured descriptor stays alive for this call, and
     // `dacl_present`/`dacl`/`defaulted` are valid local out-parameters.
-    & unsafe {
+    let dacl_read = unsafe {
         GetSecurityDescriptorDacl(
             descriptor_pointer,
             &raw mut dacl_present,
             &raw mut dacl,
             &raw mut defaulted,
         )
-    }
+    };
     // SAFETY: the same captured descriptor stays alive for this call, and
     // `control`/`revision` are valid local out-parameters.
-    & unsafe {
+    let control_read = unsafe {
         GetSecurityDescriptorControl(descriptor_pointer, &raw mut control, &raw mut revision)
     };
+    // D39: all four accessor statuses are aggregated, so any zero refuses the
+    // transition before the DACL/protection derivation below.
+    let read = owner_read & group_read & dacl_read & control_read;
     if read == 0 {
         return Err(io::Error::last_os_error());
     }
