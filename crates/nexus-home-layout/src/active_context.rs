@@ -206,11 +206,7 @@ pub fn read_memory_provider_config(
     nexus_root: &Path,
 ) -> Result<Option<MemoryProviderConfig>, anyhow::Error> {
     let path = nexus_root.join("config.toml");
-    // I-000304: only a genuinely absent directory entry is the implicit local
-    // default. `metadata` follows a final symlink, so an existing config link
-    // whose target is gone also answers `NotFound`; classify the entry itself,
-    // then let the read fail closed for a link that no longer resolves. Every
-    // other filesystem error keeps the caller's failure path.
+    // I-000304: an absent entry is Local; a dangling config link's followed NotFound fails closed.
     match std::fs::symlink_metadata(&path) {
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
