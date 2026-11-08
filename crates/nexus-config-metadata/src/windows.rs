@@ -565,7 +565,7 @@ fn sid_is_trusted(sid: PSID, owner: PSID) -> bool {
     // SAFETY: both pointers address SID structures the `IsValidSid` calls
     // above validated, inside the live captured descriptor; `EqualSid`
     // documents its operands as valid SID structures and is synchronous.
-    unsafe { EqualSid(sid, owner) != 0 }
+    (unsafe { EqualSid(sid, owner) != 0 })
     // SAFETY: the IsValidSid-validated ACE SID compared against the
     // documented well-known SYSTEM SID class; the descriptor stays alive
     // and the call is synchronous.
