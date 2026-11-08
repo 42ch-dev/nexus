@@ -21,12 +21,12 @@ use windows_sys::Win32::Security::Authorization::{SetSecurityInfo, SE_FILE_OBJEC
 use windows_sys::Win32::Security::{
     AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetFileSecurityW,
     GetKernelObjectSecurity, GetSecurityDescriptorControl, GetSecurityDescriptorDacl,
-    GetSecurityDescriptorGroup, GetSecurityDescriptorOwner, GetSecurityDescriptorSacl,
-    IsWellKnownSid, IsValidSid, WinBuiltinAdministratorsSid, WinLocalSystemSid,
-    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, ATTRIBUTE_SECURITY_INFORMATION,
-    DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, LABEL_SECURITY_INFORMATION,
-    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SCOPE_SECURITY_INFORMATION, SE_DACL_PROTECTED, SID, UNPROTECTED_DACL_SECURITY_INFORMATION,
+    GetSecurityDescriptorGroup, GetSecurityDescriptorOwner, GetSecurityDescriptorSacl, IsValidSid,
+    IsWellKnownSid, WinBuiltinAdministratorsSid, WinLocalSystemSid, ACCESS_ALLOWED_ACE, ACE_HEADER,
+    ACL, ACL_SIZE_INFORMATION, ATTRIBUTE_SECURITY_INFORMATION, DACL_SECURITY_INFORMATION,
+    GROUP_SECURITY_INFORMATION, LABEL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SCOPE_SECURITY_INFORMATION,
+    SE_DACL_PROTECTED, SID, UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, CREATE_NEW,
@@ -421,12 +421,11 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
     // enclosure, before any unbounded SID validator or comparison.
     let owner_count = advertised_subauthority_count(owner);
     if !descriptor_end.is_some_and(|end| {
-        sid_required_length(owner_count)
-            .is_some_and(|required| {
-                owner_start
-                    .checked_add(required as usize)
-                    .is_some_and(|sid_end| sid_end <= end)
-            })
+        sid_required_length(owner_count).is_some_and(|required| {
+            owner_start
+                .checked_add(required as usize)
+                .is_some_and(|sid_end| sid_end <= end)
+        })
     }) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -567,10 +566,10 @@ fn sid_is_trusted(sid: PSID, owner: PSID) -> bool {
     // above validated, inside the live captured descriptor; `EqualSid`
     // documents its operands as valid SID structures and is synchronous.
     unsafe { EqualSid(sid, owner) != 0 }
-        // SAFETY: the IsValidSid-validated ACE SID compared against the
-        // documented well-known SYSTEM SID class; the descriptor stays alive
-        // and the call is synchronous.
-        || unsafe { IsWellKnownSid(sid, WinLocalSystemSid) != 0 }
+    // SAFETY: the IsValidSid-validated ACE SID compared against the
+    // documented well-known SYSTEM SID class; the descriptor stays alive
+    // and the call is synchronous.
+    || unsafe { IsWellKnownSid(sid, WinLocalSystemSid) != 0 }
         // SAFETY: the same IsValidSid-validated ACE SID compared against the
         // documented Administrators SID class; the descriptor stays alive and
         // the call is synchronous.
