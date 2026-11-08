@@ -147,8 +147,12 @@ if ($env:NEXUS_TEST_EVERYONE_READ -eq '1' -and -not ($rules | Where-Object { $_.
 "#;
     let output = std::process::Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env_remove("PSModulePath")
         .env("NEXUS_TEST_CREDENTIAL_PATH", path)
-        .env("NEXUS_TEST_EVERYONE_READ", if everyone_read { "1" } else { "0" })
+        .env(
+            "NEXUS_TEST_EVERYONE_READ",
+            if everyone_read { "1" } else { "0" },
+        )
         .output()
         .expect("start Windows ACL fixture setup");
     assert!(
@@ -196,11 +200,17 @@ fn windows_credential_acl_everyone_read_is_refused() {
         panic!("expected coded credential refusal");
     };
     assert_eq!(code, "memory_credential_invalid");
-    assert!(!message.contains(SEED_HEX), "credential message leaked the seed");
+    assert!(
+        !message.contains(SEED_HEX),
+        "credential message leaked the seed"
+    );
     let again = MemoryCredential::load(home.path(), CREDENTIAL_ID)
         .expect_err("Everyone read access must still be refused");
     match again {
-        CoreError::Coded { code: next_code, message: next_message } => {
+        CoreError::Coded {
+            code: next_code,
+            message: next_message,
+        } => {
             assert_eq!(next_code, code);
             assert_eq!(next_message, message);
         }
