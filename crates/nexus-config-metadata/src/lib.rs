@@ -12,10 +12,20 @@
 //! This is the workspace's single, deliberately approved `unsafe` exception.
 //! Every existing crate keeps its own lint table; the root workspace table keeps
 //! `unsafe_code = "forbid"` and this crate does not inherit it (see
-//! `Cargo.toml`). Every `unsafe` block names the documented OS call it wraps in a
-//! SAFETY comment, and the public surface is safe. Nothing here decides *whether*
+//! `Cargo.toml`). Every `unsafe` block either wraps exactly one documented OS
+//! call with a SAFETY comment naming its descriptor/buffer contract, or is one
+//! of the three bounded non-call reads in the credential DACL walk — the two
+//! typed `ACE_HEADER`/`ACCESS_ALLOWED_ACE` field-read/classification blocks
+//! (decision D44) and the single one-byte SID count metadata read (decision
+//! D45) — each carrying a SAFETY
+//! comment citing the record's documented layout, extent, alignment and
+//! lifetime. Nothing here hand-parses security bytes or reinterprets unknown
+//! layouts: unknown or unsupported policy still refuses, and the public surface
+//! is safe. Nothing here decides *whether*
 //! to publish: a failure is returned so the caller leaves the old document
-//! unchanged.
+//! unchanged. The same rule covers the Windows credential privacy gate the
+//! memory credential loader consumes: a failure is returned so the loader
+//! refuses the credential file.
 
 use std::fs::File;
 use std::io;
@@ -254,6 +264,32 @@ pub fn link_count(target: &Path) -> io::Result<u64> {
     {
         portable::link_count(target)
     }
+}
+
+/// The Windows credential privacy gate the memory credential loader consumes.
+///
+/// It reports whether the caller's already-open file handle grants access only
+/// to trusted principals: the file's owner, LOCAL SYSTEM and the Administrators
+/// group. Every allow grant the DACL carries — read or nonread — must belong to
+/// one of the three; nonread rights such as `WRITE_DAC` are refused exactly the
+/// same, since a principal that can rewrite the DACL can grant itself read
+/// later. `Ok(())` accepts the bytes behind the handle; any error refuses the
+/// credential file instead. Like every function here, a failure is returned,
+/// never repaired: the caller decides whether to keep the file.
+///
+/// # Errors
+///
+/// The native error the handle query reported,
+/// [`io::ErrorKind::PermissionDenied`] when an allow grant belongs to a
+/// principal beyond the three trusted ones, when the owner/DACL is missing or
+/// unverifiable, or when the owner or a trustee SID fails the native
+/// `IsValidSid` validation, and [`io::ErrorKind::Unsupported`] when the DACL
+/// carries an access-control entry class this checker cannot interpret or an
+/// allowed-access record is truncated below the complete minimal `SID`
+/// structure.
+#[cfg(windows)]
+pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
+    windows::grants_only_to_trusted_principals(file)
 }
 
 /// Report a creation failure whose staging directory could not be removed.

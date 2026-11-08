@@ -3779,6 +3779,7 @@ dependencies = [
  "nexus-acp-host",
  "nexus-agent-host",
  "nexus-cloud-sync",
+ "nexus-config-metadata",
  "nexus-contracts",
  "nexus-core",
  "nexus-creator-memory",

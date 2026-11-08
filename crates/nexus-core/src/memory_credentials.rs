@@ -171,6 +171,17 @@ fn read_protected_file(path: &Path) -> CoreResult<Vec<u8>> {
         }
     }
 
+    // Windows carries no Unix mode bit, so the privacy policy is the DACL of
+    // the already-open handle (§3.1): only the file's owner, SYSTEM and the
+    // Administrators group may hold any grant — read or nonread — and an
+    // unverifiable policy refuses before any byte is accepted.
+    #[cfg(windows)]
+    nexus_config_metadata::grants_only_to_trusted_principals(&file).map_err(|_| {
+        invalid(
+            "credential file permissions must be restricted to the owner, SYSTEM and Administrators",
+        )
+    })?;
+
     // Bound the read itself: a file that grows after the metadata check still
     // cannot make this loader allocate past the declared limit.
     let mut bytes = Vec::new();
