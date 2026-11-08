@@ -162,21 +162,38 @@ if ($env:NEXUS_TEST_EVERYONE_READ -eq '1' -and -not ($rules | Where-Object { $_.
     );
 }
 
-/// Add one read-allow rule for an arbitrary SID to an already-trusted fixture,
-/// reusing the child-only PowerShell hygiene of the fixture writer above.
+/// Add one allow rule for an arbitrary SID to an already-trusted fixture.
+///
+/// The `SecurityIdentifier` is constructed from the exact environment SID and
+/// that `IdentityReference` object is passed to `FileSystemAccessRule`: the
+/// string overload would delegate through `NTAccount` account-name translation
+/// instead of SID parsing. `rights` names the `FileSystemRights` member the
+/// fixture must grant (for example `Read` or `ChangePermissions`, the .NET
+/// name of `WRITE_DAC`). The child-only PSModulePath hygiene of the fixture
+/// writer above is reused, and the applied rule is read back so a grant that
+/// never landed, landed with fewer rights, or silently gained read fails the
+/// setup loudly instead of weakening the consumer case.
 #[cfg(windows)]
-fn grant_windows_credential_read(path: &Path, sid: &str) {
+fn grant_windows_credential_access(path: &Path, sid: &str, rights: &str) {
     let script = r#"
 $ErrorActionPreference = 'Stop'
 $path = $env:NEXUS_TEST_CREDENTIAL_PATH
+$identity = [System.Security.Principal.SecurityIdentifier]::new($env:NEXUS_TEST_GRANT_SID)
+$rights = [System.Security.AccessControl.FileSystemRights]$env:NEXUS_TEST_GRANT_RIGHTS
 $acl = Get-Acl -LiteralPath $path
-$rule = [System.Security.AccessControl.FileSystemAccessRule]::new($env:NEXUS_TEST_GRANT_SID, 'Read', 'Allow')
+$rule = [System.Security.AccessControl.FileSystemAccessRule]::new($identity, $rights, 'Allow')
 $acl.SetAccessRule($rule)
 Set-Acl -LiteralPath $path -AclObject $acl
 $actual = Get-Acl -LiteralPath $path
-$granted = @($actual.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq $env:NEXUS_TEST_GRANT_SID -and ($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::ReadData) -ne 0 })
+$granted = @($actual.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq $identity.Value })
 if ($granted.Count -eq 0) {
     throw 'fixture grant missing'
+}
+if (($granted[0].FileSystemRights -band $rights) -ne $rights) {
+    throw 'fixture grant lacks the requested rights'
+}
+if ((($rights -band [System.Security.AccessControl.FileSystemRights]::ReadData) -eq 0) -and (($granted[0].FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::ReadData) -ne 0)) {
+    throw 'fixture grant unexpectedly includes read'
 }
 "#;
     let output = std::process::Command::new("powershell.exe")
@@ -184,6 +201,7 @@ if ($granted.Count -eq 0) {
         .env_remove("PSModulePath")
         .env("NEXUS_TEST_CREDENTIAL_PATH", path)
         .env("NEXUS_TEST_GRANT_SID", sid)
+        .env("NEXUS_TEST_GRANT_RIGHTS", rights)
         .output()
         .expect("start Windows ACL grant fixture setup");
     assert!(
@@ -258,10 +276,32 @@ fn windows_credential_acl_everyone_read_is_refused() {
 fn windows_credential_acl_other_untrusted_principal_read_is_refused() {
     let home = home();
     let path = windows_credential_fixture(home.path());
-    grant_windows_credential_read(&path, "S-1-5-11");
+    grant_windows_credential_access(&path, "S-1-5-11", "Read");
+    assert_untrusted_grant_refused(home.path());
+}
 
-    let error = MemoryCredential::load(home.path(), CREDENTIAL_ID)
-        .expect_err("a read grant to Authenticated Users must be refused");
+/// D43/F002: the policy rejects unrelated grants of any ordinary right, not
+/// only read. `ChangePermissions` is the .NET name of `WRITE_DAC`: an
+/// unrelated principal holding it could rewrite the DACL and grant itself
+/// read later, so the gate must refuse it on its own. The fixture read-back
+/// proves the grant verifiably carries `WRITE_DAC` and no read right, so this
+/// case exercises the unrelated-grant refusal itself and not a read shortcut.
+#[cfg(windows)]
+#[test]
+fn windows_credential_acl_unrelated_write_dac_grant_is_refused() {
+    let home = home();
+    let path = windows_credential_fixture(home.path());
+    grant_windows_credential_access(&path, "S-1-5-11", "ChangePermissions");
+    assert_untrusted_grant_refused(home.path());
+}
+
+/// The coded, seed-safe, deterministic refusal shape shared by the
+/// unrelated-grant regressions: a static `memory_credential_invalid` error
+/// that leaks neither the seed nor file contents and repeats identically.
+#[cfg(windows)]
+fn assert_untrusted_grant_refused(user_home: &Path) {
+    let error = MemoryCredential::load(user_home, CREDENTIAL_ID)
+        .expect_err("an unrelated access grant must be refused");
     let text = error.to_string();
     assert!(!text.contains(SEED_HEX), "credential error leaked the seed");
     let CoreError::Coded { code, message } = error else {
@@ -272,8 +312,8 @@ fn windows_credential_acl_other_untrusted_principal_read_is_refused() {
         !message.contains(SEED_HEX),
         "credential message leaked the seed"
     );
-    let again = MemoryCredential::load(home.path(), CREDENTIAL_ID)
-        .expect_err("an untrusted read grant must still be refused");
+    let again = MemoryCredential::load(user_home, CREDENTIAL_ID)
+        .expect_err("an unrelated access grant must still be refused");
     match again {
         CoreError::Coded {
             code: next_code,

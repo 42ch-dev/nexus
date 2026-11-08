@@ -16,9 +16,7 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle as _};
 use std::path::Path;
 use std::ptr;
 
-use windows_sys::Win32::Foundation::{
-    GENERIC_ALL, GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE,
-};
+use windows_sys::Win32::Foundation::{GENERIC_WRITE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Security::Authorization::{SetSecurityInfo, SE_FILE_OBJECT};
 use windows_sys::Win32::Security::{
     AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetFileSecurityW,
@@ -32,7 +30,7 @@ use windows_sys::Win32::Security::{
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, CREATE_NEW,
-    FILE_ATTRIBUTE_NORMAL, FILE_READ_DATA, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
+    FILE_ATTRIBUTE_NORMAL, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
 
 /// Owner, group and DACL is the access policy this writer reproduces; the
@@ -272,15 +270,16 @@ pub fn access_policy_blob(target: &Path) -> io::Result<Vec<u8>> {
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0x0;
 const ACCESS_DENIED_ACE_TYPE: u8 = 0x1;
 
-/// Decide whether the open file's DACL grants the read-data right to any
-/// principal beyond the file's owner, LOCAL SYSTEM and the Administrators
-/// group.
+/// Decide whether the open file's DACL grants any access right to a principal
+/// beyond the file's owner, LOCAL SYSTEM and the Administrators group.
 ///
-/// `Ok(())` means every read grant belongs to one of those three principals.
+/// `Ok(())` means every allow grant belongs to one of those three principals.
 /// The memory credential loader calls this with its already-open handle before
-/// accepting the file's bytes, so a credential readable by anyone else — or a
-/// policy that cannot be interpreted — is refused: a read grant to any other
-/// SID, or a missing/null DACL or an owner that cannot be compared, is
+/// accepting the file's bytes, so a credential sharing *any* ordinary right
+/// with another principal — read, but also nonread rights such as `WRITE_DAC`,
+/// which would let that principal rewrite the DACL and grant itself read
+/// later — or an uninterpretable policy is refused: an allow grant to any
+/// other SID, or a missing/null DACL or an owner that cannot be compared, is
 /// [`io::ErrorKind::PermissionDenied`]; a DACL carrying an ACE class this
 /// checker cannot interpret (object, callback, audit, alarm and label ACEs are
 /// not grants this loader can reason about) is [`io::ErrorKind::Unsupported`].
@@ -289,7 +288,7 @@ const ACCESS_DENIED_ACE_TYPE: u8 = 0x1;
 /// The query follows the documented `GetKernelObjectSecurity` two-call
 /// contract against the caller's handle, so no path is reopened between the
 /// open and the decision and nothing mutates the policy.
-pub fn grants_read_only_to_trusted_principals(file: &File) -> io::Result<()> {
+pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
     let mut needed = 0_u32;
     // SAFETY: the measuring form takes a null descriptor with a zero length and
     // a valid out-parameter; it is expected to fail with the required size.
@@ -393,12 +392,10 @@ pub fn grants_read_only_to_trusted_principals(file: &File) -> io::Result<()> {
                 // that follows the access mask inside it.
                 let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
                 let sid = ptr::from_ref(&allowed.SidStart).cast_mut().cast::<c_void>();
-                let grants_read =
-                    allowed.Mask & (FILE_READ_DATA | GENERIC_READ | GENERIC_ALL) != 0;
-                if grants_read && !sid_is_trusted(sid, owner) {
+                if !sid_is_trusted(sid, owner) {
                     return Err(io::Error::new(
                         io::ErrorKind::PermissionDenied,
-                        "credential file grants read access beyond the owner, \
+                        "credential file grants access beyond the owner, \
                          SYSTEM and Administrators",
                     ));
                 }

@@ -260,22 +260,25 @@ pub fn link_count(target: &Path) -> io::Result<u64> {
 
 /// The Windows credential privacy gate the memory credential loader consumes.
 ///
-/// It reports whether the caller's already-open file handle is readable only by
-/// trusted principals: the file's owner, LOCAL SYSTEM and the Administrators
-/// group. `Ok(())` accepts the bytes behind the handle; any error refuses the
+/// It reports whether the caller's already-open file handle grants access only
+/// to trusted principals: the file's owner, LOCAL SYSTEM and the Administrators
+/// group. Every allow grant the DACL carries — read or nonread — must belong to
+/// one of the three; nonread rights such as `WRITE_DAC` are refused exactly the
+/// same, since a principal that can rewrite the DACL can grant itself read
+/// later. `Ok(())` accepts the bytes behind the handle; any error refuses the
 /// credential file instead. Like every function here, a failure is returned,
 /// never repaired: the caller decides whether to keep the file.
 ///
 /// # Errors
 ///
 /// The native error the handle query reported,
-/// [`io::ErrorKind::PermissionDenied`] when a read grant belongs to a principal
-/// beyond the three trusted ones or the owner/DACL is missing or unverifiable,
-/// and [`io::ErrorKind::Unsupported`] when the DACL carries an access-control
-/// entry class this checker cannot interpret.
+/// [`io::ErrorKind::PermissionDenied`] when an allow grant belongs to a
+/// principal beyond the three trusted ones or the owner/DACL is missing or
+/// unverifiable, and [`io::ErrorKind::Unsupported`] when the DACL carries an
+/// access-control entry class this checker cannot interpret.
 #[cfg(windows)]
-pub fn grants_read_only_to_trusted_principals(file: &File) -> io::Result<()> {
-    windows::grants_read_only_to_trusted_principals(file)
+pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
+    windows::grants_only_to_trusted_principals(file)
 }
 
 /// Report a creation failure whose staging directory could not be removed.
