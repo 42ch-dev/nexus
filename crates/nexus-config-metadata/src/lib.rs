@@ -280,9 +280,12 @@ pub fn link_count(target: &Path) -> io::Result<u64> {
 ///
 /// The native error the handle query reported,
 /// [`io::ErrorKind::PermissionDenied`] when an allow grant belongs to a
-/// principal beyond the three trusted ones or the owner/DACL is missing or
-/// unverifiable, and [`io::ErrorKind::Unsupported`] when the DACL carries an
-/// access-control entry class this checker cannot interpret.
+/// principal beyond the three trusted ones, when the owner/DACL is missing or
+/// unverifiable, or when the owner or a trustee SID fails the native
+/// `IsValidSid` validation, and [`io::ErrorKind::Unsupported`] when the DACL
+/// carries an access-control entry class this checker cannot interpret or an
+/// allowed-access record is truncated below the complete minimal `SID`
+/// structure.
 #[cfg(windows)]
 pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
     windows::grants_only_to_trusted_principals(file)

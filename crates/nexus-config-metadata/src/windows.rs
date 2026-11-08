@@ -22,11 +22,11 @@ use windows_sys::Win32::Security::{
     AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetFileSecurityW,
     GetKernelObjectSecurity, GetSecurityDescriptorControl, GetSecurityDescriptorDacl,
     GetSecurityDescriptorGroup, GetSecurityDescriptorOwner, GetSecurityDescriptorSacl,
-    IsWellKnownSid, WinBuiltinAdministratorsSid, WinLocalSystemSid, ACCESS_ALLOWED_ACE, ACE_HEADER,
-    ACL, ACL_SIZE_INFORMATION, ATTRIBUTE_SECURITY_INFORMATION, DACL_SECURITY_INFORMATION,
-    GROUP_SECURITY_INFORMATION, LABEL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
-    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SCOPE_SECURITY_INFORMATION,
-    SE_DACL_PROTECTED, UNPROTECTED_DACL_SECURITY_INFORMATION,
+    IsWellKnownSid, IsValidSid, WinBuiltinAdministratorsSid, WinLocalSystemSid,
+    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, ATTRIBUTE_SECURITY_INFORMATION,
+    DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, LABEL_SECURITY_INFORMATION,
+    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SCOPE_SECURITY_INFORMATION, SE_DACL_PROTECTED, SID, UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, CREATE_NEW,
@@ -274,6 +274,11 @@ const ACCESS_DENIED_ACE_TYPE: u8 = 0x1;
 /// beyond the file's owner, LOCAL SYSTEM and the Administrators group.
 ///
 /// `Ok(())` means every allow grant belongs to one of those three principals.
+/// Before any comparison, both comparison operands — the descriptor's owner
+/// SID and each walked ACE's trustee SID — are validated with the native
+/// `IsValidSid`, and a trustee SID is only compared after its record proved
+/// extent for the complete minimal `SID` structure; an invalid or truncated
+/// record refuses the credential.
 /// The memory credential loader calls this with its already-open handle before
 /// accepting the file's bytes, so a credential sharing *any* ordinary right
 /// with another principal — read, but also nonread rights such as `WRITE_DAC`,
@@ -354,6 +359,18 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
             "credential file has no verifiable owner or DACL",
         ));
     }
+    // Semantic validity before any comparison: the owner SID must be a valid
+    // SID structure, or the credential policy is unverifiable and refuses.
+    // SAFETY: `IsValidSid` validates the SID structure at `owner` and
+    // documents a non-null pointer as its precondition; `owner` passed the
+    // non-null check above and addresses the security descriptor's owner SID
+    // inside the live captured descriptor, which stays alive for this call.
+    if unsafe { IsValidSid(owner) } == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "credential file has an invalid owner security identifier",
+        ));
+    }
 
     let mut information = ACL_SIZE_INFORMATION::default();
     let information_size = u32::try_from(std::mem::size_of::<ACL_SIZE_INFORMATION>())
@@ -391,25 +408,46 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
             // A denied ACE only narrows access; it grants nobody anything.
             ACCESS_DENIED_ACE_TYPE => {}
             ACCESS_ALLOWED_ACE_TYPE => {
-                // A record whose documented `AceSize` does not cover the full
-                // `ACCESS_ALLOWED_ACE` field layout cannot be classified:
-                // refuse it instead of reinterpreting a truncated record.
-                if (header.AceSize as usize) < std::mem::size_of::<ACCESS_ALLOWED_ACE>() {
+                // A record whose documented `AceSize` does not cover the
+                // header, the mask and the complete minimal `SID` structure
+                // (revision, subauthority count, identifier authority and one
+                // subauthority) cannot be classified: refuse it instead of
+                // reinterpreting a truncated record.
+                let needed_extent = std::mem::size_of::<ACE_HEADER>()
+                    + std::mem::size_of::<u32>()
+                    + std::mem::size_of::<SID>();
+                if (header.AceSize as usize) < needed_extent {
                     return Err(io::Error::new(
                         io::ErrorKind::Unsupported,
                         "credential file carries a truncated allowed-access entry",
                     ));
                 }
                 // SAFETY: an allowed ACE whose documented `AceSize` field
-                // covers the whole `ACCESS_ALLOWED_ACE` field layout (header,
-                // mask and the first SID dword) is read here, so the twelve
-                // bytes of that layout are within the record's extent; the
-                // record is DWORD-aligned per the documented ACE layout and
-                // lives inside the DACL captured above. `SidStart` addresses
-                // the trustee SID that the documented layout stores
-                // contiguously after the mask.
+                // covers the header, the mask and the complete minimal `SID`
+                // representation is read here, so those bytes are within the
+                // record's extent; the record is DWORD-aligned per the
+                // documented ACE layout and lives inside the DACL captured
+                // above. `SidStart` addresses the trustee SID that the
+                // documented layout stores contiguously after the mask, so
+                // the fixed SID structure is readable before validation.
                 let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
                 let sid = ptr::from_ref(&allowed.SidStart).cast_mut().cast::<c_void>();
+                // Semantic validity before any comparison: the trustee SID
+                // must be a valid SID structure, or the credential policy is
+                // unverifiable and refuses.
+                // SAFETY: `IsValidSid` validates the SID structure at `sid`
+                // and documents a non-null pointer as its precondition; `sid`
+                // addresses the ACE's contiguous trustee SID inside the same
+                // live, in-extent record whose complete minimal SID
+                // representation the extent guard above proved readable, and
+                // the descriptor stays alive for this call.
+                if unsafe { IsValidSid(sid) } == 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "credential file carries an access-control entry with \
+                         an invalid security identifier",
+                    ));
+                }
                 if !sid_is_trusted(sid, owner) {
                     return Err(io::Error::new(
                         io::ErrorKind::PermissionDenied,
@@ -432,17 +470,20 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
 
 /// Whether the SID is the file's owner, LOCAL SYSTEM or the Administrators
 /// group — the three principals a credential file may grant access to.
+///
+/// Both operands must already have passed the native `IsValidSid` check at
+/// the call sites above; `EqualSid` documents its operands as SID structures
+/// assumed to be valid.
 fn sid_is_trusted(sid: PSID, owner: PSID) -> bool {
-    // SAFETY: `EqualSid` documents its two operands as SID structures that are
-    // assumed to be valid and undefined for invalid ones; both pointers
-    // address OS-produced SIDs (the captured owner and the walked ACE's
-    // contiguous SID) inside the live descriptor, and the call is synchronous.
+    // SAFETY: both pointers address SID structures the `IsValidSid` calls
+    // above validated, inside the live captured descriptor; `EqualSid`
+    // documents its operands as valid SID structures and is synchronous.
     unsafe { EqualSid(sid, owner) != 0 }
-        // SAFETY: the same live OS-produced ACE SID compared against the
+        // SAFETY: the IsValidSid-validated ACE SID compared against the
         // documented well-known SYSTEM SID class; the descriptor stays alive
         // and the call is synchronous.
         || unsafe { IsWellKnownSid(sid, WinLocalSystemSid) != 0 }
-        // SAFETY: the same live OS-produced ACE SID compared against the
+        // SAFETY: the same IsValidSid-validated ACE SID compared against the
         // documented Administrators SID class; the descriptor stays alive and
         // the call is synchronous.
         || unsafe { IsWellKnownSid(sid, WinBuiltinAdministratorsSid) != 0 }
