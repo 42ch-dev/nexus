@@ -380,16 +380,34 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
         if got == 0 {
             return Err(io::Error::last_os_error());
         }
-        // SAFETY: `GetAce` addresses a live ACE whose leading `ACE_HEADER` is
-        // the documented layout.
+        // SAFETY: `GetAce` succeeded for an index below the documented
+        // `AceCount` of the DACL captured above, so `ace` is the address of a
+        // live ACE record inside that DACL, which stays alive for this whole
+        // function. Per the documented layout, `ACE_HEADER` is the first
+        // member of every ACE structure and each ACE begins on a DWORD
+        // boundary, so this four-byte, four-aligned header read is in extent.
         let header = unsafe { &*ace.cast::<ACE_HEADER>() };
         match header.AceType {
             // A denied ACE only narrows access; it grants nobody anything.
             ACCESS_DENIED_ACE_TYPE => {}
             ACCESS_ALLOWED_ACE_TYPE => {
-                // SAFETY: an allowed ACE carries the documented
-                // `ACCESS_ALLOWED_ACE` layout; `SidStart` addresses the SID
-                // that follows the access mask inside it.
+                // A record whose documented `AceSize` does not cover the full
+                // `ACCESS_ALLOWED_ACE` field layout cannot be classified:
+                // refuse it instead of reinterpreting a truncated record.
+                if (header.AceSize as usize) < std::mem::size_of::<ACCESS_ALLOWED_ACE>() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "credential file carries a truncated allowed-access entry",
+                    ));
+                }
+                // SAFETY: an allowed ACE whose documented `AceSize` field
+                // covers the whole `ACCESS_ALLOWED_ACE` field layout (header,
+                // mask and the first SID dword) is read here, so the twelve
+                // bytes of that layout are within the record's extent; the
+                // record is DWORD-aligned per the documented ACE layout and
+                // lives inside the DACL captured above. `SidStart` addresses
+                // the trustee SID that the documented layout stores
+                // contiguously after the mask.
                 let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
                 let sid = ptr::from_ref(&allowed.SidStart).cast_mut().cast::<c_void>();
                 if !sid_is_trusted(sid, owner) {
@@ -413,16 +431,20 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
 }
 
 /// Whether the SID is the file's owner, LOCAL SYSTEM or the Administrators
-/// group — the three principals a credential file may grant read.
+/// group — the three principals a credential file may grant access to.
 fn sid_is_trusted(sid: PSID, owner: PSID) -> bool {
-    // SAFETY: both pointers address valid SIDs inside the live captured
-    // descriptor.
+    // SAFETY: `EqualSid` documents its two operands as SID structures that are
+    // assumed to be valid and undefined for invalid ones; both pointers
+    // address OS-produced SIDs (the captured owner and the walked ACE's
+    // contiguous SID) inside the live descriptor, and the call is synchronous.
     unsafe { EqualSid(sid, owner) != 0 }
-        // SAFETY: the same live SID compared against the documented well-known
-        // SYSTEM SID class.
+        // SAFETY: the same live OS-produced ACE SID compared against the
+        // documented well-known SYSTEM SID class; the descriptor stays alive
+        // and the call is synchronous.
         || unsafe { IsWellKnownSid(sid, WinLocalSystemSid) != 0 }
-        // SAFETY: the same live SID compared against the documented
-        // Administrators SID class.
+        // SAFETY: the same live OS-produced ACE SID compared against the
+        // documented Administrators SID class; the descriptor stays alive and
+        // the call is synchronous.
         || unsafe { IsWellKnownSid(sid, WinBuiltinAdministratorsSid) != 0 }
 }
 

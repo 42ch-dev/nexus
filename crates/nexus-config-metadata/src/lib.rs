@@ -12,8 +12,15 @@
 //! This is the workspace's single, deliberately approved `unsafe` exception.
 //! Every existing crate keeps its own lint table; the root workspace table keeps
 //! `unsafe_code = "forbid"` and this crate does not inherit it (see
-//! `Cargo.toml`). Every `unsafe` block names the documented OS call it wraps in a
-//! SAFETY comment, and the public surface is safe. Nothing here decides *whether*
+//! `Cargo.toml`). Every `unsafe` block either wraps exactly one documented OS
+//! call with a SAFETY comment naming its descriptor/buffer contract, or is one
+//! of the two typed `ACE_HEADER`/`ACCESS_ALLOWED_ACE` field-read/classification
+//! blocks in the credential DACL walk — the narrow, separately approved ABI
+//! exception for native-API-produced ACL records, each carrying a SAFETY
+//! comment citing the record's documented layout, extent, alignment and
+//! lifetime. Nothing here hand-parses security bytes or reinterprets unknown
+//! layouts: unknown or unsupported policy still refuses, and the public surface
+//! is safe. Nothing here decides *whether*
 //! to publish: a failure is returned so the caller leaves the old document
 //! unchanged. The same rule covers the Windows credential privacy gate the
 //! memory credential loader consumes: a failure is returned so the loader
