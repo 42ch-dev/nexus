@@ -212,7 +212,9 @@ impl CliConfig {
     ///
     /// Reads stay unlocked — the lock only excludes writers from each other.
     /// Unknown keys are retained by the flattened [`Self::extra`] table, so a
-    /// later write round-trips the keys other writers own.
+    /// later write round-trips the keys other writers own. Plain-read
+    /// compatibility: an entry whose target is unreadable (a dangling config
+    /// link) also reads as defaults; the mutation path refuses it instead.
     fn read_document(nexus: &Path) -> anyhow::Result<Self> {
         let config_path = Self::path_in(nexus);
         let content = match std::fs::read_to_string(&config_path) {
@@ -225,20 +227,50 @@ impl CliConfig {
         if content.trim().is_empty() {
             return Ok(Self::default());
         }
-        match toml::from_str::<Self>(&content) {
+        Self::parse_document(&config_path, &content)
+    }
+
+    /// Parse committed `config.toml` content. I-000089 (contract §6): a parse
+    /// failure reports the error and reads nothing. Never rename or move the
+    /// committed file here: reads are unlocked and writers are not atomic, so
+    /// this snapshot can be stale, and a rename could relocate a document
+    /// another writer just committed. Repair is an explicit user/writer
+    /// action under the lock.
+    fn parse_document(config_path: &Path, content: &str) -> anyhow::Result<Self> {
+        match toml::from_str::<Self>(content) {
             Ok(config) => Ok(config),
             Err(error) => {
-                // I-000089 (contract §6): a parse failure reports the error and
-                // reads nothing. Never rename or move the committed file here:
-                // reads are unlocked and writers are not atomic, so this
-                // snapshot can be stale, and a rename could relocate a document
-                // another writer just committed. Repair is an explicit
-                // user/writer action under the lock.
                 tracing::warn!("Config file unreadable; leaving it untouched: {error}");
                 Err(anyhow::Error::new(error)
                     .context(format!("cannot parse {}", config_path.display())))
             }
         }
+    }
+
+    /// Read the document a mutation would modify, under the writer lock.
+    ///
+    /// Unlike the unlocked plain read, an existing directory entry that
+    /// cannot be read — a dangling config link, or the entry vanishing under
+    /// the lock — is an error (I-000304): mutating would otherwise publish
+    /// manufactured defaults and silently drop the foreign keys the
+    /// configured document carried. A genuinely absent entry still reads as
+    /// defaults, so first-time configuration keeps working.
+    fn read_document_for_mutation(nexus: &Path) -> anyhow::Result<Self> {
+        let config_path = Self::path_in(nexus);
+        if toml_entry_absent(&config_path)? {
+            return Ok(Self::default());
+        }
+        let content = std::fs::read_to_string(&config_path)
+            .map_err(|error| {
+                anyhow::Error::new(error).context(format!(
+                    "cannot read existing {} for mutation",
+                    config_path.display()
+                ))
+            })?;
+        if content.trim().is_empty() {
+            return Ok(Self::default());
+        }
+        Self::parse_document(&config_path, &content)
     }
 
     /// Migrate a legacy `config.json` to `config.toml` under the writer lock.
@@ -315,6 +347,11 @@ impl CliConfig {
     /// (`agent_profile`, `entrance`, ...) round-trip through [`Self::extra`].
     /// `run` failing writes nothing.
     ///
+    /// I-000304: an existing entry that cannot be read (a dangling config
+    /// link) fails the mutation instead of manufacturing defaults over it;
+    /// a genuinely absent entry still reads as defaults. Plain reads keep
+    /// their defaults compatibility.
+    ///
     /// # Errors
     ///
     /// Returns an error if the lock cannot be taken, the document cannot be
@@ -323,7 +360,7 @@ impl CliConfig {
         let nexus = nexus_home()?;
         Self::with_writer_lock(&nexus, || {
             Self::migrate_legacy_json_locked(&nexus)?;
-            let mut config = Self::read_document(&nexus)?;
+            let mut config = Self::read_document_for_mutation(&nexus)?;
             let outcome = run(&mut config)?;
             // Atomic publication: a concurrent lock-free reader (the Core
             // `ReadOnly` snapshot, I-000291) must never see a truncated
@@ -1393,6 +1430,103 @@ platform_url = "https://direct.api.io"
             marker_error.kind(),
             std::io::ErrorKind::NotFound,
             "no migration marker entry exists: {marker_error}"
+        );
+    }
+
+    /// I-000304 (R6): a mutation over an existing dangling `config.toml`
+    /// link must fail closed instead of manufacturing a provider-free
+    /// defaults document through the creatable target. The link, its
+    /// destination, and the retained legacy JSON stay untouched.
+    #[cfg(unix)]
+    #[test]
+    fn mutate_refuses_an_existing_dangling_config_link() {
+        let (_home, nexus_dir) = isolated_nexus_dir();
+        let json_path = nexus_dir.join("config.json");
+        let config_path = nexus_dir.join("config.toml");
+        let target = nexus_dir.join("creatable.toml");
+        let legacy = "{\"active_creator_id\":\"ctr_legacy\"}";
+        std::fs::write(&json_path, legacy).expect("legacy json");
+        std::os::unix::fs::symlink("creatable.toml", &config_path).expect("dangling config link");
+
+        let error = CliConfig::mutate(|config| {
+            config.active_creator_id = Some("ctr_dangling".to_string());
+            Ok(())
+        })
+        .expect_err("a mutation over an unreadable existing entry must fail");
+
+        assert!(
+            !error.to_string().contains("ctr_dangling"),
+            "the manufactured selection must not leak into the error: {error}"
+        );
+        let target_error = std::fs::symlink_metadata(&target)
+            .expect_err("the dangling link's target must not be created");
+        assert_eq!(
+            target_error.kind(),
+            std::io::ErrorKind::NotFound,
+            "the dangling link's target is genuinely absent: {target_error}"
+        );
+        let link = std::fs::symlink_metadata(&config_path).expect("the config entry is retained");
+        assert!(
+            link.file_type().is_symlink(),
+            "the config entry is still the original symlink"
+        );
+        assert_eq!(
+            std::fs::read_link(&config_path).expect("the config link destination"),
+            std::path::Path::new("creatable.toml"),
+            "the config link keeps its original relative destination"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&json_path).expect("legacy json"),
+            legacy,
+            "the legacy document keeps its bytes and name"
+        );
+        let marker_error = std::fs::symlink_metadata(nexus_dir.join("config.json.migrated"))
+            .expect_err("the legacy document was not renamed");
+        assert_eq!(
+            marker_error.kind(),
+            std::io::ErrorKind::NotFound,
+            "no migration marker entry exists: {marker_error}"
+        );
+    }
+
+    /// The valid-symlink control: a mutation through a readable config link
+    /// still updates the intended fields through the link's target while the
+    /// link destination and foreign tables other writers own survive.
+    #[cfg(unix)]
+    #[test]
+    fn mutate_updates_an_existing_valid_symlink_target() {
+        let (_home, nexus_dir) = isolated_nexus_dir();
+        let config_path = nexus_dir.join("config.toml");
+        std::fs::write(
+            nexus_dir.join("real.toml"),
+            "active_creator_id = \"ctr_link\"\n\n[memory_provider]\nkind = \"local\"\n",
+        )
+        .expect("seed the link's target");
+        std::os::unix::fs::symlink("real.toml", &config_path).expect("valid config link");
+
+        CliConfig::mutate(|config| {
+            config.platform_url = "https://link.test".to_string();
+            Ok(())
+        })
+        .expect("a mutation over a readable existing entry must succeed");
+
+        let stored = std::fs::read_to_string(&config_path).expect("read through the link");
+        assert!(
+            stored.contains("https://link.test"),
+            "the intended field must update: {stored}"
+        );
+        assert!(
+            stored.contains("ctr_link"),
+            "the configured selection must survive: {stored}"
+        );
+        assert!(
+            stored.contains("[memory_provider]"),
+            "the foreign provider table must survive: {stored}"
+        );
+        assert_eq!(
+            std::fs::read_link(&config_path).expect("the config link destination"),
+            std::path::Path::new("real.toml"),
+            "the config link keeps its original destination"
         );
     }
 }
