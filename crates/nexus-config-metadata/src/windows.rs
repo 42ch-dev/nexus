@@ -471,24 +471,24 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
         if got == 0 {
             return Err(io::Error::last_os_error());
         }
-        // A native success that leaves no ACE pointer is an unverifiable
-        // output, not a documented result and never an acceptance fallback:
-        // refuse it instead of deriving last-error evidence that does not
-        // exist for this case.
-        if ace.is_null() {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "credential file carries an access-control list with an \
-                 unexpected missing entry",
-            ));
-        }
+        // NonNull enforces only nonnull; it does not establish native extent, alignment or lifetime.
+        let ace = match ptr::NonNull::new(ace) {
+            Some(ace) => ace,
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "credential file carries an access-control list with an \
+                     unexpected missing entry",
+                ));
+            }
+        };
         // SAFETY: `GetAce` succeeded for an index below the documented
         // `AceCount` of the DACL captured above, so `ace` is the address of a
         // live ACE record inside that DACL, which stays alive for this whole
         // function. Per the documented layout, `ACE_HEADER` is the first
         // member of every ACE structure and each ACE begins on a DWORD
         // boundary, so this four-byte, four-aligned header read is in extent.
-        let header = unsafe { &*ace.cast::<ACE_HEADER>() };
+        let header = unsafe { &*ace.as_ptr().cast::<ACE_HEADER>() };
         match header.AceType {
             // A denied ACE only narrows access; it grants nobody anything.
             ACCESS_DENIED_ACE_TYPE => {}
@@ -517,7 +517,7 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
                 // above. `SidStart` addresses the trustee SID that the
                 // documented layout stores contiguously after the mask, so
                 // the fixed SID structure is readable before validation.
-                let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
+                let allowed = unsafe { &*ace.as_ptr().cast::<ACCESS_ALLOWED_ACE>() };
                 let sid = ptr::from_ref(&allowed.SidStart).cast_mut().cast::<c_void>();
                 // Bounded safety metadata (D45): the count byte's fixed
                 // prefix was proved readable by the extent guard above, and
