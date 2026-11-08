@@ -471,13 +471,7 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
         if got == 0 {
             return Err(io::Error::last_os_error());
         }
-        // A native success that leaves no ACE pointer is an unverifiable
-        // output, not a documented result and never an acceptance fallback:
-        // refuse it instead of deriving last-error evidence that does not
-        // exist for this case. The checked constructor turns the refusal into
-        // a type-level nonnull invariant carried to both typed reads below
-        // (it says nothing about address validity; the documented extent,
-        // alignment and lifetime contracts below stay mandatory).
+        // NonNull enforces only nonnull; it does not establish native extent, alignment or lifetime.
         let ace = match ptr::NonNull::new(ace) {
             Some(ace) => ace,
             None => {
