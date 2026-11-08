@@ -587,7 +587,7 @@ fn wide_path(path: &Path) -> Vec<u16> {
 
 #[cfg(test)]
 mod sid_bounds_tests {
-    use super::{record_encloses_sid, sid_required_length};
+    use super::{record_encloses_sid, sid_required_length, ACE_HEADER, SID};
 
     /// A record whose fixed storage fits but whose advertised variable tail
     /// does not must be refused: one-subauthority storage does not enclose a
@@ -597,7 +597,10 @@ mod sid_bounds_tests {
         let fixed_fit = (std::mem::size_of::<ACE_HEADER>()
             + std::mem::size_of::<u32>()
             + std::mem::size_of::<SID>()) as u32;
-        assert!(record_encloses_sid(fixed_fit, 1), "exactly the fixed fit encloses one subauthority");
+        assert!(
+            record_encloses_sid(fixed_fit, 1),
+            "exactly the fixed fit encloses one subauthority"
+        );
         assert!(
             !record_encloses_sid(fixed_fit, 2),
             "the same extent must refuse a SID advertising a second subauthority"
@@ -611,7 +614,10 @@ mod sid_bounds_tests {
         let two_subauthorities = sid_required_length(2).expect("a bounded advertised length");
         let exact = (std::mem::size_of::<ACE_HEADER>() + std::mem::size_of::<u32>()) as u32
             + two_subauthorities;
-        assert!(record_encloses_sid(exact, 2), "the exact enclosing extent encloses");
+        assert!(
+            record_encloses_sid(exact, 2),
+            "the exact enclosing extent encloses"
+        );
         assert!(
             !record_encloses_sid(exact - 1, 2),
             "one byte short of the advertised tail must refuse"

@@ -110,11 +110,13 @@ jobs:
 
       - name: Check Windows credential ACL regression tests
         if: always() && runner.os == 'Windows'
-        # libtest OR-combines the filters across both targets: the four
-        # windows_credential_acl_ consumer cases in nexus-core plus the
-        # sid_bounds_ unit cases covering the credential gate's SID
-        # enclosure logic in nexus-config-metadata.
-        run: cargo test --target x86_64-pc-windows-msvc -p nexus-core --test memory_provider_config -p nexus-config-metadata --lib windows_credential_acl_ sid_bounds_
+        # Each package and target has its own Cargo test filter. Propagate
+        # either native command's failure explicitly in the Windows shell.
+        run: |
+          cargo test --target x86_64-pc-windows-msvc -p nexus-core --test memory_provider_config windows_credential_acl_
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --target x86_64-pc-windows-msvc -p nexus-config-metadata --lib sid_bounds_
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Check explicit-home regression tests
         if: runner.os == 'macOS'
