@@ -318,6 +318,130 @@ async fn a_dangling_provider_config_link_fails_the_open_instead_of_selecting_loc
     writer.close().await.expect("close");
 }
 
+/// I-000304 (R5): the implicit legacy `config.json` migration shares the
+/// config-entry authority. A dangling `config.toml` link is an existing entry,
+/// not genuine absence: the open must refuse with `config_load` and never
+/// create the link's target, replace the entry or rename the legacy document.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dangling_config_link_blocks_implicit_legacy_migration() {
+    const CREATOR: &str = "crt_alpha";
+    const SLUG: &str = "default";
+    const LEGACY: &str = "{\"active_creator_id\":\"crt_alpha\",\"active_workspace_slug_by_creator\":{\"crt_alpha\":\"default\"}}";
+
+    let home = tempfile::tempdir().expect("temp home");
+    let user_home = home.path().canonicalize().expect("canonical home");
+    let nexus_home = nexus_home_layout::nexus_root_from_home(&user_home);
+    std::fs::create_dir_all(&nexus_home).expect("nexus home");
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        &user_home, CREATOR, SLUG,
+    ))
+    .expect("workspace dir");
+    let config = nexus_home.join("config.toml");
+    let target = nexus_home.join("creatable.toml");
+    std::fs::write(nexus_home.join("config.json"), LEGACY).expect("legacy json");
+    std::os::unix::fs::symlink("creatable.toml", &config).expect("dangling config link");
+
+    let Err(error) = CoreService::open(CoreOpenOptions {
+        user_home,
+        access: CoreAccess::EngineOwner,
+        memory: None,
+    })
+    .await
+    else {
+        panic!("a dangling config entry must refuse the open");
+    };
+    let CoreError::Internal { category } = &error else {
+        panic!("expected the config_load refusal, got {error:?}");
+    };
+    assert!(
+        category.starts_with("config_load:"),
+        "the legacy migration refused the dangling config entry: {error:?}"
+    );
+
+    let target_error = std::fs::symlink_metadata(&target)
+        .expect_err("the dangling link's target must not exist");
+    assert_eq!(
+        target_error.kind(),
+        std::io::ErrorKind::NotFound,
+        "the dangling link's target is genuinely absent: {target_error}"
+    );
+    let link = std::fs::symlink_metadata(&config).expect("the config entry is retained");
+    assert!(
+        link.file_type().is_symlink(),
+        "the config entry is still the original symlink"
+    );
+    assert_eq!(
+        std::fs::read_link(&config).expect("the config link destination"),
+        std::path::Path::new("creatable.toml"),
+        "the config link keeps its original relative destination"
+    );
+    assert_eq!(
+        std::fs::read_to_string(nexus_home.join("config.json")).expect("legacy json"),
+        LEGACY,
+        "the legacy document keeps its bytes"
+    );
+    let marker_error = std::fs::symlink_metadata(nexus_home.join("config.json.migrated"))
+        .expect_err("the legacy document was not renamed");
+    assert_eq!(
+        marker_error.kind(),
+        std::io::ErrorKind::NotFound,
+        "no migration marker entry exists: {marker_error}"
+    );
+}
+
+/// I-000304 (R5) control: genuine absence of the `config.toml` entry still
+/// migrates a valid legacy document, and the migrated document keeps the
+/// implicit local provider selection.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_genuinely_absent_config_entry_still_migrates_legacy_json() {
+    const CREATOR: &str = "crt_alpha";
+    const SLUG: &str = "default";
+    const LEGACY: &str = "{\"active_creator_id\":\"crt_alpha\",\"active_workspace_slug_by_creator\":{\"crt_alpha\":\"default\"}}";
+
+    let home = tempfile::tempdir().expect("temp home");
+    let user_home = home.path().canonicalize().expect("canonical home");
+    let nexus_home = nexus_home_layout::nexus_root_from_home(&user_home);
+    std::fs::create_dir_all(&nexus_home).expect("nexus home");
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        &user_home, CREATOR, SLUG,
+    ))
+    .expect("workspace dir");
+    std::fs::write(nexus_home.join("config.json"), LEGACY).expect("legacy json");
+    assert!(
+        !nexus_home.join("config.toml").exists(),
+        "the control starts from genuine absence"
+    );
+
+    let core = CoreService::open(CoreOpenOptions {
+        user_home,
+        access: CoreAccess::EngineOwner,
+        memory: None,
+    })
+    .await
+    .expect("a genuinely absent config migrates and opens");
+    let principal = core.active_principal().await.expect("principal");
+    assert_eq!(principal.creator_id(), CREATOR);
+
+    let migrated = std::fs::read_to_string(nexus_home.join("config.toml")).expect("migrated toml");
+    assert!(
+        migrated.contains(CREATOR),
+        "the migrated document carries the legacy creator: {migrated}"
+    );
+    assert!(
+        !nexus_home.join("config.json").exists()
+            && nexus_home.join("config.json.migrated").exists(),
+        "the legacy document was renamed after publication"
+    );
+    assert!(
+        read_memory_provider_config(&nexus_home)
+            .expect("the migrated document reads")
+            .is_none(),
+        "a migrated provider-free document keeps the implicit local default"
+    );
+}
+
 #[test]
 fn explicit_local_selection_round_trips() {
     let home = home();
