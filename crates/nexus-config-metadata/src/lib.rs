@@ -14,9 +14,10 @@
 //! `unsafe_code = "forbid"` and this crate does not inherit it (see
 //! `Cargo.toml`). Every `unsafe` block either wraps exactly one documented OS
 //! call with a SAFETY comment naming its descriptor/buffer contract, or is one
-//! of the two typed `ACE_HEADER`/`ACCESS_ALLOWED_ACE` field-read/classification
-//! blocks in the credential DACL walk — the narrow, separately approved ABI
-//! exception for native-API-produced ACL records, each carrying a SAFETY
+//! of the three bounded non-call reads in the credential DACL walk — the two
+//! typed `ACE_HEADER`/`ACCESS_ALLOWED_ACE` field-read/classification blocks
+//! (decision D44) and the single one-byte SID count metadata read (decision
+//! D45) — each carrying a SAFETY
 //! comment citing the record's documented layout, extent, alignment and
 //! lifetime. Nothing here hand-parses security bytes or reinterprets unknown
 //! layouts: unknown or unsupported policy still refuses, and the public surface

@@ -270,15 +270,55 @@ pub fn access_policy_blob(target: &Path) -> io::Result<Vec<u8>> {
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0x0;
 const ACCESS_DENIED_ACE_TYPE: u8 = 0x1;
 
+/// Read the advertised subauthority count of a SID — the single bounded
+/// fixed-SID safety-metadata access (D45): exactly one byte at the
+/// documented count offset, read only to size the SID for its enclosure
+/// check. No identifier, subauthority or other content byte is read.
+///
+/// # SAFETY (caller obligations)
+///
+/// `sid` addresses a live SID structure whose complete fixed prefix — the
+/// whole `std::mem::size_of::<SID>()` representation (revision, count,
+/// identifier authority, one subauthority slot) — has been proven readable
+/// inside the enclosing extent by the caller's bounds checks, and the
+/// enclosing object outlives this call. Only the one count byte at the
+/// documented offset is dereferenced.
+fn advertised_subauthority_count(sid: PSID) -> u32 {
+    // SAFETY: the caller proved the complete fixed-prefix extent above; this
+    // reads exactly the one count byte at its documented offset (no alignment
+    // requirement, no content or subauthority bytes), within the live
+    // enclosing object.
+    unsafe { u32::from(std::ptr::read((sid as *const u8).add(1))) }
+}
+
+/// The complete byte length of a SID advertising `count` subauthorities:
+/// the fixed prefix of the `SID` representation (everything but its one
+/// subauthority slot) plus four bytes per advertised subauthority. `None`
+/// when the advertised count cannot yield a bounded length.
+fn sid_required_length(count: u32) -> Option<u32> {
+    let fixed_prefix = (std::mem::size_of::<SID>() - std::mem::size_of::<u32>()) as u32;
+    fixed_prefix.checked_add(count.checked_mul(4)?)
+}
+
+/// Whether a record of `record_extent` bytes encloses its fixed fields
+/// (header and access mask) plus the complete SID advertised by `count`.
+/// An unbounded advertised length never encloses.
+fn record_encloses_sid(record_extent: u32, count: u32) -> bool {
+    let fixed_fields = (std::mem::size_of::<ACE_HEADER>() + std::mem::size_of::<u32>()) as u32;
+    sid_required_length(count)
+        .is_some_and(|sid_length| fixed_fields.checked_add(sid_length) <= Some(record_extent))
+}
+
 /// Decide whether the open file's DACL grants any access right to a principal
 /// beyond the file's owner, LOCAL SYSTEM and the Administrators group.
 ///
 /// `Ok(())` means every allow grant belongs to one of those three principals.
 /// Before any comparison, both comparison operands — the descriptor's owner
-/// SID and each walked ACE's trustee SID — are validated with the native
-/// `IsValidSid`, and a trustee SID is only compared after its record proved
-/// extent for the complete minimal `SID` structure; an invalid or truncated
-/// record refuses the credential.
+/// SID and each walked ACE's trustee SID — pass a complete enclosure chain:
+/// fixed-prefix readability, the bounded count metadata read (D45), the
+/// full count-dependent SID extent against its enclosing returned bytes
+/// (descriptor or record), and the native `IsValidSid`; an unenclosed,
+/// truncated, invalid or uninterpretable record refuses the credential.
 /// The memory credential loader calls this with its already-open handle before
 /// accepting the file's bytes, so a credential sharing *any* ordinary right
 /// with another principal — read, but also nonread rights such as `WRITE_DAC`,
@@ -359,12 +399,47 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
             "credential file has no verifiable owner or DACL",
         ));
     }
+    // The owner SID lives inside the returned descriptor: its readable extent
+    // ends at the bytes the second query actually wrote (`needed`), not at
+    // the allocation's spare capacity or padding.
+    let descriptor_end = (descriptor.as_ptr() as usize).checked_add(needed as usize);
+    let owner_start = owner as usize;
+    // Fixed-prefix readability before the metadata read: the whole minimal
+    // `SID` representation (revision, count, identifier authority, one
+    // subauthority slot) must lie inside the returned bytes.
+    if !descriptor_end.is_some_and(|end| {
+        owner_start
+            .checked_add(std::mem::size_of::<SID>())
+            .is_some_and(|fixed_end| fixed_end <= end)
+    }) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "credential file has an invalid owner security identifier",
+        ));
+    }
+    // Bounded safety metadata (D45), then the complete count-dependent
+    // enclosure, before any unbounded SID validator or comparison.
+    let owner_count = advertised_subauthority_count(owner);
+    if !descriptor_end.is_some_and(|end| {
+        sid_required_length(owner_count)
+            .is_some_and(|required| {
+                owner_start
+                    .checked_add(required as usize)
+                    .is_some_and(|sid_end| sid_end <= end)
+            })
+    }) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "credential file has an invalid owner security identifier",
+        ));
+    }
     // Semantic validity before any comparison: the owner SID must be a valid
     // SID structure, or the credential policy is unverifiable and refuses.
     // SAFETY: `IsValidSid` validates the SID structure at `owner` and
     // documents a non-null pointer as its precondition; `owner` passed the
-    // non-null check above and addresses the security descriptor's owner SID
-    // inside the live captured descriptor, which stays alive for this call.
+    // non-null check above, its complete advertised representation was proved
+    // enclosed in the returned descriptor bytes, and the descriptor stays
+    // alive for this call.
     if unsafe { IsValidSid(owner) } == 0 {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -408,11 +483,13 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
             // A denied ACE only narrows access; it grants nobody anything.
             ACCESS_DENIED_ACE_TYPE => {}
             ACCESS_ALLOWED_ACE_TYPE => {
-                // A record whose documented `AceSize` does not cover the
-                // header, the mask and the complete minimal `SID` structure
-                // (revision, subauthority count, identifier authority and one
-                // subauthority) cannot be classified: refuse it instead of
-                // reinterpreting a truncated record.
+                // The fixed-prefix guard: a record whose documented
+                // `AceSize` does not cover the header, the mask and the
+                // complete minimal `SID` structure (revision, subauthority
+                // count, identifier authority and one subauthority slot)
+                // cannot be classified and refuses. The record's full
+                // count-dependent enclosure is checked after the bounded
+                // count read below.
                 let needed_extent = std::mem::size_of::<ACE_HEADER>()
                     + std::mem::size_of::<u32>()
                     + std::mem::size_of::<SID>();
@@ -432,15 +509,26 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
                 // the fixed SID structure is readable before validation.
                 let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
                 let sid = ptr::from_ref(&allowed.SidStart).cast_mut().cast::<c_void>();
+                // Bounded safety metadata (D45): the count byte's fixed
+                // prefix was proved readable by the extent guard above, and
+                // only then is the complete count-dependent enclosure
+                // checked, before any unbounded SID validator or comparison.
+                let trustee_count = advertised_subauthority_count(sid);
+                if !record_encloses_sid(header.AceSize as u32, trustee_count) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "credential file carries a truncated allowed-access entry",
+                    ));
+                }
                 // Semantic validity before any comparison: the trustee SID
                 // must be a valid SID structure, or the credential policy is
                 // unverifiable and refuses.
                 // SAFETY: `IsValidSid` validates the SID structure at `sid`
                 // and documents a non-null pointer as its precondition; `sid`
-                // addresses the ACE's contiguous trustee SID inside the same
-                // live, in-extent record whose complete minimal SID
-                // representation the extent guard above proved readable, and
-                // the descriptor stays alive for this call.
+                // addresses the ACE's contiguous trustee SID, whose complete
+                // advertised representation the enclosure check above proved
+                // inside the record's documented `AceSize` extent, and the
+                // descriptor stays alive for this call.
                 if unsafe { IsValidSid(sid) } == 0 {
                     return Err(io::Error::new(
                         io::ErrorKind::PermissionDenied,
@@ -495,4 +583,55 @@ fn wide_path(path: &Path) -> Vec<u16> {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect()
+}
+
+#[cfg(test)]
+mod sid_bounds_tests {
+    use super::{record_encloses_sid, sid_required_length};
+
+    /// A record whose fixed storage fits but whose advertised variable tail
+    /// does not must be refused: one-subauthority storage does not enclose a
+    /// SID advertising a second subauthority.
+    #[test]
+    fn sid_bounds_fixed_fit_does_not_enclose_longer_advertised_tail() {
+        let fixed_fit = (std::mem::size_of::<ACE_HEADER>()
+            + std::mem::size_of::<u32>()
+            + std::mem::size_of::<SID>()) as u32;
+        assert!(record_encloses_sid(fixed_fit, 1), "exactly the fixed fit encloses one subauthority");
+        assert!(
+            !record_encloses_sid(fixed_fit, 2),
+            "the same extent must refuse a SID advertising a second subauthority"
+        );
+    }
+
+    /// The exact enclosing boundary is accepted: header + mask + the SID's
+    /// complete advertised length, and not a byte less.
+    #[test]
+    fn sid_bounds_exact_enclosing_boundary_is_accepted_and_shorter_refused() {
+        let two_subauthorities = sid_required_length(2).expect("a bounded advertised length");
+        let exact = (std::mem::size_of::<ACE_HEADER>() + std::mem::size_of::<u32>()) as u32
+            + two_subauthorities;
+        assert!(record_encloses_sid(exact, 2), "the exact enclosing extent encloses");
+        assert!(
+            !record_encloses_sid(exact - 1, 2),
+            "one byte short of the advertised tail must refuse"
+        );
+    }
+
+    /// The advertised length is the fixed prefix plus four bytes per
+    /// subauthority, bounded even at the maximum representable count.
+    #[test]
+    fn sid_bounds_required_length_is_bounded_per_subauthority() {
+        let fixed_prefix = (std::mem::size_of::<SID>() - std::mem::size_of::<u32>()) as u32;
+        assert_eq!(sid_required_length(0), Some(fixed_prefix));
+        assert_eq!(sid_required_length(1), Some(fixed_prefix + 4));
+        assert_eq!(sid_required_length(255), Some(fixed_prefix + 255 * 4));
+    }
+
+    /// An unbounded advertised length (overflow path) never encloses,
+    /// regardless of the record extent.
+    #[test]
+    fn sid_bounds_unbounded_advertised_length_never_encloses() {
+        assert!(!record_encloses_sid(u32::MAX, u32::MAX));
+    }
 }

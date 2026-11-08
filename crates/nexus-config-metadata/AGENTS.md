@@ -14,23 +14,29 @@ group, mode, ACL and extended access attributes it had.
   verbatim. Every other crate keeps the inherited `unsafe_code = "forbid"`.
 - Every `unsafe` block either wraps exactly one documented OS call and carries
   an English SAFETY comment naming the descriptor/buffer contract it relies on,
-  or is one of the two typed field-read/classification blocks in the credential
-  DACL walk (`windows.rs` `grants_only_to_trusted_principals`): reading the
-  leading `ACE_HEADER` of a `GetAce`-returned record and the `ACCESS_ALLOWED_ACE`
-  fields of a record classified as access-allowed. This is the crate's only
-  approved non-call unsafe exception (owner-scoped decision D44). Each such
-  block carries an English SAFETY comment citing the exact documented record
+  or is one of the three bounded non-call reads in the credential DACL walk
+  (`windows.rs` `grants_only_to_trusted_principals`), each separately approved:
+  the two typed field-read/classification blocks (`ACE_HEADER` and
+  `ACCESS_ALLOWED_ACE`, decision D44) and the single bounded fixed-SID
+  safety-metadata read (decision D45) — `advertised_subauthority_count`, which
+  reads exactly the one count byte at the SID's documented offset, only after
+  the caller proves the complete fixed-prefix extent, and only to size the SID
+  for its enclosure check before any validator or comparison. Each such block
+  carries an English SAFETY comment citing the exact documented record
   contract it relies on — layout (`ACE_HEADER` first member of every ACE;
   `ACCESS_ALLOWED_ACE` `{Header, Mask, SidStart}` with the SID contiguous after
-  the mask), extent (`GetAce` succeeds for indices below `AceCount`; the
-  checked `AceSize` covers the full field layout before the allowed-record
-  read), alignment (each ACE begins on a DWORD boundary) and lifetime (the
-  records live inside the descriptor captured above, which outlives the walk) —
-  and the walk refuses records it cannot interpret.
-- The exception authorizes no general security-descriptor/ACL byte parser and
-  no reinterpretation of unknown layouts: unknown or unsupported policy still
-  refuses, public functions stay safe, and no unsafe memory operation may hide
-  inside an OS-call block or a helper.
+  the mask; `SID` `{Revision, SubAuthorityCount, IdentifierAuthority,
+  SubAuthority[1]}`), extent (`GetAce` succeeds for indices below `AceCount`;
+  the checked `AceSize` covers the fixed layout, then the complete
+  count-dependent SID length, before the validation), alignment (each ACE
+  begins on a DWORD boundary) and lifetime (the records live inside the
+  descriptor captured above, which outlives the walk) — and the walk refuses
+  records it cannot interpret.
+- The exceptions authorize no general security-descriptor/ACL byte parser, no
+  subauthority or identifier content decoding, and no reinterpretation of
+  unknown layouts: unknown or unsupported policy still refuses, public
+  functions stay safe, and no unsafe memory operation may hide inside an
+  OS-call block or an undocumented helper.
 - Public functions are safe. They never decide whether to publish: a failure is
   returned so the caller refuses and leaves the old document unchanged.
 - No hand-rolled security parsing: use the platform facilities directly
