@@ -104,6 +104,110 @@ fn valid_credential_json() -> String {
     format!("{{\"identity_seed_hex\": \"{SEED_HEX}\", \"capability_token\": null}}")
 }
 
+#[cfg(windows)]
+fn set_windows_credential_acl(path: &Path, everyone_read: bool) {
+    let script = r#"
+$ErrorActionPreference = 'Stop'
+$path = $env:NEXUS_TEST_CREDENTIAL_PATH
+$owner = (Get-Acl -LiteralPath $path).GetOwner([System.Security.Principal.SecurityIdentifier])
+$system = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+$admins = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')
+$acl = [System.Security.AccessControl.FileSecurity]::new()
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($sid in @($owner, $system, $admins)) {
+    $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'Allow')
+    $acl.SetAccessRule($rule)
+}
+if ($env:NEXUS_TEST_EVERYONE_READ -eq '1') {
+    $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($everyone, 'Read', 'Allow')
+    $acl.SetAccessRule($rule)
+}
+Set-Acl -LiteralPath $path -AclObject $acl
+$actual = Get-Acl -LiteralPath $path
+if (-not $actual.AreAccessRulesProtected -or $actual.GetOwner([System.Security.Principal.SecurityIdentifier]) -ne $owner) {
+    throw 'fixture ACL protection or owner mismatch'
+}
+$rules = @($actual.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+$allowed = @($owner.Value, $system.Value, $admins.Value)
+if ($env:NEXUS_TEST_EVERYONE_READ -eq '1') { $allowed += $everyone.Value }
+foreach ($rule in $rules) {
+    if ($rule.IsInherited -or $rule.AccessControlType -ne 'Allow' -or $rule.IdentityReference.Value -notin $allowed) {
+        throw 'fixture ACL contains an unexpected rule'
+    }
+}
+foreach ($sid in @($owner, $system, $admins)) {
+    if (-not ($rules | Where-Object { $_.IdentityReference.Value -eq $sid.Value -and ($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl })) {
+        throw 'fixture ACL missing trusted full control'
+    }
+}
+if ($env:NEXUS_TEST_EVERYONE_READ -eq '1' -and -not ($rules | Where-Object { $_.IdentityReference.Value -eq $everyone.Value -and ($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::ReadData) -ne 0 })) {
+    throw 'fixture ACL missing Everyone read'
+}
+"#;
+    let output = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("NEXUS_TEST_CREDENTIAL_PATH", path)
+        .env("NEXUS_TEST_EVERYONE_READ", if everyone_read { "1" } else { "0" })
+        .output()
+        .expect("start Windows ACL fixture setup");
+    assert!(
+        output.status.success(),
+        "Windows ACL fixture setup failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[cfg(windows)]
+fn windows_credential_fixture(home: &Path) -> PathBuf {
+    let dir = credentials_dir(home);
+    std::fs::create_dir_all(&dir).expect("credential dir");
+    let path = dir.join(format!("{CREDENTIAL_ID}.json"));
+    std::fs::write(&path, valid_credential_json()).expect("credential file");
+    set_windows_credential_acl(&path, false);
+    path
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_credential_acl_trusted_principals_load_redacted() {
+    let home = home();
+    windows_credential_fixture(home.path());
+    let credential = MemoryCredential::load(home.path(), CREDENTIAL_ID)
+        .expect("credential with trusted ACL must load");
+    let debug = format!("{credential:?}");
+    assert!(debug.contains("redacted"), "{debug}");
+    assert!(!debug.contains(SEED_HEX), "Debug leaked the seed");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_credential_acl_everyone_read_is_refused() {
+    let home = home();
+    let path = windows_credential_fixture(home.path());
+    MemoryCredential::load(home.path(), CREDENTIAL_ID).expect("restricted fixture must load");
+    set_windows_credential_acl(&path, true);
+
+    let error = MemoryCredential::load(home.path(), CREDENTIAL_ID)
+        .expect_err("Everyone read access must be refused");
+    let text = error.to_string();
+    assert!(!text.contains(SEED_HEX), "credential error leaked the seed");
+    let CoreError::Coded { code, message } = error else {
+        panic!("expected coded credential refusal");
+    };
+    assert_eq!(code, "memory_credential_invalid");
+    assert!(!message.contains(SEED_HEX), "credential message leaked the seed");
+    let again = MemoryCredential::load(home.path(), CREDENTIAL_ID)
+        .expect_err("Everyone read access must still be refused");
+    match again {
+        CoreError::Coded { code: next_code, message: next_message } => {
+            assert_eq!(next_code, code);
+            assert_eq!(next_message, message);
+        }
+        _ => panic!("expected coded credential refusal"),
+    }
+}
+
 #[test]
 fn missing_memory_provider_table_selects_local() {
     let home = home();

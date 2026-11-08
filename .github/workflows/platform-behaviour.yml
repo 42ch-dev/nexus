@@ -108,6 +108,10 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo test --target x86_64-pc-windows-msvc -p nexus42 --lib --no-default-features --features connect-host explicit_home
 
+      - name: Check Windows credential ACL regression tests
+        if: always() && runner.os == 'Windows'
+        run: cargo test --target x86_64-pc-windows-msvc -p nexus-core --test memory_provider_config windows_credential_acl_
+
       - name: Check explicit-home regression tests
         if: runner.os == 'macOS'
         run: cargo test -p nexus42 --lib --no-default-features --features connect-host explicit_home
