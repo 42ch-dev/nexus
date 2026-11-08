@@ -260,13 +260,12 @@ impl CliConfig {
         if toml_entry_absent(&config_path)? {
             return Ok(Self::default());
         }
-        let content = std::fs::read_to_string(&config_path)
-            .map_err(|error| {
-                anyhow::Error::new(error).context(format!(
-                    "cannot read existing {} for mutation",
-                    config_path.display()
-                ))
-            })?;
+        let content = std::fs::read_to_string(&config_path).map_err(|error| {
+            anyhow::Error::new(error).context(format!(
+                "cannot read existing {} for mutation",
+                config_path.display()
+            ))
+        })?;
         if content.trim().is_empty() {
             return Ok(Self::default());
         }
