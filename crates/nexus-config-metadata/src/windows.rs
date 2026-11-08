@@ -471,6 +471,17 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
         if got == 0 {
             return Err(io::Error::last_os_error());
         }
+        // A native success that leaves no ACE pointer is an unverifiable
+        // output, not a documented result and never an acceptance fallback:
+        // refuse it instead of deriving last-error evidence that does not
+        // exist for this case.
+        if ace.is_null() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "credential file carries an access-control list with an \
+                 unexpected missing entry",
+            ));
+        }
         // SAFETY: `GetAce` succeeded for an index below the documented
         // `AceCount` of the DACL captured above, so `ace` is the address of a
         // live ACE record inside that DACL, which stays alive for this whole
