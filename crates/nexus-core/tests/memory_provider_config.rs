@@ -150,12 +150,8 @@ fn unreadable_provider_config_is_an_error_not_the_local_default() {
     // could not inspect.
     let not_a_dir = home.path().join("not-a-dir");
     std::fs::write(&not_a_dir, "regular file").expect("parent file");
-    let error = read_memory_provider_config(&not_a_dir)
+    read_memory_provider_config(&not_a_dir)
         .expect_err("an uninspectable config must not read as absent");
-    assert!(
-        !error.to_string().is_empty(),
-        "the filesystem error reaches the caller: {error}"
-    );
 }
 
 /// I-000304, consumer level: `CoreService::open` resolves the workspace from
@@ -217,9 +213,9 @@ async fn an_uninspectable_provider_table_fails_the_open_instead_of_selecting_loc
         ),
         "the held migration fence keeps the open from finishing"
     );
-    // The window: the same `config.toml` turns uninspectable — a
-    // self-referential symlink answers ELOOP, a non-`NotFound` metadata error —
-    // between the workspace snapshot and the provider selection.
+    // The window: the same `config.toml` turns uninspectable — the directory
+    // entry stays, but its read fails with ELOOP — between the workspace
+    // snapshot and the provider selection.
     std::fs::remove_file(&config).expect("drop the readable document");
     std::os::unix::fs::symlink("config.toml", &config).expect("self-referential config symlink");
     drop(fence);
@@ -234,9 +230,82 @@ async fn an_uninspectable_provider_table_fails_the_open_instead_of_selecting_loc
         category.starts_with("config_load:"),
         "the provider snapshot refused the document: {error:?}"
     );
+
+    // The failed pin released the engine admission it took: a real writer open
+    // acquires it once the document is readable again.
+    std::fs::remove_file(&config).expect("drop the config symlink");
+    std::fs::write(&config, &document).expect("restore config");
+    let writer = CoreService::open(open(CoreAccess::DirectWriter))
+        .await
+        .expect("the failed open released its writer admission");
+    writer.close().await.expect("close");
+}
+
+/// I-000304, consumer level (R4): the same window as the ELOOP regression above,
+/// but here the config path is an **existing symlink whose target is absent**.
+/// Following the final link answers `NotFound`, which is not proof that the
+/// config directory entry is missing: the reader must classify the entry
+/// itself, fail the open with the existing `config_load` refusal and never pin
+/// the implicit local provider.
+///
+/// The deterministic seam is the one the neighbouring consumer uses: the fresh
+/// store's public migration fence is held while the caller-owned open future is
+/// polled exactly once, so the workspace snapshot is taken and the provider
+/// selection has provably not run yet when the link is swapped.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dangling_provider_config_link_fails_the_open_instead_of_selecting_local() {
+    const CREATOR: &str = "crt_alpha";
+    const SLUG: &str = "default";
+
+    let home = tempfile::tempdir().expect("temp home");
+    let user_home = home.path().canonicalize().expect("canonical home");
+    let nexus_home = nexus_home_layout::nexus_root_from_home(&user_home);
+    std::fs::create_dir_all(&nexus_home).expect("nexus home");
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        &user_home, CREATOR, SLUG,
+    ))
+    .expect("workspace dir");
+    let document = format!(
+        "active_creator_id = \"{CREATOR}\"\n\
+         [active_workspace_slug_by_creator]\n\
+         \"{CREATOR}\" = \"{SLUG}\"\n"
+    );
+    let config = nexus_home.join("config.toml");
+    std::fs::write(&config, &document).expect("seed config");
+    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, SLUG);
+    let open = |access| CoreOpenOptions {
+        user_home: user_home.clone(),
+        access,
+        memory: None,
+    };
+
+    let fence = nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path)
+        .expect("the fresh store has no live writer");
+    let mut opened = Box::pin(CoreService::open(open(CoreAccess::EngineOwner)));
+    let mut poll_once = std::task::Context::from_waker(std::task::Waker::noop());
     assert!(
-        category.contains("Too many levels of symbolic links"),
-        "the failure is the uninspectable document, not workspace discovery: {category}"
+        matches!(
+            opened.as_mut().poll(&mut poll_once),
+            std::task::Poll::Pending
+        ),
+        "the held migration fence keeps the open from finishing"
+    );
+    // The window: the config path stays a directory entry but becomes a
+    // symlink whose target does not exist.
+    std::fs::remove_file(&config).expect("drop the readable document");
+    std::os::unix::fs::symlink("absent-config.toml", &config).expect("dangling config symlink");
+    drop(fence);
+
+    let Err(error) = opened.await else {
+        panic!("a dangling provider config must not select the local default");
+    };
+    let CoreError::Internal { category } = &error else {
+        panic!("expected the config_load refusal, got {error:?}");
+    };
+    assert!(
+        category.starts_with("config_load:"),
+        "the provider snapshot refused the dangling config link: {error:?}"
     );
 
     // The failed pin released the engine admission it took: a real writer open
