@@ -359,8 +359,8 @@ async fn a_dangling_config_link_blocks_implicit_legacy_migration() {
         "the legacy migration refused the dangling config entry: {error:?}"
     );
 
-    let target_error = std::fs::symlink_metadata(&target)
-        .expect_err("the dangling link's target must not exist");
+    let target_error =
+        std::fs::symlink_metadata(&target).expect_err("the dangling link's target must not exist");
     assert_eq!(
         target_error.kind(),
         std::io::ErrorKind::NotFound,
