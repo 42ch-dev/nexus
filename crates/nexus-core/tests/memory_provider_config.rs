@@ -342,13 +342,15 @@ async fn a_dangling_config_link_blocks_implicit_legacy_migration() {
     std::fs::write(nexus_home.join("config.json"), LEGACY).expect("legacy json");
     std::os::unix::fs::symlink("creatable.toml", &config).expect("dangling config link");
 
-    let error = CoreService::open(CoreOpenOptions {
+    let Err(error) = CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::EngineOwner,
         memory: None,
     })
     .await
-    .expect_err("a dangling config entry must refuse the open");
+    else {
+        panic!("a dangling config entry must refuse the open");
+    };
     let CoreError::Internal { category } = &error else {
         panic!("expected the config_load refusal, got {error:?}");
     };
@@ -357,19 +359,34 @@ async fn a_dangling_config_link_blocks_implicit_legacy_migration() {
         "the legacy migration refused the dangling config entry: {error:?}"
     );
 
-    assert!(
-        std::fs::symlink_metadata(&target).is_err(),
-        "the dangling link's target was not created"
+    let target_error = std::fs::symlink_metadata(&target)
+        .expect_err("the dangling link's target must not exist");
+    assert_eq!(
+        target_error.kind(),
+        std::io::ErrorKind::NotFound,
+        "the dangling link's target is genuinely absent: {target_error}"
     );
-    std::fs::symlink_metadata(&config).expect("the config link is retained");
+    let link = std::fs::symlink_metadata(&config).expect("the config entry is retained");
+    assert!(
+        link.file_type().is_symlink(),
+        "the config entry is still the original symlink"
+    );
+    assert_eq!(
+        std::fs::read_link(&config).expect("the config link destination"),
+        std::path::Path::new("creatable.toml"),
+        "the config link keeps its original relative destination"
+    );
     assert_eq!(
         std::fs::read_to_string(nexus_home.join("config.json")).expect("legacy json"),
         LEGACY,
         "the legacy document keeps its bytes"
     );
-    assert!(
-        !nexus_home.join("config.json.migrated").exists(),
-        "the legacy document was not renamed"
+    let marker_error = std::fs::symlink_metadata(nexus_home.join("config.json.migrated"))
+        .expect_err("the legacy document was not renamed");
+    assert_eq!(
+        marker_error.kind(),
+        std::io::ErrorKind::NotFound,
+        "no migration marker entry exists: {marker_error}"
     );
 }
 

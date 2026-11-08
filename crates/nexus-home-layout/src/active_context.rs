@@ -435,26 +435,42 @@ mod tests {
         // The entry appears as a link whose target does not exist.
         std::os::unix::fs::symlink("creatable.toml", root.join("config.toml"))
             .expect("dangling config link");
-        release.send().expect("release the migration");
+        release.send(()).expect("release the migration");
 
         loader
             .join()
             .expect("loader thread")
             .expect_err("an existing dangling config entry must not migrate");
 
-        assert!(
-            std::fs::symlink_metadata(root.join("creatable.toml")).is_err(),
-            "the dangling link's target was not created"
+        let target_error = std::fs::symlink_metadata(root.join("creatable.toml"))
+            .expect_err("the dangling link's target must not exist");
+        assert_eq!(
+            target_error.kind(),
+            std::io::ErrorKind::NotFound,
+            "the dangling link's target is genuinely absent: {target_error}"
         );
-        std::fs::symlink_metadata(root.join("config.toml")).expect("the config link is retained");
+        let link = std::fs::symlink_metadata(root.join("config.toml"))
+            .expect("the config entry is retained");
+        assert!(
+            link.file_type().is_symlink(),
+            "the config entry is still the original symlink"
+        );
+        assert_eq!(
+            std::fs::read_link(root.join("config.toml")).expect("the config link destination"),
+            std::path::Path::new("creatable.toml"),
+            "the config link keeps its original relative destination"
+        );
         assert_eq!(
             std::fs::read_to_string(root.join("config.json")).expect("legacy json"),
             legacy,
             "the legacy document keeps its bytes"
         );
-        assert!(
-            !root.join("config.json.migrated").exists(),
-            "the legacy document was not renamed"
+        let marker_error = std::fs::symlink_metadata(root.join("config.json.migrated"))
+            .expect_err("the legacy document was not renamed");
+        assert_eq!(
+            marker_error.kind(),
+            std::io::ErrorKind::NotFound,
+            "no migration marker entry exists: {marker_error}"
         );
     }
 }

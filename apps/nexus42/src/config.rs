@@ -1365,19 +1365,34 @@ platform_url = "https://direct.api.io"
             loaded.active_creator_id, None,
             "an unreadable entry keeps the CLI's documented defaults"
         );
-        assert!(
-            std::fs::symlink_metadata(&target).is_err(),
-            "the dangling link's target was not created"
+        let target_error = std::fs::symlink_metadata(&target)
+            .expect_err("the dangling link's target must not exist");
+        assert_eq!(
+            target_error.kind(),
+            std::io::ErrorKind::NotFound,
+            "the dangling link's target is genuinely absent: {target_error}"
         );
-        std::fs::symlink_metadata(&config_path).expect("the config link is retained");
+        let link = std::fs::symlink_metadata(&config_path).expect("the config entry is retained");
+        assert!(
+            link.file_type().is_symlink(),
+            "the config entry is still the original symlink"
+        );
+        assert_eq!(
+            std::fs::read_link(&config_path).expect("the config link destination"),
+            std::path::Path::new("creatable.toml"),
+            "the config link keeps its original relative destination"
+        );
         assert_eq!(
             std::fs::read_to_string(&json_path).expect("legacy json"),
             legacy,
             "the legacy document keeps its bytes"
         );
-        assert!(
-            !nexus_dir.join("config.json.migrated").exists(),
-            "the legacy document was not renamed"
+        let marker_error = std::fs::symlink_metadata(nexus_dir.join("config.json.migrated"))
+            .expect_err("the legacy document was not renamed");
+        assert_eq!(
+            marker_error.kind(),
+            std::io::ErrorKind::NotFound,
+            "no migration marker entry exists: {marker_error}"
         );
     }
 }
