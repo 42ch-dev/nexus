@@ -60,7 +60,7 @@ Selection follows this order:
 
 1. `CoreOpenOptions.memory = Some(selection)` supplies a validated open-only override and neither reads nor writes provider configuration. `Some(Local)` therefore overrides a remote disk selection for that open.
 2. `None` reads `[memory_provider]` from `<user_home>/.nexus42/config.toml` exactly once while opening.
-3. Local remains selected for a genuinely absent config directory entry, a blank document, an absent `[memory_provider]` table, or `kind = "local"`; existing homes retain local behavior. A config path that exists but cannot be inspected or read — an existing symlink whose target is gone, any other filesystem error, or a malformed document — fails the open instead of selecting local.
+3. Local remains selected for a genuinely absent config directory entry, a blank document, an absent `[memory_provider]` table, or `kind = "local"`; existing homes retain local behavior. A config path that exists but cannot be inspected or read — an existing symlink whose target is gone, any other filesystem error, or a malformed document — fails the open instead of selecting local. Implicit legacy `config.json` migration requires a genuinely absent `config.toml` directory entry, checked before migration and again under the writer lock: an existing unreadable or dangling config is never filled and then read as provider-free.
 
 A remote table contains only:
 

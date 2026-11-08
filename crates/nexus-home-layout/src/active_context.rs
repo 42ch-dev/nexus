@@ -49,27 +49,44 @@ pub struct CliConfigSnapshot {
     pub active_workspace_slug_by_creator: HashMap<String, String>,
 }
 
+/// Whether `config.toml`'s directory entry is genuinely absent.
+///
+/// `Path::exists` follows the final link, so a dangling config link also reads
+/// as absent and would let the legacy migration fill its target. Only
+/// `NotFound` on the entry itself enables that migration; every other error
+/// stays a caller-visible failure.
+fn toml_entry_absent(toml_path: &Path) -> Result<bool, anyhow::Error> {
+    match std::fs::symlink_metadata(toml_path) {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error.into()),
+    }
+}
+
 impl CliConfigSnapshot {
     /// Load from `config.toml` with automatic migration from legacy `config.json`.
     ///
     /// A provisioned `config.toml` is read without any write or lock. The legacy
     /// migration publishes `config.toml`, so it takes the shared writer lock and
-    /// re-checks the TOML inside it — a writer that committed while the
+    /// re-checks the TOML entry inside it — a writer that committed while the
     /// acquisition waited wins over the stale legacy snapshot (the CLI's own
-    /// migration has always done this, `apps/nexus42/src/config.rs`).
+    /// migration has always done this, `apps/nexus42/src/config.rs`). Only a
+    /// genuinely absent entry enables that migration: an existing entry that
+    /// cannot be read — including a dangling link — fails instead of being
+    /// filled.
     ///
     /// # Errors
     ///
     /// Returns an error when reading `config.toml` or the legacy `config.json`
     /// fails, when `config.toml` contains invalid TOML, or when migrating a
     /// valid `config.json` fails to take the writer lock, write `config.toml` or
-    /// rename the legacy file to `config.json.migrated`. Missing config files
-    /// are not errors.
+    /// rename the legacy file to `config.json.migrated`. Genuinely missing
+    /// config files are not errors.
     pub fn load(nexus_root: &Path) -> Result<Self, anyhow::Error> {
         let toml_path = nexus_root.join("config.toml");
         let json_path = nexus_root.join("config.json");
 
-        if toml_path.exists() {
+        if !toml_entry_absent(&toml_path)? {
             return Self::read_document(&toml_path);
         }
 
@@ -93,8 +110,9 @@ impl CliConfigSnapshot {
     ///
     /// The migration replaces the whole shared document, so it must not run
     /// beside a locked writer: it acquires the same lock and re-checks the TOML
-    /// inside it, and a concurrent commit that landed first is returned instead
-    /// of overwritten.
+    /// entry inside it — an entry that appeared while the lock was acquired,
+    /// including a dangling link, is never filled — and a concurrent commit that
+    /// landed first is returned instead of overwritten.
     fn migrate_legacy_json(
         nexus_root: &Path,
         toml_path: &Path,
@@ -103,7 +121,7 @@ impl CliConfigSnapshot {
         #[cfg(test)]
         migration_rendezvous::hold(nexus_root);
         let _lock = crate::config_lock::acquire(nexus_root)?;
-        if toml_path.exists() {
+        if !toml_entry_absent(toml_path)? {
             return Self::read_document(toml_path);
         }
         let text = match std::fs::read_to_string(json_path) {
@@ -392,5 +410,51 @@ mod tests {
             .expect("loader thread")
             .expect("the empty legacy home reads as the default");
         assert_eq!(snapshot.active_creator_id, None);
+    }
+
+    /// I-000304 (R5): a dangling `config.toml` link is an existing entry, not
+    /// genuine absence, so a retained valid legacy document is never migrated
+    /// into the link's creatable target. The link appears after the pre-lock
+    /// probe and the locked recheck refuses it, leaving the JSON unmigrated.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_toml_link_blocks_legacy_migration_instead_of_filling_it() {
+        let _serial = RENDEZVOUS_TEST.lock().expect("rendezvous test serial");
+        let tmp = tempfile::tempdir().expect("temp home");
+        let root = tmp.path().to_path_buf();
+        let legacy = "{\"active_creator_id\":\"ctr_legacy\"}";
+        std::fs::write(root.join("config.json"), legacy).expect("legacy json");
+
+        let (arrived, release) = migration_rendezvous::arm(&root);
+        let loader_root = root.clone();
+        let loader = std::thread::spawn(move || CliConfigSnapshot::load(&loader_root));
+
+        // The migration passed its pre-lock probe and is held before the lock.
+        arrived.recv().expect("the migration reached the hold");
+
+        // The entry appears as a link whose target does not exist.
+        std::os::unix::fs::symlink("creatable.toml", root.join("config.toml"))
+            .expect("dangling config link");
+        release.send().expect("release the migration");
+
+        loader
+            .join()
+            .expect("loader thread")
+            .expect_err("an existing dangling config entry must not migrate");
+
+        assert!(
+            std::fs::symlink_metadata(root.join("creatable.toml")).is_err(),
+            "the dangling link's target was not created"
+        );
+        std::fs::symlink_metadata(root.join("config.toml")).expect("the config link is retained");
+        assert_eq!(
+            std::fs::read_to_string(root.join("config.json")).expect("legacy json"),
+            legacy,
+            "the legacy document keeps its bytes"
+        );
+        assert!(
+            !root.join("config.json.migrated").exists(),
+            "the legacy document was not renamed"
+        );
     }
 }

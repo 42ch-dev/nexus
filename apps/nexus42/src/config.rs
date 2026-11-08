@@ -152,9 +152,9 @@ impl CliConfig {
 
     /// Load configuration from the standard location.
     ///
-    /// Migration: if `config.toml` does not exist but `config.json` does,
-    /// the JSON file is read, converted to TOML, and the original is renamed
-    /// to `config.json.migrated`.
+    /// Migration: if `config.toml`'s entry is genuinely absent but
+    /// `config.json` does, the JSON file is read, converted to TOML, and the
+    /// original is renamed to `config.json.migrated`.
     ///
     /// # Errors
     ///
@@ -202,7 +202,7 @@ impl CliConfig {
     fn load_from_nexus_home(nexus: &Path) -> anyhow::Result<Self> {
         // Migration writes `config.toml`, so it takes the writer lock. Probe
         // first so a plain read does not contend with the other writers.
-        if !nexus.join("config.toml").exists() && nexus.join("config.json").exists() {
+        if toml_entry_absent(&nexus.join("config.toml"))? && nexus.join("config.json").exists() {
             Self::migrate_legacy_json(nexus)?;
         }
         Self::read_document(nexus)
@@ -252,7 +252,7 @@ impl CliConfig {
     fn migrate_legacy_json_locked(nexus: &Path) -> anyhow::Result<()> {
         let config_path = nexus.join("config.toml");
         let json_path = nexus.join("config.json");
-        if config_path.exists() {
+        if !toml_entry_absent(&config_path)? {
             return Ok(());
         }
         let content = match std::fs::read_to_string(&json_path) {
@@ -507,6 +507,19 @@ impl CliConfig {
                 VALID_CONFIG_KEYS.join(", ")
             ))
         }
+    }
+}
+
+/// Whether `config.toml`'s directory entry is genuinely absent.
+///
+/// `Path::exists` follows the final link, so a dangling config link also reads
+/// as absent and would let the implicit legacy migration fill its target. Only
+/// `NotFound` on the entry itself enables that migration.
+fn toml_entry_absent(toml_path: &Path) -> anyhow::Result<bool> {
+    match std::fs::symlink_metadata(toml_path) {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -1328,6 +1341,43 @@ platform_url = "https://direct.api.io"
         assert!(
             !stored.contains("ctr_legacy"),
             "the legacy snapshot must not win: {stored}"
+        );
+    }
+
+    /// I-000304 (R5): an existing dangling `config.toml` link is not a
+    /// migration-eligible absence. The implicit legacy migration must not
+    /// create the link's target or rename the JSON; the CLI reader keeps its
+    /// documented defaults for the unreadable entry.
+    #[cfg(unix)]
+    #[test]
+    fn implicit_migration_does_not_fill_a_dangling_toml_link() {
+        let (_home, nexus_dir) = isolated_nexus_dir();
+        let json_path = nexus_dir.join("config.json");
+        let config_path = nexus_dir.join("config.toml");
+        let target = nexus_dir.join("creatable.toml");
+        let legacy = "{\"active_creator_id\":\"ctr_legacy\"}";
+        std::fs::write(&json_path, legacy).expect("legacy json");
+        std::os::unix::fs::symlink("creatable.toml", &config_path).expect("dangling config link");
+
+        let loaded = CliConfig::load_from_nexus_root(&nexus_dir).expect("the CLI read succeeds");
+
+        assert_eq!(
+            loaded.active_creator_id, None,
+            "an unreadable entry keeps the CLI's documented defaults"
+        );
+        assert!(
+            std::fs::symlink_metadata(&target).is_err(),
+            "the dangling link's target was not created"
+        );
+        std::fs::symlink_metadata(&config_path).expect("the config link is retained");
+        assert_eq!(
+            std::fs::read_to_string(&json_path).expect("legacy json"),
+            legacy,
+            "the legacy document keeps its bytes"
+        );
+        assert!(
+            !nexus_dir.join("config.json.migrated").exists(),
+            "the legacy document was not renamed"
         );
     }
 }
