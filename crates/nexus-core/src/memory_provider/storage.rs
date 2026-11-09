@@ -2199,6 +2199,12 @@ impl MemoryStore {
     ) -> StoreResult<Option<ReceiptRow>> {
         let mut tx = begin_immediate(&self.pool).await?;
         let now = self.now();
+        // I-000305: a changed payload under a retained key conflicts before
+        // the authorization resolves the request's target row, so a changed
+        // target whose candidate is gone answers the key instead of
+        // NOT_FOUND. The replay disclosure stays in `probe` below, behind
+        // this authorization.
+        conflict_only_probe(&mut tx, ctx, now).await?;
         let _ = authorize(&mut tx, admission, now).await?;
         let row = probe(&mut tx, ctx, now).await?;
         tx.rollback().await?;
@@ -3182,6 +3188,50 @@ async fn probe(
             Ok(None)
         }
     }
+}
+
+/// Judge only the payload-conflict half of the dedup namespace, before any
+/// target lookup (I-000305).
+///
+/// A retained key bound to a different payload answers
+/// `IDEMPOTENCY_CONFLICT` even when the request's target row is gone; the
+/// pre-fix order let `authorize` resolve the candidate first and report the
+/// missing target instead. The disclosure half — serving a same-payload
+/// replay — stays with [`probe`] behind the caller's authorization, so this
+/// preflight reveals only that the caller's own key is bound.
+///
+/// A receipt past the retention window is treated exactly as [`probe`] does
+/// (swept or swept-in-place, then the key starts over), so this preflight can
+/// never conflict a key the full probe would free.
+async fn conflict_only_probe(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    ctx: &OpContext<'_>,
+    now: DateTime<Utc>,
+) -> StoreResult<()> {
+    let Some(idempotency_key) = ctx.idempotency_key else {
+        return Ok(());
+    };
+    let sql = format!(
+        "SELECT {RECEIPT_COLUMNS} FROM memory_receipts \
+         WHERE space_id = ? AND requester_principal_id = ? AND op = ? AND idempotency_key = ?"
+    );
+    let existing = sqlx::query_as::<_, ReceiptRow>(sqlx::AssertSqlSafe(sql))
+        .bind(ctx.space_id)
+        .bind(ctx.requester_principal_id)
+        .bind(ctx.op)
+        .bind(idempotency_key)
+        .fetch_optional(&mut **tx)
+        .await?;
+    let Some(row) = existing else {
+        return Ok(());
+    };
+    if matches!(retention(&row, now)?, Retention::Expired) {
+        return Ok(());
+    }
+    if row.payload_digest != ctx.payload_digest {
+        return Err(StoreError::IdempotencyConflict);
+    }
+    Ok(())
 }
 
 async fn space_in_tx(

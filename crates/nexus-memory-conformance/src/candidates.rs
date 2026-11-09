@@ -2524,6 +2524,22 @@ impl FixtureMemoryProvider {
         let space_id = request.space_id.as_str();
         require_served_space(self, space_id)?;
         let candidate_id = request.candidate_id.as_str();
+        // Replay resolution runs before the target lookup (I-000305): a
+        // retained key must resolve its receipt even when the target row is
+        // gone, and a changed target under the same key fails with
+        // IDEMPOTENCY_CONFLICT instead of replaying. `Fresh` and the
+        // expired-binding release fall through to the untouched grant/target
+        // path below.
+        let admission = Mutation::keyed(
+            OP_CANDIDATES_DISMISS,
+            request.idempotency_key.as_str(),
+            admitted,
+        );
+        if let Some(replay) =
+            resolve_or_release(conn, space_id, principal_id, &admission, now).await?
+        {
+            return Ok(replay);
+        }
         let grants = load_grants(conn, space_id).await?;
         let candidate = fetch_candidate(conn, space_id, candidate_id)
             .await?
@@ -2543,11 +2559,6 @@ impl FixtureMemoryProvider {
             // Indistinguishable from a missing id (C-102).
             return Err(candidate_unavailable());
         }
-        let admission = Mutation::keyed(
-            OP_CANDIDATES_DISMISS,
-            request.idempotency_key.as_str(),
-            admitted,
-        );
         let target = ReceiptTarget::for_scope(
             required_capabilities(OP_CANDIDATES_DISMISS)
                 .expect("memory.candidates.dismiss has a published capability list"),
@@ -2555,11 +2566,6 @@ impl FixtureMemoryProvider {
             &candidate.capture_visibility,
             candidate.scope_context(),
         )?;
-        if let Some(replay) =
-            resolve_or_release(conn, space_id, principal_id, &admission, now).await?
-        {
-            return Ok(replay);
-        }
         require_space_admits(conn, OP_CANDIDATES_DISMISS, space_id).await?;
         // §7.7: a fenced or archived subject rejects every write for it. A
         // dismissal admitted before the fence still replays above; a fresh one
@@ -2640,6 +2646,22 @@ impl FixtureMemoryProvider {
         let space_id = request.space_id.as_str();
         require_served_space(self, space_id)?;
         let candidate_id = request.candidate_id.as_str();
+        // Replay resolution runs before the target lookup (I-000305): a
+        // retained key must resolve its receipt even when the target row is
+        // gone, and a changed target under the same key fails with
+        // IDEMPOTENCY_CONFLICT instead of replaying. `Fresh` and the
+        // expired-binding release fall through to the untouched grant/target
+        // path below.
+        let admission = Mutation::keyed(
+            OP_CANDIDATES_REVIEW,
+            request.idempotency_key.as_str(),
+            admitted,
+        );
+        if let Some(replay) =
+            resolve_or_release(conn, space_id, principal_id, &admission, now).await?
+        {
+            return Ok(replay);
+        }
         let grants = load_grants(conn, space_id).await?;
         let candidate = fetch_candidate(conn, space_id, candidate_id)
             .await?
@@ -2656,11 +2678,6 @@ impl FixtureMemoryProvider {
             context_id.as_deref(),
             now,
         )?;
-        let admission = Mutation::keyed(
-            OP_CANDIDATES_REVIEW,
-            request.idempotency_key.as_str(),
-            admitted,
-        );
         let target = ReceiptTarget::for_scope(
             required_capabilities(OP_CANDIDATES_REVIEW)
                 .expect("memory.candidates.review has a published capability list"),
@@ -2668,11 +2685,6 @@ impl FixtureMemoryProvider {
             &visibility,
             context_id.as_deref(),
         )?;
-        if let Some(replay) =
-            resolve_or_release(conn, space_id, principal_id, &admission, now).await?
-        {
-            return Ok(replay);
-        }
         require_space_admits(conn, OP_CANDIDATES_REVIEW, space_id).await?;
         if candidate.status == "consumed" {
             return Err(candidate_consumed(candidate_id));

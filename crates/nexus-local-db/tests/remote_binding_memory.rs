@@ -508,3 +508,133 @@ async fn cross_generation_release_cannot_release_another_generation() {
         "terminal facts are cleared with the binding"
     );
 }
+
+/// I-000333: the monotone object-fact surface is exactly the consumer-visible
+/// upsert plus the binding cleanup, so the SQL boundary takes no extra trigger
+/// (PM decision 2: the acceptance's "if needed" branch is not taken).
+///
+/// Mapping argument for the legitimate update surface:
+/// * [`record_remote_binding_object_tx`] is the only state-mutating writer. Its
+///   `ON CONFLICT … DO UPDATE` carries the rank guard (`live` 0 < `consumed`
+///   1 < `released` 2), so a lower rank never overwrites a higher one — no
+///   consumer, and no other admitted writer, can resurrect a terminal fact
+///   through it.
+/// * `release_binding_dependencies_tx` is the exact terminal cleanup: a
+///   `DELETE … WHERE binding_id = ?` behind `require_binding_removable_tx`
+///   (live objects must be zero first). It deletes rows, never rewrites a
+///   state, so it cannot conflict with the monotone contract.
+/// * The removal-gate counts and `remote_binding_object_is_known` are reads.
+///
+/// A `BEFORE UPDATE` trigger would duplicate a guard the single mapped writer
+/// already enforces, so no migration or writer-admission change is added.
+#[tokio::test]
+async fn object_facts_stay_monotone_across_the_mapped_writes() {
+    let (pool, _dir) = fresh_pool().await;
+    let seed = seed(&pool).await;
+    let ns = namespace(&seed, CLIENT);
+    let state_of = |object_id: &'static str| {
+        let pool = pool.clone();
+        let binding_id = seed.binding_id.clone();
+        async move {
+            sqlx::query_scalar::<_, String>(
+                "SELECT state FROM remote_binding_memory_objects \
+                 WHERE binding_id = ? AND object_id = ?",
+            )
+            .bind(binding_id)
+            .bind(object_id)
+            .fetch_optional(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    // Forward transitions are accepted: live → consumed → released.
+    record(
+        &pool,
+        &ns,
+        RemoteBindingObjectKind::Record,
+        "rec_monotone",
+        RemoteBindingObjectState::Live,
+    )
+    .await;
+    record(
+        &pool,
+        &ns,
+        RemoteBindingObjectKind::Record,
+        "rec_monotone",
+        RemoteBindingObjectState::Consumed,
+    )
+    .await;
+    assert_eq!(state_of("rec_monotone").await.as_deref(), Some("consumed"));
+    record(
+        &pool,
+        &ns,
+        RemoteBindingObjectKind::Record,
+        "rec_monotone",
+        RemoteBindingObjectState::Released,
+    )
+    .await;
+    assert_eq!(state_of("rec_monotone").await.as_deref(), Some("released"));
+
+    // Backward transitions never rewrite the released fact.
+    for stale in [
+        RemoteBindingObjectState::Live,
+        RemoteBindingObjectState::Consumed,
+    ] {
+        record(
+            &pool,
+            &ns,
+            RemoteBindingObjectKind::Record,
+            "rec_monotone",
+            stale,
+        )
+        .await;
+        assert_eq!(
+            state_of("rec_monotone").await.as_deref(),
+            Some("released"),
+            "a {stale:?} rewrite never resurrects a released fact"
+        );
+    }
+
+    // `consumed` is terminal against `live` as well.
+    record(
+        &pool,
+        &ns,
+        RemoteBindingObjectKind::Candidate,
+        "cand_monotone",
+        RemoteBindingObjectState::Consumed,
+    )
+    .await;
+    record(
+        &pool,
+        &ns,
+        RemoteBindingObjectKind::Candidate,
+        "cand_monotone",
+        RemoteBindingObjectState::Live,
+    )
+    .await;
+    assert_eq!(
+        state_of("cand_monotone").await.as_deref(),
+        Some("consumed"),
+        "a live rewrite never resurrects a consumed candidate"
+    );
+    assert_eq!(
+        dependencies(&pool, &seed.binding_id).await,
+        (0, 0),
+        "no terminal fact blocks removal"
+    );
+
+    // The cleanup deletes rows instead of rewriting states, and a fact for the
+    // removed binding is a no-op (the mapped surface cannot revive it).
+    remove(&seed, &pool).await.unwrap();
+    assert!(fact_states(&pool, &seed.binding_id).await.is_empty());
+    record(
+        &pool,
+        &ns,
+        RemoteBindingObjectKind::Record,
+        "rec_late",
+        RemoteBindingObjectState::Live,
+    )
+    .await;
+    assert!(state_of("rec_late").await.is_none());
+}
