@@ -283,7 +283,9 @@ impl CliConfig {
     /// As [`Self::read_document_for_mutation`], plus a writer lock that
     /// cannot be taken.
     pub(crate) fn preflight_document(nexus: &Path) -> anyhow::Result<()> {
-        Self::with_writer_lock(nexus, || Self::read_document_for_mutation(nexus).map(|_| ()))
+        Self::with_writer_lock(nexus, || {
+            Self::read_document_for_mutation(nexus).map(|_| ())
+        })
     }
 
     /// Migrate a legacy `config.json` to `config.toml` under the writer lock.
@@ -1564,8 +1566,8 @@ platform_url = "https://direct.api.io"
         std::fs::write(nexus_dir.join("config.toml"), "not toml {{{{").expect("seed corrupt");
         let preflight = CliConfig::preflight_document(&nexus_dir)
             .expect_err("the preflight must refuse a corrupt document");
-        let mutation = CliConfig::mutate(|_| Ok(()))
-            .expect_err("the mutation must refuse a corrupt document");
+        let mutation =
+            CliConfig::mutate(|_| Ok(())).expect_err("the mutation must refuse a corrupt document");
         assert_eq!(
             preflight.to_string(),
             mutation.to_string(),
