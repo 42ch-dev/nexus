@@ -284,8 +284,13 @@ fn read_start_tick(pid: u32) -> Option<u64> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
     let pid = Pid::from_u32(pid);
-    let mut system = System::new();
-    // Selective refresh (sysinfo 0.39): load exactly this PID and nothing
+    // sysinfo 0.40: `System::new()` returns `Result` (fails on unsupported
+    // OS). Fail closed: no system snapshot → no birth token → cleanup
+    // unconfirmed (verify refuses; capture yields None deterministically).
+    let Ok(mut system) = System::new() else {
+        return None;
+    };
+    // Selective refresh (sysinfo 0.40.1): load exactly this PID and nothing
     // else. `ProcessesToUpdate::Some` keeps the refresh bounded to one
     // process, `ProcessRefreshKind::nothing()` rules out every optional
     // field (PID / PPID / name / start time are always reported), and
