@@ -724,6 +724,13 @@ jobs:
           pnpm --filter @42ch/nexus-provider-acp build
       - name: Run tests
         run: cargo test ${{ matrix.packages }}
+      # I-000324 (user-approved enumeration): the C-111 remote creator-memory
+      # cohort is feature-gated on nexus42's own `memory-remote`, so the group
+      # step above never selects it. Run it in the `cli` group, after the peer
+      # setup this group already performs; no new job or cache key.
+      - name: Run memory-remote creator cohort
+        if: matrix.group == 'cli'
+        run: cargo test -p nexus42 --features memory-remote --test creator_memory_remote
 
   # R-V1193-P1T7-CI-CONNECT-HOST-TESTS (v1.193 P2-T14). The retirement left
   # exactly two shipped app cohorts: the ordinary `cli` default (covered by
