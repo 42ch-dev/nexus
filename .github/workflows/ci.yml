@@ -659,6 +659,8 @@ jobs:
               -p nexus-home-layout
               -p nexus-local-db
               -p nexus-cloud-domain
+              -p nexus-config-metadata
+              -p nexus-memory-conformance
           - group: orchestration-core
             packages: >-
               -p nexus-orchestration
@@ -903,6 +905,7 @@ jobs:
           --test memory_review_port
           --test local_memory_provider --test memory_receipts --test memory_reconcile
           --test memory_profile_admission --test memory_provider_config
+          --test memory_provider_binding --test readonly_config_open
           --test legacy_content_migration
           --test creator_capture
           -- --test-threads=2
