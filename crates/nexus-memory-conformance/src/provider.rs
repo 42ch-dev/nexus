@@ -53,6 +53,9 @@ impl FixtureMemoryProvider {
     pub async fn open(database_path: &Path) -> Result<Self, FixtureError> {
         let store = FixtureStore::open(database_path).await?;
         let identity = provision_space(&store).await?;
+        // Restart recovery (§8.5): a generate receipt left pending by a lost
+        // session can never complete, so reopen terminalizes it `failed`.
+        crate::reflections::terminalize_orphaned_generate_receipts(&store).await?;
         Ok(Self {
             store,
             identity,

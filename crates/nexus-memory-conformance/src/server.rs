@@ -573,7 +573,7 @@ impl FixtureMemoryProvider {
     }
 
     /// Open the one writer transaction a mutation owns.
-    async fn begin_write(&self) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, SpokeReject> {
+    pub(crate) async fn begin_write(&self) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, SpokeReject> {
         self.store()
             .pool()
             .begin_with("BEGIN IMMEDIATE")
@@ -1816,10 +1816,20 @@ impl MemoryPort for FixtureMemoryProvider {
 
     async fn generate_reflection(
         &self,
-        _principal: &Principal,
-        _request: MemoryReflectionsGenerateRequest,
+        principal: &Principal,
+        request: MemoryReflectionsGenerateRequest,
     ) -> SpokeResult<MemoryReflectionsGenerateResponse> {
-        unsupported("memory.reflections.generate")
+        let admitted = match self.admitted("memory.reflections.generate", request) {
+            Ok(admitted) => admitted,
+            Err(reject) => return SpokeResult::Reject(reject),
+        };
+        match self
+            .reflection_generate(principal_id(principal), &admitted, Utc::now())
+            .await
+        {
+            Ok(receipt) => respond_receipt(&receipt),
+            Err(reject) => SpokeResult::Reject(reject),
+        }
     }
 
     async fn get_receipt(

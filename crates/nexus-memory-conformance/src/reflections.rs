@@ -19,26 +19,40 @@
 //! slice because the frozen slices keep theirs module-private; codes and
 //! `details` shapes are the published protocol ones.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{json, Map, Value};
-use spoke_operations::spoke_schemas::{MemoryReflectionsListRequest, MemoryReflectionsStateRequest};
 use spoke_operations::spoke_schemas::memory_reflections_generate_request::ReadSelection as GenerateSelection;
 use spoke_operations::spoke_schemas::memory_reflections_list_request::ReadSelection as ListSelection;
 use spoke_operations::spoke_schemas::memory_reflections_state_request::ReadSelection as StateSelection;
+use spoke_operations::spoke_schemas::reflection::ReflectionCostUnitKind;
+use spoke_operations::spoke_schemas::{
+    ExtensionKey, MemoryReceipt, MemoryReflectionsGenerateRequest, MemoryReflectionsListRequest,
+    MemoryReflectionsStateRequest,
+};
 use spoke_operations::{
-    is_freeze_allowlisted, jcs_sha256_hex, validate_memory_reflections_list,
-    validate_memory_reflections_state, GrantRequirement, SpokeReject, SpokeRejectCode,
-    SpokeResult,
+    is_freeze_allowlisted, jcs_sha256_hex, validate_memory_reflections_generate,
+    validate_memory_reflections_list, validate_memory_reflections_state, GrantRequirement,
+    SpokeReject, SpokeRejectCode, SpokeResult,
 };
 use sqlx::{Row, SqliteConnection};
 use std::num::NonZeroU64;
+use std::str::FromStr;
+use uuid::Uuid;
 
+use crate::candidates::{
+    receipt_id, release_expired_binding_in_tx, required_capabilities, resolve_replay,
+    settle_receipt_in_tx, stage_receipt_in_tx, Admitted, Mutation, ReceiptState, ReceiptTarget,
+    ReplayResolution,
+};
+use crate::faults::FaultPoint;
 use crate::policy::describe_body;
 use crate::provider::FixtureMemoryProvider;
 use crate::spaces::{
-    internal, internal_failure, is_authorized, load_grants, snapshot_marker, ENGINE_POLICY_VERSION,
-    MAX_PAGE_SIZE,
+    bump_snapshot, internal, internal_failure, is_authorized, load_grants, snapshot_marker,
+    ENGINE_POLICY_VERSION, MAX_PAGE_SIZE,
 };
+use crate::storage::FixtureStore;
+use crate::FixtureError;
 
 /// The grant facets one reflection request's selection needs (§6.5).
 ///
@@ -965,6 +979,496 @@ impl FixtureMemoryProvider {
         });
         Ok(records)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Generate: `memory.reflections.generate` — two-transaction pending→terminal
+// receipt flow with the GenerationPause/GenerationFailure fault points
+// ---------------------------------------------------------------------------
+
+/// The fixture's content-free generation cost: one published-pattern unit kind
+/// charged exactly once, on the terminal committed receipt (C-078). The kind
+/// is validated through the published pattern types at the only place one is
+/// minted; the reflection's `extensions` stay the empty map, so no extension
+/// key is ever invented here.
+const GENERATION_COST_UNIT_KIND: &str = "fixture_reflection_unit";
+const GENERATION_COST_UNITS: i64 = 1;
+
+/// §14.3: the caller cannot tell whether the mutation committed.
+fn outcome_uncertain() -> SpokeReject {
+    SpokeReject {
+        code: SpokeRejectCode::OutcomeUncertain,
+        message: "the mutation's commit state is unknown; resolve with the same idempotency key \
+                  or memory.receipts.get"
+            .to_owned(),
+        details: None,
+    }
+}
+
+/// A commit that failed may still have taken effect (§14.3).
+fn commit_unknown() -> SpokeReject {
+    SpokeReject {
+        code: SpokeRejectCode::OutcomeUncertain,
+        message: "the transaction's commit state is unknown; resolve with the same idempotency \
+                  key or memory.receipts.get"
+            .to_owned(),
+        details: None,
+    }
+}
+
+/// A fixture fault that ended before this operation committed anything. §14.2
+/// allows the retryable internal class only when no effect committed, which
+/// holds at every site this is raised.
+fn fault_before_effect(point: FaultPoint) -> SpokeReject {
+    SpokeReject {
+        code: SpokeRejectCode::InternalError,
+        message: format!("fixture fault hold at {point:?} ended before any effect was committed"),
+        details: None,
+    }
+}
+
+fn insufficient_data() -> SpokeReject {
+    SpokeReject {
+        code: SpokeRejectCode::InsufficientData,
+        message: "no authorized source records for the pinned selection".to_owned(),
+        details: None,
+    }
+}
+
+fn revision_conflict() -> SpokeReject {
+    SpokeReject {
+        code: SpokeRejectCode::RevisionConflict,
+        message: "expected_state_digest does not match the current basis".to_owned(),
+        details: None,
+    }
+}
+
+/// §7.27 admission, fail-closed: the required-profile and sufficiency
+/// preconditions, in the local provider's order (profiles first, then
+/// sufficiency, then the CAS digest). Returns the live source records and the
+/// profile revisions the committed basis pins.
+#[allow(clippy::too_many_arguments)]
+async fn check_generate_policy(
+    conn: &mut SqliteConnection,
+    space_id: &str,
+    subject_id: &str,
+    status: &str,
+    target: &ReflectionTarget,
+    selection_value: &Value,
+    filter: Option<&Value>,
+    expected_state_digest: &str,
+) -> Result<(Vec<BasisRecord>, Vec<(String, i64)>), SpokeReject> {
+    let profiles = load_profile_revisions(conn, space_id, subject_id).await?;
+    let missing = missing_required_profile_kinds(&profiles)?;
+    if !missing.is_empty() {
+        return Err(SpokeReject {
+            code: SpokeRejectCode::ProfileIncomplete,
+            message: format!("required profile kinds absent: {missing:?}"),
+            details: Some(Map::from_iter([("missing".to_owned(), json!(missing))])),
+        });
+    }
+    let records = load_basis_records(conn, space_id, subject_id).await?;
+    let mut records: Vec<BasisRecord> = if status == "archived" {
+        Vec::new()
+    } else {
+        records
+    };
+    records.retain(|record| {
+        target_admits(target, &record.visibility, record.context_id.as_deref())
+            && filter_admits(&record.provenance, filter)
+    });
+    if !sufficient(records.len()) {
+        return Err(insufficient_data());
+    }
+    let source_set: Vec<(&str, i64)> = records
+        .iter()
+        .map(|record| (record.record_id.as_str(), record.revision))
+        .collect();
+    let canonical = canonical_basis_object(selection_value, filter, &profiles, &source_set);
+    if basis_digest(&canonical)? != expected_state_digest {
+        return Err(revision_conflict());
+    }
+    Ok((records, profiles))
+}
+
+/// What transaction 1 of a generate run decided.
+enum PendingGenerate {
+    /// The identical admitted replay: return the stored receipt, no effect.
+    Replayed(Box<MemoryReceipt>),
+    /// The pending receipt is staged on the caller's uncommitted transaction.
+    Staged(Box<StagedGenerate>),
+}
+
+/// The facts transaction 2 needs about the staged pending receipt.
+struct StagedGenerate {
+    space_id: String,
+    subject_id: String,
+    receipt_id: String,
+    filter_value: Option<Value>,
+    records: Vec<BasisRecord>,
+    profiles: Vec<(String, i64)>,
+}
+
+impl FixtureMemoryProvider {
+    /// Transaction 1 of [`Self::reflection_generate`], on the caller's
+    /// uncommitted transaction: current authorization, replay resolution
+    /// (with the expired-key release), the §7.27 policy + `expected_state_digest`
+    /// CAS, then the pending receipt staging. Never commits.
+    async fn stage_pending_generate_in_tx(
+        &self,
+        conn: &mut SqliteConnection,
+        principal_id: &str,
+        op: &'static str,
+        admitted: &Admitted<MemoryReflectionsGenerateRequest>,
+        now: DateTime<Utc>,
+    ) -> Result<PendingGenerate, SpokeReject> {
+        let request = admitted.request();
+        let space_id = request.space_id.as_str();
+        let subject_id = request.subject_id.as_str();
+        let target = ReflectionTarget::from_generate(&request.selection);
+        self.require_reflection_admitted(
+            conn,
+            principal_id,
+            op,
+            space_id,
+            subject_id,
+            &target,
+            request.cognition_filter.is_some(),
+            now,
+        )
+        .await?;
+        let mutation = Mutation::keyed(op, request.idempotency_key.as_str(), admitted);
+        match resolve_replay(conn, space_id, principal_id, &mutation, now).await? {
+            ReplayResolution::Replayed(receipt) => return Ok(PendingGenerate::Replayed(receipt)),
+            ReplayResolution::KeyReusable { receipt_id } => {
+                release_expired_binding_in_tx(conn, space_id, principal_id, &mutation, &receipt_id)
+                    .await?;
+            }
+            ReplayResolution::Fresh => {}
+        }
+        let status = subject_status(conn, space_id, subject_id).await?;
+        let selection_value =
+            serde_json::to_value(&request.selection).map_err(internal_failure)?;
+        let filter_value = request
+            .filter
+            .as_ref()
+            .map(|filter| serde_json::to_value(filter).map_err(internal_failure))
+            .transpose()?;
+        let (records, profiles) = check_generate_policy(
+            conn,
+            space_id,
+            subject_id,
+            &status,
+            &target,
+            &selection_value,
+            filter_value.as_ref(),
+            request.expected_state_digest.as_str(),
+        )
+        .await?;
+        let capabilities = required_capabilities(op)
+            .ok_or_else(|| internal(format!("{op} has no published capability list")))?;
+        let contexts: Vec<&str> = target.context_ids.iter().map(String::as_str).collect();
+        let receipt_target = ReceiptTarget::new(
+            capabilities,
+            Some(subject_id),
+            &contexts,
+            target.reads_shared,
+            target.subject_all,
+        )?;
+        let receipt_id = receipt_id();
+        stage_receipt_in_tx(
+            conn,
+            space_id,
+            principal_id,
+            &mutation,
+            &receipt_id,
+            &receipt_target,
+            ReceiptState::Pending,
+            now,
+        )
+        .await?;
+        Ok(PendingGenerate::Staged(Box::new(StagedGenerate {
+            space_id: space_id.to_owned(),
+            subject_id: subject_id.to_owned(),
+            receipt_id,
+            filter_value,
+            records,
+            profiles,
+        })))
+    }
+
+    /// [`Self::reflection_generate`] on the whole provider: the fault points
+    /// bracket both transactions of the two-transaction flow.
+    pub(crate) async fn reflection_generate(
+        &self,
+        principal_id: &str,
+        admitted: &Admitted<MemoryReflectionsGenerateRequest>,
+        now: DateTime<Utc>,
+    ) -> Result<MemoryReceipt, SpokeReject> {
+        let request = admitted.request();
+        checked(validate_memory_reflections_generate(request))?;
+        // Bounded test-only admission pause before the writer transaction: a
+        // competing identical admission can commit terminally while this one
+        // waits, and this one then replays that terminal receipt (C-070/C-076).
+        self.faults()
+            .hold(FaultPoint::AdmissionPause)
+            .await
+            .map_err(|_| fault_before_effect(FaultPoint::AdmissionPause))?;
+
+        // Transaction 1: current authorization, replay resolution, §7.27
+        // policy + `expected_state_digest` CAS, then the pending receipt.
+        let mut transaction = self.begin_write().await?;
+        let pending = match self
+            .stage_pending_generate_in_tx(
+                &mut transaction,
+                principal_id,
+                "memory.reflections.generate",
+                admitted,
+                now,
+            )
+            .await?
+        {
+            PendingGenerate::Replayed(receipt) => {
+                let _ = transaction.rollback().await;
+                return Ok(*receipt);
+            }
+            PendingGenerate::Staged(pending) => pending,
+        };
+        // Pre-commit loss: dropping the staged transaction leaves no pending
+        // receipt, dedup row or target behind.
+        self.faults()
+            .hold(FaultPoint::BeforeCommit)
+            .await
+            .map_err(|_| fault_before_effect(FaultPoint::BeforeCommit))?;
+        if self.faults().trip(FaultPoint::BeforeCommit) {
+            transaction.rollback().await.map_err(internal_failure)?;
+            return Err(outcome_uncertain());
+        }
+        transaction.commit().await.map_err(|_| commit_unknown())?;
+        // Armed before the operation: the pending receipt is durable and the
+        // generation never ran (alternate C-015 shape).
+        if self.faults().trip(FaultPoint::AfterCommitBeforeResponse) {
+            return Err(outcome_uncertain());
+        }
+        // Bounded hold with the pending receipt observable (`status = pending`
+        // over `memory.receipts.get`); it is also the arming window that
+        // targets transaction 2 with the one-shot points.
+        self.faults()
+            .hold(FaultPoint::GenerationPause)
+            .await
+            .map_err(|_| outcome_uncertain())?;
+
+        // The fixture-deterministic generation step (C-078 one-shot fail):
+        // an honest failure is a terminal `failed` receipt with an error
+        // envelope and retry class, and no cost is ever charged for it.
+        let generation_failed = self.faults().trip(FaultPoint::GenerationFailure);
+
+        // Transaction 2: settle the pending receipt to exactly one terminal
+        // outcome (the reflection row commits with it, MEM-R009). An abort
+        // here leaves the pending receipt recoverable; the
+        // never-return-to-pending rule keeps the settle one-way.
+        let mut transaction = self.begin_write().await?;
+        let terminal = if generation_failed {
+            ReceiptState::Failed(internal("the fixture's deterministic generation step failed"))
+        } else {
+            let reflection_id = format!("refl_{}", Uuid::new_v4().simple());
+            insert_generated_reflection(
+                &mut transaction,
+                &pending.space_id,
+                &pending.subject_id,
+                principal_id,
+                request,
+                pending.filter_value.as_ref(),
+                &pending.records,
+                &pending.profiles,
+                now,
+                &reflection_id,
+            )
+            .await?;
+            ReceiptState::Committed(json!({
+                "reflection_id": reflection_id,
+                "cost": {
+                    "unit_kind": GENERATION_COST_UNIT_KIND,
+                    "units": GENERATION_COST_UNITS,
+                },
+            }))
+        };
+        let receipt =
+            match settle_receipt_in_tx(&mut transaction, &pending.space_id, &pending.receipt_id, terminal, now).await
+            {
+                Ok(receipt) => receipt,
+                Err(reject) => {
+                    let _ = transaction.rollback().await;
+                    return Err(reject);
+                }
+            };
+        self.faults()
+            .hold(FaultPoint::BeforeCommit)
+            .await
+            .map_err(|_| outcome_uncertain())?;
+        if self.faults().trip(FaultPoint::BeforeCommit) {
+            transaction.rollback().await.map_err(internal_failure)?;
+            return Err(outcome_uncertain());
+        }
+        transaction.commit().await.map_err(|_| commit_unknown())?;
+        // Armed during the generation pause: the terminal receipt is durable
+        // but the response is lost; a same-key replay returns it (C-070/C-071).
+        if self.faults().trip(FaultPoint::AfterCommitBeforeResponse) {
+            return Err(outcome_uncertain());
+        }
+        self.faults()
+            .hold(FaultPoint::ResponseDrop)
+            .await
+            .map_err(|_| outcome_uncertain())?;
+        Ok(receipt)
+    }
+}
+
+/// Insert the immutable reflection row a committed generate run publishes, on
+/// the caller's transaction 2 (MEM-R009: the row and its terminal receipt
+/// commit together). The pinned basis carries exactly the four published
+/// `ReflectionBasis` members plus the fixture-private `source_ids`; the body
+/// is the fixture's deterministic text, never an emulated model answer.
+#[allow(clippy::too_many_arguments)]
+async fn insert_generated_reflection(
+    conn: &mut SqliteConnection,
+    space_id: &str,
+    subject_id: &str,
+    principal_id: &str,
+    request: &MemoryReflectionsGenerateRequest,
+    filter: Option<&Value>,
+    records: &[BasisRecord],
+    profiles: &[(String, i64)],
+    now: DateTime<Utc>,
+    reflection_id: &str,
+) -> Result<(), SpokeReject> {
+    let selection_value = serde_json::to_value(&request.selection).map_err(internal_failure)?;
+    let source_set: Vec<(&str, i64)> = records
+        .iter()
+        .map(|record| (record.record_id.as_str(), record.revision))
+        .collect();
+    let canonical =
+        canonical_basis_object(&selection_value, filter, profiles, &source_set);
+    let state_digest = basis_digest(&canonical)?;
+    let source_set_digest = basis_digest(&json!({ "source_set": source_set }))?;
+    let source_ids: Vec<String> = records
+        .iter()
+        .map(|record| record.record_id.clone())
+        .collect();
+    let mut profile_revisions = Map::new();
+    for (kind, revision) in profiles {
+        profile_revisions.insert(kind.clone(), json!(revision));
+    }
+    let basis = json!({
+        "source_set_digest": source_set_digest,
+        "record_count": source_set.len(),
+        "profile_revisions": profile_revisions,
+        "state_digest": state_digest,
+        PINNED_SOURCE_IDS_KEY: source_ids,
+    });
+    // The published pattern types validate the only cost kind this fixture
+    // mints; the extensions stay the empty map, so no extension key is minted.
+    if ReflectionCostUnitKind::from_str(GENERATION_COST_UNIT_KIND).is_err()
+        || ExtensionKey::from_str(GENERATION_COST_UNIT_KIND).is_err()
+    {
+        return Err(internal(
+            "the generated cost unit kind is not publishable under the protocol patterns",
+        ));
+    }
+    let kinds: Vec<&str> = profiles.iter().map(|(kind, _)| kind.as_str()).collect();
+    let body_text = format!(
+        "Fixture reflection over {} authorized source record(s) (profile kinds: {}); \
+         the pinned basis digest is {}.",
+        source_set.len(),
+        kinds.join(", "),
+        state_digest,
+    );
+    sqlx::query(
+        "INSERT INTO reflections (reflection_id, space_id, subject_id, \
+         requester_principal_id, selection_json, filter_json, cognition_filter_json, \
+         basis_json, body_text, body_format, cost_unit_kind, cost_units, \
+         engine_policy_version, model, schema_version, revision, extensions_json, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(reflection_id)
+    .bind(space_id)
+    .bind(subject_id)
+    .bind(principal_id)
+    .bind(selection_value.to_string())
+    .bind(filter.map(std::string::ToString::to_string))
+    .bind(
+        request
+            .cognition_filter
+            .as_ref()
+            .map(|filter| serde_json::to_string(filter).map_err(internal_failure))
+            .transpose()?,
+    )
+    .bind(basis.to_string())
+    .bind(&body_text)
+    .bind("markdown")
+    .bind(GENERATION_COST_UNIT_KIND)
+    .bind(GENERATION_COST_UNITS)
+    .bind(ENGINE_POLICY_VERSION)
+    .bind(Option::<String>::None)
+    .bind(1_i64)
+    .bind(1_i64)
+    .bind("{}")
+    .bind(now.to_rfc3339_opts(SecondsFormat::Micros, true))
+    .execute(&mut *conn)
+    .await
+    .map_err(internal_failure)?;
+    // One bump covers both the new row and its terminal receipt: they commit
+    // in this same transaction, and cursors bind to this marker (MEM-R026).
+    bump_snapshot(conn, space_id).await
+}
+
+/// Restart recovery (§8.5): a generate receipt left pending by a lost session
+/// can never complete — the fixture's generation is in-process state — so
+/// reopening the database terminalizes every orphaned pending generate
+/// receipt `failed` (retryable `INTERNAL_ERROR`, no cost). The same rule the
+/// local provider applies, so cross-provider rows observe identical
+/// semantics.
+pub(crate) async fn terminalize_orphaned_generate_receipts(
+    store: &FixtureStore,
+) -> Result<(), FixtureError> {
+    let pool = store.pool();
+    let orphans = sqlx::query(
+        "SELECT space_id, receipt_id FROM receipts \
+         WHERE op = 'memory.reflections.generate' AND status = 'pending'",
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|row| {
+        Ok((
+            row.try_get::<String, _>("space_id")?,
+            row.try_get::<String, _>("receipt_id")?,
+        ))
+    })
+    .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    for (space_id, receipt_id) in orphans {
+        let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
+        let settled = settle_receipt_in_tx(
+            &mut transaction,
+            &space_id,
+            &receipt_id,
+            ReceiptState::Failed(internal(
+                "the provider restarted before the reflection generation completed",
+            )),
+            Utc::now(),
+        )
+        .await;
+        match settled {
+            Ok(_) => transaction.commit().await?,
+            Err(reject) => {
+                return Err(FixtureError::Bootstrap(format!(
+                    "orphaned generate receipt {receipt_id} could not be terminalized: {}",
+                    reject.message
+                )))
+            }
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
