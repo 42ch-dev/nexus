@@ -32,6 +32,11 @@ pub struct FixtureMemoryProvider {
     /// Crate-private: the operation slices pin every request to the durable
     /// space/authority pair this provider serves.
     pub(crate) identity: FixtureIdentity,
+    /// Whether `memory.describe` advertises `spoke-memory-reflection`. The
+    /// deliberately-unadvertised shape still serves all three operations; the
+    /// absent advertisement only makes Connect negotiation answer
+    /// `capability_missing` before dispatch (C-003/C-073 remote continuity).
+    advertises_reflection: bool,
     /// Operator/test-only control (C7 seam): bounded fault points only. It is
     /// in-memory state attached to this provider instance, never persisted and
     /// never consulted as provider authority.
@@ -59,8 +64,31 @@ impl FixtureMemoryProvider {
         Ok(Self {
             store,
             identity,
+            advertises_reflection: true,
             faults: FixtureFaults::new(),
         })
+    }
+
+    /// Open the same database as the deliberately-unadvertised shape: all
+    /// three reflection operations are served, but `memory.describe` omits
+    /// `spoke-memory-reflection`, so Connect negotiation keeps answering
+    /// `capability_missing` for the reflection family (C-003/C-073 remote).
+    ///
+    /// # Errors
+    ///
+    /// Same contract as [`FixtureMemoryProvider::open`].
+    pub async fn open_unadvertised(database_path: &Path) -> Result<Self, FixtureError> {
+        let provider = Self::open(database_path).await?;
+        Ok(Self {
+            advertises_reflection: false,
+            ..provider
+        })
+    }
+
+    /// Whether the describe body advertises `spoke-memory-reflection`.
+    #[must_use]
+    pub const fn advertises_reflection(&self) -> bool {
+        self.advertises_reflection
     }
 
     /// The durable space/authority identity provisioned for this database.

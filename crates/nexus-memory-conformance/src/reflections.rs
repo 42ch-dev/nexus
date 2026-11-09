@@ -557,7 +557,7 @@ const fn sufficient(record_count: usize) -> bool {
 /// `REQUIRED_PROFILE_KINDS` read from the describe body's single source of
 /// truth; the fixture requires no authored kinds, so this stays empty.
 fn required_profile_kinds() -> Result<Vec<String>, SpokeReject> {
-    serde_json::from_value(describe_body()["required_profile_kinds"].clone())
+    serde_json::from_value(describe_body(true)["required_profile_kinds"].clone())
         .map_err(|error| internal(format!("describe body carries malformed profile kinds: {error}")))
 }
 

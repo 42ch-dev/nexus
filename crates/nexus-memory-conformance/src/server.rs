@@ -23,9 +23,10 @@
 //!   `details.retry_class` at the service boundary without losing their code,
 //!   message or existing details.
 //!
-//! The optional reflection and transfer families are not served: their methods
-//! answer the SDK's terminal capability refusal and `memory.describe` never
-//! advertises them.
+//! The reflection family is served (advertised exactly when the provider is
+//! constructed advertised); the optional transfer family is not served: its
+//! methods answer the SDK's terminal capability refusal and `memory.describe`
+//! never advertises it.
 
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -628,8 +629,9 @@ impl MemoryPort for FixtureMemoryProvider {
         _request: MemoryDescribeRequest,
     ) -> SpokeResult<MemoryDescribeResponse> {
         // §7.1: no grant is required, only authenticated admission — which the
-        // service face already performed.
-        respond(describe_body())
+        // service face already performed. The capability list is honest for
+        // this provider's construction shape.
+        respond(describe_body(self.advertises_reflection()))
     }
 
     async fn list_spaces(
