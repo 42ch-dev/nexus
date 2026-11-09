@@ -4559,19 +4559,20 @@ enum RecordMutation<'a> {
 // write-time flag the insert recorded. The reflection ops (`mod.rs`) are the
 // consumers, landing with Tasks 2–4 of v230-n4r-local-reflection.
 
-#[allow(dead_code)] // consumed by the reflection ops (same plan, Tasks 2–4)
 const REFLECTION_COLUMNS: &str = "reflection_id, space_id, subject_id, requester_principal_id, \
      selection_json, filter_json, cognition_filter_json, basis_json, engine_policy_version, \
      model, schema_version, revision, extensions_json, created_at, body_text, body_format, \
      cost_unit_kind, cost_units, stale_cache";
 
 /// One generated reflection envelope as stored (§7.27).
-#[allow(dead_code)] // consumed by the reflection ops (same plan, Tasks 2–4)
 #[derive(Clone, Debug, sqlx::FromRow)]
 pub(super) struct ReflectionRow {
     pub reflection_id: String,
     pub space_id: String,
     pub subject_id: String,
+    // The generate flow (Task 4) consumes both: the replay path names the
+    // requester, §7.26 never serves the write-time staleness cache.
+    #[allow(dead_code)]
     pub requester_principal_id: String,
     pub selection_json: String,
     pub filter_json: Option<String>,
@@ -4587,6 +4588,7 @@ pub(super) struct ReflectionRow {
     pub body_format: String,
     pub cost_unit_kind: Option<String>,
     pub cost_units: Option<f64>,
+    #[allow(dead_code)] // the write-time cache; §7.26 reads never serve it
     pub stale_cache: bool,
 }
 
@@ -4594,7 +4596,7 @@ pub(super) struct ReflectionRow {
 /// Pinned shapes arrive as verbatim JSON text (serialization is the caller's
 /// admission step); `cost` is the wire's one optional object, stored as its two
 /// columns or neither.
-#[allow(dead_code)] // consumed by the reflection ops (same plan, Tasks 2–4)
+#[allow(dead_code)] // consumed by the generate flow (same plan, Task 4)
 pub(super) struct NewReflection<'a> {
     pub reflection_id: &'a str,
     pub space_id: &'a str,
@@ -4618,7 +4620,7 @@ pub(super) struct NewReflection<'a> {
 
 /// Append one reflection envelope. There is no update or delete path: rows are
 /// immutable and never swept.
-#[allow(dead_code)] // consumed by the reflection ops (same plan, Tasks 2–4)
+#[allow(dead_code)] // consumed by the generate flow (same plan, Task 4)
 async fn insert_reflection(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     reflection: &NewReflection<'_>,
@@ -4659,7 +4661,7 @@ async fn insert_reflection(
     Ok(())
 }
 
-#[allow(dead_code)] // consumed by the reflection ops (same plan, Tasks 2–4)
+#[allow(dead_code)] // consumed by the generate flow (same plan, Task 4)
 async fn reflection_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     space_id: &str,
@@ -4674,6 +4676,342 @@ async fn reflection_in_tx(
         .bind(reflection_id)
         .fetch_optional(&mut **tx)
         .await?)
+}
+
+// ── Reflection reads (§7.25–§7.26, N4-R Task 3) ─────────────────────────
+//
+// The read-time staleness mechanism (C-042): the provider recomposes its
+// canonical basis object over the *current* authorized set on every read and
+// compares digests — there are no eager invalidation writes and the stored
+// `stale_cache` is never consulted. The digest composition itself lives on the
+// provider side (`super::reflection_state_digest`/`reflection_source_set_digest`);
+// this layer owns the authorized sets, the pinned-basis comparisons and the
+// tombstone exclusion (C-077), all inside one read transaction.
+
+/// The §7.25 state snapshot: the authorized source-record identity set (live
+/// rows only — a tombstoned row leaves the authorized set at read time,
+/// C-077) and the subject's profile revisions. Pairs sorted by id, then
+/// revision.
+pub(super) struct ReflectionBasisSnapshot {
+    pub records: Vec<(String, i64)>,
+    pub profile_revisions: Vec<(String, i64)>,
+}
+
+/// One visible reflection envelope plus the staleness this read recomputed
+/// against its pinned basis (§7.26) — never the stored write-time cache.
+pub(super) struct VisibleReflection {
+    pub row: ReflectionRow,
+    pub stale: bool,
+}
+
+/// The authorized record identity set for one selection/filter, split into its
+/// live and tombstoned halves (C-077's two sides), each sorted. Tombstones
+/// keep their placement and provenance columns, so the predicate reaches them;
+/// counting them back in is how a pinned basis proves its only delta was
+/// tombstoning.
+async fn reflection_record_sets(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    selection: &Selection,
+    filter: Option<&[String]>,
+    space_id: &str,
+    subject_id: &str,
+) -> StoreResult<(Vec<(String, i64)>, Vec<(String, i64)>)> {
+    let (where_sql, binds) = record_predicate(selection, filter, &[], true, space_id, subject_id);
+    let sql = format!(
+        "SELECT record_id, revision, tombstone_json IS NOT NULL \
+         FROM memory_records{where_sql}"
+    );
+    let mut rows = sqlx::query_as::<_, (String, i64, bool)>(sqlx::AssertSqlSafe(sql));
+    for bind in &binds {
+        rows = rows.bind(bind);
+    }
+    let mut live = Vec::new();
+    let mut tombstones = Vec::new();
+    for (record_id, revision, tombstoned) in rows.fetch_all(&mut **tx).await? {
+        if tombstoned {
+            tombstones.push((record_id, revision));
+        } else {
+            live.push((record_id, revision));
+        }
+    }
+    live.sort();
+    tombstones.sort();
+    Ok((live, tombstones))
+}
+
+/// The subject's authored profile kinds with their revisions, sorted by kind.
+async fn profile_revisions_in_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    space_id: &str,
+    subject_id: &str,
+) -> StoreResult<Vec<(String, i64)>> {
+    let mut rows = sqlx::query_as::<_, (String, i64)>(
+        "SELECT profile_kind, revision FROM memory_profiles \
+         WHERE space_id = ? AND subject_id = ? ORDER BY profile_kind",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    rows.sort();
+    Ok(rows)
+}
+
+/// A reflection row's pinned filter column as the provenance id list the
+/// predicate and the digest composition read; an absent column is no filter.
+fn pinned_filter(raw: Option<&String>) -> StoreResult<Option<Vec<String>>> {
+    raw.map(|raw| {
+        let filter: Value = serde_json::from_str(raw)
+            .map_err(|error| StoreError::Corrupt(format!("reflection filter: {error}")))?;
+        filter
+            .get("source_context_ids")
+            .and_then(Value::as_array)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .ok_or_else(|| {
+                StoreError::Corrupt("reflection filter names no source_context_ids".to_string())
+            })
+    })
+    .transpose()
+}
+
+/// §7.26/§7.27 read-time staleness and the C-077 exclusion for one pinned
+/// basis. `stale` is true iff the current authorized basis — recomposed under
+/// the pinned selection/filter — differs from the pinned basis digest. The row
+/// is excluded iff recomposing the source set *with its tombstones counted
+/// back in* reproduces the pinned source-set digest while the live set does
+/// not: the basis's only delta is tombstoning, so the deleted content must not
+/// leak through the derived envelope. Every other delta edits, additions,
+/// profile or policy changes — stays listed and reports honest staleness.
+#[allow(clippy::type_complexity)]
+fn pinned_staleness(
+    live: &[(String, i64)],
+    counting_tombstones: &[(String, i64)],
+    profile_revisions: &[(String, i64)],
+    selection: &Selection,
+    filter: Option<&[String]>,
+    basis_json: &str,
+) -> StoreResult<(bool, bool)> {
+    let basis: Value = serde_json::from_str(basis_json)
+        .map_err(|error| StoreError::Corrupt(format!("reflection basis: {error}")))?;
+    let pinned_member = |member: &str| {
+        basis
+            .get(member)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| StoreError::Corrupt(format!("reflection basis has no {member}")))
+    };
+    let pinned_source_set = pinned_member("source_set_digest")?;
+    let pinned_state = pinned_member("state_digest")?;
+    let state = super::reflection_state_digest(live, profile_revisions, selection, filter)
+        .map_err(StoreError::Corrupt)?;
+    let source_live =
+        super::reflection_source_set_digest(live).map_err(StoreError::Corrupt)?;
+    let source_counting =
+        super::reflection_source_set_digest(counting_tombstones).map_err(StoreError::Corrupt)?;
+    Ok((
+        state != pinned_state,
+        source_counting == pinned_source_set && source_live != pinned_source_set,
+    ))
+}
+
+/// The MEM-R026 invalidation marker for a reflection page: a digest over the
+/// visible envelope set, *every* record identity of the subject (live and
+/// tombstoned — any basis-affecting change rebinds an outstanding cursor even
+/// when no reflection row moved), the space's grant revisions and the subject
+/// status. A state or grant change therefore answers a stale cursor with
+/// `CURSOR_INVALID` (§7.0.7).
+fn reflection_marker(
+    reflections: &[(String, i64)],
+    records: &[(String, i64)],
+    grants: &[GrantRow],
+    subject_status: Option<&str>,
+) -> StoreResult<String> {
+    let mut reflections = reflections.to_vec();
+    reflections.sort();
+    let mut grant_revisions: Vec<(String, i64)> = grants
+        .iter()
+        .map(|grant| (grant.grant_id.clone(), grant.revision))
+        .collect();
+    grant_revisions.sort();
+    match super::digest_value(json!({
+        "records": records,
+        "reflections": reflections,
+        "grants": grant_revisions,
+        "subject": subject_status,
+    })) {
+        Ok(digest) => Ok(digest),
+        Err(error) => Err(StoreError::Corrupt(error)),
+    }
+}
+
+impl MemoryStore {
+    /// §7.25 state read path: the authorized basis snapshot for one
+    /// selection/filter under the caller's *current* `reflect` coverage — the
+    /// authoritative store-clock check the provider-level admission only
+    /// previews. One transaction, one snapshot.
+    pub(super) async fn reflection_basis(
+        &self,
+        space_id: &str,
+        subject_id: &str,
+        selection: &Selection,
+        filter: Option<&[String]>,
+        principal_id: &str,
+    ) -> StoreResult<ReflectionBasisSnapshot> {
+        self.require_provisioned(space_id).await?;
+        let (mut tx, now) = self.begin_read().await?;
+        space_in_tx(&mut tx, space_id).await?;
+        let grant_rows = grants_in_tx(&mut tx, space_id).await?;
+        let grants = wire_grants(&grant_rows)?;
+        if !covered(
+            &grants,
+            principal_id,
+            space_id,
+            now,
+            &selection.base_requirement("reflect", subject_id),
+        ) {
+            return Err(StoreError::NotAuthorized(format!(
+                "principal {principal_id} holds no reflect grant covering the selection"
+            )));
+        }
+        let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
+        // §5.2/D-10: an unsettled file intent withholds the subject from reads.
+        if withheld(unsettled.as_deref(), subject_id)? {
+            tx.commit().await?;
+            return Ok(ReflectionBasisSnapshot {
+                records: Vec::new(),
+                profile_revisions: Vec::new(),
+            });
+        }
+        let (records, _tombstones) =
+            reflection_record_sets(&mut tx, selection, filter, space_id, subject_id).await?;
+        let profile_revisions = profile_revisions_in_tx(&mut tx, space_id, subject_id).await?;
+        tx.commit().await?;
+        Ok(ReflectionBasisSnapshot {
+            records,
+            profile_revisions,
+        })
+    }
+
+    /// §7.26 list read path (and §7.25's `last_reflection_id` pick): every
+    /// reflection envelope of the subject this principal may see, newest
+    /// first, with staleness recomputed per row at read time and C-077 rows
+    /// excluded. Visible means all of: the caller's current `reflect`
+    /// coverage admits the reflection's pinned selection, the request's
+    /// selection scope covers the pin (an absent request selection narrows to
+    /// the caller's covered reflections only), and the pin's basis delta is
+    /// not tombstoning. The marker binds the page to the snapshot it was cut
+    /// from, so any state or grant change invalidates outstanding cursors.
+    pub(super) async fn reflections(
+        &self,
+        space_id: &str,
+        subject_id: &str,
+        request_selection: Option<&Selection>,
+        principal_id: &str,
+    ) -> StoreResult<(Vec<VisibleReflection>, String, u64)> {
+        self.require_provisioned(space_id).await?;
+        let (mut tx, now) = self.begin_read().await?;
+        space_in_tx(&mut tx, space_id).await?;
+        let grant_rows = grants_in_tx(&mut tx, space_id).await?;
+        let grants = wire_grants(&grant_rows)?;
+        let subject_row = subject_in_tx(&mut tx, space_id, subject_id).await?;
+        let subject_status = subject_row.as_ref().map(|subject| subject.status.clone());
+        let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
+        if withheld(unsettled.as_deref(), subject_id)? {
+            tx.commit().await?;
+            let marker = reflection_marker(&[], &[], &grant_rows, subject_status.as_deref())?;
+            return Ok((Vec::new(), marker, 0));
+        }
+        let profile_revisions = profile_revisions_in_tx(&mut tx, space_id, subject_id).await?;
+        // Every record identity of the subject, live and tombstoned: the
+        // cursor marker must move on any basis-affecting change (MEM-R026).
+        let (all_live, all_tombstones) =
+            reflection_record_sets(&mut tx, &Selection::SubjectAll, None, space_id, subject_id)
+                .await?;
+        let mut all_records = all_live;
+        all_records.extend(all_tombstones);
+        let sql = format!(
+            "SELECT {REFLECTION_COLUMNS} FROM memory_reflections \
+             WHERE space_id = ? AND subject_id = ? \
+             ORDER BY created_at DESC, reflection_id DESC"
+        );
+        let rows = sqlx::query_as::<_, ReflectionRow>(sqlx::AssertSqlSafe(sql))
+            .bind(space_id)
+            .bind(subject_id)
+            .fetch_all(&mut *tx)
+            .await?;
+        // Per distinct pinned selection/filter, one recomputation of the
+        // record sets the staleness verdict and the C-077 exclusion read;
+        // envelopes sharing a pin share a probe.
+        let mut probes: HashMap<(String, String), (bool, bool)> = HashMap::new();
+        let mut visible = Vec::with_capacity(rows.len());
+        for row in rows {
+            let pinned = super::pinned_selection(&row.selection_json)
+                .map_err(StoreError::Corrupt)?;
+            let filter = pinned_filter(row.filter_json.as_ref())?;
+            let (stale, excluded) = {
+                let key = (
+                    row.selection_json.clone(),
+                    row.filter_json.clone().unwrap_or_default(),
+                );
+                if let Some(&probe) = probes.get(&key) {
+                    probe
+                } else {
+                    let (live, tombstones) = reflection_record_sets(
+                        &mut tx,
+                        &pinned,
+                        filter.as_deref(),
+                        space_id,
+                        subject_id,
+                    )
+                    .await?;
+                    let mut counting = live.clone();
+                    counting.extend(tombstones);
+                    counting.sort();
+                    let probe = pinned_staleness(
+                        &live,
+                        &counting,
+                        &profile_revisions,
+                        &pinned,
+                        filter.as_deref(),
+                        &row.basis_json,
+                    )?;
+                    probes.insert(key, probe);
+                    probe
+                }
+            };
+            if excluded
+                || !covered(
+                    &grants,
+                    principal_id,
+                    space_id,
+                    now,
+                    &pinned.base_requirement("reflect", subject_id),
+                )
+                || !super::selection_scope_covers(&pinned, request_selection)
+            {
+                continue;
+            }
+            visible.push(VisibleReflection { row, stale });
+        }
+        tx.commit().await?;
+        let marker_set: Vec<(String, i64)> = visible
+            .iter()
+            .map(|visible| (visible.row.reflection_id.clone(), visible.row.revision))
+            .collect();
+        let marker = reflection_marker(
+            &marker_set,
+            &all_records,
+            &grant_rows,
+            subject_status.as_deref(),
+        )?;
+        let total = u64::try_from(visible.len()).unwrap_or(u64::MAX);
+        Ok((visible, marker, total))
+    }
 }
 
 impl MemoryStore {

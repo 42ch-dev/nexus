@@ -65,8 +65,8 @@ use nexus_local_db::LocalDbError;
 use storage::{
     Admission, CandidateRow, CaptureError, Coverage, Fence, FenceAction, FenceTarget, GrantRow,
     MemoryStore, MigrationOutcome, NewCandidate, NewGrant, OpContext, Placement, ProfileRow,
-    ReceiptRow, RecordRead, RecordRow, ReviewDecision, Selection, SpaceRow, StoreError, SubjectRow,
-    RECEIPT_FAILED, RECEIPT_PENDING,
+    ReceiptRow, RecordRead, RecordRow, ReflectionRow, ReviewDecision, Selection, SpaceRow,
+    StoreError, SubjectRow, RECEIPT_FAILED, RECEIPT_PENDING,
 };
 
 /// The Character binding a binding-local capture stands on (compass D15).
@@ -707,6 +707,179 @@ fn cognition_refusal(present: bool) -> Option<ProviderError> {
             .to_string(),
         details: None,
     })
+}
+
+// ── Reflection read-time basis mechanism (§7.25–§7.27, N4-R) ────────────
+//
+// Staleness is computed, never stored (C-042/MEM-R013): every read recomposes
+// the canonical basis object over the *current* authorized set and compares
+// 64-hex digests. No eager invalidation writes exist — a basis-affecting
+// change (record create/update/delete/promote, profile update, any
+// authorization change altering the authorized set) is observed at the next
+// read, which is the whole mechanism. The storage layer owns the authorized
+// sets and runs the same compositions inside its read transaction.
+
+/// 64-hex over a canonical basis object. The error is the reject's message
+/// text: the composition runs on both sides of the module boundary (storage
+/// reads and this facade), and each wraps it in its own error type.
+fn digest_value(value: Value) -> Result<String, String> {
+    match jcs_sha256_hex(&value) {
+        SpokeResult::Ok(digest) => Ok(digest),
+        SpokeResult::Reject(reject) => Err(reject.message),
+    }
+}
+
+/// §7.27 `source_set_digest`: 64-hex over the authorized source record id +
+/// revision set — sorted `[record_id, revision]` pairs, the caller's contract.
+fn reflection_source_set_digest(records: &[(String, i64)]) -> Result<String, String> {
+    digest_value(json!({ "records": records }))
+}
+
+/// §7.25 `state_digest`: the provider-composed canonical object of the
+/// current authorized basis — sorted record pairs, profile revisions, the
+/// selection/filter resolution, and the engine policy version. It is the
+/// shape both the `state` op publishes as its CAS token and a pinned basis
+/// carries, so the §7.26 staleness comparison is one recomputation.
+fn reflection_state_digest(
+    records: &[(String, i64)],
+    profile_revisions: &[(String, i64)],
+    selection: &Selection,
+    filter: Option<&[String]>,
+) -> Result<String, String> {
+    digest_value(json!({
+        "engine_policy_version": policy::ENGINE_POLICY_VERSION,
+        "filter": filter_key(filter),
+        "profile_revisions": profile_revisions,
+        "records": records,
+        "selection": selection_key(selection),
+    }))
+}
+
+/// A pinned selection column parsed back into the §6.12 read selection. The
+/// column is verbatim wire JSON; anything else is a broken projection.
+fn pinned_selection(raw: &str) -> Result<Selection, String> {
+    let value = json_member(raw, "pinned selection").map_err(|error| error.message())?;
+    match value.get("mode").and_then(Value::as_str) {
+        Some("subject_all") => Ok(Selection::SubjectAll),
+        Some("shared_only") => Ok(Selection::SharedOnly),
+        Some("selected_contexts") => Ok(Selection::SelectedContexts {
+            context_ids: value
+                .get("context_ids")
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            include_shared: value
+                .get("include_shared")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        _ => Err(format!("pinned selection: unknown selection mode in {raw}")),
+    }
+}
+
+/// Whether a request's selection scope covers a reflection pinned to
+/// `pinned` (§7.26: a present request selection restricts the listing to the
+/// reflections it covers; an absent one names no restriction beyond the
+/// caller's own coverage). Coverage is scope containment — a pin never
+/// reaches past its request's scope.
+fn selection_scope_covers(pinned: &Selection, requested: Option<&Selection>) -> bool {
+    let Some(requested) = requested else {
+        return true;
+    };
+    match (pinned, requested) {
+        (_, Selection::SubjectAll) => true,
+        (Selection::SharedOnly, Selection::SharedOnly) => true,
+        (
+            Selection::SharedOnly,
+            Selection::SelectedContexts {
+                include_shared, ..
+            },
+        ) => *include_shared,
+        (
+            Selection::SelectedContexts {
+                context_ids,
+                include_shared,
+            },
+            Selection::SelectedContexts {
+                context_ids: requested_ids,
+                include_shared: requested_shared,
+            },
+        ) => {
+            context_ids
+                .iter()
+                .all(|context_id| requested_ids.contains(context_id))
+                && (!*include_shared || *requested_shared)
+        }
+        // A pin reaching past its request's scope — `subject_all` under a
+        // restricted request, context pins under `shared_only` — is uncovered.
+        _ => false,
+    }
+}
+
+/// §7.25 provider policy verdict over the authorized basis: the protocol
+/// defines no numeric thresholds, so this provider calls an empty authorized
+/// basis insufficient and any non-empty one sufficient. Generation refuses
+/// `INSUFFICIENT_DATA` on exactly the same verdict.
+fn data_sufficiency(record_count: usize) -> &'static str {
+    if record_count == 0 {
+        "insufficient"
+    } else {
+        "sufficient"
+    }
+}
+
+/// §7.27 envelope projection. The pinned `selection`/`filter`/`basis` columns
+/// are served verbatim (published array shapes preserved, absent optionals
+/// never `null`-substituted); `stale` is the read's own recomputation, never
+/// the stored write-time cache; `cost` and `generator.model` exist only when
+/// the row carries them.
+fn reflection_body(row: &ReflectionRow, stale: bool) -> Result<Value, ProviderError> {
+    let mut body = json!({
+        "reflection_id": row.reflection_id,
+        "space_id": row.space_id,
+        "subject_id": row.subject_id,
+        "revision": row.revision,
+        "schema_version": row.schema_version,
+        "created_at": row.created_at,
+        "selection": json_member(&row.selection_json, "reflection selection")?,
+        "basis": json_member(&row.basis_json, "reflection basis")?,
+        "body": { "body": row.body_text, "format": row.body_format },
+        "generator": { "engine_policy_version": row.engine_policy_version },
+        "extensions": json_member(&row.extensions_json, "reflection extensions")?,
+        "stale": stale,
+    });
+    let members = body
+        .as_object_mut()
+        .expect("reflection projection is an object");
+    if let Some(raw) = &row.filter_json {
+        members.insert(
+            "filter".to_string(),
+            json_member(raw, "reflection filter")?,
+        );
+    }
+    if let Some(raw) = &row.cognition_filter_json {
+        members.insert(
+            "cognition_filter".to_string(),
+            json_member(raw, "reflection cognition_filter")?,
+        );
+    }
+    if let (Some(unit_kind), Some(units)) = (&row.cost_unit_kind, row.cost_units) {
+        members.insert(
+            "cost".to_string(),
+            json!({ "unit_kind": unit_kind, "units": units }),
+        );
+    }
+    if let Some(model) = &row.model {
+        if let Some(generator) = members.get_mut("generator").and_then(Value::as_object_mut) {
+            generator.insert("model".to_string(), json!(model));
+        }
+    }
+    Ok(body)
 }
 
 /// §6.10 receipt projection, as every mutating op returns it. A `failed` receipt
@@ -3812,7 +3985,83 @@ impl MemoryPort for LocalMemoryProvider {
         {
             return deny(&error);
         }
-        unsupported(OP_REFLECTIONS_STATE)
+        let principal_id = principal_id(principal);
+        let filter = request
+            .filter
+            .as_ref()
+            .map(|filter| filter.source_context_ids.clone());
+        // §7.25: the basis is published content-free and its digest is composed
+        // over the *current* authorized basis inside the store read (C-042 —
+        // no eager invalidation writes exist), so every basis-affecting fact
+        // shows up at the next read.
+        let snapshot = match self
+            .store
+            .reflection_basis(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                &selection,
+                filter.as_deref(),
+                principal_id,
+            )
+            .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(error) => return deny(&store_error(error)),
+        };
+        let state_digest = match reflection_state_digest(
+            &snapshot.records,
+            &snapshot.profile_revisions,
+            &selection,
+            filter.as_deref(),
+        ) {
+            Ok(digest) => digest,
+            Err(error) => {
+                return deny(&ProviderError::Internal(format!(
+                    "{OP_REFLECTIONS_STATE} basis digest: {error}"
+                )));
+            }
+        };
+        let profile_kinds: Vec<String> = snapshot
+            .profile_revisions
+            .iter()
+            .map(|(kind, _)| kind.clone())
+            .collect();
+        let missing_required_profile_kinds: Vec<String> = policy::REQUIRED_PROFILE_KINDS
+            .iter()
+            .filter(|required| !profile_kinds.iter().any(|kind| kind == *required))
+            .map(|required| (*required).to_string())
+            .collect();
+        // The read-side narrowing is the same one `list` uses: the newest
+        // envelope this caller may see under this selection, excluding
+        // tombstoned-basis rows (C-077). With no envelope to compare against,
+        // `stale` is honestly false — there is no pinned basis that could have
+        // gone stale.
+        let (rows, ..) = match self
+            .store
+            .reflections(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                Some(&selection),
+                principal_id,
+            )
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => return deny(&store_error(error)),
+        };
+        let last = rows.first();
+        let stale = last.is_some_and(|visible| visible.stale);
+        respond(json!({
+            "basis": {
+                "profile_kinds": profile_kinds,
+                "record_count": snapshot.records.len(),
+            },
+            "data_sufficiency": data_sufficiency(snapshot.records.len()),
+            "missing_required_profile_kinds": missing_required_profile_kinds,
+            "stale": stale,
+            "state_digest": state_digest,
+            "last_reflection_id": last.map(|visible| visible.row.reflection_id.clone()),
+        }))
     }
 
     async fn list_reflections(
@@ -3856,7 +4105,69 @@ impl MemoryPort for LocalMemoryProvider {
         {
             return deny(&error);
         }
-        unsupported(OP_REFLECTIONS_LIST)
+        let principal_id = principal_id(principal);
+        let filter = request
+            .filter
+            .as_ref()
+            .map(|filter| filter.source_context_ids.clone());
+        // MEM-R026: the cursor binds everything that decides the page — the
+        // op, space, subject, the selection/filter resolution actually applied
+        // and the engine policy version. Any other request under it is
+        // `CURSOR_INVALID`.
+        let scope = format!(
+            "{}|sel={}|filter={}",
+            cursor_scope(
+                OP_REFLECTIONS_LIST,
+                Some(request.space_id.as_str()),
+                Some(request.subject_id.as_str()),
+                None,
+            ),
+            selection
+                .as_ref()
+                .map(selection_key)
+                .unwrap_or_else(|| "*".to_string()),
+            filter_key(filter.as_deref()),
+        );
+        let (offset, claimed) =
+            match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
+                Ok(page) => page,
+                Err(error) => return deny(&error),
+            };
+        // §7.26: every envelope this caller may see under this selection,
+        // staleness recomputed per row against its pinned basis (the stored
+        // write-time cache is never served), tombstoned-basis rows excluded
+        // (C-077). The marker covers the whole visible set plus every record
+        // identity of the subject and the grant revisions, so any state or
+        // grant change invalidates the cursor with `CURSOR_INVALID`.
+        let (rows, marker, ..) = match self
+            .store
+            .reflections(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                selection.as_ref(),
+                principal_id,
+            )
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => return deny(&store_error(error)),
+        };
+        if let Err(error) = verify_cursor(claimed.as_deref(), &marker) {
+            return deny(&error);
+        }
+        let (page_rows, next) = page(rows, page_limit(request.limit), offset);
+        let mut bodies = Vec::with_capacity(page_rows.len());
+        for visible in &page_rows {
+            match reflection_body(&visible.row, visible.stale) {
+                Ok(body) => bodies.push(body),
+                Err(error) => return deny(&error),
+            }
+        }
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
+        respond(json!({
+            "reflections": bodies,
+            "next_cursor": next_cursor,
+        }))
     }
 
     async fn generate_reflection(
