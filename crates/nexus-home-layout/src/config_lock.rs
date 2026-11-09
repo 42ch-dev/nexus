@@ -507,9 +507,10 @@ pub enum LockAuthority {
 /// [`LockAuthority::Unproven`] and fail closed. A lock the probe creates is
 /// unlinked again before returning; a failed unlink still reports
 /// [`LockAuthority::Writer`] — the authority is proved, and the tokenless
-/// leftover is stolen as stale by the next [`acquire`]. The probe window is
-/// the life of one create call, so a writer racing past it lands in the
-/// existing stale-steal path.
+/// leftover becomes stealable as stale only after the [`STALE_AFTER`] window
+/// (10 s) elapses, the bounded cost the next [`acquire`] pays. The probe
+/// window is the life of one create call, so a writer racing past it lands
+/// in the existing stale-steal path.
 pub fn probe_authority(nexus_home: &Path) -> LockAuthority {
     let path = nexus_home.join(LOCK_FILE);
     match lock_options().open(&path) {
