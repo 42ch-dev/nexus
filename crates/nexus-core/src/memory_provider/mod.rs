@@ -51,10 +51,12 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use spoke_operations::spoke_schemas as schemas;
 use spoke_operations::{
-    jcs_sha256_hex, validate_memory_candidates_list, validate_memory_candidates_review,
-    validate_memory_capture, validate_memory_grants_grant, validate_memory_grants_list,
-    validate_memory_recall, validate_memory_records_create, validate_memory_records_list,
-    validate_memory_records_update, validate_memory_spaces_list, validate_memory_subjects_fence,
+    grant_covers, jcs_sha256_hex, validate_memory_candidates_list,
+    validate_memory_candidates_review, validate_memory_capture, validate_memory_grants_grant,
+    validate_memory_grants_list, validate_memory_recall, validate_memory_records_create,
+    validate_memory_records_list, validate_memory_records_update,
+    validate_memory_reflections_generate, validate_memory_reflections_list,
+    validate_memory_reflections_state, validate_memory_spaces_list, validate_memory_subjects_fence,
     GrantRequirement, IssuedGrant, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult,
 };
 
@@ -106,6 +108,11 @@ const OP_RECORDS_LIST: &str = "memory.records.list";
 const OP_RECORDS_PROMOTE: &str = "memory.records.promote";
 const OP_RECALL: &str = "memory.recall";
 const OP_PROFILE_UPDATE: &str = "memory.profile.update";
+/// The §7.25–§7.27 reflection family (N4-R). Served under the
+/// `spoke-memory-reflection` sub-capability; Task 2 wires their admission.
+const OP_REFLECTIONS_STATE: &str = "memory.reflections.state";
+const OP_REFLECTIONS_LIST: &str = "memory.reflections.list";
+const OP_REFLECTIONS_GENERATE: &str = "memory.reflections.generate";
 /// NXM-5 Task 2's internal op: adopting a legacy-derived object into provider
 /// storage. It is never a wire op — it is the receipt identity of the
 /// just-in-time adoption a dismissal performs **inside the transaction that
@@ -648,6 +655,58 @@ fn grant_body(grant: &GrantRow) -> Result<Value, ProviderError> {
 fn grant_wire(grant: &GrantRow) -> Result<schemas::MemoryGrant, ProviderError> {
     serde_json::from_value(grant_body(grant)?)
         .map_err(|e| ProviderError::Internal(format!("grant projection: {e}")))
+}
+
+/// §6.5 coverage one reflection op needs for the §6.12 selection it names
+/// (§7.25–§7.27, N4-R): the `reflect` capability over that selection —
+/// unrestricted coverage for `subject_all` (C-075), every listed context, and
+/// shared access when shared rows are in scope. A `list` without a selection
+/// narrows to the caller's covered reflections at read time, so its admission
+/// names the capability and subject only. The projection mirrors the
+/// store-side `Selection::base_requirement`.
+fn reflect_requirement<'a>(
+    selection: Option<&'a Selection>,
+    subject_id: &'a str,
+) -> GrantRequirement<'a> {
+    let (context_ids, reads_shared, subject_all) = match selection {
+        Some(Selection::SubjectAll) => (Vec::new(), false, true),
+        Some(Selection::SharedOnly) => (Vec::new(), true, false),
+        Some(Selection::SelectedContexts {
+            context_ids,
+            include_shared,
+        }) => (context_ids.clone(), *include_shared, false),
+        None => (Vec::new(), false, false),
+    };
+    GrantRequirement {
+        capability: "reflect",
+        subject_id: Some(subject_id),
+        context_ids,
+        reads_shared,
+        subject_all,
+    }
+}
+
+/// §7.25 state digest shape: 64 lowercase hex, the exact form the `state` op
+/// publishes as its CAS token (locked D9 — the provider never widens the
+/// accepted token grammar).
+fn is_state_digest(token: &str) -> bool {
+    token.len() == 64
+        && token
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Locked D9: the provider serves no cognition family, so a present
+/// `cognition_filter` is refused outright on every reflection op — an honest
+/// refusal, never a silent widening of the selection.
+fn cognition_refusal(present: bool) -> Option<ProviderError> {
+    present.then(|| ProviderError::InvalidInput {
+        field: "cognition_filter".to_string(),
+        reason: "cognition_filter is not served by this provider; the selection is never widened \
+                 to cover it"
+            .to_string(),
+        details: None,
+    })
 }
 
 /// §6.10 receipt projection, as every mutating op returns it. A `failed` receipt
@@ -2600,6 +2659,80 @@ impl LocalMemoryProvider {
     }
 }
 
+impl LocalMemoryProvider {
+    /// §7.25–§7.27 reflection admission (N4-R Task 2): current `reflect`
+    /// coverage over the selection (§6.5 — one grant, never unioned), then the
+    /// §8.2 freeze classification for the cost-bearing generate. The caller's
+    /// grant set is read fresh (`grants_page_for`), so a revocation or expiry
+    /// that landed before this call is observed here — the reflection surface
+    /// never answers from a stale grant snapshot, and a refusal discloses
+    /// nothing but the refusal (no existence oracle for foreign ids).
+    ///
+    /// `simplify:` this provider-level coverage check samples the wall clock,
+    /// not the store's proof-seam clock; the authoritative store-clock
+    /// authorization lands with the reflection read/generate flows (plan
+    /// Tasks 3–4), which also move it inside the effect transaction. Upgrade:
+    /// when Task 4's transactional recheck lands, this pre-store gate either
+    /// moves with it or is superseded by it.
+    async fn reflect_admission(
+        &self,
+        principal: &schemas::Principal,
+        space_id: &str,
+        subject_id: &str,
+        selection: Option<&Selection>,
+        freeze_gated: bool,
+    ) -> Result<(), ProviderError> {
+        let principal_id = principal_id(principal);
+        let (rows, ..) = self
+            .store
+            .grants_page_for(principal_id, space_id, None, None, None)
+            .await
+            .map_err(store_error)?;
+        let mut grants = Vec::with_capacity(rows.len());
+        for row in &rows {
+            grants.push(grant_wire(row)?);
+        }
+        let requirement = reflect_requirement(selection, subject_id);
+        let now = Utc::now();
+        if !grants
+            .iter()
+            .any(|grant| grant_covers(grant, principal_id, space_id, now, &requirement))
+        {
+            return Err(ProviderError::NotAuthorized(format!(
+                "principal {principal_id} holds no reflect grant covering the selection \
+                 in space {space_id}"
+            )));
+        }
+        // §8.2: `state`/`list` are allowlisted read-only ops and stay served
+        // during a freeze; only generate is gate-checked here. Coverage just
+        // passed, so the caller holds a live grant and the space row is
+        // necessarily in their visible set; anything else is a broken
+        // projection, not an admission outcome.
+        if freeze_gated {
+            let (spaces, _) = self
+                .store
+                .visible_spaces(principal_id)
+                .await
+                .map_err(store_error)?;
+            match spaces.iter().find(|space| space.space_id == space_id) {
+                Some(space) if space.status == "frozen" => {
+                    return Err(ProviderError::SpaceFrozen(format!(
+                        "space {space_id} is frozen; {OP_REFLECTIONS_GENERATE} is outside the \
+                         maintenance allowlist"
+                    )));
+                }
+                None => {
+                    return Err(ProviderError::Internal(
+                        "reflection admission lost its covered space".to_string(),
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl MemoryPort for LocalMemoryProvider {
     async fn describe(
@@ -3643,26 +3776,136 @@ impl MemoryPort for LocalMemoryProvider {
 
     async fn get_reflection_state(
         &self,
-        _principal: &schemas::Principal,
-        _request: schemas::MemoryReflectionsStateRequest,
+        principal: &schemas::Principal,
+        request: schemas::MemoryReflectionsStateRequest,
     ) -> SpokeResult<schemas::MemoryReflectionsStateResponse> {
-        unsupported("memory.reflections.state")
+        use schemas::memory_reflections_state_request::ReadSelection;
+        // N4-R Task 2: admission only. An admitted request still answers the
+        // not-served refusal until the read flow lands (plan Tasks 3–4), so the
+        // N3 wire shape survives for every caller this admission lets through.
+        let selection = match &request.selection {
+            ReadSelection::SubjectAll => Selection::SubjectAll,
+            ReadSelection::SharedOnly => Selection::SharedOnly,
+            ReadSelection::SelectedContexts {
+                context_ids,
+                include_shared,
+            } => Selection::SelectedContexts {
+                context_ids: context_ids.clone(),
+                include_shared: include_shared.unwrap_or(false),
+            },
+        };
+        if let SpokeResult::Reject(reject) = validate_memory_reflections_state(&request) {
+            return deny(&ProviderError::from_reject(reject, "selection"));
+        }
+        if let Some(error) = cognition_refusal(request.cognition_filter.is_some()) {
+            return deny(&error);
+        }
+        if let Err(error) = self
+            .reflect_admission(
+                principal,
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                Some(&selection),
+                false,
+            )
+            .await
+        {
+            return deny(&error);
+        }
+        unsupported(OP_REFLECTIONS_STATE)
     }
 
     async fn list_reflections(
         &self,
-        _principal: &schemas::Principal,
-        _request: schemas::MemoryReflectionsListRequest,
+        principal: &schemas::Principal,
+        request: schemas::MemoryReflectionsListRequest,
     ) -> SpokeResult<schemas::MemoryReflectionsListResponse> {
-        unsupported("memory.reflections.list")
+        use schemas::memory_reflections_list_request::ReadSelection;
+        // An absent selection names no data access beyond the caller's covered
+        // reflections, so its admission is capability-and-subject only; a
+        // present one is covered like any other read selection (C-075 holds for
+        // an explicit `subject_all`).
+        let selection = request.selection.as_ref().map(|selection| match selection {
+            ReadSelection::SubjectAll => Selection::SubjectAll,
+            ReadSelection::SharedOnly => Selection::SharedOnly,
+            ReadSelection::SelectedContexts {
+                context_ids,
+                include_shared,
+            } => Selection::SelectedContexts {
+                context_ids: context_ids.clone(),
+                include_shared: include_shared.unwrap_or(false),
+            },
+        });
+        if let SpokeResult::Reject(reject) =
+            validate_memory_reflections_list(&request, policy::MAX_PAGE_SIZE_BOUND)
+        {
+            return deny(&ProviderError::from_reject(reject, "selection"));
+        }
+        if let Some(error) = cognition_refusal(request.cognition_filter.is_some()) {
+            return deny(&error);
+        }
+        if let Err(error) = self
+            .reflect_admission(
+                principal,
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                selection.as_ref(),
+                false,
+            )
+            .await
+        {
+            return deny(&error);
+        }
+        unsupported(OP_REFLECTIONS_LIST)
     }
 
     async fn generate_reflection(
         &self,
-        _principal: &schemas::Principal,
-        _request: schemas::MemoryReflectionsGenerateRequest,
+        principal: &schemas::Principal,
+        request: schemas::MemoryReflectionsGenerateRequest,
     ) -> SpokeResult<schemas::MemoryReflectionsGenerateResponse> {
-        unsupported("memory.reflections.generate")
+        use schemas::memory_reflections_generate_request::ReadSelection;
+        let selection = match &request.selection {
+            ReadSelection::SubjectAll => Selection::SubjectAll,
+            ReadSelection::SharedOnly => Selection::SharedOnly,
+            ReadSelection::SelectedContexts {
+                context_ids,
+                include_shared,
+            } => Selection::SelectedContexts {
+                context_ids: context_ids.clone(),
+                include_shared: include_shared.unwrap_or(false),
+            },
+        };
+        if let SpokeResult::Reject(reject) = validate_memory_reflections_generate(&request) {
+            return deny(&ProviderError::from_reject(reject, "selection"));
+        }
+        if let Some(error) = cognition_refusal(request.cognition_filter.is_some()) {
+            return deny(&error);
+        }
+        if !is_state_digest(request.expected_state_digest.as_str()) {
+            return deny(&ProviderError::InvalidInput {
+                field: "expected_state_digest".to_string(),
+                reason:
+                    "expected_state_digest must be the 64 lowercase hex digest the state op published"
+                        .to_string(),
+                details: None,
+            });
+        }
+        // Generate is the cost-bearing mutation: it alone sits outside the
+        // §8.2 freeze allowlist, so its admission classifies the freeze.
+        if let Err(error) = self
+            .reflect_admission(
+                principal,
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                Some(&selection),
+                true,
+            )
+            .await
+        {
+            return deny(&error);
+        }
+        unsupported(OP_REFLECTIONS_GENERATE)
     }
 
     async fn create_export(
