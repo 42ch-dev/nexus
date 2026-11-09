@@ -1066,6 +1066,48 @@ async fn c_032_dismiss_replay_never_resurrects_remote() {
     dismiss_replay_never_resurrects(Matrix::remote().await).await;
 }
 
+/// I-000305: repeating a retained dismiss idempotency key with a changed
+/// target must resolve the key's receipt binding, not the target row. The
+/// changed target names an absent candidate, so the pre-hoist ordering —
+/// target fetch before replay resolution — answered NOT_FOUND
+/// (CANDIDATE-shaped) instead of the retained key's IDEMPOTENCY_CONFLICT.
+async fn changed_target_under_a_retained_key_is_a_conflict(matrix: Matrix) {
+    bootstrap(&matrix, &[]).await;
+    let admin = matrix.admin();
+    let captured = admin
+        .capture(capture_body("k-i305", TEXT, &shared_scope()))
+        .await;
+    let candidate_id = candidate_ids(&captured)[0].clone();
+
+    let dismissed = admin
+        .dismiss_candidate(dismiss_body(&candidate_id, 1, "k-i305-dismiss"))
+        .await;
+    assert!(is_committed(&dismissed), "{dismissed}");
+
+    // The same key over a different payload: the retained receipt binding
+    // must answer with the digest conflict even though the named candidate
+    // row does not exist.
+    let changed = admin
+        .dismiss_candidate(dismiss_body("cand_i305_absent", 1, "k-i305-dismiss"))
+        .await;
+    assert_eq!(
+        error_code(&changed),
+        "IDEMPOTENCY_CONFLICT",
+        "a changed target under a retained key conflicts instead of reporting the missing row: {changed}"
+    );
+    matrix.shutdown().await;
+}
+
+#[tokio::test]
+async fn i305_changed_target_under_a_retained_key_is_a_conflict_local() {
+    changed_target_under_a_retained_key_is_a_conflict(Matrix::local().await).await;
+}
+
+#[tokio::test]
+async fn i305_changed_target_under_a_retained_key_is_a_conflict_remote() {
+    changed_target_under_a_retained_key_is_a_conflict(Matrix::remote().await).await;
+}
+
 /// C-033: two ACTUAL signed clients review one candidate. Both are observed at
 /// the provider's own admission boundary (the seam acknowledges the arrival,
 /// not elapsed client time) while the writer is held; exactly one commits, the
