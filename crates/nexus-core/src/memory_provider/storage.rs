@@ -4822,12 +4822,14 @@ fn pinned_staleness(
 /// The MEM-R026 invalidation marker for a reflection page: a digest over the
 /// visible envelope set, *every* record identity of the subject (live and
 /// tombstoned — any basis-affecting change rebinds an outstanding cursor even
-/// when no reflection row moved), the space's grant revisions and the subject
-/// status. A state or grant change therefore answers a stale cursor with
-/// `CURSOR_INVALID` (§7.0.7).
+/// when no reflection row moved), the subject's profile revisions (the same
+/// sorted pairs the state digest composes), the space's grant revisions and
+/// the subject status. A state or grant change therefore answers a stale
+/// cursor with `CURSOR_INVALID` (§7.0.7).
 fn reflection_marker(
     reflections: &[(String, i64)],
     records: &[(String, i64)],
+    profile_revisions: &[(String, i64)],
     grants: &[GrantRow],
     subject_status: Option<&str>,
 ) -> StoreResult<String> {
@@ -4840,6 +4842,7 @@ fn reflection_marker(
     grant_revisions.sort();
     match super::digest_value(json!({
         "records": records,
+        "profile_revisions": profile_revisions,
         "reflections": reflections,
         "grants": grant_revisions,
         "subject": subject_status,
@@ -4923,7 +4926,8 @@ impl MemoryStore {
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         if withheld(unsettled.as_deref(), subject_id)? {
             tx.commit().await?;
-            let marker = reflection_marker(&[], &[], &grant_rows, subject_status.as_deref())?;
+            let marker =
+                reflection_marker(&[], &[], &[], &grant_rows, subject_status.as_deref())?;
             return Ok((Vec::new(), marker, 0));
         }
         let profile_revisions = profile_revisions_in_tx(&mut tx, space_id, subject_id).await?;
@@ -5006,6 +5010,7 @@ impl MemoryStore {
         let marker = reflection_marker(
             &marker_set,
             &all_records,
+            &profile_revisions,
             &grant_rows,
             subject_status.as_deref(),
         )?;
