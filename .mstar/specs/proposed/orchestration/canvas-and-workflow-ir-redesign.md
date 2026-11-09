@@ -28,10 +28,74 @@ tags:
 | **Scope** | Detailed design for a **Canvas + Workflow IR** stack that **MAY completely replace** today's strategy-orchestration authoring and intake path (hand-authored `preset.yaml` → loader → graph-flow; Strategy Canvas as YAML explainability + node-granular patch). Lifecycle remains **Generate or Compose → Validate → Simulate → Approve → Apply → Execute**. |
 | **Coordinates with** | [orchestration-engine.md](../../active/orchestration/orchestration-engine.md) (current Master: graph-flow + preset SSOT), [canvas-strategy-surface.md](../../active/surfaces/canvas-strategy-surface.md) (Strategy Canvas β), [docs/strategy-authoring.md](../../../../docs/strategy-authoring.md), [STRATEGY.md](../../../../STRATEGY.md) (Harness / Canvas pillars), `dynamic-workflow-and-simulation.md` ([PR #482](https://github.com/42ch-dev/nexus/pull/482) direction brief; path `.mstar/specs/proposed/orchestration/` once merged — **this file is the detailed redesign**) |
 | **Relationship to #482** | `dynamic-workflow-and-simulation.md` ([PR #482](https://github.com/42ch-dev/nexus/pull/482)) states product direction (universal IR, nest/compose, patterns, lifecycle, safety fences). **This document** answers *how* to redesign Canvas + IR so the **current strategy orchestration implementation can be fully retired** after a staged migration — schema, UX, APIs, loader replacement, acceptance criteria. |
+| **Recommended merge / land order** | See §0.1 — merge **#482 before #483**; start implementation only after both are accepted as direction + detailed design (still not implement authority until Draft/Master promotion). |
 
 The key words MUST, MUST NOT, SHOULD, and MAY are RFC 2119 terms for a conforming implementation of this proposal only (if adopted).
 
 **Not implement authority.** Per [`.mstar/specs/AGENTS.md`](../../AGENTS.md), Exploration under `proposed/` never outranks the active orchestration Master. Adoption requires a later Draft/Master promotion and link-migration sweep.
+
+### 0.1 Recommended sequence — proposals then implementation
+
+This section is **maintainer guidance** for how to land the two Explorations and then the §7 migration phases. It does not schedule work by itself.
+
+#### Proposal merge order
+
+| Order | Artifact | Why this order |
+| --- | --- | --- |
+| **1** | [PR #482](https://github.com/42ch-dev/nexus/pull/482) direction (`dynamic-workflow-and-simulation.md` + packaging companion) | Thin consensus: universal IR, end-user nest/compose, developer patterns, Generate\|Compose lifecycle, TS/Rust boundary, safety fences, modular packaging. Locks product constraints before schema hardens. |
+| **2** | **This PR (#483)** detailed redesign | Depends on #482's product locks. Filling IR schema, Canvas ops, dual-read cutover, and acceptance *before* direction is merged risks freezing the wrong ceiling (e.g. YAML-forever projection, explainability-only Canvas). |
+| **3** | Resolve §9 open questions that #482/#483 share | Nest depth, IR encoding, generator home, simulate fidelity, Approve policy — decide against #482 constraints, record answers here or in a follow-up Proposed/Draft. |
+| **4** | Draft/Master promotion (later, separate PR) | Only then does this design outrank active Masters; link-migration sweep per AGENTS.md. |
+
+**Anti-pattern:** merging #483 first “because it is more detailed,” or implementing P0 while #482 is still contested. Review of #483 MAY happen in parallel with #482 review; **merge and treat-as-constraint** SHOULD be #482 → #483.
+
+**Optional review tactic:** if maintainers want the replacement story narrated first, review #483 for understanding, then merge #482 as the short normative direction, then merge #483 — repository merge order still #482 then #483.
+
+#### Implementation land order (after both Explorations are accepted)
+
+Do **not** run packaging track and IR-replace track as two unrelated rewrites. Prefer:
+
+```text
+#482 merged (direction)
+        │
+        ▼
+#483 merged (detailed redesign)
+        │
+        ▼
+Decide §9 blockers needed for P0/P1 (encoding, import fidelity)
+        │
+        ▼
+§7 P0  workflow-ir stub + lossless import of samples
+        │
+        ▼
+§7 P1  Validate-on-IR (shared facade)
+        │
+        ├──────────────────┬─────────────────────┐
+        ▼                  ▼                     ▼
+§7 P2 Simulator MVP   §7 P3 Canvas compose   Packaging A-track
+(dry-run, no Apply)   MVP (flagged)          (thin core / features;
+                                             may start after P0 if
+                                             rebuild pain dominates)
+        │                  │
+        └────────┬─────────┘
+                 ▼
+§7 P4 Dual-read loader (YAML presets unbroken)
+                 │
+                 ▼
+§7 P5 IR-primary authoring (new strategies as IR)
+                 │
+                 ▼
+§7 P6 Cut YAML main path (acceptance §7.4)
+```
+
+| Gate | MUST hold before next step |
+| --- | --- |
+| Before **P0** | #482 + #483 merged (or explicitly waived in writing); sample list for round-trip agreed |
+| Before **P3** default-on | P1 validate parity on samples; compose ops behind flag until then |
+| Before **P4** | IR→Graph Task mapping table reviewed against orchestration-engine §8.2 |
+| Before **P6** | §7.4 acceptance checklist green on a reference workspace; kill-switch documented |
+
+**Parallelism that is OK:** Spoke-style packaging / crate fan-out (lightweight-core track from #482) MAY proceed in parallel with P0–P2 **as long as** it does not invent a second authoring SSOT or a second runtime. **Not OK:** shipping Generate→Apply to production before Simulate fence + explicit Approve exist.
 
 ---
 
@@ -364,6 +428,8 @@ Generate | Compose → Validate → Simulate → Approve → Apply → Execute
 ---
 
 ## 7. Migration plan — fully refactor current implementation
+
+**Prerequisite sequencing:** follow §0.1 (merge #482 → merge this document → then P0…). The table below is the *implementation* ladder after those proposals are accepted; it is not a license to skip the proposal merge order.
 
 ### 7.1 Phase plan
 
