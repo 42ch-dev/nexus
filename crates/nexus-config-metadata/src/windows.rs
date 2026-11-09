@@ -236,8 +236,9 @@ pub fn link_count(target: &Path) -> io::Result<u64> {
 pub fn open_staging_file(path: &Path) -> io::Result<File> {
     let path = wide_path(path);
     // SAFETY: the path is NUL-terminated, the security attributes are absent (the
-    // file inherits the private staging directory's DACL) and no template handle
-    // is needed.
+    // file inherits the staging directory's DACL) and no template handle is
+    // needed. Share mode 0 is the staged-byte protection on this platform: no
+    // other principal can open the file while this handle is open.
     let handle = unsafe {
         CreateFileW(
             path.as_ptr(),
