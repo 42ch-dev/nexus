@@ -24,8 +24,8 @@ use spoke_operations::MemoryPort;
 use nexus_memory_conformance::{FaultHold, FaultPoint, FixtureFaults};
 
 use support::{
-    bootstrap, error_code, grant_body, is_committed, record_body, result, retry_class, wire,
-    context_scope, shared_scope, Matrix, OTHER_SUBJECT, SUBJECT,
+    bootstrap, error_code, error_details, grant_body, is_committed, record_body, result, retry_class,
+    wire, context_scope, shared_scope, Matrix, OTHER_SUBJECT, SUBJECT,
 };
 
 /// 64 hex characters: the CAS token shape `state` publishes.
@@ -1146,5 +1146,142 @@ async fn c_100_reflection_error_classes_remote() {
         page["reflections"].as_array().expect("rows").is_empty(),
         "refusals publish nothing: {page}"
     );
+    matrix.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// Fix round: blocking-warning regressions (qc-consolidated B3, B5)
+// ---------------------------------------------------------------------------
+
+/// B3: an authorized same-key replay outranks the §8.2 freeze gate over the
+/// fixture boundary. A committed generation whose response was lost is
+/// recoverable through the identical retry while the space is frozen; a fresh
+/// key still answers `SPACE_FROZEN`, and unfreezing lets it run exactly one
+/// new generation. The fixture checked freeze before its replay resolution,
+/// which made already-committed work unrecoverable during a freeze.
+#[tokio::test]
+async fn qc_b3_committed_generation_replays_while_frozen_remote() {
+    let matrix = Matrix::remote().await;
+    bootstrap(&matrix, &[]).await;
+    create_shared_record(&matrix, "k-b3-r1", "The committed chart stays recoverable.").await;
+    let digest = admin_state(&matrix, SUBJECT).await["state_digest"].clone();
+    let first = matrix
+        .admin()
+        .reflections_generate(generate_body(
+            SUBJECT,
+            digest.as_str().expect("digest"),
+            "k-b3-commit",
+        ))
+        .await;
+    assert!(is_committed(&first), "{first}");
+    let receipt_id = first["receipt_id"].as_str().expect("receipt id").to_owned();
+
+    let frozen = matrix.admin().freeze_space("k-b3-freeze", 1).await;
+    assert!(is_committed(&frozen), "{frozen}");
+
+    let replayed = matrix
+        .admin()
+        .reflections_generate(generate_body(
+            SUBJECT,
+            digest.as_str().expect("digest"),
+            "k-b3-commit",
+        ))
+        .await;
+    assert!(is_committed(&replayed), "the replay outranks the freeze: {replayed}");
+    assert_eq!(replayed["receipt_id"], json!(receipt_id), "{replayed}");
+
+    let fresh = matrix
+        .admin()
+        .reflections_generate(generate_body(
+            SUBJECT,
+            digest.as_str().expect("digest"),
+            "k-b3-fresh",
+        ))
+        .await;
+    assert_eq!(error_code(&fresh), "SPACE_FROZEN", "{fresh}");
+    assert_eq!(retry_class(&fresh), "terminal");
+
+    let unfrozen = matrix.admin().unfreeze_space("k-b3-unfreeze", 2).await;
+    assert!(is_committed(&unfrozen), "{unfrozen}");
+    let second = matrix
+        .admin()
+        .reflections_generate(generate_body(
+            SUBJECT,
+            digest.as_str().expect("digest"),
+            "k-b3-fresh",
+        ))
+        .await;
+    assert!(is_committed(&second), "{second}");
+    assert_ne!(second["receipt_id"], json!(receipt_id), "{second}");
+    let rows = list_rows(&matrix).await["reflections"].clone();
+    assert_eq!(
+        rows.as_array().expect("rows").len(),
+        2,
+        "the replay added no envelope; the fresh key added exactly one: {rows}"
+    );
+    matrix.shutdown().await;
+}
+
+/// B5: transaction 1 enforces the §7.7 subject lifecycle gate after replay
+/// resolution and before staging fresh work. A fenced subject rejects a fresh
+/// generation with the protocol's fence refusal, while its already-admitted
+/// completion still replays above the fence and its reads stay served.
+#[tokio::test]
+async fn qc_b5_fenced_subject_refuses_fresh_generation_remote() {
+    let matrix = Matrix::remote().await;
+    bootstrap(&matrix, &[]).await;
+    create_shared_record(&matrix, "k-b5-r1", "The fence stops fresh work only.").await;
+    let digest = admin_state(&matrix, SUBJECT).await["state_digest"].clone();
+    let first = matrix
+        .admin()
+        .reflections_generate(generate_body(
+            SUBJECT,
+            digest.as_str().expect("digest"),
+            "k-b5-commit",
+        ))
+        .await;
+    assert!(is_committed(&first), "{first}");
+    let receipt_id = first["receipt_id"].as_str().expect("receipt id").to_owned();
+
+    let fenced = matrix
+        .admin()
+        .fence_subject(SUBJECT, json!({ "type": "subject" }), "fence", 1, "k-b5-fence")
+        .await;
+    assert!(is_committed(&fenced), "{fenced}");
+
+    // The already-admitted completion keeps replaying above the fence.
+    let replayed = matrix
+        .admin()
+        .reflections_generate(generate_body(
+            SUBJECT,
+            digest.as_str().expect("digest"),
+            "k-b5-commit",
+        ))
+        .await;
+    assert!(is_committed(&replayed), "{replayed}");
+    assert_eq!(replayed["receipt_id"], json!(receipt_id), "{replayed}");
+
+    // Fresh work on the fenced subject is refused with the fence refusal.
+    let fresh = matrix
+        .admin()
+        .reflections_generate(generate_body(
+            SUBJECT,
+            digest.as_str().expect("digest"),
+            "k-b5-fresh",
+        ))
+        .await;
+    assert_eq!(error_code(&fresh), "SUBJECT_FENCED", "{fresh}");
+    assert_eq!(retry_class(&fresh), "terminal");
+    assert_eq!(error_details(&fresh)["scope"], json!("subject"), "{fresh}");
+    assert!(
+        fresh["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(SUBJECT)),
+        "the refusal names the fenced subject: {fresh}"
+    );
+
+    // Reads are not fenced: the fenced subject's state stays served.
+    let read = matrix.admin().reflections_state(state_body(SUBJECT)).await;
+    assert!(read.get("error").is_none(), "reads stay admitted: {read}");
     matrix.shutdown().await;
 }

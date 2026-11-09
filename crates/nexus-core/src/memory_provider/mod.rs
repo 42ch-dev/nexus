@@ -2975,12 +2975,17 @@ impl LocalMemoryProvider {
 
 impl LocalMemoryProvider {
     /// §7.25–§7.27 reflection admission (N4-R Task 2): current `reflect`
-    /// coverage over the selection (§6.5 — one grant, never unioned), then the
-    /// §8.2 freeze classification for the cost-bearing generate. The caller's
-    /// grant set is read fresh (`grants_page_for`), so a revocation or expiry
-    /// that landed before this call is observed here — the reflection surface
-    /// never answers from a stale grant snapshot, and a refusal discloses
-    /// nothing but the refusal (no existence oracle for foreign ids).
+    /// coverage over the selection (§6.5 — one grant, never unioned). The
+    /// caller's grant set is read fresh (`grants_page_for`), so a revocation
+    /// or expiry that landed before this call is observed here — the
+    /// reflection surface never answers from a stale grant snapshot, and a
+    /// refusal discloses nothing but the refusal (no existence oracle for
+    /// foreign ids).
+    ///
+    /// The §8.2 freeze classification is not part of this facade check: it
+    /// lives in the store's transaction gate behind replay resolution, so an
+    /// authorized same-key retry discloses an already-committed receipt even
+    /// while the space is frozen (§7.0.5/MEM-R021/C-036).
     ///
     /// `simplify:` this provider-level coverage check samples the wall clock,
     /// not the store's proof-seam clock; the authoritative store-clock
@@ -2994,7 +2999,6 @@ impl LocalMemoryProvider {
         space_id: &str,
         subject_id: &str,
         selection: Option<&Selection>,
-        freeze_gated: bool,
     ) -> Result<(), ProviderError> {
         let principal_id = principal_id(principal);
         let (rows, ..) = self
@@ -3016,32 +3020,6 @@ impl LocalMemoryProvider {
                 "principal {principal_id} holds no reflect grant covering the selection \
                  in space {space_id}"
             )));
-        }
-        // §8.2: `state`/`list` are allowlisted read-only ops and stay served
-        // during a freeze; only generate is gate-checked here. Coverage just
-        // passed, so the caller holds a live grant and the space row is
-        // necessarily in their visible set; anything else is a broken
-        // projection, not an admission outcome.
-        if freeze_gated {
-            let (spaces, _) = self
-                .store
-                .visible_spaces(principal_id)
-                .await
-                .map_err(store_error)?;
-            match spaces.iter().find(|space| space.space_id == space_id) {
-                Some(space) if space.status == "frozen" => {
-                    return Err(ProviderError::SpaceFrozen(format!(
-                        "space {space_id} is frozen; {OP_REFLECTIONS_GENERATE} is outside the \
-                         maintenance allowlist"
-                    )));
-                }
-                None => {
-                    return Err(ProviderError::Internal(
-                        "reflection admission lost its covered space".to_string(),
-                    ));
-                }
-                Some(_) => {}
-            }
         }
         Ok(())
     }
@@ -4131,7 +4109,6 @@ impl MemoryPort for LocalMemoryProvider {
                 request.space_id.as_str(),
                 request.subject_id.as_str(),
                 Some(&selection),
-                false,
             )
             .await
         {
@@ -4184,16 +4161,17 @@ impl MemoryPort for LocalMemoryProvider {
             .map(|required| (*required).to_string())
             .collect();
         // The read-side narrowing is the same one `list` uses: the newest
-        // envelope this caller may see under this selection, excluding
-        // tombstoned-basis rows (C-077). With no envelope to compare against,
-        // `stale` is honestly false — there is no pinned basis that could have
-        // gone stale.
+        // envelope this caller may see under this selection and provenance
+        // filter, excluding tombstoned-basis rows (C-077). With no envelope
+        // to compare against, `stale` is honestly false — there is no pinned
+        // basis that could have gone stale.
         let (rows, ..) = match self
             .store
             .reflections(
                 request.space_id.as_str(),
                 request.subject_id.as_str(),
                 Some(&selection),
+                filter.as_deref(),
                 principal_id,
             )
             .await
@@ -4254,7 +4232,6 @@ impl MemoryPort for LocalMemoryProvider {
                 request.space_id.as_str(),
                 request.subject_id.as_str(),
                 selection.as_ref(),
-                false,
             )
             .await
         {
@@ -4300,6 +4277,7 @@ impl MemoryPort for LocalMemoryProvider {
                 request.space_id.as_str(),
                 request.subject_id.as_str(),
                 selection.as_ref(),
+                filter.as_deref(),
                 principal_id,
             )
             .await
@@ -4360,15 +4338,18 @@ impl MemoryPort for LocalMemoryProvider {
                 details: None,
             });
         }
-        // Generate is the cost-bearing mutation: it alone sits outside the
-        // §8.2 freeze allowlist, so its admission classifies the freeze.
+        // Generate is the cost-bearing mutation: its admission checks current
+        // coverage before any receipt disclosure, but the §8.2 freeze gate
+        // does not run here — the store's transaction gate applies freeze to
+        // fresh work only, after replay resolution (§7.0.5/MEM-R021/C-036),
+        // so an already-committed generation's same-key retry stays
+        // recoverable while the space is frozen.
         if let Err(error) = self
             .reflect_admission(
                 principal,
                 request.space_id.as_str(),
                 request.subject_id.as_str(),
                 Some(&selection),
-                true,
             )
             .await
         {
