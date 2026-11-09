@@ -18,7 +18,12 @@ workspace = true
 # are opt-in, and Nexus enables none of them — it owns child-process
 # lifecycle with Tokio + `ByteStreams` and owns its wire schemas in
 # `schemas/`. No `unstable_*` feature is enabled.
-agent-client-protocol = "=3.5.0"
+# 2026-11-09 dependency round (ACP 5.0.0, #477 superseded): v5 moves the
+# stable v1 surface to `v1::` (schema, connection, session setup) and
+# carries prompt errors on the session stream (`SessionMessage::
+# PromptResponse`). Stable protocol v1 only; `default = []` unchanged;
+# no `unstable_*` feature is enabled.
+agent-client-protocol = "=5.0.0"
 tokio = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

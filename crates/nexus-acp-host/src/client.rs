@@ -19,7 +19,7 @@
 //!
 //! The `NexusAcpClient` trait uses Nexus-owned DTO types from
 //! `nexus_contracts::local::acp` (e.g. `NexusInitializeRequest`,
-//! `NexusInitializeResponse`). SDK types (`agent_client_protocol::schema::v1::`) are
+//! `NexusInitializeResponse`). SDK types (`agent_client_protocol::v1::schema::`) are
 //! confined to `AcpSdkAdapter` implementation blocks and `FromSdk` conversion
 //! methods. This decoupling allows future SDK migration without changing
 //! consumers.
@@ -36,7 +36,7 @@
 //!
 //! The ACP SDK v2.1 stable-v1 API uses a component/channel-based architecture:
 //! - `Client` is a zero-sized role struct (no longer a trait).
-//! - Connections are created via `Client.builder().connect_with(transport, |cx| {...})`.
+//! - Connections are created via `Client.v1().connect_with(transport, |cx| {...})`.
 //! - The `ConnectionTo<Agent>` handle is Clone + Send, allowing it to be stored
 //!   and used from outside the connection callback.
 //! - The old `Client` trait (for handling agent requests) is replaced by
@@ -56,17 +56,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use agent_client_protocol as acp;
-use agent_client_protocol::schema::v1::AgentCapabilities;
-use agent_client_protocol::schema::v1::AuthMethod;
-use agent_client_protocol::schema::v1::CancelNotification;
-use agent_client_protocol::schema::v1::InitializeResponse;
-use agent_client_protocol::schema::v1::ListSessionsRequest;
-use agent_client_protocol::schema::v1::ListSessionsResponse;
-use agent_client_protocol::schema::v1::SessionInfo;
-use agent_client_protocol::schema::v1::SessionModeState;
-use agent_client_protocol::schema::v1::SetSessionConfigOptionRequest;
-use agent_client_protocol::schema::v1::SetSessionConfigOptionResponse;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::AgentCapabilities;
+use agent_client_protocol::v1::schema::AuthMethod;
+use agent_client_protocol::v1::schema::CancelNotification;
+use agent_client_protocol::v1::schema::InitializeResponse;
+use agent_client_protocol::v1::schema::ListSessionsRequest;
+use agent_client_protocol::v1::schema::ListSessionsResponse;
+use agent_client_protocol::v1::schema::SessionInfo;
+use agent_client_protocol::v1::schema::SessionModeState;
+use agent_client_protocol::v1::schema::SetSessionConfigOptionRequest;
+use agent_client_protocol::v1::schema::SetSessionConfigOptionResponse;
+use agent_client_protocol::v1::schema::{
     ContentBlock, ContentChunk, Implementation, InitializeRequest, McpServer, McpServerHttp,
     McpServerSse, McpServerStdio, NewSessionRequest, PermissionOption, PermissionOptionKind,
     PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
@@ -75,7 +75,8 @@ use agent_client_protocol::schema::v1::{
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::util::MatchDispatch;
-use agent_client_protocol::{ActiveSession, Agent, ByteStreams, ConnectionTo, SessionMessage};
+use agent_client_protocol::v1::{ActiveSession, ConnectionTo, SessionMessage, SessionSetup};
+use agent_client_protocol::{Agent, ByteStreams};
 use tokio::sync::RwLock;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -106,15 +107,15 @@ use nexus_contracts::local::acp::{
     NexusSetConfigOptionRequest, NexusSetConfigOptionResponse, NexusStopReason,
 };
 
-// ── Compile-time Send assertion for ConnectionTo<Agent> ────────────
+// ── Compile-time Send assertion for v1::ConnectionTo<Agent> ────────
 //
-// The LocalSetBridge pattern relies on ConnectionTo<Agent> being Send so
-// it can be extracted from the !Send LocalSet context and stored in
+// The LocalSetBridge pattern relies on v1::ConnectionTo<Agent> being Send
+// so it can be extracted from the !Send LocalSet context and stored in
 // Arc<RwLock<...>> accessible from the async tokio world. This const
 // block fails to compile if the SDK ever changes that guarantee.
 const _: fn() = || {
     const fn assert_send<T: Send>() {}
-    assert_send::<agent_client_protocol::ConnectionTo<agent_client_protocol::Agent>>();
+    assert_send::<agent_client_protocol::v1::ConnectionTo<agent_client_protocol::Agent>>();
 };
 
 // ── SDK ↔ Nexus DTO conversion helpers ──────────────────────────────
@@ -298,19 +299,19 @@ fn sdk_set_config_option_request_from_nexus(
 }
 
 fn sdk_config_option_category_to_nexus(
-    cat: &agent_client_protocol::schema::v1::SessionConfigOptionCategory,
+    cat: &agent_client_protocol::v1::schema::SessionConfigOptionCategory,
 ) -> NexusConfigOptionCategory {
     match cat {
-        agent_client_protocol::schema::v1::SessionConfigOptionCategory::Mode => {
+        agent_client_protocol::v1::schema::SessionConfigOptionCategory::Mode => {
             NexusConfigOptionCategory::Mode
         }
-        agent_client_protocol::schema::v1::SessionConfigOptionCategory::Model => {
+        agent_client_protocol::v1::schema::SessionConfigOptionCategory::Model => {
             NexusConfigOptionCategory::Model
         }
-        agent_client_protocol::schema::v1::SessionConfigOptionCategory::ThoughtLevel => {
+        agent_client_protocol::v1::schema::SessionConfigOptionCategory::ThoughtLevel => {
             NexusConfigOptionCategory::ThoughtLevel
         }
-        agent_client_protocol::schema::v1::SessionConfigOptionCategory::Other(s) => {
+        agent_client_protocol::v1::schema::SessionConfigOptionCategory::Other(s) => {
             NexusConfigOptionCategory::Other(s.clone())
         }
         _ => NexusConfigOptionCategory::Other("unknown".to_string()),
@@ -318,7 +319,7 @@ fn sdk_config_option_category_to_nexus(
 }
 
 fn sdk_config_select_option_to_nexus(
-    opt: &agent_client_protocol::schema::v1::SessionConfigSelectOption,
+    opt: &agent_client_protocol::v1::schema::SessionConfigSelectOption,
 ) -> NexusConfigSelectOption {
     NexusConfigSelectOption {
         value: opt.value.to_string(),
@@ -328,10 +329,10 @@ fn sdk_config_select_option_to_nexus(
 }
 
 fn sdk_config_select_options_to_nexus(
-    opts: &agent_client_protocol::schema::v1::SessionConfigSelectOptions,
+    opts: &agent_client_protocol::v1::schema::SessionConfigSelectOptions,
 ) -> NexusConfigSelectOptions {
     match opts {
-        agent_client_protocol::schema::v1::SessionConfigSelectOptions::Ungrouped(items) => {
+        agent_client_protocol::v1::schema::SessionConfigSelectOptions::Ungrouped(items) => {
             NexusConfigSelectOptions::Ungrouped(
                 items
                     .iter()
@@ -339,7 +340,7 @@ fn sdk_config_select_options_to_nexus(
                     .collect(),
             )
         }
-        agent_client_protocol::schema::v1::SessionConfigSelectOptions::Grouped(groups) => {
+        agent_client_protocol::v1::schema::SessionConfigSelectOptions::Grouped(groups) => {
             NexusConfigSelectOptions::Grouped(
                 groups
                     .iter()
@@ -360,7 +361,7 @@ fn sdk_config_select_options_to_nexus(
 }
 
 fn sdk_config_select_to_nexus(
-    sel: &agent_client_protocol::schema::v1::SessionConfigSelect,
+    sel: &agent_client_protocol::v1::schema::SessionConfigSelect,
 ) -> NexusConfigSelect {
     NexusConfigSelect {
         current_value: sel.current_value.to_string(),
@@ -369,9 +370,9 @@ fn sdk_config_select_to_nexus(
 }
 
 fn sdk_config_option_to_nexus(
-    opt: &agent_client_protocol::schema::v1::SessionConfigOption,
+    opt: &agent_client_protocol::v1::schema::SessionConfigOption,
 ) -> NexusConfigOption {
-    use agent_client_protocol::schema::v1::SessionConfigKind;
+    use agent_client_protocol::v1::schema::SessionConfigKind;
     let kind = match &opt.kind {
         SessionConfigKind::Select(sel) => NexusConfigKind::Select(sdk_config_select_to_nexus(sel)),
         other => {
@@ -586,17 +587,18 @@ struct SdkConnection {
     init_response: Option<InitializeResponse>,
     /// Active sessions keyed by session ID string.
     ///
-    /// `ActiveSession<'static, Agent>` is `'static` when obtained from
-    /// `SessionBuilder::start_session()`, so it can be stored here.
-    /// The bridge's single-threaded guarantee means exclusive `&mut` access.
+    /// `v1::ActiveSession<'static, Agent>` is `'static` when obtained from
+    /// `SessionBuilder::start_session()` (via `SessionSetup.session`), so it
+    /// can be stored here. The bridge's single-threaded guarantee means
+    /// exclusive `&mut` access.
     sessions: HashMap<String, ActiveSession<'static, Agent>>,
 }
 
 /// Concrete adapter wrapping the `agent-client-protocol` SDK.
 ///
-/// This struct uses the SDK v0.11.0 `Client.builder().connect_with()` pattern
-/// to establish a connection to the agent. The `ConnectionTo<Agent>` handle is
-/// stored and reused for all subsequent operations.
+/// This struct uses the SDK v5 `Client.v1().connect_with()` pattern
+/// to establish a connection to the agent. The `v1::ConnectionTo<Agent>`
+/// handle is stored and reused for all subsequent operations.
 ///
 /// The adapter uses [`LocalSetBridge`] to execute operations that may require
 /// !Send futures, bridging them to the async tokio world.
@@ -682,7 +684,7 @@ impl AcpSdkAdapter {
     ///
     /// This method establishes the ACP SDK connection using the provided
     /// stdin/stdout pipes from the agent subprocess. The connection uses
-    /// the SDK's `Client.builder().connect_with()` pattern.
+    /// the SDK's `Client.v1().connect_with()` pattern.
     ///
     /// We store this handle for use by trait methods. The connection is kept
     /// alive by the callback returning a pending future.
@@ -730,8 +732,9 @@ impl AcpSdkAdapter {
                 // Create the transport using SDK ByteStreams.
                 let transport = ByteStreams::new(stdin_compat, stdout_compat);
 
-                // Build the Client with permission request handler
-                let builder = acp::Client.builder().name(&agent_id);
+                // Build the Client with permission request handler (v5:
+                // `Client.v1()` replaces the removed `Client.builder()`).
+                let builder = acp::Client.v1().name(&agent_id);
 
                 // Register permission request handler via on_receive_request.
                 // The agent sends `session/request_permission` when it needs
@@ -963,7 +966,7 @@ impl AcpSdkAdapter {
                 .map_err(|e| crate::AcpError::sdk(&e))?;
 
             match update {
-                SessionMessage::SessionMessage(_dispatch) => {
+                SessionMessage::Message(_dispatch) => {
                     // Streaming content update — logged but not accumulated
                     // in NexusPromptCompleted (content consumption is handled
                     // by the caller via subscribe/future streaming API).
@@ -972,8 +975,12 @@ impl AcpSdkAdapter {
                         "Received streaming update"
                     );
                 }
-                SessionMessage::StopReason(reason) => {
-                    let nexus_reason = nexus_stop_reason_from_sdk(reason);
+                // ACP 5.0 (upstream #474): a `session/prompt` error arrives
+                // on the session stream instead of closing the connection —
+                // map it to the existing error path (never silent).
+                SessionMessage::PromptResponse(result) => {
+                    let response = result.map_err(|e| crate::AcpError::sdk(&e))?;
+                    let nexus_reason = nexus_stop_reason_from_sdk(response.stop_reason);
                     tracing::info!(
                         session_id = %session_id_str,
                         stop_reason = ?nexus_reason,
@@ -1036,7 +1043,7 @@ impl AcpSdkAdapter {
                 .map_err(|e| crate::AcpError::sdk(&e))?;
 
             match update {
-                SessionMessage::SessionMessage(dispatch) => {
+                SessionMessage::Message(dispatch) => {
                     // Use MatchDispatch to extract all streaming updates from the notification
                     let updates =
                         Self::extract_updates_from_dispatch(dispatch, &session_id_str).await;
@@ -1044,8 +1051,13 @@ impl AcpSdkAdapter {
                         let _ = tx.send(acp_update).await;
                     }
                 }
-                SessionMessage::StopReason(reason) => {
-                    let nexus_reason = nexus_stop_reason_from_sdk(reason);
+                // ACP 5.0 (upstream #474): a `session/prompt` error arrives
+                // on the session stream instead of closing the connection —
+                // surface it via the existing `Failed` update (error
+                // surfacing is never weakened).
+                SessionMessage::PromptResponse(result) => {
+                    let response = result.map_err(|e| crate::AcpError::sdk(&e))?;
+                    let nexus_reason = nexus_stop_reason_from_sdk(response.stop_reason);
                     tracing::info!(
                         session_id = %session_id_str,
                         stop_reason = ?nexus_reason,
@@ -1074,7 +1086,7 @@ impl AcpSdkAdapter {
     /// Returns a list of `AcpStreamUpdate` items extracted from the notification.
     /// Handles all `SessionUpdate` variants: text, thought, tool calls, plans.
     async fn extract_updates_from_dispatch(
-        dispatch: acp::Dispatch,
+        dispatch: acp::v1::Dispatch,
         session_id: &str,
     ) -> Vec<AcpStreamUpdate> {
         let captured: std::sync::Arc<std::sync::Mutex<Vec<AcpStreamUpdate>>> =
@@ -1082,7 +1094,9 @@ impl AcpSdkAdapter {
         let captured_clone = captured.clone();
         let sid = session_id.to_string();
 
-        let result = MatchDispatch::new(dispatch)
+        // ACP 5.0: `MatchDispatch` handles are typed per protocol version;
+        // convert the v1 dispatch to the raw form first.
+        let result = MatchDispatch::new(dispatch.into_raw())
             .if_notification(async move |notif: SessionNotification| {
                 let updates = Self::session_update_to_acp_updates(notif.update, &sid);
                 if !updates.is_empty() {
@@ -1301,29 +1315,31 @@ impl NexusAcpClient for AcpSdkAdapter {
                             })?
                             .map_err(|e| crate::AcpError::sdk(&e))?;
 
-                        let session_id_str = session_result.session_id().to_string();
+                        // ACP 5.0: `start_session()` returns a `SessionSetup`
+                        // holding the session and the complete setup response
+                        // (`ActiveSession::response()` was removed).
+                        let SessionSetup { session, response, .. } = session_result;
 
-                        // Convert modes. ACP 2.1: `modes()` borrows
-                        // `Option<&SessionModeState>` — map directly.
-                        let nexus_modes = session_result
-                            .modes()
-                            .map(nexus_session_mode_state_from_sdk);
+                        let session_id_str = session.session_id().to_string();
 
-                        // Convert config_options from the SDK response.
-                        // The SDK `NewSessionResponse` may include config_options
-                        // exposing agent-specific configuration IDs for model/mode
-                        // switching via `set_config_option`. ACP 2.1: use the
-                        // borrowed `config_options()` accessor; `response()` is
-                        // now synthesized by value.
-                        let nexus_config_options = session_result
-                            .config_options()
+                        // Convert modes. ACP 2.1: the setup response carries
+                        // `Option<SessionModeState>` — map directly.
+                        let nexus_modes =
+                            response.modes.map(|state| nexus_session_mode_state_from_sdk(&state));
+
+                        // Convert config_options from the setup response. The
+                        // SDK response may include config_options exposing
+                        // agent-specific configuration IDs for model/mode
+                        // switching via `set_config_option`.
+                        let nexus_config_options = response
+                            .config_options
                             .map(|opts| opts.iter().map(sdk_config_option_to_nexus).collect());
 
                         // Store the active session (write lock, brief scope)
                         {
                             let mut guard = connection.write().await;
                             if let Some(conn) = guard.as_mut() {
-                                conn.sessions.insert(session_id_str.clone(), session_result);
+                                conn.sessions.insert(session_id_str.clone(), session);
                             }
                         }
 
@@ -1752,7 +1768,7 @@ mod tests {
 
     #[test]
     fn stop_reason_from_sdk() {
-        use agent_client_protocol::schema::v1::StopReason;
+        use agent_client_protocol::v1::schema::StopReason;
         assert_eq!(
             nexus_stop_reason_from_sdk(StopReason::EndTurn),
             NexusStopReason::EndTurn
@@ -1797,7 +1813,7 @@ mod tests {
     #[test]
     fn auth_method_from_sdk_agent_variant() {
         let sdk_method = AuthMethod::Agent(
-            agent_client_protocol::schema::v1::AuthMethodAgent::new("oauth", "OAuth 2.0")
+            agent_client_protocol::v1::schema::AuthMethodAgent::new("oauth", "OAuth 2.0")
                 .description("Authenticate via OAuth"),
         );
         let nexus_method = nexus_auth_method_from_sdk(&sdk_method);
@@ -1817,7 +1833,7 @@ mod tests {
         // Since only the Agent variant is available without feature flags,
         // we verify the Agent path works correctly.
         let sdk_method = AuthMethod::Agent(
-            agent_client_protocol::schema::v1::AuthMethodAgent::new("test-id", "Test"),
+            agent_client_protocol::v1::schema::AuthMethodAgent::new("test-id", "Test"),
         );
         let nexus_method = nexus_auth_method_from_sdk(&sdk_method);
         assert_eq!(nexus_method.id, "test-id");
@@ -1827,16 +1843,16 @@ mod tests {
 
     #[test]
     fn session_mode_state_from_sdk() {
-        use agent_client_protocol::schema::v1::SessionMode;
+        use agent_client_protocol::v1::schema::SessionMode;
         let sdk_state = SessionModeState::new(
-            agent_client_protocol::schema::v1::SessionModeId::new("act"),
+            agent_client_protocol::v1::schema::SessionModeId::new("act"),
             vec![
                 SessionMode::new(
-                    agent_client_protocol::schema::v1::SessionModeId::new("act"),
+                    agent_client_protocol::v1::schema::SessionModeId::new("act"),
                     "Act",
                 ),
                 SessionMode::new(
-                    agent_client_protocol::schema::v1::SessionModeId::new("ask"),
+                    agent_client_protocol::v1::schema::SessionModeId::new("ask"),
                     "Ask",
                 ),
             ],
@@ -1914,7 +1930,7 @@ mod tests {
                 assert_eq!(h.url, "https://example.com/mcp");
                 assert_eq!(
                     h.headers,
-                    [] as [agent_client_protocol::schema::v1::HttpHeader; 0]
+                    [] as [agent_client_protocol::v1::schema::HttpHeader; 0]
                 );
             }
             _ => panic!("Expected Http variant"),
@@ -1946,7 +1962,7 @@ mod tests {
         let sdk_req = sdk_new_session_request_from_nexus(nexus_req);
         assert_eq!(
             sdk_req.mcp_servers,
-            [] as [agent_client_protocol::schema::v1::McpServer; 0]
+            [] as [agent_client_protocol::v1::schema::McpServer; 0]
         );
     }
 
@@ -2155,7 +2171,7 @@ mod tests {
     #[test]
     fn session_info_to_nexus_basic() {
         let sdk_info = SessionInfo::new(
-            agent_client_protocol::schema::v1::SessionId::new("session-abc"),
+            agent_client_protocol::v1::schema::SessionId::new("session-abc"),
             PathBuf::from("/home/user/project"),
         );
         let nexus_info = sdk_session_info_to_nexus(&sdk_info);
@@ -2168,7 +2184,7 @@ mod tests {
     #[test]
     fn session_info_to_nexus_with_optional_fields() {
         let sdk_info = SessionInfo::new(
-            agent_client_protocol::schema::v1::SessionId::new("session-def"),
+            agent_client_protocol::v1::schema::SessionId::new("session-def"),
             PathBuf::from("/var/app"),
         )
         .title("Production Session")
@@ -2193,12 +2209,12 @@ mod tests {
     fn list_sessions_response_to_nexus_with_sessions() {
         let sdk_sessions = vec![
             SessionInfo::new(
-                agent_client_protocol::schema::v1::SessionId::new("sess-1"),
+                agent_client_protocol::v1::schema::SessionId::new("sess-1"),
                 PathBuf::from("/tmp/a"),
             )
             .title("Session A"),
             SessionInfo::new(
-                agent_client_protocol::schema::v1::SessionId::new("sess-2"),
+                agent_client_protocol::v1::schema::SessionId::new("sess-2"),
                 PathBuf::from("/tmp/b"),
             ),
         ];
@@ -2232,7 +2248,7 @@ mod tests {
 
     #[test]
     fn config_option_category_to_nexus_all_variants() {
-        use agent_client_protocol::schema::v1::SessionConfigOptionCategory;
+        use agent_client_protocol::v1::schema::SessionConfigOptionCategory;
         assert_eq!(
             sdk_config_option_category_to_nexus(&SessionConfigOptionCategory::Mode),
             NexusConfigOptionCategory::Mode
@@ -2255,7 +2271,7 @@ mod tests {
 
     #[test]
     fn config_select_option_to_nexus() {
-        let sdk_opt = agent_client_protocol::schema::v1::SessionConfigSelectOption::new(
+        let sdk_opt = agent_client_protocol::v1::schema::SessionConfigSelectOption::new(
             "opt-1",
             "Option One",
         )
@@ -2269,8 +2285,8 @@ mod tests {
     #[test]
     fn config_select_options_ungrouped_to_nexus() {
         let sdk_opts =
-            agent_client_protocol::schema::v1::SessionConfigSelectOptions::Ungrouped(vec![
-                agent_client_protocol::schema::v1::SessionConfigSelectOption::new("a", "A"),
+            agent_client_protocol::v1::schema::SessionConfigSelectOptions::Ungrouped(vec![
+                agent_client_protocol::v1::schema::SessionConfigSelectOption::new("a", "A"),
             ]);
         let nexus_opts = sdk_config_select_options_to_nexus(&sdk_opts);
         match nexus_opts {
@@ -2284,10 +2300,10 @@ mod tests {
 
     #[test]
     fn config_select_to_nexus() {
-        let sdk_sel = agent_client_protocol::schema::v1::SessionConfigSelect::new(
+        let sdk_sel = agent_client_protocol::v1::schema::SessionConfigSelect::new(
             "claude-3-opus",
             vec![
-                agent_client_protocol::schema::v1::SessionConfigSelectOption::new(
+                agent_client_protocol::v1::schema::SessionConfigSelectOption::new(
                     "claude-3-opus",
                     "Claude 3 Opus",
                 ),
@@ -2305,19 +2321,19 @@ mod tests {
 
     #[test]
     fn config_option_to_nexus_select() {
-        let sdk_opt = agent_client_protocol::schema::v1::SessionConfigOption::select(
+        let sdk_opt = agent_client_protocol::v1::schema::SessionConfigOption::select(
             "model",
             "Model",
             "claude-3-opus",
             vec![
-                agent_client_protocol::schema::v1::SessionConfigSelectOption::new(
+                agent_client_protocol::v1::schema::SessionConfigSelectOption::new(
                     "claude-3-opus",
                     "Claude 3 Opus",
                 ),
             ],
         )
         .description("Select the model")
-        .category(agent_client_protocol::schema::v1::SessionConfigOptionCategory::Model);
+        .category(agent_client_protocol::v1::schema::SessionConfigOptionCategory::Model);
         let nexus_opt = sdk_config_option_to_nexus(&sdk_opt);
         assert_eq!(nexus_opt.id, "model");
         assert_eq!(nexus_opt.name, "Model");
@@ -2338,13 +2354,13 @@ mod tests {
     #[test]
     fn set_config_option_response_to_nexus_with_options() {
         let sdk_resp = SetSessionConfigOptionResponse::new(vec![
-            agent_client_protocol::schema::v1::SessionConfigOption::select(
+            agent_client_protocol::v1::schema::SessionConfigOption::select(
                 "mode",
                 "Mode",
                 "act",
                 vec![
-                    agent_client_protocol::schema::v1::SessionConfigSelectOption::new("act", "Act"),
-                    agent_client_protocol::schema::v1::SessionConfigSelectOption::new("ask", "Ask"),
+                    agent_client_protocol::v1::schema::SessionConfigSelectOption::new("act", "Act"),
+                    agent_client_protocol::v1::schema::SessionConfigSelectOption::new("ask", "Ask"),
                 ],
             ),
         ]);
@@ -2377,12 +2393,12 @@ mod tests {
     fn build_permission_response_approve_prefers_allow_always() {
         let options = vec![
             PermissionOption::new(
-                agent_client_protocol::schema::v1::PermissionOptionId::new("opt-1"),
+                agent_client_protocol::v1::schema::PermissionOptionId::new("opt-1"),
                 "Allow Once",
                 PermissionOptionKind::AllowOnce,
             ),
             PermissionOption::new(
-                agent_client_protocol::schema::v1::PermissionOptionId::new("opt-2"),
+                agent_client_protocol::v1::schema::PermissionOptionId::new("opt-2"),
                 "Allow Always",
                 PermissionOptionKind::AllowAlways,
             ),
@@ -2403,7 +2419,7 @@ mod tests {
     #[test]
     fn build_permission_response_approve_fallback_to_allow_once() {
         let options = vec![PermissionOption::new(
-            agent_client_protocol::schema::v1::PermissionOptionId::new("opt-1"),
+            agent_client_protocol::v1::schema::PermissionOptionId::new("opt-1"),
             "Allow Once",
             PermissionOptionKind::AllowOnce,
         )];
@@ -2423,12 +2439,12 @@ mod tests {
     fn build_permission_response_deny_prefers_reject_always() {
         let options = vec![
             PermissionOption::new(
-                agent_client_protocol::schema::v1::PermissionOptionId::new("opt-1"),
+                agent_client_protocol::v1::schema::PermissionOptionId::new("opt-1"),
                 "Reject Once",
                 PermissionOptionKind::RejectOnce,
             ),
             PermissionOption::new(
-                agent_client_protocol::schema::v1::PermissionOptionId::new("opt-2"),
+                agent_client_protocol::v1::schema::PermissionOptionId::new("opt-2"),
                 "Reject Always",
                 PermissionOptionKind::RejectAlways,
             ),
@@ -2448,7 +2464,7 @@ mod tests {
     #[test]
     fn build_permission_response_no_matching_option_cancels() {
         let options = vec![PermissionOption::new(
-            agent_client_protocol::schema::v1::PermissionOptionId::new("opt-1"),
+            agent_client_protocol::v1::schema::PermissionOptionId::new("opt-1"),
             "Allow Once",
             PermissionOptionKind::AllowOnce,
         )];
