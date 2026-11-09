@@ -140,10 +140,17 @@ fn candidate_ids(body: &Value) -> Vec<String> {
 async fn describe_contract(matrix: Matrix) {
     let body = matrix.admin().describe().await;
     assert_eq!(body["memory_protocol_version"], json!(1));
+    let expected_capabilities: Value = if matrix.kind() == Kind::Remote {
+        // The advertised fixture genuinely serves the reflection family, so
+        // describe names both families it serves.
+        json!(["spoke-memory", "spoke-memory-reflection"])
+    } else {
+        json!(["spoke-memory"])
+    };
     assert_eq!(
         body["capabilities"],
-        json!(["spoke-memory"]),
-        "only the served family is advertised: {body}"
+        expected_capabilities,
+        "only the served families are advertised: {body}"
     );
     assert!(
         body["engine_policy_version"]
@@ -333,7 +340,10 @@ async fn c_003_reflection_requires_subcapability_local() {
 
 #[tokio::test]
 async fn c_003_reflection_requires_subcapability_remote() {
-    reflection_requires_subcapability(Matrix::remote().await).await;
+    // The continuity shape: the deliberately-unadvertised fixture serves the
+    // same operations, so the family's `capability_missing` is the real
+    // dispatch denial over Connect negotiation, not a served-but-pinned gap.
+    reflection_requires_subcapability(Matrix::remote_unadvertised().await).await;
 }
 
 /// C-004: transfer requires its sub-capability across every export/import
@@ -385,7 +395,12 @@ async fn describe_has_no_space_catalogue(matrix: Matrix) {
         body.get("spaces").is_none(),
         "describe is not a space catalogue: {body}"
     );
-    assert_eq!(body["capabilities"], json!(["spoke-memory"]));
+    let expected_capabilities: Value = if matrix.kind() == Kind::Remote {
+        json!(["spoke-memory", "spoke-memory-reflection"])
+    } else {
+        json!(["spoke-memory"])
+    };
+    assert_eq!(body["capabilities"], expected_capabilities);
 
     // The catalogue is a bounded page: a page never exceeds the requested limit
     // and reports its end instead of growing without bound.

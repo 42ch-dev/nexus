@@ -97,6 +97,10 @@ name = "c_records_recall_profiles"
 required-features = ["dev-graph-memory-remote"]
 
 [[test]]
+name = "c_reflections_remote"
+required-features = ["dev-graph-memory-remote"]
+
+[[test]]
 name = "remote_core_recall_profiles"
 required-features = ["dev-graph-memory-remote"]
 

@@ -1275,9 +1275,14 @@ async fn operator_bootstrap_is_callable_and_visible(
 ) {
     let admin = matrix.admin();
     let described = admin.describe().await;
+    let expected_capabilities: Value = if matrix.kind() == Kind::Remote {
+        json!(["spoke-memory", "spoke-memory-reflection"])
+    } else {
+        json!(["spoke-memory"])
+    };
     assert_eq!(
         described["capabilities"],
-        json!(["spoke-memory"]),
+        expected_capabilities,
         "{described}"
     );
     assert_eq!(described["required_profile_kinds"], json!([]));
