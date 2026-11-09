@@ -28,7 +28,8 @@
 // V1.227 NXM-2: 28 → 29 — memory_provider_meta key/value table, the provider-owned home of the durable §6.10 retention clock floor, plus its writer-protocol guard/outbox family (migration 20261101000004_memory_provider_meta.sql).
 // V1.227 NXM-3: 29 → 30 — memory_journal durable intent journal for cross-store (SQL + file) writes (§5.2/D-10): the planned file targets are committed with the effect rows, recovery settles or quarantines them, plus its writer-protocol guard/outbox family (migration 20261101000005_memory_journal.sql).
 // V1.229 N3 P4 (D18): 30 → 31 — content-free remote binding-memory dependency metadata: independent per-wire-attempt admissions plus monotone known candidate/record facts, both RESTRICT-bound to the Nexus binding (migration 20261104000001_remote_binding_memory_dependencies.sql).
-pub const DB_SCHEMA_VERSION: u32 = 31;
+// V1.230 N4-R: 31 → 32 — append-only memory_reflections envelopes (spoke-memory §7.25–§7.27): verbatim pinned selection/filter/basis JSON with the insert-only guard + insert outbox family (reflections are immutable — no update/delete triggers, no retention sweep; migration 20261110000001_memory_reflections.sql).
+pub const DB_SCHEMA_VERSION: u32 = 32;
 
 /// Contract schema version from generated wire types
 ///

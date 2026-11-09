@@ -4548,6 +4548,134 @@ enum RecordMutation<'a> {
     },
 }
 
+// ── Reflections (§7.25–§7.27, N4-R) ─────────────────────────────────────
+//
+// One append-only envelope per generated reflection; the table is immutable by
+// design, so the family is an insert and an identity read and nothing else.
+// Pinned shapes travel as verbatim JSON text end to end: this mapping never
+// parses or re-serializes them, so published array shapes survive intact and an
+// absent optional filter stays SQL NULL — never a `null`-substituted array.
+// Staleness is recomputed at read time (§7.26); `stale_cache` is only the
+// write-time flag the insert recorded. The reflection ops (`mod.rs`) are the
+// consumers, landing with Tasks 2–4 of v230-n4r-local-reflection.
+
+#[allow(dead_code)] // consumed by the reflection ops (same plan, Tasks 2–4)
+const REFLECTION_COLUMNS: &str = "reflection_id, space_id, subject_id, requester_principal_id, \
+     selection_json, filter_json, cognition_filter_json, basis_json, engine_policy_version, \
+     model, schema_version, revision, extensions_json, created_at, body_text, body_format, \
+     cost_unit_kind, cost_units, stale_cache";
+
+/// One generated reflection envelope as stored (§7.27).
+#[allow(dead_code)] // consumed by the reflection ops (same plan, Tasks 2–4)
+#[derive(Clone, Debug, sqlx::FromRow)]
+pub(super) struct ReflectionRow {
+    pub reflection_id: String,
+    pub space_id: String,
+    pub subject_id: String,
+    pub requester_principal_id: String,
+    pub selection_json: String,
+    pub filter_json: Option<String>,
+    pub cognition_filter_json: Option<String>,
+    pub basis_json: String,
+    pub engine_policy_version: String,
+    pub model: Option<String>,
+    pub schema_version: i64,
+    pub revision: i64,
+    pub extensions_json: String,
+    pub created_at: String,
+    pub body_text: String,
+    pub body_format: String,
+    pub cost_unit_kind: Option<String>,
+    pub cost_units: Option<f64>,
+    pub stale_cache: bool,
+}
+
+/// One reflection envelope to insert — the generate flow's transaction-2 write.
+/// Pinned shapes arrive as verbatim JSON text (serialization is the caller's
+/// admission step); `cost` is the wire's one optional object, stored as its two
+/// columns or neither.
+#[allow(dead_code)] // consumed by the reflection ops (same plan, Tasks 2–4)
+pub(super) struct NewReflection<'a> {
+    pub reflection_id: &'a str,
+    pub space_id: &'a str,
+    pub subject_id: &'a str,
+    pub requester_principal_id: &'a str,
+    pub selection_json: &'a str,
+    pub filter_json: Option<&'a str>,
+    pub cognition_filter_json: Option<&'a str>,
+    pub basis_json: &'a str,
+    pub engine_policy_version: &'a str,
+    pub model: Option<&'a str>,
+    pub schema_version: i64,
+    pub revision: i64,
+    pub extensions_json: &'a str,
+    pub created_at: &'a str,
+    pub body_text: &'a str,
+    pub body_format: &'a str,
+    pub stale_cache: bool,
+    pub cost: Option<(&'a str, f64)>,
+}
+
+/// Append one reflection envelope. There is no update or delete path: rows are
+/// immutable and never swept.
+#[allow(dead_code)] // consumed by the reflection ops (same plan, Tasks 2–4)
+async fn insert_reflection(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    reflection: &NewReflection<'_>,
+) -> StoreResult<()> {
+    let (cost_unit_kind, cost_units) = match reflection.cost {
+        Some((unit_kind, units)) => (Some(unit_kind), Some(units)),
+        None => (None, None),
+    };
+    sqlx::query(
+        "INSERT INTO memory_reflections \
+         (reflection_id, space_id, subject_id, requester_principal_id, selection_json, \
+          filter_json, cognition_filter_json, basis_json, engine_policy_version, model, \
+          schema_version, revision, extensions_json, created_at, body_text, body_format, \
+          cost_unit_kind, cost_units, stale_cache) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(reflection.reflection_id)
+    .bind(reflection.space_id)
+    .bind(reflection.subject_id)
+    .bind(reflection.requester_principal_id)
+    .bind(reflection.selection_json)
+    .bind(reflection.filter_json)
+    .bind(reflection.cognition_filter_json)
+    .bind(reflection.basis_json)
+    .bind(reflection.engine_policy_version)
+    .bind(reflection.model)
+    .bind(reflection.schema_version)
+    .bind(reflection.revision)
+    .bind(reflection.extensions_json)
+    .bind(reflection.created_at)
+    .bind(reflection.body_text)
+    .bind(reflection.body_format)
+    .bind(cost_unit_kind)
+    .bind(cost_units)
+    .bind(reflection.stale_cache)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+#[allow(dead_code)] // consumed by the reflection ops (same plan, Tasks 2–4)
+async fn reflection_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    reflection_id: &str,
+) -> StoreResult<Option<ReflectionRow>> {
+    let sql = format!(
+        "SELECT {REFLECTION_COLUMNS} FROM memory_reflections \
+         WHERE space_id = ? AND reflection_id = ?"
+    );
+    Ok(sqlx::query_as::<_, ReflectionRow>(sqlx::AssertSqlSafe(sql))
+        .bind(space_id)
+        .bind(reflection_id)
+        .fetch_optional(&mut **tx)
+        .await?)
+}
+
 impl MemoryStore {
     /// The bearer subject that owns one provider-native candidate row, if this
     /// store holds it.
