@@ -216,28 +216,55 @@ pub struct CoreService {
 /// [`nexus_home_layout::config_lock::publish_document`] — an atomic rename —
 /// so an admitted reader still always observes one complete version.
 ///
-/// A lock that cannot be created means the home grants no directory-write
-/// authority — the same authority every writer needs for its lock file,
-/// staging directory and rename — so no concurrent writer can exist in such a
-/// home and the uncoordinated read is whole-document by that permission
-/// boundary. Falling back there preserves I-000291: an already-provisioned
-/// read-only home still serves a no-override `ReadOnly` open instead of
-/// failing on the lock.
+/// Lock acquisition and the protected read report through separate layers: a
+/// failed protected read propagates and is never retried outside the lock,
+/// where a concurrent in-place rewrite would be observable. The one justified
+/// unlocked read is the documented read-only home (I-000291):
+/// `PermissionDenied` on the lock file means no directory-write authority for
+/// the lock — the same authority every writer needs for its lock file, staging
+/// directory and rename — so no writer the coordination could exclude exists
+/// in such a home and the uncoordinated read is whole-document by that
+/// permission boundary. Falling back there preserves I-000291: an
+/// already-provisioned read-only home still serves a no-override `ReadOnly`
+/// open instead of failing on the lock. Any other acquisition failure (an
+/// unremovable stale lock after the steal deadline, an unwritable ownership
+/// token) establishes nothing about writers and fails closed.
 ///
 /// # Errors
 ///
-/// [`CoreError::Internal`] for an unreadable document and the mapped
+/// [`CoreError::Internal`] for a lock acquisition failure other than
+/// `PermissionDenied` and for an unreadable document, and the mapped
 /// [`CoreError::InvalidInput`] of a stored remote reference that fails
 /// validation — a malformed table never degrades to local silently.
 fn selection_snapshot(nexus_home: &Path) -> CoreResult<MemoryProviderSelection> {
-    let config =
-        match crate::config_lock::with_config_lock(nexus_home, || read_provider_snapshot(nexus_home))
-        {
-            Ok(config) => config,
-            // No lock authority means no writer authority; read the same
-            // whole-document path without coordination (I-000291).
-            Err(_) => read_provider_snapshot(nexus_home)?,
-        };
+    snapshot_with_lock(nexus_home, |home| {
+        let _lock = nexus_home_layout::config_lock::acquire(home)?;
+        Ok(read_provider_snapshot(home))
+    })
+}
+
+/// The snapshot with the daemon-home config lock acquired around its read.
+///
+/// `locked_read` reports the acquisition failure in its outer layer and the
+/// protected read's result in its inner one, so the two failure kinds stay
+/// distinguishable; injected in tests to fail each layer independently.
+fn snapshot_with_lock(
+    nexus_home: &Path,
+    locked_read: impl FnOnce(&Path) -> Result<CoreResult<Option<MemoryProviderConfig>>, std::io::Error>,
+) -> CoreResult<MemoryProviderSelection> {
+    let config = match locked_read(nexus_home) {
+        Ok(config) => config?,
+        // Only a denied lock-file write is the documented read-only home;
+        // read the whole document without coordination (I-000291).
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            read_provider_snapshot(nexus_home)?
+        }
+        Err(error) => {
+            return Err(CoreError::Internal {
+                category: format!("config_lock: {error}"),
+            })
+        }
+    };
     MemoryProviderSelection::from_config(config)
 }
 
@@ -1116,5 +1143,87 @@ mod tests {
             remote_selection(),
             "the snapshot reads the whole document, never the truncated window"
         );
+    }
+
+    /// A failed protected read propagates and is never retried outside the
+    /// lock: the home holds a complete valid document, so any unlocked retry
+    /// would succeed and the error below would not surface. The layers are
+    /// injected because the real acquisition seams (the ownership-token
+    /// failure hook) live behind the home-layout crate's own `cfg(test)` build.
+    #[test]
+    fn a_failed_protected_read_is_never_retried_unlocked() {
+        let home = tempfile::tempdir().expect("home");
+        std::fs::write(
+            home.path().join("config.toml"),
+            config_document(&remote_selection()),
+        )
+        .expect("config");
+
+        let reads = std::cell::Cell::new(0u8);
+        let error = snapshot_with_lock(home.path(), |_| {
+            reads.set(reads.get() + 1);
+            Ok(Err(CoreError::Internal {
+                category: "config_load: injected read failure".to_string(),
+            }))
+        })
+        .expect_err("the failed protected read propagates");
+
+        let CoreError::Internal { category } = &error else {
+            panic!("unexpected error shape: {error:?}");
+        };
+        assert_eq!(
+            category, "config_load: injected read failure",
+            "the protected read's own error propagates unchanged: {error:?}"
+        );
+        assert_eq!(reads.get(), 1, "the read ran once, under the lock");
+    }
+
+    /// An acquisition failure that is not a denied lock-file write — the shape
+    /// the stale-lock steal deadline and the ownership-token failure surface
+    /// through — proves nothing about writer absence and fails closed instead
+    /// of falling back to the uncoordinated read (which would read the valid
+    /// document below as a successful snapshot).
+    #[test]
+    fn a_non_permission_lock_failure_fails_closed() {
+        let home = tempfile::tempdir().expect("home");
+        std::fs::write(
+            home.path().join("config.toml"),
+            config_document(&remote_selection()),
+        )
+        .expect("config");
+
+        let error = snapshot_with_lock(home.path(), |_| {
+            Err(std::io::Error::other("injected acquisition failure"))
+        })
+        .expect_err("the acquisition failure propagates");
+
+        let CoreError::Internal { category } = &error else {
+            panic!("unexpected error shape: {error:?}");
+        };
+        assert!(
+            category.starts_with("config_lock: "),
+            "the acquisition failure is the config_lock carrier, not an unlocked read: {error:?}"
+        );
+    }
+
+    /// The read-only-home fallback survives the split: a denied lock-file
+    /// write is the one acquisition failure that reads the document without
+    /// coordination. The end-to-end acceptance is
+    /// `tests/readonly_config_open.rs`; this pins the split layer itself.
+    #[test]
+    fn a_permission_denied_acquisition_still_falls_back_to_the_unlocked_read() {
+        let home = tempfile::tempdir().expect("home");
+        std::fs::write(
+            home.path().join("config.toml"),
+            config_document(&remote_selection()),
+        )
+        .expect("config");
+
+        let selection = snapshot_with_lock(home.path(), |_| {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        })
+        .expect("the denied lock-file write falls back to the uncoordinated read");
+
+        assert_eq!(selection, remote_selection());
     }
 }
