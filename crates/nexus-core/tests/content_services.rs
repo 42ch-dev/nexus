@@ -91,6 +91,7 @@ async fn setup() -> Fixture {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap();

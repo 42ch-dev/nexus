@@ -77,7 +77,7 @@ pub(super) fn max_content_bytes() -> usize {
 
 /// §7.0.7 page bound: the caller's `limit` defaults to and may never exceed the
 /// advertised `max_page_size`.
-pub(super) const MAX_PAGE_SIZE_BOUND: NonZeroU64 = match NonZeroU64::new(MAX_PAGE_SIZE) {
+pub(crate) const MAX_PAGE_SIZE_BOUND: NonZeroU64 = match NonZeroU64::new(MAX_PAGE_SIZE) {
     Some(bound) => bound,
     None => panic!("max_page_size must be positive"),
 };

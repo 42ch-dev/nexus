@@ -4,7 +4,41 @@
 
 mod sqlite;
 
+use std::fs::File;
+use std::sync::Arc;
+
 use sqlx::sqlite::SqliteConnection;
+
+/// The complete OS admission a guarded connection belongs to.
+///
+/// These are the *originally acquired* admission lock handles: the shared
+/// migration lock and, for an engine owner, the exclusive engine lock. The
+/// writer guard and every guarded connection share ownership of one value, so
+/// the OS locks stay held exactly as long as the last real guarded connection
+/// (or the guard) exists and are released when SQLite destroys a connection's
+/// userdata. Nothing here opens another lock file or re-acquires a lock.
+pub struct WriterAdmission {
+    _migration_lock: File,
+    _engine_lock: Option<File>,
+}
+
+impl WriterAdmission {
+    #[must_use]
+    pub fn new(migration_lock: File, engine_lock: Option<File>) -> Self {
+        Self {
+            _migration_lock: migration_lock,
+            _engine_lock: engine_lock,
+        }
+    }
+}
+
+impl std::fmt::Debug for WriterAdmission {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WriterAdmission")
+            .field("engine_owner", &self._engine_lock.is_some())
+            .finish_non_exhaustive()
+    }
+}
 
 /// Immutable connection-local writer context installed as SQLite userdata.
 #[derive(Debug, Clone)]
@@ -39,6 +73,7 @@ impl WriterMode {
 pub async fn install_writer_functions(
     conn: &mut SqliteConnection,
     context: WriterConnectionContext,
+    admission: Option<Arc<WriterAdmission>>,
 ) -> Result<(), sqlx::Error> {
-    sqlite::install_writer_functions(conn, context).await
+    sqlite::install_writer_functions(conn, context, admission).await
 }

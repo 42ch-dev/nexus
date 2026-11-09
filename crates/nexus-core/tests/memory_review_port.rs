@@ -124,6 +124,7 @@ async fn open_core(env: &Env) -> (CoreService, nexus_core::Principal) {
     let core = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .unwrap();
@@ -604,12 +605,18 @@ async fn record_placement(
     .unwrap()
 }
 
-/// One provider-native `fact` fragment of the Character, placed in a binding
-/// context, carrying the provenance the caller chose.
+/// One `fact` Character fragment of the Character, placed in a binding context,
+/// carrying the provenance the caller chose.
 ///
 /// The provider records `source_context_ids` verbatim and independently of the
 /// placement (`memory_provider/mod.rs` capture/review), so a valid fragment may
 /// name no source context at all or name another context first.
+///
+/// The record carries the session identity every real fragment producer writes
+/// (review `fragment_decision`, the legacy bridge's `FAMILY_CHARACTER_FRAGMENTS`
+/// block) because the retained `CharacterMemoryFragmentInfo` requires it: a
+/// `fact` without it is a provider-native record, not a Nexus Character
+/// fragment, and promotion refuses it before any provider mutation.
 async fn seed_fragment_record(
     env: &Env,
     character_id: &str,
@@ -623,7 +630,9 @@ async fn seed_fragment_record(
          (record_id, space_id, subject_id, kind, content_json, scope_visibility, \
           scope_context_id, provenance_json, import_ref_json, occurred_at, tombstone_json, \
           revision, created_at, updated_at) \
-         VALUES (?, 'spc_local_default', ?, 'fact', '{\"text\":\"a durable fact\"}', \
+         VALUES (?, 'spc_local_default', ?, 'fact', \
+                 '{\"text\":\"a durable fact\",\"structured\":{\"nexus_legacy\":\
+                   {\"session_id\":\"sess_seed_fragment\"}}}', \
                  'context', ?, ?, NULL, NULL, NULL, 1, \
                  '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
     )

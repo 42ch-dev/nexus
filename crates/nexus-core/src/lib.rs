@@ -10,8 +10,15 @@ mod chronology;
 // `connect-host` is the Connect-host product cohort (WS accept loop +
 // peer-tools event lane, no rmcp); `connect-client` is the superset
 // (connect-host + the rmcp reverse-invoke bridge). Either exposes the module.
+// `memory-remote` additionally compiles it for the one WS transport the remote
+// memory client dials through (n3-provider-binding.md §6); the accept/session/
+// peer-control submodules stay behind the two Connect cohorts.
 mod config_lock;
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(any(
+    feature = "connect-client",
+    feature = "connect-host",
+    feature = "memory-remote"
+))]
 pub mod connect;
 mod content;
 mod context;
@@ -26,7 +33,15 @@ mod home;
 pub mod host;
 mod knowledge;
 mod memory;
+// v1.229 N3 Task 3: the one provider authority an open pins.
+mod memory_binding;
+mod memory_credentials;
 mod memory_pipeline;
+// v1.229 N3 Task 1: the signed Connect open of a selected remote provider.
+#[cfg(feature = "memory-remote")]
+mod memory_remote;
+// v1.229 NXM-9: the validated `[memory_provider]` selection an open resolves.
+mod memory_selection;
 // v1.227 NXM-1: the in-process `spoke_operations::MemoryPort` provider.
 pub mod memory_provider;
 mod operation_receipts;
@@ -78,7 +93,7 @@ pub use config_lock::with_config_lock;
 pub use content::{resolve_guarded_path, resolve_guarded_path_async, CoreChapterContentQuery};
 pub use context::{LocalDirectiveStore, ReadOnlyDirectiveStore};
 pub use creators::CREATOR_INTERNAL_CODES;
-pub use error::{CoreError, CoreResult, MEMORY_INTERNAL_CODES};
+pub use error::{CoreError, CoreResult, MemoryProviderRefusal, MEMORY_INTERNAL_CODES};
 #[cfg(feature = "execution")]
 pub use execution::{
     CancelOutcome, DriveDisposition, ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError,
@@ -101,7 +116,10 @@ pub use memory::{
 /// (NXM-5 Task 2 fix round 2, finding F1). Test builds only.
 #[cfg(feature = "test-hooks")]
 pub use memory::{MemoryReviewPause, MemoryReviewRendezvous};
+pub use memory_credentials::MemoryCredential;
 pub use memory_provider::{LegacyContentMigration, LegacyMigrationStatus};
+pub use memory_selection::{MemoryProviderSelection, RemoteMemoryProviderSelection};
+pub use nexus_home_layout::MemoryProviderConfig;
 pub use presets::PresetError;
 pub use principal::Principal;
 pub use references::{RegisterReferenceParams, REFERENCE_SOURCE_TYPES};

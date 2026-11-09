@@ -76,6 +76,18 @@ connect-client = [
 # Model B's sink/stream session channels (futures_channel::mpsc) ride the
 # same rmcp transport module; the shell compiles only under embedded-mcp.
 embedded-mcp = ["connect-client", "dep:rmcp", "dep:futures-channel"]
+# v1.229 N3 Task 1: the remote memory client (n3-provider-binding.md §6). The
+# smallest cohort that can dial a provider — the signed Connect client, the WS
+# transport and the public peer-id accessor. It enables NO accept/session/
+# peer-control/rmcp/execution edge: `connect/mod.rs` compiles only
+# `ws_transport` under this feature, and `memory_remote` is the only module
+# that consumes it. Default/domain builds keep zero Connect edges.
+memory-remote = [
+    "dep:spoke-connect",
+    "dep:tokio-tungstenite",
+    "dep:futures-util",
+    "dep:ed25519-dalek",
+]
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
@@ -98,6 +110,11 @@ spoke-connect = { workspace = true, features = ["remote-adapter"], optional = tr
 tokio-tungstenite = { workspace = true, optional = true }
 # identity.rs seeds the per-peer device identity from the OS CSPRNG.
 getrandom = { version = "0.4", optional = true }
+# v1.229 N3 Task 1 (n3-provider-binding.md §5.1/D18): the remote client derives
+# the loaded credential's Ed25519 PUBLIC peer identity — the same keypair its
+# signed hello presents — from the seed both this accessor and the dial consume.
+# `memory-remote` only; the default/domain graph gains no crypto edge.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"], optional = true }
 # Model B session transport channels (embedded-mcp edge only).
 futures-channel = { version = "0.3", optional = true }
 nexus-provider-ports = { path = "../nexus-provider-ports", optional = true }
@@ -138,6 +155,11 @@ hex = { version = "0.4", optional = true }
 base64 = { version = "0.23", optional = true }
 sha2 = { workspace = true, optional = true }
 serde.workspace = true
+# §3.2 endpoint discipline: the raw endpoint is validated with the same
+# `http::Uri` grammar `tokio_tungstenite::connect_async` consumes, instead of
+# a second parser with a different normalization. Already in the workspace
+# lock through the WS transport.
+http = "1"
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
@@ -153,6 +175,17 @@ serde_yaml = { workspace = true }
 # advisory workspace-authority lease. Every use site is `cfg(unix)`-gated, so
 # the edge is scoped to Unix rather than linked on every target.
 nix = { version = "0.31.3", features = ["fs"], optional = true }
+# §3.1 credential-file opening: `O_NOFOLLOW | O_NONBLOCK` flags make the
+# symlink/special-file refusal atomic with the open. Constants only; `libc`
+# is already resolved in the workspace lock through `nix`.
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# §3.1 credential-file privacy gate (I313/D43): the loader inspects the
+# already-open credential handle's DACL through the workspace's audited
+# native-access-policy bridge — the only crate whose `unsafe` exception covers
+# these OS calls — so this crate keeps its inherited `unsafe_code` forbid.
+nexus-config-metadata = { path = "../nexus-config-metadata" }
 
 [dev-dependencies]
 # Enable the gated execution test seams for this package's own tests without

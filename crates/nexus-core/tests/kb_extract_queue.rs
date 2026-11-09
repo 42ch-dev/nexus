@@ -79,6 +79,7 @@ async fn open_core(home: &std::path::Path, access: CoreAccess) -> (CoreService, 
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access,
+        memory: None,
     })
     .await
     .unwrap();

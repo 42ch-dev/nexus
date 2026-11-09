@@ -2041,28 +2041,54 @@ mod tests {
 
     /// PR #229 F-2: a non-loopback `daemon.json` host must fail closed —
     /// the lane has no TLS support (plaintext only), so `start_peer_tools_lane`
-    /// refuses to start with the TLS-required message instead of binding
-    /// cleartext off-loopback (V1.92 HTTP API posture). The check runs before
-    /// the remote-bind env gate, so the refusal is unconditional.
+    /// refuses to start instead of binding cleartext off-loopback (V1.92 HTTP
+    /// API posture). The check runs before the remote-bind env gate, so the
+    /// refusal is unconditional. The assertion is the typed refusal plus a
+    /// loopback positive control: the refusal text is incidental.
     #[tokio::test]
     async fn non_loopback_bind_fails_closed_without_tls() {
         let home = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
-        std::fs::write(
-            nexus_home_layout::connect_daemon_config_path(home.path()),
-            r#"{"host":"0.0.0.0","port":0}"#,
-        )
-        .expect("write daemon.json");
-        let shutdown = Arc::new(Notify::new());
-        let Err(err) = start_peer_tools_lane(home.path(), shutdown, None).await else {
+        let config = nexus_home_layout::connect_daemon_config_path(home.path());
+        std::fs::write(&config, r#"{"host":"0.0.0.0","port":0}"#).expect("write daemon.json");
+        let Err(err) = start_peer_tools_lane(home.path(), Arc::new(Notify::new()), None).await
+        else {
             panic!("non-loopback bind must fail closed without TLS")
         };
-        let msg = format!("{err:#}");
+        assert!(matches!(err, CoreError::Internal { .. }), "got {err:?}");
+
+        // Positive control: the same home on the loopback default passes the
+        // plaintext gate and really binds, so the refusal above is the
+        // non-loopback rule rather than a general lane-start failure.
+        std::fs::write(&config, r#"{"host":"127.0.0.1","port":0}"#)
+            .expect("write the loopback daemon.json");
+        let shutdown = Arc::new(Notify::new());
+        let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None)
+            .await
+            .expect("the loopback plaintext bind starts");
+        assert!(lane.addr.ip().is_loopback(), "the lane bound loopback");
+        // Cooperative shutdown: `notify_one` retains a permit even when the
+        // spawned relay has not registered yet, and both returned handles are
+        // awaited so a live accept loop or supervised watcher is observed
+        // settling instead of detaching with the test.
+        shutdown.notify_one();
+        let mut accept = lane.task;
+        let mut watch = lane.watch_task;
+        let mut unsettled = Vec::new();
+        for (label, handle) in [("accept loop", &mut accept), ("supervisor", &mut watch)] {
+            match tokio::time::timeout(std::time::Duration::from_secs(10), &mut *handle).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => unsettled.push(format!("{label} join failed: {error}")),
+                Err(_) => {
+                    handle.abort();
+                    let _ = handle.await;
+                    unsettled.push(format!("{label} did not settle cooperatively"));
+                }
+            }
+        }
         assert!(
-            msg.contains("non-loopback bind")
-                && msg.contains("no TLS support")
-                && msg.contains("127.0.0.1"),
-            "error must name the TLS refusal and the loopback default: {msg}"
+            unsettled.is_empty(),
+            "the loopback lane did not settle cooperatively: {unsettled:?}"
         );
     }
 

@@ -51,6 +51,7 @@ async fn work_selection_invalidates_foreign_context() {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap();
@@ -439,6 +440,7 @@ async fn work_selection_invalidates_foreign_context() {
     let switched = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap();
@@ -475,6 +477,7 @@ async fn work_selection_invalidates_foreign_context() {
     let reopened = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap();
@@ -519,6 +522,7 @@ async fn work_list_grammar_matches_legacy_daemon_contract() {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap();
@@ -615,6 +619,7 @@ async fn internal_database_fault_carries_legacy_code() {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap();
@@ -698,6 +703,7 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap();
@@ -889,6 +895,7 @@ async fn work_lifecycle_mutators_reject_read_only_core() {
     let writer = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap();
@@ -924,6 +931,7 @@ async fn work_lifecycle_mutators_reject_read_only_core() {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .unwrap();
@@ -979,6 +987,7 @@ async fn open_work_core(home: &std::path::Path, creator: &str) -> CoreService {
     CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap()
@@ -1012,6 +1021,7 @@ async fn open_engine_core(home: &std::path::Path, creator: &str) -> CoreService 
     CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .unwrap()
@@ -1335,6 +1345,7 @@ async fn retained_work_lazy_completion_promotion_is_idempotent_and_writer_only()
     let reader = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .unwrap();
@@ -1353,6 +1364,7 @@ async fn retained_work_lazy_completion_promotion_is_idempotent_and_writer_only()
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap();

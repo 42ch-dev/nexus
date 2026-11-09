@@ -53,7 +53,8 @@ use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
 use crate::actors::AdmittedActor;
-use crate::error::{CoreError, CoreResult};
+use crate::error::{CoreError, CoreResult, MemoryProviderRefusal};
+use crate::memory_binding::MemoryProviderBinding;
 use crate::memory_pipeline::{
     internal_err, map_local_db_error, process_bearer_review_batch, sqlx_internal,
     MemoryPipelineCtx, ReviewBatchRow, REVIEW_BATCH_LIMIT,
@@ -65,12 +66,10 @@ use std::sync::Arc;
 use crate::memory_provider::legacy;
 use crate::memory_provider::policy;
 use crate::memory_provider::profile;
-use crate::memory_provider::{
-    CaptureBinding, LegacyContentMigration, LocalMemoryProvider, MemoryDisposition,
-};
+use crate::memory_provider::{CaptureBinding, LegacyContentMigration, MemoryDisposition};
 use crate::principal::Principal;
 use crate::service::CoreService;
-use spoke_operations::{spoke_schemas, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult};
+use spoke_operations::{spoke_schemas, SpokeReject, SpokeRejectCode, SpokeResult};
 
 /// Per-Character review-call budget (mirrors the Creator review handler — the
 /// batch drains at most one bounded slice per call and reports `has_more`).
@@ -101,6 +100,351 @@ fn optional_str(value: Option<&impl std::ops::Deref<Target = String>>) -> Option
     value.map(|s| s.as_str())
 }
 
+/// One local metadata timestamp (RFC 3339 UTC) for D18 dependency rows.
+fn now_iso() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+/// The effective outcome one remote provider result actually proves.
+///
+/// One decision for every remote-capable path: it governs the caller-visible
+/// class/family, whether a durable admission may be retired, and whether a
+/// retained absence/consumed/conflict shortcut may run. A `terminal` class
+/// alone is not enough: `INTERNAL_ERROR` and the contract's own
+/// `OUTCOME_UNCERTAIN` never prove an outcome, and a missing/unknown class
+/// leaves the attempt unknown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteOutcome {
+    /// The provider proved a definite refusal of the reported code.
+    Definite,
+    /// A transient failure: no effect was proven, but neither is the code's
+    /// own outcome (e.g. a `NOT_FOUND` while the provider is degraded).
+    Retryable,
+    /// The attempt may have committed; nothing may be read as a clean outcome.
+    Uncertain,
+}
+
+/// The §14.2 retry class the provider declared, when it is a known one.
+fn declared_retry_class(reject: &SpokeReject) -> Option<&str> {
+    reject
+        .details
+        .as_ref()
+        .and_then(|details| details.get("retry_class"))
+        .and_then(Value::as_str)
+        .filter(|class| matches!(*class, "terminal" | "retryable" | "uncertain"))
+}
+
+/// The one effective-outcome decision for a remote provider result.
+///
+/// Codes that can never prove an outcome win over the declared class (a
+/// contradictory `terminal` beside them stays unknown), and any missing,
+/// unknown or `uncertain` class stays unknown as well.
+fn remote_outcome(reject: &SpokeReject) -> RemoteOutcome {
+    if matches!(
+        reject.code,
+        SpokeRejectCode::OutcomeUncertain
+            | SpokeRejectCode::InternalError
+            | SpokeRejectCode::CapabilityPortMissing
+    ) {
+        return RemoteOutcome::Uncertain;
+    }
+    match declared_retry_class(reject) {
+        Some("terminal") => RemoteOutcome::Definite,
+        Some("retryable") => RemoteOutcome::Retryable,
+        _ => RemoteOutcome::Uncertain,
+    }
+}
+
+/// Whether one refusal proves the named no-effect outcome.
+///
+/// A local provider is authoritative by code: its in-process refusals carry no
+/// remote retry class and the retained local shortcuts stay unchanged. A remote
+/// provider must prove the outcome through [`remote_outcome`], so a transient or
+/// unknown result never reads as absence, consumption or a definite conflict.
+fn refusal_proves(binding_is_local: bool, reject: &SpokeReject, codes: &[SpokeRejectCode]) -> bool {
+    codes.contains(&reject.code)
+        && (binding_is_local || remote_outcome(reject) == RemoteOutcome::Definite)
+}
+
+/// Whether one capture refusal proves this wire attempt had no effect (D18).
+///
+/// §14.2 classifies every memory reject in `details.retry_class`, and the
+/// provider documents `OUTCOME_UNCERTAIN` — including a response-projection
+/// failure *after* commit — as an effect that may already exist. Only a
+/// definite (`terminal`) class on a pre-effect refusal code proves a clean
+/// no-effect result. A retryable/uncertain class, a missing or unknown class,
+/// and any code whose mutation semantics do not prove a pre-effect refusal all
+/// keep the durable admission. The capture and the review entry share this one
+/// policy: neither invents a second retirement rule.
+/// The record ids one committed review must name, validated against the
+/// decision Core actually issued (`spoke-memory-protocol` §7.15).
+///
+/// The committed result is `{ outcome, record_ids }` and a review is atomic, so
+/// a consistent result is exactly: `dropped` with no records (a legitimate
+/// drop), `promoted` with the one promoted record, or `fragmented` with one
+/// record per issued fragment. The peer's schema accepts an empty or short
+/// `record_ids` and any known `outcome`, so shape alone is not proof. Treating
+/// such a receipt as complete would consume the candidate, retire the attempt
+/// and leave the provider's real record unprotected; instead this returns a
+/// coded inconsistency and the caller keeps the attempt's admission.
+///
+/// The receipt must also be *this* request's receipt: its echoed
+/// `idempotency_key` and `space_id` are bound to the issued request and the
+/// pinned space. An older receipt with a matching shape but its own key would
+/// otherwise settle a different attempt — the monotone object facts cannot
+/// revive its already released record — and retire the only protection the new
+/// attempt has. The requester principal is deliberately not compared: the local
+/// principal is not the remote authenticated identity.
+fn review_result_record_ids(
+    decision: &Value,
+    body: &Value,
+    issued_space: &str,
+    issued_key: &str,
+) -> CoreResult<Vec<String>> {
+    // I-272: every mismatch below is static. A forged receipt admits arbitrary
+    // peer-authored bytes (`space_id`, `idempotency_key`, `result.outcome`,
+    // `record_ids`) including private markers and newlines, and the pipeline
+    // logs the very `Display` this helper returns - so no peer field is ever
+    // interpolated into a category or message.
+    let malformed = |reason: &'static str| internal_err("memory_review_receipt", reason);
+    let action = decision
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the issued review decision carries no action"))?;
+    let space = body
+        .get("space_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed review result carries no space"))?;
+    if space != issued_space {
+        return Err(malformed(
+            "the committed result space does not match the issued request",
+        ));
+    }
+    let key = body
+        .get("idempotency_key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed review result carries no idempotency key"))?;
+    if key != issued_key {
+        return Err(malformed(
+            "the committed review result echoes a different idempotency key than the issued request",
+        ));
+    }
+    let outcome = body
+        .pointer("/result/outcome")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed review result carries no outcome"))?;
+    let ids = body
+        .pointer("/result/record_ids")
+        .and_then(Value::as_array)
+        .ok_or_else(|| malformed("the committed review result carries no record_ids"))?;
+    let mut record_ids = Vec::with_capacity(ids.len());
+    for id in ids {
+        let id = id.as_str().filter(|id| !id.is_empty()).ok_or_else(|| {
+            malformed("the committed review result names an empty or non-string record id")
+        })?;
+        record_ids.push(id.to_string());
+    }
+    let (expected_outcome, expected_records) = match action {
+        "drop" => ("dropped", 0),
+        "promote" => ("promoted", 1),
+        "fragment" => {
+            let fragments = decision
+                .get("fragments")
+                .and_then(Value::as_array)
+                .filter(|fragments| !fragments.is_empty())
+                .ok_or_else(|| malformed("the issued fragment decision carries no fragments"))?;
+            ("fragmented", fragments.len())
+        }
+        _ => {
+            return Err(malformed(
+                "the issued decision action is not a review decision",
+            ))
+        }
+    };
+    if outcome != expected_outcome {
+        return Err(malformed(
+            "the committed outcome does not match the issued decision",
+        ));
+    }
+    if record_ids.len() != expected_records {
+        return Err(malformed(
+            "the committed result record count does not match the issued decision",
+        ));
+    }
+    Ok(record_ids)
+}
+
+/// The candidate ids one committed capture receipt proves for THIS request.
+///
+/// A committed capture may legitimately produce no candidate, so an empty list
+/// is consistent. The receipt must still be *this* request's: its echoed
+/// `space_id` and `idempotency_key` are bound to the issued request and the
+/// pinned space, exactly as [`review_result_record_ids`] requires. A stale
+/// receipt for another key would otherwise publish its objects and retire the
+/// new attempt's admission, while that attempt's own candidates stay
+/// unprotected. Every mismatch is static: no peer-authored byte reaches a
+/// message.
+fn capture_result_candidate_ids(
+    body: &Value,
+    issued_space: &str,
+    issued_key: &str,
+) -> CoreResult<Vec<String>> {
+    let malformed = |reason: &'static str| internal_err("memory_capture_receipt", reason);
+    let space = body
+        .get("space_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed capture result carries no space"))?;
+    if space != issued_space {
+        return Err(malformed(
+            "the committed capture result space does not match the issued request",
+        ));
+    }
+    let key = body
+        .get("idempotency_key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed capture result carries no idempotency key"))?;
+    if key != issued_key {
+        return Err(malformed(
+            "the committed capture result echoes a different idempotency key than the issued request",
+        ));
+    }
+    let ids = body
+        .pointer("/result/candidate_ids")
+        .and_then(Value::as_array)
+        .ok_or_else(|| malformed("the committed capture result carries no candidate_ids"))?;
+    let mut candidate_ids = Vec::with_capacity(ids.len());
+    for id in ids {
+        let id = id.as_str().filter(|id| !id.is_empty()).ok_or_else(|| {
+            malformed("the committed capture result names an empty or non-string candidate id")
+        })?;
+        candidate_ids.push(id.to_string());
+    }
+    Ok(candidate_ids)
+}
+
+/// The record id one committed promotion receipt proves for THIS request.
+///
+/// D18: a committed promotion releases the record's binding dependency, so the
+/// receipt must prove this exact request — the echoed `space_id` and
+/// `idempotency_key`, the requested record, and the shared placement the
+/// request asked for. A stale or mismatched receipt would otherwise release
+/// another live record's protection. Every mismatch is static.
+fn promote_result_record_id(
+    body: &Value,
+    issued_space: &str,
+    issued_key: &str,
+    issued_record_id: &str,
+) -> CoreResult<String> {
+    let malformed = |reason: &'static str| internal_err("memory_promote_receipt", reason);
+    let space = body
+        .get("space_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed promotion result carries no space"))?;
+    if space != issued_space {
+        return Err(malformed(
+            "the committed promotion result space does not match the issued request",
+        ));
+    }
+    let key = body
+        .get("idempotency_key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed promotion result carries no idempotency key"))?;
+    if key != issued_key {
+        return Err(malformed(
+            "the committed promotion result echoes a different idempotency key than the issued request",
+        ));
+    }
+    let record = body
+        .pointer("/result/record_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed promotion result carries no record_id"))?;
+    if record != issued_record_id {
+        return Err(malformed(
+            "the committed promotion result names a different record than the issued request",
+        ));
+    }
+    let visibility = body
+        .pointer("/result/scope/visibility")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed promotion result carries no target scope"))?;
+    if visibility != "shared" {
+        return Err(malformed(
+            "the committed promotion result does not report the requested shared placement",
+        ));
+    }
+    Ok(record.to_string())
+}
+
+/// The candidate one committed dismissal receipt proves for THIS request.
+///
+/// §7.14's atomic result is `{ candidate_id, outcome: "dismissed" }` (MEM-R009),
+/// and the peer's schema accepts another space, key, candidate or outcome, so
+/// shape alone is not proof. The receipt must be *this* dismissal's before the
+/// candidate's binding dependency is released
+/// ([`MemoryAdapter::dismiss_native`]): a provider can answer with an older,
+/// still schema-valid receipt for candidate A while B is the pending candidate,
+/// and releasing on it would stop counting B as live. Every mismatch is static:
+/// no peer-authored byte reaches a message.
+fn dismiss_result_candidate_id(
+    body: &Value,
+    issued_space: &str,
+    issued_key: &str,
+    issued_candidate: &str,
+) -> CoreResult<String> {
+    let malformed = |reason: &'static str| internal_err("memory_dismiss_receipt", reason);
+    let space = body
+        .get("space_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed dismissal result carries no space"))?;
+    if space != issued_space {
+        return Err(malformed(
+            "the committed dismissal result space does not match the issued request",
+        ));
+    }
+    let key = body
+        .get("idempotency_key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed dismissal result carries no idempotency key"))?;
+    if key != issued_key {
+        return Err(malformed(
+            "the committed dismissal result echoes a different idempotency key than the issued request",
+        ));
+    }
+    let candidate = body
+        .pointer("/result/candidate_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed dismissal result carries no candidate_id"))?;
+    if candidate != issued_candidate {
+        return Err(malformed(
+            "the committed dismissal result names a different candidate than the issued request",
+        ));
+    }
+    let outcome = body
+        .pointer("/result/outcome")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed dismissal result carries no outcome"))?;
+    if outcome != "dismissed" {
+        return Err(malformed(
+            "the committed dismissal outcome does not match the issued dismissal",
+        ));
+    }
+    Ok(candidate.to_string())
+}
+
+fn remote_capture_reject_proves_no_effect(reject: &SpokeReject) -> bool {
+    refusal_proves(
+        false,
+        reject,
+        &[
+            SpokeRejectCode::NotAuthorized,
+            SpokeRejectCode::SpaceFrozen,
+            SpokeRejectCode::SubjectFenced,
+            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::NotFound,
+        ],
+    )
+}
+
 fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> serde_json::Value {
     serde_json::json!({
         "limit": limit,
@@ -112,7 +456,7 @@ fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> ser
 // ── Provider seam (NXM-5 Task 2) ─────────────────────────────────────────
 //
 // The read and dismissal handlers below serve the memory family through the
-// `MemoryPort` the open pinned ([`CoreService::memory_provider`]) instead of
+// `MemoryPort` the open pinned ([`CoreService::memory_binding`]) instead of
 // the legacy tables. This block is the existing-DTO/error adapter: a handler
 // keeps its retained request/response shape (compass D5) while the adapter
 // records the legacy page/keyset/offset semantics on top of provider reads and
@@ -123,13 +467,6 @@ fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> ser
 // content alike. Legacy metadata rides in `content.structured.nexus_legacy`,
 // which is what lets the retained DTOs render the legacy display fields
 // (`pending_id`, `fragment_id`, `world_id`, keywords) rather than provider ids.
-
-/// The provider space this workspace serves (`memory.describe` reports it).
-const MEMORY_SPACE_ID: &str = crate::memory_provider::DEFAULT_SPACE_ID;
-
-/// Rows the adapter asks for per internal provider page: the provider's own
-/// advertised `max_page_size`, so a legacy DTO never names a bigger bound.
-const MEMORY_PAGE_SIZE: u64 = 100;
 
 /// The one authored profile kind (§4.2): the `SOUL.md` document.
 const SOUL_PROFILE_KIND: &str = "personality";
@@ -159,11 +496,113 @@ fn memory_reject(reject: &SpokeReject) -> CoreError {
     }
 }
 
-/// The success body of a port result as JSON, or its refusal as a core error.
-fn memory_ok<T: serde::Serialize>(result: SpokeResult<T>) -> CoreResult<Value> {
+/// Map one port refusal under the pinned binding.
+///
+/// A local provider is trusted: its retained taxonomy, message and conflict
+/// detection stay exactly as before. A remote provider never contributes peer
+/// text here — only the whitelisted effective code, a wire code that names a
+/// known memory code, and the whitelisted §14.2 retry class survive (§3.1).
+fn memory_reject_for(binding: &MemoryProviderBinding, reject: &SpokeReject) -> CoreError {
+    if binding.is_local() {
+        memory_reject(reject)
+    } else {
+        remote_refusal(reject)
+    }
+}
+
+/// The shared safe policy for one refusal raised by a remote provider (§3.1).
+///
+/// The peer controls its own message and extra details, so neither is trusted
+/// or copied: only the whitelisted effective code, the peer's wire code when it
+/// names a known memory code, the effective outcome and — for a proven definite
+/// stale-revision conflict — the retained consumer-visible conflict code
+/// survive. The class and coarse family come from [`remote_outcome`], the same
+/// decision the admission and shortcut rules use, so a transient or unknown
+/// result is never presented as a definite 400/404/409.
+fn remote_refusal(reject: &SpokeReject) -> CoreError {
+    let outcome = remote_outcome(reject);
+    let retry_class = match outcome {
+        RemoteOutcome::Definite => "terminal",
+        RemoteOutcome::Retryable => "retryable",
+        RemoteOutcome::Uncertain => "uncertain",
+    };
+    let family = match outcome {
+        RemoteOutcome::Definite => memory_refusal_family(reject.code),
+        RemoteOutcome::Retryable | RemoteOutcome::Uncertain => MemoryProviderRefusal::Unavailable,
+    };
+    let wire_code = reject
+        .details
+        .as_ref()
+        .and_then(|details| details.get("wire_code"))
+        .and_then(Value::as_str)
+        .filter(|code| SpokeRejectCode::try_from_str(code).is_some())
+        .map(str::to_string);
+    CoreError::MemoryProviderRefused {
+        // A proven stale-revision conflict keeps the `version_mismatch` code
+        // consumers already match on the local branch (I-000204).
+        conflict_code: (outcome == RemoteOutcome::Definite
+            && reject.code == SpokeRejectCode::RevisionConflict)
+            .then(|| "version_mismatch".to_string()),
+        code: reject.code.as_str().to_string(),
+        wire_code,
+        retry_class: retry_class.to_string(),
+        family,
+    }
+}
+
+/// The coarse transport family for one whitelisted memory rejection code.
+const fn memory_refusal_family(code: SpokeRejectCode) -> MemoryProviderRefusal {
+    match code {
+        SpokeRejectCode::NotFound
+        | SpokeRejectCode::KnowledgeEntryNotFound
+        | SpokeRejectCode::RelationNotFound => MemoryProviderRefusal::NotFound,
+        SpokeRejectCode::NotAuthorized | SpokeRejectCode::GrantRevoked => {
+            MemoryProviderRefusal::Forbidden
+        }
+        SpokeRejectCode::InvalidInput
+        | SpokeRejectCode::InvalidStatus
+        | SpokeRejectCode::InvalidStatusTransition
+        | SpokeRejectCode::EmptyCanonicalName
+        | SpokeRejectCode::MergeTargetSelf
+        | SpokeRejectCode::MissingRequiredField
+        | SpokeRejectCode::InvalidPacketInput
+        | SpokeRejectCode::InvalidKnowledgeEntryStatus
+        | SpokeRejectCode::InvalidKnowledgeEntryStatusTransition
+        | SpokeRejectCode::RelationSelfEdge
+        | SpokeRejectCode::RelationMissingEndpoint
+        | SpokeRejectCode::ProfileIncomplete
+        | SpokeRejectCode::InsufficientData
+        | SpokeRejectCode::CursorInvalid => MemoryProviderRefusal::InvalidInput,
+        SpokeRejectCode::RevisionConflict
+        | SpokeRejectCode::StoredRevisionStale
+        | SpokeRejectCode::CandidateNotProvisional
+        | SpokeRejectCode::CandidateTerminalStatus
+        | SpokeRejectCode::CandidateConsumed
+        | SpokeRejectCode::DuplicateActiveKnowledgeEntry
+        | SpokeRejectCode::KnowledgeEntryAlreadyExists
+        | SpokeRejectCode::RelationAlreadyExists
+        | SpokeRejectCode::KnowledgeEntryTerminalStatus
+        | SpokeRejectCode::IdempotencyConflict
+        | SpokeRejectCode::ExportExpired
+        | SpokeRejectCode::ReceiptExpired
+        | SpokeRejectCode::ImportConflict
+        | SpokeRejectCode::SpaceFrozen
+        | SpokeRejectCode::SubjectFenced => MemoryProviderRefusal::Conflict,
+        // `OutcomeUncertain`, `InternalError`, `CapabilityPortMissing` and any
+        // code outside the capture contract's clean refusals: the outcome may
+        // not be settled, so callers must not read it as a definite failure.
+        _ => MemoryProviderRefusal::Unavailable,
+    }
+}
+
+/// The success body of a port result as JSON, or its refusal under the binding.
+fn memory_ok_for<T: serde::Serialize>(
+    binding: &MemoryProviderBinding,
+    result: SpokeResult<T>,
+) -> CoreResult<Value> {
     match result {
         SpokeResult::Ok(value) => serde_json::to_value(&value).map_err(wire_err),
-        SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+        SpokeResult::Reject(reject) => Err(memory_reject_for(binding, &reject)),
     }
 }
 
@@ -251,21 +690,37 @@ fn pending_row_in_scope(row: &PendingMemoryRow, binding_id: Option<&str>) -> boo
 ///
 /// E6's Character mind projection (`crate::soul`) reads through the same
 /// adapter: one merged-read address for both entry points (NXM-7).
+///
+/// The adapter holds the open's pinned [`MemoryProviderBinding`] (N3 §5):
+/// standard reads and writes run through `binding.port()` in the binding's own
+/// space, while the provider-local internals (the legacy bridge, JIT adoption,
+/// review disposition and the SOUL-invalidation journal) are reached only
+/// through [`MemoryProviderBinding::local`].
 pub struct MemoryAdapter {
-    provider: Arc<LocalMemoryProvider>,
+    pool: SqlitePool,
+    binding: Arc<MemoryProviderBinding>,
     principal: spoke_schemas::Principal,
     subject_id: String,
+    /// The Nexus Character this bearer belongs to (`None` for the Creator
+    /// bearer): the D18 dependency namespace needs the Nexus subject, not only
+    /// the provider subject id.
+    character_id: Option<String>,
 }
 
 impl MemoryAdapter {
     /// The adapter for one bearer, get-or-creating its provider subject.
     ///
     /// Ensuring the subject is the write that opts the bearer into the bridge's
-    /// legacy projection, so it runs only on a writable provider: a read-only
+    /// legacy projection, so it runs only on a writable binding: a read-only
     /// core (NXM-5 Task 2 fix round 1, finding F6) serves the projection of the
     /// subject an earlier writer open already ensured, and writes nothing.
+    ///
+    /// `pool` is the workspace pool: D18 dependency facts (admission retirement,
+    /// known-object acknowledgements) are written on it in their own short
+    /// transactions and only for a nonlocal binding.
     pub async fn open(
-        provider: Arc<LocalMemoryProvider>,
+        pool: SqlitePool,
+        binding: Arc<MemoryProviderBinding>,
         principal: &Principal,
         subject_id: String,
         kind_ns: &str,
@@ -273,36 +728,267 @@ impl MemoryAdapter {
     ) -> CoreResult<Self> {
         let spoke_principal: spoke_schemas::Principal =
             map_wire(json!({ "principal_id": principal.creator_id(), "extensions": {} }))?;
-        if provider.is_writable() {
+        if binding.is_writable() {
             let request: spoke_schemas::MemorySubjectsEnsureRequest = map_wire(json!({
-                "space_id": MEMORY_SPACE_ID,
+                "space_id": binding.space_id(),
                 "subject_id": subject_id,
                 "kind": { "ns": kind_ns, "id": kind_id },
             }))?;
-            if let SpokeResult::Reject(reject) =
-                provider.ensure_subject(&spoke_principal, request).await
+            if let SpokeResult::Reject(reject) = binding
+                .port()
+                .ensure_subject(&spoke_principal, request)
+                .await
             {
-                return Err(memory_reject(&reject));
+                return Err(memory_reject_for(&binding, &reject));
             }
         }
+        let character_id = (kind_ns == legacy::CHARACTER_KIND_NS).then(|| kind_id.to_string());
         Ok(Self {
-            provider,
+            pool,
+            binding,
             principal: spoke_principal,
             subject_id,
+            character_id,
         })
     }
 
-    /// The bearer's memory-disposition section: a review drain holds it across
-    /// the consumed-check, the classification and the persistence of every row
-    /// it processes (NXM-5 Task 2 fix round 2, finding F1).
-    async fn review_claim(&self) -> CoreResult<MemoryDisposition> {
-        self.provider.review_disposition(&self.subject_id).await
+    /// The bearer's memory-disposition section, when this binding serves the
+    /// local provider: a review drain holds it across the consumed-check, the
+    /// classification and the persistence of every row it processes (NXM-5 Task
+    /// 2 fix round 2, finding F1).
+    ///
+    /// A remote binding has no provider-local section: its candidate CAS and
+    /// atomic review supply the exclusion, so the drain runs without one.
+    async fn review_claim(&self) -> CoreResult<Option<MemoryDisposition>> {
+        if !self.is_local() {
+            return Ok(None);
+        }
+        let local = self.binding.local()?;
+        Ok(Some(local.review_disposition(&self.subject_id).await?))
     }
 
     /// The provider subject this adapter speaks for: the bearer a write under
     /// this adapter may mutate (R4-F2).
     const fn subject_id(&self) -> &str {
         self.subject_id.as_str()
+    }
+
+    /// Whether the open pinned the local provider. Provider-local internals
+    /// (the narrative-cache invalidation behind a promotion) run only here.
+    pub(crate) fn is_local(&self) -> bool {
+        self.binding.is_local()
+    }
+
+    /// Map a port result under this binding (see [`memory_ok_for`]).
+    fn ok<T: serde::Serialize>(&self, result: SpokeResult<T>) -> CoreResult<Value> {
+        memory_ok_for(&self.binding, result)
+    }
+
+    /// Map a port refusal under this binding (see [`memory_reject_for`]).
+    fn refuse(&self, reject: &SpokeReject) -> CoreError {
+        memory_reject_for(&self.binding, reject)
+    }
+
+    /// Whether this refusal proves the retained no-effect answer for one of
+    /// `codes` (see [`refusal_proves`]).
+    fn proves(&self, reject: &SpokeReject, codes: &[SpokeRejectCode]) -> bool {
+        refusal_proves(self.is_local(), reject, codes)
+    }
+
+    /// The remote dependency namespace this adapter may record facts under
+    /// (D18, §5.1): only a nonlocal binding with a pinned public client
+    /// identity and a Character bearer has remote binding-local memory to
+    /// protect. A local binding — or a nonlocal one whose identity was not
+    /// pinned — records nothing instead of falling back to another namespace.
+    fn remote_namespace<'a>(
+        &'a self,
+        binding_id: &'a str,
+    ) -> Option<nexus_local_db::RemoteBindingNamespace<'a>> {
+        let character_id = self.character_id.as_deref()?;
+        let client_identity = self.binding.client_identity()?;
+        let (authority_host_id, authority_generation) = self.binding.authority();
+        Some(nexus_local_db::RemoteBindingNamespace::new(
+            self.principal.principal_id.as_str(),
+            character_id,
+            binding_id,
+            authority_host_id,
+            authority_generation.get(),
+            self.binding.space_id(),
+            client_identity,
+        ))
+    }
+
+    /// Record one known remote provider-object fact for this binding (D18).
+    ///
+    /// The write is monotone and conditional on the binding still existing, so
+    /// a late acknowledgement cannot resurrect a terminal fact or a deleted
+    /// binding. Local bindings (and nonlocal ones without a pinned identity)
+    /// record nothing here and keep their existing behavior.
+    async fn record_remote_object(
+        &self,
+        binding_id: Option<&str>,
+        kind: nexus_local_db::RemoteBindingObjectKind,
+        object_id: &str,
+        state: nexus_local_db::RemoteBindingObjectState,
+    ) -> CoreResult<()> {
+        let Some(binding_id) = binding_id else {
+            return Ok(());
+        };
+        let Some(namespace) = self.remote_namespace(binding_id) else {
+            return Ok(());
+        };
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        nexus_local_db::record_remote_binding_object_tx(
+            &mut tx,
+            &namespace,
+            kind,
+            object_id,
+            state,
+            &now_iso(),
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        tx.commit().await.map_err(sqlx_internal)?;
+        Ok(())
+    }
+
+    /// Record a committed review outcome (D18) in one local transaction: the
+    /// consumed candidate, the record references the provider's receipt
+    /// returned, **and** the retirement of this one attempt. A later
+    /// capture-result publication can then neither resurrect the consumed
+    /// candidate nor overwrite these record references, and a committed review
+    /// can never leave its facts without its own attempt retired (or the
+    /// reverse) — they settle together or not at all.
+    async fn record_remote_review(
+        &self,
+        attempt: Option<&str>,
+        binding_id: Option<&str>,
+        candidate_id: &str,
+        record_ids: &[String],
+    ) -> CoreResult<()> {
+        let Some(binding_id) = binding_id else {
+            return Ok(());
+        };
+        let Some(namespace) = self.remote_namespace(binding_id) else {
+            return Ok(());
+        };
+        let now = now_iso();
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        nexus_local_db::record_remote_binding_object_tx(
+            &mut tx,
+            &namespace,
+            nexus_local_db::RemoteBindingObjectKind::Candidate,
+            candidate_id,
+            nexus_local_db::RemoteBindingObjectState::Consumed,
+            &now,
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        for record_id in record_ids {
+            nexus_local_db::record_remote_binding_object_tx(
+                &mut tx,
+                &namespace,
+                nexus_local_db::RemoteBindingObjectKind::Record,
+                record_id,
+                nexus_local_db::RemoteBindingObjectState::Live,
+                &now,
+            )
+            .await
+            .map_err(map_local_db_error)?;
+        }
+        // Only this attempt retires, and only together with the facts above.
+        if let Some(attempt) = attempt {
+            nexus_local_db::retire_remote_binding_admission_tx(&mut tx, attempt, &namespace)
+                .await
+                .map_err(map_local_db_error)?;
+        }
+        tx.commit().await.map_err(sqlx_internal)?;
+        Ok(())
+    }
+
+    /// Durably admit one remote binding-local review attempt before the RPC.
+    ///
+    /// The drain can consume a candidate Core did not capture itself — an
+    /// independent signed writer may create it with the legacy pending shape
+    /// and a context scope naming this binding — so such a candidate carries no
+    /// admission and no candidate fact. This commits the same per-attempt
+    /// admission the capture arm uses: the exact dependency namespace, one
+    /// `BEGIN IMMEDIATE` writer transaction and the same owned-provenance gate.
+    /// It lands before the provider call, so an uncertain, cancelled or
+    /// locally-unsettled attempt keeps the binding protected.
+    ///
+    /// Shared/Creator candidates and local bindings own no binding dependency
+    /// and admit nothing (`Ok(None)`).
+    async fn admit_remote_review_attempt(
+        &self,
+        binding_id: Option<&str>,
+    ) -> CoreResult<Option<String>> {
+        let Some(binding_id) = binding_id else {
+            return Ok(None);
+        };
+        let Some(character_id) = self.character_id.as_deref() else {
+            return Ok(None);
+        };
+        let Some(namespace) = self.remote_namespace(binding_id) else {
+            return Ok(None);
+        };
+        let admission_id = uuid::Uuid::new_v4().to_string();
+        let admitted_at = now_iso();
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        nexus_local_db::require_valid_provenance_tx(
+            &mut tx,
+            self.principal.principal_id.as_str(),
+            character_id,
+            Some(binding_id),
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        nexus_local_db::insert_remote_binding_admission_tx(
+            &mut tx,
+            &admission_id,
+            &namespace,
+            &admitted_at,
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        tx.commit().await.map_err(sqlx_internal)?;
+        Ok(Some(admission_id))
+    }
+
+    /// Apply the D18 consequence of one review refusal.
+    ///
+    /// Only the shared proven-no-effect policy may retire this attempt: an
+    /// uncertain, retryable, unknown or contradictory outcome keeps it, and a
+    /// local retirement failure keeps it too.
+    async fn settle_remote_review_reject(
+        &self,
+        attempt: Option<&str>,
+        binding_id: Option<&str>,
+        reject: &SpokeReject,
+    ) -> CoreResult<()> {
+        let (Some(attempt), Some(binding_id)) = (attempt, binding_id) else {
+            return Ok(());
+        };
+        if !remote_capture_reject_proves_no_effect(reject) {
+            return Ok(());
+        }
+        let Some(namespace) = self.remote_namespace(binding_id) else {
+            return Ok(());
+        };
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        nexus_local_db::retire_remote_binding_admission_tx(&mut tx, attempt, &namespace)
+            .await
+            .map_err(map_local_db_error)?;
+        tx.commit().await.map_err(sqlx_internal)?;
+        Ok(())
     }
 
     /// Every pending candidate of the subject, newest first in the retained
@@ -318,17 +1004,17 @@ impl MemoryAdapter {
         let mut cursor: Option<String> = None;
         loop {
             let request: spoke_schemas::MemoryCandidatesListRequest = map_wire(json!({
-                "space_id": MEMORY_SPACE_ID,
+                "space_id": self.binding.space_id(),
                 "subject_id": self.subject_id,
                 "status": "pending",
-                "limit": MEMORY_PAGE_SIZE,
+                "limit": self.binding.page_size().get(),
                 "cursor": cursor,
             }))?;
-            let body = memory_ok(
-                self.provider
-                    .list_candidates(&self.principal, request)
-                    .await,
-            )?;
+            let body = self.ok(self
+                .binding
+                .port()
+                .list_candidates(&self.principal, request)
+                .await)?;
             rows.extend(
                 body["candidates"]
                     .as_array()
@@ -369,17 +1055,17 @@ impl MemoryAdapter {
         let mut cursor: Option<String> = None;
         loop {
             let request: spoke_schemas::MemoryCandidatesListRequest = map_wire(json!({
-                "space_id": MEMORY_SPACE_ID,
+                "space_id": self.binding.space_id(),
                 "subject_id": self.subject_id,
                 "status": "pending",
-                "limit": MEMORY_PAGE_SIZE,
+                "limit": self.binding.page_size().get(),
                 "cursor": cursor,
             }))?;
-            let body = memory_ok(
-                self.provider
-                    .list_candidates(&self.principal, request)
-                    .await,
-            )?;
+            let body = self.ok(self
+                .binding
+                .port()
+                .list_candidates(&self.principal, request)
+                .await)?;
             count += body["candidates"]
                 .as_array()
                 .into_iter()
@@ -439,20 +1125,8 @@ impl MemoryAdapter {
         let mut rows: Vec<Value> = Vec::new();
         let mut cursor: Option<String> = None;
         loop {
-            let request: spoke_schemas::MemoryRecordsListRequest = map_wire(json!({
-                "space_id": MEMORY_SPACE_ID,
-                "subject_id": self.subject_id,
-                "selection": selection,
-                "kinds": kinds,
-                "filter": filter.map(|ids| json!({ "source_context_ids": ids })),
-                "limit": MEMORY_PAGE_SIZE,
-                "cursor": cursor,
-            }))?;
-            let body = memory_ok(
-                self.provider
-                    .list_records_scoped(&self.principal, request, project_legacy)
-                    .await,
-            )?;
+            let request = self.records_request(&selection, kinds, filter, cursor.as_deref())?;
+            let body = self.list_page(request, project_legacy).await?;
             rows.extend(body["records"].as_array().cloned().unwrap_or_default());
             if want.is_some_and(|want| rows.len() >= want) {
                 break;
@@ -469,6 +1143,50 @@ impl MemoryAdapter {
             rows.truncate(want);
         }
         Ok(rows)
+    }
+
+    /// The `memory.records.list` request one page of a walk sends, in the pinned
+    /// space.
+    fn records_request(
+        &self,
+        selection: &Value,
+        kinds: &[&str],
+        filter: Option<&[String]>,
+        cursor: Option<&str>,
+    ) -> CoreResult<spoke_schemas::MemoryRecordsListRequest> {
+        map_wire(json!({
+            "space_id": self.binding.space_id(),
+            "subject_id": self.subject_id,
+            "selection": selection,
+            "kinds": kinds,
+            "filter": filter.map(|ids| json!({ "source_context_ids": ids })),
+            "limit": self.binding.page_size().get(),
+            "cursor": cursor,
+        }))
+    }
+
+    /// One mapped `memory.records.list` page in the pinned space.
+    ///
+    /// A local binding serves the same read with the legacy bridge's projection
+    /// applied (per `project_legacy`); a remote binding serves its own objects
+    /// only, so selecting it never merges local legacy content into the read.
+    async fn list_page(
+        &self,
+        request: spoke_schemas::MemoryRecordsListRequest,
+        project_legacy: bool,
+    ) -> CoreResult<Value> {
+        if self.is_local() {
+            let local = self.binding.local()?;
+            self.ok(local
+                .list_records_scoped(&self.principal, request, project_legacy)
+                .await)
+        } else {
+            self.ok(self
+                .binding
+                .port()
+                .list_records(&self.principal, request)
+                .await)
+        }
     }
 
     /// One kind-filtered family read of the subject's retained records, as the
@@ -510,16 +1228,23 @@ impl MemoryAdapter {
     /// carries no records either way, so its absence is not an archive.
     async fn subject_archived(&self) -> CoreResult<bool> {
         let request: spoke_schemas::MemorySubjectsGetRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "subject_id": self.subject_id,
         }))?;
-        match self.provider.get_subject(&self.principal, request).await {
+        match self
+            .binding
+            .port()
+            .get_subject(&self.principal, request)
+            .await
+        {
             SpokeResult::Ok(body) => {
                 let body = serde_json::to_value(&body).map_err(wire_err)?;
                 Ok(body["subject"]["status"].as_str() == Some("archived"))
             }
-            SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::NotFound => Ok(false),
-            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+            SpokeResult::Reject(reject) if self.proves(&reject, &[SpokeRejectCode::NotFound]) => {
+                Ok(false)
+            }
+            SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
 
@@ -527,11 +1252,15 @@ impl MemoryAdapter {
     /// renders it. `None` is the honest-empty answer for an absent document.
     pub(crate) async fn personality(&self) -> CoreResult<Option<String>> {
         let request: spoke_schemas::MemoryProfileGetRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "subject_id": self.subject_id,
             "profile_kinds": [SOUL_PROFILE_KIND],
         }))?;
-        let body = memory_ok(self.provider.get_profile(&self.principal, request).await)?;
+        let body = self.ok(self
+            .binding
+            .port()
+            .get_profile(&self.principal, request)
+            .await)?;
         Ok(body["profiles"]
             .as_array()
             .into_iter()
@@ -545,16 +1274,23 @@ impl MemoryAdapter {
     /// `None` is the retained not-found answer.
     async fn candidate(&self, candidate_id: &str) -> CoreResult<Option<Value>> {
         let request: spoke_schemas::MemoryCandidatesGetRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "candidate_id": candidate_id,
         }))?;
-        match self.provider.get_candidate(&self.principal, request).await {
+        match self
+            .binding
+            .port()
+            .get_candidate(&self.principal, request)
+            .await
+        {
             SpokeResult::Ok(body) => Ok(serde_json::to_value(&body)
                 .map_err(wire_err)?
                 .get("candidate")
                 .cloned()),
-            SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::NotFound => Ok(None),
-            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+            SpokeResult::Reject(reject) if self.proves(&reject, &[SpokeRejectCode::NotFound]) => {
+                Ok(None)
+            }
+            SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
 
@@ -565,13 +1301,20 @@ impl MemoryAdapter {
     /// `Ok(false)` means nothing was pending under that id — absent, already
     /// consumed, or concurrently dismissed — which the handlers render as their
     /// retained not-found answer.
+    ///
+    /// A remote binding serves no legacy projection, so the bridge's
+    /// deterministic id names nothing there: the same `Ok(false)`, with no
+    /// provider write.
     async fn dismiss_legacy(&self, candidate_id: &str) -> CoreResult<bool> {
+        if !self.is_local() {
+            return Ok(false);
+        }
+        let local = self.binding.local()?;
         let digest = match spoke_operations::jcs_sha256_hex(&json!(candidate_id)) {
             SpokeResult::Ok(digest) => digest,
             SpokeResult::Reject(reject) => return Err(memory_reject(&reject)),
         };
-        match self
-            .provider
+        match local
             .dismiss_legacy_candidate(
                 &self.principal,
                 &self.subject_id,
@@ -589,16 +1332,18 @@ impl MemoryAdapter {
             // is `RevisionConflict` — all three are the retained not-found
             // answer, never dismissal success (fix round 4, finding F3).
             SpokeResult::Reject(reject)
-                if matches!(
-                    reject.code,
-                    SpokeRejectCode::NotFound
-                        | SpokeRejectCode::CandidateConsumed
-                        | SpokeRejectCode::RevisionConflict
+                if self.proves(
+                    &reject,
+                    &[
+                        SpokeRejectCode::NotFound,
+                        SpokeRejectCode::CandidateConsumed,
+                        SpokeRejectCode::RevisionConflict,
+                    ],
                 ) =>
             {
                 Ok(false)
             }
-            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+            SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
 
@@ -608,61 +1353,234 @@ impl MemoryAdapter {
     ///
     /// `Ok(false)` folds the same outcomes as [`Self::dismiss_legacy`]: absent,
     /// already consumed, or lost the revision race.
-    async fn dismiss_native(&self, candidate_id: &str, revision: u64) -> CoreResult<bool> {
+    ///
+    /// A committed dismissal is a disposal acknowledgement (D18): the candidate
+    /// fact for `binding_id` moves to `released` in its own local transaction.
+    /// The write is monotone and conditional, so an acknowledgement that lands
+    /// before the capture result is published is durable and a later result
+    /// publication cannot resurrect it.
+    ///
+    /// Before the release, the committed result must be this request's receipt
+    /// (space, idempotency key, candidate and `dismissed` outcome); a
+    /// schema-valid but stale or mismatched receipt is refused as malformed and
+    /// the candidate fact stays live, so the binding stays unremovable.
+    async fn dismiss_native(
+        &self,
+        candidate_id: &str,
+        revision: u64,
+        binding_id: Option<&str>,
+    ) -> CoreResult<bool> {
         let request: spoke_schemas::MemoryCandidatesDismissRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "candidate_id": candidate_id,
             "expected_revision": revision,
             "idempotency_key": format!("e4dismiss-native:{candidate_id}"),
         }))?;
+        // The committed receipt must identify THIS dismissal: a provider can
+        // answer with an older, still schema-valid receipt for another
+        // candidate or key, and releasing on it would stop counting a pending
+        // candidate as live.
+        let issued_space = request.space_id.as_str().to_string();
+        let issued_key = request.idempotency_key.as_str().to_string();
         match self
-            .provider
+            .binding
+            .port()
             .dismiss_candidate(&self.principal, request)
             .await
         {
-            SpokeResult::Ok(_) => Ok(true),
+            SpokeResult::Ok(receipt) => {
+                let body = serde_json::to_value(&receipt).map_err(wire_err)?;
+                // A mismatched receipt returns here with the candidate fact
+                // still live, so the binding stays protected.
+                let released =
+                    dismiss_result_candidate_id(&body, &issued_space, &issued_key, candidate_id)?;
+                self.record_remote_object(
+                    binding_id,
+                    nexus_local_db::RemoteBindingObjectKind::Candidate,
+                    &released,
+                    nexus_local_db::RemoteBindingObjectState::Released,
+                )
+                .await?;
+                Ok(true)
+            }
             SpokeResult::Reject(reject)
-                if matches!(
-                    reject.code,
-                    SpokeRejectCode::NotFound
-                        | SpokeRejectCode::CandidateConsumed
-                        | SpokeRejectCode::RevisionConflict
+                if self.proves(
+                    &reject,
+                    &[
+                        SpokeRejectCode::NotFound,
+                        SpokeRejectCode::CandidateConsumed,
+                        SpokeRejectCode::RevisionConflict,
+                    ],
                 ) =>
             {
                 Ok(false)
             }
-            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+            SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
 
-    /// Consume one pending candidate with the review decision the drain built,
-    /// under the bearer's disposition section the caller already holds.
+    /// Dismiss the provider candidate the retained `pending_id` addresses by
+    /// its bridge-shaped id, through the standard revision-checked operation.
+    ///
+    /// The retained `pending_id` can address a candidate by the bridge's
+    /// deterministic (legacy-shaped) id on a binding that serves no projection.
+    /// There the shape names an ordinary provider candidate, never local
+    /// provenance, so the dismissal is the same CAS op every native candidate
+    /// uses — but the provider authorizes that op by grant coverage, which a
+    /// space-wide grant satisfies for **any** subject. The bearer identity and
+    /// the retained pending identity are therefore Nexus-side invariants: the
+    /// fetched candidate must belong to this adapter's subject and map to the
+    /// requested `pending_id`, or it is refused before any CAS (I-000197).
+    /// `Ok(false)` folds the outcomes [`Self::dismiss_native`] folds.
+    async fn dismiss_provider_candidate(
+        &self,
+        candidate_id: &str,
+        pending_id: &str,
+    ) -> CoreResult<bool> {
+        let Some(candidate) = self.candidate(candidate_id).await? else {
+            return Ok(false);
+        };
+        if candidate["status"].as_str() != Some("pending") {
+            return Ok(false);
+        }
+        let Some(row) = self.matched_pending_row(&candidate, pending_id) else {
+            return Ok(false);
+        };
+        // The binding this candidate was captured under is the dependency the
+        // dismissal acknowledges; a shared-scope candidate carries none.
+        let binding_id = candidate
+            .pointer("/capture_scope/context_id")
+            .and_then(Value::as_str);
+        self.dismiss_native(&row.candidate_id, row.revision, binding_id)
+            .await
+    }
+
+    /// The retained pending row one fetched provider candidate may be dismissed
+    /// as: the candidate's borrowed `subject_id` must be this adapter's subject
+    /// and it must carry the requested retained `pending_id`.
+    ///
+    /// The subject is read straight off the fetched candidate and compared
+    /// before the row is mapped, so the list/count projections (which never
+    /// need it) pay no per-row copy. A candidate that shares the shaped id but
+    /// names another bearer (or another pending row) is not this row: a
+    /// space-level provider grant would still authorize its candidate-level
+    /// operation, so this identity check is the only thing that keeps one
+    /// bearer's dismissal off another's item.
+    fn matched_pending_row(&self, candidate: &Value, pending_id: &str) -> Option<PendingMemoryRow> {
+        if candidate["subject_id"].as_str() != Some(self.subject_id.as_str()) {
+            return None;
+        }
+        let row = PendingMemoryRow::from_candidate(candidate)?;
+        (row.pending_id == pending_id).then_some(row)
+    }
+
+    /// Consume one pending candidate with the review decision the drain built.
     ///
     /// The decision is the §7.15 wire decision (`promote` / `fragment` /
     /// `drop`). A legacy-derived candidate is adopted under the bridge's
     /// deterministic id inside the same guarded transaction that consumes it
-    /// (NXM-5's mutation-time adoption, reused — not redefined — by NXM-8).
+    /// (NXM-5's mutation-time adoption, reused — not redefined — by NXM-8),
+    /// under the bearer's disposition section the caller holds.
+    ///
+    /// A remote binding-local review durably admits this attempt in the exact
+    /// dependency namespace **before** the provider call, because the candidate
+    /// the drain consumes may have been created by an independent signed writer
+    /// and therefore carry no Core admission or candidate fact. A definite
+    /// committed receipt settles in one local transaction: the consumed
+    /// candidate, the record references it returned, and the retirement of this
+    /// attempt. **Before** settling, the committed result must be consistent
+    /// with the decision Core issued (`drop` → no records, `promote` → one,
+    /// `fragment` → one per issued fragment, with valid ids) **and** must be
+    /// this request's receipt: its echoed idempotency key and space are bound
+    /// to the issued request and the pinned space. A schema-valid but
+    /// inconsistent or stale receipt is refused as malformed, so the attempt
+    /// keeps its admission. An uncertain, cancelled, malformed or locally-unsettled
+    /// attempt therefore keeps its admission, and the binding stays unremovable;
+    /// only the shared proven-no-effect refusal policy retires an attempt, and
+    /// never another one.
     pub(crate) async fn review(
         &self,
         candidate_id: &str,
         expected_revision: u64,
         decision: Value,
-        section: &MemoryDisposition,
+        section: Option<&MemoryDisposition>,
+        binding_id: Option<&str>,
     ) -> CoreResult<()> {
         let request: spoke_schemas::MemoryCandidatesReviewRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "candidate_id": candidate_id,
             "expected_revision": expected_revision,
-            "decision": decision,
+            // Kept for the committed-result check: the response must name
+            // exactly the records this decision asked the provider to create.
+            "decision": decision.clone(),
             "idempotency_key": idempotency_key("review", candidate_id)?,
         }))?;
+        if self.is_local() {
+            let local = self.binding.local()?;
+            // The drain takes the section before it fetches its slice, so a
+            // local review always has one.
+            let section = section.ok_or_else(|| {
+                internal_err(
+                    "memory_review_section",
+                    "a local review drain requires the disposition section",
+                )
+            })?;
+            return match local
+                .review_legacy_candidate(&self.principal, &self.subject_id, request, section)
+                .await
+            {
+                SpokeResult::Ok(_) => Ok(()),
+                SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
+            };
+        }
+        // A remote binding-local review consumes a candidate the drain chose to
+        // settle, and that candidate need not carry a Core capture admission or
+        // candidate fact (an independent signed writer can have created it).
+        // Admit this one attempt before the RPC under the same per-attempt
+        // namespace, then settle its facts and its retirement together.
+        let attempt = self.admit_remote_review_attempt(binding_id).await?;
+        // The committed receipt must identify THIS request: a provider can
+        // answer with an older, still schema-valid receipt whose result matches
+        // in shape but belongs to another key (and a different namespace).
+        let issued_space = request.space_id.as_str().to_string();
+        let issued_key = request.idempotency_key.as_str().to_string();
         match self
-            .provider
-            .review_legacy_candidate(&self.principal, &self.subject_id, request, section)
+            .binding
+            .port()
+            .review_candidate(&self.principal, request)
             .await
         {
-            SpokeResult::Ok(_) => Ok(()),
-            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+            SpokeResult::Ok(receipt) => {
+                let body = serde_json::to_value(&receipt).map_err(wire_err)?;
+                // An SDK-schema-valid receipt can still be inconsistent with the
+                // decision (no ids, a short id list, a mismatched outcome). Only
+                // a consistent committed result may settle; otherwise the
+                // attempt keeps its admission and the binding stays protected.
+                let record_ids =
+                    review_result_record_ids(&decision, &body, &issued_space, &issued_key)?;
+                // A settlement failure returns an error with the attempt still
+                // in place, so the binding stays protected.
+                self.record_remote_review(
+                    attempt.as_deref(),
+                    binding_id,
+                    candidate_id,
+                    &record_ids,
+                )
+                .await?;
+                Ok(())
+            }
+            SpokeResult::Reject(reject) => {
+                if let Err(error) = self
+                    .settle_remote_review_reject(attempt.as_deref(), binding_id, &reject)
+                    .await
+                {
+                    tracing::warn!(
+                        error = %error,
+                        "review refusal settlement could not persist; the attempt keeps protection"
+                    );
+                }
+                Err(self.refuse(&reject))
+            }
         }
     }
 
@@ -707,11 +1625,15 @@ impl MemoryAdapter {
     /// The Creator's `personality` profile (`SOUL.md`), if authored.
     async fn personality_profile(&self) -> CoreResult<Option<Value>> {
         let request: spoke_schemas::MemoryProfileGetRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "subject_id": self.subject_id,
             "profile_kinds": [profile::SOUL_PROFILE_KIND],
         }))?;
-        let body = memory_ok(self.provider.get_profile(&self.principal, request).await)?;
+        let body = self.ok(self
+            .binding
+            .port()
+            .get_profile(&self.principal, request)
+            .await)?;
         Ok(body["profiles"]
             .as_array()
             .and_then(|profiles| profiles.first())
@@ -726,7 +1648,7 @@ impl MemoryAdapter {
         idempotency_key: &str,
     ) -> CoreResult<()> {
         let request: spoke_schemas::MemoryRecordsCreateRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "subject_id": self.subject_id,
             "kind": kind,
             "content": content,
@@ -734,7 +1656,12 @@ impl MemoryAdapter {
             "source_context_ids": [],
             "idempotency_key": idempotency_key,
         }))?;
-        memory_ok(self.provider.create_record(&self.principal, request).await).map(|_| ())
+        self.ok(self
+            .binding
+            .port()
+            .create_record(&self.principal, request)
+            .await)
+            .map(|_| ())
     }
 
     /// Replace one Creator record's content on the expected revision.
@@ -742,7 +1669,8 @@ impl MemoryAdapter {
     /// A record the bridge still projects is adopted under its deterministic id
     /// inside this write's guarded transaction (NXM-6 fix round 1, finding F2):
     /// the user edits a memory they can read, and the legacy file is never
-    /// written (D6).
+    /// written (D6). A remote binding has no projection to adopt and runs the
+    /// ordinary `memory.records.update`.
     async fn update_memory_record(
         &self,
         record_id: &str,
@@ -751,17 +1679,24 @@ impl MemoryAdapter {
         idempotency_key: &str,
     ) -> CoreResult<()> {
         let request: spoke_schemas::MemoryRecordsUpdateRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "record_id": record_id,
             "expected_revision": expected_revision,
             "content": content,
             "idempotency_key": idempotency_key,
         }))?;
-        memory_ok(
-            self.provider
+        if self.is_local() {
+            let local = self.binding.local()?;
+            self.ok(local
                 .update_legacy_record(&self.principal, &self.subject_id, request)
-                .await,
-        )
+                .await)
+        } else {
+            self.ok(self
+                .binding
+                .port()
+                .update_record(&self.principal, request)
+                .await)
+        }
         .map(|_| ())
     }
 
@@ -775,17 +1710,24 @@ impl MemoryAdapter {
         idempotency_key: &str,
     ) -> CoreResult<()> {
         let request: spoke_schemas::MemoryRecordsDeleteRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "record_id": record_id,
             "expected_revision": expected_revision,
             "reason": "deleted through the creator memory CLI",
             "idempotency_key": idempotency_key,
         }))?;
-        memory_ok(
-            self.provider
+        if self.is_local() {
+            let local = self.binding.local()?;
+            self.ok(local
                 .delete_legacy_record(&self.principal, &self.subject_id, request)
-                .await,
-        )
+                .await)
+        } else {
+            self.ok(self
+                .binding
+                .port()
+                .delete_record(&self.principal, request)
+                .await)
+        }
         .map(|_| ())
     }
 
@@ -824,29 +1766,41 @@ impl MemoryAdapter {
         idempotency_key: &str,
     ) -> CoreResult<()> {
         let request: spoke_schemas::MemoryProfileUpdateRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "subject_id": self.subject_id,
             "profile_kind": profile::SOUL_PROFILE_KIND,
             "expected_revision": expected_revision,
             "document": { "format": "markdown", "body": body },
             "idempotency_key": idempotency_key,
         }))?;
-        memory_ok(self.provider.update_profile(&self.principal, request).await).map(|_| ())
+        self.ok(self
+            .binding
+            .port()
+            .update_profile(&self.principal, request)
+            .await)
+            .map(|_| ())
     }
 
     /// One provider record (a projected legacy row included) by id.
     async fn record(&self, record_id: &str) -> CoreResult<Option<Value>> {
         let request: spoke_schemas::MemoryRecordsGetRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "record_id": record_id,
         }))?;
-        match self.provider.get_record(&self.principal, request).await {
+        match self
+            .binding
+            .port()
+            .get_record(&self.principal, request)
+            .await
+        {
             SpokeResult::Ok(body) => Ok(serde_json::to_value(&body)
                 .map_err(wire_err)?
                 .get("record")
                 .cloned()),
-            SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::NotFound => Ok(None),
-            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+            SpokeResult::Reject(reject) if self.proves(&reject, &[SpokeRejectCode::NotFound]) => {
+                Ok(None)
+            }
+            SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
 
@@ -856,6 +1810,12 @@ impl MemoryAdapter {
     /// legacy fragment is addressed by the bridge's deterministic external id
     /// while the DTO serves its legacy `fragment_id` (D5), so the listed id is
     /// resolved through the bridge id before it can name a record (R4-F1).
+    ///
+    /// This resolves *which* record an id names; it does not decide whether that
+    /// record is a Nexus Character fragment. The serving caller classifies the
+    /// resolved record with [`MemoryAdapter::character_fragment_origin`] before
+    /// it uses or mutates it, so a record without proven origin is never served
+    /// as a fragment and known damage is never hidden.
     async fn character_fragment(&self, fragment_id: &str) -> CoreResult<Option<Value>> {
         if let Some(record) = self.record(fragment_id).await? {
             return Ok(Some(record));
@@ -867,42 +1827,111 @@ impl MemoryAdapter {
     /// §7.21 explicit placement change to shared, revision-checked, adopting a
     /// still-projected legacy row inside the promotion's transaction. A CAS miss
     /// keeps the retained `version_mismatch` conflict; an absent record keeps
-    /// the retained not-found answer.
-    async fn promote_fragment(&self, record_id: &str, expected_revision: u64) -> CoreResult<()> {
-        match self
-            .provider
-            .promote_character_fragment(
-                &self.principal,
-                &self.subject_id,
-                record_id,
-                expected_revision,
-                &idempotency_key("promote", record_id)?,
-            )
-            .await
-        {
-            SpokeResult::Ok(_) => Ok(()),
+    /// the retained not-found answer. A remote binding has no projection to
+    /// adopt and runs the ordinary `memory.records.promote`.
+    ///
+    /// On success the provider transaction has committed exactly the placement
+    /// change this call requested, so the caller states the outcome from the
+    /// record it already validated instead of reading the record again.
+    async fn promote_fragment(
+        &self,
+        record_id: &str,
+        expected_revision: u64,
+        binding_id: &str,
+    ) -> CoreResult<()> {
+        let key = idempotency_key("promote", record_id)?;
+        let issued_space = self.binding.space_id().to_string();
+        let result = if self.is_local() {
+            let local = self.binding.local()?;
+            local
+                .promote_character_fragment(
+                    &self.principal,
+                    &self.subject_id,
+                    record_id,
+                    expected_revision,
+                    &key,
+                )
+                .await
+        } else {
+            let request: spoke_schemas::MemoryRecordsPromoteRequest = map_wire(json!({
+                "space_id": &issued_space,
+                "record_id": record_id,
+                "target_scope": { "visibility": "shared" },
+                "expected_revision": expected_revision,
+                "idempotency_key": &key,
+            }))?;
+            self.binding
+                .port()
+                .promote_record(&self.principal, request)
+                .await
+        };
+        match result {
+            SpokeResult::Ok(receipt) => {
+                if !self.is_local() {
+                    // D18: a promotion to shared releases the record's binding
+                    // dependency. Only a receipt that proves THIS promotion —
+                    // this space, key, record and the requested shared
+                    // placement — may release it; otherwise another live
+                    // record's protection would be cleared (or this record's
+                    // released while its real promotion is unknown), so the
+                    // mismatch returns with the fact untouched.
+                    let body = serde_json::to_value(&receipt).map_err(wire_err)?;
+                    let promoted = promote_result_record_id(&body, &issued_space, &key, record_id)?;
+                    self.record_remote_object(
+                        Some(binding_id),
+                        nexus_local_db::RemoteBindingObjectKind::Record,
+                        &promoted,
+                        nexus_local_db::RemoteBindingObjectState::Released,
+                    )
+                    .await?;
+                }
+                Ok(())
+            }
             SpokeResult::Reject(reject) => Err(match reject.code {
-                SpokeRejectCode::NotFound => {
+                // Only a proven absence takes the retained not-found answer; a
+                // remote `NotFound` with a missing or unknown outcome stays an
+                // honest unknown failure.
+                SpokeRejectCode::NotFound if self.proves(&reject, &[SpokeRejectCode::NotFound]) => {
                     not_found("character memory fragment", &format!("'{record_id}'"))
                 }
-                SpokeRejectCode::RevisionConflict => CoreError::ActorConflict {
+                // The local provider keeps its trusted message; a remote
+                // definite stale-revision conflict reaches the same
+                // `version_mismatch` contract through the safe carrier in
+                // `self.refuse` (static text + classification metadata).
+                SpokeRejectCode::RevisionConflict if self.is_local() => CoreError::ActorConflict {
                     code: "version_mismatch".to_string(),
                     message: format!("fragment revision mismatch: {}", reject.message),
                 },
-                _ => memory_reject(&reject),
+                _ => self.refuse(&reject),
             }),
         }
     }
 
     /// The placement a committed promotion left for one record, while the
     /// SOUL-narrative invalidation it owes has not run (R4-F3 round 2).
+    ///
+    /// The recovery row is provider-local state, so a remote binding reports no
+    /// outstanding invalidation.
     async fn soul_invalidation_binding(&self, record_id: &str) -> CoreResult<Option<String>> {
-        self.provider.soul_invalidation_binding(record_id).await
+        if !self.is_local() {
+            return Ok(None);
+        }
+        self.binding
+            .local()?
+            .soul_invalidation_binding(record_id)
+            .await
     }
 
-    /// Clear that recovery row once the invalidation ran.
+    /// Clear that recovery row once the invalidation ran; a remote binding has
+    /// no row to clear.
     async fn finish_soul_invalidation(&self, record_id: &str) -> CoreResult<()> {
-        self.provider.finish_soul_invalidation(record_id).await
+        if !self.is_local() {
+            return Ok(());
+        }
+        self.binding
+            .local()?
+            .finish_soul_invalidation(record_id)
+            .await
     }
 }
 
@@ -1000,10 +2029,12 @@ impl CoreService {
 
 impl CoreService {
     /// The provider adapter for the principal's own Creator bearer, over the
-    /// pinned `MemoryPort` (a read-only core serves reads from it too).
+    /// pinned binding (a read-only core serves reads from its own provider too).
     pub(crate) async fn creator_memory(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
+        let binding = self.memory_binding()?;
         MemoryAdapter::open(
-            self.memory_provider()?,
+            self.inner.pool.clone(),
+            binding,
             principal,
             legacy::creator_subject_id(principal.creator_id()),
             legacy::CREATOR_KIND_NS,
@@ -1015,8 +2046,10 @@ impl CoreService {
     /// The adapter the dismissal write paths use: a read-only core refuses here
     /// with the retained typed error instead of attempting the write.
     async fn creator_memory_writer(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
+        let binding = self.memory_writer_binding()?;
         MemoryAdapter::open(
-            self.memory_writer()?,
+            self.inner.pool.clone(),
+            binding,
             principal,
             legacy::creator_subject_id(principal.creator_id()),
             legacy::CREATOR_KIND_NS,
@@ -1031,8 +2064,10 @@ impl CoreService {
         principal: &Principal,
         character_id: &str,
     ) -> CoreResult<MemoryAdapter> {
+        let binding = self.memory_binding()?;
         MemoryAdapter::open(
-            self.memory_provider()?,
+            self.inner.pool.clone(),
+            binding,
             principal,
             legacy::character_subject_id(character_id),
             legacy::CHARACTER_KIND_NS,
@@ -1048,8 +2083,10 @@ impl CoreService {
         principal: &Principal,
         character_id: &str,
     ) -> CoreResult<MemoryAdapter> {
+        let binding = self.memory_writer_binding()?;
         MemoryAdapter::open(
-            self.memory_writer()?,
+            self.inner.pool.clone(),
+            binding,
             principal,
             legacy::character_subject_id(character_id),
             legacy::CHARACTER_KIND_NS,
@@ -1479,7 +2516,7 @@ impl CoreService {
             legacy["created_at"] = json!(created_at);
         }
         let capture: spoke_schemas::MemoryCaptureRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": memory.binding.space_id(),
             "subject_id": memory.subject_id.as_str(),
             "content": {
                 "text": raw_digest.as_str(),
@@ -1495,7 +2532,11 @@ impl CoreService {
             "kind_hint": task_kind_to_memory_kind(&task_kind),
             "idempotency_key": format!("e4capture:{digest}"),
         }))?;
-        memory_ok(memory.provider.capture(&memory.principal, capture).await)?;
+        memory.ok(memory
+            .binding
+            .port()
+            .capture(&memory.principal, capture)
+            .await)?;
         map_wire(json!({ "success": true, "pending_id": pending_id }))
     }
 
@@ -1843,13 +2884,19 @@ impl CoreService {
     /// fields the pending-review DTOs render. The legacy queue is never written,
     /// so there is no window in which a legacy row exists without its provider
     /// successor, and the capture stays visible after the one-shot migration
-    /// turns the legacy queue reads off.
+    /// turns the legacy queue reads off. A nonlocal binding has no bridge
+    /// identity, so the candidate is stored under the provider's own minted id
+    /// while the same retained fields still let the pending DTOs address it.
     ///
     /// # Errors
     /// As [`Self::acquire_actor_activity`], plus `invalid_input` for malformed
-    /// capture fields, the binding admission an active binding of this Character
-    /// on an owned active World (`actor_not_found`), and the mapped storage
-    /// error otherwise.
+    /// capture fields, the binding admission (an active binding of this
+    /// Character on an owned active World, `actor_not_found`), and the mapped
+    /// storage error otherwise. A local write runs the admission inside the
+    /// provider's own write transaction (D15). A nonlocal write commits its own
+    /// durable admission in the same short writer transaction and before the
+    /// RPC (D18, §5.1): an unprovable attempt keeps the binding non-removable,
+    /// and only that attempt's definite result may retire it.
     pub async fn capture_character_pending_review(
         &self,
         principal: &Principal,
@@ -1887,10 +2934,11 @@ impl CoreService {
         let memory = self
             .character_memory_writer(principal, &character_id)
             .await?;
-        // The binding the legacy insert admitted is still admitted, and the
-        // check now runs inside the provider's own write transaction (D15):
-        // `remove_binding` takes the same write lock, so it cannot delete the
-        // binding between the check and the candidate write.
+        // The binding the legacy insert admitted is still admitted: the local
+        // check runs inside the provider's own write transaction (D15), and a
+        // nonlocal capture commits its own durable admission before the RPC
+        // (D18). `remove_binding` takes the same write lock, so it cannot delete
+        // the binding between the check and the candidate write.
         let binding = binding_id.map(|binding| CaptureBinding {
             owner_creator: principal.creator_id(),
             character: &character_id,
@@ -1909,7 +2957,7 @@ impl CoreService {
             origin["created_at"] = json!(created_at);
         }
         let capture: spoke_schemas::MemoryCaptureRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": memory.binding.space_id(),
             "subject_id": memory.subject_id.as_str(),
             "content": {
                 "text": raw_digest.as_str(),
@@ -1928,21 +2976,217 @@ impl CoreService {
             "kind_hint": task_kind_to_memory_kind(&task_kind),
             "idempotency_key": character_capture_key(&pending_id)?,
         }))?;
-        let candidate_id = legacy::character_pending_review_candidate_id(&pending_id);
-        match memory
-            .provider
-            .capture_identified(&memory.principal, capture, &candidate_id, binding.as_ref())
-            .await
-        {
-            Ok(SpokeResult::Ok(_)) => {}
-            Ok(SpokeResult::Reject(reject)) => return Err(memory_reject(&reject)),
-            Err(error) => return Err(map_local_db_error(error)),
+        if memory.binding.is_local() {
+            let local = memory.binding.local()?;
+            let candidate_id = legacy::character_pending_review_candidate_id(&pending_id);
+            match local
+                .capture_identified(&memory.principal, capture, &candidate_id, binding.as_ref())
+                .await
+            {
+                Ok(SpokeResult::Ok(_)) => {}
+                Ok(SpokeResult::Reject(reject)) => return Err(memory.refuse(&reject)),
+                Err(error) => return Err(map_local_db_error(error)),
+            }
+        } else {
+            // A remote binding serves no local bridge identity: the standard
+            // capture op stores the candidate under its own minted id. A
+            // binding-local capture first commits its own durable admission
+            // (D18, §5.1) in the same short writer transaction as the Nexus
+            // provenance admission, before the RPC; only this attempt's
+            // definite result retires it and publishes the candidate
+            // references the provider returned. A shared-scope capture carries
+            // no binding dependency and takes no admission.
+            match binding_id {
+                Some(binding_id) => {
+                    self.capture_remote_binding_scoped(
+                        principal,
+                        &memory,
+                        &character_id,
+                        binding_id,
+                        capture,
+                    )
+                    .await?;
+                }
+                None => {
+                    if let SpokeResult::Reject(reject) = memory
+                        .binding
+                        .port()
+                        .capture(&memory.principal, capture)
+                        .await
+                    {
+                        return Err(memory.refuse(&reject));
+                    }
+                }
+            }
         }
 
         map_wire(json!({
             "success": true,
             "pending_id": pending_id,
         }))
+    }
+
+    /// Send one binding-scoped remote capture under its own durable admission
+    /// (D18, `n3-provider-binding.md` §5.1).
+    ///
+    /// The admission is written in the same short `BEGIN IMMEDIATE` as the
+    /// Nexus provenance check and committed **before** the RPC, so a crash,
+    /// cancellation, transport failure or uncertain commit cannot leave the
+    /// binding removable while the effect may exist. Only this attempt's
+    /// definite committed receipt publishes its candidate references and retires
+    /// this admission — together in one local transaction; a refusal that proves
+    /// no effect (`retry_class = terminal` on a pre-effect code) retires it too,
+    /// while an uncertain/retryable/unknown/contradictory result keeps it
+    /// (I-000196). Nothing else clears it: a later attempt, receipt
+    /// or counter never settles an older unknown, so an unprovable attempt keeps
+    /// binding non-removable (the supervisor-selected conservative policy;
+    /// owner confirmation pending). The provider is never asked to replay or
+    /// roll back, and no memory content or request body is stored.
+    ///
+    /// shortcut: an unprovable wire outcome keeps its binding non-removable
+    /// indefinitely (later attempts and concealed/negative provider reads never
+    /// prove absence), until remote-connect's signed runtime provides a real
+    /// remote binding and outcome evidence (R2).
+    async fn capture_remote_binding_scoped(
+        &self,
+        principal: &Principal,
+        memory: &MemoryAdapter,
+        character_id: &str,
+        binding_id: &str,
+        capture: spoke_schemas::MemoryCaptureRequest,
+    ) -> CoreResult<()> {
+        let binding = &memory.binding;
+        // A nonlocal binding without its pinned public client identity cannot
+        // be admitted: fail closed instead of recording under another identity.
+        let Some(client_identity) = binding.client_identity() else {
+            return Err(CoreError::Internal {
+                category: "memory_remote_identity_missing".to_string(),
+            });
+        };
+        let (authority_host_id, authority_generation) = binding.authority();
+        let namespace = nexus_local_db::RemoteBindingNamespace::new(
+            principal.creator_id(),
+            character_id,
+            binding_id,
+            authority_host_id,
+            authority_generation.get(),
+            binding.space_id(),
+            client_identity,
+        );
+        let admission_id = uuid::Uuid::new_v4().to_string();
+        let admitted_at = now_iso();
+        let mut admission = nexus_local_db::begin_immediate(&self.inner.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        // The local binding must still be this Character's active binding on an
+        // owned active World when the attempt becomes durable — the same
+        // admission the local provider's write transaction performs, in the same
+        // writer transaction that makes the unknown attempt durable.
+        nexus_local_db::require_valid_provenance_tx(
+            &mut admission,
+            principal.creator_id(),
+            character_id,
+            Some(binding_id),
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        nexus_local_db::insert_remote_binding_admission_tx(
+            &mut admission,
+            &admission_id,
+            &namespace,
+            &admitted_at,
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        admission.commit().await.map_err(sqlx_internal)?;
+
+        // The committed receipt must identify THIS request: a provider can
+        // answer with an older, still schema-valid receipt whose result belongs
+        // to another key (and another namespace), and publishing its objects
+        // while retiring this admission would leave this capture unprotected.
+        let issued_space = capture.space_id.as_str().to_string();
+        let issued_key = capture.idempotency_key.as_str().to_string();
+        match binding.port().capture(&memory.principal, capture).await {
+            SpokeResult::Ok(receipt) => {
+                let body = serde_json::to_value(&receipt).map_err(wire_err)?;
+                // A mismatched receipt returns here with the admission still in
+                // place, so the binding stays unremovable.
+                let candidate_ids =
+                    capture_result_candidate_ids(&body, &issued_space, &issued_key)?;
+                let published_at = now_iso();
+                let mut published = nexus_local_db::begin_immediate(&self.inner.pool)
+                    .await
+                    .map_err(map_local_db_error)?;
+                for candidate_id in &candidate_ids {
+                    nexus_local_db::record_remote_binding_object_tx(
+                        &mut published,
+                        &namespace,
+                        nexus_local_db::RemoteBindingObjectKind::Candidate,
+                        candidate_id,
+                        nexus_local_db::RemoteBindingObjectState::Live,
+                        &published_at,
+                    )
+                    .await
+                    .map_err(map_local_db_error)?;
+                }
+                nexus_local_db::retire_remote_binding_admission_tx(
+                    &mut published,
+                    &admission_id,
+                    &namespace,
+                )
+                .await
+                .map_err(map_local_db_error)?;
+                published.commit().await.map_err(sqlx_internal)?;
+                Ok(())
+            }
+            SpokeResult::Reject(reject) => {
+                // D18/I-000196: only a refusal that proves this attempt had no
+                // effect retires its admission. `OUTCOME_UNCERTAIN` (including a
+                // response-projection failure after commit), a retryable class,
+                // a missing/unknown class or a contradictory code all keep it;
+                // a local settlement failure keeps it too. The provider outcome
+                // then surfaces through the shared remote-refusal policy: its
+                // whitelisted code, wire code and retry class survive, its peer
+                // text does not (I-000202).
+                if let Err(error) = self
+                    .settle_remote_capture_reject(&admission_id, &namespace, &reject)
+                    .await
+                {
+                    tracing::warn!(
+                        admission_id = %admission_id,
+                        error = %error,
+                        "capture refusal settlement could not persist; the admission keeps protection"
+                    );
+                }
+                Err(memory.refuse(&reject))
+            }
+        }
+    }
+
+    /// Apply the D18 consequence of one definite capture refusal.
+    ///
+    /// Retire this attempt's admission only when the result proves the attempt
+    /// had no effect. An uncertain, unknown, malformed or contradictory refusal
+    /// — and a local retirement failure — leave it in place, so removal keeps
+    /// refusing until this exact attempt's own definite evidence settles it; no
+    /// later result clears it.
+    async fn settle_remote_capture_reject(
+        &self,
+        admission_id: &str,
+        namespace: &nexus_local_db::RemoteBindingNamespace<'_>,
+        reject: &SpokeReject,
+    ) -> CoreResult<()> {
+        if !remote_capture_reject_proves_no_effect(reject) {
+            return Ok(());
+        }
+        let mut retired = nexus_local_db::begin_immediate(&self.inner.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        nexus_local_db::retire_remote_binding_admission_tx(&mut retired, admission_id, namespace)
+            .await
+            .map_err(map_local_db_error)?;
+        retired.commit().await.map_err(sqlx_internal)?;
+        Ok(())
     }
 
     #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
@@ -2041,10 +3285,14 @@ impl CoreService {
     /// per-Character activity lease; a missing row is `404` and mutates
     /// nothing.
     ///
-    /// Served through the pinned `MemoryPort`: the row is adopted under the
-    /// bridge's deterministic id and consumed in the same guarded transaction,
-    /// so a dismissal can never leave an adopted pending row behind (NXM-5 Task
-    /// 2 fix round 1, finding F4).
+    /// Served through the pinned `MemoryPort`: a local binding adopts the row
+    /// under the bridge's deterministic id and consumes it in the same guarded
+    /// transaction, so a dismissal can never leave an adopted pending row
+    /// behind (NXM-5 Task 2 fix round 1, finding F4). A nonlocal binding serves
+    /// no projection: a candidate the provider really holds under that shaped
+    /// id is an ordinary provider candidate, dismissed through the standard
+    /// revision check only after its subject and retained pending identity
+    /// match this bearer (I-000197).
     ///
     /// # Errors
     /// As [`Self::acquire_actor_activity`], plus [`CoreError::NotFound`] when
@@ -2069,35 +3317,54 @@ impl CoreService {
             .await?;
         let candidate_id = legacy::character_pending_review_candidate_id(&pending_id);
         let missing = || not_found("pending review", &format!("'{pending_id}'"));
-        if !pending_now(&memory, &candidate_id).await? {
-            // A capture the provider owns outright carries a minted candidate
-            // id: address it through the row itself, exactly as the Creator
-            // dismissal does (NXM-16).
-            if let Some(row) = memory
-                .pending_rows()
-                .await?
-                .into_iter()
-                .find(|row| row.pending_id == pending_id)
-            {
-                if memory
-                    .dismiss_native(&row.candidate_id, row.revision)
-                    .await?
-                {
-                    return map_wire(json!({
-                        "success": true,
-                        "pending_id": pending_id,
-                    }));
+        let pending = pending_now(&memory, &candidate_id).await?;
+        if memory.is_local() {
+            // A local binding adopts the row under the bridge's deterministic id
+            // and consumes it in the same guarded transaction, so a row that was
+            // pending can only answer through that dismissal.
+            if pending {
+                if !memory.dismiss_legacy(&candidate_id).await? {
+                    return Err(missing());
                 }
+                return map_wire(json!({
+                    "success": true,
+                    "pending_id": pending_id,
+                }));
             }
-            return Err(missing());
+        } else if pending
+            && memory
+                .dismiss_provider_candidate(&candidate_id, &pending_id)
+                .await?
+        {
+            // A nonlocal binding serves no projection: a candidate it really
+            // holds under this shaped id is an ordinary provider candidate,
+            // and the standard revision check runs only after its subject and
+            // retained pending identity match this bearer (I-000197).
+            return map_wire(json!({
+                "success": true,
+                "pending_id": pending_id,
+            }));
         }
-        if !memory.dismiss_legacy(&candidate_id).await? {
-            return Err(missing());
+        // A capture the provider owns outright carries a minted candidate
+        // id: address it through the row itself, exactly as the Creator
+        // dismissal does (NXM-16).
+        if let Some(row) = memory
+            .pending_rows()
+            .await?
+            .into_iter()
+            .find(|row| row.pending_id == pending_id)
+        {
+            if memory
+                .dismiss_native(&row.candidate_id, row.revision, row.binding_id.as_deref())
+                .await?
+            {
+                return map_wire(json!({
+                    "success": true,
+                    "pending_id": pending_id,
+                }));
+            }
         }
-        map_wire(json!({
-            "success": true,
-            "pending_id": pending_id,
-        }))
+        Err(missing())
     }
 
     #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
@@ -2108,9 +3375,19 @@ impl CoreService {
     /// (`binding_id` present = that binding's local fragments, absent = the
     /// Character-shared ones) becomes the provider's placement selection.
     ///
+    /// The served set is the retained **fragment family**, not every protocol
+    /// `fact` ([`CharacterFragmentFamily`]): a record with no proven Nexus origin
+    /// is not served here as if it were a fragment, and a record that lost its
+    /// identity while its own metadata or this binding's facts still prove that
+    /// origin fails honestly instead of disappearing. The walk classifies rows as
+    /// it pages and stops at the first family row past the requested page, so
+    /// `offset`/`has_more` describe the family without reading or projecting the
+    /// whole collection.
+    ///
     /// # Errors
-    /// [`CoreError::NotFound`] for a foreign/missing Character and the mapped
-    /// storage error otherwise.
+    /// [`CoreError::NotFound`] for a foreign/missing Character, the honest
+    /// damaged-metadata refusal for a fragment-origin record without its
+    /// identity, and the mapped storage error otherwise.
     pub async fn list_character_memory_fragments(
         &self,
         principal: &Principal,
@@ -2134,24 +3411,56 @@ impl CoreService {
         );
         let start = usize::try_from(offset).unwrap_or(usize::MAX);
         let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
-        // One row past the page proves more rows exist (the retained
-        // `limit + 1` overfetch). The page window is served as asked: clamping
-        // it to an internal bound used to answer an empty page with
-        // `has_more = false` while records existed past the window (fix round 1,
-        // finding F5).
-        let want = start.saturating_add(page_size).saturating_add(1);
-        let records = memory
-            .records(selection, &["fact"], None, Some(want))
-            .await?;
-        let page: Vec<&Value> = records.iter().skip(start).take(page_size).collect();
-        let has_more = records.len() > start.saturating_add(page.len());
+        // The retained `limit + 1` overfetch, counted in FAMILY rows: one
+        // classified fragment past the page proves `has_more`. The walk stops
+        // there, so it never reads or converts the whole collection, and a row
+        // it never reaches cannot fail the page.
+        let mut skipped = 0usize;
+        let mut page: Vec<CharacterMemoryFragmentInfo> = Vec::new();
+        let mut has_more = false;
+        let mut cursor: Option<String> = None;
+        'walk: loop {
+            let request = memory.records_request(&selection, &["fact"], None, cursor.as_deref())?;
+            let mut body = memory.list_page(request, true).await?;
+            let rows = body
+                .get_mut("records")
+                .and_then(Value::as_array_mut)
+                .map(std::mem::take)
+                .unwrap_or_default();
+            for record in rows {
+                match memory
+                    .character_fragment_origin(&record, binding_id.as_deref())
+                    .await?
+                {
+                    // No proven Nexus origin: a generic record, not this family's.
+                    CharacterFragmentFamily::Unproven => {}
+                    CharacterFragmentFamily::Damaged => return Err(damaged_character_fragment()),
+                    CharacterFragmentFamily::Fragment(session_id) => {
+                        if skipped < start {
+                            skipped += 1;
+                        } else if page.len() < page_size {
+                            page.push(stored_character_fragment(
+                                &record,
+                                &character_id,
+                                session_id,
+                            )?);
+                        } else {
+                            has_more = true;
+                            break 'walk;
+                        }
+                    }
+                }
+            }
+            match body["next_cursor"].as_str() {
+                Some(next) => cursor = Some(next.to_string()),
+                None => break,
+            }
+        }
+        // The retained page window applies to the family, so `offset` and
+        // `has_more` describe fragments only.
         let next_cursor = has_more.then(|| format!("v1:{}", offset.saturating_add(limit)));
-        let fragments: Vec<CharacterMemoryFragmentInfo> = page
-            .iter()
-            .map(|record| character_fragment_from_provider(record, &character_id))
-            .collect::<CoreResult<_>>()?;
         map_wire(json!({
-            "fragments": fragments,
+            "fragments": page,
             "pagination": pagination_info(limit, has_more, next_cursor.as_deref()),
         }))
     }
@@ -2171,16 +3480,24 @@ impl CoreService {
     ///
     /// The id is the one the fragment DTO served, so a legacy-projected fragment
     /// resolves through the bridge's external id and is adopted inside the
-    /// promotion's own transaction (R4-F1); the record must belong to this
-    /// Character and be a `fact` fragment (R4-F2). The retained SOUL-narrative
-    /// invalidation runs on the already-shared path too, so a retry after a
-    /// failed invalidation reaches one consistent state (R4-F3).
+    /// promotion's own transaction (R4-F1). The record must belong to this
+    /// Character and be a representable Nexus Character fragment
+    /// ([`CharacterFragmentFamily`]): a record without proven Nexus origin keeps
+    /// the retained non-fragment answer, and a record that lost its required
+    /// identity while its own metadata or this binding's facts prove that origin
+    /// is an honest damaged-metadata failure — both before any provider mutation. The complete retained projection is proven on that record at the
+    /// same provider revision the CAS targets, so a concurrent replacement cannot
+    /// promote an unvalidated revision, and the response states the placement the
+    /// provider's own receipt returned instead of re-reading (a later writer
+    /// cannot turn a committed promotion into a projection failure). The retained
+    /// SOUL-narrative invalidation runs on the already-shared path too, so a
+    /// retry after a failed invalidation reaches one consistent state (R4-F3).
     ///
     /// # Errors
     /// As [`Self::acquire_actor_activity`], plus the mapped storage conflicts
-    /// (`version_mismatch`, `character_fragment_already_shared`) and the
-    /// retained not-found answer for an id that names no fragment of this
-    /// Character.
+    /// (`version_mismatch`, `character_fragment_already_shared`), the retained
+    /// non-fragment answer, the damaged-metadata refusal and the retained
+    /// not-found answer for an id that names no fragment of this Character.
     pub async fn promote_character_fragment(
         &self,
         principal: &Principal,
@@ -2217,35 +3534,52 @@ impl CoreService {
             .unwrap_or_default()
             .to_string();
         // R4-F2: the lease above names one Character, so the record must be that
-        // Character's own and a `fact` fragment. The read alone is authorized by
-        // the principal's grants, which also cover every other Character it
-        // owns, so the owner and kind are checked here — before any mutation.
+        // Character's own and a Nexus Character fragment. The read alone is
+        // authorized by the principal's grants, which also cover every other
+        // Character it owns, so the owner and family are checked here — before
+        // any mutation.
         if current["subject_id"].as_str() != Some(memory.subject_id()) {
             return Err(absent());
         }
-        if current["kind"].as_str() != Some("fact") {
-            return Err(invalid_input(
-                "fragment_id must name a Character memory fragment",
-            ));
-        }
+        // The retained family contract, applied at the promotion boundary: a
+        // record with no proven Nexus origin keeps the retained non-fragment
+        // answer, a record whose required identity is gone while Nexus still holds
+        // positive origin evidence (its own metadata, or this binding's fact for
+        // it) fails honestly, and only a representable fragment reaches the
+        // promotion below.
+        let current_binding = current
+            .pointer("/scope/context_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let session_id = match memory
+            .character_fragment_origin(&current, current_binding.as_deref())
+            .await?
+        {
+            CharacterFragmentFamily::Fragment(session_id) => session_id.to_string(),
+            CharacterFragmentFamily::Unproven => {
+                return Err(invalid_input(
+                    "fragment_id must name a Character memory fragment",
+                ));
+            }
+            CharacterFragmentFamily::Damaged => return Err(damaged_character_fragment()),
+        };
         // The placement the promotion leaves. While the record is still
         // binding-local its own scope names it; once the promotion committed it
         // names the target, and its provenance is a client claim that need not
         // name the placement at all — so the promotion's transaction recorded the
         // old binding and a retry reads that recovery row instead of guessing
         // (R4-F3 round 2).
-        let Some(source_binding) = current
-            .pointer("/scope/context_id")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-        else {
+        let Some(source_binding) = current_binding else {
             // The promotion already committed and only its invalidation is
             // outstanding: finish it before answering the stable conflict, so a
-            // retry never leaves the shared fragment behind a stale cache.
-            let binding = memory.soul_invalidation_binding(&record_id).await?;
-            self.invalidate_character_soul_narratives(&character_id, binding.as_deref())
-                .await?;
-            memory.finish_soul_invalidation(&record_id).await?;
+            // retry never leaves the shared fragment behind a stale cache. A
+            // remote binding has no local narrative cache or journal to settle.
+            if memory.is_local() {
+                let binding = memory.soul_invalidation_binding(&record_id).await?;
+                self.invalidate_character_soul_narratives(&character_id, binding.as_deref())
+                    .await?;
+                memory.finish_soul_invalidation(&record_id).await?;
+            }
             return Err(CoreError::ActorConflict {
                 code: "character_fragment_already_shared".to_string(),
                 message: "character memory fragment is already shared".to_string(),
@@ -2257,21 +3591,54 @@ impl CoreService {
             .ok_or_else(|| {
                 invalid_input("expected_revision must be a non-negative fragment revision")
             })?;
+        let provider_revision = u64::try_from(provider_revision).unwrap_or(u64::MAX);
+        // The validation below and the CAS above it must name the SAME provider
+        // revision: a caller whose expected revision is not the one this record
+        // was read at would otherwise promote a revision whose content was never
+        // validated (a concurrent replacement could slip through the CAS). That
+        // stale read is the retained `version_mismatch`, written before any
+        // provider call — the provider's own CAS stays the authority for a record
+        // that advances after this read.
+        let stored_revision = current["revision"].as_u64().unwrap_or(1);
+        if stored_revision != provider_revision {
+            return Err(CoreError::ActorConflict {
+                code: "version_mismatch".to_string(),
+                message: format!(
+                    "fragment revision mismatch: expected {expected_revision}, stored {}",
+                    stored_revision.saturating_sub(1)
+                ),
+            });
+        }
+        // The one retained projection: it proves every DTO-relevant value on the
+        // authorized record at the CAS revision, BEFORE the provider mutation,
+        // and it is also the response value. The promotion commits exactly the
+        // placement it requests (shared) and the CAS proves the record was at
+        // `stored_revision`, so the transaction leaves `stored_revision + 1` —
+        // the revision the DTO exposes as `stored_revision`.
+        let fragment = character_fragment_from_provider(
+            &current,
+            &character_id,
+            &session_id,
+            None,
+            provider_revision,
+        )?;
         memory
-            .promote_fragment(
-                &record_id,
-                u64::try_from(provider_revision).unwrap_or(u64::MAX),
-            )
+            .promote_fragment(&record_id, stored_revision, source_binding.as_str())
             .await?;
         // Retained cache semantics: exactly the affected SOUL-narrative scopes
-        // (shared + the old binding) are invalidated.
-        self.invalidate_character_soul_narratives(&character_id, Some(source_binding.as_str()))
-            .await?;
-        memory.finish_soul_invalidation(&record_id).await?;
-        let promoted = memory.record(&record_id).await?.ok_or_else(absent)?;
-        map_wire(json!({
-            "fragment": character_fragment_from_provider(&promoted, &character_id)?,
-        }))
+        // (shared + the old binding) are invalidated. The cache and the
+        // invalidation journal are local-provider state, so a remote binding
+        // settles neither.
+        if memory.is_local() {
+            self.invalidate_character_soul_narratives(&character_id, Some(source_binding.as_str()))
+                .await?;
+            memory.finish_soul_invalidation(&record_id).await?;
+        }
+        // The committed response is the value proven above: no second
+        // serialization of the record and no post-commit read remain, so an
+        // intervening writer cannot turn this promotion into a projection
+        // failure.
+        map_wire(json!({ "fragment": fragment }))
     }
 
     /// Retained cache semantics on fragment promotion: exactly the affected
@@ -2372,7 +3739,8 @@ impl CoreService {
         let mut rows: Vec<PendingMemoryRow> = pending.into_iter().take(batch_limit).collect();
         // The check/use boundary (fix round 2, finding F1): the fetch above only
         // selects the slice. This re-check runs inside the bearer's disposition
-        // section, so a dismissal can neither commit between it and the
+        // section when the binding is local (a remote binding relies on its
+        // candidate CAS), so a dismissal can neither commit between it and the
         // classification below nor be classified after it: one that already
         // committed is observed here and its row is dropped.
         #[cfg(feature = "test-hooks")]
@@ -2401,7 +3769,8 @@ impl CoreService {
         };
         let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
         let mut outcome =
-            process_bearer_review_batch(&batch_rows, bearer, &memory, &section, deadline).await?;
+            process_bearer_review_batch(&batch_rows, bearer, &memory, section.as_ref(), deadline)
+                .await?;
         drop(section);
         drop(ctx);
         let deadline_stopped = outcome.processed < processing_slice;
@@ -2483,27 +3852,151 @@ fn validate_capture_fields(
     Ok(())
 }
 
-/// One provider record rendered as the retained Character fragment DTO.
+/// Which provider records this adapter serves as a Nexus Character fragment,
+/// and which it can only report as damaged.
 ///
-/// The bridge stores the legacy display fields in `nexus_legacy` and serves a
-/// Character fragment's legacy revision as `legacy + 1` (so the 0→1 promotion
-/// step survives the seam); the DTO exposes the legacy numbering again. A
-/// provider-native record of another origin falls back to its own id/revision.
+/// N2's adoption maps a reviewed `FragmentOnly` product **to** a core `fact`
+/// record (`spoke-memory-adoption-plan.md` §4.6); it does not make every
+/// protocol `fact` a Nexus Character fragment. Both real producers write the
+/// fragment's session identity into the record's own `nexus_legacy` block — the
+/// review pipeline (`memory_pipeline::fragment_decision`) and the legacy bridge
+/// (`legacy.rs`, `FAMILY_CHARACTER_FRAGMENTS`) — and the retained DTO requires
+/// that identity (`session_id`, `minLength: 1`):
+///
+/// - a `fact` carrying it is a fragment this adapter serves;
+/// - a record that lost it while Nexus still holds positive origin evidence — the
+///   exact Character-fragment producer markers of its own `nexus_legacy` block, or
+///   the binding's authoritative D18 fact for that exact record — is damaged and
+///   is reported honestly instead of dropped;
+/// - anything else is unproven: served as a generic provider record, never as a
+///   fragment, and its absence of evidence says nothing about where it came from.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CharacterFragmentFamily<'a> {
+    /// A representable Character fragment: its retained session identity.
+    Fragment(&'a str),
+    /// Known Nexus fragment origin whose required identity is gone.
+    Damaged,
+    /// No proven Nexus origin: a generic provider record, not a fragment.
+    Unproven,
+}
+
+/// The one `nexus_legacy.family` value that names the Character fragment family
+/// (`memory_provider/legacy.rs`, `FAMILY_CHARACTER_FRAGMENTS`). Any other family
+/// names another Nexus family, so it is not Character-fragment origin.
+const CHARACTER_FRAGMENT_FAMILY: &str = "character_memory_fragments";
+
+/// Classify one provider record from its own retained metadata.
+///
+/// Only an actual Character-fragment producer marker counts as the record's own
+/// origin claim: the legacy bridge's exact `family` identity, or the review
+/// pipeline's `pending_id`. A bare `fragment_id`, an arbitrary `family` (e.g. the
+/// unrelated `memory_long_term` family) or any `kind`/provenance claim is not
+/// Character-fragment origin.
+fn character_fragment_family(record: &Value) -> CharacterFragmentFamily<'_> {
+    if record["kind"].as_str() != Some("fact") {
+        return CharacterFragmentFamily::Unproven;
+    }
+    let origin = nexus_legacy(record);
+    if let Some(session_id) = origin["session_id"]
+        .as_str()
+        .filter(|session_id| !session_id.is_empty())
+    {
+        return CharacterFragmentFamily::Fragment(session_id);
+    }
+    let names_origin = origin["family"].as_str() == Some(CHARACTER_FRAGMENT_FAMILY)
+        || origin["pending_id"]
+            .as_str()
+            .is_some_and(|pending_id| !pending_id.is_empty());
+    if names_origin {
+        CharacterFragmentFamily::Damaged
+    } else {
+        CharacterFragmentFamily::Unproven
+    }
+}
+
+impl MemoryAdapter {
+    /// Whether this binding's authoritative facts prove the record's Nexus
+    /// origin.
+    ///
+    /// `true` is positive origin evidence for this exact object; `false` proves
+    /// nothing about it and is never read as "provider-native". A local binding,
+    /// or a nonlocal one whose public identity was not pinned, records no such
+    /// facts and therefore has no fact-based evidence.
+    async fn known_fragment_origin(&self, binding_id: &str, record_id: &str) -> CoreResult<bool> {
+        let Some(namespace) = self.remote_namespace(binding_id) else {
+            return Ok(false);
+        };
+        nexus_local_db::actor_world_binding::remote_binding_object_is_known(
+            &self.pool,
+            &namespace,
+            nexus_local_db::RemoteBindingObjectKind::Record,
+            record_id,
+        )
+        .await
+        .map_err(map_local_db_error)
+    }
+
+    /// The retained family of one record, with every authoritative origin signal
+    /// this adapter already holds for `binding_id`.
+    ///
+    /// The record's own metadata is authoritative on its own; a record that lost
+    /// it is known to be damaged when that metadata names fragment origin or this
+    /// binding's D18 facts name this exact record. Otherwise it stays unproven.
+    async fn character_fragment_origin<'a>(
+        &self,
+        record: &'a Value,
+        binding_id: Option<&str>,
+    ) -> CoreResult<CharacterFragmentFamily<'a>> {
+        let family = character_fragment_family(record);
+        if family != CharacterFragmentFamily::Unproven {
+            return Ok(family);
+        }
+        let (Some(binding_id), Some(record_id)) = (binding_id, record["record_id"].as_str()) else {
+            return Ok(family);
+        };
+        if self.known_fragment_origin(binding_id, record_id).await? {
+            return Ok(CharacterFragmentFamily::Damaged);
+        }
+        Ok(family)
+    }
+}
+
+/// The one static refusal for a fragment-origin record whose required identity
+/// is missing: stored-state damage, never a caller-input verdict.
+fn damaged_character_fragment() -> CoreError {
+    internal_err(
+        "memory_fragment_metadata",
+        "a Character fragment record is missing its session identity",
+    )
+}
+
+/// One validated provider record rendered as the retained Character fragment
+/// DTO.
+///
+/// The caller passes the session identity [`character_fragment_family`] proved
+/// and the placement/revision the DTO must state, so this projection never
+/// invents a missing value: the retained schema requires a non-empty
+/// `session_id`, and a record without one is not representable as a fragment at
+/// all. The bridge stores the legacy display fields in `nexus_legacy` and its
+/// record revision is the legacy revision `+ 1` (the 0→1 promotion step the DTO
+/// exposes), which is why callers pass the DTO's own `revision`.
 fn character_fragment_from_provider(
     record: &Value,
     character_id: &str,
+    session_id: &str,
+    binding_id: Option<&str>,
+    revision: u64,
 ) -> CoreResult<CharacterMemoryFragmentInfo> {
     let origin = nexus_legacy(record);
     let fragment_id = origin["fragment_id"]
         .as_str()
         .or_else(|| record["record_id"].as_str())
         .unwrap_or_default();
-    let revision = record["revision"].as_u64().unwrap_or(1).saturating_sub(1);
     map_wire(json!({
         "fragment_id": fragment_id,
-        "session_id": origin["session_id"].as_str().unwrap_or_default(),
+        "session_id": session_id,
         "character_id": character_id,
-        "binding_id": record.pointer("/scope/context_id"),
+        "binding_id": binding_id,
         "summary": record.pointer("/content/text").and_then(Value::as_str).unwrap_or_default(),
         "keywords": record_keywords(record),
         "created_at": origin["created_at"]
@@ -2513,6 +4006,18 @@ fn character_fragment_from_provider(
         "ttl": origin["ttl"],
         "revision": revision,
     }))
+}
+
+/// The retained projection of one already-classified fragment record at the
+/// placement and 0-based revision it currently stores.
+fn stored_character_fragment(
+    record: &Value,
+    character_id: &str,
+    session_id: &str,
+) -> CoreResult<CharacterMemoryFragmentInfo> {
+    let binding_id = record.pointer("/scope/context_id").and_then(Value::as_str);
+    let revision = record["revision"].as_u64().unwrap_or(1).saturating_sub(1);
+    character_fragment_from_provider(record, character_id, session_id, binding_id, revision)
 }
 
 /// One provider record rendered as the retained Creator fragment DTO.
@@ -2613,17 +4118,23 @@ impl CoreService {
     /// Delete one of the principal's pending reviews; a missing row is `404`
     /// and mutates nothing.
     ///
-    /// Served through the pinned `MemoryPort`. The row is adopted under the
-    /// bridge's deterministic id and consumed in the same guarded transaction,
-    /// so the legacy table stays write-idle, the id can never resurface through
-    /// the bridge, and a dismissal can never leave an adopted pending row behind
-    /// (NXM-5 Task 2 fix round 1, finding F4).
+    /// Served through the pinned `MemoryPort`. A local binding adopts the row
+    /// under the bridge's deterministic id and consumes it in the same guarded
+    /// transaction, so the legacy table stays write-idle, the id can never
+    /// resurface through the bridge, and a dismissal can never leave an adopted
+    /// pending row behind (NXM-5 Task 2 fix round 1, finding F4). A nonlocal
+    /// binding serves no projection: a candidate it really holds under that
+    /// shaped id is an ordinary provider candidate, dismissed through the
+    /// standard revision check only after its subject and retained pending
+    /// identity match this bearer (I-000197).
     ///
     /// A row that belongs to another Creator keeps the retained
-    /// `pending_review` `ForbiddenReason`: the provider cannot see it, so the
-    /// ownership re-read that distinguishes `403` from `404` is the legacy
-    /// table's — read-only, exactly as before the reroute (fix round 1,
-    /// finding F2).
+    /// `pending_review` `ForbiddenReason` on a local binding: the provider
+    /// cannot see it, so the ownership re-read that distinguishes `403` from
+    /// `404` is the legacy table's — read-only, exactly as before the reroute
+    /// (fix round 1, finding F2). A nonlocal miss is the selected provider's
+    /// own not-found answer; the legacy table is never read for it (Task 4
+    /// fix 2, finding F3).
     ///
     /// # Errors
     /// [`CoreError::NotFound`] when the row is absent,
@@ -2643,9 +4154,26 @@ impl CoreService {
         // (before the reroute the row was deleted, so a repeat dismissal found
         // nothing). The authoritative decision is still the guarded dismissal
         // below; this read only keeps that answer.
-        if pending_now(&memory, &candidate_id).await?
-            && memory.dismiss_legacy(&candidate_id).await?
-        {
+        let pending = pending_now(&memory, &candidate_id).await?;
+        let dismissed = if memory.is_local() {
+            // The local bridge adopts the row under the deterministic id and
+            // consumes it in the same guarded transaction.
+            if pending {
+                memory.dismiss_legacy(&candidate_id).await?
+            } else {
+                false
+            }
+        } else {
+            // A nonlocal binding serves no projection: the shaped id only
+            // addresses an ordinary provider candidate there, and the standard
+            // revision check runs only after its subject and retained pending
+            // identity match this bearer (I-000197).
+            pending
+                && memory
+                    .dismiss_provider_candidate(&candidate_id, &pending_id)
+                    .await?
+        };
+        if dismissed {
             return Ok(DeletePendingReviewResponse {
                 success: true,
                 pending_id,
@@ -2662,7 +4190,7 @@ impl CoreService {
             .find(|row| row.pending_id == pending_id)
         {
             if memory
-                .dismiss_native(&row.candidate_id, row.revision)
+                .dismiss_native(&row.candidate_id, row.revision, row.binding_id.as_deref())
                 .await?
             {
                 return Ok(DeletePendingReviewResponse {
@@ -2671,7 +4199,17 @@ impl CoreService {
                 });
             }
         }
-        Err(self.pending_review_refusal(principal, &pending_id).await?)
+        if memory.is_local() {
+            return Err(self.pending_review_refusal(principal, &pending_id).await?);
+        }
+        // A nonlocal binding has no local legacy queue, so the selected
+        // provider's "nothing pending" is the whole answer: the local ownership
+        // lookup is not consulted here, and a remote miss can neither read
+        // legacy rows nor surface an unrelated local ownership 403 or local
+        // storage error.
+        Err(CoreError::NotFound {
+            resource: format!("pending review '{pending_id}' not found"),
+        })
     }
 
     /// The retained refusal for a dismissal that found nothing to consume: a
@@ -2681,6 +4219,9 @@ impl CoreService {
     /// handler performed, so its failure keeps the pre-reroute
     /// `database_error` mapping instead of masquerading as an absence
     /// (NXM-5 QC1-F3).
+    ///
+    /// Called for a **local** binding only: a nonlocal dismissal derives its
+    /// miss from the selected provider and never reads the legacy table (§5).
     async fn pending_review_refusal(
         &self,
         principal: &Principal,
@@ -2808,7 +4349,8 @@ impl CoreService {
         let mut rows: Vec<PendingMemoryRow> = pending.into_iter().take(batch_limit).collect();
         // The check/use boundary (fix round 2, finding F1): the fetch above only
         // selects the slice. This re-check runs inside the bearer's disposition
-        // section, so a dismissal can neither commit between it and the
+        // section when the binding is local (a remote binding relies on its
+        // candidate CAS), so a dismissal can neither commit between it and the
         // classification below nor be classified after it: one that already
         // committed is observed here and its row is dropped.
         #[cfg(feature = "test-hooks")]
@@ -2839,7 +4381,7 @@ impl CoreService {
             &batch_rows,
             MemoryBearerRef::Creator(principal.creator_id()),
             &memory,
-            &section,
+            section.as_ref(),
             deadline,
         )
         .await?;
@@ -4149,7 +5691,13 @@ impl CoreService {
     /// `admin` grant, because it writes provider objects of every subject the
     /// workspace owns, and it never writes a legacy table or bearer file (D6).
     ///
+    /// A nonlocal binding has no local legacy content to read: it refuses with
+    /// the retained `not_supported` code before any read or write (§5), instead
+    /// of a generic local-accessor error, and never transfers data implicitly.
+    ///
     /// # Errors
+    /// [`CoreError::Coded`] (`not_supported`) when the pinned binding is not the
+    /// local provider (no effects),
     /// [`CoreError::Forbidden`] under read-only core access,
     /// [`CoreError::ForbiddenReason`] when the principal holds no `admin` grant,
     /// [`CoreError::ActorConflict`] (`idempotency_conflict`) when the recorded
@@ -4160,7 +5708,14 @@ impl CoreService {
         principal: &Principal,
     ) -> CoreResult<LegacyContentMigration> {
         self.verify_principal(principal)?;
-        let provider = self.memory_writer()?;
+        let binding = self.memory_writer_binding()?;
+        if !binding.is_local() {
+            return Err(CoreError::Coded {
+                code: "not_supported".to_string(),
+                message: "legacy migration requires the local provider".to_string(),
+            });
+        }
+        let provider = binding.local()?;
         let spoke_principal: spoke_schemas::Principal = map_wire(json!({
             "principal_id": principal.creator_id(),
             "extensions": {},
@@ -4235,6 +5790,7 @@ mod tests {
         let core = CoreService::open(CoreOpenOptions {
             user_home,
             access: CoreAccess::EngineOwner,
+            memory: None,
         })
         .await
         .unwrap();
@@ -4283,5 +5839,941 @@ mod tests {
             1,
             "`want` bounds the returned set, not the provider page"
         );
+    }
+
+    /// Boot an `EngineOwner` core over a workspace whose state DB carries the
+    /// creator row; the home, service and principal stay owned by the caller so
+    /// the adapter's writer admission outlives every probe.
+    async fn boot_owner_core() -> (TempDir, CoreService, Principal) {
+        let tmp = TempDir::new().unwrap();
+        let user_home = tmp.path().to_path_buf();
+        let nexus_home = user_home.join(".nexus42");
+        std::fs::create_dir_all(&nexus_home).unwrap();
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            &user_home,
+            CREATOR_UNDER_TEST,
+            "default",
+        ))
+        .unwrap();
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            format!(
+                "active_creator_id = \"{CREATOR_UNDER_TEST}\"\n\
+                 [active_workspace_slug_by_creator]\n\
+                 \"{CREATOR_UNDER_TEST}\" = \"default\""
+            ),
+        )
+        .unwrap();
+        let db_path =
+            nexus_home_layout::workspace_state_db_path(&user_home, CREATOR_UNDER_TEST, "default");
+        {
+            let guarded =
+                init_engine_pool(&db_path, CREATOR_UNDER_TEST, GuardedPoolOptions::default())
+                    .await
+                    .unwrap();
+            let pool = guarded.clone_pool();
+            ensure_creator_row(&pool, CREATOR_UNDER_TEST, "Owner")
+                .await
+                .unwrap();
+            pool.close().await;
+        }
+        let core = CoreService::open(CoreOpenOptions {
+            user_home,
+            access: CoreAccess::EngineOwner,
+            memory: None,
+        })
+        .await
+        .unwrap();
+        let principal = core.active_principal().await.unwrap();
+        (tmp, core, principal)
+    }
+
+    /// Capture a candidate under a second bearer's subject through the shared
+    /// space grant and return the provider candidate id addressing it.
+    async fn foreign_candidate(memory: &MemoryAdapter) -> String {
+        const FOREIGN_CREATOR: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        // The same opaque id can address another bearer's candidate; the row is
+        // shared-scope, so the space-wide grant admits the capture and the read.
+        let foreign_subject = legacy::creator_subject_id(FOREIGN_CREATOR);
+        // The foreign bearer opt-in subject: capture admits a known subject
+        // (the space-wide grant then covers the candidate operation).
+        memory
+            .ok(memory
+                .binding
+                .port()
+                .ensure_subject(
+                    &memory.principal,
+                    map_wire(json!({
+                        "space_id": memory.binding.space_id(),
+                        "subject_id": foreign_subject,
+                        "kind": { "ns": legacy::CREATOR_KIND_NS, "id": FOREIGN_CREATOR },
+                    }))
+                    .unwrap(),
+                )
+                .await)
+            .unwrap();
+        let request: spoke_schemas::MemoryCaptureRequest = map_wire(json!({
+            "space_id": memory.binding.space_id(),
+            "subject_id": foreign_subject,
+            "content": {
+                "text": "Foreign bearer pending row.",
+                "structured": { "nexus_legacy": {
+                    "pending_id": "pend_identity_foreign",
+                    "session_id": "sess_identity_foreign",
+                    "creator_id": FOREIGN_CREATOR,
+                    "task_kind": "chapter",
+                    "raw_digest": "Foreign bearer pending row.",
+                }},
+            },
+            "capture_scope": { "visibility": "shared" },
+            "source_context_ids": [],
+            "kind_hint": "story_summary",
+            "idempotency_key": "identity-foreign-capture",
+        }))
+        .unwrap();
+        let captured = memory
+            .binding
+            .port()
+            .capture(&memory.principal, request)
+            .await;
+        assert!(
+            matches!(&captured, SpokeResult::Ok(_)),
+            "the space grant must admit a foreign-subject capture"
+        );
+        let listed = memory
+            .ok(memory
+                .binding
+                .port()
+                .list_candidates(
+                    &memory.principal,
+                    map_wire(json!({
+                        "space_id": memory.binding.space_id(),
+                        "subject_id": foreign_subject,
+                        "status": "pending",
+                        "limit": 10,
+                        "cursor": null,
+                    }))
+                    .unwrap(),
+                )
+                .await)
+            .unwrap();
+        let foreign = listed["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|candidate| {
+                candidate.pointer("/proposed/content/structured/nexus_legacy/pending_id")
+                    == Some(&json!("pend_identity_foreign"))
+            })
+            .cloned()
+            .expect("the foreign capture is listed under its own subject");
+        foreign["candidate_id"].as_str().unwrap().to_string()
+    }
+
+    /// I-000197 (Task 4 fix 3): the retained `pending_id` addresses a candidate
+    /// by the bridge's deterministic (opaque) id, and the provider authorizes a
+    /// candidate operation by grant coverage — the bootstrapped space-wide
+    /// `admin` grant satisfies it for **any** subject. The shared dismissal
+    /// therefore verifies the fetched candidate against the adapter's subject
+    /// and the requested retained pending id before the CAS: a candidate that
+    /// shares the id but names another bearer, or another pending row, is
+    /// refused without mutation, while the matched row still dismisses.
+    #[tokio::test]
+    async fn opaque_bridge_id_cannot_dismiss_another_bearers_candidate() {
+        let (_home, core, principal) = boot_owner_core().await;
+        core.create_pending_review(
+            &principal,
+            capture(
+                "pend_identity_own",
+                "The chapter pivots from betrayal to alliance.",
+            ),
+        )
+        .await
+        .unwrap();
+        let memory = core.creator_memory(&principal).await.unwrap();
+        let own = memory
+            .pending_rows()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.pending_id == "pend_identity_own")
+            .expect("the capture is queued under the creator subject");
+
+        let foreign_candidate_id = foreign_candidate(&memory).await;
+
+        // Another bearer's candidate under the opaque id: refused before the
+        // CAS even though the provider grant allows the operation there.
+        assert!(
+            !memory
+                .dismiss_provider_candidate(&foreign_candidate_id, "pend_identity_foreign")
+                .await
+                .unwrap(),
+            "another bearer's candidate is never dismissed"
+        );
+        assert_eq!(
+            memory
+                .candidate(&foreign_candidate_id)
+                .await
+                .unwrap()
+                .unwrap()["status"],
+            "pending",
+            "the refused dismissal mutated nothing"
+        );
+
+        // The adapter's own candidate addressed with a different retained
+        // pending id: refused before the CAS as well.
+        assert!(
+            !memory
+                .dismiss_provider_candidate(&own.candidate_id, "pend_identity_other")
+                .await
+                .unwrap(),
+            "a candidate of another retained pending row is never dismissed"
+        );
+        assert_eq!(
+            memory.candidate(&own.candidate_id).await.unwrap().unwrap()["status"],
+            "pending",
+            "the mismatched pending identity mutated nothing"
+        );
+
+        // Matched subject and retained identity: the standard CAS consumes it.
+        assert!(memory
+            .dismiss_provider_candidate(&own.candidate_id, "pend_identity_own")
+            .await
+            .unwrap());
+        assert_eq!(
+            memory.candidate(&own.candidate_id).await.unwrap().unwrap()["status"],
+            "consumed",
+            "the matched row is dismissed through the standard op"
+        );
+    }
+
+    fn retry_class_reject(code: SpokeRejectCode, retry_class: Option<&str>) -> SpokeReject {
+        SpokeReject {
+            code,
+            message: "capture refused".to_string(),
+            details: retry_class.map(|retry_class| {
+                json!({ "retry_class": retry_class })
+                    .as_object()
+                    .expect("retry-class object")
+                    .clone()
+            }),
+        }
+    }
+
+    async fn open_d18_core() -> (TempDir, CoreService) {
+        let tmp = TempDir::new().unwrap();
+        let user_home = tmp.path().to_path_buf();
+        let nexus_home = user_home.join(".nexus42");
+        std::fs::create_dir_all(&nexus_home).unwrap();
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            &user_home,
+            CREATOR_UNDER_TEST,
+            "default",
+        ))
+        .unwrap();
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            format!(
+                "active_creator_id = \"{CREATOR_UNDER_TEST}\"\n\
+                 [active_workspace_slug_by_creator]\n\
+                 \"{CREATOR_UNDER_TEST}\" = \"default\""
+            ),
+        )
+        .unwrap();
+        let db_path =
+            nexus_home_layout::workspace_state_db_path(&user_home, CREATOR_UNDER_TEST, "default");
+        {
+            let guarded =
+                init_engine_pool(&db_path, CREATOR_UNDER_TEST, GuardedPoolOptions::default())
+                    .await
+                    .unwrap();
+            let pool = guarded.clone_pool();
+            ensure_creator_row(&pool, CREATOR_UNDER_TEST, "Owner")
+                .await
+                .unwrap();
+            for world in ["wld_d18A", "wld_d18B"] {
+                sqlx::query(
+                    "INSERT INTO narrative_worlds \
+                     (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+                      time_policy, metadata_json, created_at) \
+                     VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', \
+                      datetime('now'))",
+                )
+                .bind(world)
+                .bind(CREATOR_UNDER_TEST)
+                .bind(world)
+                .bind(world)
+                .execute(&pool)
+                .await
+                .unwrap();
+            }
+            pool.close().await;
+        }
+        let core = CoreService::open(CoreOpenOptions {
+            user_home,
+            access: CoreAccess::EngineOwner,
+            memory: None,
+        })
+        .await
+        .unwrap();
+        (tmp, core)
+    }
+
+    async fn seed_d18_binding(core: &CoreService) -> (String, String) {
+        let pool = core.pool();
+        let created = nexus_local_db::create_character_with_initial_binding(
+            pool,
+            nexus_local_db::CreateCharacterParams {
+                owner_creator_id: CREATOR_UNDER_TEST,
+                display_name: "Dana",
+                image_uri: None,
+                persona_json: "{}",
+                world_id: "wld_d18A",
+                world_sheet_entry_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        let character_id = created.character.character_id;
+        let binding_id = created.binding.binding_id;
+        nexus_local_db::add_actor_world_binding(
+            pool,
+            nexus_local_db::CreateBindingParams {
+                owner_creator_id: CREATOR_UNDER_TEST,
+                character_id: &character_id,
+                world_id: "wld_d18B",
+                world_sheet_entry_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        (character_id, binding_id)
+    }
+
+    async fn d18_admission_count(core: &CoreService, binding_id: &str) -> i64 {
+        let mut tx = nexus_local_db::begin_immediate(core.pool()).await.unwrap();
+        let counts = nexus_local_db::remote_binding_dependency_counts_tx(&mut tx, binding_id)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        counts.admissions
+    }
+
+    async fn admit_d18(
+        core: &CoreService,
+        admission_id: &str,
+        namespace: &nexus_local_db::RemoteBindingNamespace<'_>,
+    ) {
+        let mut tx = nexus_local_db::begin_immediate(core.pool()).await.unwrap();
+        nexus_local_db::insert_remote_binding_admission_tx(
+            &mut tx,
+            admission_id,
+            namespace,
+            "2026-11-05T00:00:00Z",
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
+
+    /// I-000196: the production capture-refusal settlement retires an admission
+    /// only for a proven no-effect refusal. Uncertain, retryable, missing/
+    /// unknown-class and contradictory results keep it, against real durable
+    /// state; only the `terminal` pre-effect refusal releases it.
+    #[tokio::test]
+    async fn uncertain_capture_reject_keeps_its_durable_admission() {
+        let (_tmp, core) = open_d18_core().await;
+        let (character_id, binding_id) = seed_d18_binding(&core).await;
+        let binding = core.memory_binding().unwrap();
+        let (host, generation) = binding.authority();
+        let namespace = nexus_local_db::RemoteBindingNamespace::new(
+            CREATOR_UNDER_TEST,
+            &character_id,
+            &binding_id,
+            host,
+            generation.get(),
+            binding.space_id(),
+            "peer_key_d18",
+        );
+        admit_d18(&core, "adm_uncertain", &namespace).await;
+
+        let uncertain = retry_class_reject(SpokeRejectCode::OutcomeUncertain, Some("uncertain"));
+        core.settle_remote_capture_reject("adm_uncertain", &namespace, &uncertain)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "OUTCOME_UNCERTAIN may have committed, so the attempt stays protected"
+        );
+
+        let retryable = retry_class_reject(SpokeRejectCode::InternalError, Some("retryable"));
+        core.settle_remote_capture_reject("adm_uncertain", &namespace, &retryable)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "a retryable class does not prove absence"
+        );
+
+        let missing_class = retry_class_reject(SpokeRejectCode::InvalidInput, None);
+        core.settle_remote_capture_reject("adm_uncertain", &namespace, &missing_class)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "a missing class never proves absence"
+        );
+
+        let unknown_class = retry_class_reject(SpokeRejectCode::InvalidInput, Some("someday"));
+        core.settle_remote_capture_reject("adm_uncertain", &namespace, &unknown_class)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "an unknown class never proves absence"
+        );
+
+        let contradictory = retry_class_reject(SpokeRejectCode::OutcomeUncertain, Some("terminal"));
+        core.settle_remote_capture_reject("adm_uncertain", &namespace, &contradictory)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "an uncertain code with a terminal class is contradictory, not proof"
+        );
+
+        let terminal = retry_class_reject(SpokeRejectCode::InvalidInput, Some("terminal"));
+        core.settle_remote_capture_reject("adm_uncertain", &namespace, &terminal)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            0,
+            "a pre-effect terminal refusal retires exactly this attempt"
+        );
+    }
+
+    /// I-000196: one attempt's definite refusal retires only its own admission;
+    /// an outstanding sibling attempt keeps the binding protected.
+    #[tokio::test]
+    async fn definite_capture_reject_retires_only_its_own_admission() {
+        let (_tmp, core) = open_d18_core().await;
+        let (character_id, binding_id) = seed_d18_binding(&core).await;
+        let binding = core.memory_binding().unwrap();
+        let (host, generation) = binding.authority();
+        let namespace = nexus_local_db::RemoteBindingNamespace::new(
+            CREATOR_UNDER_TEST,
+            &character_id,
+            &binding_id,
+            host,
+            generation.get(),
+            binding.space_id(),
+            "peer_key_d18",
+        );
+        admit_d18(&core, "adm_first", &namespace).await;
+        admit_d18(&core, "adm_second", &namespace).await;
+        assert_eq!(d18_admission_count(&core, &binding_id).await, 2);
+
+        let terminal = retry_class_reject(SpokeRejectCode::NotAuthorized, Some("terminal"));
+        core.settle_remote_capture_reject("adm_first", &namespace, &terminal)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "the sibling attempt is not released by this result"
+        );
+
+        let uncertain = retry_class_reject(SpokeRejectCode::OutcomeUncertain, Some("uncertain"));
+        core.settle_remote_capture_reject("adm_second", &namespace, &uncertain)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "an uncertain result keeps its own protection"
+        );
+    }
+
+    fn hostile_reject(
+        code: SpokeRejectCode,
+        retry_class: Option<&str>,
+        wire_code: Option<&str>,
+    ) -> SpokeReject {
+        SpokeReject {
+            code,
+            message: format!("{PEER_MARKER} token=abc"),
+            details: Some(
+                json!({
+                    "retry_class": retry_class,
+                    "wire_code": wire_code,
+                    "debug": PEER_MARKER,
+                })
+                .as_object()
+                .expect("details object")
+                .clone(),
+            ),
+        }
+    }
+
+    const PEER_MARKER: &str = "PEER_SECRET_MARKER";
+
+    /// I-000202: the effective outcome stays unknown whenever the provider did
+    /// not prove one — a raw `INTERNAL_ERROR` beside a contradictory `terminal`
+    /// class, an `uncertain` class on any code, a missing/unknown class, and the
+    /// contract's own uncertain code.
+    #[test]
+    fn remote_outcome_stays_conservative_for_uncertain_or_contradictory_refusals() {
+        assert_eq!(
+            remote_outcome(&hostile_reject(
+                SpokeRejectCode::InternalError,
+                Some("terminal"),
+                None
+            )),
+            RemoteOutcome::Uncertain,
+            "INTERNAL_ERROR never proves an outcome, whatever class rides along"
+        );
+        assert_eq!(
+            remote_outcome(&hostile_reject(
+                SpokeRejectCode::InvalidInput,
+                Some("uncertain"),
+                None
+            )),
+            RemoteOutcome::Uncertain,
+        );
+        assert_eq!(
+            remote_outcome(&hostile_reject(SpokeRejectCode::NotFound, None, None)),
+            RemoteOutcome::Uncertain,
+        );
+        assert_eq!(
+            remote_outcome(&hostile_reject(
+                SpokeRejectCode::NotFound,
+                Some("later"),
+                None
+            )),
+            RemoteOutcome::Uncertain,
+        );
+        assert_eq!(
+            remote_outcome(&hostile_reject(
+                SpokeRejectCode::NotFound,
+                Some("retryable"),
+                None
+            )),
+            RemoteOutcome::Retryable,
+        );
+        assert_eq!(
+            remote_outcome(&hostile_reject(
+                SpokeRejectCode::NotFound,
+                Some("terminal"),
+                None
+            )),
+            RemoteOutcome::Definite,
+        );
+        assert_eq!(
+            remote_outcome(&hostile_reject(
+                SpokeRejectCode::OutcomeUncertain,
+                Some("terminal"),
+                None
+            )),
+            RemoteOutcome::Uncertain,
+            "the contract's own uncertain code wins over a contradictory class"
+        );
+    }
+
+    /// I-000202: a retained absence/consumed/conflict shortcut runs only when
+    /// the remote result proves that outcome; the local provider stays
+    /// authoritative by code. The admission's no-effect proof is the same
+    /// decision, narrowed to its pre-effect codes.
+    #[test]
+    fn remote_shortcuts_require_a_definite_outcome() {
+        let absent_without_class = hostile_reject(SpokeRejectCode::NotFound, None, None);
+        assert!(
+            refusal_proves(true, &absent_without_class, &[SpokeRejectCode::NotFound]),
+            "local refusals carry no remote class and keep the retained answer"
+        );
+        assert!(
+            !refusal_proves(false, &absent_without_class, &[SpokeRejectCode::NotFound]),
+            "an unknown remote NotFound is not an absence"
+        );
+        for class in ["uncertain", "retryable"] {
+            assert!(
+                !refusal_proves(
+                    false,
+                    &hostile_reject(SpokeRejectCode::NotFound, Some(class), None),
+                    &[SpokeRejectCode::NotFound],
+                ),
+                "{class} NotFound must not read as absence"
+            );
+        }
+        assert!(refusal_proves(
+            false,
+            &hostile_reject(SpokeRejectCode::NotFound, Some("terminal"), None),
+            &[SpokeRejectCode::NotFound],
+        ));
+
+        let dismissal = [
+            SpokeRejectCode::CandidateConsumed,
+            SpokeRejectCode::RevisionConflict,
+        ];
+        assert!(refusal_proves(
+            false,
+            &hostile_reject(SpokeRejectCode::CandidateConsumed, Some("terminal"), None),
+            &dismissal,
+        ));
+        assert!(refusal_proves(
+            false,
+            &hostile_reject(SpokeRejectCode::RevisionConflict, Some("terminal"), None),
+            &dismissal,
+        ));
+        for code in dismissal {
+            assert!(
+                !refusal_proves(
+                    false,
+                    &hostile_reject(code, Some("uncertain"), None),
+                    &dismissal,
+                ),
+                "an uncertain {code:?} must not read as the definite not-found answer"
+            );
+        }
+
+        assert!(!remote_capture_reject_proves_no_effect(&hostile_reject(
+            SpokeRejectCode::InternalError,
+            Some("terminal"),
+            None
+        )));
+        assert!(remote_capture_reject_proves_no_effect(&hostile_reject(
+            SpokeRejectCode::InvalidInput,
+            Some("terminal"),
+            None
+        )));
+        assert!(!remote_capture_reject_proves_no_effect(&hostile_reject(
+            SpokeRejectCode::RevisionConflict,
+            Some("terminal"),
+            None
+        )));
+    }
+
+    /// The classification one hostile rejection carries: the five fields each
+    /// case below asserts, read from the retained structured carrier.
+    fn refusal_fields(
+        code: SpokeRejectCode,
+        retry_class: Option<&str>,
+        wire_code: Option<&str>,
+    ) -> (
+        String,
+        Option<String>,
+        String,
+        MemoryProviderRefusal,
+        Option<String>,
+    ) {
+        let error = remote_refusal(&hostile_reject(code, retry_class, wire_code));
+        let CoreError::MemoryProviderRefused {
+            code,
+            wire_code,
+            retry_class,
+            family,
+            conflict_code,
+        } = error
+        else {
+            panic!("a remote refusal keeps its structured carrier: {error:?}");
+        };
+        (code, wire_code, retry_class, family, conflict_code)
+    }
+
+    /// I-000202/I-000204: the safe carrier keeps the effective classification,
+    /// the retained conflict code for a proven stale-revision conflict, and no
+    /// peer-controlled text.
+    #[test]
+    fn remote_refusal_keeps_classification_and_drops_peer_text() {
+        // An internal failure beside a contradictory `terminal` class is still
+        // an unknown outcome, never a definite failure.
+        let (code, wire_code, retry_class, family, conflict_code) = refusal_fields(
+            SpokeRejectCode::InternalError,
+            Some("terminal"),
+            Some("INTERNAL_ERROR"),
+        );
+        assert_eq!(code, "INTERNAL_ERROR");
+        assert_eq!(retry_class, "uncertain");
+        assert_eq!(wire_code.as_deref(), Some("INTERNAL_ERROR"));
+        assert_eq!(family, MemoryProviderRefusal::Unavailable);
+        assert_eq!(conflict_code.as_deref(), None);
+
+        // A proven definite refusal keeps its family and a known peer wire code.
+        let (code, wire_code, retry_class, family, conflict_code) = refusal_fields(
+            SpokeRejectCode::NotAuthorized,
+            Some("terminal"),
+            Some("NOT_AUTHORIZED"),
+        );
+        assert_eq!(code, "NOT_AUTHORIZED");
+        assert_eq!(retry_class, "terminal");
+        assert_eq!(wire_code.as_deref(), Some("NOT_AUTHORIZED"));
+        assert_eq!(family, MemoryProviderRefusal::Forbidden);
+        assert_eq!(conflict_code.as_deref(), None);
+
+        // An uncertain outcome beside a validation code is not a definite 400,
+        // and unknown peer strings never pass through.
+        let (code, wire_code, retry_class, family, conflict_code) = refusal_fields(
+            SpokeRejectCode::InvalidInput,
+            Some("uncertain"),
+            Some("NOT_A_MEMORY_CODE"),
+        );
+        assert_eq!(code, "INVALID_INPUT");
+        assert_eq!(retry_class, "uncertain");
+        assert_eq!(wire_code.as_deref(), None);
+        assert_eq!(family, MemoryProviderRefusal::Unavailable);
+        assert_eq!(conflict_code.as_deref(), None);
+
+        // A proven definite stale-revision conflict retains the consumer-visible
+        // `version_mismatch` code (I-000204) ...
+        let (code, _, retry_class, family, conflict_code) = refusal_fields(
+            SpokeRejectCode::RevisionConflict,
+            Some("terminal"),
+            Some("REVISION_CONFLICT"),
+        );
+        assert_eq!(code, "REVISION_CONFLICT");
+        assert_eq!(retry_class, "terminal");
+        assert_eq!(family, MemoryProviderRefusal::Conflict);
+        assert_eq!(conflict_code.as_deref(), Some("version_mismatch"));
+
+        // ... while an uncertain conflict never does.
+        let error = remote_refusal(&hostile_reject(
+            SpokeRejectCode::RevisionConflict,
+            Some("uncertain"),
+            None,
+        ));
+        let CoreError::MemoryProviderRefused {
+            retry_class,
+            family,
+            conflict_code,
+            ..
+        } = &error
+        else {
+            panic!("a remote refusal keeps its structured carrier: {error:?}");
+        };
+        assert_eq!(retry_class, "uncertain");
+        assert_eq!(*family, MemoryProviderRefusal::Unavailable);
+        assert_eq!(conflict_code.as_deref(), None);
+
+        // Nothing peer-authored survives the rendered or debug form.
+        let rendered = format!(
+            "{} {error:?}",
+            remote_refusal(&hostile_reject(
+                SpokeRejectCode::InvalidInput,
+                Some("terminal"),
+                Some("NOT_AUTHORIZED"),
+            ))
+        );
+        assert!(
+            !rendered.contains(PEER_MARKER),
+            "peer text must not escape: {rendered}"
+        );
+        assert!(!rendered.contains("token=abc"));
+    }
+
+    /// I-272 (fix round 3): the committed-receipt validation never echoes a
+    /// peer-authored field back into the observable error. `SpaceId` admits
+    /// any nonempty string, so a forged receipt can carry a private marker or
+    /// a newline; the pipeline logs the very `Display` this helper returns, so
+    /// the boundary is the error text itself. `review_result_record_ids` is
+    /// private, which makes this the only place the redacted form is pinnable.
+    #[test]
+    fn receipt_mismatches_never_echo_peer_fields() {
+        const SENTINEL: &str = "spc_forged\nMARKER-R2-PRIVATE token=abc";
+        let decision = json!({ "action": "drop" });
+
+        let forged_space = json!({
+            "space_id": SENTINEL,
+            "idempotency_key": "idem_r2_receipt",
+            "result": { "outcome": "dropped", "record_ids": [] },
+        });
+        let error =
+            review_result_record_ids(&decision, &forged_space, "spc_issued", "idem_r2_receipt")
+                .expect_err("a foreign space must refuse the committed receipt");
+        assert_redacted_receipt_error(&error, "foreign space");
+
+        let forged_outcome = json!({
+            "space_id": "spc_issued",
+            "idempotency_key": "idem_r2_receipt",
+            "result": { "outcome": SENTINEL, "record_ids": [] },
+        });
+        let error =
+            review_result_record_ids(&decision, &forged_outcome, "spc_issued", "idem_r2_receipt")
+                .expect_err("a foreign outcome must refuse the committed receipt");
+        assert_redacted_receipt_error(&error, "foreign outcome");
+    }
+
+    /// The coded carrier survives while every peer-authored byte is dropped.
+    fn assert_redacted_receipt_error(error: &CoreError, branch: &str) {
+        let CoreError::Internal { category } = error else {
+            panic!("{branch}: expected the coded internal receipt error, got {error:?}");
+        };
+        assert!(
+            category.starts_with("memory_review_receipt: "),
+            "{branch}: {category}"
+        );
+        let rendered = format!("{error} {error:?} {category}");
+        assert!(
+            !rendered.contains("MARKER-R2-PRIVATE"),
+            "{branch}: peer marker escaped: {rendered}"
+        );
+        assert!(
+            !rendered.contains("token=abc"),
+            "{branch}: peer secret escaped: {rendered}"
+        );
+        assert!(
+            !rendered.contains('\n'),
+            "{branch}: peer newline escaped: {rendered:?}"
+        );
+    }
+
+    /// A committed receipt only proves an effect for THIS request. The capture
+    /// and promotion validators accept their own request's answer and refuse a
+    /// schema-valid answer that belongs to another space, key, record or
+    /// placement — always with a static category, never the peer's bytes.
+    #[test]
+    fn committed_receipts_prove_only_their_own_request() {
+        let candidate_receipt = |space: &str, key: &str, ids: Value| {
+            json!({
+                "space_id": space,
+                "idempotency_key": key,
+                "result": { "candidate_ids": ids },
+            })
+        };
+        let own = candidate_receipt("spc_a", "e4capture:1", json!(["cand_1"]));
+        assert_eq!(
+            capture_result_candidate_ids(&own, "spc_a", "e4capture:1")
+                .expect("this request's own receipt"),
+            vec!["cand_1".to_string()],
+        );
+        assert!(
+            capture_result_candidate_ids(
+                &candidate_receipt("spc_a", "e4capture:1", json!([])),
+                "spc_a",
+                "e4capture:1",
+            )
+            .expect("an empty answer is still this request's")
+            .is_empty(),
+            "a capture may legitimately retain no candidate",
+        );
+        for (body, what) in [
+            (
+                candidate_receipt("spc_b", "e4capture:1", json!(["cand_1"])),
+                "space",
+            ),
+            (
+                candidate_receipt("spc_a", "e4capture:2", json!(["cand_1"])),
+                "key",
+            ),
+        ] {
+            let error = capture_result_candidate_ids(&body, "spc_a", "e4capture:1")
+                .expect_err("another request's receipt proves nothing");
+            match error {
+                CoreError::Internal { category } => assert!(
+                    category.starts_with("memory_capture_receipt"),
+                    "the static capture refusal for the {what}, got {category}"
+                ),
+                other => panic!("expected the static capture refusal for the {what}: {other:?}"),
+            }
+        }
+
+        let promotion = |space: &str, key: &str, record: &str, visibility: &str| {
+            json!({
+                "space_id": space,
+                "idempotency_key": key,
+                "result": { "record_id": record, "scope": { "visibility": visibility } },
+            })
+        };
+        assert_eq!(
+            promote_result_record_id(
+                &promotion("spc_a", "promote:r1", "rec_1", "shared"),
+                "spc_a",
+                "promote:r1",
+                "rec_1",
+            )
+            .expect("this request's own promotion"),
+            "rec_1",
+        );
+        for (body, what) in [
+            (promotion("spc_b", "promote:r1", "rec_1", "shared"), "space"),
+            (promotion("spc_a", "promote:r2", "rec_1", "shared"), "key"),
+            (
+                promotion("spc_a", "promote:r1", "rec_2", "shared"),
+                "record",
+            ),
+            (
+                promotion("spc_a", "promote:r1", "rec_1", "context"),
+                "requested shared placement",
+            ),
+        ] {
+            let error = promote_result_record_id(&body, "spc_a", "promote:r1", "rec_1")
+                .expect_err("another request's receipt releases nothing");
+            match error {
+                CoreError::Internal { category } => assert!(
+                    category.starts_with("memory_promote_receipt"),
+                    "the static promotion refusal for the {what}, got {category}"
+                ),
+                other => panic!("expected the static promotion refusal for the {what}: {other:?}"),
+            }
+        }
+    }
+
+    /// §7.14 (I-000303): a committed dismissal receipt only proves THIS
+    /// dismissal, and it is the gate `dismiss_native` passes before it releases
+    /// the candidate's binding dependency. A provider can answer with an older,
+    /// still schema-valid receipt for candidate A while B is the pending
+    /// candidate; releasing on it would stop counting B as live. `Ok` is the
+    /// only path that reaches the release, so a mismatch keeps that dependency
+    /// live.
+    #[test]
+    fn dismissal_receipts_prove_only_their_own_request() {
+        const KEY: &str = "e4dismiss-native:cand_issued";
+        const SENTINEL: &str = "cand_forged\nMARKER-I303 token=abc";
+        let receipt = |space: &str, key: &str, candidate: &str, outcome: &str| {
+            json!({
+                "space_id": space,
+                "idempotency_key": key,
+                "result": { "candidate_id": candidate, "outcome": outcome },
+            })
+        };
+        let own = receipt("spc_a", KEY, "cand_issued", "dismissed");
+        assert_eq!(
+            dismiss_result_candidate_id(&own, "spc_a", KEY, "cand_issued")
+                .expect("this request's own dismissal"),
+            "cand_issued",
+        );
+        for (body, what) in [
+            (receipt("spc_b", KEY, "cand_issued", "dismissed"), "space"),
+            (
+                receipt(
+                    "spc_a",
+                    "e4dismiss-native:cand_old",
+                    "cand_issued",
+                    "dismissed",
+                ),
+                "key",
+            ),
+            (receipt("spc_a", KEY, SENTINEL, "dismissed"), "candidate"),
+            (receipt("spc_a", KEY, "cand_issued", "dropped"), "outcome"),
+        ] {
+            let error = dismiss_result_candidate_id(&body, "spc_a", KEY, "cand_issued")
+                .expect_err("another request's receipt releases nothing");
+            let CoreError::Internal { category } = &error else {
+                panic!("expected the static dismissal refusal for the {what}: {error:?}");
+            };
+            assert!(
+                category.starts_with("memory_dismiss_receipt"),
+                "the static dismissal refusal for the {what}, got {category}"
+            );
+            let rendered = format!("{error} {error:?} {category}");
+            assert!(
+                !rendered.contains("MARKER-I303") && !rendered.contains("token=abc"),
+                "peer bytes must not escape the {what} refusal: {rendered}"
+            );
+        }
     }
 }

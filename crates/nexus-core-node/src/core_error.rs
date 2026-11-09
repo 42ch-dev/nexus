@@ -4,7 +4,7 @@ use napi::bindgen_prelude::Error;
 use nexus_agent_host::core::readiness::safe_provider_message;
 use nexus_agent_host::HostError;
 use nexus_contracts::{CoreError, CoreErrorCode};
-use nexus_core::CoreError as DomainError;
+use nexus_core::{CoreError as DomainError, MemoryProviderRefusal};
 use serde_json::Value;
 
 /// Serialize a wire [`CoreError`] as the N-API rejection reason.
@@ -468,6 +468,54 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             )]),
             http_status: Some(500),
         },
+        // A remote memory-provider refusal: the peer's message and extra
+        // details never travel. Only the whitelisted effective memory code,
+        // an allowlisted peer wire code and the effective retry class ride
+        // `details`, so a caller can still tell an uncertain outcome from a
+        // clean failure (spec §3.1).
+        DomainError::MemoryProviderRefused {
+            code,
+            wire_code,
+            retry_class,
+            family,
+            conflict_code,
+        } => {
+            let mut details = serde_json::Map::new();
+            details.insert("memory_code".into(), Value::String(code.clone()));
+            if let Some(wire_code) = wire_code {
+                details.insert("wire_code".into(), Value::String(wire_code));
+            }
+            details.insert("retry_class".into(), Value::String(retry_class));
+            match conflict_code {
+                // A proven definite memory conflict keeps the retained
+                // consumer-visible `conflict_code`/409 envelope the local
+                // `ActorConflict` already renders, with static text.
+                Some(conflict_code) => {
+                    details.insert("conflict_code".into(), Value::String(conflict_code));
+                    CoreError {
+                        code: CoreErrorCode::OwnerBusy,
+                        message: "memory revision mismatch".into(),
+                        details,
+                        http_status: Some(409),
+                    }
+                }
+                None => {
+                    let (wire_code_name, http_status) = match family {
+                        MemoryProviderRefusal::NotFound => (CoreErrorCode::NotFound, 404),
+                        MemoryProviderRefusal::Forbidden => (CoreErrorCode::Forbidden, 403),
+                        MemoryProviderRefusal::InvalidInput => (CoreErrorCode::InvalidInput, 400),
+                        MemoryProviderRefusal::Conflict => (CoreErrorCode::OwnerBusy, 409),
+                        MemoryProviderRefusal::Unavailable => (CoreErrorCode::Busy, 503),
+                    };
+                    CoreError {
+                        code: wire_code_name,
+                        message: format!("memory provider refused: {code}"),
+                        details,
+                        http_status: Some(http_status),
+                    }
+                }
+            }
+        }
     }
 }
 

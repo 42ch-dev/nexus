@@ -139,6 +139,7 @@ fn open_options(f: &Fixture, access: CoreAccess) -> CoreOpenOptions {
     CoreOpenOptions {
         user_home: f.tmp.path().to_path_buf(),
         access,
+        memory: None,
     }
 }
 

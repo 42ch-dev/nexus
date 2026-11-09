@@ -1004,6 +1004,7 @@ async fn publish_full_core(
     let core = match CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access,
+        memory: None,
     })
     .await
     {

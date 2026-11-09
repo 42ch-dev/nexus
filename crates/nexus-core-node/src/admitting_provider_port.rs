@@ -594,9 +594,13 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let user_home = tmp.path().to_path_buf();
         crate::wire_fixture::seed_wire_home(&user_home).await;
-        let core = nexus_core::CoreService::open(nexus_core::CoreOpenOptions { user_home, access })
-            .await
-            .expect("core open");
+        let core = nexus_core::CoreService::open(nexus_core::CoreOpenOptions {
+            user_home,
+            access,
+            memory: None,
+        })
+        .await
+        .expect("core open");
         let core = Arc::new(core);
         *state.core.lock().expect("core mutex") = Some(core.clone());
         (tmp, core)

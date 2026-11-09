@@ -176,6 +176,7 @@ async fn open_core(env: &Env) -> (CoreService, nexus_core::Principal) {
     let core = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .unwrap();
@@ -2937,8 +2938,11 @@ async fn completion_marker_closes_the_legacy_projection() {
     );
 }
 
-/// F2: one bearer projects under exactly one canonical subject, so a subject
-/// that lists nothing is a subject that can read nothing by id.
+/// F2/I-000149: one bearer projects under exactly one canonical subject, so a
+/// subject that lists nothing is a subject that can read nothing by id. The
+/// naming is pinned when it is created — a second subject naming the same
+/// bearer is refused before insertion rather than re-selected by the smallest
+/// id at read time.
 #[tokio::test]
 async fn legacy_bearer_projects_under_one_canonical_subject() {
     const CANONICAL: &str = "sbj_bridge_aaa";
@@ -2949,16 +2953,36 @@ async fn legacy_bearer_projects_under_one_canonical_subject() {
     seed_legacy_creator_content(&env).await;
     let provider = open_bridge_provider(&env).await;
     let admin = bridge_principal();
-    for subject in [CANONICAL, SHADOW] {
-        bridge_ok(
-            &provider
-                .ensure_subject(
-                    &admin,
-                    bridge_ensure_request(subject, legacy::CREATOR_KIND_NS, CREATOR),
-                )
-                .await,
-        );
-    }
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(CANONICAL, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+    let second = provider
+        .ensure_subject(
+            &admin,
+            bridge_ensure_request(SHADOW, legacy::CREATOR_KIND_NS, CREATOR),
+        )
+        .await;
+    assert_eq!(
+        bridge_reject_code(&second),
+        "INVALID_INPUT",
+        "a second subject naming the same bearer is refused"
+    );
+    let inserted = provider
+        .get_subject(
+            &admin,
+            dto(serde_json::json!({ "space_id": BRIDGE_SPACE, "subject_id": SHADOW })),
+        )
+        .await;
+    assert_eq!(
+        bridge_reject_code(&inserted),
+        "NOT_FOUND",
+        "the refusal happens before insertion"
+    );
     bridge_ok(
         &provider
             .grant(
@@ -3031,6 +3055,177 @@ async fn legacy_bearer_projects_under_one_canonical_subject() {
             .await,
     );
     assert_eq!(served["record"]["subject_id"], CANONICAL);
+}
+
+/// I-000149: once a bearer's canonical subject has dismissed a projected row,
+/// an out-of-band ensure of a smaller subject naming the same bearer must not
+/// re-assign the projection. The ensure is refused in its own transaction, so
+/// the dismissed digest stays retired and list/get keep agreeing, while a
+/// genuinely new subject is still admitted and granted.
+#[tokio::test]
+async fn i_000149_consumed_candidate_cannot_resurrect_after_smaller_subject_ensure() {
+    const SMALLER: &str = "sbj_bridge_aaa";
+    const SHADOW_PRINCIPAL: &str = "prn_i149_shadow";
+
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let subject = legacy::creator_subject_id(CREATOR);
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(&subject, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+    let candidate_id = legacy::pending_review_candidate_id("pend_bridge");
+    bridge_ok(
+        &provider
+            .dismiss_legacy_candidate(&admin, &subject, &candidate_id, None, "i-000149-dismiss")
+            .await,
+    );
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "consumed"
+    );
+
+    // The reader the counterexample needs: a principal granted review on the
+    // subject an out-of-band ensure is about to create.
+    bridge_ok(
+        &provider
+            .grant(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": SMALLER,
+                    "principal_id": SHADOW_PRINCIPAL,
+                    "capabilities": ["review"],
+                    "idempotency_key": "k-i149-shadow-grant",
+                })),
+            )
+            .await,
+    );
+    let shadow: bridge_schemas::Principal = dto(serde_json::json!({
+        "principal_id": SHADOW_PRINCIPAL,
+        "extensions": {},
+    }));
+
+    let refused = provider
+        .ensure_subject(
+            &admin,
+            bridge_ensure_request(SMALLER, legacy::CREATOR_KIND_NS, CREATOR),
+        )
+        .await;
+    // The smaller subject names no existing row, so this read is what a
+    // consumer sees: the dismissed digest must not come back as pending.
+    let resurrected = bridge_ok(
+        &provider
+            .list_candidates(
+                &shadow,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": SMALLER,
+                    "status": "pending",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        resurrected["candidates"],
+        serde_json::json!([]),
+        "the refused subject resurrects no pending row: {resurrected}"
+    );
+    assert_eq!(
+        bridge_reject_code(&refused),
+        "INVALID_INPUT",
+        "a second subject naming the same bearer is refused"
+    );
+    let inserted = provider
+        .get_subject(
+            &admin,
+            dto(serde_json::json!({ "space_id": BRIDGE_SPACE, "subject_id": SMALLER })),
+        )
+        .await;
+    assert_eq!(
+        bridge_reject_code(&inserted),
+        "NOT_FOUND",
+        "the refusal happens before insertion"
+    );
+
+    // By-id reads agree with the listing: the provider-held id is still the
+    // consumed shell and no subject can read it as pending content.
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "consumed"
+    );
+    let shadow_get = provider
+        .get_candidate(
+            &shadow,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": candidate_id,
+            })),
+        )
+        .await;
+    assert_eq!(
+        bridge_reject_code(&shadow_get),
+        "NOT_FOUND",
+        "a principal granted only on the refused subject reads no consumed row"
+    );
+    let canonical_pending = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": subject,
+                    "status": "pending",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        canonical_pending["candidates"],
+        serde_json::json!([]),
+        "{canonical_pending}"
+    );
+
+    // The refusal is bearer-scoped: a genuinely new subject is admitted and
+    // receives its own grant.
+    let fresh = bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request("sbj_i149_fresh", "nexus", "n3_i149"),
+            )
+            .await,
+    );
+    assert_eq!(
+        fresh["result"]["created"],
+        serde_json::json!(true),
+        "{fresh}"
+    );
+    let fresh_grant = bridge_ok(
+        &provider
+            .grant(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": "sbj_i149_fresh",
+                    "principal_id": SHADOW_PRINCIPAL,
+                    "capabilities": ["review"],
+                    "idempotency_key": "k-i149-fresh-grant",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        fresh_grant["result"]["revision"],
+        serde_json::json!(1),
+        "{fresh_grant}"
+    );
 }
 
 /// F3: a projected record keeps revision 1, so the cursor marker carries a
@@ -3954,6 +4149,7 @@ async fn read_only_core_serves_memory_reads_and_refuses_the_write() {
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .expect("read-only open");
@@ -4399,6 +4595,7 @@ async fn read_only_core_projects_bearers_no_writer_ever_ensured() {
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .expect("read-only open");
@@ -4472,6 +4669,7 @@ async fn read_only_core_over_a_never_provisioned_workspace_answers_not_found() {
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .expect("read-only open over the pre-provider workspace");
@@ -4559,6 +4757,7 @@ async fn read_only_core_answers_a_missing_space_row_as_not_found() {
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .expect("read-only open");
@@ -5425,7 +5624,7 @@ async fn character_mind_projection_serves_provider_seeded_soul_fragments_and_mem
     seed_legacy_creator_content(&env).await;
     let (alpha, zeta) = seed_mind_projection_fixtures(&env, &other_binding).await;
 
-    let mind = CoreCharacterMind::new(
+    let mind = CoreCharacterMind::local_for_test(
         plain_pool(&env).await,
         core.memory_provider_for_test().expect("pinned provider"),
     )
@@ -5456,7 +5655,7 @@ async fn character_mind_projection_serves_provider_seeded_soul_fragments_and_mem
          it came from, in slug order"
     );
 
-    let shared_only = CoreCharacterMind::new(
+    let shared_only = CoreCharacterMind::local_for_test(
         plain_pool(&env).await,
         core.memory_provider_for_test().expect("pinned provider"),
     )
@@ -5518,7 +5717,7 @@ async fn character_mind_projection_ranks_the_complete_memory_set_by_slug_before_
         }
     }
 
-    let mind = CoreCharacterMind::new(
+    let mind = CoreCharacterMind::local_for_test(
         plain_pool(&env).await,
         core.memory_provider_for_test().expect("pinned provider"),
     )
@@ -5573,7 +5772,7 @@ async fn character_mind_projection_keeps_the_legacy_tie_break_at_the_scope_cap()
     }
     pool.close().await;
 
-    let mind = CoreCharacterMind::new(
+    let mind = CoreCharacterMind::local_for_test(
         plain_pool(&env).await,
         core.memory_provider_for_test().expect("pinned provider"),
     )
@@ -5647,7 +5846,7 @@ async fn character_mind_projection_keeps_the_legacy_text_order_across_timestamp_
     .unwrap();
     pool.close().await;
 
-    let mind = CoreCharacterMind::new(
+    let mind = CoreCharacterMind::local_for_test(
         plain_pool(&env).await,
         core.memory_provider_for_test().expect("pinned provider"),
     )
@@ -5723,7 +5922,7 @@ async fn character_mind_projection_excludes_an_archived_subject_like_recall() {
             .expect("memory file bytes");
 
     // A live subject: the projection serves both record families.
-    let live = CoreCharacterMind::new(plain_pool(&env).await, provider.clone())
+    let live = CoreCharacterMind::local_for_test(plain_pool(&env).await, provider.clone())
         .projection(&principal, CREATOR, &env.character_id, None)
         .await
         .expect("live projection");
@@ -5761,11 +5960,12 @@ async fn character_mind_projection_excludes_an_archived_subject_like_recall() {
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .expect("read-only open");
     let principal = read_only.active_principal().await.unwrap();
-    let excluded = CoreCharacterMind::new(
+    let excluded = CoreCharacterMind::local_for_test(
         plain_pool(&env).await,
         read_only
             .memory_provider_for_test()
@@ -5790,6 +5990,7 @@ async fn character_mind_projection_fails_closed_when_the_provider_refuses() {
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .expect("read-only open");
@@ -5799,7 +6000,7 @@ async fn character_mind_projection_fails_closed_when_the_provider_refuses() {
         .expect("pinned provider");
     let pool = plain_pool(&env).await;
 
-    let refused = CoreCharacterMind::new(pool.clone(), provider.clone())
+    let refused = CoreCharacterMind::local_for_test(pool.clone(), provider.clone())
         .projection(&principal, CREATOR, &env.character_id, None)
         .await
         .expect_err("an absent provider space cannot serve the projection");
@@ -5808,7 +6009,7 @@ async fn character_mind_projection_fails_closed_when_the_provider_refuses() {
         "the refusal propagates instead of becoming an empty mind: {refused:?}"
     );
 
-    let malformed = CoreCharacterMind::new(pool, provider)
+    let malformed = CoreCharacterMind::local_for_test(pool, provider)
         .projection(&principal, CREATOR, "not-a-character", None)
         .await
         .expect_err("a malformed bearer id names no subject");

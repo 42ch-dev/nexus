@@ -902,7 +902,7 @@ jobs:
           --test content_services --test timeline_services --test memory_services
           --test memory_review_port
           --test local_memory_provider --test memory_receipts --test memory_reconcile
-          --test memory_profile_admission
+          --test memory_profile_admission --test memory_provider_config
           --test legacy_content_migration
           --test creator_capture
           -- --test-threads=2

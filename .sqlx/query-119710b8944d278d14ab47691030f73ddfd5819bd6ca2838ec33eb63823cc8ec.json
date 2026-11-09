@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS (\n              SELECT 1 FROM remote_binding_memory_objects\n              WHERE authority_host_id = ? AND authority_generation = ? AND space_id = ?\n                AND client_identity = ? AND character_id = ? AND binding_id = ?\n                AND object_kind = ? AND object_id = ?\n          ) as \"known!\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "known!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "119710b8944d278d14ab47691030f73ddfd5819bd6ca2838ec33eb63823cc8ec"
+}

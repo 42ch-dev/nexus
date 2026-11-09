@@ -15,11 +15,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use nexus_local_db::writer_protocol::{
-    acquire_writer_guard, open_admitted_pool, open_guarded_pool, release_retained_writer_guards,
-    run_guarded_migrations, WriterMode, BOOTSTRAP_CREATOR_ID,
+    acquire_store_reset_fence, acquire_writer_guard, init_guarded_pool, join_live_engine_pool,
+    open_admitted_pool, open_guarded_pool, open_guarded_pool_arc, release_retained_writer_guards,
+    retain_writer_guard, run_guarded_migrations, GuardedPoolOptions, WriterMode,
+    BOOTSTRAP_CREATOR_ID,
 };
 use nexus_local_db::{
     creator_holder_entry_id, ensure_creator_row, init_engine_pool, init_pool, open_pool_read_only,
@@ -82,6 +85,20 @@ fn reap(child: &mut Child, err_path: &Path) {
         let captured = fs::read_to_string(err_path).unwrap_or_default();
         panic!("child exited {status}:\n{captured}");
     }
+}
+
+/// Run one `migration_fence` / `engine_solo` child and return its outcome.
+fn child_outcome(dir: &Path, db: &Path, mode: &str, tag: &str) -> String {
+    let out = dir.join(format!("{tag}_out"));
+    let err = dir.join(format!("{tag}_err"));
+    let mut child = spawn_child(
+        mode,
+        db,
+        &[("OUT_PATH", out.to_string_lossy().to_string())],
+        &err,
+    );
+    reap(&mut child, &err);
+    fs::read_to_string(out).expect("child outcome")
 }
 
 /// Run one engine-owner race round between two real processes.
@@ -758,6 +775,38 @@ async fn v1191_holder_writer() {
     release_retained_writer_guards(&db);
 }
 
+/// Remote dependency metadata rejects every mutation from an unregistered writer.
+#[tokio::test]
+async fn remote_dependency_tables_fence_raw_writers() {
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("remote_dependencies.db");
+    let bootstrap = init_pool(&db).await.expect("init_pool");
+    bootstrap.close().await;
+    release_retained_writer_guards(&db);
+
+    let raw = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
+        .await
+        .expect("raw connect");
+    for sql in [
+        "INSERT INTO remote_binding_memory_admissions \
+         (admission_id, owner_creator_id, character_id, binding_id, authority_host_id, \
+          authority_generation, space_id, client_identity, created_at) \
+         VALUES ('adm_raw', 'ctr_raw', 'chr_raw', 'bnd_raw', 'host', '1', 'space', 'client', 'now')",
+        "UPDATE remote_binding_memory_admissions SET created_at = 'changed'",
+        "DELETE FROM remote_binding_memory_admissions",
+        "INSERT INTO remote_binding_memory_objects \
+         (authority_host_id, authority_generation, space_id, client_identity, character_id, \
+          binding_id, object_kind, object_id, state, created_at, updated_at) \
+         VALUES ('host', '1', 'space', 'client', 'chr_raw', 'bnd_raw', \
+                 'candidate', 'cand_raw', 'live', 'now', 'now')",
+        "UPDATE remote_binding_memory_objects SET state = 'released'",
+        "DELETE FROM remote_binding_memory_objects",
+    ] {
+        assert_fenced(&raw, sql).await;
+    }
+    raw.close().await;
+}
+
 /// Every mutation of the new tables is fenced on a handle that never received
 /// the protocol scalars — the raw/pre-opened writer loophole.
 async fn assert_holder_tables_fenced_for_raw_writer(db: &Path) {
@@ -1128,6 +1177,7 @@ async fn assert_re_registration_replaces_live_userdata(db: &Path) {
     install_writer_functions(
         &mut conn,
         probe_context("v1191_first", GuardWriterMode::Direct, 1, None),
+        None,
     )
     .await
     .expect("first install");
@@ -1140,6 +1190,7 @@ async fn assert_re_registration_replaces_live_userdata(db: &Path) {
     install_writer_functions(
         &mut conn,
         probe_context("v1191_second", GuardWriterMode::Engine, 2, Some(7)),
+        None,
     )
     .await
     .expect("re-registration on the same live connection");
@@ -1192,6 +1243,7 @@ async fn assert_registration_ownership(db: &Path) {
     install_writer_functions(
         &mut conn,
         probe_context("v1191_a", GuardWriterMode::Direct, 1, None),
+        None,
     )
     .await
     .expect("install");
@@ -1200,6 +1252,7 @@ async fn assert_registration_ownership(db: &Path) {
     install_writer_functions(
         &mut conn,
         probe_context("v1191_b", GuardWriterMode::Engine, 2, Some(1)),
+        None,
     )
     .await
     .expect("replace");
@@ -1224,6 +1277,7 @@ async fn assert_registration_ownership(db: &Path) {
                 i64::from(cycle) + 1,
                 None,
             ),
+            None,
         )
         .await
         .expect("cycle install");
@@ -1260,6 +1314,445 @@ async fn probe_scalars(conn: &mut SqliteConnection) -> (String, String, i64, Opt
     .expect("probe scalars")
 }
 
+/// A genuine holder's final lifetime end — the local provider store dropping
+/// its own direct admission, a failed initialization — must give the OS
+/// admission back: a real second process can take the exclusive migration lock
+/// afterwards, which it cannot while any shared writer lock survives.
+#[tokio::test]
+async fn dropped_guard_holders_release_the_migration_lock() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+
+    let engine = init_engine_pool(&db).await.expect("engine owner");
+    let direct = init_guarded_pool(&db, BOOTSTRAP_CREATOR_ID)
+        .await
+        .expect("direct holder");
+    // The provider store's shape: the handle's final lifetime end is a drop,
+    // with no explicit release call.
+    drop(direct);
+    // The core's shape: an explicit release at a defined drain point, then the
+    // handle is given up.
+    engine.pool().close().await;
+    engine.release_retained_admission();
+    drop(engine);
+
+    let out = dir.path().join("fence_out");
+    let err = dir.path().join("fence_err");
+    let mut child = spawn_child(
+        "migration_fence",
+        &db,
+        &[("OUT_PATH", out.to_string_lossy().to_string())],
+        &err,
+    );
+    reap(&mut child, &err);
+    assert_eq!(
+        fs::read_to_string(&out).expect("fence outcome"),
+        "won",
+        "a separate process must acquire the exclusive migration lock"
+    );
+}
+
+/// The documented raw-pool retention: an `open_admitted_pool` admission is
+/// owned by this process until an explicit release, even after every pool and
+/// connection the caller held is really closed and dropped.
+#[tokio::test]
+async fn raw_process_retention_holds_until_explicit_release() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+
+    let pool = open_admitted_pool(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("raw admitted pool");
+    let (one,): (i64,) = sqlx::query_as("SELECT 1")
+        .fetch_one(&pool)
+        .await
+        .expect("raw pool serves");
+    assert_eq!(one, 1);
+    pool.close().await;
+    drop(pool);
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "raw_blocked"),
+        "busy",
+        "a raw process-retained admission survives its caller's pools"
+    );
+
+    release_retained_writer_guards(&db);
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "raw_allowed"),
+        "won",
+        "the documented explicit release frees the raw admission"
+    );
+}
+
+/// A usable pool clone keeps the OS migration admission: a second process is
+/// refused while the clone can still run a query, and allowed once the pool is
+/// closed and the admission settled.
+#[tokio::test]
+async fn usable_pool_clone_blocks_another_process_until_settled() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+
+    let guarded = init_engine_pool(&db).await.expect("engine owner");
+    let survivor = guarded.clone_pool();
+    drop(guarded);
+
+    // A real query proves the surviving clone is a usable writer.
+    let (one,): (i64,) = sqlx::query_as("SELECT 1")
+        .fetch_one(&survivor)
+        .await
+        .expect("survivor query");
+    assert_eq!(one, 1);
+
+    let blocked = dir.path().join("clone_fence_blocked");
+    let blocked_err = dir.path().join("clone_fence_blocked_err");
+    let mut child = spawn_child(
+        "migration_fence",
+        &db,
+        &[("OUT_PATH", blocked.to_string_lossy().to_string())],
+        &blocked_err,
+    );
+    reap(&mut child, &blocked_err);
+    assert_eq!(
+        fs::read_to_string(&blocked).expect("blocked outcome"),
+        "busy",
+        "a second process must not migrate while the clone is usable"
+    );
+
+    survivor.close().await;
+    release_retained_writer_guards(&db);
+    drop(survivor);
+
+    let allowed = dir.path().join("clone_fence_allowed");
+    let allowed_err = dir.path().join("clone_fence_allowed_err");
+    let mut child = spawn_child(
+        "migration_fence",
+        &db,
+        &[("OUT_PATH", allowed.to_string_lossy().to_string())],
+        &allowed_err,
+    );
+    reap(&mut child, &allowed_err);
+    assert_eq!(
+        fs::read_to_string(&allowed).expect("allowed outcome"),
+        "won",
+        "after the pool closed and its admission settled another process may migrate"
+    );
+}
+
+/// The original public raw close: a clone is closed while one of its
+/// connections is still checked out and usable. Both the migration lock and the
+/// engine owner's exclusivity must stay held by that connection's own admission
+/// until SQLite really disposes it — then both release on their own, with no
+/// purge and no helper.
+#[tokio::test]
+async fn raw_clone_close_keeps_both_admissions_until_connection_disposed() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+
+    let guarded = init_engine_pool(&db).await.expect("engine owner");
+    let clone = guarded.clone_pool();
+    drop(guarded);
+
+    let mut checked_out = clone.acquire().await.expect("checked-out connection");
+    let (one,): (i64,) = sqlx::query_as("SELECT 1")
+        .fetch_one(&mut *checked_out)
+        .await
+        .expect("the clone's connection is usable");
+    assert_eq!(one, 1);
+
+    // The public raw close starts here and waits for the checked-out connection.
+    let closing = clone.close();
+    // Let any close-start settlement run before probing: the admission must
+    // survive on the checked-out connection's own ownership, not on the
+    // registry's timing.
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "blocked_migration"),
+        "busy",
+        "another process must not migrate while a checked-out connection is alive"
+    );
+    assert_eq!(
+        child_outcome(dir.path(), &db, "engine_solo", "blocked_engine"),
+        "busy",
+        "nor may another process become the engine owner"
+    );
+
+    // Real disposal of that connection.
+    drop(checked_out);
+    closing.await;
+    drop(clone);
+
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "allowed_migration"),
+        "won",
+        "after real disposal the migration lock is free"
+    );
+    assert_eq!(
+        child_outcome(dir.path(), &db, "engine_solo", "allowed_engine"),
+        "won",
+        "after real disposal the engine ownership is free"
+    );
+}
+
+/// F13: an OPEN pool keeps its published admission with ZERO current native
+/// connections. The last idle connection is really detached from the pool and
+/// disposed, so its userdata pin is gone; both OS locks must still be held by
+/// the pool itself, a reconnect must reuse the exact published identity through
+/// the existing join path, and the real close must release everything on its
+/// own, even though the closed handle stays referenced here.
+#[tokio::test]
+async fn open_pool_keeps_its_admission_with_zero_connections() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+
+    let guarded = init_engine_pool(&db).await.expect("engine owner");
+    let published = {
+        let mut conn = guarded
+            .pool()
+            .acquire()
+            .await
+            .expect("published connection");
+        probe_scalars(&mut conn).await.0
+    };
+    let clone = guarded.clone_pool();
+    // The original holder is gone: only the pool clone and its own admission
+    // remain.
+    drop(guarded);
+
+    // Real eviction: detach the last connection from the pool, then dispose it
+    // so SQLite drops that connection's userdata pin.
+    // Drain every pooled connection this way: each one is detached from the
+    // pool and then really disposed, so SQLite drops its userdata pin.
+    for _ in 0..8 {
+        if clone.size() == 0 {
+            break;
+        }
+        let conn = clone.acquire().await.expect("pooled connection to drain");
+        drop(conn.detach());
+    }
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        clone.size(),
+        0,
+        "precondition: the pool is open with zero current connections"
+    );
+
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "zero_conn_migration"),
+        "busy",
+        "an open pool with no connections still holds the migration admission"
+    );
+    assert_eq!(
+        child_outcome(dir.path(), &db, "engine_solo", "zero_conn_engine"),
+        "busy",
+        "and the engine ownership"
+    );
+
+    // A reconnect is served under the SAME published admission.
+    let mut reconnected = clone.acquire().await.expect("reconnect on the open pool");
+    let (writer_id, mode, _, _) = probe_scalars(&mut reconnected).await;
+    assert_eq!(
+        writer_id, published,
+        "the reconnect is the published writer, not a new identity"
+    );
+    assert_eq!(mode, "engine");
+    drop(reconnected);
+
+    // The existing in-process join path still resolves the published admission.
+    let joined = join_live_engine_pool(&db, GuardedPoolOptions::default())
+        .await
+        .expect("join lookup")
+        .expect("the open pool's admission is joinable with zero connections");
+    let mut joined_conn = joined.pool().acquire().await.expect("joined connection");
+    assert_eq!(
+        probe_scalars(&mut joined_conn).await.0,
+        published,
+        "a joining open reuses the published identity"
+    );
+    drop(joined_conn);
+    // Drain the independent joined pool's native pins before closing the original pool.
+    joined.pool().close().await;
+    drop(joined);
+
+    // Close-start retirement: the closed handle stays referenced below.
+    clone.close().await;
+    assert_eq!(
+        child_outcome(
+            dir.path(),
+            &db,
+            "migration_fence",
+            "zero_conn_closed_migration"
+        ),
+        "won",
+        "the real close released the migration admission with no purge"
+    );
+    assert_eq!(
+        child_outcome(dir.path(), &db, "engine_solo", "zero_conn_closed_engine"),
+        "won",
+        "and freed the engine ownership"
+    );
+    assert_eq!(clone.size(), 0, "the closed handle stays referenced");
+}
+
+/// F14: a raw pool that JOINS an ordinary open must promote the published
+/// admission to process retention — parking the claim alone would let the
+/// admission die with the ordinary holder.
+#[tokio::test]
+async fn joined_raw_open_retains_the_published_admission() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+
+    let ordinary = init_guarded_pool(&db, BOOTSTRAP_CREATOR_ID)
+        .await
+        .expect("ordinary direct holder");
+    let raw = open_admitted_pool(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("raw admitted pool");
+    let (one,): (i64,) = sqlx::query_as("SELECT 1")
+        .fetch_one(&raw)
+        .await
+        .expect("raw pool serves");
+    assert_eq!(one, 1);
+    raw.close().await;
+    drop(raw);
+
+    // The ordinary holder ends: its pool closes and its own claim goes back.
+    ordinary.pool().close().await;
+    ordinary.release_retained_admission();
+    drop(ordinary);
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "joined_raw_blocked"),
+        "busy",
+        "the joined raw retention outlives the ordinary holder it joined"
+    );
+
+    release_retained_writer_guards(&db);
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "joined_raw_allowed"),
+        "won",
+        "the documented explicit release frees the joined raw admission"
+    );
+}
+
+/// F14: retaining a guard NEVER installs an identity that is not the published
+/// one. The caller's guard here is a stale identity whose entry was dropped
+/// while the guard stayed alive; the admission a later open published must stay
+/// authoritative, and the next join must carry that published writer id.
+#[tokio::test]
+async fn raw_retention_keeps_the_published_identity() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+    run_guarded_migrations(&db)
+        .await
+        .expect("migrated workspace");
+
+    // Identity A publishes itself, then its entry is dropped while the guard
+    // itself is still alive.
+    let stale = acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("stale identity");
+    let stale_pool = open_guarded_pool_arc(Arc::clone(&stale))
+        .await
+        .expect("stale pool publishes its admission");
+    let stale_id = {
+        let mut conn = stale_pool.pool().acquire().await.expect("stale connection");
+        probe_scalars(&mut conn).await.0
+    };
+    release_retained_writer_guards(&db);
+
+    // Identity B is published afterwards.
+    let published = init_guarded_pool(&db, BOOTSTRAP_CREATOR_ID)
+        .await
+        .expect("published holder");
+    let published_id = {
+        let mut conn = published
+            .pool()
+            .acquire()
+            .await
+            .expect("published connection");
+        probe_scalars(&mut conn).await.0
+    };
+    assert_ne!(
+        stale_id, published_id,
+        "precondition: two different identities exist for this path"
+    );
+
+    // The caller hands over the STALE guard: retention must keep B.
+    retain_writer_guard(&stale);
+
+    let joined = acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("join the published admission");
+    let joined_pool = open_guarded_pool(&joined).await.expect("joined pool");
+    let mut conn = joined_pool.acquire().await.expect("joined connection");
+    assert_eq!(
+        probe_scalars(&mut conn).await.0,
+        published_id,
+        "the retained/joined admission is the published identity, not the caller's"
+    );
+    drop(conn);
+    stale_pool.pool().close().await;
+    drop(stale_pool);
+    joined_pool.close().await;
+    published.pool().close().await;
+    published.release_retained_admission();
+    drop(published);
+    drop(joined);
+    release_retained_writer_guards(&db);
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "stale_identity_held"),
+        "busy",
+        "the caller's stale guard still owns its admission after its pool closes"
+    );
+    drop(stale);
+
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "identity_released"),
+        "won",
+        "every identity's locks are released once both are gone"
+    );
+}
+
 async fn child_main() {
     let mode = std::env::var(CHILD_ENV).expect("child mode");
     let db = PathBuf::from(std::env::var("DB_PATH").expect("db"));
@@ -1293,6 +1786,18 @@ async fn child_main() {
                     Err(err) => panic!("unexpected child error: {err}"),
                 };
             fs::write(out, outcome).expect("write owner outcome");
+        }
+        "migration_fence" => {
+            let out = PathBuf::from(std::env::var("OUT_PATH").expect("out"));
+            let outcome = match acquire_store_reset_fence(&db) {
+                Ok(fence) => {
+                    drop(fence);
+                    "won"
+                }
+                Err(LocalDbError::OwnerBusy { .. }) => "busy",
+                Err(err) => panic!("unexpected child error: {err}"),
+            };
+            fs::write(out, outcome).expect("write fence outcome");
         }
         #[cfg(debug_assertions)]
         "v1191_ownership" => assert_registration_ownership(&db).await,
