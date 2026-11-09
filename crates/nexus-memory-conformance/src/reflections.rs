@@ -20,15 +20,25 @@
 //! `details` shapes are the published protocol ones.
 
 use chrono::{DateTime, Utc};
+use serde_json::{json, Map, Value};
+use spoke_operations::spoke_schemas::{MemoryReflectionsListRequest, MemoryReflectionsStateRequest};
 use spoke_operations::spoke_schemas::memory_reflections_generate_request::ReadSelection as GenerateSelection;
 use spoke_operations::spoke_schemas::memory_reflections_list_request::ReadSelection as ListSelection;
 use spoke_operations::spoke_schemas::memory_reflections_state_request::ReadSelection as StateSelection;
-use spoke_operations::spoke_schemas::CognitionFilter;
-use spoke_operations::{is_freeze_allowlisted, GrantRequirement, SpokeReject, SpokeRejectCode};
+use spoke_operations::{
+    is_freeze_allowlisted, jcs_sha256_hex, validate_memory_reflections_list,
+    validate_memory_reflections_state, GrantRequirement, SpokeReject, SpokeRejectCode,
+    SpokeResult,
+};
 use sqlx::{Row, SqliteConnection};
+use std::num::NonZeroU64;
 
+use crate::policy::describe_body;
 use crate::provider::FixtureMemoryProvider;
-use crate::spaces::{internal_failure, is_authorized, load_grants};
+use crate::spaces::{
+    internal, internal_failure, is_authorized, load_grants, snapshot_marker, ENGINE_POLICY_VERSION,
+    MAX_PAGE_SIZE,
+};
 
 /// The grant facets one reflection request's selection needs (§6.5).
 ///
@@ -169,7 +179,9 @@ impl FixtureMemoryProvider {
     /// whole decision on the caller's single snapshot. `state`/`list` pass
     /// `is_freeze_allowlisted`; `generate` refuses `SPACE_FROZEN` when frozen.
     /// The admission decision's inputs arrive per-op from the serving slices;
-    /// the count is the protocol surface, not a design smell.
+    /// the count is the protocol surface, not a design smell. The cognition
+    /// filter arrives as presence only: each request type generates its own
+    /// filter shape and every shape is refused identically.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn require_reflection_admitted(
         &self,
@@ -179,10 +191,10 @@ impl FixtureMemoryProvider {
         space_id: &str,
         subject_id: &str,
         target: &ReflectionTarget,
-        cognition_filter: Option<&CognitionFilter>,
+        cognition_filter_present: bool,
         now: DateTime<Utc>,
     ) -> Result<(), SpokeReject> {
-        if cognition_filter.is_some() {
+        if cognition_filter_present {
             return Err(cognition_filter_unsupported());
         }
         if space_id != self.identity.space_id {
@@ -208,6 +220,750 @@ impl FixtureMemoryProvider {
             ));
         }
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Read ops: `memory.reflections.state` and `memory.reflections.list`
+// ---------------------------------------------------------------------------
+
+/// The fixture-private `basis_json` member a generate run pins beyond the four
+/// published `ReflectionBasis` fields. C-077's read-time exclusion needs the
+/// pinned source record ids and the published shape carries only their digest,
+/// so storage keeps the id list beside them; the served basis strips it.
+const PINNED_SOURCE_IDS_KEY: &str = "source_ids";
+
+fn checked(result: SpokeResult<()>) -> Result<(), SpokeReject> {
+    match result {
+        SpokeResult::Ok(()) => Ok(()),
+        SpokeResult::Reject(reject) => Err(reject),
+    }
+}
+
+fn cursor_invalid(message: impl Into<String>) -> SpokeReject {
+    SpokeReject {
+        code: SpokeRejectCode::CursorInvalid,
+        message: message.into(),
+        details: None,
+    }
+}
+
+async fn subject_status(
+    conn: &mut SqliteConnection,
+    space_id: &str,
+    subject_id: &str,
+) -> Result<String, SpokeReject> {
+    let row = sqlx::query("SELECT status FROM subjects WHERE space_id = ? AND subject_id = ?")
+        .bind(space_id)
+        .bind(subject_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(internal_failure)?
+        .ok_or_else(|| not_found(format!("subject {subject_id} does not exist in this space")))?;
+    row.try_get("status").map_err(internal_failure)
+}
+
+/// §6.5 placement parity with recall: `subject_all` admits every placement,
+/// `shared_only` only shared records, and a context selection its named
+/// contexts plus shared records when `include_shared`.
+fn target_admits(target: &ReflectionTarget, visibility: &str, context_id: Option<&str>) -> bool {
+    if target.subject_all {
+        return true;
+    }
+    if visibility == "shared" {
+        return target.reads_shared;
+    }
+    context_id.is_some_and(|context_id| {
+        target
+            .context_ids
+            .iter()
+            .any(|named| named == context_id)
+    })
+}
+
+/// §6.13: the provenance filter intersects the record's recorded claim and
+/// combines with the selection by AND; both sides arrive as protocol JSON.
+fn filter_admits(provenance: &Value, filter: Option<&Value>) -> bool {
+    let Some(filter) = filter else {
+        return true;
+    };
+    provenance
+        .get("source_context_ids")
+        .and_then(Value::as_array)
+        .is_some_and(|claims| {
+            claims.iter().filter_map(Value::as_str).any(|claim| {
+                filter
+                    .get("source_context_ids")
+                    .and_then(Value::as_array)
+                    .is_some_and(|wanted| {
+                        wanted.iter().filter_map(Value::as_str).any(|named| named == claim)
+                    })
+            })
+        })
+}
+
+/// One live source record feeding a basis digest: the tombstone predicate
+/// keeps dead rows out (MEM-R014), ordered by id for a total digest input.
+struct BasisRecord {
+    record_id: String,
+    revision: i64,
+    visibility: String,
+    context_id: Option<String>,
+    provenance: Value,
+}
+
+async fn load_basis_records(
+    conn: &mut SqliteConnection,
+    space_id: &str,
+    subject_id: &str,
+) -> Result<Vec<BasisRecord>, SpokeReject> {
+    let rows = sqlx::query(
+        "SELECT record_id, revision, scope_visibility, scope_context_id, provenance_json \
+         FROM records WHERE space_id = ? AND subject_id = ? AND tombstone_json IS NULL \
+         ORDER BY record_id",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(internal_failure)?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(BasisRecord {
+                record_id: row.try_get("record_id").map_err(internal_failure)?,
+                revision: row.try_get("revision").map_err(internal_failure)?,
+                visibility: row.try_get("scope_visibility").map_err(internal_failure)?,
+                context_id: row.try_get("scope_context_id").map_err(internal_failure)?,
+                provenance: json_field(
+                    &row.try_get::<String, _>("provenance_json").map_err(internal_failure)?,
+                    "record provenance",
+                )?,
+            })
+        })
+        .collect()
+}
+
+async fn load_profile_revisions(
+    conn: &mut SqliteConnection,
+    space_id: &str,
+    subject_id: &str,
+) -> Result<Vec<(String, i64)>, SpokeReject> {
+    let rows = sqlx::query(
+        "SELECT profile_kind, revision FROM profiles \
+         WHERE space_id = ? AND subject_id = ? ORDER BY profile_kind",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(internal_failure)?;
+    rows.iter()
+        .map(|row| {
+            Ok((
+                row.try_get::<String, _>("profile_kind").map_err(internal_failure)?,
+                row.try_get::<i64, _>("revision").map_err(internal_failure)?,
+            ))
+        })
+        .collect()
+}
+
+/// The subject's tombstoned record ids (C-077's read-time exclusion set).
+async fn tombstoned_record_ids(
+    conn: &mut SqliteConnection,
+    space_id: &str,
+    subject_id: &str,
+) -> Result<Vec<String>, SpokeReject> {
+    let rows = sqlx::query(
+        "SELECT record_id FROM records \
+         WHERE space_id = ? AND subject_id = ? AND tombstone_json IS NOT NULL",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(internal_failure)?;
+    rows.iter()
+        .map(|row| row.try_get("record_id").map_err(internal_failure))
+        .collect()
+}
+
+fn json_field(text: &str, name: &str) -> Result<Value, SpokeReject> {
+    serde_json::from_str(text)
+        .map_err(|error| internal(format!("stored {name} is not valid JSON: {error}")))
+}
+
+/// The §6.5 facets a stored (or received) selection resolves to, so pinned
+/// rows and live records meet in one predicate without new protocol types.
+fn target_from_value(selection: &Value) -> Result<ReflectionTarget, SpokeReject> {
+    let mode = selection
+        .get("mode")
+        .and_then(Value::as_str)
+        .ok_or_else(|| internal("a stored reflection selection carries no mode"))?;
+    match mode {
+        "subject_all" => Ok(ReflectionTarget::new(true, &[], true)),
+        "shared_only" => Ok(ReflectionTarget::new(false, &[], true)),
+        "selected_contexts" => {
+            let ids: Vec<String> = selection
+                .get("context_ids")
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let reads_shared = selection
+                .get("include_shared")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            Ok(ReflectionTarget::new(false, &ids, reads_shared))
+        }
+        other => Err(internal(format!("unknown selection mode {other:?}"))),
+    }
+}
+
+/// The fixture's canonical basis object over one resolved selection/filter:
+/// sorted source `[record_id, revision]` pairs, the profile revisions, the
+/// selection/filter resolution and the engine policy. `jcs_sha256_hex` over
+/// this object is the whole C-042 mechanism: computed at read time, never
+/// stored, so every basis-affecting change alters the digest at the next read.
+fn canonical_basis_object(
+    selection: &Value,
+    filter: Option<&Value>,
+    profiles: &[(String, i64)],
+    source_set: &[(&str, i64)],
+) -> Value {
+    let mut profile_kinds: Vec<&str> = profiles.iter().map(|(kind, _)| kind.as_str()).collect();
+    profile_kinds.sort_unstable();
+    let mut profile_revisions = Map::new();
+    for (kind, revision) in profiles {
+        profile_revisions.insert(kind.clone(), json!(revision));
+    }
+    json!({
+        "selection": selection,
+        "filter": filter,
+        "profile_kinds": profile_kinds,
+        "profile_revisions": profile_revisions,
+        "record_count": source_set.len(),
+        "source_set": source_set,
+        "engine_policy_version": ENGINE_POLICY_VERSION,
+    })
+}
+
+fn basis_digest(object: &Value) -> Result<String, SpokeReject> {
+    match jcs_sha256_hex(object) {
+        SpokeResult::Ok(digest) => Ok(digest),
+        SpokeResult::Reject(reject) => Err(reject),
+    }
+}
+
+/// The current digest over one pinned selection/filter: the same composer as
+/// `state`, fed by that row's pinned pair (§7.26 staleness at read time).
+fn current_digest_for(
+    selection: &Value,
+    filter: Option<&Value>,
+    records: &[BasisRecord],
+    profiles: &[(String, i64)],
+) -> Result<String, SpokeReject> {
+    let target = target_from_value(selection)?;
+    let source_set: Vec<(&str, i64)> = records
+        .iter()
+        .filter(|record| {
+            target_admits(&target, &record.visibility, record.context_id.as_deref())
+                && filter_admits(&record.provenance, filter)
+        })
+        .map(|record| (record.record_id.as_str(), record.revision))
+        .collect();
+    basis_digest(&canonical_basis_object(selection, filter, profiles, &source_set))
+}
+
+/// The pinned source record ids one stored basis carries (C-077).
+fn pinned_source_ids(basis: &Value) -> Vec<String> {
+    basis
+        .get(PINNED_SOURCE_IDS_KEY)
+        .and_then(Value::as_array)
+        .map(|ids| {
+            ids.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// C-077: a reflection whose *whole* pinned source set has been tombstoned is
+/// excluded from list/get at read time; the row itself is never deleted. A
+/// partially tombstoned set keeps the reflection (stale already reports it).
+fn source_set_tombstoned(source_ids: &[String], tombstoned: &[String]) -> bool {
+    !source_ids.is_empty() && source_ids.iter().all(|id| tombstoned.contains(id))
+}
+
+fn pinned_state_digest(basis: &Value) -> Result<String, SpokeReject> {
+    basis
+        .get("state_digest")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| internal("a stored reflection basis carries no state_digest"))
+}
+
+/// The resume index one list cursor names on exactly this surviving set: a
+/// different binding digest, a missing entry or a malformed cursor is refused
+/// `CURSOR_INVALID` instead of silently resuming elsewhere (MEM-R026).
+fn list_cursor_start(
+    cursor: Option<&str>,
+    binding: &str,
+    served: &[ServedReflection],
+) -> Result<usize, SpokeReject> {
+    let Some(cursor) = cursor else {
+        return Ok(0);
+    };
+    let (digest, last_id) = cursor
+        .split_once(':')
+        .ok_or_else(|| cursor_invalid("cursor is malformed"))?;
+    if digest != binding {
+        return Err(cursor_invalid(
+            "cursor was issued for a different query or provider state",
+        ));
+    }
+    served
+        .iter()
+        .position(|row| row.reflection_id == last_id)
+        .map(|position| position + 1)
+        .ok_or_else(|| cursor_invalid("cursor no longer matches the listed set"))
+}
+
+/// The fixture's provider-variable sufficiency verdict: an authorized basis
+/// with at least one source record is sufficient (C-079 asserts the outcome
+/// shape, not shared thresholds; the same verdict gates generate in Task 4).
+const fn sufficient(record_count: usize) -> bool {
+    record_count > 0
+}
+
+/// `REQUIRED_PROFILE_KINDS` read from the describe body's single source of
+/// truth; the fixture requires no authored kinds, so this stays empty.
+fn required_profile_kinds() -> Result<Vec<String>, SpokeReject> {
+    serde_json::from_value(describe_body()["required_profile_kinds"].clone())
+        .map_err(|error| internal(format!("describe body carries malformed profile kinds: {error}")))
+}
+
+fn missing_required_profile_kinds(
+    profiles: &[(String, i64)],
+) -> Result<Vec<String>, SpokeReject> {
+    let required = required_profile_kinds()?;
+    Ok(required
+        .into_iter()
+        .filter(|kind| !profiles.iter().any(|(present, _)| present == kind))
+        .collect())
+}
+
+/// One reflection row as it serves: pinned columns verbatim plus the parsed
+/// basis, with the fixture-private `source_ids` member still attached.
+struct ServedReflection {
+    reflection_id: String,
+    space_id: String,
+    subject_id: String,
+    created_at: String,
+    revision: i64,
+    schema_version: i64,
+    selection: Value,
+    filter: Option<Value>,
+    cognition_filter: Option<Value>,
+    basis: Value,
+    body_text: String,
+    body_format: String,
+    cost: Option<(String, i64)>,
+    engine_policy_version: String,
+    model: Option<String>,
+    extensions: Value,
+}
+
+/// One subject's reflections oldest-first, the stable paging order. Rows are
+/// immutable and never deleted, so the scan order is total.
+async fn load_served_reflections(
+    conn: &mut SqliteConnection,
+    space_id: &str,
+    subject_id: &str,
+) -> Result<Vec<ServedReflection>, SpokeReject> {
+    let rows = sqlx::query(
+        "SELECT reflection_id, space_id, subject_id, created_at, revision, schema_version, \
+         selection_json, filter_json, cognition_filter_json, basis_json, body_text, body_format, \
+         cost_unit_kind, cost_units, engine_policy_version, model, extensions_json \
+         FROM reflections WHERE space_id = ? AND subject_id = ? \
+         ORDER BY created_at, reflection_id",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(internal_failure)?;
+    rows.into_iter()
+        .map(|row| {
+            let cost_unit_kind: Option<String> =
+                row.try_get("cost_unit_kind").map_err(internal_failure)?;
+            let cost_units: Option<i64> = row.try_get("cost_units").map_err(internal_failure)?;
+            Ok(ServedReflection {
+                reflection_id: row.try_get("reflection_id").map_err(internal_failure)?,
+                space_id: row.try_get("space_id").map_err(internal_failure)?,
+                subject_id: row.try_get("subject_id").map_err(internal_failure)?,
+                created_at: row.try_get("created_at").map_err(internal_failure)?,
+                revision: row.try_get("revision").map_err(internal_failure)?,
+                schema_version: row.try_get("schema_version").map_err(internal_failure)?,
+                selection: json_field(
+                    &row.try_get::<String, _>("selection_json").map_err(internal_failure)?,
+                    "reflection selection",
+                )?,
+                filter: row
+                    .try_get::<Option<String>, _>("filter_json")
+                    .map_err(internal_failure)?
+                    .map(|text| json_field(&text, "reflection filter"))
+                    .transpose()?,
+                cognition_filter: row
+                    .try_get::<Option<String>, _>("cognition_filter_json")
+                    .map_err(internal_failure)?
+                    .map(|text| json_field(&text, "reflection cognition filter"))
+                    .transpose()?,
+                basis: json_field(
+                    &row.try_get::<String, _>("basis_json").map_err(internal_failure)?,
+                    "reflection basis",
+                )?,
+                body_text: row.try_get("body_text").map_err(internal_failure)?,
+                body_format: row.try_get("body_format").map_err(internal_failure)?,
+                cost: cost_unit_kind.zip(cost_units),
+                engine_policy_version: row
+                    .try_get("engine_policy_version")
+                    .map_err(internal_failure)?,
+                model: row.try_get("model").map_err(internal_failure)?,
+                extensions: json_field(
+                    &row.try_get::<String, _>("extensions_json").map_err(internal_failure)?,
+                    "reflection extensions",
+                )?,
+            })
+        })
+        .collect()
+}
+
+/// The published `Reflection` wire object: pinned columns verbatim, the
+/// four-member basis (the fixture-private `source_ids` stripped), and `stale`
+/// recomputed by the caller at read time (§7.26).
+fn reflection_wire(row: &ServedReflection, stale: bool) -> Result<Value, SpokeReject> {
+    let mut wire_basis = row
+        .basis
+        .as_object()
+        .cloned()
+        .ok_or_else(|| internal("a stored reflection basis is not an object"))?;
+    wire_basis.remove(PINNED_SOURCE_IDS_KEY);
+    let mut object = Map::new();
+    object.insert("reflection_id".into(), json!(row.reflection_id));
+    object.insert("space_id".into(), json!(row.space_id));
+    object.insert("subject_id".into(), json!(row.subject_id));
+    object.insert(
+        "revision".into(),
+        json!(u64::try_from(row.revision).map_err(internal_failure)?),
+    );
+    object.insert(
+        "schema_version".into(),
+        json!(u64::try_from(row.schema_version).map_err(internal_failure)?),
+    );
+    object.insert("created_at".into(), json!(row.created_at));
+    object.insert("selection".into(), row.selection.clone());
+    if let Some(filter) = &row.filter {
+        object.insert("filter".into(), filter.clone());
+    }
+    if let Some(cognition_filter) = &row.cognition_filter {
+        object.insert("cognition_filter".into(), cognition_filter.clone());
+    }
+    object.insert("basis".into(), Value::Object(wire_basis));
+    object.insert(
+        "body".into(),
+        json!({ "body": row.body_text, "format": row.body_format }),
+    );
+    if let Some((unit_kind, units)) = &row.cost {
+        object.insert(
+            "cost".into(),
+            json!({ "unit_kind": unit_kind, "units": f64::from(u32::try_from(*units).map_err(internal_failure)?), }),
+        );
+    }
+    let mut generator = Map::new();
+    generator.insert(
+        "engine_policy_version".into(),
+        json!(row.engine_policy_version),
+    );
+    if let Some(model) = &row.model {
+        generator.insert("model".into(), json!(model));
+    }
+    object.insert("generator".into(), Value::Object(generator));
+    object.insert("extensions".into(), row.extensions.clone());
+    object.insert("stale".into(), json!(stale));
+    Ok(Value::Object(object))
+}
+
+/// The `memory.reflections.state` view: content-free basis, the fixture's
+/// sufficiency verdict, honest staleness and the digest CAS token.
+pub(crate) struct ReflectionStateView {
+    pub(crate) basis: Value,
+    pub(crate) sufficient: bool,
+    pub(crate) missing_required_profile_kinds: Vec<String>,
+    pub(crate) stale: bool,
+    pub(crate) state_digest: String,
+    pub(crate) last_reflection_id: Option<String>,
+}
+
+pub(crate) struct ReflectionListPage {
+    pub(crate) reflections: Vec<Value>,
+    pub(crate) next_cursor: Option<String>,
+}
+
+impl FixtureMemoryProvider {
+    /// [`Self::reflection_state_in_tx`] on one read snapshot: the whole read
+    /// runs inside one transaction so the digest, the staleness verdict and
+    /// the last-reflection lookup agree.
+    pub(crate) async fn reflection_state(
+        &self,
+        principal_id: &str,
+        request: &MemoryReflectionsStateRequest,
+        now: DateTime<Utc>,
+    ) -> Result<ReflectionStateView, SpokeReject> {
+        checked(validate_memory_reflections_state(request))?;
+        let mut transaction = self
+            .store()
+            .pool()
+            .begin()
+            .await
+            .map_err(internal_failure)?;
+        let view = self
+            .reflection_state_in_tx(&mut transaction, principal_id, request, now)
+            .await?;
+        transaction.commit().await.map_err(internal_failure)?;
+        Ok(view)
+    }
+
+    /// [`Self::reflection_state`] on a caller-owned connection; never commits.
+    pub(crate) async fn reflection_state_in_tx(
+        &self,
+        conn: &mut SqliteConnection,
+        principal_id: &str,
+        request: &MemoryReflectionsStateRequest,
+        now: DateTime<Utc>,
+    ) -> Result<ReflectionStateView, SpokeReject> {
+        let space_id = request.space_id.as_str();
+        let subject_id = request.subject_id.as_str();
+        let target = ReflectionTarget::from_state(&request.selection);
+        self.require_reflection_admitted(
+            conn,
+            principal_id,
+            "memory.reflections.state",
+            space_id,
+            subject_id,
+            &target,
+            request.cognition_filter.is_some(),
+            now,
+        )
+        .await?;
+        let status = subject_status(conn, space_id, subject_id).await?;
+        let selection_value =
+            serde_json::to_value(&request.selection).map_err(internal_failure)?;
+        let filter_value = request
+            .filter
+            .as_ref()
+            .map(|filter| serde_json::to_value(filter).map_err(internal_failure))
+            .transpose()?;
+        let records = self.live_basis_records(
+            conn,
+            space_id,
+            subject_id,
+            &status,
+            &target,
+            filter_value.as_ref(),
+        )
+        .await?;
+        let profiles = load_profile_revisions(conn, space_id, subject_id).await?;
+        let source_set: Vec<(&str, i64)> = records
+            .iter()
+            .map(|record| (record.record_id.as_str(), record.revision))
+            .collect();
+        let canonical = canonical_basis_object(&selection_value, filter_value.as_ref(), &profiles, &source_set);
+        let state_digest = basis_digest(&canonical)?;
+
+        // The most recent surviving reflection pinned to exactly this
+        // selection/filter: staleness compares against that pinned basis
+        // (§7.26); with nothing published there is nothing to be stale
+        // against, so `stale` is false.
+        let tombstoned = tombstoned_record_ids(conn, space_id, subject_id).await?;
+        let last = load_served_reflections(conn, space_id, subject_id)
+            .await?
+            .into_iter()
+            .rev()
+            .find(|row| {
+                !source_set_tombstoned(&pinned_source_ids(&row.basis), &tombstoned)
+                    && row.selection == selection_value
+                    && row.filter.as_ref() == filter_value.as_ref()
+            });
+        let stale = match &last {
+            Some(row) => pinned_state_digest(&row.basis)? != state_digest,
+            None => false,
+        };
+        Ok(ReflectionStateView {
+            basis: json!({
+                "profile_kinds": canonical["profile_kinds"],
+                "record_count": canonical["record_count"],
+            }),
+            sufficient: sufficient(source_set.len()),
+            missing_required_profile_kinds: missing_required_profile_kinds(&profiles)?,
+            stale,
+            state_digest,
+            last_reflection_id: last.map(|row| row.reflection_id),
+        })
+    }
+
+    /// [`Self::reflection_list_in_tx`] on one read snapshot.
+    pub(crate) async fn reflection_list(
+        &self,
+        principal_id: &str,
+        request: &MemoryReflectionsListRequest,
+        now: DateTime<Utc>,
+    ) -> Result<ReflectionListPage, SpokeReject> {
+        checked(validate_memory_reflections_list(request, MAX_PAGE_SIZE))?;
+        let mut transaction = self
+            .store()
+            .pool()
+            .begin()
+            .await
+            .map_err(internal_failure)?;
+        let page = self
+            .reflection_list_in_tx(&mut transaction, principal_id, request, now)
+            .await?;
+        transaction.commit().await.map_err(internal_failure)?;
+        Ok(page)
+    }
+
+    /// [`Self::reflection_list`] on a caller-owned connection; never commits.
+    pub(crate) async fn reflection_list_in_tx(
+        &self,
+        conn: &mut SqliteConnection,
+        principal_id: &str,
+        request: &MemoryReflectionsListRequest,
+        now: DateTime<Utc>,
+    ) -> Result<ReflectionListPage, SpokeReject> {
+        let space_id = request.space_id.as_str();
+        let subject_id = request.subject_id.as_str();
+        let target = ReflectionTarget::from_list(request.selection.as_ref());
+        self.require_reflection_admitted(
+            conn,
+            principal_id,
+            "memory.reflections.list",
+            space_id,
+            subject_id,
+            &target,
+            request.cognition_filter.is_some(),
+            now,
+        )
+        .await?;
+        let status = subject_status(conn, space_id, subject_id).await?;
+        let selection_value = request
+            .selection
+            .as_ref()
+            .map(|selection| serde_json::to_value(selection).map_err(internal_failure))
+            .transpose()?;
+        let filter_value = request
+            .filter
+            .as_ref()
+            .map(|filter| serde_json::to_value(filter).map_err(internal_failure))
+            .transpose()?;
+        let records = self.live_basis_records(
+            conn,
+            space_id,
+            subject_id,
+            &status,
+            &target,
+            filter_value.as_ref(),
+        )
+        .await?;
+        let profiles = load_profile_revisions(conn, space_id, subject_id).await?;
+        let tombstoned = tombstoned_record_ids(conn, space_id, subject_id).await?;
+
+        // C-077 read-time exclusion plus the optional restriction: a supplied
+        // selection (or filter) keeps exactly the reflections pinned to it.
+        let served: Vec<ServedReflection> = load_served_reflections(conn, space_id, subject_id)
+            .await?
+            .into_iter()
+            .filter(|row| {
+                !source_set_tombstoned(&pinned_source_ids(&row.basis), &tombstoned)
+                    && selection_value
+                        .as_ref()
+                        .is_none_or(|wanted| &row.selection == wanted)
+                    && filter_value
+                        .as_ref()
+                        .is_none_or(|wanted| row.filter.as_ref() == Some(wanted))
+            })
+            .collect();
+
+        // §7.0.7/MEM-R026: the cursor binds the caller, the query and the
+        // provider snapshot marker plus the engine policy, so any grant or
+        // state change invalidates it even when the page's rows did not move.
+        let snapshot = snapshot_marker(conn, space_id).await?;
+        let binding = match jcs_sha256_hex(&json!({
+            "principal": principal_id,
+            "op": "memory.reflections.list",
+            "space": space_id,
+            "subject": subject_id,
+            "selection": selection_value,
+            "filter": filter_value,
+            "snapshot": snapshot,
+            "policy": ENGINE_POLICY_VERSION,
+        })) {
+            SpokeResult::Ok(digest) => digest,
+            SpokeResult::Reject(reject) => return Err(reject),
+        };
+        let start = list_cursor_start(request.cursor.as_deref().map(String::as_str), &binding, &served)?;
+
+        let limit =
+            usize::try_from(request.limit.map_or(MAX_PAGE_SIZE.get(), NonZeroU64::get))
+                .map_err(internal_failure)?;
+        let remaining = &served[start..];
+        let page = &remaining[..remaining.len().min(limit)];
+        let next_cursor = if remaining.len() > limit {
+            page.last()
+                .map(|row| format!("{binding}:{}", row.reflection_id))
+        } else {
+            None
+        };
+        let mut reflections = Vec::with_capacity(page.len());
+        for row in page {
+            // §7.26: authoritative staleness computed at read time against the
+            // pinned basis; nothing stored is trusted for it.
+            let digest =
+                current_digest_for(&row.selection, row.filter.as_ref(), &records, &profiles)?;
+            let stale = pinned_state_digest(&row.basis)? != digest;
+            reflections.push(reflection_wire(row, stale)?);
+        }
+        Ok(ReflectionListPage {
+            reflections,
+            next_cursor,
+        })
+    }
+
+    /// The live source set one read's digest is computed over: the subject's
+    /// non-tombstoned records, emptied for an archived subject (§7.7/§11) and
+    /// narrowed by the request's selection and provenance filter.
+    async fn live_basis_records(
+        &self,
+        conn: &mut SqliteConnection,
+        space_id: &str,
+        subject_id: &str,
+        status: &str,
+        target: &ReflectionTarget,
+        filter: Option<&Value>,
+    ) -> Result<Vec<BasisRecord>, SpokeReject> {
+        let mut records = load_basis_records(conn, space_id, subject_id).await?;
+        if status == "archived" {
+            records.clear();
+        }
+        records.retain(|record| {
+            target_admits(target, &record.visibility, record.context_id.as_deref())
+                && filter_admits(&record.provenance, filter)
+        });
+        Ok(records)
     }
 }
 
@@ -376,5 +1132,92 @@ mod tests {
         assert!(is_freeze_allowlisted("memory.reflections.state"));
         assert!(is_freeze_allowlisted("memory.reflections.list"));
         assert!(!is_freeze_allowlisted("memory.reflections.generate"));
+    }
+
+    // -- read-op helpers ------------------------------------------------------
+
+    fn profiles() -> Vec<(String, i64)> {
+        vec![("personality".to_owned(), 2)]
+    }
+
+    fn digest_of(records: &[(&str, i64)], filter: Option<&Value>) -> String {
+        let selection = json!({ "mode": "subject_all" });
+        basis_digest(&canonical_basis_object(&selection, filter, &profiles(), records))
+            .expect("canonical digest computes")
+    }
+
+    /// C-042's mechanism: every basis-affecting fact moves the digest.
+    #[test]
+    fn canonical_digest_tracks_every_basis_fact() {
+        let base = digest_of(&[("r-1", 1)], None);
+        assert_ne!(base, digest_of(&[("r-1", 2)], None), "record revision");
+        assert_ne!(base, digest_of(&[("r-1", 1), ("r-2", 1)], None), "record set");
+        let selection = json!({ "mode": "subject_all" });
+        let filtered = Some(json!({ "source_context_ids": ["ctx-a"] }));
+        assert_ne!(base, {
+            let digest = basis_digest(&canonical_basis_object(
+                &selection,
+                filtered.as_ref(),
+                &profiles(),
+                &[("r-1", 1)],
+            ));
+            digest.expect("canonical digest computes")
+        }, "filter");
+        let mut profiles = profiles();
+        profiles[0].1 = 3;
+        let other = basis_digest(&canonical_basis_object(
+            &selection,
+            None,
+            &profiles,
+            &[("r-1", 1)],
+        ));
+        assert_ne!(base, other.expect("canonical digest computes"), "profile revision");
+    }
+
+    /// The digest input is total: the same facts in the same order produce the
+    /// same digest regardless of call ordering.
+    #[test]
+    fn canonical_digest_is_deterministic() {
+        assert_eq!(
+            digest_of(&[("r-1", 1), ("r-2", 2)], None),
+            digest_of(&[("r-1", 1), ("r-2", 2)], None),
+        );
+    }
+
+    /// C-077: only a fully tombstoned non-empty source set is excluded; a
+    /// partial tombstone stays listed (already stale) and an empty pin never
+    /// excludes.
+    #[test]
+    fn whole_pinned_source_set_tombstones_the_row() {
+        let tombstoned = ["r-1".to_owned(), "r-2".to_owned()];
+        assert!(source_set_tombstoned(&["r-1".into(), "r-2".into()], &tombstoned));
+        // Partial tombstone: the pinned set still has a live source.
+        assert!(!source_set_tombstoned(
+            &["r-1".into(), "r-2".into(), "r-3".into()],
+            &tombstoned
+        ));
+        assert!(!source_set_tombstoned(&[], &tombstoned));
+    }
+
+    /// Placement parity with recall, via the stored-selection resolver.
+    #[test]
+    fn stored_selection_resolves_to_recall_parity() {
+        let admits = |selection: &Value, visibility: &str, context: Option<&str>| {
+            let target = target_from_value(selection).expect("selection resolves");
+            target_admits(&target, visibility, context)
+        };
+        let all = json!({ "mode": "subject_all" });
+        let shared = json!({ "mode": "shared_only" });
+        let contexts = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"] });
+        let with_shared =
+            json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"], "include_shared": true });
+        assert!(admits(&all, "shared", Some("ctx-b")));
+        assert!(admits(&all, "context", Some("ctx-b")));
+        assert!(admits(&shared, "shared", None));
+        assert!(!admits(&shared, "context", Some("ctx-a")));
+        assert!(admits(&contexts, "context", Some("ctx-a")));
+        assert!(!admits(&contexts, "context", Some("ctx-b")));
+        assert!(!admits(&contexts, "shared", None));
+        assert!(admits(&with_shared, "shared", None));
     }
 }

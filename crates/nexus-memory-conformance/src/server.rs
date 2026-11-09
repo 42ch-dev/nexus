@@ -1774,18 +1774,44 @@ impl MemoryPort for FixtureMemoryProvider {
 
     async fn get_reflection_state(
         &self,
-        _principal: &Principal,
-        _request: MemoryReflectionsStateRequest,
+        principal: &Principal,
+        request: MemoryReflectionsStateRequest,
     ) -> SpokeResult<MemoryReflectionsStateResponse> {
-        unsupported("memory.reflections.state")
+        let view = match self
+            .reflection_state(principal_id(principal), &request, Utc::now())
+            .await
+        {
+            Ok(view) => view,
+            Err(reject) => return SpokeResult::Reject(reject),
+        };
+        let mut body = json!({
+            "basis": view.basis,
+            "data_sufficiency": if view.sufficient { "sufficient" } else { "insufficient" },
+            "missing_required_profile_kinds": view.missing_required_profile_kinds,
+            "stale": view.stale,
+            "state_digest": view.state_digest,
+        });
+        if let Some(last_reflection_id) = view.last_reflection_id {
+            body["last_reflection_id"] = json!(last_reflection_id);
+        }
+        respond(body)
     }
 
     async fn list_reflections(
         &self,
-        _principal: &Principal,
-        _request: MemoryReflectionsListRequest,
+        principal: &Principal,
+        request: MemoryReflectionsListRequest,
     ) -> SpokeResult<MemoryReflectionsListResponse> {
-        unsupported("memory.reflections.list")
+        match self
+            .reflection_list(principal_id(principal), &request, Utc::now())
+            .await
+        {
+            Ok(page) => respond(json!({
+                "reflections": page.reflections,
+                "next_cursor": page.next_cursor,
+            })),
+            Err(reject) => SpokeResult::Reject(reject),
+        }
     }
 
     async fn generate_reflection(
