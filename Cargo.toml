@@ -250,8 +250,17 @@ regress = "0.12"
 # Connect responder, the TS generated union formatting and the bindings/CI
 # drift tooling moved. libp2p DOES move with this round: upstream 0.15.2
 # requires `libp2p =0.57.1`.
-spoke-schemas = "=0.15.2"
-spoke-operations = "=0.15.2"
+# Lockstep round 0.15.2 → 0.16.0: upstream v0.16.0 adds the cognition family
+# (structured cognition protocol and consumers, upstream #154) — nexus keeps it
+# UNCONSUMED (baseline adaptation only; refusal pins unchanged). Presence
+# fix: optional array/map members on requests/responses became Option<...>
+# (presence-sensitive); MindDelta paths are now RFC 6901 pointers rooted at
+# /modules/mental/<field> (consumer fixtures updated this round).
+# spoke-operations drops its *_scope_view helper surface (unused here) and
+# spoke-connect makes spoke-operations/schemas unconditional deps. libp2p
+# stays =0.57.1.
+spoke-schemas = "=0.16.0"
+spoke-operations = "=0.16.0"
 # V1.148 P3 N-C0 (DF-72): spoke-connect — Connect Host facade (signed
 # hello, allowlist, capability-token gate). V1.153 P0: 0.8.2 → 0.9.1
 # (dial-bound hello + envelope-auth v2 are internal to spoke-connect;
@@ -271,7 +280,11 @@ spoke-operations = "=0.15.2"
 # the served-op set is unchanged and `memory.*` refusal is pinned in interop.
 # 0.15.1 → 0.15.2: remote-responder-only fix (see the round note above);
 # nexus's served-op set and refusal expectations are unchanged.
-spoke-connect = "=0.15.2"
+# 0.15.2 → 0.16.0: spoke-operations/spoke-schemas became unconditional deps
+# of every connect build; new normal deps (base64, chrono, getrandom, uuid,
+# serde_jcs); uniffi now optional (nexus enables neither ffi nor bindgen-cli);
+# remote_adapter public API and CapabilityTokenProof/Claims byte-identical.
+spoke-connect = "=0.16.0"
 # V1.148 P3 N-C0: libp2p — identity/PeerId/Multiaddr types for the
 # `nexus42 connect` CLI (ed25519 keypair + protobuf key serialization only).
 # V1.195 P4: 0.56.0 → 0.57.0 — lockstep with spoke-connect 0.14.1 (see the
