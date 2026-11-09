@@ -264,9 +264,15 @@ struct ClaimsView<'a> {
 /// graph carries no Connect edge and could not validate against it at all —
 /// hence this mirror. The remote dial path re-validates through the published
 /// type (`memory_remote.rs`, double validation, fail-closed both layers).
-/// Drift guard: the `mirror_matches_published_capability_token` test below
-/// pins mirror-vs-published agreement at 0.16.0; any upstream shape change
-/// turns silent drift into a red gate.
+/// Drift guard: the `token_equivalence_tests` below pin mirror-vs-published
+/// agreement on the enumerated vectors — the declared 0.16.0 shape with every
+/// declared optional member in each presence state (present / absent / null),
+/// the coded refusal surface, and one named hypothetical additive member. An
+/// UNNAMED future upstream member that the published type starts accepting
+/// is not covered by a stored vector: the mirror would refuse tokens
+/// carrying it (`deny_unknown_fields`) while published accepts them — the
+/// I-000338 failure shape — so every lockstep bump MUST extend these vectors
+/// with any new upstream member.
 fn validate_capability_token(token: &serde_json::Value) -> CoreResult<()> {
     ProofView::deserialize(token)
         .map(|_| ())
@@ -277,9 +283,12 @@ fn validate_capability_token(token: &serde_json::Value) -> CoreResult<()> {
 mod token_equivalence_tests {
     // I-000332 drift guard: the mirror (`validate_capability_token`) must
     // accept/reject exactly what the published `spoke_connect` 0.16.0
-    // `CapabilityTokenProof` accepts/rejects on every shared vector. A future
-    // upstream wire-shape extension fails this test instead of drifting
-    // silently.
+    // `CapabilityTokenProof` accepts/rejects on every shared vector. The
+    // vectors enumerate the declared shape — including each declared
+    // optional member in every presence state — and one named hypothetical
+    // additive member (I-000338); an unnamed future upstream member is
+    // covered only once a lockstep bump extends these vectors, not by this
+    // module's presence alone.
     use super::{validate_capability_token, CREDENTIAL_INVALID_CODE};
     use crate::error::CoreError;
     use spoke_connect::core::CapabilityTokenProof;
@@ -345,6 +354,56 @@ mod token_equivalence_tests {
         assert!(
             matches!(err, CoreError::Coded { ref code, .. } if code == CREDENTIAL_INVALID_CODE)
         );
+    }
+
+    /// Declared optional members agree in every presence state (I-000338):
+    /// present, absent (serde default) and explicit null all deserialize to
+    /// the same value on both sides. The 0.15.2 → 0.16.0 lockstep produced
+    /// exactly this class of member; a vector set that only exercises the
+    /// full shape never observes an optional member's absence.
+    #[test]
+    fn declared_optional_members_agree_across_presence_states() {
+        for member in ["iat", "jti"] {
+            // Present: the full-shape vector already carries both.
+            assert_equivalent(valid_token(), &format!("{member} present"));
+
+            // Absent: `#[serde(default)]` fills `None` on both sides.
+            let mut absent = valid_token();
+            absent["claims"].as_object_mut().unwrap().remove(member);
+            assert_equivalent(absent, &format!("{member} absent"));
+
+            // Null: `Option` deserializes it to `None` on both sides.
+            let mut null = valid_token();
+            null["claims"][member] = serde_json::Value::Null;
+            assert_equivalent(null, &format!("{member} null"));
+        }
+    }
+
+    /// Additive-member tripwire (I-000338): today both sides reject an
+    /// unknown claim field, so the vector is green — the mirror's coded
+    /// refusal for it is pinned explicitly. The moment a future upstream
+    /// version starts ACCEPTING a member the mirror does not declare, the
+    /// published side of `assert_equivalent` flips to `Ok` while
+    /// `validate_capability_token` keeps refusing, and this test fails:
+    /// the guard fires at the lockstep bump instead of letting real
+    /// credentials carrying the new member drift into refused-at-the-mirror
+    /// failures unnoticed.
+    #[test]
+    fn an_upstream_additive_member_flips_this_guard_red() {
+        let mut additive = valid_token();
+        additive["claims"]["nbf"] = serde_json::json!(1_700_000_000_u64);
+
+        // The mirror's coded refusal surface for the extra field.
+        let err = validate_capability_token(&additive)
+            .expect_err("the mirror refuses a claim field it does not declare");
+        assert!(
+            matches!(err, CoreError::Coded { ref code, .. } if code == CREDENTIAL_INVALID_CODE),
+            "the refusal stays the coded credential failure: {err:?}"
+        );
+
+        // And that refusal is exactly the published refusal today — which is
+        // precisely the equivalence a future additive member breaks.
+        assert_equivalent(additive, "hypothetical additive member");
     }
 }
 

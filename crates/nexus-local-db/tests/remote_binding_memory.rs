@@ -431,10 +431,11 @@ async fn late_acknowledgement_cannot_revive_a_deleted_binding() {
         RemoteBindingObjectState::Live,
     )
     .await;
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM remote_binding_memory_objects WHERE binding_id = ?",
+    let count: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) AS \"count: i64\" FROM remote_binding_memory_objects \
+         WHERE binding_id = ?",
+        seed.binding_id
     )
-    .bind(&seed.binding_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -536,12 +537,12 @@ async fn object_facts_stay_monotone_across_the_mapped_writes() {
         let pool = pool.clone();
         let binding_id = seed.binding_id.clone();
         async move {
-            sqlx::query_scalar::<_, String>(
+            sqlx::query_scalar!(
                 "SELECT state FROM remote_binding_memory_objects \
                  WHERE binding_id = ? AND object_id = ?",
+                binding_id,
+                object_id
             )
-            .bind(binding_id)
-            .bind(object_id)
             .fetch_optional(&pool)
             .await
             .unwrap()

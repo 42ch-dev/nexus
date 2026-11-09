@@ -272,6 +272,22 @@ impl CliConfig {
         Self::parse_document(&config_path, &content)
     }
 
+    /// The admission read a bootstrap preflight runs (I-000339): the same
+    /// [`Self::read_document_for_mutation`] refusal rule [`Self::mutate`]
+    /// applies, under the same writer lock, without writing anything. One
+    /// rule, two readers: a refusal rule added to the mutation path cannot
+    /// desynchronize from the preflight.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::read_document_for_mutation`], plus a writer lock that
+    /// cannot be taken.
+    pub(crate) fn preflight_document(nexus: &Path) -> anyhow::Result<()> {
+        Self::with_writer_lock(nexus, || {
+            Self::read_document_for_mutation(nexus).map(|_| ())
+        })
+    }
+
     /// Migrate a legacy `config.json` to `config.toml` under the writer lock.
     fn migrate_legacy_json(nexus: &Path) -> anyhow::Result<()> {
         Self::with_writer_lock(nexus, || Self::migrate_legacy_json_locked(nexus))
@@ -1526,6 +1542,51 @@ platform_url = "https://direct.api.io"
             std::fs::read_link(&config_path).expect("the config link destination"),
             std::path::Path::new("real.toml"),
             "the config link keeps its original destination"
+        );
+    }
+
+    /// I-000339: the bootstrap preflight and the real mutation share one
+    /// admission rule — every document the mutation refuses, the preflight
+    /// refuses too, with the same refusal, and what both accept stays
+    /// accepted. Since the preflight IS `read_document_for_mutation`, a rule
+    /// added to the mutation path cannot desynchronize the preflight; this
+    /// pins the wiring.
+    #[test]
+    fn preflight_acceptance_is_mutation_acceptance() {
+        let (_home, nexus_dir) = isolated_nexus_dir();
+
+        // Absent document: both accept (first-time configuration keeps
+        // working).
+        CliConfig::preflight_document(&nexus_dir)
+            .expect("the preflight accepts an absent document");
+        CliConfig::mutate(|_| Ok(())).expect("the mutation accepts an absent document");
+
+        // A corrupt document: both refuse through the same parse rule, with
+        // the same refusal.
+        std::fs::write(nexus_dir.join("config.toml"), "not toml {{{{").expect("seed corrupt");
+        let preflight = CliConfig::preflight_document(&nexus_dir)
+            .expect_err("the preflight must refuse a corrupt document");
+        let mutation =
+            CliConfig::mutate(|_| Ok(())).expect_err("the mutation must refuse a corrupt document");
+        assert_eq!(
+            preflight.to_string(),
+            mutation.to_string(),
+            "one refusal rule means one refusal text"
+        );
+
+        // An existing entry that cannot be read — a directory at the
+        // document path, the portable dangling-link stand-in — refuses both
+        // with the same read refusal.
+        std::fs::remove_file(nexus_dir.join("config.toml")).expect("drop the corrupt document");
+        std::fs::create_dir(nexus_dir.join("config.toml")).expect("seed the unreadable entry");
+        let preflight = CliConfig::preflight_document(&nexus_dir)
+            .expect_err("the preflight must refuse an unreadable entry");
+        let mutation = CliConfig::mutate(|_| Ok(()))
+            .expect_err("the mutation must refuse an unreadable entry");
+        assert_eq!(
+            preflight.to_string(),
+            mutation.to_string(),
+            "one refusal rule means one refusal text"
         );
     }
 }

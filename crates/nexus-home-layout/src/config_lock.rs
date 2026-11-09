@@ -463,6 +463,82 @@ pub fn acquire(nexus_home: &Path) -> std::io::Result<ConfigLock> {
     }
 }
 
+/// The lock-file authority a denied [`acquire`] leaves the caller with
+/// (I-000336).
+///
+/// `acquire` surfaces every denied step as the same `PermissionDenied`, but
+/// only one of them proves the documented read-only home (I-000291): the
+/// exclusive create of the lock file denied by a home with no
+/// directory-write authority. The other denials — an existing lock file
+/// another principal may hold, an ownership-token write that failed after
+/// creation — establish nothing about writer absence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockAuthority {
+    /// The lock-file create/open is denied AND the lock entry is
+    /// independently observed absent (`symlink_metadata` → `NotFound`): no
+    /// writer can hold a lock that cannot exist, the I-000291 read-only-home
+    /// boundary (the home being absent altogether lands here too — no lock
+    /// file and no document can exist).
+    ReadOnlyHome,
+    /// A lock entry exists — hit by the create or observed by stat; another
+    /// principal may hold the writer lock.
+    Exists,
+    /// The probe created (and removed) the lock file: this process has the
+    /// directory-write authority every writer needs, so the denied step was
+    /// something else — an ownership-token write, not a read-only home.
+    Writer,
+    /// The probe could not establish the boundary — the denial's stage is
+    /// neither create nor open, or the independent stat of the lock entry
+    /// was itself refused — so nothing was proved and the caller must fail
+    /// closed.
+    Unproven,
+}
+
+/// Classify one denied [`acquire`] without re-deriving the read-only-home
+/// admission from a repeated denial.
+///
+/// Two independent facts are required for [`LockAuthority::ReadOnlyHome`]:
+/// the lock-file create/open is denied, and the lock entry's absence is
+/// established by a separate `symlink_metadata` read (I-000336, QC1-W1 — a
+/// path-specific policy can deny only the lock file of an otherwise usable
+/// home, so the repeated denial alone is no proof). An entry the create runs
+/// into or the stat observes, a stat the process may not perform, and any
+/// other ambiguity stay [`LockAuthority::Exists`] /
+/// [`LockAuthority::Unproven`] and fail closed. A lock the probe creates is
+/// unlinked again before returning; a failed unlink still reports
+/// [`LockAuthority::Writer`] — the authority is proved, and the tokenless
+/// leftover becomes stealable as stale only after the [`STALE_AFTER`] window
+/// (10 s) elapses, the bounded cost the next [`acquire`] pays. The probe
+/// window is the life of one create call, so a writer racing past it lands
+/// in the existing stale-steal path.
+pub fn probe_authority(nexus_home: &Path) -> LockAuthority {
+    let path = nexus_home.join(LOCK_FILE);
+    match lock_options().open(&path) {
+        Ok(file) => {
+            drop(file);
+            if let Err(unlink_error) = std::fs::remove_file(&path) {
+                tracing::warn!(
+                    %unlink_error,
+                    "config.toml.lock probe could not unlink the file it created"
+                );
+            }
+            LockAuthority::Writer
+        }
+        // An entry the create ran into: another principal may hold the
+        // writer lock.
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => LockAuthority::Exists,
+        // The create/open denial is only the first fact; the lock entry's
+        // absence must come from a separate stat, not from the denial.
+        Err(_) => match std::fs::symlink_metadata(&path) {
+            Err(stat_error) if stat_error.kind() == std::io::ErrorKind::NotFound => {
+                LockAuthority::ReadOnlyHome
+            }
+            Ok(_) => LockAuthority::Exists,
+            Err(_) => LockAuthority::Unproven,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};

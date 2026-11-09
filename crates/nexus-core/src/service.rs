@@ -219,21 +219,28 @@ pub struct CoreService {
 /// Lock acquisition and the protected read report through separate layers: a
 /// failed protected read propagates and is never retried outside the lock,
 /// where a concurrent in-place rewrite would be observable. The one justified
-/// unlocked read is the documented read-only home (I-000291):
-/// `PermissionDenied` on the lock file means no directory-write authority for
-/// the lock — the same authority every writer needs for its lock file, staging
-/// directory and rename — so no writer the coordination could exclude exists
-/// in such a home and the uncoordinated read is whole-document by that
-/// permission boundary. Falling back there preserves I-000291: an
+/// unlocked read is the documented read-only home (I-000291), now proven
+/// rather than assumed (I-000336): a denied acquisition is classified by
+/// re-attempting the lock-file create once, and only the denied create with
+/// no existing lock file — the same directory-write authority every writer
+/// needs for its lock file, staging directory and rename — takes the
+/// uncoordinated read. In such a home no writer the coordination could
+/// exclude exists, and the read is whole-document by that permission
+/// boundary. Falling back there preserves I-000291: an
 /// already-provisioned read-only home still serves a no-override `ReadOnly`
-/// open instead of failing on the lock. Any other acquisition failure (an
-/// unremovable stale lock after the steal deadline, an unwritable ownership
-/// token) establishes nothing about writers and fails closed.
+/// open instead of failing on the lock. Every other denial — an existing
+/// lock file another principal may hold, an ownership-token write this
+/// process could not complete, a home it cannot even create — establishes
+/// nothing about writers and fails closed with its own diagnostic, as does
+/// any non-denied acquisition failure (an unremovable stale lock after the
+/// steal deadline, an unwritable ownership token surfaced as a non-denied
+/// error kind).
 ///
 /// # Errors
 ///
-/// [`CoreError::Internal`] for a lock acquisition failure other than
-/// `PermissionDenied` and for an unreadable document, and the mapped
+/// [`CoreError::Internal`] for a lock acquisition failure that is not the
+/// proven read-only-home denial (the diagnostic carries the failing
+/// classification) and for an unreadable document, and the mapped
 /// [`CoreError::InvalidInput`] of a stored remote reference that fails
 /// validation — a malformed table never degrades to local silently.
 fn selection_snapshot(nexus_home: &Path) -> CoreResult<MemoryProviderSelection> {
@@ -254,10 +261,27 @@ fn snapshot_with_lock(
 ) -> CoreResult<MemoryProviderSelection> {
     let config = match locked_read(nexus_home) {
         Ok(config) => config?,
-        // Only a denied lock-file write is the documented read-only home;
-        // read the whole document without coordination (I-000291).
         Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
-            read_provider_snapshot(nexus_home)?
+            // I-000336: only the proven read-only home reads unlocked. The
+            // classification lives in the lock owner and requires two
+            // independent facts — a denied lock-file create/open AND the
+            // lock entry's absence established by a separate stat — so a
+            // path-specific denial of an otherwise usable home cannot pass
+            // for the I-000291 boundary. Every other classification fails
+            // closed.
+            match nexus_home_layout::config_lock::probe_authority(nexus_home) {
+                nexus_home_layout::config_lock::LockAuthority::ReadOnlyHome => {
+                    read_provider_snapshot(nexus_home)?
+                }
+                authority => {
+                    return Err(CoreError::Internal {
+                        category: format!(
+                            "config_lock: denied acquisition is not a proven read-only home \
+                             ({authority:?}): {error}"
+                        ),
+                    })
+                }
+            }
         }
         Err(error) => {
             return Err(CoreError::Internal {
@@ -1205,12 +1229,112 @@ mod tests {
         );
     }
 
-    /// The read-only-home fallback survives the split: a denied lock-file
-    /// write is the one acquisition failure that reads the document without
-    /// coordination. The end-to-end acceptance is
-    /// `tests/readonly_config_open.rs`; this pins the split layer itself.
+    /// The proven read-only-home fallback survives the classification: a
+    /// denied lock-file create in a home with no directory-write authority
+    /// (the probe's re-attempt is denied the same way) is the one acquisition
+    /// failure that reads the document without coordination. The end-to-end
+    /// acceptance is `tests/readonly_config_open.rs`; this pins the split
+    /// layer itself.
+    #[cfg(unix)]
     #[test]
-    fn a_permission_denied_acquisition_still_falls_back_to_the_unlocked_read() {
+    fn a_proven_read_only_home_still_falls_back_to_the_unlocked_read() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let home = tempfile::tempdir().expect("home");
+        std::fs::write(
+            home.path().join("config.toml"),
+            config_document(&remote_selection()),
+        )
+        .expect("config");
+        // No lock file exists and the home grants no write authority, so the
+        // probe's create is denied the same way the acquisition was.
+        std::fs::set_permissions(home.path(), std::fs::Permissions::from_mode(0o555))
+            .expect("seal the nexus home");
+
+        let selection = snapshot_with_lock(home.path(), |_| {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        })
+        .expect("the proven read-only home falls back to the uncoordinated read");
+
+        assert_eq!(selection, remote_selection());
+    }
+
+    /// I-000336 negative: an existing lock file stands in the way of the
+    /// denied acquisition, and another principal may hold the writer lock —
+    /// the probe sees the file and the snapshot must refuse instead of
+    /// producing an unlocked successful read of the valid document below.
+    #[test]
+    fn an_existing_lock_file_denies_the_read_only_home_fallback() {
+        let home = tempfile::tempdir().expect("home");
+        std::fs::write(
+            home.path().join("config.toml"),
+            config_document(&remote_selection()),
+        )
+        .expect("config");
+        std::fs::write(home.path().join("config.toml.lock"), "held").expect("existing lock");
+
+        let error = snapshot_with_lock(home.path(), |_| {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        })
+        .expect_err("an existing lock file must not produce an unlocked snapshot");
+
+        let CoreError::Internal { category } = &error else {
+            panic!("unexpected error shape: {error:?}");
+        };
+        assert!(
+            category.starts_with("config_lock: denied acquisition"),
+            "the refusal names the unproven classification: {error:?}"
+        );
+    }
+
+    /// I-000336 fixup negative (QC1-W1): a denied create whose independent
+    /// stat is itself denied proves nothing — the lock entry's existence
+    /// cannot be ruled out, so the snapshot refuses instead of reading
+    /// unlocked. Stripping the directory's search bit denies both the
+    /// lock-file create and the separate stat with one real policy: the
+    /// ambiguous shape that must never admit the unlocked read.
+    #[cfg(unix)]
+    #[test]
+    fn an_unstatable_home_denied_acquisition_fails_closed() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+            }
+        }
+
+        let home = tempfile::tempdir().expect("home");
+        std::fs::write(
+            home.path().join("config.toml"),
+            config_document(&remote_selection()),
+        )
+        .expect("config");
+        std::fs::set_permissions(home.path(), std::fs::Permissions::from_mode(0o444))
+            .expect("strip the search bit");
+        let _restore = Restore(home.path().to_path_buf());
+
+        let error = snapshot_with_lock(home.path(), |_| {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        })
+        .expect_err("an unstatable home is not a proven read-only home");
+
+        let CoreError::Internal { category } = &error else {
+            panic!("unexpected error shape: {error:?}");
+        };
+        assert!(
+            category.contains("Unproven") && category.starts_with("config_lock: "),
+            "the refusal names the unproven classification: {error:?}"
+        );
+    }
+
+    /// I-000336 negative: in a home this process CAN create the lock file in,
+    /// a denied acquisition was not a write-authority boundary (an
+    /// ownership-token write, not a read-only home) — writers may exist, so
+    /// the snapshot fails closed instead of reading unlocked.
+    #[test]
+    fn a_denied_acquisition_with_lock_write_authority_fails_closed() {
         let home = tempfile::tempdir().expect("home");
         std::fs::write(
             home.path().join("config.toml"),
@@ -1218,11 +1342,21 @@ mod tests {
         )
         .expect("config");
 
-        let selection = snapshot_with_lock(home.path(), |_| {
+        let error = snapshot_with_lock(home.path(), |_| {
             Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
         })
-        .expect("the denied lock-file write falls back to the uncoordinated read");
+        .expect_err("a writable home is not a proven read-only home");
 
-        assert_eq!(selection, remote_selection());
+        let CoreError::Internal { category } = &error else {
+            panic!("unexpected error shape: {error:?}");
+        };
+        assert!(
+            category.starts_with("config_lock: denied acquisition"),
+            "the refusal names the unproven classification: {error:?}"
+        );
+        assert!(
+            !home.path().join("config.toml.lock").exists(),
+            "the probe leaves no lock file behind"
+        );
     }
 }

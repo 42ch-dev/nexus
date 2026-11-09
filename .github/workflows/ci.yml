@@ -661,6 +661,7 @@ jobs:
               -p nexus-cloud-domain
               -p nexus-config-metadata
               -p nexus-memory-conformance
+              -p nexus-spoke-adapter
           - group: orchestration-core
             packages: >-
               -p nexus-orchestration
@@ -724,13 +725,6 @@ jobs:
           pnpm --filter @42ch/nexus-provider-acp build
       - name: Run tests
         run: cargo test ${{ matrix.packages }}
-      # I-000324 (user-approved enumeration): the C-111 remote creator-memory
-      # cohort is feature-gated on nexus42's own `memory-remote`, so the group
-      # step above never selects it. Run it in the `cli` group, after the peer
-      # setup this group already performs; no new job or cache key.
-      - name: Run memory-remote creator cohort
-        if: matrix.group == 'cli'
-        run: cargo test -p nexus42 --features memory-remote --test creator_memory_remote
 
   # R-V1193-P1T7-CI-CONNECT-HOST-TESTS (v1.193 P2-T14). The retirement left
   # exactly two shipped app cohorts: the ordinary `cli` default (covered by
@@ -796,6 +790,72 @@ jobs:
         run: cargo test -p nexus42 --features connect-host --test connect_token_issue
       - name: Run Connect command surface contract
         run: cargo test -p nexus42 --features connect-host --test command_surface_contract v1193_connect_help_describes_served_compute_surface -- --exact
+
+  # I-000340 (follow-up). The C-111 remote creator-memory cohort was a step on
+  # the `cli` matrix row (I-000324), but it compiles a differently-feature-
+  # unified graph: `nexus42 --features memory-remote` pulls
+  # `nexus-core/memory-remote` and links the memory client, so its dep graph
+  # must not share the matrix row's cache key — the same precedent recorded
+  # for rust-connect-host above ("a second, differently-feature-unified dep
+  # graph must not share the matrix group's cache key"). The `cli` row's
+  # budget already forced one split; giving the cohort its own small leg keeps
+  # both caches coherent instead of accepting extra minutes on a row that
+  # cannot absorb them. Same command as before, same runner class, no
+  # coverage change; no peer setup needed (the test spawns
+  # CARGO_BIN_EXE_nexus42 only).
+  rust-memory-remote:
+    name: Rust memory-remote cohort
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
+    env:
+      SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
+      # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
+      # Behaviour unchanged; local dev profiles untouched.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          filter: blob:none
+      - uses: ./.github/actions/free-disk-space
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Read workspace version for cargo cache key
+        id: workspace-version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+        with:
+          # Distinct suffix: this cohort's feature unification differs from
+          # rust-tests' groups, rust-connect-host and rust-clippy-connect-host
+          # (same-key concurrent writers would race — same precedent as
+          # -sqlx/-module-dx).
+          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-memory-remote
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+      - name: Run memory-remote creator cohort
+        run: cargo test -p nexus42 --features memory-remote --test creator_memory_remote
+      - name: Run dev-graph memory-remote conformance cohort
+        # C7 (I-000322) marks ten nexus-memory-conformance test targets
+        # `required-features = ["dev-graph-memory-remote"]`, so the plain
+        # `cargo test ${{ matrix.packages }}` core-group step skips them. The
+        # feature exists only on that package: never append it to the
+        # multi-package group invocation. Clippy coverage of this combination
+        # is out of scope: the feature set leaves the pre-existing
+        # `nexus-core` `test_hooks` seams dead (their only users need
+        # `compute`), so `--all-targets -- -D warnings` fails on dead_code
+        # that predates this card.
+        run: cargo test -p nexus-memory-conformance --features dev-graph-memory-remote
+      - name: Run nexus-core memory-remote drift-guard tests
+        # I-000338's `memory_credentials` drift guards are
+        # `#[cfg(all(test, feature = "memory-remote"))]`; the core-group
+        # invocation never enables nexus-core's `memory-remote`, so without
+        # this step the tripwire fires only locally.
+        run: cargo test -p nexus-core --features memory-remote --lib
 
 
   # QC3 W-001 / QC2 F-001 (v1.193 P2-T14). Retiring the Rust daemon crate moved
