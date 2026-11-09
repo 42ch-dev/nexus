@@ -2694,6 +2694,101 @@ impl ProviderPort for QuietPort {
     }
 }
 
+/// I-000282: observes the outgoing `memory.candidates.list` request bodies so
+/// a test can pin the exact page bound the Core read path negotiated.
+struct CandidateListProbe {
+    inner: Arc<dyn RemoteMemoryService>,
+    limits: std::sync::Mutex<Vec<u64>>,
+}
+
+impl CandidateListProbe {
+    fn over(inner: Arc<dyn RemoteMemoryService>) -> Self {
+        Self {
+            inner,
+            limits: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn limits(&self) -> Vec<u64> {
+        self.limits.lock().expect("observed page limits").clone()
+    }
+}
+
+#[async_trait]
+impl RemoteMemoryService for CandidateListProbe {
+    async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
+        if op == "memory.candidates.list" {
+            if let Some(limit) = payload.get("limit").and_then(Value::as_u64) {
+                self.limits
+                    .lock()
+                    .expect("observed page limits")
+                    .push(limit);
+            }
+        }
+        self.inner.invoke(peer_id, op, payload).await
+    }
+}
+
+/// I-000282: the Core read path takes the page bound the provider advertises
+/// in `memory.describe` — the fixture advertises 25, narrower than the local
+/// default — so every outgoing candidate page request carries `limit: 25`.
+/// The decorator observes the real signed request body; a client that assumed
+/// its own larger page would ask for it here.
+#[tokio::test]
+async fn remote_candidate_pages_carry_the_negotiated_limit() {
+    let env = Env::boot("R2 Page Bound Owner").await;
+    let provider = Provider::open().await;
+    let probe = Arc::new(CandidateListProbe::over(
+        provider.inner.server(provider.directory.admission()),
+    ));
+    let service: Arc<dyn RemoteMemoryService> = probe.clone();
+    let (core, responder) = provider.open_core_serving(&env, service).await;
+    let principal = core.active_principal().await.expect("active principal");
+
+    // Two pending candidates exercise the read; the assertion is on the
+    // outgoing request bound, not on how many rows fit in one page.
+    for pending_id in ["pend_bound_a", "pend_bound_b"] {
+        core.create_pending_review(
+            &principal,
+            dto::<CreatePendingReviewRequest>(json!({
+                "creator_id": env.creator_id,
+                "pending_id": pending_id,
+                "session_id": format!("sess_{pending_id}"),
+                "task_kind": "brainstorm",
+                "raw_digest": PROMOTE_DIGEST,
+                "created_at": "2026-01-01T00:00:02Z",
+            })),
+        )
+        .await
+        .expect("creator capture");
+    }
+    let listed = core
+        .list_pending_reviews(&principal, None, 10)
+        .await
+        .expect("creator queue");
+    assert_eq!(listed.items.len(), 2);
+
+    let limits = probe.limits();
+    assert!(
+        !limits.is_empty(),
+        "the read walked the provider's candidate pages"
+    );
+    assert!(
+        limits.iter().all(|limit| *limit == 25),
+        "every outgoing page request takes the advertised bound (25), got {limits:?}"
+    );
+
+    assert_eq!(
+        responder_of(responder).await.remote_peer_id().as_deref(),
+        Some(peer_id(&CLIENT_SEED).as_str()),
+        "the pages travelled the signed session of the loaded credential"
+    );
+    assert!(
+        core.close().await.expect("close").cleanup_confirmed,
+        "the open releases its own admission"
+    );
+}
+
 /// Test-only decorator over the REAL fixture memory service.
 ///
 /// It forwards every ordinary request unchanged to the assembled fixture service
