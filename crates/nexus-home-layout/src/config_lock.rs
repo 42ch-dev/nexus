@@ -474,29 +474,42 @@ pub fn acquire(nexus_home: &Path) -> std::io::Result<ConfigLock> {
 /// creation — establish nothing about writer absence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LockAuthority {
-    /// No lock file exists and creating one is denied: no writer this
-    /// protocol could coordinate exists in this home. The home being absent
-    /// altogether lands here too — no lock file and no document can exist.
+    /// The lock-file create/open is denied AND the lock entry is
+    /// independently observed absent (`symlink_metadata` → `NotFound`): no
+    /// writer can hold a lock that cannot exist, the I-000291 read-only-home
+    /// boundary (the home being absent altogether lands here too — no lock
+    /// file and no document can exist).
     ReadOnlyHome,
-    /// A lock file already exists; another principal may hold the writer
-    /// lock.
+    /// A lock entry exists — hit by the create or observed by stat; another
+    /// principal may hold the writer lock.
     Exists,
     /// The probe created (and removed) the lock file: this process has the
     /// directory-write authority every writer needs, so the denied step was
     /// something else — an ownership-token write, not a read-only home.
     Writer,
-    /// The probe itself failed; nothing was proved.
+    /// The probe could not establish the boundary — the denial's stage is
+    /// neither create nor open, or the independent stat of the lock entry
+    /// was itself refused — so nothing was proved and the caller must fail
+    /// closed.
     Unproven,
 }
 
-/// Classify one denied [`acquire`] by re-attempting the lock-file create
-/// once with the same exclusive-create options.
+/// Classify one denied [`acquire`] without re-deriving the read-only-home
+/// admission from a repeated denial.
 ///
-/// A lock the probe creates is unlinked again before returning; a failed
-/// unlink still reports [`LockAuthority::Writer`] — the authority is
-/// proved, and the tokenless leftover is stolen as stale by the next
-/// [`acquire`]. The probe window is the life of one create call, so a
-/// writer racing past it lands in the existing stale-steal path.
+/// Two independent facts are required for [`LockAuthority::ReadOnlyHome`]:
+/// the lock-file create/open is denied, and the lock entry's absence is
+/// established by a separate `symlink_metadata` read (I-000336, QC1-W1 — a
+/// path-specific policy can deny only the lock file of an otherwise usable
+/// home, so the repeated denial alone is no proof). An entry the create runs
+/// into or the stat observes, a stat the process may not perform, and any
+/// other ambiguity stay [`LockAuthority::Exists`] /
+/// [`LockAuthority::Unproven`] and fail closed. A lock the probe creates is
+/// unlinked again before returning; a failed unlink still reports
+/// [`LockAuthority::Writer`] — the authority is proved, and the tokenless
+/// leftover is stolen as stale by the next [`acquire`]. The probe window is
+/// the life of one create call, so a writer racing past it lands in the
+/// existing stale-steal path.
 pub fn probe_authority(nexus_home: &Path) -> LockAuthority {
     let path = nexus_home.join(LOCK_FILE);
     match lock_options().open(&path) {
@@ -510,16 +523,18 @@ pub fn probe_authority(nexus_home: &Path) -> LockAuthority {
             }
             LockAuthority::Writer
         }
+        // An entry the create ran into: another principal may hold the
+        // writer lock.
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => LockAuthority::Exists,
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::NotFound
-            ) =>
-        {
-            LockAuthority::ReadOnlyHome
-        }
-        Err(_) => LockAuthority::Unproven,
+        // The create/open denial is only the first fact; the lock entry's
+        // absence must come from a separate stat, not from the denial.
+        Err(_) => match std::fs::symlink_metadata(&path) {
+            Err(stat_error) if stat_error.kind() == std::io::ErrorKind::NotFound => {
+                LockAuthority::ReadOnlyHome
+            }
+            Ok(_) => LockAuthority::Exists,
+            Err(_) => LockAuthority::Unproven,
+        },
     }
 }
 
