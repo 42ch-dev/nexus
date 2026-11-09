@@ -782,9 +782,10 @@ fn grant_wire(grant: &GrantRow) -> Result<schemas::MemoryGrant, ProviderError> {
 /// (§7.25–§7.27, N4-R): the `reflect` capability over that selection —
 /// unrestricted coverage for `subject_all` (C-075), every listed context, and
 /// shared access when shared rows are in scope. A `list` without a selection
-/// narrows to the caller's covered reflections at read time, so its admission
-/// names the capability and subject only. The projection mirrors the
-/// store-side `Selection::base_requirement`.
+/// is a subject-wide read: it demands the same unrestricted coverage a
+/// `subject_all` selection does, matching the fixture's
+/// `ReflectionTarget::from_list(None)` (greptile P1#2 — fail closed, so a
+/// scoped grant can never list the whole subject by omitting the selection).
 fn reflect_requirement<'a>(
     selection: Option<&'a Selection>,
     subject_id: &'a str,
@@ -796,7 +797,7 @@ fn reflect_requirement<'a>(
             context_ids,
             include_shared,
         }) => (context_ids.clone(), *include_shared, false),
-        None => (Vec::new(), false, false),
+        None => (Vec::new(), true, true),
     };
     GrantRequirement {
         capability: "reflect",
@@ -4317,10 +4318,9 @@ impl MemoryPort for LocalMemoryProvider {
         if !self.reflections {
             return unsupported(OP_REFLECTIONS_LIST);
         }
-        // An absent selection names no data access beyond the caller's covered
-        // reflections, so its admission is capability-and-subject only; a
-        // present one is covered like any other read selection (C-075 holds for
-        // an explicit `subject_all`).
+        // An absent selection is a subject-wide listing, so its admission
+        // demands the same unrestricted grant an explicit `subject_all` does;
+        // a present one is covered like any other read selection (C-075).
         let selection = request.selection.as_ref().map(wire_read_selection);
         if let SpokeResult::Reject(reject) =
             validate_memory_reflections_list(&request, policy::MAX_PAGE_SIZE_BOUND)

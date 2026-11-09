@@ -608,8 +608,10 @@ struct ServedReflection {
     extensions: Value,
 }
 
-/// One subject's reflections oldest-first, the stable paging order. Rows are
-/// immutable and never deleted, so the scan order is total.
+/// One subject's reflections newest-first, the stable paging order: the
+/// fixture-internal `seq` is monotonic per insert, so same-second creations
+/// still order by generation. Rows are immutable and never deleted, so the
+/// scan order is total.
 async fn load_served_reflections(
     conn: &mut SqliteConnection,
     space_id: &str,
@@ -620,7 +622,7 @@ async fn load_served_reflections(
          selection_json, filter_json, cognition_filter_json, basis_json, body_text, body_format, \
          cost_unit_kind, cost_units, engine_policy_version, model, extensions_json \
          FROM reflections WHERE space_id = ? AND subject_id = ? \
-         ORDER BY created_at, reflection_id",
+         ORDER BY seq DESC",
     )
     .bind(space_id)
     .bind(subject_id)
@@ -830,7 +832,6 @@ impl FixtureMemoryProvider {
         let last = load_served_reflections(conn, space_id, subject_id)
             .await?
             .into_iter()
-            .rev()
             .find(|row| {
                 !source_set_tombstoned(&pinned_source_ids(&row.basis), &tombstoned)
                     && row.selection == selection_value
@@ -1477,8 +1478,9 @@ async fn insert_generated_reflection(
         "INSERT INTO reflections (reflection_id, space_id, subject_id, \
          requester_principal_id, selection_json, filter_json, cognition_filter_json, \
          basis_json, body_text, body_format, cost_unit_kind, cost_units, \
-         engine_policy_version, model, schema_version, revision, extensions_json, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         engine_policy_version, model, schema_version, revision, extensions_json, created_at, seq) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
+         (SELECT COALESCE(MAX(seq), 0) + 1 FROM reflections))",
     )
     .bind(reflection_id)
     .bind(space_id)
@@ -1526,7 +1528,7 @@ pub async fn terminalize_orphaned_generate_receipts(
     let pool = store.pool();
     let now = timestamp_text(Utc::now());
     let orphans = sqlx::query(
-        "SELECT space_id, receipt_id FROM receipts \
+        "SELECT space_id, receipt_id, owner_id FROM receipts \
          WHERE op = 'memory.reflections.generate' AND status = 'pending' \
          AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
     )
@@ -1538,16 +1540,21 @@ pub async fn terminalize_orphaned_generate_receipts(
         Ok((
             row.try_get::<String, _>("space_id")?,
             row.try_get::<String, _>("receipt_id")?,
+            row.try_get::<Option<String>, _>("owner_id")?,
         ))
     })
     .collect::<Result<Vec<_>, sqlx::Error>>()?;
-    for (space_id, receipt_id) in orphans {
+    for (space_id, receipt_id, owner_id) in orphans {
         let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
+        // The settle guard is `owner_id IS ?`, so the parked row's own stamp
+        // must ride along: every leased receipt carries a non-NULL owner, and
+        // binding `None` here would match zero rows and fail every reopen
+        // (§7.0.3, inspector round 3).
         let settled = settle_receipt_in_tx(
             &mut transaction,
             &space_id,
             &receipt_id,
-            None,
+            owner_id.as_deref(),
             ReceiptState::Failed(internal(
                 "the provider restarted before the reflection generation completed",
             )),

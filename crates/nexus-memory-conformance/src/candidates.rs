@@ -1320,7 +1320,9 @@ pub async fn stage_receipt_in_tx(
 /// generate flow: the guarded update then matches only the receipt this owner
 /// still holds pending, so a reopen recovery (or another instance) settling it
 /// first answers the typed uncertain refusal instead of claiming the effect
-/// (§7.0.3, inspector round 2). Every other caller passes `None`.
+/// (§7.0.3, inspector round 2). The crash-orphan recovery passes the parked
+/// row's own stored owner — the lease there is expired, so the row is settled,
+/// not raced; every other caller passes `None`.
 pub async fn settle_receipt_in_tx(
     conn: &mut SqliteConnection,
     space_id: &str,
