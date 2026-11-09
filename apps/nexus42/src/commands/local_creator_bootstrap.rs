@@ -199,56 +199,19 @@ async fn persistent_rows_with_name(
         .collect())
 }
 
-/// The config document's fallible admission read (I-000304), run under the
-/// same writer lock the later `CliConfig::mutate` takes, ahead of every
-/// store write (I-000330): a genuinely absent document is defaults; an
-/// existing entry that cannot be read — a dangling config link — or one
-/// that no longer parses refuses with nothing persisted. The mutation
-/// re-runs this read later; a document that breaks in between still fails
-/// after store 1, the deferred D49 multi-store recovery window.
+/// The config document's fallible admission read, run under the same writer
+/// lock the later `CliConfig::mutate` takes, ahead of every store write
+/// (I-000330): a genuinely absent document is defaults; an existing entry
+/// that cannot be read — a dangling config link — or one that no longer
+/// parses refuses with nothing persisted. The mutation re-runs this read
+/// later; a document that breaks in between still fails after store 1, the
+/// deferred D49 multi-store recovery window. I-000339: the read itself is
+/// the real mutation admission (`CliConfig::preflight_document`), so both
+/// paths share one refusal rule instead of two hand-maintained copies.
 fn preflight_config_document() -> Result<()> {
     let nexus = config::nexus_home()?;
-    let config_path = CliConfig::path_in(&nexus);
-    let mut outcome: Option<anyhow::Result<()>> = None;
-    nexus_core::with_config_lock(&nexus, || {
-        outcome = Some(admission_read(&config_path));
-        Ok(())
-    })
-    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-    outcome.unwrap_or_else(|| {
-        Err(anyhow::anyhow!(
-            "config lock released without running the writer"
-        ))
-    })?;
+    CliConfig::preflight_document(&nexus)?;
     Ok(())
-}
-
-/// The admission read [`CliConfig::mutate`] performs under the lock: absent
-/// is defaults; an unreadable existing entry (a dangling config link) or one
-/// that no longer parses refuses.
-fn admission_read(config_path: &std::path::Path) -> anyhow::Result<()> {
-    match std::fs::symlink_metadata(config_path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(anyhow::Error::new(error)
-                .context(format!("cannot inspect {}", config_path.display())))
-        }
-        Ok(_) => {}
-    }
-    let content = std::fs::read_to_string(config_path).map_err(|error| {
-        anyhow::Error::new(error).context(format!(
-            "cannot read existing {} for mutation",
-            config_path.display()
-        ))
-    })?;
-    if content.trim().is_empty() {
-        return Ok(());
-    }
-    toml::from_str::<CliConfig>(&content)
-        .map(|_: CliConfig| ())
-        .map_err(|error| {
-            anyhow::Error::new(error).context(format!("cannot parse {}", config_path.display()))
-        })
 }
 
 /// AR-89 mint leg: fresh persistent identity + INSERT + set active +
