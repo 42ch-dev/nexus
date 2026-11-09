@@ -34,7 +34,9 @@
 #![allow(clippy::too_many_lines)] // one end-to-end scenario per row
 
 use serde_json::{json, Value};
-use spoke_operations::{spoke_schemas as schemas, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult};
+use spoke_operations::{
+    spoke_schemas as schemas, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult,
+};
 
 use nexus_core::memory_provider::LocalMemoryProvider;
 use sqlx::Connection as _;
@@ -250,7 +252,8 @@ fn expect_state_digest(body: &Value, what: &str) -> String {
         .as_str()
         .unwrap_or_else(|| panic!("{what} publishes a state digest: {body}"));
     assert!(
-        digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        digest.len() == 64
+            && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
             && digest.bytes().all(|byte| !byte.is_ascii_uppercase()),
         "{what} publishes a 64-lowercase-hex digest: {digest}"
     );
@@ -273,18 +276,17 @@ async fn grant_subject_all_reflect(provider: &LocalMemoryProvider, admin: &schem
                 })),
             )
             .await,
-            "the subject-wide reflect grant",
+        "the subject-wide reflect grant",
     );
     assert_eq!(
-        receipt["status"], json!("committed"),
+        receipt["status"],
+        json!("committed"),
         "the reflect grant commits: {receipt}"
     );
 }
 
 /// Ensure the row's subject exists, then return the principal pair.
-async fn t3_setup(
-    provider: &LocalMemoryProvider,
-) -> (schemas::Principal, schemas::Principal) {
+async fn t3_setup(provider: &LocalMemoryProvider) -> (schemas::Principal, schemas::Principal) {
     let admin = principal(ADMIN);
     let grantee = principal(T3_GRANTEE);
     let ensured = served(
@@ -295,9 +297,10 @@ async fn t3_setup(
                     "space_id": provider.space_id(),
                     "subject_id": T3_SUBJECT,
                 })),
-            ).await,
-            "the subject ensure",
-        );
+            )
+            .await,
+        "the subject ensure",
+    );
     assert_eq!(ensured["status"], json!("committed"), "{ensured}");
     (admin, grantee)
 }
@@ -323,9 +326,10 @@ async fn t3_record(
                     "source_context_ids": [source],
                     "idempotency_key": format!("t3-record-{text}"),
                 })),
-            ).await,
-            "the record create",
-        );
+            )
+            .await,
+        "the record create",
+    );
     receipt["result"]["record_id"]
         .as_str()
         .unwrap_or_else(|| panic!("the create names its record: {receipt}"))
@@ -346,8 +350,9 @@ async fn t3_records(
                     "subject_id": T3_SUBJECT,
                     "selection": { "mode": "subject_all" },
                 })),
-            ).await,
-            "the record list",
+            )
+            .await,
+        "the record list",
     );
     page["records"]
         .as_array()
@@ -432,7 +437,7 @@ fn expect_refusal<T: std::fmt::Debug>(
     }
 }
 
-/// One subject_all generate payload for the row subject.
+/// One `subject_all` generate payload for the row subject.
 fn generate_payload(space: &str, digest: &str, key: &str) -> Value {
     json!({
         "space_id": space,
@@ -450,7 +455,10 @@ async fn t3_generate(
     key: &str,
 ) -> SpokeResult<schemas::MemoryReflectionsGenerateResponse> {
     provider
-        .generate_reflection(caller, dto(generate_payload(provider.space_id(), digest, key)))
+        .generate_reflection(
+            caller,
+            dto(generate_payload(provider.space_id(), digest, key)),
+        )
         .await
 }
 
@@ -468,7 +476,8 @@ async fn author_required_profile(provider: &LocalMemoryProvider, admin: &schemas
                     "expected_revision": null,
                     "idempotency_key": "t3-author-profile",
                 })),
-            ).await,
+            )
+            .await,
         "the required profile author",
     );
     assert_eq!(authored["status"], json!("committed"), "{authored}");
@@ -478,8 +487,22 @@ async fn author_required_profile(provider: &LocalMemoryProvider, admin: &schemas
 /// CAS token: the exact shape a generate request pins.
 async fn sufficient_basis(provider: &LocalMemoryProvider, admin: &schemas::Principal) -> String {
     author_required_profile(provider, admin).await;
-    t3_record(provider, admin, T3_CONTEXT_A, T3_SOURCE_A, "generation row a").await;
-    t3_record(provider, admin, T3_CONTEXT_B, T3_SOURCE_B, "generation row b").await;
+    t3_record(
+        provider,
+        admin,
+        T3_CONTEXT_A,
+        T3_SOURCE_A,
+        "generation row a",
+    )
+    .await;
+    t3_record(
+        provider,
+        admin,
+        T3_CONTEXT_B,
+        T3_SOURCE_B,
+        "generation row b",
+    )
+    .await;
     expect_state_digest(
         &t3_state(provider, admin, json!({ "mode": "subject_all" }), None).await,
         "the sufficient basis",
@@ -500,13 +523,14 @@ async fn receipt_body_of(
                     "space_id": provider.space_id(),
                     "receipt_id": receipt_id,
                 })),
-            ).await,
+            )
+            .await,
         "the receipt read",
     )["receipt"]
         .clone()
 }
 
-/// The durable (receipt_id, status) rows the reflection generate op recorded,
+/// The durable (`receipt_id`, status) rows the reflection generate op recorded,
 /// read read-only over the provider's own state database — the durable-row
 /// observation channel the matrix observers use. Safe inside the parked
 /// window: the pending receipt is transaction 1's committed row.
@@ -529,9 +553,7 @@ async fn durable_generation_receipts(
     .fetch_all(&mut conn)
     .await
     .expect("the durable generation receipts read");
-    conn.close()
-        .await
-        .expect("the read-only connection closes");
+    conn.close().await.expect("the read-only connection closes");
     rows
 }
 
@@ -539,8 +561,10 @@ async fn durable_generation_receipts(
 /// rows carry exactly the parked window's committed pending receipt.
 async fn parked_pending_receipt_id(user_home: &std::path::Path, space: &str) -> String {
     let rows = durable_generation_receipts(user_home, space).await;
-    let pending: Vec<&(String, String)> =
-        rows.iter().filter(|(_, status)| status == "pending").collect();
+    let pending: Vec<&(String, String)> = rows
+        .iter()
+        .filter(|(_, status)| status == "pending")
+        .collect();
     assert_eq!(
         pending.len(),
         1,
@@ -564,7 +588,11 @@ async fn c_073_reflection_reads_succeed_with_capability_local() {
 
     // The granted peer's empty basis, published content-free.
     let state = t3_state(&provider, &grantee, json!({ "mode": "subject_all" }), None).await;
-    assert_eq!(state["basis"], json!({ "profile_kinds": [], "record_count": 0 }), "{state}");
+    assert_eq!(
+        state["basis"],
+        json!({ "profile_kinds": [], "record_count": 0 }),
+        "{state}"
+    );
     assert_eq!(state["data_sufficiency"], json!("insufficient"), "{state}");
     assert_eq!(
         state["missing_required_profile_kinds"],
@@ -581,7 +609,8 @@ async fn c_073_reflection_reads_succeed_with_capability_local() {
     // The `admin` grant implies `reflect` within its coverage: same reads.
     let admin_state = t3_state(&provider, &admin, json!({ "mode": "subject_all" }), None).await;
     assert_eq!(
-        admin_state["basis"]["record_count"], json!(0),
+        admin_state["basis"]["record_count"],
+        json!(0),
         "the admin reads the same empty basis: {admin_state}"
     );
 
@@ -590,7 +619,9 @@ async fn c_073_reflection_reads_succeed_with_capability_local() {
         provider.list_spaces(&admin, dto(json!({}))).await,
         "the space list",
     );
-    let revision = spaces["spaces"][0]["revision"].as_i64().expect("space revision");
+    let revision = spaces["spaces"][0]["revision"]
+        .as_i64()
+        .expect("space revision");
     let frozen = served(
         provider
             .freeze_space(
@@ -600,19 +631,20 @@ async fn c_073_reflection_reads_succeed_with_capability_local() {
                     "expected_revision": revision,
                     "idempotency_key": "t3-freeze",
                 })),
-            ).await,
-            "the freeze",
+            )
+            .await,
+        "the freeze",
     );
     assert_eq!(frozen["status"], json!("committed"), "{frozen}");
-    let frozen_state =
-        t3_state(&provider, &grantee, json!({ "mode": "subject_all" }), None).await;
+    let frozen_state = t3_state(&provider, &grantee, json!({ "mode": "subject_all" }), None).await;
     assert_eq!(
         frozen_state["state_digest"], state["state_digest"],
         "a frozen space answers the same basis: {frozen_state}"
     );
     let frozen_list = t3_list(&provider, &grantee, None, None).await;
     assert_eq!(
-        frozen_list["reflections"], json!([]),
+        frozen_list["reflections"],
+        json!([]),
         "the frozen listing is served empty: {frozen_list}"
     );
 }
@@ -661,8 +693,9 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
                     "expected_revision": revision,
                     "idempotency_key": "t3-edit-a",
                 })),
-            ).await,
-            "the record edit",
+            )
+            .await,
+        "the record edit",
     );
     assert_eq!(edited["status"], json!("committed"), "{edited}");
     digests.push(expect_state_digest(
@@ -693,8 +726,9 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
                     "expected_revision": revision,
                     "idempotency_key": "t3-delete-a",
                 })),
-            ).await,
-            "the record delete",
+            )
+            .await,
+        "the record delete",
     );
     assert_eq!(deleted["status"], json!("committed"), "{deleted}");
     let shrunk = t3_state(&provider, &admin, selection.clone(), None).await;
@@ -719,8 +753,9 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
                     "expected_revision": revision,
                     "idempotency_key": "t3-promote-b",
                 })),
-            ).await,
-            "the record promote",
+            )
+            .await,
+        "the record promote",
     );
     assert_eq!(promoted["status"], json!("committed"), "{promoted}");
     digests.push(expect_state_digest(
@@ -741,17 +776,20 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
                     "expected_revision": null,
                     "idempotency_key": "t3-profile",
                 })),
-            ).await,
-            "the profile update",
+            )
+            .await,
+        "the profile update",
     );
     assert_eq!(profiled["status"], json!("committed"), "{profiled}");
     let profile_state = t3_state(&provider, &admin, selection.clone(), None).await;
     assert_eq!(
-        profile_state["basis"]["profile_kinds"], json!(["personality"]),
+        profile_state["basis"]["profile_kinds"],
+        json!(["personality"]),
         "the authored kind publishes: {profile_state}"
     );
     assert_eq!(
-        profile_state["missing_required_profile_kinds"], json!([]),
+        profile_state["missing_required_profile_kinds"],
+        json!([]),
         "no required kind is missing any more: {profile_state}"
     );
     digests.push(expect_state_digest(&profile_state, "after profile update"));
@@ -775,13 +813,15 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
                     "shared_access": false,
                     "idempotency_key": "t3-reflect-ctx-a",
                 })),
-            ).await,
-            "the context-scoped reflect grant",
+            )
+            .await,
+        "the context-scoped reflect grant",
     );
     let peer_state = t3_state(&provider, &grantee, scoped_selection, None).await;
     digests.push(expect_state_digest(&peer_state, "the peer's scoped basis"));
     assert_eq!(
-        peer_state["basis"]["record_count"], json!(0),
+        peer_state["basis"]["record_count"],
+        json!(0),
         "context A holds no live row any more: {peer_state}"
     );
 
@@ -811,7 +851,8 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
     assert_eq!(receipt["status"], json!("committed"), "{receipt}");
     let pinned = t3_state(&provider, &admin, selection.clone(), None).await;
     assert_eq!(
-        pinned["stale"], json!(false),
+        pinned["stale"],
+        json!(false),
         "the pin matches the current basis: {pinned}"
     );
     let revision = t3_records(&provider, &admin)
@@ -831,12 +872,14 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
                     "expected_revision": revision,
                     "idempotency_key": "t3-pin-edit-b",
                 })),
-            ).await,
+            )
+            .await,
         "the pinned-basis edit",
     );
     let moved = t3_state(&provider, &admin, selection, None).await;
     assert_eq!(
-        moved["stale"], json!(true),
+        moved["stale"],
+        json!(true),
         "the pin is stale at the next read, honestly recomputed: {moved}"
     );
     assert_ne!(
@@ -874,8 +917,9 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
                     "expected_revision": null,
                     "idempotency_key": "t3c076-profile",
                 })),
-            ).await,
-            "the profile update",
+            )
+            .await,
+        "the profile update",
     );
     assert_eq!(profiled["status"], json!("committed"), "{profiled}");
     let profile_only = t3_state(&provider, &admin, selection.clone(), None).await;
@@ -884,9 +928,14 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
         json!({ "profile_kinds": ["personality"], "record_count": 0 }),
         "{profile_only}"
     );
-    assert_eq!(profile_only["data_sufficiency"], json!("insufficient"), "{profile_only}");
     assert_eq!(
-        profile_only["missing_required_profile_kinds"], json!([]),
+        profile_only["data_sufficiency"],
+        json!("insufficient"),
+        "{profile_only}"
+    );
+    assert_eq!(
+        profile_only["missing_required_profile_kinds"],
+        json!([]),
         "{profile_only}"
     );
 
@@ -904,8 +953,7 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
         repeat["state_digest"], full["state_digest"],
         "unchanged state recomputes the same digest: {repeat}"
     );
-    let filtered =
-        t3_state(&provider, &admin, selection.clone(), Some(&[T3_SOURCE_A])).await;
+    let filtered = t3_state(&provider, &admin, selection.clone(), Some(&[T3_SOURCE_A])).await;
     let filtered_digest = expect_state_digest(&filtered, "the filtered state");
     assert_eq!(filtered["basis"]["record_count"], json!(1), "{filtered}");
     assert_ne!(
@@ -927,8 +975,9 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
                     "expected_revision": revision,
                     "idempotency_key": "t3c076-edit",
                 })),
-            ).await,
-            "the record edit",
+            )
+            .await,
+        "the record edit",
     );
     assert_eq!(edited["status"], json!("committed"), "{edited}");
     let after_edit = t3_state(&provider, &admin, selection, None).await;
@@ -949,7 +998,8 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
     assert_eq!(receipt["status"], json!("committed"), "{receipt}");
     let fresh = t3_list(&provider, &admin, None, None).await;
     assert_eq!(
-        fresh["reflections"][0]["stale"], json!(false),
+        fresh["reflections"][0]["stale"],
+        json!(false),
         "the fresh pin is not stale: {fresh}"
     );
     let (record_id, revision) = t3_records(&provider, &admin).await.remove(0);
@@ -964,17 +1014,20 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
                     "expected_revision": revision,
                     "idempotency_key": "t3c076-pin-edit",
                 })),
-            ).await,
+            )
+            .await,
         "the pinned-basis edit",
     );
     let stale_page = t3_list(&provider, &admin, None, None).await;
     assert_eq!(
-        stale_page["reflections"][0]["stale"], json!(true),
+        stale_page["reflections"][0]["stale"],
+        json!(true),
         "the envelope reports the recomputed staleness: {stale_page}"
     );
     let stale_state = t3_state(&provider, &admin, json!({ "mode": "subject_all" }), None).await;
     assert_eq!(
-        stale_state["stale"], json!(true),
+        stale_state["stale"],
+        json!(true),
         "the state read answers the same recomputation: {stale_state}"
     );
     assert_ne!(
@@ -1022,8 +1075,9 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
                     "selection": { "mode": "subject_all" },
                     "limit": 1,
                 })),
-            ).await,
-            "the record list page",
+            )
+            .await,
+        "the record list page",
     );
     let foreign_cursor = records_page["next_cursor"]
         .as_str()
@@ -1092,7 +1146,12 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
             receipt["result"].get("body").is_none(),
             "the envelope body is served by the listing, never the receipt: {receipt}"
         );
-        let stored = receipt_body_of(&provider, &grantee, receipt["receipt_id"].as_str().expect("receipt id")).await;
+        let stored = receipt_body_of(
+            &provider,
+            &grantee,
+            receipt["receipt_id"].as_str().expect("receipt id"),
+        )
+        .await;
         assert_eq!(stored["status"], json!("committed"), "{stored}");
         assert_eq!(
             stored["result"]["reflection_id"], receipt["result"]["reflection_id"],
@@ -1102,17 +1161,17 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
 
     let page_one = t3_list(&provider, &grantee, None, Some(1)).await;
     let rows = page_one["reflections"].as_array().expect("envelope page");
-    assert_eq!(
-        rows.len(),
-        1,
-        "the bound limits the page: {page_one}"
-    );
+    assert_eq!(rows.len(), 1, "the bound limits the page: {page_one}");
     let cursor = page_one["next_cursor"]
         .as_str()
         .expect("a partial page names its continuation");
     let page_two = t3_list(&provider, &grantee, Some(cursor), None).await;
     let rest = page_two["reflections"].as_array().expect("envelope page");
-    assert_eq!(rest.len(), 1, "the continuation serves the rest: {page_two}");
+    assert_eq!(
+        rest.len(),
+        1,
+        "the continuation serves the rest: {page_two}"
+    );
     assert!(
         page_two.get("next_cursor").is_none(),
         "the exhausted listing reports no next cursor: {page_two}"
@@ -1124,11 +1183,18 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
         .collect();
     served_ids.sort_unstable();
     let mut expected_ids = vec![
-        first["result"]["reflection_id"].as_str().expect("reflection id"),
-        second["result"]["reflection_id"].as_str().expect("reflection id"),
+        first["result"]["reflection_id"]
+            .as_str()
+            .expect("reflection id"),
+        second["result"]["reflection_id"]
+            .as_str()
+            .expect("reflection id"),
     ];
     expected_ids.sort_unstable();
-    assert_eq!(served_ids, expected_ids, "the two pages serve both envelopes");
+    assert_eq!(
+        served_ids, expected_ids,
+        "the two pages serve both envelopes"
+    );
 }
 
 /// C-077: a tombstoned row leaves the authorized basis at read time — the
@@ -1150,8 +1216,22 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_local() {
     // Seed the full basis (profile + two records), pin it, then tombstone one
     // record: the pin's only delta is that tombstone.
     author_required_profile(&provider, &admin).await;
-    let record_a = t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "tombstone row a").await;
-    t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "tombstone row b").await;
+    let record_a = t3_record(
+        &provider,
+        &admin,
+        T3_CONTEXT_A,
+        T3_SOURCE_A,
+        "tombstone row a",
+    )
+    .await;
+    t3_record(
+        &provider,
+        &admin,
+        T3_CONTEXT_A,
+        T3_SOURCE_A,
+        "tombstone row b",
+    )
+    .await;
     let before = t3_state(&provider, &admin, selection.clone(), None).await;
     assert_eq!(before["basis"]["record_count"], json!(2), "{before}");
     let digest = expect_state_digest(&before, "the two-row state");
@@ -1165,11 +1245,13 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_local() {
         .expect("the committed generation names its reflection");
     let pinned_page = t3_list(&provider, &grantee, None, None).await;
     assert_eq!(
-        pinned_page["reflections"][0]["reflection_id"], json!(reflection_id),
+        pinned_page["reflections"][0]["reflection_id"],
+        json!(reflection_id),
         "the envelope serves while its basis is live: {pinned_page}"
     );
     assert_eq!(
-        pinned_page["reflections"][0]["basis"]["record_count"], json!(2),
+        pinned_page["reflections"][0]["basis"]["record_count"],
+        json!(2),
         "the pin carries the full source set: {pinned_page}"
     );
 
@@ -1197,7 +1279,8 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_local() {
 
     let after = t3_state(&provider, &admin, selection.clone(), None).await;
     assert_eq!(
-        after["basis"]["record_count"], json!(1),
+        after["basis"]["record_count"],
+        json!(1),
         "the tombstoned row left the authorized set: {after}"
     );
     assert_ne!(
@@ -1220,12 +1303,14 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_local() {
     // deleted content must not leak through the derived envelope.
     let excluded = t3_list(&provider, &grantee, None, None).await;
     assert_eq!(
-        excluded["reflections"], json!([]),
+        excluded["reflections"],
+        json!([]),
         "a tombstone-only pinned set leaves the listing: {excluded}"
     );
     let excluded_state = t3_state(&provider, &admin, selection, None).await;
     assert_eq!(
-        excluded_state["basis"]["record_count"], json!(1),
+        excluded_state["basis"]["record_count"],
+        json!(1),
         "the live basis still serves: {excluded_state}"
     );
     assert!(
@@ -1233,7 +1318,8 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_local() {
         "the excluded envelope no longer surfaces as the last reflection: {excluded_state}"
     );
     assert_eq!(
-        excluded_state["stale"], json!(false),
+        excluded_state["stale"],
+        json!(false),
         "with no visible envelope there is no pin to go stale: {excluded_state}"
     );
 }
@@ -1267,7 +1353,8 @@ async fn c_070_reflect_grant_committed_and_pending_generation_local() {
         let pending = receipt_body_of(&provider, &grantee, &pending_id).await;
         assert_eq!(pending["status"], json!("pending"), "{pending}");
         assert_eq!(
-            pending["op"], json!("memory.reflections.generate"),
+            pending["op"],
+            json!("memory.reflections.generate"),
             "{pending}"
         );
         assert!(
@@ -1280,7 +1367,8 @@ async fn c_070_reflect_grant_committed_and_pending_generation_local() {
         );
         let page = t3_list(&provider, &grantee, None, None).await;
         assert_eq!(
-            page["reflections"], json!([]),
+            page["reflections"],
+            json!([]),
             "no envelope exists before generation runs: {page}"
         );
         release.wait().await;
@@ -1291,7 +1379,9 @@ async fn c_070_reflect_grant_committed_and_pending_generation_local() {
 
     // Exactly one terminal outcome; the same key replays it verbatim.
     let envelope_page = t3_list(&provider, &grantee, None, None).await;
-    let envelopes = envelope_page["reflections"].as_array().expect("envelope page");
+    let envelopes = envelope_page["reflections"]
+        .as_array()
+        .expect("envelope page");
     assert_eq!(
         envelopes.len(),
         1,
@@ -1387,25 +1477,28 @@ async fn c_072_generated_envelope_shape_local() {
         "the profile revisions are pinned: {page}"
     );
     assert_eq!(
-        envelope["basis"]["state_digest"], json!(digest),
+        envelope["basis"]["state_digest"],
+        json!(digest),
         "the pin matches the generating state's digest: {page}"
     );
     assert!(
         envelope["basis"]["source_set_digest"].is_string(),
         "the source set digest is pinned: {page}"
     );
-    assert_eq!(
-        envelope["body"]["format"], json!("markdown"),
-        "{page}"
-    );
+    assert_eq!(envelope["body"]["format"], json!("markdown"), "{page}");
     assert!(
-        !envelope["body"]["body"].as_str().expect("a body").is_empty(),
+        !envelope["body"]["body"]
+            .as_str()
+            .expect("a body")
+            .is_empty(),
         "the envelope carries a real body: {page}"
     );
     assert_eq!(
         envelope["generator"]["engine_policy_version"],
-        served(provider.describe(&admin, dto(json!({}))).await, "the describe")
-            ["engine_policy_version"],
+        served(
+            provider.describe(&admin, dto(json!({}))).await,
+            "the describe"
+        )["engine_policy_version"],
         "the generator stamps the served policy version: {page}"
     );
     assert_eq!(
@@ -1444,20 +1537,24 @@ async fn c_072_generated_envelope_shape_local() {
         "the pinned profile revisions never rewrite: {after}"
     );
     assert_eq!(
-        after["reflections"][0]["basis"]["state_digest"], json!(digest),
+        after["reflections"][0]["basis"]["state_digest"],
+        json!(digest),
         "the pinned state digest never rewrites: {after}"
     );
     assert_eq!(
-        after["reflections"][0]["stale"], json!(true),
+        after["reflections"][0]["stale"],
+        json!(true),
         "the pin is honestly stale: {after}"
     );
     let state = t3_state(&provider, &admin, json!({ "mode": "subject_all" }), None).await;
     assert_ne!(
-        state["state_digest"], json!(digest),
+        state["state_digest"],
+        json!(digest),
         "the basis move is visible at the next read: {state}"
     );
     assert_eq!(
-        state["stale"], json!(true),
+        state["stale"],
+        json!(true),
         "the pin is honestly stale: {state}"
     );
 }
@@ -1486,9 +1583,7 @@ async fn c_078_generation_failure_honesty_and_no_double_charge_local() {
         "the interrupted generation",
     );
     assert!(
-        failed
-            .message
-            .contains("interrupted before any effect"),
+        failed.message.contains("interrupted before any effect"),
         "the refusal reports the honest interruption: {failed:?}"
     );
     // The durable rows name the failed receipt; the receipt channel serves it.
@@ -1497,13 +1592,16 @@ async fn c_078_generation_failure_honesty_and_no_double_charge_local() {
     let receipt_id = rows
         .iter()
         .find(|(_, status)| status == "failed")
-        .map(|(receipt_id, _)| receipt_id.clone())
-        .expect("the interrupted generation recorded its failure: {rows:?}");
+        .map(|(receipt_id, _)| receipt_id.clone());
+    let Some(receipt_id) = receipt_id else {
+        panic!("the interrupted generation recorded its failure: {rows:?}");
+    };
     let stored = receipt_body_of(&provider, &grantee, &receipt_id).await;
     assert_eq!(stored["status"], json!("failed"), "{stored}");
     assert_eq!(stored["error"]["code"], json!("INTERNAL_ERROR"), "{stored}");
     assert_eq!(
-        stored["error"]["details"]["retry_class"], json!("retryable"),
+        stored["error"]["details"]["retry_class"],
+        json!("retryable"),
         "{stored}"
     );
     assert!(
@@ -1531,7 +1629,8 @@ async fn c_078_generation_failure_honesty_and_no_double_charge_local() {
     );
     let page = t3_list(&provider, &grantee, None, None).await;
     assert_eq!(
-        page["reflections"], json!([]),
+        page["reflections"],
+        json!([]),
         "the failed generation wrote no effect: {page}"
     );
 
@@ -1548,7 +1647,11 @@ async fn c_078_generation_failure_honesty_and_no_double_charge_local() {
     );
     let settled = t3_list(&provider, &grantee, None, None).await;
     let envelopes = settled["reflections"].as_array().expect("envelope page");
-    assert_eq!(envelopes.len(), 1, "one fresh generation, one envelope: {settled}");
+    assert_eq!(
+        envelopes.len(),
+        1,
+        "one fresh generation, one envelope: {settled}"
+    );
     assert_eq!(
         envelopes[0]["cost"],
         json!({ "unit_kind": "reflection", "units": 1.0 }),
@@ -1582,7 +1685,8 @@ async fn c_079_insufficient_data_policy_outcomes_local() {
     let empty = t3_state(&provider, &admin, selection.clone(), None).await;
     assert_eq!(empty["data_sufficiency"], json!("insufficient"), "{empty}");
     assert_eq!(
-        empty["missing_required_profile_kinds"], json!(["personality"]),
+        empty["missing_required_profile_kinds"],
+        json!(["personality"]),
         "{empty}"
     );
     let empty_digest = expect_state_digest(&empty, "the empty state");
@@ -1605,9 +1709,14 @@ async fn c_079_insufficient_data_policy_outcomes_local() {
     //    generation refuses `INSUFFICIENT_DATA`.
     author_required_profile(&provider, &admin).await;
     let profiled = t3_state(&provider, &admin, selection.clone(), None).await;
-    assert_eq!(profiled["data_sufficiency"], json!("insufficient"), "{profiled}");
     assert_eq!(
-        profiled["missing_required_profile_kinds"], json!([]),
+        profiled["data_sufficiency"],
+        json!("insufficient"),
+        "{profiled}"
+    );
+    assert_eq!(
+        profiled["missing_required_profile_kinds"],
+        json!([]),
         "{profiled}"
     );
     let profiled_digest = expect_state_digest(&profiled, "the profile-only state");
@@ -1658,11 +1767,13 @@ async fn c_015_pending_receipt_long_running_operation_local() {
         let pending = receipt_body_of(&provider, &grantee, &pending_id).await;
         assert_eq!(pending["status"], json!("pending"), "{pending}");
         assert_eq!(
-            pending["op"], json!("memory.reflections.generate"),
+            pending["op"],
+            json!("memory.reflections.generate"),
             "{pending}"
         );
         assert_eq!(
-            pending["requester_principal_id"], json!(T3_GRANTEE),
+            pending["requester_principal_id"],
+            json!(T3_GRANTEE),
             "{pending}"
         );
         assert!(pending["payload_digest"].is_string(), "{pending}");
@@ -1682,7 +1793,8 @@ async fn c_015_pending_receipt_long_running_operation_local() {
     let receipt = served(generation, "the long-running generation");
     assert_eq!(receipt["status"], json!("committed"), "{receipt}");
     assert_eq!(
-        receipt["receipt_id"], json!(pending_id),
+        receipt["receipt_id"],
+        json!(pending_id),
         "the parked receipt settles in place: {receipt}"
     );
     assert!(receipt["completed_at"].is_string(), "{receipt}");
@@ -1755,7 +1867,8 @@ async fn c_090_reflection_grant_surfaces_local() {
     )
     .await;
     assert_eq!(
-        covered["basis"]["record_count"], json!(0),
+        covered["basis"]["record_count"],
+        json!(0),
         "the covered selection serves: {covered}"
     );
     expect_state_digest(&covered, "the covered read");
@@ -1872,7 +1985,10 @@ async fn c_100_reflection_error_classes_local() {
         "the cognition-filtered read",
     );
     assert_eq!(
-        cognition.details.as_ref().and_then(|details| details["field"].as_str()),
+        cognition
+            .details
+            .as_ref()
+            .and_then(|details| details["field"].as_str()),
         Some("cognition_filter"),
         "the refusal names the filter: {cognition:?}"
     );
@@ -1895,7 +2011,13 @@ async fn c_100_reflection_error_classes_local() {
     //    same key is `IDEMPOTENCY_CONFLICT` (terminal).
     let digest = sufficient_basis(&provider, &admin).await;
     let stale = expect_refusal(
-        t3_generate(&provider, &grantee, "0000000000000000000000000000000000000000000000000000000000000000", "t4c100-stale").await,
+        t3_generate(
+            &provider,
+            &grantee,
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "t4c100-stale",
+        )
+        .await,
         SpokeRejectCode::RevisionConflict,
         "terminal",
         "the stale-CAS generation",
@@ -1986,7 +2108,10 @@ async fn c_100_reflection_error_classes_local() {
     let empty_subject = "sbj_c100_empty";
     served(
         provider
-            .ensure_subject(&admin, dto(json!({ "space_id": space, "subject_id": empty_subject })))
+            .ensure_subject(
+                &admin,
+                dto(json!({ "space_id": space, "subject_id": empty_subject })),
+            )
             .await,
         "the empty subject ensure",
     );
@@ -2075,8 +2200,13 @@ async fn c_100_reflection_error_classes_local() {
         ),
         "the frozen-basis state",
     );
-    let spaces = served(provider.list_spaces(&admin, dto(json!({}))).await, "the space list");
-    let space_revision = spaces["spaces"][0]["revision"].as_i64().expect("space revision");
+    let spaces = served(
+        provider.list_spaces(&admin, dto(json!({}))).await,
+        "the space list",
+    );
+    let space_revision = spaces["spaces"][0]["revision"]
+        .as_i64()
+        .expect("space revision");
     let frozen = served(
         provider
             .freeze_space(
@@ -2149,18 +2279,25 @@ async fn c_100_reflection_error_classes_local() {
         "the interrupted generation",
     );
     assert!(
-        interrupted.message.contains("interrupted before any effect"),
+        interrupted
+            .message
+            .contains("interrupted before any effect"),
         "the refusal reports the honest interruption: {interrupted:?}"
     );
     let failed_rows = durable_generation_receipts(&home_path, &space).await;
     let fault_receipt = failed_rows
         .iter()
         .find(|(_, status)| status == "failed")
-        .map(|(receipt_id, _)| receipt_id.clone())
-        .expect("the interruption recorded its failure: {failed_rows:?}");
+        .map(|(receipt_id, _)| receipt_id.clone());
+    let Some(fault_receipt) = fault_receipt else {
+        panic!("the interruption recorded its failure: {failed_rows:?}");
+    };
     let failed = receipt_body_of(&provider, &admin, &fault_receipt).await;
     assert_eq!(failed["status"], json!("failed"), "{failed}");
-    assert!(failed.get("result").is_none(), "no cost on failure: {failed}");
+    assert!(
+        failed.get("result").is_none(),
+        "no cost on failure: {failed}"
+    );
 
     // 9. `uncertain`: a same-key replay under a pending generation answers
     //    `OUTCOME_UNCERTAIN` until the terminal outcome commits.
@@ -2205,7 +2342,7 @@ async fn c_100_reflection_error_classes_local() {
 
 // ── Fix round: blocking-warning regressions (qc-consolidated B1–B4) ──────
 
-/// One subject_all generate payload with a provenance filter pinned.
+/// One `subject_all` generate payload with a provenance filter pinned.
 fn generate_payload_filtered(space: &str, digest: &str, key: &str, filter: &[&str]) -> Value {
     json!({
         "space_id": space,
@@ -2218,17 +2355,21 @@ fn generate_payload_filtered(space: &str, digest: &str, key: &str, filter: &[&st
 }
 
 /// The reflection listing body for one request (filter/cursor/limit shape).
-async fn t3_list_request(provider: &LocalMemoryProvider, caller: &schemas::Principal, request: Value) -> Value {
-    served(provider.list_reflections(caller, dto(request)).await, "the reflection list")
+async fn t3_list_request(
+    provider: &LocalMemoryProvider,
+    caller: &schemas::Principal,
+    request: Value,
+) -> Value {
+    served(
+        provider.list_reflections(caller, dto(request)).await,
+        "the reflection list",
+    )
 }
 
-/// The one unsettled journal row's (receipt_id, first file target path), read
+/// The one unsettled journal row's (`receipt_id`, first file target path), read
 /// read-only from the provider's own state database — the durable-row
 /// observation channel, not a provider reimplementation.
-async fn unsettled_journal_target(
-    user_home: &std::path::Path,
-    space: &str,
-) -> (String, String) {
+async fn unsettled_journal_target(user_home: &std::path::Path, space: &str) -> (String, String) {
     let db = nexus_home_layout::workspace_state_db_path(user_home, ADMIN, "default");
     let options = sqlx::sqlite::SqliteConnectOptions::new()
         .filename(db)
@@ -2266,14 +2407,13 @@ async fn journal_state(user_home: &std::path::Path, space: &str, receipt_id: &st
     let mut conn = sqlx::sqlite::SqliteConnection::connect_with(&options)
         .await
         .expect("one read-only connection to the provider's own file");
-    let (state,): (String,) = sqlx::query_as(
-        "SELECT state FROM memory_journal WHERE space_id = ? AND receipt_id = ?",
-    )
-    .bind(space)
-    .bind(receipt_id)
-    .fetch_one(&mut conn)
-    .await
-    .expect("the journal row read");
+    let (state,): (String,) =
+        sqlx::query_as("SELECT state FROM memory_journal WHERE space_id = ? AND receipt_id = ?")
+            .bind(space)
+            .bind(receipt_id)
+            .fetch_one(&mut conn)
+            .await
+            .expect("the journal row read");
     conn.close().await.expect("the read-only connection closes");
     state
 }
@@ -2300,7 +2440,9 @@ async fn qc_b1_verdicts_are_per_row_under_one_pin_local() {
         "the first generation",
     );
     assert_eq!(first["status"], json!("committed"), "{first}");
-    let first_id = first["result"]["reflection_id"].as_str().expect("reflection id");
+    let first_id = first["result"]["reflection_id"]
+        .as_str()
+        .expect("reflection id");
 
     // The basis moves; R2 pins the moved basis under the same pin.
     let added = t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "qc-b1 row c").await;
@@ -2314,16 +2456,26 @@ async fn qc_b1_verdicts_are_per_row_under_one_pin_local() {
         "the second generation",
     );
     assert_eq!(second["status"], json!("committed"), "{second}");
-    let second_id = second["result"]["reflection_id"].as_str().expect("reflection id");
+    let second_id = second["result"]["reflection_id"]
+        .as_str()
+        .expect("reflection id");
 
     // Newest-first listing: each envelope carries its own verdict.
     let page = t3_list(&provider, &grantee, None, None).await;
     let rows = page["reflections"].as_array().expect("envelope rows");
     assert_eq!(rows.len(), 2, "both envelopes list: {page}");
     assert_eq!(rows[0]["reflection_id"], json!(second_id), "{page}");
-    assert_eq!(rows[0]["stale"], json!(false), "R2 pins the current basis: {page}");
+    assert_eq!(
+        rows[0]["stale"],
+        json!(false),
+        "R2 pins the current basis: {page}"
+    );
     assert_eq!(rows[1]["reflection_id"], json!(first_id), "{page}");
-    assert_eq!(rows[1]["stale"], json!(true), "R1 pins the superseded basis: {page}");
+    assert_eq!(
+        rows[1]["stale"],
+        json!(true),
+        "R1 pins the superseded basis: {page}"
+    );
 
     // Exclusion stays per-row: tombstone the record R2 added. R2's pin
     // becomes tombstone-only (excluded); R1's pin is whole again (fresh),
@@ -2352,10 +2504,15 @@ async fn qc_b1_verdicts_are_per_row_under_one_pin_local() {
     let rows = after["reflections"].as_array().expect("envelope rows");
     assert_eq!(rows.len(), 1, "the tombstone-only pin is excluded: {after}");
     assert_eq!(rows[0]["reflection_id"], json!(first_id), "{after}");
-    assert_eq!(rows[0]["stale"], json!(false), "R1's pin is whole again: {after}");
+    assert_eq!(
+        rows[0]["stale"],
+        json!(false),
+        "R1's pin is whole again: {after}"
+    );
     let state = t3_state(&provider, &admin, selection, None).await;
     assert_eq!(
-        state.get("last_reflection_id"), Some(&json!(first_id)),
+        state.get("last_reflection_id"),
+        Some(&json!(first_id)),
         "the excluded envelope stops surfacing last: {state}"
     );
     assert_eq!(state["stale"], json!(false), "{state}");
@@ -2480,7 +2637,10 @@ async fn qc_b2_pending_journal_withholds_then_answers_terminal_local() {
         "the quarantined record list",
     );
     assert_eq!(
-        records.details.as_ref().and_then(|d| d["subject_id"].as_str()),
+        records
+            .details
+            .as_ref()
+            .and_then(|d| d["subject_id"].as_str()),
         Some(T3_SUBJECT),
         "the refusal names the quarantined subject: {records:?}"
     );
@@ -2529,8 +2689,13 @@ async fn qc_b3_committed_generation_replays_while_frozen_local() {
     let (admin, grantee) = t3_setup(&provider).await;
     grant_subject_all_reflect(&provider, &admin).await;
     let digest = sufficient_basis(&provider, &admin).await;
-    let spaces = served(provider.list_spaces(&admin, dto(json!({}))).await, "the space list");
-    let revision = spaces["spaces"][0]["revision"].as_i64().expect("space revision");
+    let spaces = served(
+        provider.list_spaces(&admin, dto(json!({}))).await,
+        "the space list",
+    );
+    let revision = spaces["spaces"][0]["revision"]
+        .as_i64()
+        .expect("space revision");
 
     // The generation commits; its response is the caller's only copy.
     let first = served(
@@ -2617,10 +2782,30 @@ async fn qc_b4_filtered_list_and_state_honor_provenance_local() {
 
     // One record per provenance source; each generation pins its own filter.
     author_required_profile(&provider, &admin).await;
-    t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "qc-b4 source a").await;
-    t3_record(&provider, &admin, T3_CONTEXT_B, T3_SOURCE_B, "qc-b4 source b").await;
+    t3_record(
+        &provider,
+        &admin,
+        T3_CONTEXT_A,
+        T3_SOURCE_A,
+        "qc-b4 source a",
+    )
+    .await;
+    t3_record(
+        &provider,
+        &admin,
+        T3_CONTEXT_B,
+        T3_SOURCE_B,
+        "qc-b4 source b",
+    )
+    .await;
     let digest_a = expect_state_digest(
-        &t3_state(&provider, &admin, json!({ "mode": "subject_all" }), Some(&[T3_SOURCE_A])).await,
+        &t3_state(
+            &provider,
+            &admin,
+            json!({ "mode": "subject_all" }),
+            Some(&[T3_SOURCE_A]),
+        )
+        .await,
         "the filtered basis a",
     );
     let pin_a = served(
@@ -2637,9 +2822,17 @@ async fn qc_b4_filtered_list_and_state_honor_provenance_local() {
             .await,
         "the filtered generation a",
     );
-    let pin_a_id = pin_a["result"]["reflection_id"].as_str().expect("reflection id");
+    let pin_first_id = pin_a["result"]["reflection_id"]
+        .as_str()
+        .expect("reflection id");
     let digest_b = expect_state_digest(
-        &t3_state(&provider, &admin, json!({ "mode": "subject_all" }), Some(&[T3_SOURCE_B])).await,
+        &t3_state(
+            &provider,
+            &admin,
+            json!({ "mode": "subject_all" }),
+            Some(&[T3_SOURCE_B]),
+        )
+        .await,
         "the filtered basis b",
     );
     let pin_b = served(
@@ -2656,12 +2849,18 @@ async fn qc_b4_filtered_list_and_state_honor_provenance_local() {
             .await,
         "the filtered generation b",
     );
-    let pin_b_id = pin_b["result"]["reflection_id"].as_str().expect("reflection id");
+    let pin_second_id = pin_b["result"]["reflection_id"]
+        .as_str()
+        .expect("reflection id");
 
     // Unfiltered: both envelopes list.
     let unfiltered = t3_list(&provider, &grantee, None, None).await;
     let rows = unfiltered["reflections"].as_array().expect("rows");
-    assert_eq!(rows.len(), 2, "both pins list without a filter: {unfiltered}");
+    assert_eq!(
+        rows.len(),
+        2,
+        "both pins list without a filter: {unfiltered}"
+    );
 
     // Filtered list: only the envelope pinned to the requested provenance.
     let listed_a = t3_list_request(
@@ -2675,8 +2874,16 @@ async fn qc_b4_filtered_list_and_state_honor_provenance_local() {
     )
     .await;
     let rows_a = listed_a["reflections"].as_array().expect("rows");
-    assert_eq!(rows_a.len(), 1, "the filter narrows the projection: {listed_a}");
-    assert_eq!(rows_a[0]["reflection_id"], json!(pin_a_id), "{listed_a}");
+    assert_eq!(
+        rows_a.len(),
+        1,
+        "the filter narrows the projection: {listed_a}"
+    );
+    assert_eq!(
+        rows_a[0]["reflection_id"],
+        json!(pin_first_id),
+        "{listed_a}"
+    );
     let listed_b = t3_list_request(
         &provider,
         &grantee,
@@ -2689,19 +2896,37 @@ async fn qc_b4_filtered_list_and_state_honor_provenance_local() {
     .await;
     let rows_b = listed_b["reflections"].as_array().expect("rows");
     assert_eq!(rows_b.len(), 1, "{listed_b}");
-    assert_eq!(rows_b[0]["reflection_id"], json!(pin_b_id), "{listed_b}");
+    assert_eq!(
+        rows_b[0]["reflection_id"],
+        json!(pin_second_id),
+        "{listed_b}"
+    );
 
     // Filtered state: the last-reflection pick honors the same filter, and
     // the reported staleness is that envelope's own verdict.
-    let state_a = t3_state(&provider, &admin, json!({ "mode": "subject_all" }), Some(&[T3_SOURCE_A])).await;
+    let state_a = t3_state(
+        &provider,
+        &admin,
+        json!({ "mode": "subject_all" }),
+        Some(&[T3_SOURCE_A]),
+    )
+    .await;
     assert_eq!(
-        state_a.get("last_reflection_id"), Some(&json!(pin_a_id)),
+        state_a.get("last_reflection_id"),
+        Some(&json!(pin_first_id)),
         "the state's last pick honors the filter: {state_a}"
     );
     assert_eq!(state_a["stale"], json!(false), "{state_a}");
-    let state_b = t3_state(&provider, &admin, json!({ "mode": "subject_all" }), Some(&[T3_SOURCE_B])).await;
+    let state_b = t3_state(
+        &provider,
+        &admin,
+        json!({ "mode": "subject_all" }),
+        Some(&[T3_SOURCE_B]),
+    )
+    .await;
     assert_eq!(
-        state_b.get("last_reflection_id"), Some(&json!(pin_b_id)),
+        state_b.get("last_reflection_id"),
+        Some(&json!(pin_second_id)),
         "{state_b}"
     );
 }

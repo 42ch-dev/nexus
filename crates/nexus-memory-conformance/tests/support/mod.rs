@@ -378,7 +378,7 @@ impl Transport for ObservedTransport {
 }
 
 /// The evidence of one real typed dial attempt that failed.
-struct DialAttemptFailure {
+pub struct DialAttemptFailure {
     error: RemoteAdapterError,
     first_inbound: Arc<std::sync::Mutex<Option<Vec<u8>>>>,
     client_socket: Weak<ObservedTransport>,
@@ -388,7 +388,7 @@ struct DialAttemptFailure {
 /// signed-dial rejection is modelled; every other setup failure still panics,
 /// so an `Err` proves the signed stage was reached and rejected.
 #[derive(Debug)]
-enum EndpointSetupFailure {
+pub enum EndpointSetupFailure {
     /// The SDK's own dial error from signed responder-hello verification, with
     /// the observation that the responder hello really arrived and both socket
     /// owners observed by the listener side.
@@ -910,6 +910,11 @@ impl Matrix {
     }
 
     /// Assemble a run over a prepared home.
+    //
+    // clippy::too_many_lines: every branch below is the catch-unwind +
+    // settle-provider ownership dance; splitting it would either duplicate
+    // the settle order or abstract a move the tests must observe exactly.
+    #[allow(clippy::too_many_lines)]
     async fn assemble(
         kind: Kind,
         home_dir: TempDir,
@@ -986,9 +991,10 @@ impl Matrix {
                 if let Err(error) = settle_provider_setup(provider).await {
                     problems.push(format!("the provider did not settle: {error}"));
                 }
-                if problems.is_empty() {
-                    panic!("the peer endpoint setup failed: {failure:?}");
-                }
+                assert!(
+                    !problems.is_empty(),
+                    "the peer endpoint setup failed: {failure:?}"
+                );
                 panic!(
                     "the peer endpoint setup failed ({failure:?}) and cleanup also failed: {}",
                     problems.join("; ")
@@ -1108,6 +1114,11 @@ impl Matrix {
     /// Restart the provider over the SAME file: close both responder sessions,
     /// close the owned pool, reopen the file as a fresh instance and serve two
     /// fresh sessions. The previous instance is never reused.
+    //
+    // clippy::too_many_lines: same settle-order dance as [`Self::assemble`],
+    // twice (admin then peer); splitting it would duplicate the ownership
+    // handoff the tests must observe exactly.
+    #[allow(clippy::too_many_lines)]
     pub async fn restart(self) -> Self {
         let Self {
             kind,
@@ -1124,12 +1135,11 @@ impl Matrix {
             advertises_reflection,
             ..
         } = self;
-        let negotiated: &'static [&'static str] =
-            if kind == Kind::Remote && advertises_reflection {
-                &MEMORY_REFLECTION_CAPABILITIES
-            } else {
-                &MEMORY_CAPABILITIES
-            };
+        let negotiated: &'static [&'static str] = if kind == Kind::Remote && advertises_reflection {
+            &MEMORY_REFLECTION_CAPABILITIES
+        } else {
+            &MEMORY_CAPABILITIES
+        };
         admin.close().await;
         peer.close().await;
         drop(service);
@@ -1137,8 +1147,8 @@ impl Matrix {
             Provider::Local(provider) => drop(provider),
             Provider::Fixture(provider) => close_fixture(provider).await,
         }
-        let provider = open_provider_advertised(&home, kind == Kind::Remote && advertises_reflection)
-            .await;
+        let provider =
+            open_provider_advertised(&home, kind == Kind::Remote && advertises_reflection).await;
         let service = build_service(&provider, &directory);
         // The reopened provider is settled if either fresh session fails to
         // set up; the admin endpoint is settled before the provider.
@@ -1197,9 +1207,10 @@ impl Matrix {
                 if let Err(error) = settle_provider_setup(provider).await {
                     problems.push(format!("the provider did not settle: {error}"));
                 }
-                if problems.is_empty() {
-                    panic!("the restarted peer endpoint setup failed: {failure:?}");
-                }
+                assert!(
+                    !problems.is_empty(),
+                    "the restarted peer endpoint setup failed: {failure:?}"
+                );
                 panic!(
                     "the restarted peer endpoint setup failed ({failure:?}) and cleanup also failed: {}",
                     problems.join("; ")
@@ -2641,7 +2652,12 @@ impl Actor<'_> {
     pub async fn reflections_list(&self, request: Value) -> Value {
         let mut request = request;
         request["space_id"] = json!(self.space_id);
-        wire(&self.client.list_reflections(self.principal, dto(request)).await)
+        wire(
+            &self
+                .client
+                .list_reflections(self.principal, dto(request))
+                .await,
+        )
     }
 
     pub async fn reflections_generate(&self, request: Value) -> Value {

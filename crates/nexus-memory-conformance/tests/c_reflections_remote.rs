@@ -24,8 +24,8 @@ use spoke_operations::MemoryPort;
 use nexus_memory_conformance::{FaultHold, FaultPoint, FixtureFaults};
 
 use support::{
-    bootstrap, error_code, error_details, grant_body, is_committed, record_body, result, retry_class,
-    wire, context_scope, shared_scope, Matrix, OTHER_SUBJECT, SUBJECT,
+    bootstrap, context_scope, error_code, error_details, grant_body, is_committed, record_body,
+    result, retry_class, shared_scope, wire, Matrix, OTHER_SUBJECT, SUBJECT,
 };
 
 /// 64 hex characters: the CAS token shape `state` publishes.
@@ -61,12 +61,14 @@ fn dto<T: serde::de::DeserializeOwned>(value: Value) -> T {
 async fn create_shared_record(matrix: &Matrix, key: &str, text: &str) -> String {
     let created = matrix
         .admin()
-        .create_record(record_body(key, "nexus.world_building", text, &shared_scope()))
+        .create_record(record_body(
+            key,
+            "nexus.world_building",
+            text,
+            &shared_scope(),
+        ))
         .await;
-    assert!(
-        is_committed(&created),
-        "the seed record commits: {created}"
-    );
+    assert!(is_committed(&created), "the seed record commits: {created}");
     result(&created)["record_id"]
         .as_str()
         .expect("a created record names itself")
@@ -84,10 +86,7 @@ async fn create_context_record(matrix: &Matrix, key: &str, text: &str, context: 
             &context_scope(context),
         ))
         .await;
-    assert!(
-        is_committed(&created),
-        "the seed record commits: {created}"
-    );
+    assert!(is_committed(&created), "the seed record commits: {created}");
     result(&created)["record_id"]
         .as_str()
         .expect("a created record names itself")
@@ -130,14 +129,11 @@ async fn generate_with(
     wire(&client.generate_reflection(&principal, dto(body)).await)
 }
 
-async fn join_bounded(
-    handle: tokio::task::JoinHandle<Value>,
-    what: &str,
-) -> Value {
+async fn join_bounded(handle: tokio::task::JoinHandle<Value>, what: &str) -> Value {
     tokio::time::timeout(Duration::from_secs(20), handle)
         .await
         .unwrap_or_else(|_| panic!("{what} exceeded the harness bound"))
-        .expect("{what} task did not panic")
+        .unwrap_or_else(|error| panic!("{what} task panicked: {error}"))
 }
 
 /// The whole-subject reflection listing, oldest-first.
@@ -179,7 +175,11 @@ async fn c_042_basis_changes_invalidate_reflection_state_remote() {
     // Publish against the current digest, then change the basis again: the
     // published row goes stale at the next read, computed never stored.
     let generated = admin
-        .reflections_generate(generate_body(SUBJECT, digest_two.as_str().expect("digest"), "k-c042-gen"))
+        .reflections_generate(generate_body(
+            SUBJECT,
+            digest_two.as_str().expect("digest"),
+            "k-c042-gen",
+        ))
         .await;
     assert!(is_committed(&generated), "{generated}");
     let reflection_id = result(&generated)["reflection_id"]
@@ -219,13 +219,22 @@ async fn c_070_reflect_grant_committed_and_pending_generation_remote() {
     let matrix = Matrix::remote().await;
     bootstrap(&matrix, &[]).await;
     grant_peer(&matrix, "reflect", "k-c070-grant").await;
-    create_shared_record(&matrix, "k-c070-r1", "The tide ledger records every arrival.").await;
+    create_shared_record(
+        &matrix,
+        "k-c070-r1",
+        "The tide ledger records every arrival.",
+    )
+    .await;
     let digest = peer_state(&matrix, SUBJECT).await["state_digest"].clone();
 
     // A reflect holder's generate commits exactly one terminal receipt.
     let committed = matrix
         .peer()
-        .reflections_generate(generate_body(SUBJECT, digest.as_str().expect("digest"), "k-c070-a"))
+        .reflections_generate(generate_body(
+            SUBJECT,
+            digest.as_str().expect("digest"),
+            "k-c070-a",
+        ))
         .await;
     assert!(is_committed(&committed), "{committed}");
     let receipt_id = committed["receipt_id"].as_str().expect("receipt id");
@@ -233,7 +242,11 @@ async fn c_070_reflect_grant_committed_and_pending_generation_remote() {
     // The same key replays the stored terminal receipt, never re-executes.
     let replayed = matrix
         .peer()
-        .reflections_generate(generate_body(SUBJECT, digest.as_str().expect("digest"), "k-c070-a"))
+        .reflections_generate(generate_body(
+            SUBJECT,
+            digest.as_str().expect("digest"),
+            "k-c070-a",
+        ))
         .await;
     assert_eq!(replayed["receipt_id"], json!(receipt_id), "{replayed}");
     assert_eq!(
@@ -357,7 +370,9 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_remote() {
     let basis = &row["basis"];
     assert_eq!(basis["record_count"], json!(1), "{row}");
     assert!(
-        basis["source_set_digest"].as_str().is_some_and(is_hex_digest),
+        basis["source_set_digest"]
+            .as_str()
+            .is_some_and(is_hex_digest),
         "the basis pins a 64-hex source-set digest: {row}"
     );
     assert!(
@@ -385,7 +400,12 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_remote() {
 async fn c_072_generated_envelope_shape_remote() {
     let matrix = Matrix::remote().await;
     bootstrap(&matrix, &[]).await;
-    create_shared_record(&matrix, "k-c072-r1", "The envelope carries facts, not prose.").await;
+    create_shared_record(
+        &matrix,
+        "k-c072-r1",
+        "The envelope carries facts, not prose.",
+    )
+    .await;
     let described = matrix.admin().describe().await;
     let state = admin_state(&matrix, SUBJECT).await;
 
@@ -460,8 +480,7 @@ async fn c_072_generated_envelope_shape_remote() {
     }
     assert_eq!(row["extensions"], json!({}), "{row}");
     assert_eq!(
-        row["generator"]["engine_policy_version"],
-        described["engine_policy_version"],
+        row["generator"]["engine_policy_version"], described["engine_policy_version"],
         "the row stamps the provider's own policy version: {row}"
     );
     assert!(
@@ -481,7 +500,12 @@ async fn c_073_reflection_reads_succeed_with_capability_remote() {
     let matrix = Matrix::remote().await;
     bootstrap(&matrix, &[]).await;
     grant_peer(&matrix, "reflect", "k-c073-grant").await;
-    create_shared_record(&matrix, "k-c073-r1", "A granted reader reads the real basis.").await;
+    create_shared_record(
+        &matrix,
+        "k-c073-r1",
+        "A granted reader reads the real basis.",
+    )
+    .await;
     let digest = peer_state(&matrix, SUBJECT).await["state_digest"].clone();
     let generated = matrix
         .peer()
@@ -521,7 +545,12 @@ async fn c_073_reflection_reads_succeed_with_capability_remote() {
 async fn c_075_reflection_subject_all_requires_unrestricted_grant_remote() {
     let matrix = Matrix::remote().await;
     bootstrap(&matrix, &[]).await;
-    create_shared_record(&matrix, "k-c075-r1", "Whole-subject reads need whole coverage.").await;
+    create_shared_record(
+        &matrix,
+        "k-c075-r1",
+        "Whole-subject reads need whole coverage.",
+    )
+    .await;
 
     // A context-restricted reflect grant does not cover subject_all.
     let peer_id = matrix.peer_principal().principal_id.clone();
@@ -606,10 +635,7 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_remote() {
     let rows = list_rows(&matrix).await["reflections"].clone();
     let rows = rows.as_array().expect("rows");
     assert_eq!(rows.len(), 2, "rows are never rewritten in place");
-    let stale_flags: Vec<bool> = rows
-        .iter()
-        .map(|row| row["stale"] == json!(true))
-        .collect();
+    let stale_flags: Vec<bool> = rows.iter().map(|row| row["stale"] == json!(true)).collect();
     assert_eq!(
         stale_flags,
         vec![true, false],
@@ -623,12 +649,19 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_remote() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+// clippy::too_many_lines: one conformance scenario, each line a protocol
+// step or assertion; splitting the scenario would hide its setup order.
+#[allow(clippy::too_many_lines)]
 async fn c_077_tombstoned_bases_excluded_from_list_get_remote() {
     let matrix = Matrix::remote().await;
     bootstrap(&matrix, &[]).await;
-    let context_record =
-        create_context_record(&matrix, "k-c077-r1", "Only the market context.", support::CONTEXT)
-            .await;
+    let context_record = create_context_record(
+        &matrix,
+        "k-c077-r1",
+        "Only the market context.",
+        support::CONTEXT,
+    )
+    .await;
     create_shared_record(&matrix, "k-c077-r2", "Everyone can read this chart.").await;
     create_shared_record(&matrix, "k-c077-r3", "And this second shared chart.").await;
 
@@ -698,8 +731,7 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_remote() {
         "the fully tombstoned row is excluded from the listing: {page}"
     );
     assert_eq!(
-        rows[0]["reflection_id"],
-        shared_row["result"]["reflection_id"],
+        rows[0]["reflection_id"], shared_row["result"]["reflection_id"],
         "{page}"
     );
     let state = matrix
@@ -710,8 +742,7 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_remote() {
         }))
         .await;
     assert_eq!(
-        state["last_reflection_id"],
-        shared_row["result"]["reflection_id"],
+        state["last_reflection_id"], shared_row["result"]["reflection_id"],
         "the surviving selection's state lookup serves its pinned row: {state}"
     );
     let context_lookup = matrix
@@ -888,7 +919,11 @@ async fn c_079_insufficient_data_policy_outcomes_remote() {
         .admin()
         .reflections_list(json!({ "subject_id": OTHER_SUBJECT }))
         .await;
-    assert!(page["reflections"].as_array().expect("rows").is_empty());
+    assert_eq!(
+        page["reflections"].as_array().expect("rows").len(),
+        0,
+        "{page}"
+    );
 
     // One authorized record flips the verdict to sufficient.
     let created = matrix
@@ -1108,10 +1143,7 @@ async fn c_100_reflection_error_classes_remote() {
     // A frozen space admits the reads and refuses the generate: terminal.
     let frozen = matrix.admin().freeze_space("k-c100-freeze", 1).await;
     assert!(is_committed(&frozen), "{frozen}");
-    let read = matrix
-        .admin()
-        .reflections_state(state_body(SUBJECT))
-        .await;
+    let read = matrix.admin().reflections_state(state_body(SUBJECT)).await;
     assert!(read.get("error").is_none(), "reads are freeze-allowlisted");
     let frozen_generate = matrix
         .admin()
@@ -1121,7 +1153,11 @@ async fn c_100_reflection_error_classes_remote() {
             "k-c100-frozen",
         ))
         .await;
-    assert_eq!(error_code(&frozen_generate), "SPACE_FROZEN", "{frozen_generate}");
+    assert_eq!(
+        error_code(&frozen_generate),
+        "SPACE_FROZEN",
+        "{frozen_generate}"
+    );
     assert_eq!(retry_class(&frozen_generate), "terminal");
     let unfrozen = matrix.admin().unfreeze_space("k-c100-unfreeze", 2).await;
     assert!(is_committed(&unfrozen), "{unfrozen}");
@@ -1187,7 +1223,10 @@ async fn qc_b3_committed_generation_replays_while_frozen_remote() {
             "k-b3-commit",
         ))
         .await;
-    assert!(is_committed(&replayed), "the replay outranks the freeze: {replayed}");
+    assert!(
+        is_committed(&replayed),
+        "the replay outranks the freeze: {replayed}"
+    );
     assert_eq!(replayed["receipt_id"], json!(receipt_id), "{replayed}");
 
     let fresh = matrix
@@ -1245,7 +1284,13 @@ async fn qc_b5_fenced_subject_refuses_fresh_generation_remote() {
 
     let fenced = matrix
         .admin()
-        .fence_subject(SUBJECT, json!({ "type": "subject" }), "fence", 1, "k-b5-fence")
+        .fence_subject(
+            SUBJECT,
+            json!({ "type": "subject" }),
+            "fence",
+            1,
+            "k-b5-fence",
+        )
         .await;
     assert!(is_committed(&fenced), "{fenced}");
 

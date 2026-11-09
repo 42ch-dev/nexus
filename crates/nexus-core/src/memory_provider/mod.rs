@@ -279,8 +279,9 @@ impl ProviderError {
             Self::NotAuthorized(_) | Self::ReadOnly(_) => SpokeRejectCode::NotAuthorized,
             Self::SpaceFrozen(_) => SpokeRejectCode::SpaceFrozen,
             Self::SubjectFenced { .. } => SpokeRejectCode::SubjectFenced,
-            Self::RevisionConflict { .. } => SpokeRejectCode::RevisionConflict,
-            Self::StateConflict { .. } => SpokeRejectCode::RevisionConflict,
+            Self::RevisionConflict { .. } | Self::StateConflict { .. } => {
+                SpokeRejectCode::RevisionConflict
+            }
             Self::InsufficientData(_) => SpokeRejectCode::InsufficientData,
             Self::IdempotencyConflict => SpokeRejectCode::IdempotencyConflict,
             Self::ReceiptExpired { .. } => SpokeRejectCode::ReceiptExpired,
@@ -462,9 +463,13 @@ fn store_error(error: StoreError) -> ProviderError {
         },
         StoreError::RevisionConflict { current } => ProviderError::RevisionConflict { current },
         StoreError::StateConflict { current } => ProviderError::StateConflict { current },
-        StoreError::ProfileIncomplete { subject_id, missing } => {
-            ProviderError::ProfileIncomplete { subject_id, missing }
-        }
+        StoreError::ProfileIncomplete {
+            subject_id,
+            missing,
+        } => ProviderError::ProfileIncomplete {
+            subject_id,
+            missing,
+        },
         StoreError::InsufficientData { subject_id } => ProviderError::InsufficientData(format!(
             "the authorized basis of subject {subject_id} is insufficient for reflection \
              generation; capture or restore source records and retry"
@@ -808,8 +813,8 @@ fn cognition_refusal(present: bool) -> Option<ProviderError> {
 /// 64-hex over a canonical basis object. The error is the reject's message
 /// text: the composition runs on both sides of the module boundary (storage
 /// reads and this facade), and each wraps it in its own error type.
-fn digest_value(value: Value) -> Result<String, String> {
-    match jcs_sha256_hex(&value) {
+fn digest_value(value: &Value) -> Result<String, String> {
+    match jcs_sha256_hex(value) {
         SpokeResult::Ok(digest) => Ok(digest),
         SpokeResult::Reject(reject) => Err(reject.message),
     }
@@ -818,7 +823,7 @@ fn digest_value(value: Value) -> Result<String, String> {
 /// §7.27 `source_set_digest`: 64-hex over the authorized source record id +
 /// revision set — sorted `[record_id, revision]` pairs, the caller's contract.
 fn reflection_source_set_digest(records: &[(String, i64)]) -> Result<String, String> {
-    digest_value(json!({ "records": records }))
+    digest_value(&json!({ "records": records }))
 }
 
 /// §7.25 `state_digest`: the provider-composed canonical object of the
@@ -832,7 +837,7 @@ fn reflection_state_digest(
     selection: &Selection,
     filter: Option<&[String]>,
 ) -> Result<String, String> {
-    digest_value(json!({
+    digest_value(&json!({
         "engine_policy_version": policy::ENGINE_POLICY_VERSION,
         "filter": filter_key(filter),
         "profile_revisions": profile_revisions,
@@ -878,14 +883,10 @@ fn selection_scope_covers(pinned: &Selection, requested: Option<&Selection>) -> 
         return true;
     };
     match (pinned, requested) {
-        (_, Selection::SubjectAll) => true,
-        (Selection::SharedOnly, Selection::SharedOnly) => true,
-        (
-            Selection::SharedOnly,
-            Selection::SelectedContexts {
-                include_shared, ..
-            },
-        ) => *include_shared,
+        (_, Selection::SubjectAll) | (Selection::SharedOnly, Selection::SharedOnly) => true,
+        (Selection::SharedOnly, Selection::SelectedContexts { include_shared, .. }) => {
+            *include_shared
+        }
         (
             Selection::SelectedContexts {
                 context_ids,
@@ -911,7 +912,7 @@ fn selection_scope_covers(pinned: &Selection, requested: Option<&Selection>) -> 
 /// defines no numeric thresholds, so this provider calls an empty authorized
 /// basis insufficient and any non-empty one sufficient. Generation refuses
 /// `INSUFFICIENT_DATA` on exactly the same verdict.
-pub(super) fn data_sufficiency(record_count: usize) -> &'static str {
+pub(super) const fn data_sufficiency(record_count: usize) -> &'static str {
     if record_count == 0 {
         "insufficient"
     } else {
@@ -943,10 +944,7 @@ fn reflection_body(row: &ReflectionRow, stale: bool) -> Result<Value, ProviderEr
         .as_object_mut()
         .expect("reflection projection is an object");
     if let Some(raw) = &row.filter_json {
-        members.insert(
-            "filter".to_string(),
-            json_member(raw, "reflection filter")?,
-        );
+        members.insert("filter".to_string(), json_member(raw, "reflection filter")?);
     }
     if let Some(raw) = &row.cognition_filter_json {
         members.insert(
@@ -2357,8 +2355,134 @@ fn candidate_kind(hint: Option<&str>) -> String {
     }
 }
 
+/// The wire list selection mapped onto the provider-internal one.
+fn wire_read_selection(
+    selection: &schemas::memory_reflections_list_request::ReadSelection,
+) -> Selection {
+    match selection {
+        schemas::memory_reflections_list_request::ReadSelection::SubjectAll => {
+            Selection::SubjectAll
+        }
+        schemas::memory_reflections_list_request::ReadSelection::SharedOnly => {
+            Selection::SharedOnly
+        }
+        schemas::memory_reflections_list_request::ReadSelection::SelectedContexts {
+            context_ids,
+            include_shared,
+        } => Selection::SelectedContexts {
+            context_ids: context_ids.clone(),
+            include_shared: include_shared.unwrap_or(false),
+        },
+    }
+}
+
+/// The generate request's selection mapped onto the provider-internal one.
+fn wire_generate_selection(
+    selection: &schemas::memory_reflections_generate_request::ReadSelection,
+) -> Selection {
+    match selection {
+        schemas::memory_reflections_generate_request::ReadSelection::SubjectAll => {
+            Selection::SubjectAll
+        }
+        schemas::memory_reflections_generate_request::ReadSelection::SharedOnly => {
+            Selection::SharedOnly
+        }
+        schemas::memory_reflections_generate_request::ReadSelection::SelectedContexts {
+            context_ids,
+            include_shared,
+        } => Selection::SelectedContexts {
+            context_ids: context_ids.clone(),
+            include_shared: include_shared.unwrap_or(false),
+        },
+    }
+}
+
+/// The verbatim pins the generate columns stage: the wire selection/filter
+/// shapes serialized unaltered, an absent filter staying `None` — never
+/// null-substituted.
+fn pinned_request_shapes(
+    request: &schemas::MemoryReflectionsGenerateRequest,
+) -> Result<(String, Option<String>), ProviderError> {
+    let selection_json = serde_json::to_string(&request.selection)
+        .map_err(|error| ProviderError::Internal(format!("selection pin: {error}")))?;
+    let filter_json = request
+        .filter
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| ProviderError::Internal(format!("filter pin: {error}")))?;
+    Ok((selection_json, filter_json))
+}
+
+/// §9.2/§9.3, cut out of the wire method: score every authorized row, order
+/// by (score, recency, id) — deterministic for identical state, request and
+/// policy — apply the byte/item budget after the cursor, and project the
+/// kept bodies. Returns the bodies, the offset they consumed and the id the
+/// budget overflowed on, if any.
+fn recall_ranked_bodies(
+    rows: &[RecordRow],
+    terms: &[String],
+    start: usize,
+    max_items: u64,
+    max_bytes: Option<u64>,
+) -> Result<(Vec<Value>, usize, Option<String>), ProviderError> {
+    let mut ranked: Vec<(usize, &RecordRow)> = rows
+        .iter()
+        .map(|row| (policy::recall_score(&record_text(row), terms), row))
+        .collect();
+    ranked.sort_by(|(left_score, left), (right_score, right)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| created_at_cmp(&right.created_at, &left.created_at))
+            .then_with(|| left.record_id.cmp(&right.record_id))
+    });
+    let remaining = &ranked[start..];
+    let sizes: Vec<(String, usize)> = remaining
+        .iter()
+        .map(|(_, row)| (row.record_id.clone(), row.content_json.len()))
+        .collect();
+    let outcome = policy::apply_budget(&sizes, max_items, max_bytes);
+    let mut bodies = Vec::with_capacity(outcome.kept.len());
+    for index in &outcome.kept {
+        let Some((_, row)) = remaining.get(*index) else {
+            return Err(ProviderError::Internal(
+                "recall budget selected an out-of-range item".to_string(),
+            ));
+        };
+        bodies.push(record_body(row)?);
+    }
+    let consumed = start + bodies.len();
+    Ok((bodies, consumed, outcome.overflow_record_id))
+}
+
+/// A subject's profile kinds and the required ones it misses — the same
+/// projection the `state` op publishes and the generate gate refuses on.
+fn profile_projection(profile_revisions: &[(String, i64)]) -> (Vec<String>, Vec<String>) {
+    let kinds: Vec<String> = profile_revisions
+        .iter()
+        .map(|(kind, _)| kind.clone())
+        .collect();
+    let missing: Vec<String> = policy::REQUIRED_PROFILE_KINDS
+        .iter()
+        .filter(|required| !kinds.iter().any(|kind| kind == *required))
+        .map(|required| (*required).to_string())
+        .collect();
+    (kinds, missing)
+}
+
+/// The request's id set canonicalized for every place that treats it as a
+/// set (bound-query keys, digests, list narrowing): sorted, de-duplicated.
+pub(super) fn canonical_ids(ids: &[String]) -> Vec<String> {
+    let mut ids = ids.to_vec();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 /// The bound query a content page belongs to (MEM-R026): everything that
-/// changes which rows the page was cut from.
+/// changes which rows the page was cut from. The ids render canonically —
+/// two requests naming the same context/filter set in different orders or
+/// with duplicates are the same bound query and the same state digest.
 fn selection_key(selection: &Selection) -> String {
     match selection {
         Selection::SubjectAll => "subject_all".to_string(),
@@ -2368,14 +2492,19 @@ fn selection_key(selection: &Selection) -> String {
             include_shared,
         } => format!(
             "selected_contexts({}){}",
-            context_ids.join(","),
+            canonical_ids(context_ids).join(","),
             if *include_shared { "+shared" } else { "" }
         ),
     }
 }
 
+/// The provenance filter rendered into the bound-query/digest keys, the same
+/// set canonicalization as [`selection_key`].
 fn filter_key(filter: Option<&[String]>) -> String {
-    filter.map_or_else(|| "*".to_string(), |sources| sources.join(","))
+    filter.map_or_else(
+        || "*".to_string(),
+        |sources| canonical_ids(sources).join(","),
+    )
 }
 
 /// §9.2 ranking input: the record's untrusted text, never re-interpreted.
@@ -3891,49 +4020,23 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(offset) => offset,
             Err(error) => return deny(&error),
         };
-        // §9.2 ranking: deterministic for identical state, request and policy.
-        let mut ranked: Vec<(usize, &RecordRow)> = rows
-            .iter()
-            .map(|row| (policy::recall_score(&record_text(row), &terms), row))
-            .collect();
-        ranked.sort_by(|(left_score, left), (right_score, right)| {
-            right_score
-                .cmp(left_score)
-                .then_with(|| created_at_cmp(&right.created_at, &left.created_at))
-                .then_with(|| left.record_id.cmp(&right.record_id))
-        });
-        // §9.3 budget over what remains after the cursor.
-        let start = usize::try_from(offset).unwrap_or(total).min(total);
-        let remaining = &ranked[start..];
-        let sizes: Vec<(String, usize)> = remaining
-            .iter()
-            .map(|(_, row)| (row.record_id.clone(), row.content_json.len()))
-            .collect();
-        let outcome = policy::apply_budget(
-            &sizes,
+        let (bodies, consumed, overflow_record_id) = match recall_ranked_bodies(
+            &rows,
+            &terms,
+            usize::try_from(offset).unwrap_or(total).min(total),
             request.budget.max_items.get(),
             request.budget.max_bytes.map(std::num::NonZero::get),
-        );
-        let mut bodies = Vec::with_capacity(outcome.kept.len());
-        for index in &outcome.kept {
-            let Some((_, row)) = remaining.get(*index) else {
-                return deny(&ProviderError::Internal(
-                    "recall budget selected an out-of-range item".to_string(),
-                ));
-            };
-            match record_body(row) {
-                Ok(body) => bodies.push(body),
-                Err(error) => return deny(&error),
-            }
-        }
-        let consumed = start + bodies.len();
+        ) {
+            Ok(kept) => kept,
+            Err(error) => return deny(&error),
+        };
         let next_cursor = (consumed < total)
             .then(|| encode_cursor(principal_id, &scope, consumed as u64, &marker));
         respond(json!({
             "records": bodies,
             "total_authorized": total,
             "truncated": consumed < total,
-            "overflow_record_id": outcome.overflow_record_id,
+            "overflow_record_id": overflow_record_id,
             "next_cursor": next_cursor,
             "engine_policy_version": policy::ENGINE_POLICY_VERSION,
         }))
@@ -4150,16 +4253,8 @@ impl MemoryPort for LocalMemoryProvider {
                 )));
             }
         };
-        let profile_kinds: Vec<String> = snapshot
-            .profile_revisions
-            .iter()
-            .map(|(kind, _)| kind.clone())
-            .collect();
-        let missing_required_profile_kinds: Vec<String> = policy::REQUIRED_PROFILE_KINDS
-            .iter()
-            .filter(|required| !profile_kinds.iter().any(|kind| kind == *required))
-            .map(|required| (*required).to_string())
-            .collect();
+        let (profile_kinds, missing_required_profile_kinds) =
+            profile_projection(&snapshot.profile_revisions);
         // The read-side narrowing is the same one `list` uses: the newest
         // envelope this caller may see under this selection and provenance
         // filter, excluding tombstoned-basis rows (C-077). With no envelope
@@ -4199,7 +4294,6 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryReflectionsListRequest,
     ) -> SpokeResult<schemas::MemoryReflectionsListResponse> {
-        use schemas::memory_reflections_list_request::ReadSelection;
         if !self.reflections {
             return unsupported(OP_REFLECTIONS_LIST);
         }
@@ -4207,17 +4301,7 @@ impl MemoryPort for LocalMemoryProvider {
         // reflections, so its admission is capability-and-subject only; a
         // present one is covered like any other read selection (C-075 holds for
         // an explicit `subject_all`).
-        let selection = request.selection.as_ref().map(|selection| match selection {
-            ReadSelection::SubjectAll => Selection::SubjectAll,
-            ReadSelection::SharedOnly => Selection::SharedOnly,
-            ReadSelection::SelectedContexts {
-                context_ids,
-                include_shared,
-            } => Selection::SelectedContexts {
-                context_ids: context_ids.clone(),
-                include_shared: include_shared.unwrap_or(false),
-            },
-        });
+        let selection = request.selection.as_ref().map(wire_read_selection);
         if let SpokeResult::Reject(reject) =
             validate_memory_reflections_list(&request, policy::MAX_PAGE_SIZE_BOUND)
         {
@@ -4256,8 +4340,7 @@ impl MemoryPort for LocalMemoryProvider {
             ),
             selection
                 .as_ref()
-                .map(selection_key)
-                .unwrap_or_else(|| "*".to_string()),
+                .map_or_else(|| "*".to_string(), selection_key),
             filter_key(filter.as_deref()),
         );
         let (offset, claimed) =
@@ -4308,21 +4391,10 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryReflectionsGenerateRequest,
     ) -> SpokeResult<schemas::MemoryReflectionsGenerateResponse> {
-        use schemas::memory_reflections_generate_request::ReadSelection;
         if !self.reflections {
             return unsupported(OP_REFLECTIONS_GENERATE);
         }
-        let selection = match &request.selection {
-            ReadSelection::SubjectAll => Selection::SubjectAll,
-            ReadSelection::SharedOnly => Selection::SharedOnly,
-            ReadSelection::SelectedContexts {
-                context_ids,
-                include_shared,
-            } => Selection::SelectedContexts {
-                context_ids: context_ids.clone(),
-                include_shared: include_shared.unwrap_or(false),
-            },
-        };
+        let selection = wire_generate_selection(&request.selection);
         if let SpokeResult::Reject(reject) = validate_memory_reflections_generate(&request) {
             return deny(&ProviderError::from_reject(reject, "selection"));
         }
@@ -4379,23 +4451,11 @@ impl MemoryPort for LocalMemoryProvider {
             placement_gate: None,
             freeze_gated: true,
         };
-        // Verbatim pins for the columns Task 1 staged: the wire shapes travel
-        // unaltered, and an absent filter stays SQL NULL — never
-        // null-substituted.
-        let selection_json = match serde_json::to_string(&request.selection) {
-            Ok(json) => json,
-            Err(error) => {
-                return deny(&ProviderError::Internal(format!("selection pin: {error}")));
-            }
-        };
-        let filter_json = request
-            .filter
-            .as_ref()
-            .map(|filter| serde_json::to_string(filter))
-            .transpose();
-        let filter_json = match filter_json {
-            Ok(json) => json,
-            Err(error) => return deny(&ProviderError::Internal(format!("filter pin: {error}"))),
+        // Verbatim pins for the columns Task 1 staged (see
+        // [`pinned_request_shapes`]).
+        let (selection_json, filter_json) = match pinned_request_shapes(&request) {
+            Ok(pins) => pins,
+            Err(error) => return deny(&error),
         };
         let filter = request
             .filter

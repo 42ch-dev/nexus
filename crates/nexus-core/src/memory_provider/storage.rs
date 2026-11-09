@@ -4660,7 +4660,12 @@ enum RecordMutation<'a> {
 // write-time flag the insert recorded. The reflection ops (`mod.rs`) are the
 // consumers, landing with Tasks 2–4 of v230-n4r-local-reflection.
 
-const REFLECTION_COLUMNS: &str = "reflection_id, space_id, subject_id, requester_principal_id, \
+/// Per distinct pinned selection/filter (its JSON columns), the recomputed
+/// `(live, tombstoned)` record sets.
+type ReflectionProbeMap = HashMap<(String, String), (Vec<(String, i64)>, Vec<(String, i64)>)>;
+
+const REFLECTION_COLUMNS: &str =
+    "seq, reflection_id, space_id, subject_id, requester_principal_id, \
      selection_json, filter_json, cognition_filter_json, basis_json, engine_policy_version, \
      model, schema_version, revision, extensions_json, created_at, body_text, body_format, \
      cost_unit_kind, cost_units, stale_cache";
@@ -4668,6 +4673,11 @@ const REFLECTION_COLUMNS: &str = "reflection_id, space_id, subject_id, requester
 /// One generated reflection envelope as stored (§7.27).
 #[derive(Clone, Debug, sqlx::FromRow)]
 pub(super) struct ReflectionRow {
+    // The store-assigned insertion order: the read path orders by it (whole-
+    // second `created_at` stamps cannot separate same-second envelopes); the
+    // wire projection never serves it.
+    #[allow(dead_code)]
+    pub seq: i64,
     pub reflection_id: String,
     pub space_id: String,
     pub subject_id: String,
@@ -4730,11 +4740,13 @@ async fn insert_reflection(
     };
     sqlx::query(
         "INSERT INTO memory_reflections \
-         (reflection_id, space_id, subject_id, requester_principal_id, selection_json, \
+         (seq, reflection_id, space_id, subject_id, requester_principal_id, selection_json, \
           filter_json, cognition_filter_json, basis_json, engine_policy_version, model, \
           schema_version, revision, extensions_json, created_at, body_text, body_format, \
           cost_unit_kind, cost_units, stale_cache) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (\
+           (SELECT COALESCE(MAX(seq), 0) + 1 FROM memory_reflections), \
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(reflection.reflection_id)
     .bind(reflection.space_id)
@@ -4895,12 +4907,15 @@ fn pinned_staleness(
     let pinned_state = pinned_member("state_digest")?;
     let state = super::reflection_state_digest(live, profile_revisions, selection, filter)
         .map_err(StoreError::Corrupt)?;
-    let source_live =
-        super::reflection_source_set_digest(live).map_err(StoreError::Corrupt)?;
+    let source_live = super::reflection_source_set_digest(live).map_err(StoreError::Corrupt)?;
     let mut counting = live.to_vec();
     // Undo the single delete-time revision bump; a tombstoned row has no
     // other revision history after the pin.
-    counting.extend(tombstones.iter().map(|(id, revision)| (id.clone(), revision - 1)));
+    counting.extend(
+        tombstones
+            .iter()
+            .map(|(id, revision)| (id.clone(), revision - 1)),
+    );
     counting.sort();
     let source_counting =
         super::reflection_source_set_digest(&counting).map_err(StoreError::Corrupt)?;
@@ -4931,7 +4946,7 @@ fn reflection_marker(
         .map(|grant| (grant.grant_id.clone(), grant.revision))
         .collect();
     grant_revisions.sort();
-    match super::digest_value(json!({
+    match super::digest_value(&json!({
         "records": records,
         "profile_revisions": profile_revisions,
         "reflections": reflections,
@@ -5021,8 +5036,7 @@ impl MemoryStore {
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         if withheld(unsettled.as_ref(), subject_id)? {
             tx.commit().await?;
-            let marker =
-                reflection_marker(&[], &[], &[], &grant_rows, subject_status.as_deref())?;
+            let marker = reflection_marker(&[], &[], &[], &grant_rows, subject_status.as_deref())?;
             return Ok((Vec::new(), marker, 0));
         }
         let profile_revisions = profile_revisions_in_tx(&mut tx, space_id, subject_id).await?;
@@ -5036,7 +5050,7 @@ impl MemoryStore {
         let sql = format!(
             "SELECT {REFLECTION_COLUMNS} FROM memory_reflections \
              WHERE space_id = ? AND subject_id = ? \
-             ORDER BY created_at DESC, reflection_id DESC"
+             ORDER BY seq DESC"
         );
         let rows = sqlx::query_as::<_, ReflectionRow>(sqlx::AssertSqlSafe(sql))
             .bind(space_id)
@@ -5048,12 +5062,14 @@ impl MemoryStore {
         // then computed against that row's own pinned basis — envelopes
         // sharing a pin may pin different bases, so a verdict computed from a
         // sibling row's basis is never shared.
-        let mut probes: HashMap<(String, String), (Vec<(String, i64)>, Vec<(String, i64)>)> =
-            HashMap::new();
+        let mut probes: ReflectionProbeMap = HashMap::new();
+        // The request filter matches a pinned filter as a set — the same
+        // canonicalization the digest key renders — never by raw array order.
+        let request_filter_set = request_filter.map(super::canonical_ids);
         let mut visible = Vec::with_capacity(rows.len());
         for row in rows {
-            let pinned = super::pinned_selection(&row.selection_json)
-                .map_err(StoreError::Corrupt)?;
+            let pinned =
+                super::pinned_selection(&row.selection_json).map_err(StoreError::Corrupt)?;
             let filter = pinned_filter(row.filter_json.as_ref())?;
             let (live, tombstones) = {
                 let key = (
@@ -5083,7 +5099,9 @@ impl MemoryStore {
                 &row.basis_json,
             )?;
             if excluded
-                || request_filter.is_some() && filter.as_deref() != request_filter
+                || request_filter_set.as_ref().is_some_and(|requested| {
+                    Some(requested) != filter.as_deref().map(super::canonical_ids).as_ref()
+                })
                 || !covered(
                     &grants,
                     principal_id,
@@ -5130,9 +5148,12 @@ impl MemoryStore {
     /// naming an honest retryable cause — and the only cost recording rides
     /// the `committed` outcome, so a failure never charges (C-078).
     ///
-    /// Generation is deterministic over the basis snapshot transaction 1
-    /// pinned: the same authorized basis and policy version always produce
-    /// the same envelope, and a racing generation resolves through the dedup
+    /// The basis content is deterministic over the basis snapshot transaction 1
+    /// pinned — `basis_json`, `body_text` and the state/source digests are the
+    /// same pure function of the same authorized basis and policy version —
+    /// but the envelope identity is NOT: `reflection_id` is freshly minted, so
+    /// the same basis regenerated under a new idempotency key produces a new
+    /// envelope identity. A racing generation resolves through the dedup
     /// namespace, never through the content.
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn generate_reflection(
@@ -5187,16 +5208,7 @@ impl MemoryStore {
         // `state` op reports: the missing kinds are the ones
         // `missing_required_profile_kinds` names, and the verdict is exactly
         // `data_sufficiency`'s.
-        let missing: Vec<String> = super::policy::REQUIRED_PROFILE_KINDS
-            .iter()
-            .filter(|required| {
-                !snapshot
-                    .profile_revisions
-                    .iter()
-                    .any(|(kind, _)| kind == *required)
-            })
-            .map(|required| (*required).to_string())
-            .collect();
+        let missing: Vec<String> = super::profile_projection(&snapshot.profile_revisions).1;
         if !missing.is_empty() {
             return Err(StoreError::ProfileIncomplete {
                 subject_id: subject_id.to_string(),
@@ -5212,7 +5224,9 @@ impl MemoryStore {
         // generation (C-015/C-070), carrying no payload, no terminal stamp and
         // no cost.
         let receipt_id = mint_receipt_id();
-        let mut row = self.write_receipt(&mut tx, ctx, &receipt_id, None, now).await?;
+        let mut row = self
+            .write_receipt(&mut tx, ctx, &receipt_id, None, now)
+            .await?;
         self.commit_effect(tx).await?;
 
         // ── The parked window: pending published, terminal not yet ──
@@ -5309,8 +5323,8 @@ impl MemoryStore {
         failure: &Value,
         settled_at: &str,
     ) -> StoreResult<()> {
-        let failure_json =
-            serde_json::to_string(failure).map_err(|e| StoreError::Corrupt(format!("failure: {e}")))?;
+        let failure_json = serde_json::to_string(failure)
+            .map_err(|e| StoreError::Corrupt(format!("failure: {e}")))?;
         let mut tx = begin_immediate(&self.pool).await?;
         let updated = sqlx::query(
             "UPDATE memory_receipts SET status = 'failed', error_json = ?, completed_at = ? \
@@ -5371,9 +5385,8 @@ impl MemoryStore {
         let settled_at = timestamp(self.now());
         for (receipt_id,) in &orphans {
             let failure = interrupted_failure(receipt_id);
-            let failure_json = serde_json::to_string(&failure).map_err(|e| {
-                StoreError::Corrupt(format!("recovery failure envelope: {e}"))
-            });
+            let failure_json = serde_json::to_string(&failure)
+                .map_err(|e| StoreError::Corrupt(format!("recovery failure envelope: {e}")));
             let Ok(failure_json) = failure_json else {
                 tracing::warn!(%space_id, "reflection generate recovery envelope skipped");
                 continue;
@@ -5391,7 +5404,7 @@ impl MemoryStore {
             match updated {
                 Ok(updated) if updated.rows_affected() == 1 => {}
                 Ok(_) => {
-                    tracing::warn!(%receipt_id, "pending reflection receipt settled elsewhere")
+                    tracing::warn!(%receipt_id, "pending reflection receipt settled elsewhere");
                 }
                 Err(error) => tracing::warn!(%receipt_id, ?error, "reflection recovery skipped"),
             }
@@ -5403,8 +5416,9 @@ impl MemoryStore {
 }
 
 /// One generated reflection, composed over the basis snapshot transaction 1
-/// pinned. Everything is a pure function of the snapshot, the pinned request
-/// shapes and the policy version — racing generations of one key resolve
+/// pinned. The basis content is a pure function of the snapshot, the pinned
+/// request shapes and the policy version, but the envelope identity is NOT:
+/// `reflection_id` is freshly minted — racing generations of one key resolve
 /// through the dedup namespace, never through this content. All owned data:
 /// the caller ties the `NewReflection` borrows inside its own scope.
 struct ComposedGeneration {
@@ -5416,7 +5430,8 @@ struct ComposedGeneration {
     result_json: String,
 }
 
-/// The deterministic generation step. The cost is this provider's own unit
+/// The generation step: deterministic basis content, a minted envelope
+/// identity. The cost is this provider's own unit
 /// accounting — one reflection per committed generation — and exists only on
 /// the committed path, which is the whole C-078 mechanism.
 fn compose_generation(
