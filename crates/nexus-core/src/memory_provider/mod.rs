@@ -491,8 +491,9 @@ fn deny<T>(error: &ProviderError) -> SpokeResult<T> {
     spoke_operations::spoke_reject(error.reject_code(), error.message(), Some(error.details()))
 }
 
-/// The sub-capability gated families (reflection, transfer): the
-/// dispatch-level denial shape. A reject can only carry a
+/// The sub-capability gated families: the dispatch-level denial shape for a
+/// family this provider instance does not serve — transfer always, reflection
+/// only in the deliberately-unadvertised shape (§4.1). A reject can only carry a
 /// [`SpokeRejectCode`], and the port
 /// vocabulary has no `op_unsupported` variant — upstream's responder answers an
 /// unimplemented port op with `CapabilityPortMissing` (`responder.rs:367-371`)
@@ -658,11 +659,18 @@ fn payload_digest<T: Serialize>(op: &str, request: &T) -> Result<String, Provide
 }
 
 /// §7.1 `memory.describe`'s response, shared with nothing: it is the provider's
-/// declaration of its own surface.
-fn describe_body() -> Value {
+/// declaration of its own surface. `reflections` is the instance's own switch,
+/// so the advertisement names `spoke-memory-reflection` exactly when the three
+/// reflection ops are served.
+fn describe_body(reflections: bool) -> Value {
+    let capabilities: &[&str] = if reflections {
+        &policy::CAPABILITIES
+    } else {
+        &policy::CAPABILITIES_WITHOUT_REFLECTION
+    };
     json!({
         "memory_protocol_version": policy::MEMORY_PROTOCOL_VERSION,
-        "capabilities": policy::CAPABILITIES,
+        "capabilities": capabilities,
         "limits": policy::limits(),
         "required_profile_kinds": policy::REQUIRED_PROFILE_KINDS,
         "engine_policy_version": policy::ENGINE_POLICY_VERSION,
@@ -1115,6 +1123,10 @@ fn page_limit(limit: Option<NonZeroU64>) -> u64 {
 pub struct LocalMemoryProvider {
     store: MemoryStore,
     space_id: String,
+    /// Whether this instance serves the `spoke-memory-reflection` family: the
+    /// §4.1 advertisement and the §7.25–§7.27 op entry share this one switch, so
+    /// `describe` and the ops can never disagree. Production opens turn it on.
+    reflections: bool,
 }
 
 /// Exclusive per-bearer memory-disposition section
@@ -1227,6 +1239,7 @@ impl LocalMemoryProvider {
         Ok(Self {
             store,
             space_id: DEFAULT_SPACE_ID.to_string(),
+            reflections: true,
         })
     }
 
@@ -1264,7 +1277,31 @@ impl LocalMemoryProvider {
         Ok(Self {
             store,
             space_id: DEFAULT_SPACE_ID.to_string(),
+            reflections: true,
         })
+    }
+
+    /// Open the same provider with the `spoke-memory-reflection` sub-capability
+    /// withheld: `describe` omits the flag and the three reflection ops answer
+    /// the not-served refusal, the deliberately-unadvertised shape staging spec
+    /// §4 N4-R keeps C-003 green on. Everything else is the writable open above.
+    ///
+    /// Compiled out of a production build: production builds always serve the
+    /// reflection family.
+    ///
+    /// # Errors
+    ///
+    /// The [`Self::open`] errors.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub async fn open_unadvertised(
+        user_home: PathBuf,
+        creator_id: &str,
+        workspace_slug: &str,
+    ) -> CoreResult<Self> {
+        let mut provider = Self::open(user_home, creator_id, workspace_slug).await?;
+        provider.reflections = false;
+        Ok(provider)
     }
 
     /// Whether this provider may write (`false` for a read-only open).
@@ -3017,7 +3054,7 @@ impl MemoryPort for LocalMemoryProvider {
         _principal: &schemas::Principal,
         _request: schemas::MemoryDescribeRequest,
     ) -> SpokeResult<schemas::MemoryDescribeResponse> {
-        respond(describe_body())
+        respond(describe_body(self.reflections))
     }
 
     async fn list_spaces(
@@ -4060,7 +4097,7 @@ impl MemoryPort for LocalMemoryProvider {
         )
     }
 
-    // ── Sub-capability gated (never served in N1) ──────────────────────
+    // ── Sub-capability gated (N4-R reflection family) ──────────────────
 
     async fn get_reflection_state(
         &self,
@@ -4068,9 +4105,9 @@ impl MemoryPort for LocalMemoryProvider {
         request: schemas::MemoryReflectionsStateRequest,
     ) -> SpokeResult<schemas::MemoryReflectionsStateResponse> {
         use schemas::memory_reflections_state_request::ReadSelection;
-        // N4-R Task 2: admission only. An admitted request still answers the
-        // not-served refusal until the read flow lands (plan Tasks 3–4), so the
-        // N3 wire shape survives for every caller this admission lets through.
+        if !self.reflections {
+            return unsupported(OP_REFLECTIONS_STATE);
+        }
         let selection = match &request.selection {
             ReadSelection::SubjectAll => Selection::SubjectAll,
             ReadSelection::SharedOnly => Selection::SharedOnly,
@@ -4185,6 +4222,9 @@ impl MemoryPort for LocalMemoryProvider {
         request: schemas::MemoryReflectionsListRequest,
     ) -> SpokeResult<schemas::MemoryReflectionsListResponse> {
         use schemas::memory_reflections_list_request::ReadSelection;
+        if !self.reflections {
+            return unsupported(OP_REFLECTIONS_LIST);
+        }
         // An absent selection names no data access beyond the caller's covered
         // reflections, so its admission is capability-and-subject only; a
         // present one is covered like any other read selection (C-075 holds for
@@ -4291,6 +4331,9 @@ impl MemoryPort for LocalMemoryProvider {
         request: schemas::MemoryReflectionsGenerateRequest,
     ) -> SpokeResult<schemas::MemoryReflectionsGenerateResponse> {
         use schemas::memory_reflections_generate_request::ReadSelection;
+        if !self.reflections {
+            return unsupported(OP_REFLECTIONS_GENERATE);
+        }
         let selection = match &request.selection {
             ReadSelection::SubjectAll => Selection::SubjectAll,
             ReadSelection::SharedOnly => Selection::SharedOnly,
@@ -4446,8 +4489,30 @@ impl MemoryPort for LocalMemoryProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::created_at_cmp;
+    use super::{created_at_cmp, describe_body};
     use std::cmp::Ordering;
+
+    /// §4.1: the advertisement names the reflection sub-capability exactly when
+    /// the instance serves the three reflection ops — the same switch the
+    /// `memory.reflections.*` entry guard reads, so both shapes stay honest and
+    /// `spoke-memory-transfer` is never advertised.
+    #[test]
+    fn describe_advertises_reflection_exactly_when_it_is_served() {
+        for (reflections, capabilities) in [
+            (
+                true,
+                serde_json::json!(["spoke-memory", "spoke-memory-reflection"]),
+            ),
+            (false, serde_json::json!(["spoke-memory"])),
+        ] {
+            let body = describe_body(reflections);
+            assert_eq!(
+                body["capabilities"], capabilities,
+                "reflections served: {reflections}: {body}"
+            );
+            assert_eq!(body["engine_policy_version"], "nexus-local-memory-v1");
+        }
+    }
 
     /// NXM-5 QC1-F1 fix round 2: the merged-read comparator must be a total
     /// order for every supported legacy timestamp format. The reported cycle —
