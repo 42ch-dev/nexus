@@ -292,8 +292,8 @@ mod token_equivalence_tests {
                 "sub": "12D3KooWSubject",
                 "aud": "nexus",
                 "capabilities": ["memory.describe"],
-                "exp": 4102444800u64,
-                "iat": 1600000000,
+                "exp": 4_102_444_800_u64,
+                "iat": 1_600_000_000,
                 "jti": "tok_001"
             },
             "sig": "c2lnX2J5dGVzX2J5dGVzX2J5dGVzX2J5dGVzX2J5dGVzX2J5dGVz"
@@ -341,8 +341,7 @@ mod token_equivalence_tests {
 
         // The coded refusal surface stays stable for every reject.
         let err = validate_capability_token(&serde_json::json!({}))
-            .err()
-            .expect("empty object is rejected");
+            .expect_err("empty object is rejected");
         assert!(matches!(err, CoreError::Coded { ref code, .. } if code == CREDENTIAL_INVALID_CODE));
     }
 }

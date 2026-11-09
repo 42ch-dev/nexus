@@ -176,7 +176,7 @@ mod tests {
     /// Serialize writer-touching tests against the process-global singleton
     /// (I-000329): the mutex keeps each test's reset→append→flush→read cycle
     /// atomic under the default parallel harness, mirroring the repo's
-    /// `env_lock()` precedent (nexus-agent-host acp_session_lifecycle tests).
+    /// `env_lock()` precedent (nexus-agent-host `acp_session_lifecycle` tests).
     static TRACE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn trace_lock() -> std::sync::MutexGuard<'static, ()> {
