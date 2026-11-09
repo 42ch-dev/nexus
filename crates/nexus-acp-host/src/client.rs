@@ -56,6 +56,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use agent_client_protocol as acp;
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::v1::schema::AgentCapabilities;
 use agent_client_protocol::v1::schema::AuthMethod;
 use agent_client_protocol::v1::schema::CancelNotification;
@@ -73,8 +75,6 @@ use agent_client_protocol::v1::schema::{
     ResourceLink, SelectedPermissionOutcome, SessionId, SessionModeId, SessionNotification,
     SessionUpdate, SetSessionModeRequest, StopReason, TextContent,
 };
-use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::v1::{ActiveSession, ConnectionTo, SessionMessage, SessionSetup};
 use agent_client_protocol::{Agent, ByteStreams};
 use tokio::sync::RwLock;
@@ -1318,14 +1318,17 @@ impl NexusAcpClient for AcpSdkAdapter {
                         // ACP 5.0: `start_session()` returns a `SessionSetup`
                         // holding the session and the complete setup response
                         // (`ActiveSession::response()` was removed).
-                        let SessionSetup { session, response, .. } = session_result;
+                        let SessionSetup {
+                            session, response, ..
+                        } = session_result;
 
                         let session_id_str = session.session_id().to_string();
 
                         // Convert modes. ACP 2.1: the setup response carries
                         // `Option<SessionModeState>` — map directly.
-                        let nexus_modes =
-                            response.modes.map(|state| nexus_session_mode_state_from_sdk(&state));
+                        let nexus_modes = response
+                            .modes
+                            .map(|state| nexus_session_mode_state_from_sdk(&state));
 
                         // Convert config_options from the setup response. The
                         // SDK response may include config_options exposing

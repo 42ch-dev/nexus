@@ -1109,8 +1109,7 @@ mod tests {
         let writer_path = path.clone();
         let writer_home = home_path.clone();
         let writer = std::thread::spawn(move || {
-            let lock =
-                nexus_home_layout::config_lock::acquire(&writer_home).expect("writer lock");
+            let lock = nexus_home_layout::config_lock::acquire(&writer_home).expect("writer lock");
             // The truncation an in-place rewrite exposes before its complete
             // body is written.
             std::fs::write(&writer_path, "").expect("truncate under the lock");

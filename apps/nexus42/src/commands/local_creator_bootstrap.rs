@@ -215,8 +215,11 @@ fn preflight_config_document() -> Result<()> {
         Ok(())
     })
     .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-    outcome
-        .unwrap_or_else(|| Err(anyhow::anyhow!("config lock released without running the writer")))?;
+    outcome.unwrap_or_else(|| {
+        Err(anyhow::anyhow!(
+            "config lock released without running the writer"
+        ))
+    })?;
     Ok(())
 }
 

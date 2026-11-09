@@ -21,11 +21,11 @@
 
 use std::path::PathBuf;
 
+use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::schema::{
     AgentCapabilities, EnvVariable, InitializeRequest, InitializeResponse, McpServer,
     McpServerHttp, McpServerSse, McpServerStdio, NewSessionRequest, NewSessionResponse, SessionId,
 };
-use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent, Channel, Client};
 
 /// The three generic descriptor kinds a client may attach to `newSession`.
