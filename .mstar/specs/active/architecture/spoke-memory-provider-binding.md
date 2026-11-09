@@ -233,4 +233,4 @@ Under `memory-remote`, `connect/mod.rs` exposes `ws_transport`; accept/session/p
 
 Default `nexus-core` has no Connect edge. Dependency review compares feature-off and feature-on graphs rather than asserting that unrelated workspace crates never contain cloud dependencies.
 
-The current published SPOKE lockstep is `0.15.2` with `libp2p 0.57.1`; workspace manifests own the exact pins. Consumers use the published interfaces and do not substitute sibling checkouts, unpublished packages, vendored forks, or invented public APIs. A future incompatible upstream interface requires an architecture revision rather than a parallel protocol or source-gate waiver.
+The current published SPOKE lockstep is `0.16.0` with `libp2p 0.57.1`; workspace manifests own the exact pins. Consumers use the published interfaces and do not substitute sibling checkouts, unpublished packages, vendored forks, or invented public APIs. A future incompatible upstream interface requires an architecture revision rather than a parallel protocol or source-gate waiver.
