@@ -1069,8 +1069,8 @@ async fn c_032_dismiss_replay_never_resurrects_remote() {
 /// I-000305: repeating a retained dismiss idempotency key with a changed
 /// target must resolve the key's receipt binding, not the target row. The
 /// changed target names an absent candidate, so the pre-hoist ordering —
-/// target fetch before replay resolution — answered NOT_FOUND
-/// (CANDIDATE-shaped) instead of the retained key's IDEMPOTENCY_CONFLICT.
+/// target fetch before replay resolution — answered `NOT_FOUND`
+/// (CANDIDATE-shaped) instead of the retained key's `IDEMPOTENCY_CONFLICT`.
 async fn changed_target_under_a_retained_key_is_a_conflict(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let admin = matrix.admin();

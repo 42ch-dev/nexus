@@ -627,7 +627,7 @@ async fn object_facts_stay_monotone_across_the_mapped_writes() {
     // The cleanup deletes rows instead of rewriting states, and a fact for the
     // removed binding is a no-op (the mapped surface cannot revive it).
     remove(&seed, &pool).await.unwrap();
-    assert!(fact_states(&pool, &seed.binding_id).await.is_empty());
+    assert_eq!(fact_states(&pool, &seed.binding_id).await, Vec::new());
     record(
         &pool,
         &ns,

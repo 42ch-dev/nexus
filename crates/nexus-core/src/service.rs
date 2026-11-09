@@ -1105,7 +1105,7 @@ mod tests {
 
         let (truncated, truncated_rx) = std::sync::mpsc::channel();
         let (release, release_rx) = std::sync::mpsc::channel();
-        let writer_document = document.clone();
+        let writer_document = document;
         let writer_path = path.clone();
         let writer_home = home_path.clone();
         let writer = std::thread::spawn(move || {
@@ -1126,7 +1126,7 @@ mod tests {
             "the truncated rewrite is really on disk"
         );
 
-        let reader_path = home_path.clone();
+        let reader_path = home_path;
         let reader = std::thread::spawn(move || selection_snapshot(&reader_path));
         // Leave the reader time to reach the lock and wait behind the writer
         // (the lock's stale threshold is 10 s, far above this pause).
