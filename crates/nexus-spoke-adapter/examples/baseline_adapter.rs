@@ -558,7 +558,7 @@ async fn main() {
     // (returns all stored entries); spoke's scope helpers filter to the
     // requested entry_ids and the packet builder assembles the result.
     println!("--- 3. orchestrate_assemble (happy path) ---");
-    match orchestrate_assemble(&mock, assemble_request("world_1", entry_id)).await {
+    match orchestrate_assemble(&mock, assemble_request("world_1", entry_id), None).await {
         SpokeResult::Ok(AssembleResponse::Variant0 { packet, .. }) => {
             println!(
                 "  OK: packet_id={} entries={}",

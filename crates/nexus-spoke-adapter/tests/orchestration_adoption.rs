@@ -263,7 +263,7 @@ async fn orchestrate_assemble_happy_path() {
     // keyed by `assemble:<scope_id>`.
     let mock = seeded_mock();
 
-    let result = orchestrate_assemble(&mock, assemble_request("world_1", SEEDED_ENTRY_ID)).await;
+    let result = orchestrate_assemble(&mock, assemble_request("world_1", SEEDED_ENTRY_ID), None).await;
     match result {
         SpokeResult::Ok(AssembleResponse::Variant0 { packet, .. }) => {
             assert_eq!(packet.packet_id, "assemble:world_1");

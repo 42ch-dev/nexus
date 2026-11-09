@@ -74,6 +74,10 @@ pub struct MindStateRow {
 /// duplicate `mind_state_id` primary key and an unknown
 /// `holder_entry_id` foreign key.
 /// Pinned pre-v1.184 P4 `MindState` wire envelope (field names + shapes).
+/// Storage fixture only: the bare delta path `"attention"` is a pre-0.16.0
+/// shape — the spoke-operations 0.16.0 gate requires RFC 6901 pointers rooted
+/// at `/modules/mental/<field>` (see `mind_state_gate.rs` for the gate-valid
+/// form). Bytes intentionally kept as the historical storage pin.
 pub const LEGACY_MIND_STATE_WIRE_FIXTURE: &str = r#"{
         "schema_version": 1,
         "mind_state_id": "ms_001",

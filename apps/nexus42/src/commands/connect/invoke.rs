@@ -1692,7 +1692,8 @@ async fn route_orchestrator(
                 Ok(request) => request,
                 Err(error) => return Err(map_reject(&invalid_payload("assemble", &error))),
             };
-            match orchestrate_assemble(adapter, request).await {
+            // Cognition family stays UNCONSUMED (baseline rule): no view policy.
+            match orchestrate_assemble(adapter, request, None).await {
                 SpokeResult::Ok(response) => serialize_response::<AssembleResponse>(&response),
                 SpokeResult::Reject(reject) => Err(map_reject(&reject)),
             }

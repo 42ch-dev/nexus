@@ -256,6 +256,8 @@ fn build_assemble_packet_produces_equivalent_packet() {
         knowledge_entries: &wrapped,
         extensions: None,
         max_entries: Some(2),
+        cognition_selection: None,
+        current_view_policy: None,
     });
 
     match (via_wrapper, direct) {
@@ -280,6 +282,8 @@ fn build_assemble_packet_rejects_empty_packet_id() {
         knowledge_entries: &[],
         extensions: None,
         max_entries: None,
+        cognition_selection: None,
+        current_view_policy: None,
     });
     assert_eq!(
         result_kind(&via_wrapper),

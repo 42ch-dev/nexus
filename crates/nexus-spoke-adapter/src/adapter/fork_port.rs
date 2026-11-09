@@ -47,7 +47,7 @@ impl ForkTimelineQueryPort for NexusAdapter<'_> {
 
         let pool = self.pool.clone();
         let world_id = scope.scope_id.clone();
-        let timeline_event_ids = scope.timeline_event_ids.clone();
+        let timeline_event_ids = scope.timeline_event_ids.clone().unwrap_or_default();
 
         // ── Validate world existence (unknown fork → reject, not empty) ──
         // SAFETY: runtime query for existence check — SELECT 1 pattern,

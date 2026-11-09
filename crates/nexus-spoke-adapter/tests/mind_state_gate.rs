@@ -68,7 +68,7 @@ fn valid_envelope(holder_entry_id: &str) -> serde_json::Value {
             "attention": "the box",
             "emotions": [{ "emotion": "hope", "intensity": 0.6 }]
         },
-        "deltas": [{ "path": "attention", "previous": null, "next": "the box" }],
+        "deltas": [{ "path": "/modules/mental/attention", "previous": null, "next": "the box" }],
         "source_anchor": { "event_id": "evt_transfer" },
         "created_at": "2026-08-14T10:00:00Z",
         "updated_at": "2026-08-14T10:00:00Z",

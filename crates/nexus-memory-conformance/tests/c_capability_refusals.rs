@@ -20,7 +20,7 @@
 //! refusal over the actual signed transport.
 //!
 //! C-101's unknown-op envelope is asserted against protocol §14.2:750–758 over
-//! the real signed transport: the pinned `spoke-connect` 0.15.2 dispatch
+//! the real signed transport: the pinned `spoke-connect` 0.16.0 dispatch
 //! attaches the terminal retry metadata to memory-boundary denials including
 //! `op_unsupported` (upstream #149 / I-000271), so the row checks the published
 //! wire result rather than a provider-local projection.
@@ -445,7 +445,7 @@ async fn local_retryable_over_the_same_signed_provider(
 
 /// C-101: unknown op vs missing capability, with the positive on the same
 /// session and the capture baseline taken BEFORE the capability-less request.
-/// The final assertion pins the terminal retry metadata `spoke-connect` 0.15.2
+/// The final assertion pins the terminal retry metadata `spoke-connect` 0.16.0
 /// attaches to the unknown-op denial.
 async fn unknown_op_and_missing_capability_are_distinct(
     matrix: &Matrix,
@@ -526,7 +526,7 @@ async fn unknown_op_and_missing_capability_are_distinct(
         .expect("the C-101 observer closes");
     assert_eq!(pending_candidates(&admin).await.len(), 0);
 
-    // Protocol §14.2:750–758; spoke-connect 0.15.2 attaches this metadata to
+    // Protocol §14.2:750–758; spoke-connect 0.16.0 attaches this metadata to
     // the unknown-op denial (upstream #149, I-000271).
     assert_eq!(
         unknown["error"]["details"]["retry_class"],

@@ -2144,6 +2144,8 @@ impl FixtureMemoryProvider {
         let capture_content = CaptureContent {
             structured: content.get("structured").cloned(),
             text: text.to_owned(),
+            // Cognition family stays UNCONSUMED (baseline rule).
+            cognition: None,
         };
         let classification = classify(&capture_content);
         let now = Utc::now();

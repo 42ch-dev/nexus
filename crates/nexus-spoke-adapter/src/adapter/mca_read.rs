@@ -429,13 +429,15 @@ fn kb_query_from_scope(scope: &Scope) -> KbQuery {
     // the KbQuery.block_type single-value mapping. debug_assert surfaces a
     // future caller before shipping a silent truncation.
     debug_assert!(
-        scope.entry_types.len() <= 1,
+        scope.entry_types.iter().flatten().count() <= 1,
         "MCA sends at most one entry_type; multiple would be silently dropped \
          by the KbQuery.block_type single-value mapping"
     );
     let block_type = scope
         .entry_types
-        .first()
+        .iter()
+        .flatten()
+        .next()
         .and_then(|s| entry_type_to_block_type(s));
 
     // Extract the 5 nexus-specific filters from scope.extensions["nexus"]; an

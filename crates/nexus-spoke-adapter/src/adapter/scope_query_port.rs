@@ -81,8 +81,10 @@ impl ScopeQueryPort for NexusAdapter<'_> {
             // caller's selection never authorized yields no rows at all.
             return SpokeResult::Ok(Vec::new());
         }
-        let entry_ids: Vec<String> = scope.entry_ids.clone();
-        let entry_types: Vec<String> = scope.entry_types.clone();
+        // spoke-schemas 0.16.0 presence fix: optional members are Option<...>
+        // (absent → None); the pre-0.16 semantics treated absent as empty.
+        let entry_ids: Vec<String> = scope.entry_ids.clone().unwrap_or_default();
+        let entry_types: Vec<String> = scope.entry_types.clone().unwrap_or_default();
 
         let store = SqliteKbStore::new(self.pool.clone());
         let entries = if entry_ids.is_empty() && entry_types.is_empty() {
@@ -188,7 +190,7 @@ impl ScopeQueryPort for NexusAdapter<'_> {
             .and_then(|ns| ns.get("branch_id"))
             .and_then(Value::as_str)
             .map(str::to_owned);
-        let timeline_event_ids = scope.timeline_event_ids.clone();
+        let timeline_event_ids = scope.timeline_event_ids.clone().unwrap_or_default();
 
         let rows = match list_timeline_events_scoped(
             &pool,
@@ -406,7 +408,7 @@ mod tests {
 
         let target_id = seeded[1].entry_id.clone();
         let mut scope = scope_for(&world_id);
-        scope.entry_ids = vec![target_id.clone()];
+        scope.entry_ids = Some(vec![target_id.clone()]);
 
         let adapter = scoped(pool, &world_id);
         let entries = match adapter.list_knowledge_entries(&scope).await {
@@ -423,7 +425,7 @@ mod tests {
         let (world_id, _seeded) = seed_world_with_entries(&pool).await;
 
         let mut scope = scope_for(&world_id);
-        scope.entry_types = vec!["character".to_string()];
+        scope.entry_types = Some(vec!["character".to_string()]);
 
         let adapter = scoped(pool, &world_id);
         let entries = match adapter.list_knowledge_entries(&scope).await {
@@ -567,7 +569,7 @@ mod tests {
         );
 
         let mut scope = scope_for(&world_id);
-        scope.entry_ids = vec![target_id.clone()];
+        scope.entry_ids = Some(vec![target_id.clone()]);
 
         let adapter = scoped(pool, &world_id);
         let entries = match adapter.list_knowledge_entries(&scope).await {
