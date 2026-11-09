@@ -1198,7 +1198,11 @@ async fn describe_and_unavailable_families_are_honest_over_the_signed_session() 
             )
             .await,
     ));
-    assert_eq!(described["capabilities"], json!(["spoke-memory"]));
+    assert_eq!(
+        described["capabilities"],
+        json!(["spoke-memory", "spoke-memory-reflection"]),
+        "the fixture advertises exactly the families it serves",
+    );
     assert_eq!(
         described["engine_policy_version"],
         json!("nexus-fixture-spoke-memory/0.15.1")
@@ -1323,7 +1327,11 @@ async fn base_operations_describe_spaces_and_subject(
             .describe(principal, from_value(json!({})).expect("describe request"))
             .await,
     ));
-    assert_eq!(described["capabilities"], json!(["spoke-memory"]));
+    assert_eq!(
+        described["capabilities"],
+        json!(["spoke-memory", "spoke-memory-reflection"]),
+        "the fixture advertises exactly the families it serves",
+    );
 
     let listed = wire(&expect_ok(
         client

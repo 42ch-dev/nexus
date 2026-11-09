@@ -33,7 +33,15 @@ pub enum FaultPoint {
     /// Before the writer transaction, so a competing identical admission can
     /// commit while this one is paused; the paused admission then replays it.
     AdmissionPause,
-    /// The committed response is held until the caller drops the connection.
+    /// Bounded hold after a generate's pending receipt commit, before the
+    /// fixture's deterministic generation: the pending receipt is observable
+    /// through `memory.receipts.get`, and the hold is the arming window that
+    /// targets the terminal (second) transaction with the one-shot points.
+    GenerationPause,
+    /// One-shot fail at the generation step itself: the pending receipt
+    /// settles to an honest terminal `failed` (error + retry class, no cost).
+    GenerationFailure,
+    /// The committed response is held until the caller tears the connection.
     ResponseDrop,
 }
 
@@ -122,8 +130,8 @@ impl FixtureFaults {
         state.next_token
     }
 
-    /// Arm a one-shot fail point (`BeforeCommit` or
-    /// `AfterCommitBeforeResponse`), replacing any previous arm. The next
+    /// Arm a one-shot fail point (`BeforeCommit`, `AfterCommitBeforeResponse`
+    /// or `GenerationFailure`), replacing any previous arm. The next
     /// operation that reaches `point` fails through the protocol-defined path;
     /// later operations proceed.
     pub fn fail_next(&self, point: FaultPoint) {
@@ -139,15 +147,15 @@ impl FixtureFaults {
         });
     }
 
-    /// Arm a holding point (`BeforeCommit`, `AdmissionPause` or `ResponseDrop`)
-    /// with the default bound and return the test handle.
+    /// Arm a holding point (`BeforeCommit`, `AdmissionPause`, `GenerationPause`
+    /// or `ResponseDrop`) with the default bound and return the test handle.
     #[must_use]
     pub fn hold_next(&self, point: FaultPoint) -> FaultHold {
         self.hold_next_bounded(point, FAULT_HOLD_TIMEOUT)
     }
 
-    /// Arm a holding point (`BeforeCommit`, `AdmissionPause` or `ResponseDrop`)
-    /// bounded by `bound` and return the test handle.
+    /// Arm a holding point (`BeforeCommit`, `AdmissionPause`, `GenerationPause`
+    /// or `ResponseDrop`) bounded by `bound` and return the test handle.
     #[must_use]
     pub fn hold_next_bounded(&self, point: FaultPoint, bound: Duration) -> FaultHold {
         let (reached_tx, reached_rx) = oneshot::channel();
