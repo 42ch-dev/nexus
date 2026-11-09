@@ -226,6 +226,75 @@ async fn c_075_reflection_subject_all_requires_unrestricted_grant_local() {
     }
 }
 
+/// Greptile P1#2 (round 3): an absent list selection is a subject-wide
+/// listing, so a context-restricted `reflect` grant is refused exactly as an
+/// explicit `subject_all` selection is — the fail-closed rule the fixture's
+/// `ReflectionTarget::from_list(None)` already applied. The context-scoped
+/// selection the grant does cover stays served.
+#[tokio::test]
+async fn c_r3_list_without_selection_requires_unrestricted_coverage_local() {
+    let home = tempfile::TempDir::new().expect("temporary provider home");
+    let provider = LocalMemoryProvider::open(home.path().to_path_buf(), ADMIN, "default")
+        .await
+        .expect("open the local provider");
+    let space = provider.space_id().to_owned();
+    let admin = principal(ADMIN);
+    let grantee = principal(GRANTEE);
+    served(
+        provider
+            .grant(
+                &admin,
+                dto(json!({
+                    "space_id": space,
+                    "subject_id": SUBJECT,
+                    "principal_id": GRANTEE,
+                    "capabilities": ["reflect"],
+                    "context_ids": [CONTEXT],
+                    "shared_access": false,
+                    "idempotency_key": "c-r3-scoped-reflect",
+                })),
+            )
+            .await,
+        "the context-restricted reflect grant",
+    );
+
+    // No selection: the whole-subject listing is outside the grant's reach.
+    match provider
+        .list_reflections(
+            &grantee,
+            dto(json!({ "space_id": space, "subject_id": SUBJECT })),
+        )
+        .await
+    {
+        SpokeResult::Reject(reject) => {
+            expect_subject_wide_refusal(&reject, "memory.reflections.list (absent selection)");
+        }
+        SpokeResult::Ok(_) => {
+            panic!("a whole-subject listing must not serve under a context-restricted grant")
+        }
+    }
+
+    // The context-scoped selection the grant covers still serves.
+    match provider
+        .list_reflections(
+            &grantee,
+            dto(json!({
+                "space_id": space,
+                "subject_id": SUBJECT,
+                "selection": { "mode": "selected_contexts", "context_ids": [CONTEXT] },
+            })),
+        )
+        .await
+    {
+        SpokeResult::Reject(reject) => assert_ne!(
+            reject.code,
+            SpokeRejectCode::NotAuthorized,
+            "a context-scoped listing is covered by the restricted grant: {reject:?}"
+        ),
+        SpokeResult::Ok(_) => {}
+    }
+}
+
 // ── Task 3: the read path (C-073, C-042, C-076, C-071, C-077) ───────────
 
 /// The subject the Task-3 rows read; every row ensures it before writing.

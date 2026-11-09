@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 use spoke_connect::remote::RemoteAdapter;
 use spoke_operations::spoke_schemas::Principal;
 use spoke_operations::MemoryPort;
+use sqlx::Connection as _;
 
 use nexus_memory_conformance::{FaultHold, FaultPoint, FixtureFaults};
 
@@ -136,7 +137,7 @@ async fn join_bounded(handle: tokio::task::JoinHandle<Value>, what: &str) -> Val
         .unwrap_or_else(|error| panic!("{what} task panicked: {error}"))
 }
 
-/// The whole-subject reflection listing, oldest-first.
+/// The whole-subject reflection listing, newest-first.
 async fn list_rows(matrix: &Matrix) -> Value {
     matrix
         .admin()
@@ -638,8 +639,8 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_remote() {
     let stale_flags: Vec<bool> = rows.iter().map(|row| row["stale"] == json!(true)).collect();
     assert_eq!(
         stale_flags,
-        vec![true, false],
-        "oldest-first: the superseded row stays stale, the new one is fresh: {rows:#?}"
+        vec![false, true],
+        "newest-first: the fresh row lists first, the superseded one after it: {rows:#?}"
     );
     matrix.shutdown().await;
 }
@@ -1396,5 +1397,117 @@ async fn c_r2_recovery_skips_a_live_generation_lease_remote() {
     assert!(is_committed(&resumed), "{resumed}");
     let terminal = matrix.admin().get_receipt(&pending_ids[0]).await;
     assert_eq!(terminal["receipt"]["status"], json!("committed"));
+    matrix.shutdown().await;
+}
+
+// ── Inspector round 3: reopen recovery settles the expired-lease orphan ──
+
+/// Force the parked generation's lease past its deadline on the fixture row —
+/// the crash-orphan shape without waiting out the 30 s lease.
+async fn expire_pending_lease(db: &std::path::Path) {
+    let options = sqlx::sqlite::SqliteConnectOptions::new().filename(db);
+    let mut conn = sqlx::sqlite::SqliteConnection::connect_with(&options)
+        .await
+        .expect("one writable connection to the fixture database");
+    let affected = sqlx::query(
+        "UPDATE receipts SET lease_expires_at = '2020-01-01T00:00:00.000000Z' \
+         WHERE status = 'pending' AND owner_id IS NOT NULL",
+    )
+    .execute(&mut conn)
+    .await
+    .expect("the lease expiry moves into the past")
+    .rows_affected();
+    assert_eq!(
+        affected, 1,
+        "exactly the parked generation's lease expires: {affected}"
+    );
+    conn.close().await.expect("the writable connection closes");
+}
+
+/// Inspector round 3 (must-fix), fixture leg: the reopen recovery terminalizes
+/// an expired-lease crash orphan stamped by the §7.0.3 lease. The parked
+/// generate's lease is forced past its deadline and its process is lost, so
+/// the pending receipt is an orphan carrying a non-NULL `owner_id`. The
+/// recovery must settle it with that stored owner: binding `None` against the
+/// `owner_id IS ?` guard matched zero rows and made every subsequent
+/// `FixtureMemoryProvider::open` fail with `Bootstrap`.
+#[tokio::test]
+async fn c_r3_recovery_settles_an_expired_lease_orphan_remote() {
+    let matrix = Matrix::remote().await;
+    bootstrap(&matrix, &[]).await;
+    grant_peer(&matrix, "reflect", "k-r3-grant").await;
+    create_shared_record(&matrix, "k-r3-r1", "Lost mid-generation.").await;
+    let digest = peer_state(&matrix, SUBJECT).await["state_digest"].clone();
+
+    // Park the generate after its pending receipt commit, before generation.
+    let mut hold = matrix
+        .fixture_faults()
+        .expect("the fixture leg exposes fault control")
+        .hold_next_bounded(FaultPoint::GenerationPause, Duration::from_secs(20));
+    let parked = tokio::spawn({
+        let client = matrix.peer_client();
+        let principal = matrix.peer_principal().clone();
+        let space = matrix.space_id().to_owned();
+        generate_with(
+            client,
+            principal,
+            space,
+            generate_body(SUBJECT, digest.as_str().expect("digest"), "k-r3-orphan"),
+        )
+    });
+    hold.wait_reached()
+        .await
+        .expect("the generate reached its generation pause");
+    let mut observer = matrix
+        .durable_observer(SUBJECT, &[], None, None, None)
+        .await;
+    let receipt_ids = observer
+        .receipt_ids_for("memory.reflections.generate")
+        .await;
+    assert_eq!(receipt_ids.len(), 1, "exactly the orphaned receipt");
+    observer.close().await;
+
+    // The session is lost with its lease expired.
+    expire_pending_lease(matrix.fixture_db()).await;
+
+    // Before the round-3 fix this open failed with `Bootstrap`.
+    let other = nexus_memory_conformance::FixtureMemoryProvider::open(matrix.fixture_db())
+        .await
+        .expect("reopen recovers the expired-lease orphan");
+    let receipt = matrix.admin().get_receipt(&receipt_ids[0]).await;
+    assert_eq!(
+        receipt["receipt"]["status"],
+        json!("failed"),
+        "the reopen recovery settled the orphan: {receipt}"
+    );
+    assert_eq!(
+        receipt["receipt"]["error"]["code"],
+        json!("INTERNAL_ERROR"),
+        "the recorded interruption is the retryable internal class: {receipt}"
+    );
+    assert_eq!(
+        receipt["receipt"]["error"]["details"]["retry_class"],
+        json!("retryable"),
+        "{receipt}"
+    );
+    assert!(
+        receipt["receipt"].get("result").is_none() || receipt["receipt"]["result"].is_null(),
+        "a settled orphan charges nothing: {receipt}"
+    );
+    let listed = matrix
+        .admin()
+        .reflections_list(json!({ "subject_id": SUBJECT }))
+        .await;
+    assert_eq!(
+        listed["reflections"].as_array().expect("rows").len(),
+        0,
+        "the interrupted generation published nothing: {listed}"
+    );
+    drop(other);
+
+    // The lost process's terminal commit now finds the receipt settled by
+    // recovery and answers its typed refusal; nothing publishes.
+    hold.release();
+    let _ = join_bounded(parked, "the lost generation").await;
     matrix.shutdown().await;
 }
