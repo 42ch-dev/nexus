@@ -22,6 +22,21 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
 
+[features]
+default = []
+# I-000322 test-graph switch: the nexus-core features the conformance
+# vertical drives are requested HERE, explicitly, instead of entering the
+# default/workspace all-targets graph through the dev-dependency. CI and
+# targeted runs pass `--features dev-graph-memory-remote`; the default graph
+# carries no `memory-remote` edge into nexus-core (Track C owns the ci.yml
+# enumeration that must request this feature).
+dev-graph-memory-remote = [
+    "nexus-core/memory-remote",
+    "nexus-core/provider-host",
+    "nexus-core/execution",
+    "nexus-core/test-hooks",
+]
+
 [dev-dependencies]
 base64 = "0.22"
 futures-util = { workspace = true }
@@ -31,22 +46,11 @@ serde_jcs = "0.2"
 tempfile = { workspace = true }
 # v1.229 N3 Task 1 (R1): the real public Core open/close surface the remote
 # vertical slice drives over a signed loopback session. The conformance crate
-# depends on Core, never the reverse; `memory-remote` is the feature under test.
-nexus-core = { path = "../nexus-core", features = [
-    "memory-remote",
-    "provider-host",
-    # v1.229 N3 Task 2 fix 1 (R2, amendment 4): a Character host session needs
-    # the admitted creative-root pin (`host.rs::character_session_cwd`), so the
-    # real `subject_archived`/`family` consumer is reachable only with this
-    # existing feature. Test-only; the production/default graph is unchanged.
-    "execution",
-    # v1.229 N3 Task 8 (C8, amendment 1): the C-matrix rows C-023, C-024 and
-    # C-028 must be proved on the real local provider too, and its only
-    # operator seams for the commit-boundary loss, the pre-COMMIT abort and the
-    # retention clock are the existing `test-hooks` seams. Test-only and
-    # compiled out of the production build; no new hook, package or feature.
-    "test-hooks",
-] }
+# depends on Core, never the reverse; the Core features under test are
+# requested by the package feature `dev-graph-memory-remote` above (I-000322),
+# so the default/workspace all-targets graph no longer unifies them in
+# unconditionally.
+nexus-core = { path = "../nexus-core" }
 # The disposable user home the open resolves (workspace dir, state DB and the
 # provider's own file root) through the production layout instead of a
 # hardcoded copy of it.
@@ -62,3 +66,48 @@ nexus-contracts = { path = "../nexus-contracts" }
 # signed provider.
 nexus-agent-host = { path = "../nexus-agent-host" }
 nexus-provider-ports = { path = "../nexus-provider-ports" }
+
+# I-000322: every target that drives the real Core surface requires the
+# test-graph feature. Without it the target is skipped instead of compiling
+# against a feature-less Core, so the default/workspace all-targets graph
+# carries no `memory-remote` edge into nexus-core. `provider_bootstrap` and
+# `server_loopback` stay out: they exercise the fixture alone.
+[[test]]
+name = "c_admission_lifecycle"
+required-features = ["dev-graph-memory-remote"]
+
+[[test]]
+name = "c_capability_refusals"
+required-features = ["dev-graph-memory-remote"]
+
+[[test]]
+name = "c_capture_candidates"
+required-features = ["dev-graph-memory-remote"]
+
+[[test]]
+name = "c_grants_errors"
+required-features = ["dev-graph-memory-remote"]
+
+[[test]]
+name = "c_local_legacy"
+required-features = ["dev-graph-memory-remote"]
+
+[[test]]
+name = "c_records_recall_profiles"
+required-features = ["dev-graph-memory-remote"]
+
+[[test]]
+name = "remote_core_recall_profiles"
+required-features = ["dev-graph-memory-remote"]
+
+[[test]]
+name = "remote_core_records_promote"
+required-features = ["dev-graph-memory-remote"]
+
+[[test]]
+name = "remote_core_subjects_candidates"
+required-features = ["dev-graph-memory-remote"]
+
+[[test]]
+name = "remote_open"
+required-features = ["dev-graph-memory-remote"]
