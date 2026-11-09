@@ -2930,3 +2930,369 @@ async fn qc_b4_filtered_list_and_state_honor_provenance_local() {
         "{state_b}"
     );
 }
+
+// ── Inspector round 2: reopen recovery vs a live generation ─────────────
+
+/// Inspector round 2 (should-fix): a reopen recovery must not terminalize a
+/// generation another process is executing. Process A parks between its two
+/// transactions; process B opens the same workspace (its recovery pass runs
+/// against A's pending receipt); A's terminal commit must still land — the
+/// envelope publishes, the receipt settles `committed`, and no
+/// `INTERNAL_ERROR` or lease-lost refusal occurs. The pending receipt carries
+/// its owner's lease from transaction 1, so B's pass sees a live lease and
+/// skips it.
+#[tokio::test]
+async fn c_r2_recovery_skips_a_live_generation_lease_local() {
+    let home = tempfile::TempDir::new().expect("temporary provider home");
+    let home_path = home.path().to_path_buf();
+    let provider = LocalMemoryProvider::open(home_path.clone(), ADMIN, "default")
+        .await
+        .expect("open the local provider");
+    let admin = principal(ADMIN);
+    let space = provider.space_id().to_owned();
+
+    // A generable basis: one authored profile and one record.
+    served(
+        provider
+            .ensure_subject(
+                &admin,
+                dto(json!({ "space_id": space, "subject_id": T3_SUBJECT })),
+            )
+            .await,
+        "the subject ensure",
+    );
+    served(
+        provider
+            .update_profile(
+                &admin,
+                dto(json!({
+                    "space_id": space,
+                    "subject_id": T3_SUBJECT,
+                    "profile_kind": "personality",
+                    "document": { "format": "markdown", "body": "# leased generation" },
+                    "expected_revision": null,
+                    "idempotency_key": "r2-profile",
+                })),
+            )
+            .await,
+        "the profile",
+    );
+    served(
+        provider
+            .create_record(
+                &admin,
+                dto(json!({
+                    "space_id": space,
+                    "subject_id": T3_SUBJECT,
+                    "kind": "note",
+                    "content": { "text": "one row to reflect over" },
+                    "scope": { "visibility": "context", "context_id": T3_CONTEXT_A },
+                    "source_context_ids": [T3_SOURCE_A],
+                    "idempotency_key": "r2-record",
+                })),
+            )
+            .await,
+        "the record",
+    );
+    let digest = expect_state_digest(
+        &served(
+            provider
+                .get_reflection_state(
+                    &admin,
+                    dto(json!({
+                        "space_id": space,
+                        "subject_id": T3_SUBJECT,
+                        "selection": { "mode": "subject_all" },
+                    })),
+                )
+                .await,
+            "the state",
+        ),
+        "the state",
+    );
+
+    // Park process A between its pending commit and its terminal commit.
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Barrier::new(2));
+    provider.park_next_generation(Arc::clone(&entered), Arc::clone(&release));
+    let parked = provider.generate_reflection(
+        &admin,
+        dto(json!({
+            "space_id": space,
+            "subject_id": T3_SUBJECT,
+            "selection": { "mode": "subject_all" },
+            "expected_state_digest": digest,
+            "idempotency_key": "r2-leased",
+        })),
+    );
+    let window = async {
+        entered.notified().await;
+        // Process B opens the same workspace; its reopen recovery pass runs
+        // here, against A's published pending receipt. The live lease must
+        // survive it untouched and pending.
+        let other = LocalMemoryProvider::open(home_path.clone(), ADMIN, "default")
+            .await
+            .expect("open process B over the same workspace");
+        let receipt_id = parked_pending_receipt_id(&home_path, &space).await;
+        let body = receipt_body_of(&other, &admin, &receipt_id).await;
+        assert_eq!(
+            body["status"],
+            json!("pending"),
+            "process B's recovery pass left the live generation pending: {body}"
+        );
+        drop(other);
+        release.wait().await;
+    };
+    let (parked, ()) = tokio::join!(parked, window);
+    let settled = served(parked, "the leased generation");
+    assert_eq!(
+        settled["status"],
+        json!("committed"),
+        "process A's terminal commit landed with no lease-lost refusal: {settled}"
+    );
+
+    // The envelope landed with it and the receipt recorded the outcome.
+    let listed = served(
+        provider
+            .list_reflections(
+                &admin,
+                dto(json!({ "space_id": space, "subject_id": T3_SUBJECT })),
+            )
+            .await,
+        "the leased envelope listing",
+    );
+    assert_eq!(
+        listed["reflections"].as_array().expect("rows").len(),
+        1,
+        "{listed}"
+    );
+    let rows = durable_generation_receipts(&home_path, &space).await;
+    assert!(
+        rows.iter().any(|(_, status)| status == "committed"),
+        "the receipt settled committed: {rows:?}"
+    );
+    assert!(
+        !rows.iter().any(|(_, status)| status == "failed"),
+        "recovery recorded no interruption: {rows:?}"
+    );
+}
+
+// ── Inspector round 2: one snapshot per `memory.reflections.state` ──────
+
+/// Inspector round 2 (may-fix): the state body derives every member from ONE
+/// store snapshot — the basis digest and the newest-visible pick can never
+/// disagree about which basis the caller is looking at. The joint invariant
+/// the old two-read composition could break: after a basis-affecting write,
+/// `state_digest` moves AND `stale` flips against the envelope that pinned
+/// the pre-write digest, in the same response; with no move, `stale` is
+/// honestly false under the digest the envelope still pins.
+#[tokio::test]
+async fn c_r2_state_serves_one_snapshot_local() {
+    let home = tempfile::TempDir::new().expect("temporary provider home");
+    let provider = LocalMemoryProvider::open(home.path().to_path_buf(), ADMIN, "default")
+        .await
+        .expect("open the local provider");
+    let (admin, _) = t3_setup(&provider).await;
+    grant_subject_all_reflect(&provider, &admin).await;
+
+    // R1 pins the pre-write digest.
+    let pinned = sufficient_basis(&provider, &admin).await;
+    let generated = served(
+        t3_generate(&provider, &admin, &pinned, "r2-pin").await,
+        "R1",
+    );
+    assert_eq!(generated["status"], json!("committed"), "{generated}");
+    let pinned_id = generated["result"]["reflection_id"]
+        .as_str()
+        .expect("the committed reflection id")
+        .to_owned();
+
+    // No basis move: the digest the newest envelope pins IS the published
+    // digest, so `stale` is false — both members from one snapshot.
+    let before = t3_state(&provider, &admin, json!({ "mode": "subject_all" }), None).await;
+    assert_eq!(before["state_digest"], json!(pinned), "{before}");
+    assert_eq!(before["stale"], json!(false), "{before}");
+    assert_eq!(
+        before.get("last_reflection_id"),
+        Some(&json!(pinned_id)),
+        "{before}"
+    );
+
+    // A basis-affecting write: the same response must carry the moved digest
+    // AND the staleness verdict of an envelope pinning the older one.
+    t3_record(
+        &provider,
+        &admin,
+        T3_CONTEXT_A,
+        T3_SOURCE_A,
+        "moves the basis",
+    )
+    .await;
+    let after = t3_state(&provider, &admin, json!({ "mode": "subject_all" }), None).await;
+    let moved = after["state_digest"].as_str().expect("the moved digest");
+    assert_ne!(
+        moved, pinned,
+        "the basis-affecting write moves the digest: {after}"
+    );
+    assert_eq!(
+        after["stale"],
+        json!(true),
+        "the newest envelope pins the older digest, so the same snapshot that moved the \
+         digest also flips its verdict: {after}"
+    );
+    assert_eq!(
+        after.get("last_reflection_id"),
+        Some(&json!(pinned_id)),
+        "{after}"
+    );
+    // The joint invariant, stated over the pair the response published.
+    assert_eq!(
+        after["stale"],
+        json!(moved != pinned),
+        "stale is exactly (newest pinned digest != published digest): {after}"
+    );
+}
+
+// ── Inspector round 2: refusals name the actually rejected field ────────
+
+/// Inspector round 2 (may-fix): each reflection entry point publishes the
+/// request member its published validator (or shape gate) actually refused in
+/// `details.field` — never a hardcoded `"selection"`. Per entry point: an
+/// over-bound list `limit` names `limit` (agreeing with `details.limit`); a
+/// bad selection shape names `selection` on state and generate; a malformed
+/// `expected_state_digest` names `expected_state_digest`. (A malformed
+/// `idempotency_key` never reaches the provider: the wire schema type
+/// enforces its 1–128 shape, so no provider-side field mapping exists for it.)
+#[tokio::test]
+async fn c_r2_reflections_name_the_refused_field_local() {
+    let home = tempfile::TempDir::new().expect("temporary provider home");
+    let provider = LocalMemoryProvider::open(home.path().to_path_buf(), ADMIN, "default")
+        .await
+        .expect("open the local provider");
+    let admin = principal(ADMIN);
+    let space = provider.space_id().to_owned();
+
+    let field_of = |reject: &SpokeReject| -> Option<String> {
+        reject
+            .details
+            .as_ref()
+            .and_then(|details| details["field"].as_str())
+            .map(str::to_owned)
+    };
+
+    // list: over-bound limit → `limit`.
+    let refused = expect_refusal(
+        provider
+            .list_reflections(
+                &admin,
+                dto(json!({
+                    "space_id": space,
+                    "subject_id": T3_SUBJECT,
+                    "limit": 101,
+                })),
+            )
+            .await,
+        SpokeRejectCode::InvalidInput,
+        "terminal",
+        "the over-bound list limit",
+    );
+    assert_eq!(
+        refused.details.as_ref().and_then(|d| d["limit"].as_str()),
+        Some("max_page_size"),
+        "the refusal keeps the limiter key: {refused:?}"
+    );
+    assert_eq!(
+        field_of(&refused).as_deref(),
+        Some("limit"),
+        "the refusal names the limit field: {refused:?}"
+    );
+
+    // state: an empty selected-contexts selection → `selection`.
+    let refused = expect_refusal(
+        provider
+            .get_reflection_state(
+                &admin,
+                dto(json!({
+                    "space_id": space,
+                    "subject_id": T3_SUBJECT,
+                    "selection": { "mode": "selected_contexts", "context_ids": [] },
+                })),
+            )
+            .await,
+        SpokeRejectCode::InvalidInput,
+        "terminal",
+        "the empty-contexts state selection",
+    );
+    assert_eq!(
+        field_of(&refused).as_deref(),
+        Some("selection"),
+        "{refused:?}"
+    );
+
+    // list: the same selection shape → `selection`.
+    let refused = expect_refusal(
+        provider
+            .list_reflections(
+                &admin,
+                dto(json!({
+                    "space_id": space,
+                    "subject_id": T3_SUBJECT,
+                    "selection": { "mode": "selected_contexts", "context_ids": [] },
+                })),
+            )
+            .await,
+        SpokeRejectCode::InvalidInput,
+        "terminal",
+        "the empty-contexts list selection",
+    );
+    assert_eq!(
+        field_of(&refused).as_deref(),
+        Some("selection"),
+        "{refused:?}"
+    );
+
+    // generate: the same selection shape → `selection`.
+    let refused = expect_refusal(
+        provider
+            .generate_reflection(
+                &admin,
+                dto(json!({
+                    "space_id": space,
+                    "subject_id": T3_SUBJECT,
+                    "selection": { "mode": "selected_contexts", "context_ids": [] },
+                    "expected_state_digest": STATE_DIGEST,
+                    "idempotency_key": "r2-gen-selection",
+                })),
+            )
+            .await,
+        SpokeRejectCode::InvalidInput,
+        "terminal",
+        "the empty-contexts generate selection",
+    );
+    assert_eq!(
+        field_of(&refused).as_deref(),
+        Some("selection"),
+        "{refused:?}"
+    );
+
+    // generate: a malformed `expected_state_digest` never reaches the
+    // provider — the wire schema enforces its 64-hex pattern at
+    // deserialization, exactly like `idempotency_key`'s 1–128 shape; the
+    // provider-side `is_state_digest` gate that names
+    // `details.field = "expected_state_digest"` is defense in depth for
+    // direct (untyped) callers. A well-formed-but-stale digest is
+    // `REVISION_CONFLICT` (no field; it names `current_state_digest`
+    // instead), covered by the C-100 row.
+    let deserialization =
+        serde_json::from_value::<schemas::MemoryReflectionsGenerateRequest>(json!({
+            "space_id": space,
+            "subject_id": T3_SUBJECT,
+            "selection": { "mode": "subject_all" },
+            "expected_state_digest": "not-a-digest",
+            "idempotency_key": "r2-gen-digest",
+        }));
+    assert!(
+        deserialization.is_err(),
+        "the wire schema refuses a malformed CAS token before the provider"
+    );
+}

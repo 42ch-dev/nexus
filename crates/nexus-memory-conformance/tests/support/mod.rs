@@ -1070,6 +1070,15 @@ impl Matrix {
         self.kind
     }
 
+    /// The fixture leg's durable database file, so a test can open a second
+    /// provider instance over the same workspace (the reopen-recovery rows).
+    pub fn fixture_db(&self) -> &std::path::Path {
+        match &self.home {
+            Home::Remote { db, .. } => db,
+            Home::Local { .. } => panic!("the local leg has no fixture database"),
+        }
+    }
+
     pub fn space_id(&self) -> &str {
         &self.space_id
     }

@@ -43,3 +43,11 @@ CREATE INDEX IF NOT EXISTS idx_reflections_subject_created
 -- Direct lookup of one reflection within its subject.
 CREATE INDEX IF NOT EXISTS idx_reflections_subject_reflection
     ON reflections (space_id, subject_id, reflection_id);
+
+-- Generation liveness (§7.0.3, inspector round 2): a *pending* generate
+-- receipt carries the provider instance that is running its generation and the
+-- instant its lease expires, so the reopen recovery terminalizes only crash
+-- orphans (lease expired) and never a generation another instance is executing
+-- right now (lease live). Both stay NULL on terminal and non-generate receipts.
+ALTER TABLE receipts ADD COLUMN owner_id TEXT;
+ALTER TABLE receipts ADD COLUMN lease_expires_at TEXT;

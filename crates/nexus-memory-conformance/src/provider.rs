@@ -29,6 +29,12 @@ pub struct FixtureIdentity {
 /// The independent durable provider the conformance suite exercises.
 pub struct FixtureMemoryProvider {
     store: FixtureStore,
+    /// This instance's identity, stamped as a pending generate receipt's
+    /// generation-lease `owner_id` (§7.0.3, inspector round 2). Two instances
+    /// over one database never share it, so the reopen recovery can tell a
+    /// live generation from a crash orphan by the lease alone. In-memory:
+    /// identities need not outlive the process.
+    pub(crate) generation_owner: String,
     /// Crate-private: the operation slices pin every request to the durable
     /// space/authority pair this provider serves.
     pub(crate) identity: FixtureIdentity,
@@ -63,6 +69,7 @@ impl FixtureMemoryProvider {
         crate::reflections::terminalize_orphaned_generate_receipts(&store).await?;
         Ok(Self {
             store,
+            generation_owner: Uuid::new_v4().simple().to_string(),
             identity,
             advertises_reflection: true,
             faults: FixtureFaults::new(),
