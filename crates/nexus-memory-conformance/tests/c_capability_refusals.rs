@@ -468,9 +468,14 @@ async fn unknown_op_and_missing_capability_are_distinct(
         described.get("error").is_none(),
         "the same signed session serves a real op: {described}"
     );
+    let expected_capabilities: Value = if matrix.kind() == Kind::Remote {
+        json!(["spoke-memory", "spoke-memory-reflection"])
+    } else {
+        json!(["spoke-memory"])
+    };
     assert_eq!(
         described["payload"]["capabilities"],
-        json!(["spoke-memory"]),
+        expected_capabilities,
         "{described}"
     );
 
@@ -998,7 +1003,10 @@ async fn c_073_reflection_reads_refuse_without_capability_local() {
 
 #[tokio::test]
 async fn c_073_reflection_reads_refuse_without_capability_remote() {
-    let matrix = Matrix::remote().await;
+    // The continuity shape: the deliberately-unadvertised fixture serves the
+    // same operations, so the reads' `capability_missing` is the real
+    // dispatch denial over Connect negotiation.
+    let matrix = Matrix::remote_unadvertised().await;
     run_matrix_scenario(matrix, |m, r, t| {
         Box::pin(async move { reflection_reads_refuse_without_capability(m, r, t).await })
     })
