@@ -2258,8 +2258,10 @@ impl FixtureMemoryProvider {
                 .as_deref()
                 .map_or(DEFAULT_CANDIDATE_KIND, String::as_str);
             let provenance = json!({
-                "source_context_ids": request.source_context_ids,
-                "anchors": request.anchors,
+                // Wire members may be absent (presence-sensitive); the stored
+                // provenance always carries the schema's arrays.
+                "source_context_ids": request.source_context_ids.clone().unwrap_or_default(),
+                "anchors": request.anchors.clone().unwrap_or_default(),
                 "captured_by": principal_id,
                 "captured_at": timestamp_text(now),
             });
@@ -5178,15 +5180,25 @@ mod tests {
             .expect("payload object")
             .remove("source_context_ids");
         let without_member = admit_capture(omitted.clone()).expect("valid capture payload");
-        assert_eq!(
-            explicit.request().source_context_ids,
-            without_member.request().source_context_ids,
-            "the typed views are identical..."
+        // SPOKE 0.16.0 keeps member presence through the typed view: an
+        // explicit `[]` decodes to `Some([])` and an omitted member to `None`,
+        // so the two payloads stay distinguishable after decode.
+        assert!(
+            explicit
+                .request()
+                .source_context_ids
+                .as_ref()
+                .is_some_and(Vec::is_empty),
+            "an explicit empty member keeps its presence"
+        );
+        assert!(
+            without_member.request().source_context_ids.is_none(),
+            "an omitted member stays absent"
         );
         assert_ne!(
             digest(&payload).expect("payload digest"),
             digest(&omitted).expect("payload digest"),
-            "...while the received objects are not"
+            "...and the received objects differ too"
         );
 
         let conflict = refusal(
