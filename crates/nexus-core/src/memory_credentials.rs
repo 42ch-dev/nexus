@@ -342,7 +342,9 @@ mod token_equivalence_tests {
         // The coded refusal surface stays stable for every reject.
         let err = validate_capability_token(&serde_json::json!({}))
             .expect_err("empty object is rejected");
-        assert!(matches!(err, CoreError::Coded { ref code, .. } if code == CREDENTIAL_INVALID_CODE));
+        assert!(
+            matches!(err, CoreError::Coded { ref code, .. } if code == CREDENTIAL_INVALID_CODE)
+        );
     }
 }
 
