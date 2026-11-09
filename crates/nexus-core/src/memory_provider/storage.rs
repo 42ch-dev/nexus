@@ -4857,12 +4857,16 @@ fn pinned_filter(raw: Option<&String>) -> StoreResult<Option<Vec<String>>> {
 /// is excluded iff recomposing the source set *with its tombstones counted
 /// back in* reproduces the pinned source-set digest while the live set does
 /// not: the basis's only delta is tombstoning, so the deleted content must not
-/// leak through the derived envelope. Every other delta edits, additions,
-/// profile or policy changes — stays listed and reports honest staleness.
+/// leak through the derived envelope. Counting a tombstone back in is
+/// identity-based: deletion is terminal (MEM-R014) and bumps the revision by
+/// exactly one, so a tombstoned row re-enters the pin's source set at
+/// `(record_id, revision - 1)` whatever revision the pin saw. Every other
+/// delta — edits, additions, profile or policy changes — keeps the exact
+/// pairs apart and stays listed with honest staleness.
 #[allow(clippy::type_complexity)]
 fn pinned_staleness(
     live: &[(String, i64)],
-    counting_tombstones: &[(String, i64)],
+    tombstones: &[(String, i64)],
     profile_revisions: &[(String, i64)],
     selection: &Selection,
     filter: Option<&[String]>,
@@ -4883,8 +4887,13 @@ fn pinned_staleness(
         .map_err(StoreError::Corrupt)?;
     let source_live =
         super::reflection_source_set_digest(live).map_err(StoreError::Corrupt)?;
+    let mut counting = live.to_vec();
+    // Undo the single delete-time revision bump; a tombstoned row has no
+    // other revision history after the pin.
+    counting.extend(tombstones.iter().map(|(id, revision)| (id.clone(), revision - 1)));
+    counting.sort();
     let source_counting =
-        super::reflection_source_set_digest(counting_tombstones).map_err(StoreError::Corrupt)?;
+        super::reflection_source_set_digest(&counting).map_err(StoreError::Corrupt)?;
     Ok((
         state != pinned_state,
         source_counting == pinned_source_set && source_live != pinned_source_set,
@@ -5045,12 +5054,9 @@ impl MemoryStore {
                         subject_id,
                     )
                     .await?;
-                    let mut counting = live.clone();
-                    counting.extend(tombstones);
-                    counting.sort();
                     let probe = pinned_staleness(
                         &live,
-                        &counting,
+                        &tombstones,
                         &profile_revisions,
                         &pinned,
                         filter.as_deref(),
