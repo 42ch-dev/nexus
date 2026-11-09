@@ -263,10 +263,12 @@ fn snapshot_with_lock(
         Ok(config) => config?,
         Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
             // I-000336: only the proven read-only home reads unlocked. The
-            // probe re-attempts the lock-file create once — the precise
-            // pre-check the denial kind alone cannot give — so a denied
-            // create with no lock file present is the I-000291 permission
-            // boundary, and every other denial fails closed.
+            // classification lives in the lock owner and requires two
+            // independent facts — a denied lock-file create/open AND the
+            // lock entry's absence established by a separate stat — so a
+            // path-specific denial of an otherwise usable home cannot pass
+            // for the I-000291 boundary. Every other classification fails
+            // closed.
             match nexus_home_layout::config_lock::probe_authority(nexus_home) {
                 nexus_home_layout::config_lock::LockAuthority::ReadOnlyHome => {
                     read_provider_snapshot(nexus_home)?
@@ -1281,6 +1283,48 @@ mod tests {
         };
         assert!(
             category.starts_with("config_lock: denied acquisition"),
+            "the refusal names the unproven classification: {error:?}"
+        );
+    }
+
+    /// I-000336 fixup negative (QC1-W1): a denied create whose independent
+    /// stat is itself denied proves nothing — the lock entry's existence
+    /// cannot be ruled out, so the snapshot refuses instead of reading
+    /// unlocked. Stripping the directory's search bit denies both the
+    /// lock-file create and the separate stat with one real policy: the
+    /// ambiguous shape that must never admit the unlocked read.
+    #[cfg(unix)]
+    #[test]
+    fn an_unstatable_home_denied_acquisition_fails_closed() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+            }
+        }
+
+        let home = tempfile::tempdir().expect("home");
+        std::fs::write(
+            home.path().join("config.toml"),
+            config_document(&remote_selection()),
+        )
+        .expect("config");
+        std::fs::set_permissions(home.path(), std::fs::Permissions::from_mode(0o444))
+            .expect("strip the search bit");
+        let _restore = Restore(home.path().to_path_buf());
+
+        let error = snapshot_with_lock(home.path(), |_| {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        })
+        .expect_err("an unstatable home is not a proven read-only home");
+
+        let CoreError::Internal { category } = &error else {
+            panic!("unexpected error shape: {error:?}");
+        };
+        assert!(
+            category.contains("Unproven") && category.starts_with("config_lock: "),
             "the refusal names the unproven classification: {error:?}"
         );
     }
