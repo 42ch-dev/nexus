@@ -3051,8 +3051,6 @@ mod tests {
     fn outline_five_q_nogo_info_logs_dimensions() {
         use std::sync::{Arc, Mutex};
 
-        let _tracing_lock = tracing_test_lock();
-
         #[derive(Clone)]
         struct CaptureLayer {
             messages: Arc<Mutex<Vec<String>>>,
@@ -3078,6 +3076,7 @@ mod tests {
             }
         }
 
+        let _tracing_lock = tracing_test_lock();
         let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let layer = CaptureLayer {
             messages: captured.clone(),
