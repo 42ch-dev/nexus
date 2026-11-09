@@ -765,9 +765,13 @@ pub struct Matrix {
 
 /// Open the real local provider and its operator/peer mapping over a prepared
 /// home (the migration/character preparation stayed with the caller).
+/// `reflections: false` opens the deliberately-unadvertised shape (staging
+/// spec §4 N4-R): describe omits `spoke-memory-reflection` and the three
+/// reflection ops answer the not-served refusal.
 async fn open_local_workspace(
     home_dir: TempDir,
     creator_id: Option<String>,
+    reflections: bool,
 ) -> (
     Home,
     Provider,
@@ -778,9 +782,15 @@ async fn open_local_workspace(
 ) {
     let user_home = home_dir.path().to_path_buf();
     let admin_id = creator_id.unwrap_or_else(|| LOCAL_ADMIN_ID.to_owned());
-    let provider = LocalMemoryProvider::open(user_home.clone(), &admin_id, LOCAL_WORKSPACE)
-        .await
-        .expect("open the local provider");
+    let provider = if reflections {
+        LocalMemoryProvider::open(user_home.clone(), &admin_id, LOCAL_WORKSPACE)
+            .await
+            .expect("open the local provider")
+    } else {
+        LocalMemoryProvider::open_unadvertised(user_home.clone(), &admin_id, LOCAL_WORKSPACE)
+            .await
+            .expect("open the unadvertised local provider")
+    };
     let space_id = provider.space_id().to_owned();
     let directory = Arc::new(
         PeerDirectory::new()
@@ -851,7 +861,7 @@ impl Matrix {
         Self::start_advertised(kind, true).await
     }
 
-    /// A fresh run whose advertised fixture shape is chosen explicitly: the
+    /// A fresh run whose advertised shape is chosen explicitly: the
     /// deliberately-unadvertised provider serves the same operations but
     /// advertises and negotiates only the base memory family.
     async fn start_advertised(kind: Kind, advertised: bool) -> Self {
@@ -864,13 +874,27 @@ impl Matrix {
         .await
     }
 
+    /// A local run whose provider deliberately withholds the
+    /// `spoke-memory-reflection` sub-capability (staging spec §4 N4-R): the
+    /// Connect dispatch gate refuses the reflection family, which is the shape
+    /// C-003/C-073's continuity rows stay green on.
+    pub async fn local_unadvertised() -> Self {
+        Self::assemble(
+            Kind::Local,
+            TempDir::new().expect("temporary matrix home"),
+            None,
+            false,
+        )
+        .await
+    }
+
     /// A local run whose workspace already holds a real Character and its
     /// binding, created through the public Core actor surface before the
     /// provider opens (the same workspace state database the Core open used).
     pub async fn local_character() -> (Self, CharacterFixture) {
         let home = TempDir::new().expect("temporary matrix home");
         let (fixture, creator_id) = create_character_fixture(home.path()).await;
-        let matrix = Self::assemble(Kind::Local, home, Some(creator_id), false).await;
+        let matrix = Self::assemble(Kind::Local, home, Some(creator_id), true).await;
         (matrix, fixture)
     }
 
@@ -898,7 +922,7 @@ impl Matrix {
         }
         .to_owned();
         let (home, provider, space_id, directory, admin_principal, peer_principal) = match kind {
-            Kind::Local => open_local_workspace(home_dir, creator_id).await,
+            Kind::Local => open_local_workspace(home_dir, creator_id, advertised).await,
             Kind::Remote => open_remote_workspace(home_dir, advertised).await,
         };
         let negotiated: &'static [&'static str] = match (kind, advertised) {

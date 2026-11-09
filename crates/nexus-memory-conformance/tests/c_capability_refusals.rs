@@ -468,14 +468,9 @@ async fn unknown_op_and_missing_capability_are_distinct(
         described.get("error").is_none(),
         "the same signed session serves a real op: {described}"
     );
-    let expected_capabilities: Value = if matrix.kind() == Kind::Remote {
-        json!(["spoke-memory", "spoke-memory-reflection"])
-    } else {
-        json!(["spoke-memory"])
-    };
     assert_eq!(
         described["payload"]["capabilities"],
-        expected_capabilities,
+        json!(["spoke-memory", "spoke-memory-reflection"]),
         "{described}"
     );
 
@@ -994,7 +989,10 @@ async fn c_104_receipt_read_rechecks_revoked_authorization_remote() {
 
 #[tokio::test]
 async fn c_073_reflection_reads_refuse_without_capability_local() {
-    let matrix = Matrix::local().await;
+    // N4-R: on the served local provider the reflection family is negotiable,
+    // so the continuity row proves the refusal on the deliberately-unadvertised
+    // shape (staging spec §4 N4-R).
+    let matrix = Matrix::local_unadvertised().await;
     run_matrix_scenario(matrix, |m, r, t| {
         Box::pin(async move { reflection_reads_refuse_without_capability(m, r, t).await })
     })

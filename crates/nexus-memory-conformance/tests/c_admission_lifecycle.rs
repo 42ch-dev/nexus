@@ -140,17 +140,12 @@ fn candidate_ids(body: &Value) -> Vec<String> {
 async fn describe_contract(matrix: Matrix) {
     let body = matrix.admin().describe().await;
     assert_eq!(body["memory_protocol_version"], json!(1));
-    let expected_capabilities: Value = if matrix.kind() == Kind::Remote {
-        // The advertised fixture genuinely serves the reflection family, so
-        // describe names both families it serves.
-        json!(["spoke-memory", "spoke-memory-reflection"])
-    } else {
-        json!(["spoke-memory"])
-    };
+    // Both providers genuinely serve the reflection family (N4-R) on the
+    // advertised matrix; the unadvertised shape is exercised by C-003/C-073.
     assert_eq!(
         body["capabilities"],
-        expected_capabilities,
-        "only the served families are advertised: {body}"
+        json!(["spoke-memory", "spoke-memory-reflection"]),
+        "exactly the served families are advertised: {body}"
     );
     assert!(
         body["engine_policy_version"]
@@ -335,7 +330,10 @@ async fn reflection_requires_subcapability(matrix: Matrix) {
 
 #[tokio::test]
 async fn c_003_reflection_requires_subcapability_local() {
-    reflection_requires_subcapability(Matrix::local().await).await;
+    // N4-R: the served local provider advertises the reflection family, so
+    // C-003's continuity row runs on the deliberately-unadvertised shape —
+    // `describe` omits the flag there and the dispatch gate keeps refusing it.
+    reflection_requires_subcapability(Matrix::local_unadvertised().await).await;
 }
 
 #[tokio::test]
@@ -395,12 +393,11 @@ async fn describe_has_no_space_catalogue(matrix: Matrix) {
         body.get("spaces").is_none(),
         "describe is not a space catalogue: {body}"
     );
-    let expected_capabilities: Value = if matrix.kind() == Kind::Remote {
-        json!(["spoke-memory", "spoke-memory-reflection"])
-    } else {
-        json!(["spoke-memory"])
-    };
-    assert_eq!(body["capabilities"], expected_capabilities);
+    assert_eq!(
+        body["capabilities"],
+        json!(["spoke-memory", "spoke-memory-reflection"]),
+        "capability facts only, exactly the served families: {body}"
+    );
 
     // The catalogue is a bounded page: a page never exceeds the requested limit
     // and reports its end instead of growing without bound.

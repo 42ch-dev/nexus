@@ -4,10 +4,12 @@
 //! `memory.subjects.*`, `memory.grants.*`, and the round-B content families
 //! (`memory.capture`, `memory.candidates.*`, `memory.records.*`,
 //! `memory.recall`, `memory.profile.*`) end to end on a temp nexus home. The
-//! sub-capability gated families (reflection, transfer) and the NXM-2 receipt
-//! read must answer the dispatch-level denial — `CAPABILITY_PORT_MISSING`, the
-//! code upstream's responder serializes for an unimplemented op — never a
-//! success value and never an empty success.
+//! still-gated transfer family and the NXM-2 receipt read must answer the
+//! dispatch-level denial — `CAPABILITY_PORT_MISSING`, the code upstream's
+//! responder serializes for an unimplemented op — never a success value and
+//! never an empty success. The reflection family is genuinely served (N4-R):
+//! it answers its own admission verdicts, and the deliberately-unadvertised
+//! open keeps the selection denial.
 //!
 //! Every scenario runs on a temp nexus home. Import-boundary note: the shared
 //! `MemoryPort` vocabulary comes from `spoke_operations`, whose generated wire
@@ -287,13 +289,37 @@ async fn describe_reports_the_served_surface() {
             .any(|flag| flag == "spoke-memory"),
         "the served family is advertised: {body}"
     );
+    // Matrix-aware (N4-R): the default open genuinely serves the reflection
+    // family, so the honest advertisement names it; the unadvertised shape
+    // keeps the base family alone. `spoke-memory-transfer` stays gated in both.
+    assert!(
+        body["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|flag| flag == "spoke-memory-reflection"),
+        "the served reflection family is advertised: {body}"
+    );
+    let unadvertised = LocalMemoryProvider::open_unadvertised(
+        env.user_home.clone(),
+        CREATOR,
+        "default",
+    )
+    .await
+    .expect("unadvertised provider open");
+    let withheld = wire(&unadvertised.describe(&principal(CREATOR), dto(json!({}))).await);
+    assert_eq!(
+        withheld["capabilities"],
+        json!(["spoke-memory"]),
+        "the deliberately-unadvertised shape names the base family alone: {withheld}"
+    );
     assert!(
         !body["capabilities"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|flag| flag == "spoke-memory-reflection" || flag == "spoke-memory-transfer"),
-        "the gated sub-capabilities are not advertised: {body}"
+            .any(|flag| flag == "spoke-memory-transfer"),
+        "the still-gated transfer family is not advertised: {body}"
     );
     assert!(
         body.get("spaces").is_none(),

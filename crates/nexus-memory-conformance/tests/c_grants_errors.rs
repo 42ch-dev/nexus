@@ -1378,9 +1378,11 @@ async fn local_operator_bootstrap_through_core() {
         let space_id = provider.space_id().to_owned();
         assert!(!space_id.is_empty(), "Core provisioning created the space");
         let described = support::wire(&provider.describe(&operator, dto(json!({}))).await);
+        // The Core open pins the real local provider, which serves the
+        // reflection family (N4-R), so the honest advertisement names both.
         assert_eq!(
             described["capabilities"],
-            json!(["spoke-memory"]),
+            json!(["spoke-memory", "spoke-memory-reflection"]),
             "{described}"
         );
         let spaces = support::wire(&provider.list_spaces(&operator, dto(json!({}))).await);
