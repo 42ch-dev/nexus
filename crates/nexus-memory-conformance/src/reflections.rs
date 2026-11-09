@@ -60,7 +60,7 @@ use crate::FixtureError;
 /// to list the whole subject, which is the same whole-subject requirement as
 /// `subject_all`.
 #[derive(Debug, Clone)]
-pub(crate) struct ReflectionTarget {
+pub struct ReflectionTarget {
     subject_all: bool,
     context_ids: Vec<String>,
     reads_shared: bool,
@@ -296,12 +296,7 @@ fn target_admits(target: &ReflectionTarget, visibility: &str, context_id: Option
     if visibility == "shared" {
         return target.reads_shared;
     }
-    context_id.is_some_and(|context_id| {
-        target
-            .context_ids
-            .iter()
-            .any(|named| named == context_id)
-    })
+    context_id.is_some_and(|context_id| target.context_ids.iter().any(|named| named == context_id))
 }
 
 /// §6.13: the provenance filter intersects the record's recorded claim and
@@ -319,7 +314,10 @@ fn filter_admits(provenance: &Value, filter: Option<&Value>) -> bool {
                     .get("source_context_ids")
                     .and_then(Value::as_array)
                     .is_some_and(|wanted| {
-                        wanted.iter().filter_map(Value::as_str).any(|named| named == claim)
+                        wanted
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .any(|named| named == claim)
                     })
             })
         })
@@ -358,7 +356,8 @@ async fn load_basis_records(
                 visibility: row.try_get("scope_visibility").map_err(internal_failure)?,
                 context_id: row.try_get("scope_context_id").map_err(internal_failure)?,
                 provenance: json_field(
-                    &row.try_get::<String, _>("provenance_json").map_err(internal_failure)?,
+                    &row.try_get::<String, _>("provenance_json")
+                        .map_err(internal_failure)?,
                     "record provenance",
                 )?,
             })
@@ -383,8 +382,10 @@ async fn load_profile_revisions(
     rows.iter()
         .map(|row| {
             Ok((
-                row.try_get::<String, _>("profile_kind").map_err(internal_failure)?,
-                row.try_get::<i64, _>("revision").map_err(internal_failure)?,
+                row.try_get::<String, _>("profile_kind")
+                    .map_err(internal_failure)?,
+                row.try_get::<i64, _>("revision")
+                    .map_err(internal_failure)?,
             ))
         })
         .collect()
@@ -498,7 +499,12 @@ fn current_digest_for(
         })
         .map(|record| (record.record_id.as_str(), record.revision))
         .collect();
-    basis_digest(&canonical_basis_object(selection, filter, profiles, &source_set))
+    basis_digest(&canonical_basis_object(
+        selection,
+        filter,
+        profiles,
+        &source_set,
+    ))
 }
 
 /// The pinned source record ids one stored basis carries (C-077).
@@ -566,13 +572,14 @@ const fn sufficient(record_count: usize) -> bool {
 /// `REQUIRED_PROFILE_KINDS` read from the describe body's single source of
 /// truth; the fixture requires no authored kinds, so this stays empty.
 fn required_profile_kinds() -> Result<Vec<String>, SpokeReject> {
-    serde_json::from_value(describe_body(true)["required_profile_kinds"].clone())
-        .map_err(|error| internal(format!("describe body carries malformed profile kinds: {error}")))
+    serde_json::from_value(describe_body(true)["required_profile_kinds"].clone()).map_err(|error| {
+        internal(format!(
+            "describe body carries malformed profile kinds: {error}"
+        ))
+    })
 }
 
-fn missing_required_profile_kinds(
-    profiles: &[(String, i64)],
-) -> Result<Vec<String>, SpokeReject> {
+fn missing_required_profile_kinds(profiles: &[(String, i64)]) -> Result<Vec<String>, SpokeReject> {
     let required = required_profile_kinds()?;
     Ok(required
         .into_iter()
@@ -633,7 +640,8 @@ async fn load_served_reflections(
                 revision: row.try_get("revision").map_err(internal_failure)?,
                 schema_version: row.try_get("schema_version").map_err(internal_failure)?,
                 selection: json_field(
-                    &row.try_get::<String, _>("selection_json").map_err(internal_failure)?,
+                    &row.try_get::<String, _>("selection_json")
+                        .map_err(internal_failure)?,
                     "reflection selection",
                 )?,
                 filter: row
@@ -647,7 +655,8 @@ async fn load_served_reflections(
                     .map(|text| json_field(&text, "reflection cognition filter"))
                     .transpose()?,
                 basis: json_field(
-                    &row.try_get::<String, _>("basis_json").map_err(internal_failure)?,
+                    &row.try_get::<String, _>("basis_json")
+                        .map_err(internal_failure)?,
                     "reflection basis",
                 )?,
                 body_text: row.try_get("body_text").map_err(internal_failure)?,
@@ -658,7 +667,8 @@ async fn load_served_reflections(
                     .map_err(internal_failure)?,
                 model: row.try_get("model").map_err(internal_failure)?,
                 extensions: json_field(
-                    &row.try_get::<String, _>("extensions_json").map_err(internal_failure)?,
+                    &row.try_get::<String, _>("extensions_json")
+                        .map_err(internal_failure)?,
                     "reflection extensions",
                 )?,
             })
@@ -723,7 +733,7 @@ fn reflection_wire(row: &ServedReflection, stale: bool) -> Result<Value, SpokeRe
 
 /// The `memory.reflections.state` view: content-free basis, the fixture's
 /// sufficiency verdict, honest staleness and the digest CAS token.
-pub(crate) struct ReflectionStateView {
+pub struct ReflectionStateView {
     pub(crate) basis: Value,
     pub(crate) sufficient: bool,
     pub(crate) missing_required_profile_kinds: Vec<String>,
@@ -732,7 +742,7 @@ pub(crate) struct ReflectionStateView {
     pub(crate) last_reflection_id: Option<String>,
 }
 
-pub(crate) struct ReflectionListPage {
+pub struct ReflectionListPage {
     pub(crate) reflections: Vec<Value>,
     pub(crate) next_cursor: Option<String>,
 }
@@ -783,28 +793,33 @@ impl FixtureMemoryProvider {
         )
         .await?;
         let status = subject_status(conn, space_id, subject_id).await?;
-        let selection_value =
-            serde_json::to_value(&request.selection).map_err(internal_failure)?;
+        let selection_value = serde_json::to_value(&request.selection).map_err(internal_failure)?;
         let filter_value = request
             .filter
             .as_ref()
             .map(|filter| serde_json::to_value(filter).map_err(internal_failure))
             .transpose()?;
-        let records = self.live_basis_records(
-            conn,
-            space_id,
-            subject_id,
-            &status,
-            &target,
-            filter_value.as_ref(),
-        )
-        .await?;
+        let records = self
+            .live_basis_records(
+                conn,
+                space_id,
+                subject_id,
+                &status,
+                &target,
+                filter_value.as_ref(),
+            )
+            .await?;
         let profiles = load_profile_revisions(conn, space_id, subject_id).await?;
         let source_set: Vec<(&str, i64)> = records
             .iter()
             .map(|record| (record.record_id.as_str(), record.revision))
             .collect();
-        let canonical = canonical_basis_object(&selection_value, filter_value.as_ref(), &profiles, &source_set);
+        let canonical = canonical_basis_object(
+            &selection_value,
+            filter_value.as_ref(),
+            &profiles,
+            &source_set,
+        );
         let state_digest = basis_digest(&canonical)?;
 
         // The most recent surviving reflection pinned to exactly this
@@ -891,15 +906,16 @@ impl FixtureMemoryProvider {
             .as_ref()
             .map(|filter| serde_json::to_value(filter).map_err(internal_failure))
             .transpose()?;
-        let records = self.live_basis_records(
-            conn,
-            space_id,
-            subject_id,
-            &status,
-            &target,
-            filter_value.as_ref(),
-        )
-        .await?;
+        let records = self
+            .live_basis_records(
+                conn,
+                space_id,
+                subject_id,
+                &status,
+                &target,
+                filter_value.as_ref(),
+            )
+            .await?;
         let profiles = load_profile_revisions(conn, space_id, subject_id).await?;
         let tombstoned = tombstoned_record_ids(conn, space_id, subject_id).await?;
 
@@ -936,11 +952,14 @@ impl FixtureMemoryProvider {
             SpokeResult::Ok(digest) => digest,
             SpokeResult::Reject(reject) => return Err(reject),
         };
-        let start = list_cursor_start(request.cursor.as_deref().map(String::as_str), &binding, &served)?;
+        let start = list_cursor_start(
+            request.cursor.as_deref().map(String::as_str),
+            &binding,
+            &served,
+        )?;
 
-        let limit =
-            usize::try_from(request.limit.map_or(MAX_PAGE_SIZE.get(), NonZeroU64::get))
-                .map_err(internal_failure)?;
+        let limit = usize::try_from(request.limit.map_or(MAX_PAGE_SIZE.get(), NonZeroU64::get))
+            .map_err(internal_failure)?;
         let remaining = &served[start..];
         let page = &remaining[..remaining.len().min(limit)];
         let next_cursor = if remaining.len() > limit {
@@ -1166,8 +1185,7 @@ impl FixtureMemoryProvider {
         if status == "fenced" {
             return Err(subject_fenced(subject_id, "subject"));
         }
-        let selection_value =
-            serde_json::to_value(&request.selection).map_err(internal_failure)?;
+        let selection_value = serde_json::to_value(&request.selection).map_err(internal_failure)?;
         let filter_value = request
             .filter
             .as_ref()
@@ -1289,9 +1307,11 @@ impl FixtureMemoryProvider {
         // never-return-to-pending rule keeps the settle one-way.
         let mut transaction = self.begin_write().await?;
         let terminal = if generation_failed {
-            ReceiptState::Failed(internal("the fixture's deterministic generation step failed"))
+            ReceiptState::Failed(internal(
+                "the fixture's deterministic generation step failed",
+            ))
         } else {
-            let reflection_id = format!("refl_{}", Uuid::new_v4().simple());
+            let reflection_id = mint_reflection_id();
             insert_generated_reflection(
                 &mut transaction,
                 &pending.space_id,
@@ -1305,23 +1325,23 @@ impl FixtureMemoryProvider {
                 &reflection_id,
             )
             .await?;
-            ReceiptState::Committed(json!({
-                "reflection_id": reflection_id,
-                "cost": {
-                    "unit_kind": GENERATION_COST_UNIT_KIND,
-                    "units": GENERATION_COST_UNITS,
-                },
-            }))
+            ReceiptState::Committed(committed_result(&reflection_id))
         };
-        let receipt =
-            match settle_receipt_in_tx(&mut transaction, &pending.space_id, &pending.receipt_id, terminal, now).await
-            {
-                Ok(receipt) => receipt,
-                Err(reject) => {
-                    let _ = transaction.rollback().await;
-                    return Err(reject);
-                }
-            };
+        let receipt = match settle_receipt_in_tx(
+            &mut transaction,
+            &pending.space_id,
+            &pending.receipt_id,
+            terminal,
+            now,
+        )
+        .await
+        {
+            Ok(receipt) => receipt,
+            Err(reject) => {
+                let _ = transaction.rollback().await;
+                return Err(reject);
+            }
+        };
         self.faults()
             .hold(FaultPoint::BeforeCommit)
             .await
@@ -1342,6 +1362,24 @@ impl FixtureMemoryProvider {
             .map_err(|_| outcome_uncertain())?;
         Ok(receipt)
     }
+}
+
+/// One fresh reflection identity: the fixture mints a random v4 id, so the
+/// envelope identity is NOT a deterministic function of the pinned basis.
+fn mint_reflection_id() -> String {
+    format!("refl_{}", Uuid::new_v4().simple())
+}
+
+/// The committed receipt's `result` object: the envelope identity plus this
+/// provider's one-reflection cost (no envelope body rides the receipt).
+fn committed_result(reflection_id: &str) -> Value {
+    json!({
+        "reflection_id": reflection_id,
+        "cost": {
+            "unit_kind": GENERATION_COST_UNIT_KIND,
+            "units": GENERATION_COST_UNITS,
+        },
+    })
 }
 
 /// Insert the immutable reflection row a committed generate run publishes, on
@@ -1367,8 +1405,7 @@ async fn insert_generated_reflection(
         .iter()
         .map(|record| (record.record_id.as_str(), record.revision))
         .collect();
-    let canonical =
-        canonical_basis_object(&selection_value, filter, profiles, &source_set);
+    let canonical = canonical_basis_object(&selection_value, filter, profiles, &source_set);
     let state_digest = basis_digest(&canonical)?;
     let source_set_digest = basis_digest(&json!({ "source_set": source_set }))?;
     let source_ids: Vec<String> = records
@@ -1448,7 +1485,7 @@ async fn insert_generated_reflection(
 /// receipt `failed` (retryable `INTERNAL_ERROR`, no cost). The same rule the
 /// local provider applies, so cross-provider rows observe identical
 /// semantics.
-pub(crate) async fn terminalize_orphaned_generate_receipts(
+pub async fn terminalize_orphaned_generate_receipts(
     store: &FixtureStore,
 ) -> Result<(), FixtureError> {
     let pool = store.pool();
@@ -1666,8 +1703,13 @@ mod tests {
 
     fn digest_of(records: &[(&str, i64)], filter: Option<&Value>) -> String {
         let selection = json!({ "mode": "subject_all" });
-        basis_digest(&canonical_basis_object(&selection, filter, &profiles(), records))
-            .expect("canonical digest computes")
+        basis_digest(&canonical_basis_object(
+            &selection,
+            filter,
+            &profiles(),
+            records,
+        ))
+        .expect("canonical digest computes")
     }
 
     /// C-042's mechanism: every basis-affecting fact moves the digest.
@@ -1675,18 +1717,26 @@ mod tests {
     fn canonical_digest_tracks_every_basis_fact() {
         let base = digest_of(&[("r-1", 1)], None);
         assert_ne!(base, digest_of(&[("r-1", 2)], None), "record revision");
-        assert_ne!(base, digest_of(&[("r-1", 1), ("r-2", 1)], None), "record set");
+        assert_ne!(
+            base,
+            digest_of(&[("r-1", 1), ("r-2", 1)], None),
+            "record set"
+        );
         let selection = json!({ "mode": "subject_all" });
         let filtered = Some(json!({ "source_context_ids": ["ctx-a"] }));
-        assert_ne!(base, {
-            let digest = basis_digest(&canonical_basis_object(
-                &selection,
-                filtered.as_ref(),
-                &profiles(),
-                &[("r-1", 1)],
-            ));
-            digest.expect("canonical digest computes")
-        }, "filter");
+        assert_ne!(
+            base,
+            {
+                let digest = basis_digest(&canonical_basis_object(
+                    &selection,
+                    filtered.as_ref(),
+                    &profiles(),
+                    &[("r-1", 1)],
+                ));
+                digest.expect("canonical digest computes")
+            },
+            "filter"
+        );
         let mut profiles = profiles();
         profiles[0].1 = 3;
         let other = basis_digest(&canonical_basis_object(
@@ -1695,7 +1745,11 @@ mod tests {
             &profiles,
             &[("r-1", 1)],
         ));
-        assert_ne!(base, other.expect("canonical digest computes"), "profile revision");
+        assert_ne!(
+            base,
+            other.expect("canonical digest computes"),
+            "profile revision"
+        );
     }
 
     /// The digest input is total: the same facts in the same order produce the
@@ -1714,7 +1768,10 @@ mod tests {
     #[test]
     fn whole_pinned_source_set_tombstones_the_row() {
         let tombstoned = ["r-1".to_owned(), "r-2".to_owned()];
-        assert!(source_set_tombstoned(&["r-1".into(), "r-2".into()], &tombstoned));
+        assert!(source_set_tombstoned(
+            &["r-1".into(), "r-2".into()],
+            &tombstoned
+        ));
         // Partial tombstone: the pinned set still has a live source.
         assert!(!source_set_tombstoned(
             &["r-1".into(), "r-2".into(), "r-3".into()],
@@ -1733,8 +1790,7 @@ mod tests {
         let all = json!({ "mode": "subject_all" });
         let shared = json!({ "mode": "shared_only" });
         let contexts = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"] });
-        let with_shared =
-            json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"], "include_shared": true });
+        let with_shared = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"], "include_shared": true });
         assert!(admits(&all, "shared", Some("ctx-b")));
         assert!(admits(&all, "context", Some("ctx-b")));
         assert!(admits(&shared, "shared", None));

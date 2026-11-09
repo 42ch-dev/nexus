@@ -1281,8 +1281,7 @@ async fn operator_bootstrap_is_callable_and_visible(
         json!(["spoke-memory"])
     };
     assert_eq!(
-        described["capabilities"],
-        expected_capabilities,
+        described["capabilities"], expected_capabilities,
         "{described}"
     );
     assert_eq!(described["required_profile_kinds"], json!([]));

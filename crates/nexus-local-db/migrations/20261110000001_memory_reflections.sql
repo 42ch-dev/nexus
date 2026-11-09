@@ -13,12 +13,22 @@
 -- half), and generation reuses the §6.10 `memory_receipts` machinery — this
 -- table carries no receipt columns of its own.
 --
--- Writer admission: a cooperative core table with the same guard shape as the
--- other memory tables. Immutability means the family stops at the insert
--- triggers — no update/delete guard, no update/delete outbox, and no deletion
--- path exists for a raw writer to exploit.
+-- `seq` is the newest-first read order: `created_at` is a whole-second stamp,
+-- so two envelopes generated in the same second would otherwise tie and fall
+-- back to the random `reflection_id` tiebreak, which is not a deterministic
+-- newest-first listing. The store assigns it (`COALESCE(MAX(seq), 0) + 1`, the
+-- same shape as `memory_journal`), never SQLite — the table is WITHOUT ROWID,
+-- so a rowid alias would reintroduce the silent-delete trigger bypass the
+-- journal migration documents.
+--
+-- Writer admission: a cooperative core table with the same guard trio as the
+-- other memory tables, so a raw pool is fenced with `WRITER_FENCED` on every
+-- mutation shape. The family is append-only in practice (no provider update or
+-- delete path exists), but the writer-protocol contract is per-table guard
+-- coverage, and an outbox event rides every admitted insert.
 
 CREATE TABLE IF NOT EXISTS memory_reflections (
+    seq INTEGER NOT NULL UNIQUE,
     reflection_id TEXT PRIMARY KEY,
     space_id TEXT NOT NULL,
     subject_id TEXT NOT NULL,
@@ -43,18 +53,69 @@ CREATE TABLE IF NOT EXISTS memory_reflections (
     CHECK ((cost_unit_kind IS NULL) = (cost_units IS NULL))
 ) WITHOUT ROWID;
 
--- §7.26 list paging over a subject's reflections.
-CREATE INDEX IF NOT EXISTS idx_memory_reflections_subject_created
-    ON memory_reflections (space_id, subject_id, created_at);
+-- §7.26 list/state reads over a subject's reflections: newest-first by the
+-- store-assigned insertion order.
+CREATE INDEX IF NOT EXISTS idx_memory_reflections_subject_seq
+    ON memory_reflections (space_id, subject_id, seq);
 
 -- Identity lookups scoped to one subject.
 CREATE INDEX IF NOT EXISTS idx_memory_reflections_subject_reflection
     ON memory_reflections (space_id, subject_id, reflection_id);
 
--- ── Writer-protocol guard + outbox (insert-only family shape) ──
+-- ── Writer-protocol guards (full cooperative core-table shape) ──
 
 CREATE TRIGGER IF NOT EXISTS guard_memory_reflections_insert
 BEFORE INSERT ON memory_reflections
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'WRITER_FENCED')
+  WHERE COALESCE(nexus_writer_protocol(), 0) != 1
+     OR NOT EXISTS (
+         SELECT 1
+         FROM core_writer_registration r
+         INNER JOIN core_workspace_gate g ON g.pk = 1
+         WHERE r.writer_id = nexus_writer_id()
+           AND r.migration_epoch = g.migration_epoch
+           AND r.migration_epoch = nexus_migration_epoch()
+           AND (
+             r.mode IN ('direct', 'migration')
+             OR (
+               r.mode = 'engine'
+               AND r.engine_epoch IS NOT NULL
+               AND r.engine_epoch = g.engine_epoch
+               AND r.engine_epoch = nexus_engine_epoch()
+             )
+           )
+     );
+END;
+
+CREATE TRIGGER IF NOT EXISTS guard_memory_reflections_update
+BEFORE UPDATE ON memory_reflections
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'WRITER_FENCED')
+  WHERE COALESCE(nexus_writer_protocol(), 0) != 1
+     OR NOT EXISTS (
+         SELECT 1
+         FROM core_writer_registration r
+         INNER JOIN core_workspace_gate g ON g.pk = 1
+         WHERE r.writer_id = nexus_writer_id()
+           AND r.migration_epoch = g.migration_epoch
+           AND r.migration_epoch = nexus_migration_epoch()
+           AND (
+             r.mode IN ('direct', 'migration')
+             OR (
+               r.mode = 'engine'
+               AND r.engine_epoch IS NOT NULL
+               AND r.engine_epoch = g.engine_epoch
+               AND r.engine_epoch = nexus_engine_epoch()
+             )
+           )
+     );
+END;
+
+CREATE TRIGGER IF NOT EXISTS guard_memory_reflections_delete
+BEFORE DELETE ON memory_reflections
 FOR EACH ROW
 BEGIN
   SELECT RAISE(ABORT, 'WRITER_FENCED')

@@ -574,7 +574,9 @@ impl FixtureMemoryProvider {
     }
 
     /// Open the one writer transaction a mutation owns.
-    pub(crate) async fn begin_write(&self) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, SpokeReject> {
+    pub(crate) async fn begin_write(
+        &self,
+    ) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, SpokeReject> {
         self.store()
             .pool()
             .begin_with("BEGIN IMMEDIATE")
