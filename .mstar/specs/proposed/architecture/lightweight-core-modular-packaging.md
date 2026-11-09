@@ -12,6 +12,7 @@ tags:
   - publish
   - rebuild
   - typescript-boundary
+  - pattern
 ---
 
 # Lightweight Core and Modular Packaging (“Steady Fast”)
@@ -52,10 +53,11 @@ Observed on `main` @ `3263aa71f` (local analysis, Asia/Shanghai 2026-11-10):
 | --- | --- | --- | --- |
 | Contracts | JSON Schema → codegen | `schemas/` + generated Rust/TS | Lockstep semver (Spoke-like) |
 | Lightweight core | World/Timeline/KE/Fork, gateway traits, storage ports; **no** engine/WASM/agent by default | Small Rust libs | Stabilize first |
-| Workflow IR | Shared IR for generate/validate/simulate/UI | Thin Rust crate + schema | Stable API; see companion proposal |
+| Workflow IR | Shared universal IR for generate/compose/validate/simulate/UI/patterns | Thin Rust crate + schema | Stable API; see companion proposal |
+| Pattern packages | Versioned reusable subgraph / template packages consumed by Compose and generators | IR + manifest packages (independent semver) | Opt-in content; pin at compose/apply |
 | Feature packages | orchestration runtime, **simulator**, agent-host, wasm-host | Cargo features / independent version tracks | Opt-in; simulator omitable from prod graphs |
 | Compute modules | Deterministic settle logic | `wasm32` + module-sdk | Operator install; no host rebuild |
-| Surfaces | CLI / Connect / TS HTTP / UI | Rust bins + **TS apps** | Product versioning |
+| Surfaces | CLI / Connect / TS HTTP / UI (incl. Canvas compose) | Rust bins + **TS apps** | Product versioning |
 
 ---
 
@@ -76,18 +78,21 @@ Observed on `main` @ `3263aa71f` (local analysis, Asia/Shanghai 2026-11-10):
 
 The companion proposal [dynamic-workflow-and-simulation.md](../orchestration/dynamic-workflow-and-simulation.md) depends on this packaging:
 
-- **Workflow IR** is a stable crate so generators and TS UI do not link the full orchestration graph.
-- **Simulator** is a feature package for review graphs.
-- Generation churn stays out of `nexus-core`’s default cohort.
+- **Workflow IR** is a stable crate so generators, **Canvas compose**, validators, and **pattern runtime** do not link the full orchestration graph.
+- **Pattern packages** version independently and are consumed by Compose (end-user nest/combine) and by generators as building blocks.
+- **Simulator** is a feature package for review graphs (including nested effect rollup).
+- Generation / compose churn stays out of `nexus-core`’s default cohort.
 
-Dual-track roadmap lives in that companion §7.
+Dual-track roadmap lives in that companion §7 (packaging A + generate/compose/Canvas nest B).
 
 ---
 
 ## 6. Non-goals / anti-patterns
 
 - Migrating user-facing TS surfaces into a single Rust binary “for purity.”
-- Mandatory canvas drag-edit as the only strategy authoring path.
+- Mandatory canvas drag-edit from scratch as the only strategy authoring path.
+- Treating Workflow IR as a **developer-only** tool or forbidding end-user nest/compose.
+- Reducing Canvas to a **pure read-only** inspection of Agent output and discarding composition UX.
 - Publishing every internal helper crate without a consumer stability story.
 - Enabling WIT/Component work as a gate on thinning core or shipping IR v1.
 
