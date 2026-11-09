@@ -187,11 +187,15 @@ mod tests {
 
     /// Reset the singleton trace writer so each test starts clean.
     ///
-    /// Best-effort hygiene only — the tests below never depend on singleton
-    /// state, so they stay correct under the default parallel harness: every
-    /// test owns a unique run id + temp dir, and a sibling's reset merely
-    /// forces the next `append_trace_event` to reopen (append mode) its own
-    /// per-run file. No `--test-threads=1` requirement.
+    /// Mutex contract (I-000329): every writer-touching test takes
+    /// `trace_lock()` first, which serializes its whole reset→append→flush→
+    /// read cycle against the process-global singleton under the default
+    /// parallel harness. The file-content assertions below stay independent
+    /// of prior run ids because each test owns a unique run id + temp dir;
+    /// a sibling's reset merely forces the next `append_trace_event` to
+    /// reopen (append mode) its own per-run file. Deleting the mutex would
+    /// reintroduce the I-000329 race; no `--test-threads=1` requirement
+    /// exists either way.
     fn reset_trace_writer() {
         let mut guard = TRACE_WRITER
             .lock()

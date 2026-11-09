@@ -1632,12 +1632,9 @@ fn reject_settlement_payload(envelope: &ErrorEnvelope, effect_committed: bool) -
 // `tokio::task::spawn_blocking` + `Handle::current().block_on` block, and the
 // handle exported upward is the sync `InvokeHandlerV2` closure built by
 // `build_handler_with_limits` (spawned as a closure, never as this future).
-#[cfg_attr(
-    feature = "connect-host",
-    expect(
-        clippy::future_not_send,
-        reason = "polled only by run_in_lane's spawn_blocking + Handle::current().block_on block and exported only as the sync InvokeHandlerV2 closure, so no Send bound is applied to it"
-    )
+#[expect(
+    clippy::future_not_send,
+    reason = "polled only by run_in_lane's spawn_blocking + Handle::current().block_on block and exported only as the sync InvokeHandlerV2 closure, so no Send bound is applied to it"
 )]
 async fn route_orchestrator(
     route: Route,
