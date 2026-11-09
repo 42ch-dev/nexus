@@ -38,6 +38,10 @@ mod faults;
 // The published provider policy and the authenticated peer→principal table.
 mod policy;
 mod provider;
+// The reflection admission slice: `OpTarget` construction, freeze
+// classification and the cognition refusal. Grown by the serving tasks.
+#[allow(dead_code)]
+mod reflections;
 // The D15 raw-request digest scope and the wire error-envelope normalization.
 mod raw_invoke;
 // As in `spaces`: the outer convenience wrappers stay the slices' own tested
