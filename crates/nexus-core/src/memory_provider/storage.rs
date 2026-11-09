@@ -76,6 +76,7 @@
 //! placement, so [`Coverage`] resolves those requirements inside the effect
 //! transaction instead of trusting a value read before it.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "test-hooks")]
@@ -2755,6 +2756,15 @@ async fn write_journal_entry(
     Ok(())
 }
 
+/// The one unsettled journal row fencing a subject: its receipt identity and
+/// its lifecycle state. Named fields, so a consumer cannot hand the receipt id
+/// where the state is expected (the reversed-tuple defect the reflection read
+/// wave introduced).
+struct UnsettledJournal {
+    receipt_id: String,
+    state: String,
+}
+
 /// The unsettled journal state that fences one subject (D-10 read isolation).
 ///
 /// The row's own `subject_id` fences its subject, and so does every subject its
@@ -2771,7 +2781,7 @@ async fn unsettled_in(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     space_id: &str,
     subject_id: &str,
-) -> StoreResult<Option<(String, String)>> {
+) -> StoreResult<Option<UnsettledJournal>> {
     let row: Option<(String, String)> = sqlx::query_as(
         "SELECT receipt_id, state FROM memory_journal \
          WHERE space_id = ? AND state <> 'applied' \
@@ -2787,15 +2797,15 @@ async fn unsettled_in(
     .bind(journal::STATE_DEFERRED)
     .fetch_optional(&mut **tx)
     .await?;
-    Ok(row)
+    Ok(row.map(|(receipt_id, state)| UnsettledJournal { receipt_id, state }))
 }
 
 /// §5.2 steps 4–5: only an intent that is still being recovered withholds the
 /// subject's objects silently. A quarantined one — and one a bounded pass left
 /// `deferred` — answers the terminal refusal instead of waiting forever.
-fn withheld(state: Option<&str>, subject_id: &str) -> StoreResult<bool> {
-    match state {
-        Some(journal::STATE_PENDING) => Ok(true),
+fn withheld(unsettled: Option<&UnsettledJournal>, subject_id: &str) -> StoreResult<bool> {
+    match unsettled {
+        Some(unsettled) if unsettled.state == journal::STATE_PENDING => Ok(true),
         Some(_) => Err(StoreError::Unreconciled {
             subject_id: subject_id.to_string(),
         }),
@@ -4964,7 +4974,7 @@ impl MemoryStore {
         }
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         // §5.2/D-10: an unsettled file intent withholds the subject from reads.
-        if withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), subject_id)? {
+        if withheld(unsettled.as_ref(), subject_id)? {
             tx.commit().await?;
             return Ok(ReflectionBasisSnapshot {
                 records: Vec::new(),
@@ -4987,14 +4997,18 @@ impl MemoryStore {
     /// excluded. Visible means all of: the caller's current `reflect`
     /// coverage admits the reflection's pinned selection, the request's
     /// selection scope covers the pin (an absent request selection narrows to
-    /// the caller's covered reflections only), and the pin's basis delta is
-    /// not tombstoning. The marker binds the page to the snapshot it was cut
-    /// from, so any state or grant change invalidates outstanding cursors.
+    /// the caller's covered reflections only), the request's provenance
+    /// filter names the pin's own filter exactly (a present request filter
+    /// returns only envelopes pinned to it; an absent one narrows nothing),
+    /// and the pin's basis delta is not tombstoning. The marker binds the
+    /// page to the snapshot it was cut from, so any state or grant change
+    /// invalidates outstanding cursors.
     pub(super) async fn reflections(
         &self,
         space_id: &str,
         subject_id: &str,
         request_selection: Option<&Selection>,
+        request_filter: Option<&[String]>,
         principal_id: &str,
     ) -> StoreResult<(Vec<VisibleReflection>, String, u64)> {
         self.require_provisioned(space_id).await?;
@@ -5005,7 +5019,7 @@ impl MemoryStore {
         let subject_row = subject_in_tx(&mut tx, space_id, subject_id).await?;
         let subject_status = subject_row.as_ref().map(|subject| subject.status.clone());
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
-        if withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), subject_id)? {
+        if withheld(unsettled.as_ref(), subject_id)? {
             tx.commit().await?;
             let marker =
                 reflection_marker(&[], &[], &[], &grant_rows, subject_status.as_deref())?;
@@ -5030,43 +5044,46 @@ impl MemoryStore {
             .fetch_all(&mut *tx)
             .await?;
         // Per distinct pinned selection/filter, one recomputation of the
-        // record sets the staleness verdict and the C-077 exclusion read;
-        // envelopes sharing a pin share a probe.
-        let mut probes: HashMap<(String, String), (bool, bool)> = HashMap::new();
+        // current record sets; each envelope's staleness/exclusion verdict is
+        // then computed against that row's own pinned basis — envelopes
+        // sharing a pin may pin different bases, so a verdict computed from a
+        // sibling row's basis is never shared.
+        let mut probes: HashMap<(String, String), (Vec<(String, i64)>, Vec<(String, i64)>)> =
+            HashMap::new();
         let mut visible = Vec::with_capacity(rows.len());
         for row in rows {
             let pinned = super::pinned_selection(&row.selection_json)
                 .map_err(StoreError::Corrupt)?;
             let filter = pinned_filter(row.filter_json.as_ref())?;
-            let (stale, excluded) = {
+            let (live, tombstones) = {
                 let key = (
                     row.selection_json.clone(),
                     row.filter_json.clone().unwrap_or_default(),
                 );
-                if let Some(&probe) = probes.get(&key) {
-                    probe
-                } else {
-                    let (live, tombstones) = reflection_record_sets(
-                        &mut tx,
-                        &pinned,
-                        filter.as_deref(),
-                        space_id,
-                        subject_id,
-                    )
-                    .await?;
-                    let probe = pinned_staleness(
-                        &live,
-                        &tombstones,
-                        &profile_revisions,
-                        &pinned,
-                        filter.as_deref(),
-                        &row.basis_json,
-                    )?;
-                    probes.insert(key, probe);
-                    probe
+                match probes.entry(key) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => entry.insert(
+                        reflection_record_sets(
+                            &mut tx,
+                            &pinned,
+                            filter.as_deref(),
+                            space_id,
+                            subject_id,
+                        )
+                        .await?,
+                    ),
                 }
             };
+            let (stale, excluded) = pinned_staleness(
+                live,
+                tombstones,
+                &profile_revisions,
+                &pinned,
+                filter.as_deref(),
+                &row.basis_json,
+            )?;
             if excluded
+                || request_filter.is_some() && filter.as_deref() != request_filter
                 || !covered(
                     &grants,
                     principal_id,
@@ -5143,8 +5160,11 @@ impl MemoryStore {
         // one, so refusing with the unsettled predecessor is the only honest
         // outcome — a stale-CAS or insufficient-data diagnosis would send the
         // caller re-reading a basis recovery still owes.
-        if let Some((receipt_id, state)) = unsettled_in(&mut tx, ctx.space_id, subject_id).await? {
-            return Err(StoreError::UnsettledPredecessor { receipt_id, state });
+        if let Some(unsettled) = unsettled_in(&mut tx, ctx.space_id, subject_id).await? {
+            return Err(StoreError::UnsettledPredecessor {
+                receipt_id: unsettled.receipt_id,
+                state: unsettled.state,
+            });
         }
         // §7.25 state CAS over the *current* authorized basis, recomputed
         // inside this transaction — the same composition the `state` op
@@ -5776,7 +5796,7 @@ impl MemoryStore {
         // status-filtered listing is an explicit audit query and stays readable.
         // §5.2/D-10: an unsettled intent withholds the subject either way.
         let archived = status.is_none() && subject_status.as_deref() == Some("archived");
-        let hidden = withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), subject_id)?;
+        let hidden = withheld(unsettled.as_ref(), subject_id)?;
         if archived || hidden {
             tx.commit().await?;
             let marker = snapshot_marker(
@@ -5979,7 +5999,7 @@ impl MemoryStore {
         }) else {
             return Ok(None);
         };
-        if withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), row.subject_id.as_str())? {
+        if withheld(unsettled.as_ref(), row.subject_id.as_str())? {
             return Ok(None);
         }
         Ok(Some(row))
@@ -6293,7 +6313,7 @@ impl MemoryStore {
         // by-id audit routes still serve them.
         // §5.2/D-10: an unsettled file intent withholds the subject from both.
         let archived = read.excludes_archived() && subject_status.as_deref() == Some("archived");
-        let hidden = withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), subject_id)?;
+        let hidden = withheld(unsettled.as_ref(), subject_id)?;
         let subject_all = matches!(selection, Selection::SubjectAll);
         if archived || hidden {
             tx.commit().await?;
@@ -6501,7 +6521,7 @@ impl MemoryStore {
         }) else {
             return Ok(None);
         };
-        if withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), row.subject_id.as_str())? {
+        if withheld(unsettled.as_ref(), row.subject_id.as_str())? {
             return Ok(None);
         }
         Ok(Some(row))
@@ -7259,7 +7279,7 @@ impl MemoryStore {
         tx.commit().await?;
         // §5.2/D-10: a subject whose file intent is unsettled has no readable
         // profile surface yet.
-        if withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), subject_id)? {
+        if withheld(unsettled.as_ref(), subject_id)? {
             return Ok(None);
         }
         Ok(Some(rows))

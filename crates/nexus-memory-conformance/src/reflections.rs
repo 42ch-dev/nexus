@@ -156,6 +156,18 @@ fn space_frozen(space_id: &str, op: &str) -> SpokeReject {
     }
 }
 
+/// §7.7: a fenced (or archived) subject rejects every fresh subject write.
+fn subject_fenced(subject_id: &str, scope: &str) -> SpokeReject {
+    SpokeReject {
+        code: SpokeRejectCode::SubjectFenced,
+        message: format!("subject {subject_id} is fenced for writes ({scope} scope)"),
+        details: Some(Map::from_iter([(
+            "scope".to_owned(),
+            Value::String(scope.to_owned()),
+        )])),
+    }
+}
+
 fn not_found(message: impl Into<String>) -> SpokeReject {
     SpokeReject {
         code: SpokeRejectCode::NotFound,
@@ -189,10 +201,12 @@ async fn space_status(conn: &mut SqliteConnection, space_id: &str) -> Result<Str
 
 impl FixtureMemoryProvider {
     /// One admission decision for a reflection op: cognition refusal, served
-    /// space, §8.2 freeze classification, then §6.5 grant coverage — the
-    /// whole decision on the caller's single snapshot. `state`/`list` pass
-    /// `is_freeze_allowlisted`; `generate` refuses `SPACE_FROZEN` when frozen.
-    /// The admission decision's inputs arrive per-op from the serving slices;
+    /// space, then §6.5 grant coverage — the whole decision on the caller's
+    /// single snapshot. The §8.2 freeze classification is not part of this
+    /// decision: it gates fresh work only, after replay resolution in the
+    /// staging transaction (§7.0.5/MEM-R021/C-036), so an already-committed
+    /// generation's same-key retry stays recoverable while frozen. The
+    /// admission decision's inputs arrive per-op from the serving slices;
     /// the count is the protocol surface, not a design smell. The cognition
     /// filter arrives as presence only: each request type generates its own
     /// filter shape and every shape is refused identically.
@@ -201,7 +215,6 @@ impl FixtureMemoryProvider {
         &self,
         conn: &mut SqliteConnection,
         principal_id: &str,
-        op: &str,
         space_id: &str,
         subject_id: &str,
         target: &ReflectionTarget,
@@ -215,10 +228,6 @@ impl FixtureMemoryProvider {
             return Err(not_found(format!(
                 "space {space_id} is not served by this fixture"
             )));
-        }
-        let status = space_status(conn, space_id).await?;
-        if status == "frozen" && !is_freeze_allowlisted(op) {
-            return Err(space_frozen(space_id, op));
         }
         // §6.5/MEM-R006: one current grant must cover the whole target.
         let grants = load_grants(conn, space_id).await?;
@@ -766,7 +775,6 @@ impl FixtureMemoryProvider {
         self.require_reflection_admitted(
             conn,
             principal_id,
-            "memory.reflections.state",
             space_id,
             subject_id,
             &target,
@@ -865,7 +873,6 @@ impl FixtureMemoryProvider {
         self.require_reflection_admitted(
             conn,
             principal_id,
-            "memory.reflections.list",
             space_id,
             subject_id,
             &target,
@@ -1112,7 +1119,8 @@ struct StagedGenerate {
 impl FixtureMemoryProvider {
     /// Transaction 1 of [`Self::reflection_generate`], on the caller's
     /// uncommitted transaction: current authorization, replay resolution
-    /// (with the expired-key release), the §7.27 policy + `expected_state_digest`
+    /// (with the expired-key release), the fresh-effect gates (§8.2 freeze,
+    /// §7.7 subject fence), the §7.27 policy + `expected_state_digest`
     /// CAS, then the pending receipt staging. Never commits.
     async fn stage_pending_generate_in_tx(
         &self,
@@ -1129,7 +1137,6 @@ impl FixtureMemoryProvider {
         self.require_reflection_admitted(
             conn,
             principal_id,
-            op,
             space_id,
             subject_id,
             &target,
@@ -1146,7 +1153,19 @@ impl FixtureMemoryProvider {
             }
             ReplayResolution::Fresh => {}
         }
+        // Fresh work only — the replay above is exempt from every fresh-effect
+        // gate (§7.0.5/MEM-R021/C-036). The §8.2 freeze gate: generate sits
+        // outside the maintenance allowlist. Then the §7.7 subject lifecycle
+        // gate: a fenced subject rejects every fresh subject write, while an
+        // already-admitted completion keeps replaying above.
+        let space = space_status(conn, space_id).await?;
+        if space == "frozen" && !is_freeze_allowlisted(op) {
+            return Err(space_frozen(space_id, op));
+        }
         let status = subject_status(conn, space_id, subject_id).await?;
+        if status == "fenced" {
+            return Err(subject_fenced(subject_id, "subject"));
+        }
         let selection_value =
             serde_json::to_value(&request.selection).map_err(internal_failure)?;
         let filter_value = request
@@ -1215,8 +1234,9 @@ impl FixtureMemoryProvider {
             .await
             .map_err(|_| fault_before_effect(FaultPoint::AdmissionPause))?;
 
-        // Transaction 1: current authorization, replay resolution, §7.27
-        // policy + `expected_state_digest` CAS, then the pending receipt.
+        // Transaction 1: current authorization, replay resolution, the
+        // fresh-effect gates (freeze, subject fence), §7.27 policy +
+        // `expected_state_digest` CAS, then the pending receipt.
         let mut transaction = self.begin_write().await?;
         let pending = match self
             .stage_pending_generate_in_tx(

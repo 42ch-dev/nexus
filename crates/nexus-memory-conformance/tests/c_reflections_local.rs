@@ -2202,3 +2202,506 @@ async fn c_100_reflection_error_classes_local() {
     let settled = served(generation, "the parked generation");
     assert_eq!(settled["status"], json!("committed"), "{settled}");
 }
+
+// ── Fix round: blocking-warning regressions (qc-consolidated B1–B4) ──────
+
+/// One subject_all generate payload with a provenance filter pinned.
+fn generate_payload_filtered(space: &str, digest: &str, key: &str, filter: &[&str]) -> Value {
+    json!({
+        "space_id": space,
+        "subject_id": T3_SUBJECT,
+        "selection": { "mode": "subject_all" },
+        "filter": { "source_context_ids": filter },
+        "expected_state_digest": digest,
+        "idempotency_key": key,
+    })
+}
+
+/// The reflection listing body for one request (filter/cursor/limit shape).
+async fn t3_list_request(provider: &LocalMemoryProvider, caller: &schemas::Principal, request: Value) -> Value {
+    served(provider.list_reflections(caller, dto(request)).await, "the reflection list")
+}
+
+/// The one unsettled journal row's (receipt_id, first file target path), read
+/// read-only from the provider's own state database — the durable-row
+/// observation channel, not a provider reimplementation.
+async fn unsettled_journal_target(
+    user_home: &std::path::Path,
+    space: &str,
+) -> (String, String) {
+    let db = nexus_home_layout::workspace_state_db_path(user_home, ADMIN, "default");
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(db)
+        .read_only(true);
+    let mut conn = sqlx::sqlite::SqliteConnection::connect_with(&options)
+        .await
+        .expect("one read-only connection to the provider's own file");
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT receipt_id, targets_json FROM memory_journal \
+         WHERE space_id = ? AND state <> 'applied' LIMIT 1",
+    )
+    .bind(space)
+    .fetch_optional(&mut conn)
+    .await
+    .expect("the unsettled journal row read");
+    conn.close().await.expect("the read-only connection closes");
+    let (receipt_id, targets) = row.expect("one unsettled journal row exists");
+    let path = serde_json::from_str::<Value>(&targets)
+        .expect("the journal targets are JSON")
+        .as_array()
+        .expect("the journal targets are a list")[0]["path"]
+        .as_str()
+        .expect("a journal target names its path")
+        .to_owned();
+    (receipt_id, path)
+}
+
+/// The state of one journal row, read read-only from the provider's own
+/// state database.
+async fn journal_state(user_home: &std::path::Path, space: &str, receipt_id: &str) -> String {
+    let db = nexus_home_layout::workspace_state_db_path(user_home, ADMIN, "default");
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(db)
+        .read_only(true);
+    let mut conn = sqlx::sqlite::SqliteConnection::connect_with(&options)
+        .await
+        .expect("one read-only connection to the provider's own file");
+    let (state,): (String,) = sqlx::query_as(
+        "SELECT state FROM memory_journal WHERE space_id = ? AND receipt_id = ?",
+    )
+    .bind(space)
+    .bind(receipt_id)
+    .fetch_one(&mut conn)
+    .await
+    .expect("the journal row read");
+    conn.close().await.expect("the read-only connection closes");
+    state
+}
+
+/// B1: verdicts belong to each row's own pinned basis, not to a sibling row's.
+/// R1 and R2 share the selection/filter pin, but R2 pins a moved basis: R2
+/// answers fresh and R1 stale under the same pin, and the C-077 exclusion
+/// stays per-row — tombstoning R2's added record leaves R2 tombstone-only
+/// (excluded) while R1's pin is whole again (listed, fresh).
+#[tokio::test]
+async fn qc_b1_verdicts_are_per_row_under_one_pin_local() {
+    let home = tempfile::TempDir::new().expect("temporary provider home");
+    let provider = LocalMemoryProvider::open(home.path().to_path_buf(), ADMIN, "default")
+        .await
+        .expect("open the local provider");
+    let (admin, grantee) = t3_setup(&provider).await;
+    grant_subject_all_reflect(&provider, &admin).await;
+    let selection = json!({ "mode": "subject_all" });
+
+    // R1 pins the two-record basis.
+    let digest_one = sufficient_basis(&provider, &admin).await;
+    let first = served(
+        t3_generate(&provider, &grantee, &digest_one, "qc-b1-r1").await,
+        "the first generation",
+    );
+    assert_eq!(first["status"], json!("committed"), "{first}");
+    let first_id = first["result"]["reflection_id"].as_str().expect("reflection id");
+
+    // The basis moves; R2 pins the moved basis under the same pin.
+    let added = t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "qc-b1 row c").await;
+    let digest_two = expect_state_digest(
+        &t3_state(&provider, &admin, selection.clone(), None).await,
+        "the moved basis",
+    );
+    assert_ne!(digest_two, digest_one, "the added row moved the digest");
+    let second = served(
+        t3_generate(&provider, &grantee, &digest_two, "qc-b1-r2").await,
+        "the second generation",
+    );
+    assert_eq!(second["status"], json!("committed"), "{second}");
+    let second_id = second["result"]["reflection_id"].as_str().expect("reflection id");
+
+    // Newest-first listing: each envelope carries its own verdict.
+    let page = t3_list(&provider, &grantee, None, None).await;
+    let rows = page["reflections"].as_array().expect("envelope rows");
+    assert_eq!(rows.len(), 2, "both envelopes list: {page}");
+    assert_eq!(rows[0]["reflection_id"], json!(second_id), "{page}");
+    assert_eq!(rows[0]["stale"], json!(false), "R2 pins the current basis: {page}");
+    assert_eq!(rows[1]["reflection_id"], json!(first_id), "{page}");
+    assert_eq!(rows[1]["stale"], json!(true), "R1 pins the superseded basis: {page}");
+
+    // Exclusion stays per-row: tombstone the record R2 added. R2's pin
+    // becomes tombstone-only (excluded); R1's pin is whole again (fresh),
+    // so the listing keeps exactly R1 and the state names R1 last.
+    let revision = t3_records(&provider, &admin)
+        .await
+        .iter()
+        .find(|(id, _)| *id == added)
+        .expect("the added row lists before its tombstone")
+        .1;
+    served(
+        provider
+            .delete_record(
+                &admin,
+                dto(json!({
+                    "space_id": provider.space_id(),
+                    "record_id": added,
+                    "expected_revision": revision,
+                    "idempotency_key": "qc-b1-delete",
+                })),
+            )
+            .await,
+        "the added-row delete",
+    );
+    let after = t3_list(&provider, &grantee, None, None).await;
+    let rows = after["reflections"].as_array().expect("envelope rows");
+    assert_eq!(rows.len(), 1, "the tombstone-only pin is excluded: {after}");
+    assert_eq!(rows[0]["reflection_id"], json!(first_id), "{after}");
+    assert_eq!(rows[0]["stale"], json!(false), "R1's pin is whole again: {after}");
+    let state = t3_state(&provider, &admin, selection, None).await;
+    assert_eq!(
+        state.get("last_reflection_id"), Some(&json!(first_id)),
+        "the excluded envelope stops surfacing last: {state}"
+    );
+    assert_eq!(state["stale"], json!(false), "{state}");
+}
+
+/// B2: the unsettled journal tuple reaches every consumer in one order. A
+/// pending journal intent temporarily withholds its subject — the reads stay
+/// admitted and serve empty honestly; once the same intent is quarantined
+/// through the provider's own recovery (foreign bytes at the owed file
+/// target), the same reads answer the terminal refusal. The reversed tuple
+/// handed the receipt id to the state check, so a plain pending intent
+/// already answered the terminal refusal.
+#[tokio::test]
+async fn qc_b2_pending_journal_withholds_then_answers_terminal_local() {
+    let home = tempfile::TempDir::new().expect("temporary provider home");
+    let provider = LocalMemoryProvider::open(home.path().to_path_buf(), ADMIN, "default")
+        .await
+        .expect("open the local provider");
+    let (admin, grantee) = t3_setup(&provider).await;
+    grant_subject_all_reflect(&provider, &admin).await;
+    let selection = json!({ "mode": "subject_all" });
+    let space = provider.space_id().to_owned();
+
+    // One committed envelope exists before the recovery window opens.
+    let digest = sufficient_basis(&provider, &admin).await;
+    let pin = served(
+        t3_generate(&provider, &grantee, &digest, "qc-b2-pin").await,
+        "the pinned generation",
+    );
+    assert_eq!(pin["status"], json!("committed"), "{pin}");
+
+    // A crash after the journal COMMIT: the record's SQL effect is durable,
+    // its file effect is owed, and the caller learns OUTCOME_UNCERTAIN.
+    provider.inject_commit_fault(true);
+    expect_refusal(
+        provider
+            .create_record(
+                &admin,
+                dto(json!({
+                    "space_id": space,
+                    "subject_id": T3_SUBJECT,
+                    "kind": "note",
+                    "content": { "text": "qc-b2 recovering row" },
+                    "scope": { "visibility": "context", "context_id": T3_CONTEXT_A },
+                    "source_context_ids": [T3_SOURCE_A],
+                    "idempotency_key": "qc-b2-recovering",
+                })),
+            )
+            .await,
+        SpokeRejectCode::OutcomeUncertain,
+        "uncertain",
+        "the lost record commit",
+    );
+
+    // Pending intent: the subject is withheld silently — every ordinary read
+    // serves empty and stays admitted; the committed envelope does not leak.
+    let listed = served(
+        provider
+            .list_records(
+                &admin,
+                dto(json!({
+                    "space_id": space,
+                    "subject_id": T3_SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                })),
+            )
+            .await,
+        "the withheld record list",
+    );
+    assert_eq!(listed["total_authorized"], json!(0), "{listed}");
+    let state = t3_state(&provider, &admin, selection.clone(), None).await;
+    assert_eq!(state["basis"]["record_count"], json!(0), "{state}");
+    assert!(
+        state.get("last_reflection_id").is_none(),
+        "a withheld subject surfaces no envelope: {state}"
+    );
+    let page = t3_list(&provider, &grantee, None, None).await;
+    assert_eq!(page["reflections"], json!([]), "{page}");
+
+    // Durable window: exactly one unsettled journal row, still pending.
+    let (receipt_id, path) = unsettled_journal_target(home.path(), &space).await;
+    assert_eq!(
+        journal_state(home.path(), &space, &receipt_id).await,
+        "pending",
+        "the recovering intent is pending"
+    );
+
+    // The provider's own recovery quarantines the intent once the owed file
+    // target holds bytes this intent did not produce: reopen with foreign
+    // bytes at the target path (relative to the provider's `memory-store`
+    // file root).
+    let target = nexus_home_layout::operational_workspace_dir(home.path(), ADMIN, "default")
+        .join("memory-store")
+        .join(&path);
+    std::fs::create_dir_all(target.parent().expect("the target has a parent"))
+        .expect("the target directory");
+    std::fs::write(&target, "bytes no journal intent produced").expect("the foreign bytes");
+    drop(provider);
+    let provider = LocalMemoryProvider::open(home.path().to_path_buf(), ADMIN, "default")
+        .await
+        .expect("reopen the local provider");
+    assert_eq!(
+        journal_state(home.path(), &space, &receipt_id).await,
+        "quarantined",
+        "the bounded pass quarantined the foreign target"
+    );
+
+    // Terminal: the same reads now answer the refusal and name the subject.
+    let records = expect_refusal(
+        provider
+            .list_records(
+                &admin,
+                dto(json!({
+                    "space_id": space,
+                    "subject_id": T3_SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                })),
+            )
+            .await,
+        SpokeRejectCode::InternalError,
+        "terminal",
+        "the quarantined record list",
+    );
+    assert_eq!(
+        records.details.as_ref().and_then(|d| d["subject_id"].as_str()),
+        Some(T3_SUBJECT),
+        "the refusal names the quarantined subject: {records:?}"
+    );
+    expect_refusal(
+        provider
+            .get_reflection_state(
+                &admin,
+                dto(json!({
+                    "space_id": space,
+                    "subject_id": T3_SUBJECT,
+                    "selection": selection,
+                })),
+            )
+            .await,
+        SpokeRejectCode::InternalError,
+        "terminal",
+        "the quarantined state read",
+    );
+    expect_refusal(
+        provider
+            .list_reflections(
+                &grantee,
+                dto(json!({
+                    "space_id": space,
+                    "subject_id": T3_SUBJECT,
+                })),
+            )
+            .await,
+        SpokeRejectCode::InternalError,
+        "terminal",
+        "the quarantined listing",
+    );
+}
+
+/// B3: an authorized same-key replay outranks the §8.2 freeze gate. A
+/// committed generation whose response was lost is recoverable through the
+/// identical retry while the space is frozen; a fresh key still answers
+/// `SPACE_FROZEN`. The facade checked freeze before the store's replay probe,
+/// which made already-committed work unrecoverable during a freeze.
+#[tokio::test]
+async fn qc_b3_committed_generation_replays_while_frozen_local() {
+    let home = tempfile::TempDir::new().expect("temporary provider home");
+    let provider = LocalMemoryProvider::open(home.path().to_path_buf(), ADMIN, "default")
+        .await
+        .expect("open the local provider");
+    let (admin, grantee) = t3_setup(&provider).await;
+    grant_subject_all_reflect(&provider, &admin).await;
+    let digest = sufficient_basis(&provider, &admin).await;
+    let spaces = served(provider.list_spaces(&admin, dto(json!({}))).await, "the space list");
+    let revision = spaces["spaces"][0]["revision"].as_i64().expect("space revision");
+
+    // The generation commits; its response is the caller's only copy.
+    let first = served(
+        t3_generate(&provider, &grantee, &digest, "qc-b3-commit").await,
+        "the committed generation",
+    );
+    assert_eq!(first["status"], json!("committed"), "{first}");
+
+    // Freeze, then recover the committed outcome through the same key.
+    served(
+        provider
+            .freeze_space(
+                &admin,
+                dto(json!({
+                    "space_id": provider.space_id(),
+                    "expected_revision": revision,
+                    "idempotency_key": "qc-b3-freeze",
+                })),
+            )
+            .await,
+        "the freeze",
+    );
+    let replay = served(
+        t3_generate(&provider, &grantee, &digest, "qc-b3-commit").await,
+        "the same-key replay while frozen",
+    );
+    assert_eq!(
+        replay["receipt_id"], first["receipt_id"],
+        "the replay discloses the stored receipt: {replay}"
+    );
+    let replay_page = t3_list(&provider, &grantee, None, None).await;
+    assert_eq!(
+        replay_page["reflections"].as_array().expect("rows").len(),
+        1,
+        "a replay never generates again: {replay_page}"
+    );
+
+    // Fresh work during the freeze is still refused.
+    expect_refusal(
+        t3_generate(&provider, &grantee, &digest, "qc-b3-fresh").await,
+        SpokeRejectCode::SpaceFrozen,
+        "terminal",
+        "the fresh generation while frozen",
+    );
+
+    // Unfrozen, the same fresh key runs exactly one new generation.
+    served(
+        provider
+            .unfreeze_space(
+                &admin,
+                dto(json!({
+                    "space_id": provider.space_id(),
+                    "expected_revision": revision + 1,
+                    "idempotency_key": "qc-b3-unfreeze",
+                })),
+            )
+            .await,
+        "the unfreeze",
+    );
+    served(
+        t3_generate(&provider, &grantee, &digest, "qc-b3-fresh").await,
+        "the fresh generation after unfreeze",
+    );
+    let page = t3_list(&provider, &grantee, None, None).await;
+    assert_eq!(
+        page["reflections"].as_array().expect("rows").len(),
+        2,
+        "the replay added no envelope; the fresh key added one: {page}"
+    );
+}
+
+/// B4: a filtered list/state returns only the envelopes pinned to the
+/// requested provenance, and the state's last-reflection pick honors the same
+/// filter. Two distinct pins under one selection are listed and read through
+/// each pin's filter and without one.
+#[tokio::test]
+async fn qc_b4_filtered_list_and_state_honor_provenance_local() {
+    let home = tempfile::TempDir::new().expect("temporary provider home");
+    let provider = LocalMemoryProvider::open(home.path().to_path_buf(), ADMIN, "default")
+        .await
+        .expect("open the local provider");
+    let (admin, grantee) = t3_setup(&provider).await;
+    grant_subject_all_reflect(&provider, &admin).await;
+
+    // One record per provenance source; each generation pins its own filter.
+    author_required_profile(&provider, &admin).await;
+    t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "qc-b4 source a").await;
+    t3_record(&provider, &admin, T3_CONTEXT_B, T3_SOURCE_B, "qc-b4 source b").await;
+    let digest_a = expect_state_digest(
+        &t3_state(&provider, &admin, json!({ "mode": "subject_all" }), Some(&[T3_SOURCE_A])).await,
+        "the filtered basis a",
+    );
+    let pin_a = served(
+        provider
+            .generate_reflection(
+                &grantee,
+                dto(generate_payload_filtered(
+                    provider.space_id(),
+                    &digest_a,
+                    "qc-b4-pin-a",
+                    &[T3_SOURCE_A],
+                )),
+            )
+            .await,
+        "the filtered generation a",
+    );
+    let pin_a_id = pin_a["result"]["reflection_id"].as_str().expect("reflection id");
+    let digest_b = expect_state_digest(
+        &t3_state(&provider, &admin, json!({ "mode": "subject_all" }), Some(&[T3_SOURCE_B])).await,
+        "the filtered basis b",
+    );
+    let pin_b = served(
+        provider
+            .generate_reflection(
+                &grantee,
+                dto(generate_payload_filtered(
+                    provider.space_id(),
+                    &digest_b,
+                    "qc-b4-pin-b",
+                    &[T3_SOURCE_B],
+                )),
+            )
+            .await,
+        "the filtered generation b",
+    );
+    let pin_b_id = pin_b["result"]["reflection_id"].as_str().expect("reflection id");
+
+    // Unfiltered: both envelopes list.
+    let unfiltered = t3_list(&provider, &grantee, None, None).await;
+    let rows = unfiltered["reflections"].as_array().expect("rows");
+    assert_eq!(rows.len(), 2, "both pins list without a filter: {unfiltered}");
+
+    // Filtered list: only the envelope pinned to the requested provenance.
+    let listed_a = t3_list_request(
+        &provider,
+        &grantee,
+        json!({
+            "space_id": provider.space_id(),
+            "subject_id": T3_SUBJECT,
+            "filter": { "source_context_ids": [T3_SOURCE_A] },
+        }),
+    )
+    .await;
+    let rows_a = listed_a["reflections"].as_array().expect("rows");
+    assert_eq!(rows_a.len(), 1, "the filter narrows the projection: {listed_a}");
+    assert_eq!(rows_a[0]["reflection_id"], json!(pin_a_id), "{listed_a}");
+    let listed_b = t3_list_request(
+        &provider,
+        &grantee,
+        json!({
+            "space_id": provider.space_id(),
+            "subject_id": T3_SUBJECT,
+            "filter": { "source_context_ids": [T3_SOURCE_B] },
+        }),
+    )
+    .await;
+    let rows_b = listed_b["reflections"].as_array().expect("rows");
+    assert_eq!(rows_b.len(), 1, "{listed_b}");
+    assert_eq!(rows_b[0]["reflection_id"], json!(pin_b_id), "{listed_b}");
+
+    // Filtered state: the last-reflection pick honors the same filter, and
+    // the reported staleness is that envelope's own verdict.
+    let state_a = t3_state(&provider, &admin, json!({ "mode": "subject_all" }), Some(&[T3_SOURCE_A])).await;
+    assert_eq!(
+        state_a.get("last_reflection_id"), Some(&json!(pin_a_id)),
+        "the state's last pick honors the filter: {state_a}"
+    );
+    assert_eq!(state_a["stale"], json!(false), "{state_a}");
+    let state_b = t3_state(&provider, &admin, json!({ "mode": "subject_all" }), Some(&[T3_SOURCE_B])).await;
+    assert_eq!(
+        state_b.get("last_reflection_id"), Some(&json!(pin_b_id)),
+        "{state_b}"
+    );
+}
