@@ -191,6 +191,17 @@ enum ProviderError {
     RevisionConflict {
         current: i64,
     },
+    /// §7.25 state CAS (reflection generate): the recomputed basis digest no
+    /// longer matches `expected_state_digest`. Terminal; the recovery is
+    /// re-reading `memory.reflections.state` and retrying with the fresh
+    /// token, which `details.current_state_digest` names.
+    StateConflict {
+        current: String,
+    },
+    /// §7.27 data-sufficiency policy (C-079): the authorized basis cannot
+    /// support generation. Terminal; the recovery is authoring or capturing
+    /// source content, never a retry of the same request.
+    InsufficientData(String),
     IdempotencyConflict,
     /// §6.10/MEM-R021: the receipt body is past `receipt_retention_seconds`; the
     /// op is never re-executed and only the tombstone's last known status is
@@ -269,6 +280,8 @@ impl ProviderError {
             Self::SpaceFrozen(_) => SpokeRejectCode::SpaceFrozen,
             Self::SubjectFenced { .. } => SpokeRejectCode::SubjectFenced,
             Self::RevisionConflict { .. } => SpokeRejectCode::RevisionConflict,
+            Self::StateConflict { .. } => SpokeRejectCode::RevisionConflict,
+            Self::InsufficientData(_) => SpokeRejectCode::InsufficientData,
             Self::IdempotencyConflict => SpokeRejectCode::IdempotencyConflict,
             Self::ReceiptExpired { .. } => SpokeRejectCode::ReceiptExpired,
             Self::CandidateConsumed(_) => SpokeRejectCode::CandidateConsumed,
@@ -338,6 +351,14 @@ impl ProviderError {
             Self::RevisionConflict { current } => format!(
                 "expected_revision does not match the stored revision ({current}); re-read and retry"
             ),
+            Self::StateConflict { current } => format!(
+                "expected_state_digest does not match the current basis digest ({current}); \
+                 re-read memory.reflections.state and retry with the fresh digest"
+            ),
+            Self::InsufficientData(subject_id) => format!(
+                "the authorized basis of subject {subject_id} is insufficient for reflection \
+                 generation; capture or restore source records and retry"
+            ),
             Self::IdempotencyConflict => {
                 "this idempotency key was already used with a different payload".to_string()
             }
@@ -375,6 +396,9 @@ impl ProviderError {
             }
             Self::RevisionConflict { current } => {
                 details.insert("current_revision".to_string(), json!(current));
+            }
+            Self::StateConflict { current } => {
+                details.insert("current_state_digest".to_string(), json!(current));
             }
             Self::ReceiptExpired { last_known_status } => {
                 details.insert("last_known_status".to_string(), json!(last_known_status));
@@ -437,6 +461,14 @@ fn store_error(error: StoreError) -> ProviderError {
             context_id,
         },
         StoreError::RevisionConflict { current } => ProviderError::RevisionConflict { current },
+        StoreError::StateConflict { current } => ProviderError::StateConflict { current },
+        StoreError::ProfileIncomplete { subject_id, missing } => {
+            ProviderError::ProfileIncomplete { subject_id, missing }
+        }
+        StoreError::InsufficientData { subject_id } => ProviderError::InsufficientData(format!(
+            "the authorized basis of subject {subject_id} is insufficient for reflection \
+             generation; capture or restore source records and retry"
+        )),
         StoreError::IdempotencyConflict => ProviderError::IdempotencyConflict,
         StoreError::ReceiptExpired { last_known_status } => {
             ProviderError::ReceiptExpired { last_known_status }
@@ -566,6 +598,52 @@ fn pending_receipt(receipt: &ReceiptRow) -> Option<ProviderError> {
             receipt.receipt_id
         ))
     })
+}
+
+/// The §7.0.3 pending receipt body for the async reflection generate op: no
+/// result, no terminal stamp, no error — the poll answer while generation is
+/// still running. Journaled pending states never take this shape (their
+/// pending means an unpublished file effect, and they answer the uncertain
+/// error instead).
+fn pending_receipt_body(receipt: &ReceiptRow) -> Result<Value, ProviderError> {
+    let mut body = receipt_body(receipt)?;
+    let object = body
+        .as_object_mut()
+        .expect("a receipt projection is always a JSON object");
+    object.remove("result");
+    object.remove("completed_at");
+    Ok(body)
+}
+
+/// The generate flow's receipt projection (§7.0.3): a committed receipt
+/// settles as the response; a failed one replays its recorded failure — the
+/// only class a generation failure records is retryable `INTERNAL_ERROR` —
+/// and a still-pending one (observable only under the park hook) answers
+/// uncertain until its terminal outcome commits.
+fn settle_generation_receipt<T: DeserializeOwned>(receipt: &ReceiptRow) -> SpokeResult<T> {
+    match receipt.status.as_str() {
+        "committed" => settle_receipt(receipt),
+        RECEIPT_FAILED => {
+            let recorded = receipt_failure(receipt).ok().and_then(|envelope| {
+                envelope
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            });
+            deny(&ProviderError::Internal(recorded.unwrap_or_else(|| {
+                format!(
+                    "receipt {} is failed: reflection generation recorded no outcome; nothing \
+                     was charged, and a new idempotency_key starts a fresh generation",
+                    receipt.receipt_id
+                )
+            })))
+        }
+        _ => deny(&ProviderError::OutcomeUncertain(format!(
+            "receipt {} is pending: reflection generation has not settled yet, so the outcome \
+             is not final — repeat the same idempotency_key or read memory.receipts.get",
+            receipt.receipt_id
+        ))),
+    }
 }
 
 /// §6.1 `payload_digest`, bound to the operation as the plan's memory identity
@@ -825,7 +903,7 @@ fn selection_scope_covers(pinned: &Selection, requested: Option<&Selection>) -> 
 /// defines no numeric thresholds, so this provider calls an empty authorized
 /// basis insufficient and any non-empty one sufficient. Generation refuses
 /// `INSUFFICIENT_DATA` on exactly the same verdict.
-fn data_sufficiency(record_count: usize) -> &'static str {
+pub(super) fn data_sufficiency(record_count: usize) -> &'static str {
     if record_count == 0 {
         "insufficient"
     } else {
@@ -1836,6 +1914,32 @@ impl LocalMemoryProvider {
         release: std::sync::Arc<tokio::sync::Barrier>,
     ) {
         self.store.park_next_capture(entered, release);
+    }
+
+    /// §7.0.3/C-015/C-070 proof seam: park the next reflection generate after
+    /// its pending receipt committed and before its terminal commit (`entered`
+    /// signals the pending receipt is published, `release` frees the
+    /// generation), so a test can observe the published pending receipt
+    /// through `memory.receipts.get`. One-shot. Compiled out of a production
+    /// build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn park_next_generation(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Barrier>,
+    ) {
+        self.store.park_next_generation(entered, release);
+    }
+
+    /// §7.27/C-078 proof seam: fail the next reflection generation step so its
+    /// transaction 2 commits an honest `failed` receipt with no cost. One-shot:
+    /// a replay never runs a generation, so an armed fault stays armed across
+    /// one. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn inject_generation_fault(&self) {
+        self.store.inject_generation_fault();
     }
 
     /// §5.2 step 2 proof seam: have every workspace flock **wait** report from
@@ -3934,6 +4038,17 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(stored) => stored,
             Err(error) => return deny(&store_error(error)),
         };
+        // §7.0.3 async receipts (reflection generate): a pending receipt IS the
+        // poll answer — generation in progress, no effect and no cost yet
+        // (C-015/C-070). Journaled pending states keep the uncertain-error
+        // answer below: their pending means an unpublished file effect, not
+        // work in progress.
+        if stored.status == RECEIPT_PENDING && stored.op == OP_REFLECTIONS_GENERATE {
+            return match pending_receipt_body(&stored) {
+                Ok(body) => respond(json!({ "receipt": body })),
+                Err(error) => deny(&error),
+            };
+        }
         pending_receipt(&stored).map_or_else(
             || match receipt_body(&stored) {
                 Ok(body) => respond(json!({ "receipt": body })),
@@ -4216,7 +4331,76 @@ impl MemoryPort for LocalMemoryProvider {
         {
             return deny(&error);
         }
-        unsupported(OP_REFLECTIONS_GENERATE)
+        // The §7.0.3 two-transaction flow: the store commits the pending
+        // receipt (transaction 1 — the point of no return) inside the same
+        // transaction that rechecks authorization, the §7.25 CAS and the
+        // sufficiency verdicts, then generation runs deterministically over
+        // the pinned basis and transaction 2 commits exactly one terminal
+        // receipt. Every refusal below is pre-effect: no receipt, no cost.
+        let principal_id = principal_id(principal);
+        let subject_id = request.subject_id.as_str();
+        let op = OP_REFLECTIONS_GENERATE;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let requirements = [reflect_requirement(Some(&selection), subject_id)];
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: Some(subject_id),
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        // Verbatim pins for the columns Task 1 staged: the wire shapes travel
+        // unaltered, and an absent filter stays SQL NULL — never
+        // null-substituted.
+        let selection_json = match serde_json::to_string(&request.selection) {
+            Ok(json) => json,
+            Err(error) => {
+                return deny(&ProviderError::Internal(format!("selection pin: {error}")));
+            }
+        };
+        let filter_json = request
+            .filter
+            .as_ref()
+            .map(|filter| serde_json::to_string(filter))
+            .transpose();
+        let filter_json = match filter_json {
+            Ok(json) => json,
+            Err(error) => return deny(&ProviderError::Internal(format!("filter pin: {error}"))),
+        };
+        let filter = request
+            .filter
+            .as_ref()
+            .map(|filter| filter.source_context_ids.clone());
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        match self
+            .store
+            .generate_reflection(
+                &ctx,
+                &admission,
+                subject_id,
+                &selection,
+                filter.as_deref(),
+                &selection_json,
+                filter_json.as_deref(),
+                request.expected_state_digest.as_str(),
+            )
+            .await
+        {
+            Ok(receipt) => settle_generation_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
     }
 
     async fn create_export(

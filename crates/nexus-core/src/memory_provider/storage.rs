@@ -88,7 +88,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use spoke_operations::spoke_schemas::MemoryGrant;
 use spoke_operations::{
     grant_covers, is_freeze_allowlisted, validate_grant_issuance, GrantRequirement, IssuedGrant,
@@ -144,6 +144,23 @@ pub(super) enum StoreError {
     },
     RevisionConflict {
         current: i64,
+    },
+    /// §7.25 state CAS (reflection generate, N4-R): the recomputed basis
+    /// digest no longer matches the caller's `expected_state_digest`. Carries
+    /// the current digest so the refusal names the recovery path (re-read
+    /// `memory.reflections.state`, retry with the fresh token).
+    StateConflict {
+        current: String,
+    },
+    /// MEM-R005: a required authored profile kind is absent for the subject.
+    ProfileIncomplete {
+        subject_id: String,
+        missing: Vec<String>,
+    },
+    /// §7.27 provider data-sufficiency policy: the authorized basis is too
+    /// small to generate from.
+    InsufficientData {
+        subject_id: String,
     },
     IdempotencyConflict,
     /// The receipt body is past `receipt_retention_seconds`; the dedup tombstone
@@ -293,6 +310,16 @@ const ADMISSION_HOLD_BOUND: std::time::Duration = std::time::Duration::from_secs
 /// binding, `release` frees it. Test only.
 #[cfg(feature = "test-hooks")]
 struct CaptureRendezvous {
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Barrier>,
+}
+
+/// C-015/C-070 proof seam: the rendezvous a reflection generate waits at
+/// **between its pending commit (transaction 1) and its terminal commit
+/// (transaction 2)** — `entered` reports that the pending receipt is published,
+/// `release` frees the generation. Test only.
+#[cfg(feature = "test-hooks")]
+struct GenerationRendezvous {
     entered: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Barrier>,
 }
@@ -617,6 +644,15 @@ pub(super) struct MemoryStore {
     /// concurrent `remove_binding` cannot interleave (compass D15).
     #[cfg(feature = "test-hooks")]
     capture_barrier: std::sync::Mutex<Option<CaptureRendezvous>>,
+    /// Test-only rendezvous a reflection generate waits at between its pending
+    /// commit and its terminal commit — `entered` tells the test the pending
+    /// receipt is published, `release` frees the generation (C-015/C-070).
+    #[cfg(feature = "test-hooks")]
+    generation_barrier: std::sync::Mutex<Option<GenerationRendezvous>>,
+    /// Test-only one-shot fault failing the next reflection generation step so
+    /// transaction 2 commits an honest `failed` receipt (C-078).
+    #[cfg(feature = "test-hooks")]
+    generation_fault: AtomicBool,
     /// Test-only rendezvous a publication waits at **while it holds the
     /// workspace publication gate** — `entered` tells the test the gate is held,
     /// `release` frees it — so a second provider instance on the same workspace
@@ -870,6 +906,10 @@ impl MemoryStore {
             #[cfg(feature = "test-hooks")]
             capture_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
+            generation_barrier: std::sync::Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            generation_fault: AtomicBool::new(false),
+            #[cfg(feature = "test-hooks")]
             publish_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             flock_wait_report: std::sync::Mutex::new(None),
@@ -995,6 +1035,52 @@ impl MemoryStore {
     ) {
         *self.capture_barrier.lock().expect("capture gate") =
             Some(CaptureRendezvous { entered, release });
+    }
+
+    /// C-015/C-070 proof seam: park the next reflection generate after its
+    /// pending receipt committed and before its terminal commit — `entered`
+    /// signals the pending receipt is published, `release` frees the
+    /// generation — so a test can observe the published pending receipt
+    /// through `memory.receipts.get`. One-shot. Compiled out of a production
+    /// build.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn park_next_generation(
+        &self,
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Barrier>,
+    ) {
+        *self.generation_barrier.lock().expect("generation gate") =
+            Some(GenerationRendezvous { entered, release });
+    }
+
+    /// C-078 proof seam: fail the next reflection generation step so its
+    /// transaction 2 commits an honest `failed` receipt with no cost. One-shot:
+    /// a replay never runs a generation, so an armed fault stays armed across
+    /// one. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn inject_generation_fault(&self) {
+        self.generation_fault.store(true, Ordering::SeqCst);
+    }
+
+    /// The [`Self::park_next_generation`] wait, taken exactly once per fresh
+    /// generate, after transaction 1 committed the pending receipt and before
+    /// generation runs.
+    #[cfg(feature = "test-hooks")]
+    async fn generation_gate(&self) {
+        let parked = {
+            let mut gate = self.generation_barrier.lock().expect("generation gate");
+            gate.take()
+        };
+        if let Some(rendezvous) = parked {
+            rendezvous.entered.notify_one();
+            rendezvous.release.wait().await;
+        }
+    }
+
+    /// Consume the one-shot generation fault, if armed.
+    #[cfg(feature = "test-hooks")]
+    fn generation_fault(&self) -> bool {
+        self.generation_fault.swap(false, Ordering::SeqCst)
     }
 
     /// Park the next write once it has entered the write-admission machinery and
@@ -1197,6 +1283,11 @@ impl MemoryStore {
         // The pass is bounded and best-effort: an intent it cannot settle stays
         // quarantined and the subject's reads report that explicitly.
         self.recover_journal(space_id).await;
+        // N4-R: a reflection generate receipt a crash left `pending` between
+        // the two transactions terminalizes here — a pending receipt can never
+        // have a reflection row (its insert is transaction 2), so
+        // terminalizing every pending generate receipt is exact.
+        self.recover_reflections(space_id).await;
         // §6.10 retention is durable even for a deployment that only reads:
         // opening the provider reclaims what has aged out, and does so in its
         // own committed transaction so a provisioning failure cannot put an
@@ -2677,12 +2768,12 @@ async fn write_journal_entry(
 /// write can repair on its own, so a newer pending intent for the same subject
 /// must not mask it and turn the terminal diagnosis into silent absence.
 async fn unsettled_in(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
     space_id: &str,
     subject_id: &str,
-) -> StoreResult<Option<String>> {
-    let row: Option<(String,)> = sqlx::query_as(
-        "SELECT state FROM memory_journal \
+) -> StoreResult<Option<(String, String)>> {
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT receipt_id, state FROM memory_journal \
          WHERE space_id = ? AND state <> 'applied' \
            AND (subject_id = ? OR EXISTS ( \
                SELECT 1 FROM json_each(json_extract(result_json, '$.fenced_subjects')) \
@@ -2696,7 +2787,7 @@ async fn unsettled_in(
     .bind(journal::STATE_DEFERRED)
     .fetch_optional(&mut **tx)
     .await?;
-    Ok(row.map(|(state,)| state))
+    Ok(row)
 }
 
 /// §5.2 steps 4–5: only an intent that is still being recovered withholds the
@@ -4570,8 +4661,8 @@ pub(super) struct ReflectionRow {
     pub reflection_id: String,
     pub space_id: String,
     pub subject_id: String,
-    // The generate flow (Task 4) consumes both: the replay path names the
-    // requester, §7.26 never serves the write-time staleness cache.
+    // The generate flow (Task 4) pins this at insert; the §7.26 projection
+    // never serves it, so it stays mapped for row fidelity only.
     #[allow(dead_code)]
     pub requester_principal_id: String,
     pub selection_json: String,
@@ -4596,8 +4687,7 @@ pub(super) struct ReflectionRow {
 /// Pinned shapes arrive as verbatim JSON text (serialization is the caller's
 /// admission step); `cost` is the wire's one optional object, stored as its two
 /// columns or neither.
-#[allow(dead_code)] // consumed by the generate flow (same plan, Task 4)
-pub(super) struct NewReflection<'a> {
+struct NewReflection<'a> {
     pub reflection_id: &'a str,
     pub space_id: &'a str,
     pub subject_id: &'a str,
@@ -4620,7 +4710,6 @@ pub(super) struct NewReflection<'a> {
 
 /// Append one reflection envelope. There is no update or delete path: rows are
 /// immutable and never swept.
-#[allow(dead_code)] // consumed by the generate flow (same plan, Task 4)
 async fn insert_reflection(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     reflection: &NewReflection<'_>,
@@ -4659,23 +4748,6 @@ async fn insert_reflection(
     .execute(&mut **tx)
     .await?;
     Ok(())
-}
-
-#[allow(dead_code)] // consumed by the generate flow (same plan, Task 4)
-async fn reflection_in_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    space_id: &str,
-    reflection_id: &str,
-) -> StoreResult<Option<ReflectionRow>> {
-    let sql = format!(
-        "SELECT {REFLECTION_COLUMNS} FROM memory_reflections \
-         WHERE space_id = ? AND reflection_id = ?"
-    );
-    Ok(sqlx::query_as::<_, ReflectionRow>(sqlx::AssertSqlSafe(sql))
-        .bind(space_id)
-        .bind(reflection_id)
-        .fetch_optional(&mut **tx)
-        .await?)
 }
 
 // ── Reflection reads (§7.25–§7.26, N4-R Task 3) ─────────────────────────
@@ -4883,7 +4955,7 @@ impl MemoryStore {
         }
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         // §5.2/D-10: an unsettled file intent withholds the subject from reads.
-        if withheld(unsettled.as_deref(), subject_id)? {
+        if withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), subject_id)? {
             tx.commit().await?;
             return Ok(ReflectionBasisSnapshot {
                 records: Vec::new(),
@@ -4924,7 +4996,7 @@ impl MemoryStore {
         let subject_row = subject_in_tx(&mut tx, space_id, subject_id).await?;
         let subject_status = subject_row.as_ref().map(|subject| subject.status.clone());
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
-        if withheld(unsettled.as_deref(), subject_id)? {
+        if withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), subject_id)? {
             tx.commit().await?;
             let marker =
                 reflection_marker(&[], &[], &[], &grant_rows, subject_status.as_deref())?;
@@ -5017,6 +5089,409 @@ impl MemoryStore {
         let total = u64::try_from(visible.len()).unwrap_or(u64::MAX);
         Ok((visible, marker, total))
     }
+}
+
+impl MemoryStore {
+    // ── Reflection generation (§7.27, N4-R Task 4) ──────────────────────
+
+    /// §7.27 generate: the §7.0.3 two-transaction flow.
+    ///
+    /// Transaction 1 is the point of no return. Every refusal — the current
+    /// coverage recheck, the §7.25 state CAS, the freeze/fence gates, the
+    /// required-profile and data-sufficiency policy verdicts — is raised
+    /// strictly before it, so a refused generate records no receipt and
+    /// charges nothing; a same-key replay resolves through the probe before
+    /// every gate and is exempt from them (C-036). Once the pending receipt
+    /// commits, exactly one terminal outcome commits in transaction 2 — a
+    /// `committed` receipt with its reflection row, or a `failed` receipt
+    /// naming an honest retryable cause — and the only cost recording rides
+    /// the `committed` outcome, so a failure never charges (C-078).
+    ///
+    /// Generation is deterministic over the basis snapshot transaction 1
+    /// pinned: the same authorized basis and policy version always produce
+    /// the same envelope, and a racing generation resolves through the dedup
+    /// namespace, never through the content.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn generate_reflection(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        subject_id: &str,
+        selection: &Selection,
+        filter: Option<&[String]>,
+        selection_json: &str,
+        filter_json: Option<&str>,
+        expected_state_digest: &str,
+    ) -> StoreResult<ReceiptRow> {
+        // ── Transaction 1: admission and the point of no return ──
+        let (mut tx, now) = self.begin_admission().await?;
+        // §7.0.5/MEM-R021: handing back a receipt is a disclosure, so the
+        // current-coverage recheck precedes the probe; the replay it returns
+        // is exempt from every gate below (the fence included, C-036).
+        let _grants = authorize(&mut tx, admission, now).await?;
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
+            return Ok(row);
+        }
+        gate(&mut tx, admission).await?;
+        // §5.2/D-10: a withheld subject's `state` digest is the empty-basis
+        // one, so refusing with the unsettled predecessor is the only honest
+        // outcome — a stale-CAS or insufficient-data diagnosis would send the
+        // caller re-reading a basis recovery still owes.
+        if let Some((receipt_id, state)) = unsettled_in(&mut tx, ctx.space_id, subject_id).await? {
+            return Err(StoreError::UnsettledPredecessor { receipt_id, state });
+        }
+        // §7.25 state CAS over the *current* authorized basis, recomputed
+        // inside this transaction — the same composition the `state` op
+        // publishes, so a matching token proves the caller read this basis.
+        let snapshot =
+            reflection_basis_in_tx(&mut tx, selection, filter, ctx.space_id, subject_id).await?;
+        let current_digest = super::reflection_state_digest(
+            &snapshot.records,
+            &snapshot.profile_revisions,
+            selection,
+            filter,
+        )
+        .map_err(StoreError::Corrupt)?;
+        if current_digest != expected_state_digest {
+            return Err(StoreError::StateConflict {
+                current: current_digest,
+            });
+        }
+        // MEM-R005 then §7.27 sufficiency, both the same provider policy the
+        // `state` op reports: the missing kinds are the ones
+        // `missing_required_profile_kinds` names, and the verdict is exactly
+        // `data_sufficiency`'s.
+        let missing: Vec<String> = super::policy::REQUIRED_PROFILE_KINDS
+            .iter()
+            .filter(|required| {
+                !snapshot
+                    .profile_revisions
+                    .iter()
+                    .any(|(kind, _)| kind == *required)
+            })
+            .map(|required| (*required).to_string())
+            .collect();
+        if !missing.is_empty() {
+            return Err(StoreError::ProfileIncomplete {
+                subject_id: subject_id.to_string(),
+                missing,
+            });
+        }
+        if super::data_sufficiency(snapshot.records.len()) == "insufficient" {
+            return Err(StoreError::InsufficientData {
+                subject_id: subject_id.to_string(),
+            });
+        }
+        // The pending receipt is the point of no return: published before any
+        // generation (C-015/C-070), carrying no payload, no terminal stamp and
+        // no cost.
+        let receipt_id = mint_receipt_id();
+        let mut row = self.write_receipt(&mut tx, ctx, &receipt_id, None, now).await?;
+        self.commit_effect(tx).await?;
+
+        // ── The parked window: pending published, terminal not yet ──
+        #[cfg(feature = "test-hooks")]
+        self.generation_gate().await;
+
+        // ── Deterministic generation over the pinned basis ──
+        // The one-shot fault (C-078 seam) fails the generation step so
+        // transaction 2 commits the honest `failed` receipt; nothing else
+        // fails here — the composition is pure over the pinned snapshot.
+        #[cfg(feature = "test-hooks")]
+        let injected = self.generation_fault();
+        #[cfg(not(feature = "test-hooks"))]
+        let injected = false;
+        let settled_at = timestamp(self.now());
+        if injected {
+            let failure = interrupted_failure(&receipt_id);
+            self.record_generation_failure(&mut row, &receipt_id, &failure, &settled_at)
+                .await?;
+        } else {
+            let generation = compose_generation(&snapshot, selection, filter, subject_id)?;
+            // The pinned columns travel verbatim (the shapes Task 1 staged);
+            // absent optionals stay SQL NULL — never null-substituted.
+            let reflection = NewReflection {
+                reflection_id: &generation.reflection_id,
+                space_id: ctx.space_id,
+                subject_id,
+                requester_principal_id: ctx.requester_principal_id,
+                selection_json,
+                filter_json,
+                cognition_filter_json: None,
+                basis_json: &generation.basis_json,
+                engine_policy_version: super::policy::ENGINE_POLICY_VERSION,
+                model: None,
+                schema_version: 1,
+                revision: 1,
+                extensions_json: "{}",
+                created_at: &settled_at,
+                body_text: &generation.body_text,
+                body_format: "markdown",
+                stale_cache: false,
+                cost: Some(("reflection", 1.0)),
+            };
+            self.commit_generation(&mut row, &reflection, &generation.result_json, &settled_at)
+                .await?;
+        }
+        Ok(row)
+    }
+
+    /// Transaction 2, committed branch: the envelope row and the terminal
+    /// `committed` receipt join one transaction, so the pending receipt can
+    /// never resolve committed without its reflection row existing.
+    async fn commit_generation(
+        &self,
+        row: &mut ReceiptRow,
+        reflection: &NewReflection<'_>,
+        result_json: &str,
+        settled_at: &str,
+    ) -> StoreResult<()> {
+        let mut tx = begin_immediate(&self.pool).await?;
+        insert_reflection(&mut tx, reflection).await?;
+        let updated = sqlx::query(
+            "UPDATE memory_receipts SET status = 'committed', result_json = ?, \
+             error_json = NULL, completed_at = ? \
+             WHERE receipt_id = ? AND status = ?",
+        )
+        .bind(result_json)
+        .bind(settled_at)
+        .bind(&row.receipt_id)
+        .bind(RECEIPT_PENDING)
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(StoreError::Corrupt(format!(
+                "pending receipt {} vanished before its terminal commit",
+                row.receipt_id
+            )));
+        }
+        self.commit_effect(tx).await?;
+        row.status = "committed".to_string();
+        row.result_json = Some(result_json.to_string());
+        row.error_json = None;
+        row.completed_at = Some(settled_at.to_string());
+        Ok(())
+    }
+
+    /// Transaction 2, failed branch: the honest failure envelope is the
+    /// receipt's only new content. No cost exists to record — the envelope row
+    /// is never written on this path (C-078).
+    async fn record_generation_failure(
+        &self,
+        row: &mut ReceiptRow,
+        receipt_id: &str,
+        failure: &Value,
+        settled_at: &str,
+    ) -> StoreResult<()> {
+        let failure_json =
+            serde_json::to_string(failure).map_err(|e| StoreError::Corrupt(format!("failure: {e}")))?;
+        let mut tx = begin_immediate(&self.pool).await?;
+        let updated = sqlx::query(
+            "UPDATE memory_receipts SET status = 'failed', error_json = ?, completed_at = ? \
+             WHERE receipt_id = ? AND status = ?",
+        )
+        .bind(&failure_json)
+        .bind(settled_at)
+        .bind(receipt_id)
+        .bind(RECEIPT_PENDING)
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(StoreError::Corrupt(format!(
+                "pending receipt {receipt_id} vanished before its terminal commit"
+            )));
+        }
+        self.commit_effect(tx).await?;
+        row.status = RECEIPT_FAILED.to_string();
+        row.result_json = None;
+        row.error_json = Some(failure_json);
+        row.completed_at = Some(settled_at.to_string());
+        Ok(())
+    }
+
+    /// Reopen recovery (§5.2 step 3 family): terminalize every reflection
+    /// generate receipt a crash left `pending` between the two transactions.
+    /// The recorded failure is retryable `INTERNAL_ERROR` — generation was
+    /// interrupted before any effect, so nothing was charged — and a same-key
+    /// retry replays it while a new key runs a fresh generation (no double
+    /// charge, C-078). Bounded and best-effort like the journal pass: a
+    /// receipt this pass cannot terminalize stays pending until the next open.
+    async fn recover_reflections(&self, space_id: &str) {
+        let Ok(mut tx) = begin_immediate(&self.pool).await else {
+            tracing::warn!(%space_id, "reflection generate recovery skipped: no writer connection");
+            return;
+        };
+        let orphans: Vec<(String,)> = match sqlx::query_as(
+            "SELECT receipt_id FROM memory_receipts \
+             WHERE space_id = ? AND op = ? AND status = ?",
+        )
+        .bind(space_id)
+        .bind(super::OP_REFLECTIONS_GENERATE)
+        .bind(RECEIPT_PENDING)
+        .fetch_all(&mut *tx)
+        .await
+        {
+            Ok(orphans) => orphans,
+            Err(error) => {
+                tracing::warn!(%space_id, ?error, "reflection generate recovery scan skipped");
+                let _ = tx.rollback().await;
+                return;
+            }
+        };
+        if orphans.is_empty() {
+            let _ = tx.rollback().await;
+            return;
+        }
+        let settled_at = timestamp(self.now());
+        for (receipt_id,) in &orphans {
+            let failure = interrupted_failure(receipt_id);
+            let failure_json = serde_json::to_string(&failure).map_err(|e| {
+                StoreError::Corrupt(format!("recovery failure envelope: {e}"))
+            });
+            let Ok(failure_json) = failure_json else {
+                tracing::warn!(%space_id, "reflection generate recovery envelope skipped");
+                continue;
+            };
+            let updated = sqlx::query(
+                "UPDATE memory_receipts SET status = 'failed', error_json = ?, completed_at = ? \
+                 WHERE receipt_id = ? AND status = ?",
+            )
+            .bind(&failure_json)
+            .bind(&settled_at)
+            .bind(receipt_id)
+            .bind(RECEIPT_PENDING)
+            .execute(&mut *tx)
+            .await;
+            match updated {
+                Ok(updated) if updated.rows_affected() == 1 => {}
+                Ok(_) => {
+                    tracing::warn!(%receipt_id, "pending reflection receipt settled elsewhere")
+                }
+                Err(error) => tracing::warn!(%receipt_id, ?error, "reflection recovery skipped"),
+            }
+        }
+        if let Err(error) = tx.commit().await {
+            tracing::warn!(%space_id, ?error, "reflection generate recovery not committed");
+        }
+    }
+}
+
+/// One generated reflection, composed over the basis snapshot transaction 1
+/// pinned. Everything is a pure function of the snapshot, the pinned request
+/// shapes and the policy version — racing generations of one key resolve
+/// through the dedup namespace, never through this content. All owned data:
+/// the caller ties the `NewReflection` borrows inside its own scope.
+struct ComposedGeneration {
+    reflection_id: String,
+    basis_json: String,
+    body_text: String,
+    /// The receipt's `result` object, serialized: `{reflection_id, cost}` —
+    /// no envelope body ever travels in the receipt (it is served by `list`).
+    result_json: String,
+}
+
+/// The deterministic generation step. The cost is this provider's own unit
+/// accounting — one reflection per committed generation — and exists only on
+/// the committed path, which is the whole C-078 mechanism.
+fn compose_generation(
+    snapshot: &ReflectionBasisSnapshot,
+    selection: &Selection,
+    filter: Option<&[String]>,
+    subject_id: &str,
+) -> StoreResult<ComposedGeneration> {
+    let source_set_digest =
+        super::reflection_source_set_digest(&snapshot.records).map_err(StoreError::Corrupt)?;
+    let profile_revisions: Map<String, Value> = snapshot
+        .profile_revisions
+        .iter()
+        .map(|(kind, revision)| (kind.clone(), json!(revision)))
+        .collect();
+    let kinds: Vec<&str> = snapshot
+        .profile_revisions
+        .iter()
+        .map(|(kind, _)| kind.as_str())
+        .collect();
+    let state_digest = super::reflection_state_digest(
+        &snapshot.records,
+        &snapshot.profile_revisions,
+        selection,
+        filter,
+    )
+    .map_err(StoreError::Corrupt)?;
+    // The basis object is served verbatim by every envelope projection; the
+    // staleness probe reads exactly the two digest members below.
+    let basis_json = json!({
+        "profile_revisions": profile_revisions,
+        "record_count": snapshot.records.len(),
+        "source_set_digest": source_set_digest,
+        "state_digest": state_digest,
+    })
+    .to_string();
+    let body_text = format!(
+        "# Reflection — subject {subject_id}\n\n\
+         Deterministic local reflection over the authorized basis pinned at \
+         generation (§7.27).\n\n\
+         - source records: {}\n\
+         - profile kinds: {}\n\
+         - source_set_digest: `{source_set_digest}`\n\
+         - state_digest: `{state_digest}`\n\
+         - engine_policy_version: `{}`\n",
+        snapshot.records.len(),
+        kinds.join(", "),
+        super::policy::ENGINE_POLICY_VERSION,
+    );
+    let result = json!({
+        "reflection_id": format!("refl_{}", Uuid::new_v4().simple()),
+        "cost": { "unit_kind": "reflection", "units": 1.0 },
+    });
+    let reflection_id = result
+        .get("reflection_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| StoreError::Corrupt("composed reflection id".to_string()))?;
+    Ok(ComposedGeneration {
+        reflection_id,
+        basis_json,
+        body_text,
+        result_json: result.to_string(),
+    })
+}
+
+/// The basis snapshot inside an existing transaction: the generate flow's CAS
+/// reads the same authorized sets the `state` op publishes — live rows only
+/// (C-077), profiles with their revisions — one snapshot, no second read.
+async fn reflection_basis_in_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    selection: &Selection,
+    filter: Option<&[String]>,
+    space_id: &str,
+    subject_id: &str,
+) -> StoreResult<ReflectionBasisSnapshot> {
+    let (records, _tombstones) =
+        reflection_record_sets(tx, selection, filter, space_id, subject_id).await?;
+    let profile_revisions = profile_revisions_in_tx(tx, space_id, subject_id).await?;
+    Ok(ReflectionBasisSnapshot {
+        records,
+        profile_revisions,
+    })
+}
+
+/// The honest failure a generation fault records on the receipt (§5.2 step 3
+/// shape): retryable `INTERNAL_ERROR`, naming that no effect and no cost
+/// exist, so the caller's recovery is a fresh generation under a new key.
+fn interrupted_failure(receipt_id: &str) -> Value {
+    json!({
+        "code": "INTERNAL_ERROR",
+        "message": format!(
+            "receipt {receipt_id} is failed: reflection generation was interrupted before any \
+             effect; nothing was charged, and a new idempotency_key starts a fresh generation"
+        ),
+        "details": {
+            "retry_class": "retryable",
+            "receipt_id": receipt_id,
+        },
+        "extensions": {},
+    })
 }
 
 impl MemoryStore {
@@ -5295,7 +5770,7 @@ impl MemoryStore {
         // status-filtered listing is an explicit audit query and stays readable.
         // §5.2/D-10: an unsettled intent withholds the subject either way.
         let archived = status.is_none() && subject_status.as_deref() == Some("archived");
-        let hidden = withheld(unsettled.as_deref(), subject_id)?;
+        let hidden = withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), subject_id)?;
         if archived || hidden {
             tx.commit().await?;
             let marker = snapshot_marker(
@@ -5498,7 +5973,7 @@ impl MemoryStore {
         }) else {
             return Ok(None);
         };
-        if withheld(unsettled.as_deref(), row.subject_id.as_str())? {
+        if withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), row.subject_id.as_str())? {
             return Ok(None);
         }
         Ok(Some(row))
@@ -5812,7 +6287,7 @@ impl MemoryStore {
         // by-id audit routes still serve them.
         // §5.2/D-10: an unsettled file intent withholds the subject from both.
         let archived = read.excludes_archived() && subject_status.as_deref() == Some("archived");
-        let hidden = withheld(unsettled.as_deref(), subject_id)?;
+        let hidden = withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), subject_id)?;
         let subject_all = matches!(selection, Selection::SubjectAll);
         if archived || hidden {
             tx.commit().await?;
@@ -6020,7 +6495,7 @@ impl MemoryStore {
         }) else {
             return Ok(None);
         };
-        if withheld(unsettled.as_deref(), row.subject_id.as_str())? {
+        if withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), row.subject_id.as_str())? {
             return Ok(None);
         }
         Ok(Some(row))
@@ -6778,7 +7253,7 @@ impl MemoryStore {
         tx.commit().await?;
         // §5.2/D-10: a subject whose file intent is unsettled has no readable
         // profile surface yet.
-        if withheld(unsettled.as_deref(), subject_id)? {
+        if withheld(unsettled.as_ref().map(|(state, _)| state.as_str()), subject_id)? {
             return Ok(None);
         }
         Ok(Some(rows))
