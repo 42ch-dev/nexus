@@ -850,6 +850,12 @@ jobs:
         # `compute`), so `--all-targets -- -D warnings` fails on dead_code
         # that predates this card.
         run: cargo test -p nexus-memory-conformance --features dev-graph-memory-remote
+      - name: Run nexus-core memory-remote drift-guard tests
+        # I-000338's `memory_credentials` drift guards are
+        # `#[cfg(all(test, feature = "memory-remote"))]`; the core-group
+        # invocation never enables nexus-core's `memory-remote`, so without
+        # this step the tripwire fires only locally.
+        run: cargo test -p nexus-core --features memory-remote --lib
 
 
   # QC3 W-001 / QC2 F-001 (v1.193 P2-T14). Retiring the Rust daemon crate moved
