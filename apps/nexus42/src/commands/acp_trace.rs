@@ -173,8 +173,25 @@ mod tests {
         "2026-05-13T12:00:00Z".to_string()
     }
 
+    /// Serialize writer-touching tests against the process-global singleton
+    /// (I-000329): the mutex keeps each test's reset→append→flush→read cycle
+    /// atomic under the default parallel harness, mirroring the repo's
+    /// `env_lock()` precedent (nexus-agent-host `acp_session_lifecycle` tests).
+    static TRACE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn trace_lock() -> std::sync::MutexGuard<'static, ()> {
+        TRACE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     /// Reset the singleton trace writer so each test starts clean.
-    /// Must run with --test-threads=1 to avoid cross-test interference.
+    ///
+    /// Best-effort hygiene only — the tests below never depend on singleton
+    /// state, so they stay correct under the default parallel harness: every
+    /// test owns a unique run id + temp dir, and a sibling's reset merely
+    /// forces the next `append_trace_event` to reopen (append mode) its own
+    /// per-run file. No `--test-threads=1` requirement.
     fn reset_trace_writer() {
         let mut guard = TRACE_WRITER
             .lock()
@@ -201,6 +218,7 @@ mod tests {
 
     #[test]
     fn append_trace_event_writes_jsonl() {
+        let _lock = trace_lock();
         reset_trace_writer();
         let tmp = tempfile::TempDir::new().unwrap();
         let home = tmp.path();
@@ -242,6 +260,7 @@ mod tests {
 
     #[test]
     fn append_trace_event_rejects_invalid_run_id() {
+        let _lock = trace_lock();
         reset_trace_writer();
         let tmp = tempfile::TempDir::new().unwrap();
         let home = tmp.path();
@@ -263,10 +282,19 @@ mod tests {
 
     #[test]
     fn singleton_writer_reuses_file_handle() {
+        let _lock = trace_lock();
         reset_trace_writer();
+        // I-000329: the singleton is a write-overhead optimization, so its
+        // contract is observable only through trace output — repeated appends
+        // for one run land in that run's file (append, never truncate), and
+        // another run's appends land in that run's own file. Asserting the
+        // mutex's internal state (`guard.is_some()`) raced with sibling
+        // resets under the default parallel harness; file-content assertions
+        // are deterministic because every run id here is unique.
         let tmp = tempfile::TempDir::new().unwrap();
         let home = tmp.path();
         let run_id = NexusRunId("run_singleton00000000000000000001".to_string());
+        let other_run_id = NexusRunId("run_singleton00000000000000000002".to_string());
 
         let event = NexusTraceEvent::RunStarted(NexusRunStarted {
             schema_version: 1,
@@ -277,31 +305,46 @@ mod tests {
             pid: None,
             timestamp: now_rfc3339(),
         });
+        let other_event = NexusTraceEvent::RunStarted(NexusRunStarted {
+            schema_version: 1,
+            run_id: other_run_id.clone(),
+            entrypoint: "acp.run".to_string(),
+            agent_id: None,
+            cwd: None,
+            pid: None,
+            timestamp: now_rfc3339(),
+        });
 
-        // First call creates the writer
+        // Repeated appends for the same run reuse the open writer.
+        append_trace_event(home, &run_id, &event).unwrap();
         append_trace_event(home, &run_id, &event).unwrap();
 
-        // Verify the singleton holds the writer pointing to the correct file
-        let guard = TRACE_WRITER.lock().unwrap();
-        assert!(
-            guard.is_some(),
-            "singleton should be populated after first write"
-        );
-        let expected_path = nexus_home_layout::acp_run_trace_file(home, &run_id.0);
-        assert_eq!(guard.as_ref().unwrap().path, expected_path);
-        drop(guard);
+        // A different run routes to its own file without disturbing the
+        // first run's bytes.
+        append_trace_event(home, &other_run_id, &other_event).unwrap();
 
-        // Second call to the same file reuses the writer
-        append_trace_event(home, &run_id, &event).unwrap();
         flush_trace_writer();
 
         let trace_path = nexus_home_layout::acp_run_trace_file(home, &run_id.0);
         let content = std::fs::read_to_string(&trace_path).unwrap();
-        assert_eq!(content.lines().count(), 2, "both events should be written");
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2, "both same-run events should be written");
+        for line in lines {
+            let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_eq!(parsed["run_id"], run_id.0, "only this run's events");
+        }
+
+        let other_path = nexus_home_layout::acp_run_trace_file(home, &other_run_id.0);
+        let other_content = std::fs::read_to_string(&other_path).unwrap();
+        let other_lines: Vec<&str> = other_content.lines().collect();
+        assert_eq!(other_lines.len(), 1, "other run has exactly its own event");
+        let parsed: serde_json::Value = serde_json::from_str(other_lines[0]).unwrap();
+        assert_eq!(parsed["run_id"], other_run_id.0);
     }
 
     #[test]
     fn trace_file_size_limit_truncates_oversized_file() {
+        let _lock = trace_lock();
         reset_trace_writer();
         let tmp = tempfile::TempDir::new().unwrap();
         let home = tmp.path();

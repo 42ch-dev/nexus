@@ -1382,6 +1382,109 @@ async fn read_only_core_refuses_creator_record_writes(
 // Character fragment reads and promotion
 // ---------------------------------------------------------------------------
 
+/// Rewrites the committed promotion receipt one provider returns, so the Core
+/// is shown a schema-valid answer that belongs to another request. It changes
+/// no durable state and every other answer passes through untouched.
+struct MismatchedPromotionReceipt {
+    inner: Arc<dyn RemoteMemoryService>,
+    rewrite: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl RemoteMemoryService for MismatchedPromotionReceipt {
+    async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
+        let answer = self.inner.invoke(peer_id, op, payload).await;
+        if !self.rewrite.load(Ordering::SeqCst) || op != "memory.records.promote" {
+            return answer;
+        }
+        match answer {
+            SpokeResult::Ok(mut body) => {
+                body["idempotency_key"] = json!("a-promote-receipt-for-another-request");
+                SpokeResult::Ok(body)
+            }
+            SpokeResult::Reject(reject) => SpokeResult::Reject(reject),
+        }
+    }
+}
+
+/// D18/I-000283: a committed promotion receipt that does not prove THIS
+/// promotion must not release the record's binding dependency — and it must
+/// not claim the promotion. The unit negative covers
+/// `promote_result_record_id` directly; this runs the same mismatch through
+/// the real signed service path, where the receipt's echoed idempotency key is
+/// rewritten in flight.
+///
+/// The promotion fails the static `memory_promote_receipt` check and the
+/// record's live D18 fact stays live, so no other live record's protection is
+/// cleared by a foreign answer.
+#[tokio::test]
+async fn a_mismatched_promotion_receipt_keeps_the_record_dependency_live() {
+    let env = Env::boot("R3 Promotion Receipt Owner").await;
+    let provider = Provider::open().await;
+    let rewrite = Arc::new(AtomicBool::new(false));
+    let service: Arc<dyn RemoteMemoryService> = Arc::new(MismatchedPromotionReceipt {
+        inner: provider.inner.server(provider.directory.admission()),
+        rewrite: Arc::clone(&rewrite),
+    });
+    let (core, responder) = provider
+        .open_core_service(&env, service, CoreAccess::EngineOwner)
+        .await;
+    let principal = core.active_principal().await.expect("active principal");
+
+    let world = create_world(&core, &principal, "R3 Promotion Receipt World").await;
+    let (character_id, binding_id, _) =
+        create_character(&core, &principal, "R3 Receipt Ada", &world).await;
+    let subject_id = legacy::character_subject_id(&character_id);
+
+    let records = character_review_publishes_binding_local_fragments(
+        &core,
+        &principal,
+        &provider,
+        &character_id,
+        &binding_id,
+        &subject_id,
+    )
+    .await;
+    let record_id = records[0].record_id.clone();
+
+    let nexus = core_db(&env).await;
+    let before = object_facts(&nexus, &binding_id).await;
+    assert!(
+        before.contains(&("record".to_string(), record_id.clone(), "live".to_string())),
+        "the reviewed record starts as a live dependency: {before:?}"
+    );
+    nexus.close().await;
+
+    // A receipt for another request: the mismatch fails closed, statically.
+    rewrite.store(true, Ordering::SeqCst);
+    let error = core
+        .promote_character_fragment(&principal, character_id.clone(), record_id.clone(), 0)
+        .await
+        .expect_err("a mismatched promotion receipt refuses the promotion");
+    match &error {
+        CoreError::Internal { category } => assert!(
+            category.starts_with("memory_promote_receipt"),
+            "the static promotion-receipt refusal, got {category}"
+        ),
+        other => panic!("expected the static promote-receipt refusal, got {other:?}"),
+    }
+
+    let nexus = core_db(&env).await;
+    let after = object_facts(&nexus, &binding_id).await;
+    assert_eq!(after, before, "a mismatch releases no record dependency");
+    nexus.close().await;
+
+    assert_eq!(
+        responder_of(responder).await.remote_peer_id().as_deref(),
+        Some(peer_id(&CLIENT_SEED).as_str()),
+        "the refused promotion travelled the signed session of the loaded credential"
+    );
+    assert!(
+        core.close().await.expect("close").cleanup_confirmed,
+        "the open releases its own admission"
+    );
+}
+
 #[tokio::test]
 async fn character_fragment_promotion_runs_on_the_remote_provider() {
     let env = Env::boot("R3 Promotion Owner").await;

@@ -255,10 +255,97 @@ struct ClaimsView<'a> {
 
 /// Validate the nullable upstream `CapabilityTokenProof` (`{v, claims, sig}`)
 /// against the published serialized shape without importing it.
+///
+/// Ownership map (I-000332, SPOKE 0.16.0 wire-shape trigger): the canonical
+/// wire authority is `spoke_connect::core::{CapabilityTokenProof, ClaimsView}`
+/// (published type, `deny_unknown_fields`, byte-identical 0.15.2 → 0.16.0).
+/// The published type is feature-graph-owned: reachable only under
+/// `memory-remote` (optional `spoke-connect` dep), while the default core
+/// graph carries no Connect edge and could not validate against it at all —
+/// hence this mirror. The remote dial path re-validates through the published
+/// type (`memory_remote.rs`, double validation, fail-closed both layers).
+/// Drift guard: the `mirror_matches_published_capability_token` test below
+/// pins mirror-vs-published agreement at 0.16.0; any upstream shape change
+/// turns silent drift into a red gate.
 fn validate_capability_token(token: &serde_json::Value) -> CoreResult<()> {
     ProofView::deserialize(token)
         .map(|_| ())
         .map_err(|_| invalid("capability_token must be the published {v, claims, sig} proof shape"))
+}
+
+#[cfg(all(test, feature = "memory-remote"))]
+mod token_equivalence_tests {
+    // I-000332 drift guard: the mirror (`validate_capability_token`) must
+    // accept/reject exactly what the published `spoke_connect` 0.16.0
+    // `CapabilityTokenProof` accepts/rejects on every shared vector. A future
+    // upstream wire-shape extension fails this test instead of drifting
+    // silently.
+    use super::{validate_capability_token, CREDENTIAL_INVALID_CODE};
+    use crate::error::CoreError;
+    use spoke_connect::core::CapabilityTokenProof;
+
+    fn valid_token() -> serde_json::Value {
+        serde_json::json!({
+            "v": 1,
+            "claims": {
+                "iss": "12D3KooWIssuer",
+                "sub": "12D3KooWSubject",
+                "aud": "nexus",
+                "capabilities": ["memory.describe"],
+                "exp": 4_102_444_800_u64,
+                "iat": 1_600_000_000,
+                "jti": "tok_001"
+            },
+            "sig": "c2lnX2J5dGVzX2J5dGVzX2J5dGVzX2J5dGVzX2J5dGVzX2J5dGVz"
+        })
+    }
+
+    /// Mirror acceptance == published acceptance, verdict by verdict.
+    fn assert_equivalent(token: serde_json::Value, label: &str) {
+        let mirror = validate_capability_token(&token);
+        let published = serde_json::from_value::<CapabilityTokenProof>(token);
+        assert_eq!(
+            mirror.is_ok(),
+            published.is_ok(),
+            "{label}: mirror={} published={:?}",
+            mirror.is_ok(),
+            published.err().map(|e| e.to_string())
+        );
+    }
+
+    #[test]
+    fn mirror_matches_published_capability_token() {
+        // Shared accept vector.
+        assert_equivalent(valid_token(), "valid");
+
+        // Shared reject vectors (representative malformed shapes).
+        let mut unknown_claim = valid_token();
+        unknown_claim["claims"]["unknown_field"] = serde_json::json!(1);
+        assert_equivalent(unknown_claim, "unknown claim field");
+
+        let mut unknown_wrapper = valid_token();
+        unknown_wrapper["extra"] = serde_json::json!({});
+        assert_equivalent(unknown_wrapper, "unknown wrapper field");
+
+        let mut wrong_v = valid_token();
+        wrong_v["v"] = serde_json::json!("1");
+        assert_equivalent(wrong_v, "wrong v type");
+
+        let mut missing_sig = valid_token();
+        missing_sig.as_object_mut().unwrap().remove("sig");
+        assert_equivalent(missing_sig, "missing sig");
+
+        let mut bad_capabilities = valid_token();
+        bad_capabilities["claims"]["capabilities"] = serde_json::json!("memory.describe");
+        assert_equivalent(bad_capabilities, "bad capabilities type");
+
+        // The coded refusal surface stays stable for every reject.
+        let err = validate_capability_token(&serde_json::json!({}))
+            .expect_err("empty object is rejected");
+        assert!(
+            matches!(err, CoreError::Coded { ref code, .. } if code == CREDENTIAL_INVALID_CODE)
+        );
+    }
 }
 
 /// Static coded refusal: the message never interpolates file contents.

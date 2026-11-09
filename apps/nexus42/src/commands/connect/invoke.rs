@@ -1622,7 +1622,23 @@ fn reject_settlement_payload(envelope: &ErrorEnvelope, effect_committed: bool) -
 /// `tokio::time::timeout`, so a compute queued behind another compute
 /// fails fast with `invoke_deadline_exceeded` instead of holding its lane
 /// permit on an unbounded serializer backlog (Greptile P1).
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+#[expect(clippy::result_large_err)]
+// Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+// Only the `connect-host` build unifies the `spoke-operations` assemble surface
+// whose `current_view_policy: Option<&dyn CurrentViewPolicy>` parameter
+// (spoke-operations-0.16.0/src/assemble.rs:181,247) is not `Sync`; nexus always
+// passes `None` and never names the trait. No `Send` bound applies to this
+// future: its only poll site is `run_in_lane`'s
+// `tokio::task::spawn_blocking` + `Handle::current().block_on` block, and the
+// handle exported upward is the sync `InvokeHandlerV2` closure built by
+// `build_handler_with_limits` (spawned as a closure, never as this future).
+#[cfg_attr(
+    feature = "connect-host",
+    expect(
+        clippy::future_not_send,
+        reason = "polled only by run_in_lane's spawn_blocking + Handle::current().block_on block and exported only as the sync InvokeHandlerV2 closure, so no Send bound is applied to it"
+    )
+)]
 async fn route_orchestrator(
     route: Route,
     adapter: &NexusAdapter<'static>,
@@ -1692,7 +1708,8 @@ async fn route_orchestrator(
                 Ok(request) => request,
                 Err(error) => return Err(map_reject(&invalid_payload("assemble", &error))),
             };
-            match orchestrate_assemble(adapter, request).await {
+            // Cognition family stays UNCONSUMED (baseline rule): no view policy.
+            match orchestrate_assemble(adapter, request, None).await {
                 SpokeResult::Ok(response) => serialize_response::<AssembleResponse>(&response),
                 SpokeResult::Reject(reject) => Err(map_reject(&reject)),
             }

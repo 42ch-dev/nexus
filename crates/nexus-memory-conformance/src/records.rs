@@ -700,9 +700,12 @@ impl FixtureMemoryProvider {
 
         let record_id = format!("rec_{}", Uuid::new_v4().simple());
         let content = content_json(&request.content.text, request.content.structured.as_ref())?;
+        // spoke-schemas 0.16.0 presence fix: these request members are
+        // Option<...>; the stored provenance keeps the published array shape
+        // (may be empty), never null.
         let provenance = json!({
-            "source_context_ids": &request.source_context_ids,
-            "anchors": &request.anchors,
+            "source_context_ids": request.source_context_ids.clone().unwrap_or_default(),
+            "anchors": request.anchors.clone().unwrap_or_default(),
             "captured_by": principal_id,
             "captured_at": timestamp_text(now),
         });

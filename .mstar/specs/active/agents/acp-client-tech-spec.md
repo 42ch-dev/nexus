@@ -1,19 +1,17 @@
 # ACP Client Integration — Technical Specification
 
-**Status:** Shipped. The Rust adapter uses official `agent-client-protocol = "=3.2.0"` (stable-v1 API via `schema::v1::*`; no unstable v2 features, no `agent-client-protocol-rmcp`) behind Nexus-owned DTOs. Current service composition uses the core-owned `HostManager` and `packages/nexus-provider-acp` callbacks, not a route-facing daemon manager plus per-creator `acp-worker` children.
+**Status:** Shipped. The Rust adapter uses official `agent-client-protocol = "=5.0.0"` (stable-v1 API via `v1::schema::*`; no unstable v2 features, no `agent-client-protocol-rmcp`) behind Nexus-owned DTOs. Current service composition uses the core-owned `HostManager` and `packages/nexus-provider-acp` callbacks, not a route-facing daemon manager plus per-creator `acp-worker` children.
 **Document class**: Master  
 
 **Source Plan**: `2025-04-05-acp-client`
 **Date**: 2026-04-06
-**Last reconciled**: 2026-10-13 — `agent-client-protocol = "=3.2.0"` pin, the v3 opt-in feature contract, and the v3.2.0 capability disposition (§1.2).
-
+**Last reconciled**: 2026-11-09 — `agent-client-protocol = "=5.0.0"` pin, the v5 module/API migration (§1.1, §1.2), and the re-affirmed stable-v1-only capabilities.
 
 The shipped boundary is:
 
 - `crates/nexus-acp-host/Cargo.toml` pins
-  `agent-client-protocol = "=3.2.0"`; stable-v1 messages are imported from
-  `agent_client_protocol::schema::v1` (the flat `schema` re-export was
-  removed upstream) and the adapter pins `ProtocolVersion::V1` explicitly.
+  `agent-client-protocol = "=5.0.0"`; stable-v1 messages are imported from
+  `agent_client_protocol::v1::schema` (v5 removed the `schema::v1` alias) and the adapter pins `ProtocolVersion::V1` explicitly.
 - Official SDK types are confined to `nexus-acp-host`; the public
   `NexusAcpClient` trait uses Nexus-owned DTOs and includes both one-shot and
   streaming prompt operations without treating a method count as a contract.
@@ -37,24 +35,38 @@ The shipped boundary is:
 
 ### 1.1 Current dependency and boundary
 
-The shipped Rust ACP SDK is **`agent-client-protocol` 3.2.0**, exact-pinned
-(`=3.2.0`) in `crates/nexus-acp-host/Cargo.toml`. ACP crate major 3 does not
+The shipped Rust ACP SDK is **`agent-client-protocol` 5.0.0**, exact-pinned
+(`=5.0.0`) in `crates/nexus-acp-host/Cargo.toml`. ACP crate major 5 does not
 put the wire on protocol v2 — the adapter stays on stable v1 and does not pull
 `rmcp` (the ordinary-CLI ACP graph is rmcp-free; see `tooling/check-graph-pins.sh`).
-v3 makes the SDK's capabilities opt-in: the SDK declares `default = []`, so
-its native transports (`process`, `stdio`) and JSON-Schema generation
-(`schemars`) ship only when explicitly enabled, and Nexus intentionally
-enables none of them — it owns child-process lifecycle itself (Tokio `Command`
-+ `ByteStreams`) and owns its wire schemas. The SDK row therefore resolves to
-exactly one version whose resolved feature set is the empty default (printed
-`feats=[default]`), with `rmcp`, `async-process` and `blocking` absent,
-enforced by `assert_exactly_one nexus42 "" agent-client-protocol`,
+The v5 SDK still declares `default = []`, so its native transports (`process`,
+`stdio`) and JSON-Schema generation (`schemars`) ship only when explicitly
+enabled, and Nexus intentionally enables none of them — it owns child-process
+lifecycle itself (Tokio `Command` + `ByteStreams`) and owns its wire schemas.
+The SDK row therefore resolves to exactly one version whose resolved feature
+set is the empty default (printed `feats=[default]`), with `rmcp`,
+`async-process` and `blocking` absent, enforced by
+`assert_exactly_one nexus42 "" agent-client-protocol`,
 `assert_features nexus42 "" agent-client-protocol "default"`,
 `assert_empty nexus42 "" async-process` and `assert_empty nexus42 "" blocking`
 in `tooling/check-graph-pins.sh`. `crates/nexus-acp-host/src/client.rs`
-confines `agent_client_protocol::schema` types to `AcpSdkAdapter` conversion
-and implementation code; consumers use nexus contract DTOs through
+confines `agent_client_protocol::v1::schema` types to `AcpSdkAdapter`
+conversion and implementation code; consumers use nexus contract DTOs through
 `NexusAcpClient`.
+
+v5 migration (2026-11-09, replacing the pins-only PR #477): the stable v1 SDK
+surface moved under `v1::` — messages import from `v1::schema`, the client
+builder is `Client.v1()` (the role-level `builder()` is gone), connection
+handles are `v1::ConnectionTo<Agent>`, and `start_session()` returns
+`v1::SessionSetup { session, response, .. }` (`ActiveSession::response()` was
+removed; the setup response is read from `SessionSetup.response`). Session
+stream items are `SessionMessage::Message(v1::Dispatch)` (converted with
+`into_raw()` before `MatchDispatch`) and
+`SessionMessage::PromptResponse(Result<PromptResponse, Error>)`: a
+`session/prompt` error now arrives on the session stream instead of closing
+the connection (upstream #474), and Nexus maps `Err` onto its existing
+`Failed` / error path — never silently. The `anyhow` dependency added by the
+crate is the only new lock package.
 
 `crates/nexus-agent-host/src/providers/acp.rs` adapts that client boundary to
 the normalized `ProviderAdapter` lifecycle (initialize, session creation,
@@ -63,20 +75,21 @@ service/provider ownership is described above. No fixed client-method count is n
 its adapter implementation are the source authority as protocol support
 evolves.
 
-### 1.2 v3.2.0 capability disposition
+### 1.2 Capability disposition (recorded at v3.2.0, re-affirmed at v5.0.0)
 
 Recorded 2026-10-13 for the `=3.2.0` adoption (plan
-`2026-10-12-v1.215-acp-sdk-3.2.0-adoption`). Every row was re-verified against
-the fetched crate sources — cited as `<crate>-<version>/<path>:<line>` under
-`$CARGO_HOME/registry/src/index.crates.io-*/` — or against the repo file:line
-cited; a plan claim that failed verification is rewritten to what the sources
-show, not softened.
+`2026-10-12-v1.215-acp-sdk-3.2.0-adoption`) and re-affirmed 2026-11-09 for the
+`=5.0.0` adoption: no row below changes disposition at v5. Every row was
+re-verified against the fetched crate sources — cited as
+`<crate>-<version>/<path>:<line>` under `$CARGO_HOME/registry/src/index.crates.io-*/`
+— or against the repo file:line cited; a plan claim that failed verification
+is rewritten to what the sources show, not softened.
 
 #### Adopted
 
 | Capability | Why | Verified against |
 |---|---|---|
-| v3 opt-in feature contract: the SDK declares `default = []`; its native transports (`process`, `stdio`) and JSON-Schema generation (`schemars`) are opt-in Cargo features, and the pin enables none of them | Nexus owns child-process lifecycle (Tokio `Command` + `ByteStreams`) and its own wire schemas, so the featureless pin is the desired end state; moving the adapters behind features removes `async-process`, `blocking`, `async-channel`, `async-lock`, `async-signal`, `async-task` and `piper` from the workspace lock outright | `agent-client-protocol-3.2.0/Cargo.toml.orig:42` (`default = []`), `:45` (`schemars`), `:48-49` (`process` / `stdio` dep lists); the 2.2.0 baseline carried the same crates unconditionally (`agent-client-protocol-2.2.0/Cargo.toml.orig:65,73-82`); repo `Cargo.lock` delta `f99b21459`→`e5887127a` (all seven 1→0). Enforced by `tooling/check-graph-pins.sh:207` `assert_exactly_one nexus42 "" agent-client-protocol`, `:211` `assert_features nexus42 "" agent-client-protocol "default"`, `:214` `assert_empty nexus42 "" async-process`, `:215` `assert_empty nexus42 "" blocking` |
+| v3–v5 opt-in feature contract: the SDK declares `default = []`; its native transports (`process`, `stdio`) and JSON-Schema generation (`schemars`) are opt-in Cargo features, and the pin enables none of them | Nexus owns child-process lifecycle (Tokio `Command` + `ByteStreams`) and its own wire schemas, so the featureless pin is the desired end state; moving the adapters behind features removes `async-process`, `blocking`, `async-channel`, `async-lock`, `async-signal`, `async-task` and `piper` from the workspace lock outright | `agent-client-protocol-3.2.0/Cargo.toml.orig:42` (`default = []`), `:45` (`schemars`), `:48-49` (`process` / `stdio` dep lists); the 2.2.0 baseline carried the same crates unconditionally (`agent-client-protocol-2.2.0/Cargo.toml.orig:65,73-82`); repo `Cargo.lock` delta `f99b21459`→`e5887127a` (all seven 1→0). Enforced by `tooling/check-graph-pins.sh:207` `assert_exactly_one nexus42 "" agent-client-protocol`, `:211` `assert_features nexus42 "" agent-client-protocol "default"`, `:214` `assert_empty nexus42 "" async-process`, `:215` `assert_empty nexus42 "" blocking` |
 
 #### Inherited without callsite change
 
@@ -94,7 +107,7 @@ show, not softened.
 | `AcpAgent` / `AcpAgentConfig` (`process` feature), native `Stdio` (`stdio` feature) | Nexus spawns and reaps its own children with `tokio::process` and owns termination semantics; adopting either adds a second lifecycle owner | Feature-gated exports: `agent-client-protocol-3.2.0/src/lib.rs:202-209` (`AcpAgent`, `AcpAgentConfig`), `:222-226` (`Stdio`); Nexus-owned lifecycle `crates/nexus-acp-host/src/transport.rs:35,141-158` |
 | `schemars` JSON-Schema generation, typed MCP tool builders | Nexus owns its wire contracts as JSON Schema in `schemas/` (generated into TS + Rust); SDK schema generation would be a second, unowned truth source | Opt-in since v3: `agent-client-protocol-3.2.0/Cargo.toml.orig:45,83` (unconditional in the 2.2.0 baseline at `:65`); `agent-client-protocol-3.2.0/CHANGELOG.md` 3.0.0 (#373); repo `schemas/` |
 | Native MCP services, request-scoped MCP binding, `unstable_mcp_over_acp` | Nexus is an ACP **client** that forwards generic `newSession.mcp_servers` descriptors; native MCP services belong to agents, and `rmcp` stays out of the shipped graph | `agent-client-protocol-3.2.0/Cargo.toml.orig:65`; `agent-client-protocol-3.2.0/CHANGELOG.md` 3.0.0 (#388 request-scoped binding, native MCP services); descriptor forwarding `crates/nexus-acp-host/src/client.rs:222-232`; `rmcp` absence enforced by `tooling/check-graph-pins.sh:203` `assert_empty nexus42 "" rmcp` |
-| `unstable_protocol_v2`, `unstable_subagents`, session compaction / fork / notices, `unstable_llm_providers`, `unstable_end_turn_token_usage` | The adapter pins `ProtocolVersion::V1` and the posture is stable-v1-only; schema 1.10.2 adds **no new stable v1 message/update surface** — its only v1 method-name delta is the removal of the `unstable_mcp_over_acp`-gated `mcp/connect` / `mcp/disconnect` pair, and its remaining v1 delta is the removal of the internal `SkipListener` deserialization seam, which Nexus never implemented | Pin: `crates/nexus-acp-host/src/client.rs:205-218`. Unstable feature forwards: `agent-client-protocol-3.2.0/Cargo.toml.orig:53-71`. Schema 1.9.1→1.10.2: v1 method-name sets identical except `mcp/connect` / `mcp/disconnect` removed from the `#[cfg(feature = "unstable_mcp_over_acp")]`-gated module (`agent-client-protocol-schema-1.10.2/src/v1/mod.rs:9-10,25-26`); `SkipListener` present in `agent-client-protocol-schema-1.9.1/src/v1/client.rs:16,341,499,803,1469`, 0 hits in 1.10.2, 0 hits in Nexus `crates/` + `apps/` |
+| `unstable_protocol_v2`, `unstable_subagents`, session compaction / fork / notices, `unstable_llm_providers`, `unstable_end_turn_token_usage` | The adapter pins `ProtocolVersion::V1` and the posture is stable-v1-only; schema 1.10.2 adds **no new stable v1 message/update surface** — its only v1 method-name delta is the removal of the `unstable_mcp_over_acp`-gated `mcp/connect` / `mcp/disconnect` pair, and its remaining v1 delta is the removal of the internal `SkipListener` deserialization seam, which Nexus never implemented | Pin: `crates/nexus-acp-host/src/client.rs:205-218`. Unstable feature forwards: `agent-client-protocol-3.2.0/Cargo.toml.orig:53-71`. Schema 1.9.1→1.10.2: v1 method-name sets identical except `mcp/connect` / `mcp/disconnect` removed from the `#[cfg(feature = "unstable_mcp_over_acp")]`-gated module (`agent-client-protocol-schema-1.10.2/src/v1/mod.rs:9-10,25-26`); `SkipListener` present in `agent-client-protocol-schema-1.9.1/src/v1/client.rs:16,341,499,803,1469`, 0 hits in 1.10.2, 0 hits in Nexus `crates/` + `apps/`. v5.0.0 re-affirms the decline: `v1` and `v2` are separate modules and `v2` compiles only under `unstable_protocol_v2`, which the pin does not enable (`agent-client-protocol-5.0.0/src/lib.rs:205-211`) |
 
 ---
 

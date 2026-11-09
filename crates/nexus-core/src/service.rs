@@ -11,7 +11,7 @@ use nexus_contracts::{
 };
 use nexus_home_layout::active_context::{
     read_active_creator_id, read_active_workspace_slug, read_memory_provider_config,
-    try_resolve_state_db_path, CliConfigSnapshot,
+    try_resolve_state_db_path, CliConfigSnapshot, MemoryProviderConfig,
 };
 use nexus_local_db::open_pool_read_only;
 use nexus_local_db::writer_protocol::{
@@ -206,30 +206,74 @@ pub struct CoreService {
 
 /// The one disk snapshot of `[memory_provider]` an open takes.
 ///
-/// It reads the document without taking the writer lock, because every
-/// whole-document writer publishes through
-/// [`nexus_home_layout::config_lock::publish_document`] — an atomic rename — so
-/// this open always sees one complete version, never a truncated document that
-/// the layout would report as "no `[memory_provider]`", the implicit local
-/// default. Writer exclusion (read-modify-write lost-update safety) is
-/// unchanged; it just no longer gates readers.
+/// It reads the document under the daemon-home config lock (I-000288): a
+/// read-modify-write in progress can no longer expose its truncated body as
+/// "no `[memory_provider]`", the implicit local default. The lock is held for
+/// this one read only, and reader admission does not change writer exclusion
+/// (read-modify-write lost-update safety stays with the writers).
 ///
-/// I-000291: the read performs no directory write, so a `ReadOnly` open still
-/// serves an already-provisioned home whose `.nexus42` is readable but not
-/// writable. A writer that publishes in place instead (an older binary, or a
-/// differently privileged process) is not covered by that atomicity, exactly as
-/// it is outside the lock protocol.
+/// Whole-document writers publish through
+/// [`nexus_home_layout::config_lock::publish_document`] — an atomic rename —
+/// so an admitted reader still always observes one complete version.
+///
+/// Lock acquisition and the protected read report through separate layers: a
+/// failed protected read propagates and is never retried outside the lock,
+/// where a concurrent in-place rewrite would be observable. The one justified
+/// unlocked read is the documented read-only home (I-000291):
+/// `PermissionDenied` on the lock file means no directory-write authority for
+/// the lock — the same authority every writer needs for its lock file, staging
+/// directory and rename — so no writer the coordination could exclude exists
+/// in such a home and the uncoordinated read is whole-document by that
+/// permission boundary. Falling back there preserves I-000291: an
+/// already-provisioned read-only home still serves a no-override `ReadOnly`
+/// open instead of failing on the lock. Any other acquisition failure (an
+/// unremovable stale lock after the steal deadline, an unwritable ownership
+/// token) establishes nothing about writers and fails closed.
 ///
 /// # Errors
 ///
-/// [`CoreError::Internal`] for an unreadable document and the mapped
+/// [`CoreError::Internal`] for a lock acquisition failure other than
+/// `PermissionDenied` and for an unreadable document, and the mapped
 /// [`CoreError::InvalidInput`] of a stored remote reference that fails
 /// validation — a malformed table never degrades to local silently.
 fn selection_snapshot(nexus_home: &Path) -> CoreResult<MemoryProviderSelection> {
-    let config = read_memory_provider_config(nexus_home).map_err(|error| CoreError::Internal {
-        category: format!("config_load: {error}"),
-    })?;
+    snapshot_with_lock(nexus_home, |home| {
+        let _lock = nexus_home_layout::config_lock::acquire(home)?;
+        Ok(read_provider_snapshot(home))
+    })
+}
+
+/// The snapshot with the daemon-home config lock acquired around its read.
+///
+/// `locked_read` reports the acquisition failure in its outer layer and the
+/// protected read's result in its inner one, so the two failure kinds stay
+/// distinguishable; injected in tests to fail each layer independently.
+fn snapshot_with_lock(
+    nexus_home: &Path,
+    locked_read: impl FnOnce(&Path) -> Result<CoreResult<Option<MemoryProviderConfig>>, std::io::Error>,
+) -> CoreResult<MemoryProviderSelection> {
+    let config = match locked_read(nexus_home) {
+        Ok(config) => config?,
+        // Only a denied lock-file write is the documented read-only home;
+        // read the whole document without coordination (I-000291).
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            read_provider_snapshot(nexus_home)?
+        }
+        Err(error) => {
+            return Err(CoreError::Internal {
+                category: format!("config_lock: {error}"),
+            })
+        }
+    };
     MemoryProviderSelection::from_config(config)
+}
+
+/// `read_memory_provider_config` mapped onto the core error carrier, shared by
+/// the locked and the read-only-home snapshot paths.
+fn read_provider_snapshot(nexus_home: &Path) -> CoreResult<Option<MemoryProviderConfig>> {
+    read_memory_provider_config(nexus_home).map_err(|error| CoreError::Internal {
+        category: format!("config_load: {error}"),
+    })
 }
 
 impl CoreService {
@@ -1043,5 +1087,142 @@ mod tests {
             matches!(error, CoreError::Internal { .. }),
             "the malformed table is refused, not read as local: {error:?}"
         );
+    }
+
+    /// I-000288: while a config writer holds the lock mid-rewrite — the
+    /// in-place truncation an older binary could still publish — the snapshot
+    /// joins the writers' lock and never observes the truncated body. The
+    /// window is real and observable: the document on disk is empty while the
+    /// lock is held, and a reader that skipped the lock would read exactly
+    /// that empty body as the implicit local default.
+    #[test]
+    fn the_snapshot_never_reads_a_writer_in_progress_rewrite_as_local() {
+        let home = tempfile::tempdir().expect("home");
+        let home_path = home.path().to_path_buf();
+        let path = home_path.join("config.toml");
+        let document = config_document(&remote_selection());
+        std::fs::write(&path, &document).expect("seed config");
+
+        let (truncated, truncated_rx) = std::sync::mpsc::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let writer_document = document;
+        let writer_path = path.clone();
+        let writer_home = home_path.clone();
+        let writer = std::thread::spawn(move || {
+            let lock = nexus_home_layout::config_lock::acquire(&writer_home).expect("writer lock");
+            // The truncation an in-place rewrite exposes before its complete
+            // body is written.
+            std::fs::write(&writer_path, "").expect("truncate under the lock");
+            truncated.send(()).expect("signal the truncated window");
+            release_rx.recv().expect("hold the window for the reader");
+            std::fs::write(&writer_path, writer_document).expect("rewrite the whole document");
+            drop(lock);
+        });
+
+        truncated_rx.recv().expect("the truncated window is live");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("window document"),
+            "",
+            "the truncated rewrite is really on disk"
+        );
+
+        let reader_path = home_path;
+        let reader = std::thread::spawn(move || selection_snapshot(&reader_path));
+        // Leave the reader time to reach the lock and wait behind the writer
+        // (the lock's stale threshold is 10 s, far above this pause).
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        release.send(()).expect("close the window");
+        writer.join().expect("writer thread");
+
+        assert_eq!(
+            reader
+                .join()
+                .expect("reader thread")
+                .expect("the snapshot waits out the rewrite"),
+            remote_selection(),
+            "the snapshot reads the whole document, never the truncated window"
+        );
+    }
+
+    /// A failed protected read propagates and is never retried outside the
+    /// lock: the home holds a complete valid document, so any unlocked retry
+    /// would succeed and the error below would not surface. The layers are
+    /// injected because the real acquisition seams (the ownership-token
+    /// failure hook) live behind the home-layout crate's own `cfg(test)` build.
+    #[test]
+    fn a_failed_protected_read_is_never_retried_unlocked() {
+        let home = tempfile::tempdir().expect("home");
+        std::fs::write(
+            home.path().join("config.toml"),
+            config_document(&remote_selection()),
+        )
+        .expect("config");
+
+        let reads = std::cell::Cell::new(0u8);
+        let error = snapshot_with_lock(home.path(), |_| {
+            reads.set(reads.get() + 1);
+            Ok(Err(CoreError::Internal {
+                category: "config_load: injected read failure".to_string(),
+            }))
+        })
+        .expect_err("the failed protected read propagates");
+
+        let CoreError::Internal { category } = &error else {
+            panic!("unexpected error shape: {error:?}");
+        };
+        assert_eq!(
+            category, "config_load: injected read failure",
+            "the protected read's own error propagates unchanged: {error:?}"
+        );
+        assert_eq!(reads.get(), 1, "the read ran once, under the lock");
+    }
+
+    /// An acquisition failure that is not a denied lock-file write — the shape
+    /// the stale-lock steal deadline and the ownership-token failure surface
+    /// through — proves nothing about writer absence and fails closed instead
+    /// of falling back to the uncoordinated read (which would read the valid
+    /// document below as a successful snapshot).
+    #[test]
+    fn a_non_permission_lock_failure_fails_closed() {
+        let home = tempfile::tempdir().expect("home");
+        std::fs::write(
+            home.path().join("config.toml"),
+            config_document(&remote_selection()),
+        )
+        .expect("config");
+
+        let error = snapshot_with_lock(home.path(), |_| {
+            Err(std::io::Error::other("injected acquisition failure"))
+        })
+        .expect_err("the acquisition failure propagates");
+
+        let CoreError::Internal { category } = &error else {
+            panic!("unexpected error shape: {error:?}");
+        };
+        assert!(
+            category.starts_with("config_lock: "),
+            "the acquisition failure is the config_lock carrier, not an unlocked read: {error:?}"
+        );
+    }
+
+    /// The read-only-home fallback survives the split: a denied lock-file
+    /// write is the one acquisition failure that reads the document without
+    /// coordination. The end-to-end acceptance is
+    /// `tests/readonly_config_open.rs`; this pins the split layer itself.
+    #[test]
+    fn a_permission_denied_acquisition_still_falls_back_to_the_unlocked_read() {
+        let home = tempfile::tempdir().expect("home");
+        std::fs::write(
+            home.path().join("config.toml"),
+            config_document(&remote_selection()),
+        )
+        .expect("config");
+
+        let selection = snapshot_with_lock(home.path(), |_| {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        })
+        .expect("the denied lock-file write falls back to the uncoordinated read");
+
+        assert_eq!(selection, remote_selection());
     }
 }

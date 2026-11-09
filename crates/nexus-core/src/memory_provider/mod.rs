@@ -2243,12 +2243,16 @@ impl LocalMemoryProvider {
             Ok(content) => content,
             Err(error) => return Ok(deny(&error)),
         };
+        // spoke-schemas 0.16.0: capture-request anchors became Option<...>
+        // (absent = None, serialized as null); the stored provenance must stay
+        // the published `anchors` array shape (may be empty), never null.
         let anchors = match to_json(&request.anchors, "capture anchors") {
+            Ok(Value::Null) => json!([]),
             Ok(anchors) => anchors,
             Err(error) => return Ok(deny(&error)),
         };
         let provenance = json!({
-            "source_context_ids": request.source_context_ids,
+            "source_context_ids": request.source_context_ids.unwrap_or_default(),
             "anchors": anchors,
             "captured_by": principal_id,
             "captured_at": storage::timestamp(now),
@@ -3237,14 +3241,18 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(content) => content,
             Err(error) => return deny(&error),
         };
+        // spoke-schemas 0.16.0: request anchors became Option<...> (serialized
+        // null when absent); the stored provenance keeps the published array
+        // shape (may be empty), not null.
         let anchors = match to_json(&request.anchors, "record anchors") {
+            Ok(Value::Null) => json!([]),
             Ok(anchors) => anchors,
             Err(error) => return deny(&error),
         };
         // §6.6/§10: `captured_by`/`captured_at` are provider-populated; the
         // context claims are recorded verbatim and never authorize anything.
         let provenance = json!({
-            "source_context_ids": request.source_context_ids,
+            "source_context_ids": request.source_context_ids.unwrap_or_default(),
             "anchors": anchors,
             "captured_by": principal_id,
             "captured_at": storage::timestamp(Utc::now()),

@@ -48,12 +48,13 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol"
-version = "3.5.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bbe69c878aef64a3d92041e256e75acdb1bf2ea8e55ef3313e69dbb2f5bd75a"
+checksum = "80ce60ce096020c2d0aa10445bc27b8856109e288abaf564ab517031ae819d69"
 dependencies = [
  "agent-client-protocol-derive",
  "agent-client-protocol-schema",
+ "anyhow",
  "futures",
  "futures-concurrency",
  "rustc-hash",
@@ -65,9 +66,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-derive"
-version = "3.5.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25b7ae92f0d1ba46ca61e7e03d4a9758e877d100b783aa1c62b140d5a9d59fb2"
+checksum = "a12951a4e9a163a9384dec4e5681bd774c0fdb3871c5ed1deb7b44bc630df17a"
 dependencies = [
  "quote",
  "syn 3.0.6",
@@ -75,9 +76,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-schema"
-version = "1.12.0"
+version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "430e900fdb40a811c1a3e0d85b1134e485d96699f8b90889a15c1da6a0b26c3f"
+checksum = "1b2316d2cd561917bc2c16e3c64771c77e24363b56d40b58fdad091d02059992"
 dependencies = [
  "anyhow",
  "derive_more",
@@ -5854,12 +5855,12 @@ dependencies = [
 
 [[package]]
 name = "spoke-connect"
-version = "0.15.2"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f4699c65eb1a4ccef3dcbe5bcf91f2e12218e1a73fb75a95597b44f0dad6842"
+checksum = "682236fb999321fb59d07185cc98b91b70d3cb17611e1c28b2700c0e281ccb1e"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "ed25519-dalek 2.2.0",
  "futures",
@@ -5877,9 +5878,9 @@ dependencies = [
 
 [[package]]
 name = "spoke-operations"
-version = "0.15.2"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f773d4fe01da3f3f4101827a91dfcdefe3e70c6164d5fd4f120f0f832bc97105"
+checksum = "84ce7ddf399ddfc8cf6be8aaf55695941c107cb1922279a81fa973b7e70664af"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5887,15 +5888,15 @@ dependencies = [
  "serde",
  "serde_jcs",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.1",
  "spoke-schemas",
 ]
 
 [[package]]
 name = "spoke-schemas"
-version = "0.15.2"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc253fc92ada87e8f775e8aebb034ed91f2e3309d901a6681e6e54e2bb58ea6f"
+checksum = "09f79c0682ef349bca47073d0b6175041eeb1c0b6e7c9b48bdbf818fdc0ba5ff"
 dependencies = [
  "chrono",
  "regress",
@@ -6193,9 +6194,9 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.39.6"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2071df9448915b71c4fe6d25deaf1c22f12bd234f01540b77312bb8e41361e6"
+checksum = "0e8a3edbe0394ce115f3917a00349dd242be09eb5a091ed509eaf67b55cfb8a8"
 dependencies = [
  "libc",
  "memchr",

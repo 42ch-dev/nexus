@@ -90,6 +90,10 @@ pub fn build_assemble_packet(
         knowledge_entries: &wrapped,
         extensions: None,
         max_entries,
+        // Cognition family stays UNCONSUMED (baseline rule): no selection is
+        // ever projected and no view policy is installed.
+        cognition_selection: None,
+        current_view_policy: None,
     })
 }
 

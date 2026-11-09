@@ -53,14 +53,27 @@ pub struct AccessPolicy {
     policy: portable::PortablePolicy,
 }
 
-/// The private staging location a publication writes before its atomic rename.
+/// The staging location a publication writes before its atomic rename.
 ///
-/// The directory is created first and made private, and the document file is
-/// created inside it only afterwards. That ordering is what keeps the staged
-/// bytes unreadable to other principals: an inherited ACL/DACL on the target
-/// directory cannot reach a file that does not exist yet. On Windows the file is
-/// additionally opened with no sharing, so it cannot be opened between creation
-/// and the policy transition.
+/// The directory is created first, the document file only afterwards, and the
+/// platform's own protection is what keeps the staged bytes unreadable to other
+/// principals while the publication runs (I-000331 contract):
+///
+/// * Unix: the directory is created owner-only and sealed before the file
+///   exists, so no inherited ACL can reach a file that does not exist yet, and
+///   the staged file is created `0600` inside it.
+/// * Windows: the directory inherits the parent DACL — this crate applies no
+///   private DACL of its own — and the staged file is opened with share mode
+///   `0`, so no other principal can open it between creation and the policy
+///   transition. That no-sharing handle is the protection, not the directory.
+/// * Other targets: creation applies no policy transition; the staged file uses
+///   the platform `OpenOptions` default policy.
+///
+/// The handle covers the write; after [`Staging::close`] the caller renames the
+/// staged path, and that rename is authorized and protected by the target
+/// directory alone. On Windows this is the inherited parent DACL for that
+/// window — the documented contract this type carries; no private-DACL
+/// implementation is claimed.
 pub struct Staging {
     directory: PathBuf,
     path: PathBuf,
@@ -127,13 +140,15 @@ pub fn capture(target: &Path) -> io::Result<AccessPolicy> {
     }
 }
 
-/// Create the private staging directory and its owner-only document file.
+/// Create the staging directory and its document file.
 ///
-/// The directory must not exist yet; the caller picks its name. The directory is
-/// created and sealed first, then the file is created inside it, so no staged
-/// byte is ever exposed under the target directory's inherited policy. A failure
-/// after the directory exists removes it again and surfaces both the primary
-/// error and any cleanup failure with the exact leftover path.
+/// The directory must not exist yet; the caller picks its name. On Unix the
+/// directory is created owner-only and sealed first, then the file is created
+/// `0600` inside it, so no staged byte is exposed under the target directory's
+/// inherited policy. On Windows the directory inherits the parent DACL and the
+/// file is opened with no sharing; [`Staging`] carries the exact per-platform
+/// contract. A failure after the directory exists removes it again and surfaces
+/// both the primary error and any cleanup failure with the exact leftover path.
 ///
 /// # Errors
 ///

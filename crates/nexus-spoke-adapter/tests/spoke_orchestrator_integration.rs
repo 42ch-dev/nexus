@@ -426,7 +426,7 @@ async fn orchestrate_assemble_scope_filtered() {
     }))
     .expect("valid AssembleRequest fixture");
 
-    let result = orchestrate_assemble(&adapter, request).await;
+    let result = orchestrate_assemble(&adapter, request, None).await;
     match result {
         SpokeResult::Ok(AssembleResponse::Variant0 { packet, .. }) => {
             assert_eq!(

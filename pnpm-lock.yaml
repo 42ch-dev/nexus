@@ -23,11 +23,11 @@ importers:
   .:
     dependencies:
       '@42ch/spoke-operations':
-        specifier: 0.15.2
-        version: 0.15.2
+        specifier: 0.16.0
+        version: 0.16.0
       '@42ch/spoke-schemas':
-        specifier: 0.15.2
-        version: 0.15.2
+        specifier: 0.16.0
+        version: 0.16.0
     devDependencies:
       oxlint:
         specifier: ^1.90.0
@@ -464,11 +464,12 @@ importers:
 
 packages:
 
-  '@42ch/spoke-operations@0.15.2':
-    resolution: {integrity: sha512-iiEWfhfDO8DkmiVViGzjr+j6n+mw9pgEm+sQifIB48NSSRKAxLNZFNNp9wMfdqYJ/MJbANzYbCSTe7o9I1m36A==}
+  '@42ch/spoke-operations@0.16.0':
+    resolution: {integrity: sha512-vn6zEn9bn8QjTaH1FI4LczHgB1XaJMUEKbNkKSQzFW8tHjIClCDuRjztpz0x7spSu6wW3hL2HP2/N0o6aeNIfg==}
+    engines: {node: '>=22'}
 
-  '@42ch/spoke-schemas@0.15.2':
-    resolution: {integrity: sha512-vca2Pap7hn/gPlWkyS7rRRpNYr61Q7sXYTtomjCh7uUZ8xw7atZ70aPl41EHd91b5djBqm5h/JRlcaH6BJThNg==}
+  '@42ch/spoke-schemas@0.16.0':
+    resolution: {integrity: sha512-n/Qf0c7dGX2768LM3LTX7xDWBeuWuzNcNU8ZVDGNWwn2ctEPiC2RCyYAQ0CEQ4CxURiS86jWzqVjRs0Bgfw9xQ==}
 
   '@adobe/css-tools@4.5.0':
     resolution: {integrity: sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q==}
@@ -2303,9 +2304,9 @@ packages:
   caniuse-lite@1.0.30001810:
     resolution: {integrity: sha512-TITQPUkaz+aVk5GL6NhOdwk1aEaNTSDPsGFWrTuhKGtjTF70jL/Oht2W4c6rXUe5fu7Ie19VIahAXHIIiWWNeg==}
 
-  canonicalize@3.0.0:
-    resolution: {integrity: sha512-yYLfHyDMIXRyRqsKBRLX023riFLpXY2YOfdtqKXZRZy9qsfOJ9U+4F9YZL7MEzL5+ziN2x2nlBvY/Voi3EBljA==}
-    engines: {node: '>=18'}
+  canonicalize@5.1.0:
+    resolution: {integrity: sha512-bab9+WefZljqQ8jT0qRwVmTyzAUU63K97QIQD3agynIBrb6sa5M2eAy8Hv8K3p4V9+ONVYZKtGYl4Dg+/5Gumw==}
+    engines: {node: '>=22'}
     hasBin: true
 
   ccount@2.0.1:
@@ -3956,13 +3957,13 @@ packages:
 
 snapshots:
 
-  '@42ch/spoke-operations@0.15.2':
+  '@42ch/spoke-operations@0.16.0':
     dependencies:
-      '@42ch/spoke-schemas': 0.15.2
+      '@42ch/spoke-schemas': 0.16.0
       '@noble/hashes': 2.4.0
-      canonicalize: 3.0.0
+      canonicalize: 5.1.0
 
-  '@42ch/spoke-schemas@0.15.2': {}
+  '@42ch/spoke-schemas@0.16.0': {}
 
   '@adobe/css-tools@4.5.0': {}
 
@@ -5373,7 +5374,7 @@ snapshots:
 
   caniuse-lite@1.0.30001810: {}
 
-  canonicalize@3.0.0: {}
+  canonicalize@5.1.0: {}
 
   ccount@2.0.1: {}
 

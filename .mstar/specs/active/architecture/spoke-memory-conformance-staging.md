@@ -23,7 +23,7 @@ That statement is valid only when every N3, N3-refusal, N3-base, and reuse-plus-
 
 The fixture owns its file-backed SQLite database, migrations, policy, and bootstrap state. It does not depend on `LocalMemoryProvider`, `nexus-core` provider-private modules, `spoke-fixture-memory-engine`, a sibling checkout, an absolute path, an unpublished package, an echo service, or an in-memory substitute. Its integration tests may dev-depend on public `nexus-core` and `nexus42`; `nexus-core` never depends on the fixture crate.
 
-The fixture directly consumes published `spoke-schemas` (through `spoke-operations`), `spoke-operations`, and `spoke-connect`. The current published SPOKE lockstep is `0.15.2` with `libp2p 0.57.1`; workspace manifests own the exact versions. No source gate is waived for an unpublished or assumed interface.
+The fixture directly consumes published `spoke-schemas` (through `spoke-operations`), `spoke-operations`, and `spoke-connect`. The current published SPOKE lockstep is `0.16.0` with `libp2p 0.57.1`; workspace manifests own the exact versions. No source gate is waived for an unpublished or assumed interface.
 
 **Ablation: the repository-owned fixture implementation** — removal would leave no reproducible independent durable leg because the upstream policy engine is unpublished; it is retained for genuine cross-provider conformance.
 

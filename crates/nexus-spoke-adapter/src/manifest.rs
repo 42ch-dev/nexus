@@ -510,7 +510,7 @@ mod tests {
                 let _ = || {
                     let request: crate::AssembleRequest =
                         serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
-                    drop(crate::orchestrate_assemble(adapter, request));
+                    drop(crate::orchestrate_assemble(adapter, request, None));
                 };
             }
             "compute" => {

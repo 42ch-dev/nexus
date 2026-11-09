@@ -21,11 +21,11 @@
 
 use std::path::PathBuf;
 
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::v1::schema::{
     AgentCapabilities, EnvVariable, InitializeRequest, InitializeResponse, McpServer,
     McpServerHttp, McpServerSse, McpServerStdio, NewSessionRequest, NewSessionResponse, SessionId,
 };
-use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent, Channel, Client};
 
 /// The three generic descriptor kinds a client may attach to `newSession`.
@@ -61,7 +61,7 @@ async fn run_scripted_agent(
     evidence_tx: tokio::sync::mpsc::UnboundedSender<DescriptorEvidence>,
 ) -> agent_client_protocol::Result<()> {
     Agent
-        .builder()
+        .v1()
         .name("descriptor-probe-agent")
         .on_receive_request(
             async move |initialize: InitializeRequest, responder, _connection| {
@@ -114,7 +114,7 @@ async fn acp_session_delivers_generic_mcp_server_descriptors() {
     // Client side: initialize, then newSession carrying all three generic
     // descriptor kinds.
     let client_result = Client
-        .builder()
+        .v1()
         .name("descriptor-probe-client")
         .connect_with(client_channel, async move |connection| {
             connection

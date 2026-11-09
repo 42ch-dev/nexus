@@ -2106,16 +2106,23 @@ async fn raw_empty_and_omitted_source_context_ids_conflict_at_the_signed_boundar
         .expect("payload object")
         .remove("source_context_ids");
 
-    // The two wire objects are the same typed request: serde defaults the
-    // omitted member, so only the raw object distinguishes them.
+    // SPOKE 0.16.0 preserves member presence through the typed view: the
+    // explicit member decodes to `Some([])` and the omitted one to `None`,
+    // so the raw object still has to be what the digest covers.
     let typed_explicit: MemoryCaptureRequest =
         from_value(explicit.clone()).expect("typed explicit request");
     let typed_omitted: MemoryCaptureRequest =
         from_value(omitted.clone()).expect("typed omitted request");
-    assert_eq!(
-        wire(&typed_explicit),
-        wire(&typed_omitted),
-        "the typed views of both wire objects are identical"
+    assert!(
+        typed_explicit
+            .source_context_ids
+            .as_ref()
+            .is_some_and(Vec::is_empty),
+        "an explicit empty member keeps its presence"
+    );
+    assert!(
+        typed_omitted.source_context_ids.is_none(),
+        "an omitted member stays absent"
     );
     assert_ne!(digest_of(&explicit), digest_of(&omitted));
 

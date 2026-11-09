@@ -2144,6 +2144,8 @@ impl FixtureMemoryProvider {
         let capture_content = CaptureContent {
             structured: content.get("structured").cloned(),
             text: text.to_owned(),
+            // Cognition family stays UNCONSUMED (baseline rule).
+            cognition: None,
         };
         let classification = classify(&capture_content);
         let now = Utc::now();
@@ -2256,8 +2258,10 @@ impl FixtureMemoryProvider {
                 .as_deref()
                 .map_or(DEFAULT_CANDIDATE_KIND, String::as_str);
             let provenance = json!({
-                "source_context_ids": request.source_context_ids,
-                "anchors": request.anchors,
+                // Wire members may be absent (presence-sensitive); the stored
+                // provenance always carries the schema's arrays.
+                "source_context_ids": request.source_context_ids.clone().unwrap_or_default(),
+                "anchors": request.anchors.clone().unwrap_or_default(),
                 "captured_by": principal_id,
                 "captured_at": timestamp_text(now),
             });
@@ -2520,6 +2524,22 @@ impl FixtureMemoryProvider {
         let space_id = request.space_id.as_str();
         require_served_space(self, space_id)?;
         let candidate_id = request.candidate_id.as_str();
+        // Replay resolution runs before the target lookup (I-000305): a
+        // retained key must resolve its receipt even when the target row is
+        // gone, and a changed target under the same key fails with
+        // IDEMPOTENCY_CONFLICT instead of replaying. `Fresh` and the
+        // expired-binding release fall through to the untouched grant/target
+        // path below.
+        let admission = Mutation::keyed(
+            OP_CANDIDATES_DISMISS,
+            request.idempotency_key.as_str(),
+            admitted,
+        );
+        if let Some(replay) =
+            resolve_or_release(conn, space_id, principal_id, &admission, now).await?
+        {
+            return Ok(replay);
+        }
         let grants = load_grants(conn, space_id).await?;
         let candidate = fetch_candidate(conn, space_id, candidate_id)
             .await?
@@ -2539,11 +2559,6 @@ impl FixtureMemoryProvider {
             // Indistinguishable from a missing id (C-102).
             return Err(candidate_unavailable());
         }
-        let admission = Mutation::keyed(
-            OP_CANDIDATES_DISMISS,
-            request.idempotency_key.as_str(),
-            admitted,
-        );
         let target = ReceiptTarget::for_scope(
             required_capabilities(OP_CANDIDATES_DISMISS)
                 .expect("memory.candidates.dismiss has a published capability list"),
@@ -2551,11 +2566,6 @@ impl FixtureMemoryProvider {
             &candidate.capture_visibility,
             candidate.scope_context(),
         )?;
-        if let Some(replay) =
-            resolve_or_release(conn, space_id, principal_id, &admission, now).await?
-        {
-            return Ok(replay);
-        }
         require_space_admits(conn, OP_CANDIDATES_DISMISS, space_id).await?;
         // §7.7: a fenced or archived subject rejects every write for it. A
         // dismissal admitted before the fence still replays above; a fresh one
@@ -2636,6 +2646,22 @@ impl FixtureMemoryProvider {
         let space_id = request.space_id.as_str();
         require_served_space(self, space_id)?;
         let candidate_id = request.candidate_id.as_str();
+        // Replay resolution runs before the target lookup (I-000305): a
+        // retained key must resolve its receipt even when the target row is
+        // gone, and a changed target under the same key fails with
+        // IDEMPOTENCY_CONFLICT instead of replaying. `Fresh` and the
+        // expired-binding release fall through to the untouched grant/target
+        // path below.
+        let admission = Mutation::keyed(
+            OP_CANDIDATES_REVIEW,
+            request.idempotency_key.as_str(),
+            admitted,
+        );
+        if let Some(replay) =
+            resolve_or_release(conn, space_id, principal_id, &admission, now).await?
+        {
+            return Ok(replay);
+        }
         let grants = load_grants(conn, space_id).await?;
         let candidate = fetch_candidate(conn, space_id, candidate_id)
             .await?
@@ -2652,11 +2678,6 @@ impl FixtureMemoryProvider {
             context_id.as_deref(),
             now,
         )?;
-        let admission = Mutation::keyed(
-            OP_CANDIDATES_REVIEW,
-            request.idempotency_key.as_str(),
-            admitted,
-        );
         let target = ReceiptTarget::for_scope(
             required_capabilities(OP_CANDIDATES_REVIEW)
                 .expect("memory.candidates.review has a published capability list"),
@@ -2664,11 +2685,6 @@ impl FixtureMemoryProvider {
             &visibility,
             context_id.as_deref(),
         )?;
-        if let Some(replay) =
-            resolve_or_release(conn, space_id, principal_id, &admission, now).await?
-        {
-            return Ok(replay);
-        }
         require_space_admits(conn, OP_CANDIDATES_REVIEW, space_id).await?;
         if candidate.status == "consumed" {
             return Err(candidate_consumed(candidate_id));
@@ -5176,15 +5192,25 @@ mod tests {
             .expect("payload object")
             .remove("source_context_ids");
         let without_member = admit_capture(omitted.clone()).expect("valid capture payload");
-        assert_eq!(
-            explicit.request().source_context_ids,
-            without_member.request().source_context_ids,
-            "the typed views are identical..."
+        // SPOKE 0.16.0 keeps member presence through the typed view: an
+        // explicit `[]` decodes to `Some([])` and an omitted member to `None`,
+        // so the two payloads stay distinguishable after decode.
+        assert!(
+            explicit
+                .request()
+                .source_context_ids
+                .as_ref()
+                .is_some_and(Vec::is_empty),
+            "an explicit empty member keeps its presence"
+        );
+        assert!(
+            without_member.request().source_context_ids.is_none(),
+            "an omitted member stays absent"
         );
         assert_ne!(
             digest(&payload).expect("payload digest"),
             digest(&omitted).expect("payload digest"),
-            "...while the received objects are not"
+            "...and the received objects differ too"
         );
 
         let conflict = refusal(
