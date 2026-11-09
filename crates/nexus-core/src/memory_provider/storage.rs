@@ -153,6 +153,16 @@ pub(super) enum StoreError {
     StateConflict {
         current: String,
     },
+    /// §7.0.3 (inspector round 2): this process's terminal commit (transaction
+    /// 2) matched zero pending rows because the receipt's generation lease was
+    /// lost — reopen recovery terminalized it after the lease expired, or
+    /// another owner settled it. Not corruption: the envelope insert rolls
+    /// back with this error and the receipt stays replayable, so a same-key
+    /// retry (or `memory.receipts.get`) resolves the recorded outcome. Never
+    /// recorded on the receipt itself.
+    GenerationLeaseLost {
+        receipt_id: String,
+    },
     /// MEM-R005: a required authored profile kind is absent for the subject.
     ProfileIncomplete {
         subject_id: String,
@@ -328,6 +338,15 @@ struct GenerationRendezvous {
 /// §6.10 receipt status while its journaled file effect is not yet published
 /// (§5.2 step 2): durable, but not terminal.
 pub(super) const RECEIPT_PENDING: &str = "pending";
+
+/// How long a pending generate receipt's lease covers the generation running
+/// under it (§7.0.3, inspector round 2). The generation is in-process pure
+/// composition over a pinned snapshot, so the window is normally milliseconds;
+/// the lease only has to outlive pathological scheduling, while staying short
+/// enough that a crashed owner's receipt is recoverable at the next reopen
+/// without an operator. No renewals: transaction 2 either lands inside the
+/// lease or loses it to recovery.
+const GENERATION_LEASE_SECONDS: i64 = 30;
 
 /// §5.2 step 3: the receipt of an intent that could not be published. Terminal:
 /// `error_json` carries the failure envelope, and a later re-drive publishes the
@@ -582,6 +601,12 @@ impl PublicationGuard {
 }
 
 pub(super) struct MemoryStore {
+    /// This instance's identity, stamped as a pending generate receipt's
+    /// generation-lease `owner_id` (§7.0.3, inspector round 2). Two store
+    /// instances over one workspace — two processes, or two providers in one —
+    /// never share it, so reopen recovery can tell a live generation from a
+    /// crash orphan by the lease alone.
+    instance_id: String,
     pool: SqlitePool,
     /// Holds this provider's writer admission for the provider's lifetime.
     /// `None` on a read-only store, which holds no admission at all.
@@ -883,6 +908,7 @@ impl MemoryStore {
         let provisioned = Self::provider_tables_present(&pool).await?;
         let publish_gate = workspace_publish_gate(&files_root);
         Ok(Self {
+            instance_id: Uuid::new_v4().simple().to_string(),
             pool,
             guarded,
             files_root,
@@ -1286,8 +1312,11 @@ impl MemoryStore {
         self.recover_journal(space_id).await;
         // N4-R: a reflection generate receipt a crash left `pending` between
         // the two transactions terminalizes here — a pending receipt can never
-        // have a reflection row (its insert is transaction 2), so
-        // terminalizing every pending generate receipt is exact.
+        // have a reflection row (its insert is transaction 2). Only leases
+        // that are absent or already expired settle: a live lease is a
+        // generation another process is executing right now, and terminalizing
+        // it would break that process's transaction 2 (§7.0.3, inspector
+        // round 2). Its own open terminalizes it once its lease has expired.
         self.recover_reflections(space_id).await;
         // §6.10 retention is durable even for a deployment that only reads:
         // opening the provider reclaims what has aged out, and does so in its
@@ -4959,53 +4988,6 @@ fn reflection_marker(
 }
 
 impl MemoryStore {
-    /// §7.25 state read path: the authorized basis snapshot for one
-    /// selection/filter under the caller's *current* `reflect` coverage — the
-    /// authoritative store-clock check the provider-level admission only
-    /// previews. One transaction, one snapshot.
-    pub(super) async fn reflection_basis(
-        &self,
-        space_id: &str,
-        subject_id: &str,
-        selection: &Selection,
-        filter: Option<&[String]>,
-        principal_id: &str,
-    ) -> StoreResult<ReflectionBasisSnapshot> {
-        self.require_provisioned(space_id).await?;
-        let (mut tx, now) = self.begin_read().await?;
-        space_in_tx(&mut tx, space_id).await?;
-        let grant_rows = grants_in_tx(&mut tx, space_id).await?;
-        let grants = wire_grants(&grant_rows)?;
-        if !covered(
-            &grants,
-            principal_id,
-            space_id,
-            now,
-            &selection.base_requirement("reflect", subject_id),
-        ) {
-            return Err(StoreError::NotAuthorized(format!(
-                "principal {principal_id} holds no reflect grant covering the selection"
-            )));
-        }
-        let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
-        // §5.2/D-10: an unsettled file intent withholds the subject from reads.
-        if withheld(unsettled.as_ref(), subject_id)? {
-            tx.commit().await?;
-            return Ok(ReflectionBasisSnapshot {
-                records: Vec::new(),
-                profile_revisions: Vec::new(),
-            });
-        }
-        let (records, _tombstones) =
-            reflection_record_sets(&mut tx, selection, filter, space_id, subject_id).await?;
-        let profile_revisions = profile_revisions_in_tx(&mut tx, space_id, subject_id).await?;
-        tx.commit().await?;
-        Ok(ReflectionBasisSnapshot {
-            records,
-            profile_revisions,
-        })
-    }
-
     /// §7.26 list read path (and §7.25's `last_reflection_id` pick): every
     /// reflection envelope of the subject this principal may see, newest
     /// first, with staleness recomputed per row at read time and C-077 rows
@@ -5047,74 +5029,18 @@ impl MemoryStore {
                 .await?;
         let mut all_records = all_live;
         all_records.extend(all_tombstones);
-        let sql = format!(
-            "SELECT {REFLECTION_COLUMNS} FROM memory_reflections \
-             WHERE space_id = ? AND subject_id = ? \
-             ORDER BY seq DESC"
-        );
-        let rows = sqlx::query_as::<_, ReflectionRow>(sqlx::AssertSqlSafe(sql))
-            .bind(space_id)
-            .bind(subject_id)
-            .fetch_all(&mut *tx)
-            .await?;
-        // Per distinct pinned selection/filter, one recomputation of the
-        // current record sets; each envelope's staleness/exclusion verdict is
-        // then computed against that row's own pinned basis — envelopes
-        // sharing a pin may pin different bases, so a verdict computed from a
-        // sibling row's basis is never shared.
-        let mut probes: ReflectionProbeMap = HashMap::new();
-        // The request filter matches a pinned filter as a set — the same
-        // canonicalization the digest key renders — never by raw array order.
-        let request_filter_set = request_filter.map(super::canonical_ids);
-        let mut visible = Vec::with_capacity(rows.len());
-        for row in rows {
-            let pinned =
-                super::pinned_selection(&row.selection_json).map_err(StoreError::Corrupt)?;
-            let filter = pinned_filter(row.filter_json.as_ref())?;
-            let (live, tombstones) = {
-                let key = (
-                    row.selection_json.clone(),
-                    row.filter_json.clone().unwrap_or_default(),
-                );
-                match probes.entry(key) {
-                    Entry::Occupied(entry) => entry.into_mut(),
-                    Entry::Vacant(entry) => entry.insert(
-                        reflection_record_sets(
-                            &mut tx,
-                            &pinned,
-                            filter.as_deref(),
-                            space_id,
-                            subject_id,
-                        )
-                        .await?,
-                    ),
-                }
-            };
-            let (stale, excluded) = pinned_staleness(
-                live,
-                tombstones,
-                &profile_revisions,
-                &pinned,
-                filter.as_deref(),
-                &row.basis_json,
-            )?;
-            if excluded
-                || request_filter_set.as_ref().is_some_and(|requested| {
-                    Some(requested) != filter.as_deref().map(super::canonical_ids).as_ref()
-                })
-                || !covered(
-                    &grants,
-                    principal_id,
-                    space_id,
-                    now,
-                    &pinned.base_requirement("reflect", subject_id),
-                )
-                || !super::selection_scope_covers(&pinned, request_selection)
-            {
-                continue;
-            }
-            visible.push(VisibleReflection { row, stale });
-        }
+        let visible = visible_reflections_in_tx(
+            &mut tx,
+            &grants,
+            principal_id,
+            space_id,
+            subject_id,
+            &profile_revisions,
+            request_selection,
+            request_filter,
+            now,
+        )
+        .await?;
         tx.commit().await?;
         let marker_set: Vec<(String, i64)> = visible
             .iter()
@@ -5130,6 +5056,167 @@ impl MemoryStore {
         let total = u64::try_from(visible.len()).unwrap_or(u64::MAX);
         Ok((visible, marker, total))
     }
+
+    /// §7.25 state snapshot (inspector round 2): the authorized basis AND the
+    /// subject's visible reflections in **one** read transaction — one
+    /// snapshot — so the published state body can never mix an older
+    /// `state_digest` with a newer staleness verdict. The basis half is
+    /// [`Self::reflection_basis`]'s composition; the rows half is
+    /// [`Self::reflections`]' visibility narrowing for the same
+    /// selection/filter, without the cursor marker the state op never
+    /// publishes.
+    pub(super) async fn reflection_state_snapshot(
+        &self,
+        space_id: &str,
+        subject_id: &str,
+        selection: &Selection,
+        filter: Option<&[String]>,
+        principal_id: &str,
+    ) -> StoreResult<(ReflectionBasisSnapshot, Vec<VisibleReflection>)> {
+        self.require_provisioned(space_id).await?;
+        let (mut tx, now) = self.begin_read().await?;
+        space_in_tx(&mut tx, space_id).await?;
+        let grant_rows = grants_in_tx(&mut tx, space_id).await?;
+        let grants = wire_grants(&grant_rows)?;
+        // §7.25: the request's own selection must hold current `reflect`
+        // coverage before the basis publishes — the disclosure check
+        // `reflection_basis` performs, at the same point of the read.
+        if !covered(
+            &grants,
+            principal_id,
+            space_id,
+            now,
+            &selection.base_requirement("reflect", subject_id),
+        ) {
+            return Err(StoreError::NotAuthorized(format!(
+                "principal {principal_id} holds no reflect grant covering the selection"
+            )));
+        }
+        let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
+        // §5.2/D-10: an unsettled file intent withholds the subject from
+        // reads — both halves empty, exactly what the two separate reads
+        // produced before.
+        if withheld(unsettled.as_ref(), subject_id)? {
+            tx.commit().await?;
+            return Ok((
+                ReflectionBasisSnapshot {
+                    records: Vec::new(),
+                    profile_revisions: Vec::new(),
+                },
+                Vec::new(),
+            ));
+        }
+        let (records, _tombstones) =
+            reflection_record_sets(&mut tx, selection, filter, space_id, subject_id).await?;
+        let profile_revisions = profile_revisions_in_tx(&mut tx, space_id, subject_id).await?;
+        let visible = visible_reflections_in_tx(
+            &mut tx,
+            &grants,
+            principal_id,
+            space_id,
+            subject_id,
+            &profile_revisions,
+            Some(selection),
+            filter,
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok((
+            ReflectionBasisSnapshot {
+                records,
+                profile_revisions,
+            },
+            visible,
+        ))
+    }
+}
+
+/// The visible reflections one read transaction serves (§7.26): every
+/// reflection envelope of the subject this principal may see, newest first,
+/// with staleness recomputed per row at read time and C-077 rows excluded.
+/// Visible means all of: the caller's current `reflect` coverage admits the
+/// reflection's pinned selection, the request's selection scope covers the
+/// pin (an absent request selection narrows to the caller's covered
+/// reflections only), the request's provenance filter names the pin's own
+/// filter exactly (a present request filter returns only envelopes pinned to
+/// it; an absent one narrows nothing), and the pin's basis delta is not
+/// tombstoning. Caller-supplied rows come from the SAME transaction the
+/// caller opened, so every consumer of this helper serves one snapshot.
+#[allow(clippy::too_many_arguments)]
+async fn visible_reflections_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    grants: &[MemoryGrant],
+    principal_id: &str,
+    space_id: &str,
+    subject_id: &str,
+    profile_revisions: &[(String, i64)],
+    request_selection: Option<&Selection>,
+    request_filter: Option<&[String]>,
+    now: DateTime<Utc>,
+) -> StoreResult<Vec<VisibleReflection>> {
+    let sql = format!(
+        "SELECT {REFLECTION_COLUMNS} FROM memory_reflections \
+         WHERE space_id = ? AND subject_id = ? \
+         ORDER BY seq DESC"
+    );
+    let rows = sqlx::query_as::<_, ReflectionRow>(sqlx::AssertSqlSafe(sql))
+        .bind(space_id)
+        .bind(subject_id)
+        .fetch_all(&mut **tx)
+        .await?;
+    // Per distinct pinned selection/filter, one recomputation of the
+    // current record sets; each envelope's staleness/exclusion verdict is
+    // then computed against that row's own pinned basis — envelopes
+    // sharing a pin may pin different bases, so a verdict computed from a
+    // sibling row's basis is never shared.
+    let mut probes: ReflectionProbeMap = HashMap::new();
+    // The request filter matches a pinned filter as a set — the same
+    // canonicalization the digest key renders — never by raw array order.
+    let request_filter_set = request_filter.map(super::canonical_ids);
+    let mut visible = Vec::with_capacity(rows.len());
+    for row in rows {
+        let pinned = super::pinned_selection(&row.selection_json).map_err(StoreError::Corrupt)?;
+        let filter = pinned_filter(row.filter_json.as_ref())?;
+        let (live, tombstones) = {
+            let key = (
+                row.selection_json.clone(),
+                row.filter_json.clone().unwrap_or_default(),
+            );
+            match probes.entry(key) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => entry.insert(
+                    reflection_record_sets(tx, &pinned, filter.as_deref(), space_id, subject_id)
+                        .await?,
+                ),
+            }
+        };
+        let (stale, excluded) = pinned_staleness(
+            live,
+            tombstones,
+            profile_revisions,
+            &pinned,
+            filter.as_deref(),
+            &row.basis_json,
+        )?;
+        if excluded
+            || request_filter_set.as_ref().is_some_and(|requested| {
+                Some(requested) != filter.as_deref().map(super::canonical_ids).as_ref()
+            })
+            || !covered(
+                grants,
+                principal_id,
+                space_id,
+                now,
+                &pinned.base_requirement("reflect", subject_id),
+            )
+            || !super::selection_scope_covers(&pinned, request_selection)
+        {
+            continue;
+        }
+        visible.push(VisibleReflection { row, stale });
+    }
+    Ok(visible)
 }
 
 impl MemoryStore {
@@ -5222,11 +5309,24 @@ impl MemoryStore {
         }
         // The pending receipt is the point of no return: published before any
         // generation (C-015/C-070), carrying no payload, no terminal stamp and
-        // no cost.
+        // no cost. The same transaction stamps this instance as the lease
+        // owner with the generation deadline, so a concurrent reopen's
+        // recovery passes over the live generation (§7.0.3, inspector round 2).
         let receipt_id = mint_receipt_id();
         let mut row = self
             .write_receipt(&mut tx, ctx, &receipt_id, None, now)
             .await?;
+        sqlx::query(
+            "UPDATE memory_receipts SET owner_id = ?, lease_expires_at = ? \
+             WHERE receipt_id = ?",
+        )
+        .bind(&self.instance_id)
+        .bind(timestamp(
+            now + chrono::Duration::seconds(GENERATION_LEASE_SECONDS),
+        ))
+        .bind(&receipt_id)
+        .execute(&mut *tx)
+        .await?;
         self.commit_effect(tx).await?;
 
         // ── The parked window: pending published, terminal not yet ──
@@ -5291,19 +5391,21 @@ impl MemoryStore {
         let updated = sqlx::query(
             "UPDATE memory_receipts SET status = 'committed', result_json = ?, \
              error_json = NULL, completed_at = ? \
-             WHERE receipt_id = ? AND status = ?",
+             WHERE receipt_id = ? AND status = ? AND owner_id = ?",
         )
         .bind(result_json)
         .bind(settled_at)
         .bind(&row.receipt_id)
         .bind(RECEIPT_PENDING)
+        .bind(&self.instance_id)
         .execute(&mut *tx)
         .await?;
         if updated.rows_affected() != 1 {
-            return Err(StoreError::Corrupt(format!(
-                "pending receipt {} vanished before its terminal commit",
-                row.receipt_id
-            )));
+            // The lease was lost, not the store: the envelope insert rolls back
+            // with this error and the receipt stays replayable (§7.0.3).
+            return Err(StoreError::GenerationLeaseLost {
+                receipt_id: row.receipt_id.clone(),
+            });
         }
         self.commit_effect(tx).await?;
         row.status = "committed".to_string();
@@ -5328,18 +5430,20 @@ impl MemoryStore {
         let mut tx = begin_immediate(&self.pool).await?;
         let updated = sqlx::query(
             "UPDATE memory_receipts SET status = 'failed', error_json = ?, completed_at = ? \
-             WHERE receipt_id = ? AND status = ?",
+             WHERE receipt_id = ? AND status = ? AND owner_id = ?",
         )
         .bind(&failure_json)
         .bind(settled_at)
         .bind(receipt_id)
         .bind(RECEIPT_PENDING)
+        .bind(&self.instance_id)
         .execute(&mut *tx)
         .await?;
         if updated.rows_affected() != 1 {
-            return Err(StoreError::Corrupt(format!(
-                "pending receipt {receipt_id} vanished before its terminal commit"
-            )));
+            // Same lease-lost rule as the committed branch (§7.0.3).
+            return Err(StoreError::GenerationLeaseLost {
+                receipt_id: receipt_id.to_string(),
+            });
         }
         self.commit_effect(tx).await?;
         row.status = RECEIPT_FAILED.to_string();
@@ -5349,25 +5453,50 @@ impl MemoryStore {
         Ok(())
     }
 
-    /// Reopen recovery (§5.2 step 3 family): terminalize every reflection
-    /// generate receipt a crash left `pending` between the two transactions.
-    /// The recorded failure is retryable `INTERNAL_ERROR` — generation was
+    /// Reopen recovery (§5.2 step 3 family): terminalize the reflection
+    /// generate receipts a crash left `pending` between the two transactions —
+    /// and only those. A pending receipt carries its owner's lease
+    /// (§7.0.3, inspector round 2), so a receipt whose lease is still live is a
+    /// generation another process is executing right now and must be left
+    /// alone: terminalizing it would flip the live owner's transaction 2 into
+    /// a lease-lost conflict and record an "interrupted" failure nothing
+    /// interrupted. A lease that is absent (a writer older than the lease
+    /// columns) or expired marks the crash orphan this pass exists for. The
+    /// recorded failure is retryable `INTERNAL_ERROR` — generation was
     /// interrupted before any effect, so nothing was charged — and a same-key
     /// retry replays it while a new key runs a fresh generation (no double
-    /// charge, C-078). Bounded and best-effort like the journal pass: a
-    /// receipt this pass cannot terminalize stays pending until the next open.
+    /// charge, C-078). The pass holds the workspace publication section like
+    /// [`Self::recover_journal`], so recovery passes serialize, and stays
+    /// bounded and best-effort: a receipt this pass cannot terminalize stays
+    /// pending until the next open after its lease expires.
     async fn recover_reflections(&self, space_id: &str) {
+        // Held for the whole pass so recovery passes serialize; the pass only
+        // touches the receipts table, but the section is the workspace-wide
+        // recovery serialization point.
+        let _publication = match self.begin_publication_section().await {
+            Ok(publication) => publication,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "reflection generate recovery skipped: no publication lock"
+                );
+                return;
+            }
+        };
+        let now = timestamp(self.now());
         let Ok(mut tx) = begin_immediate(&self.pool).await else {
             tracing::warn!(%space_id, "reflection generate recovery skipped: no writer connection");
             return;
         };
         let orphans: Vec<(String,)> = match sqlx::query_as(
             "SELECT receipt_id FROM memory_receipts \
-             WHERE space_id = ? AND op = ? AND status = ?",
+             WHERE space_id = ? AND op = ? AND status = ? \
+             AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
         )
         .bind(space_id)
         .bind(super::OP_REFLECTIONS_GENERATE)
         .bind(RECEIPT_PENDING)
+        .bind(&now)
         .fetch_all(&mut *tx)
         .await
         {

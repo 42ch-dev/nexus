@@ -1330,3 +1330,71 @@ async fn qc_b5_fenced_subject_refuses_fresh_generation_remote() {
     assert!(read.get("error").is_none(), "reads stay admitted: {read}");
     matrix.shutdown().await;
 }
+
+// ── Inspector round 2: reopen recovery vs a live generation ─────────────
+
+/// Inspector round 2 (should-fix), fixture leg: a reopen recovery must not
+/// terminalize a generation another provider instance is executing. The
+/// generate parks at `GenerationPause` between its two transactions; a second
+/// `FixtureMemoryProvider::open` over the same database runs its recovery
+/// pass against the pending receipt; the parked generate's terminal commit
+/// must still land `committed` with no lease-lost refusal. The pending
+/// receipt carries its owner's lease from transaction 1, so the pass sees a
+/// live lease and skips it.
+#[tokio::test]
+async fn c_r2_recovery_skips_a_live_generation_lease_remote() {
+    let matrix = Matrix::remote().await;
+    bootstrap(&matrix, &[]).await;
+    grant_peer(&matrix, "reflect", "k-r2-grant").await;
+    create_shared_record(&matrix, "k-r2-r1", "Generation takes a real while.").await;
+    let digest = peer_state(&matrix, SUBJECT).await["state_digest"].clone();
+
+    // Park the generate after its pending receipt commit, before generation.
+    let mut hold = matrix
+        .fixture_faults()
+        .expect("the fixture leg exposes fault control")
+        .hold_next_bounded(FaultPoint::GenerationPause, Duration::from_secs(20));
+    let parked = tokio::spawn({
+        let client = matrix.peer_client();
+        let principal = matrix.peer_principal().clone();
+        let space = matrix.space_id().to_owned();
+        generate_with(
+            client,
+            principal,
+            space,
+            generate_body(SUBJECT, digest.as_str().expect("digest"), "k-r2-gen"),
+        )
+    });
+    hold.wait_reached()
+        .await
+        .expect("the generate reached its generation pause");
+
+    // Process B opens the same fixture database; its reopen recovery pass
+    // runs here against A's published pending receipt.
+    let other = nexus_memory_conformance::FixtureMemoryProvider::open(matrix.fixture_db())
+        .await
+        .expect("open process B over the same fixture database");
+    let mut observer = matrix
+        .durable_observer(SUBJECT, &[], None, None, None)
+        .await;
+    let pending_ids = observer
+        .receipt_ids_for("memory.reflections.generate")
+        .await;
+    assert_eq!(pending_ids.len(), 1, "exactly the pending receipt");
+    observer.close().await;
+    let pending = matrix.admin().get_receipt(&pending_ids[0]).await;
+    assert_eq!(
+        pending["receipt"]["status"],
+        json!("pending"),
+        "process B's recovery pass left the live generation pending: {pending}"
+    );
+    drop(other);
+
+    // Release: the parked generate terminal commits with no interference.
+    hold.release();
+    let resumed = join_bounded(parked, "the parked generate").await;
+    assert!(is_committed(&resumed), "{resumed}");
+    let terminal = matrix.admin().get_receipt(&pending_ids[0]).await;
+    assert_eq!(terminal["receipt"]["status"], json!("committed"));
+    matrix.shutdown().await;
+}

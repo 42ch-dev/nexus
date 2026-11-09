@@ -41,8 +41,8 @@ use uuid::Uuid;
 
 use crate::candidates::{
     receipt_id, release_expired_binding_in_tx, required_capabilities, resolve_replay,
-    settle_receipt_in_tx, stage_receipt_in_tx, Admitted, Mutation, ReceiptState, ReceiptTarget,
-    ReplayResolution,
+    settle_receipt_in_tx, stage_receipt_in_tx, timestamp_text, Admitted, Mutation, ReceiptState,
+    ReceiptTarget, ReplayResolution,
 };
 use crate::faults::FaultPoint;
 use crate::policy::describe_body;
@@ -1020,6 +1020,33 @@ impl FixtureMemoryProvider {
 const GENERATION_COST_UNIT_KIND: &str = "fixture_reflection_unit";
 const GENERATION_COST_UNITS: i64 = 1;
 
+/// How long a pending generate receipt's lease covers the generation running
+/// under it (§7.0.3, inspector round 2) — the same rule the local provider
+/// applies, so cross-provider rows observe identical semantics. The fixture's
+/// generation is deterministic in-process composition, so the lease only has
+/// to outlive pathological scheduling.
+const GENERATION_LEASE_SECONDS: i64 = 30;
+
+/// Stamp the generation lease on the just-staged pending receipt, on the
+/// caller's transaction 1 (§7.0.3, inspector round 2).
+async fn lease_pending_generate_in_tx(
+    conn: &mut SqliteConnection,
+    receipt_id: &str,
+    owner_id: &str,
+    now: DateTime<Utc>,
+) -> Result<(), SpokeReject> {
+    sqlx::query("UPDATE receipts SET owner_id = ?, lease_expires_at = ? WHERE receipt_id = ?")
+        .bind(owner_id)
+        .bind(timestamp_text(
+            now + chrono::Duration::seconds(GENERATION_LEASE_SECONDS),
+        ))
+        .bind(receipt_id)
+        .execute(conn)
+        .await
+        .map_err(internal_failure)?;
+    Ok(())
+}
+
 /// §14.3: the caller cannot tell whether the mutation committed.
 fn outcome_uncertain() -> SpokeReject {
     SpokeReject {
@@ -1224,6 +1251,11 @@ impl FixtureMemoryProvider {
             now,
         )
         .await?;
+        // §7.0.3 (inspector round 2): the same transaction 1 stamps this
+        // instance as the lease owner with the generation deadline, so the
+        // reopen recovery passes over a generation another instance is
+        // executing right now and terminalizes only crash orphans.
+        lease_pending_generate_in_tx(conn, &receipt_id, &self.generation_owner, now).await?;
         Ok(PendingGenerate::Staged(Box::new(StagedGenerate {
             space_id: space_id.to_owned(),
             subject_id: subject_id.to_owned(),
@@ -1331,6 +1363,7 @@ impl FixtureMemoryProvider {
             &mut transaction,
             &pending.space_id,
             &pending.receipt_id,
+            Some(&self.generation_owner),
             terminal,
             now,
         )
@@ -1481,18 +1514,23 @@ async fn insert_generated_reflection(
 
 /// Restart recovery (§8.5): a generate receipt left pending by a lost session
 /// can never complete — the fixture's generation is in-process state — so
-/// reopening the database terminalizes every orphaned pending generate
-/// receipt `failed` (retryable `INTERNAL_ERROR`, no cost). The same rule the
-/// local provider applies, so cross-provider rows observe identical
-/// semantics.
+/// reopening the database terminalizes it `failed` (retryable
+/// `INTERNAL_ERROR`, no cost). Only leases that are absent or expired settle:
+/// a live lease is a generation another provider instance is executing right
+/// now, and terminalizing it would break that instance's transaction 2
+/// (§7.0.3, inspector round 2). The same rule the local provider applies, so
+/// cross-provider rows observe identical semantics.
 pub async fn terminalize_orphaned_generate_receipts(
     store: &FixtureStore,
 ) -> Result<(), FixtureError> {
     let pool = store.pool();
+    let now = timestamp_text(Utc::now());
     let orphans = sqlx::query(
         "SELECT space_id, receipt_id FROM receipts \
-         WHERE op = 'memory.reflections.generate' AND status = 'pending'",
+         WHERE op = 'memory.reflections.generate' AND status = 'pending' \
+         AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
     )
+    .bind(&now)
     .fetch_all(pool)
     .await?
     .into_iter()
@@ -1509,6 +1547,7 @@ pub async fn terminalize_orphaned_generate_receipts(
             &mut transaction,
             &space_id,
             &receipt_id,
+            None,
             ReceiptState::Failed(internal(
                 "the provider restarted before the reflection generation completed",
             )),

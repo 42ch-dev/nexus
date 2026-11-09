@@ -273,6 +273,31 @@ impl ProviderError {
         }
     }
 
+    /// The request member a published reflection validator refused: the
+    /// validator's own machine-readable `field` (e.g. `selection.context_ids`,
+    /// `filter.source_context_ids`, `limit`), cut to the top-level request
+    /// member a client repairs — the shape the `"limit"` exemplars publish, so
+    /// `details.field` and `details.limit` agree. A validator that attaches no
+    /// field keeps `"selection"`: every reflection validator refusal names
+    /// selection scope today.
+    fn validator_field(reject: &SpokeReject) -> String {
+        reject
+            .details
+            .as_ref()
+            .and_then(|details| details["field"].as_str())
+            .map_or_else(
+                || "selection".to_owned(),
+                |field| field.split('.').next().unwrap_or(field).to_owned(),
+            )
+    }
+
+    /// [`Self::from_reject`] over the field the validator actually named —
+    /// the reflection entry points' mapping (inspector round 2, may-fix).
+    fn from_validator(reject: SpokeReject) -> Self {
+        let field = Self::validator_field(&reject);
+        Self::from_reject(reject, &field)
+    }
+
     const fn reject_code(&self) -> SpokeRejectCode {
         match self {
             Self::NotFound(_) => SpokeRejectCode::NotFound,
@@ -463,6 +488,11 @@ fn store_error(error: StoreError) -> ProviderError {
         },
         StoreError::RevisionConflict { current } => ProviderError::RevisionConflict { current },
         StoreError::StateConflict { current } => ProviderError::StateConflict { current },
+        StoreError::GenerationLeaseLost { receipt_id } => ProviderError::OutcomeUncertain(format!(
+            "the pending receipt {receipt_id} was settled by another owner before this \
+                 terminal commit; the envelope was not published — resolve with the same \
+                 idempotency key or memory.receipts.get"
+        )),
         StoreError::ProfileIncomplete {
             subject_id,
             missing,
@@ -4201,7 +4231,7 @@ impl MemoryPort for LocalMemoryProvider {
             },
         };
         if let SpokeResult::Reject(reject) = validate_memory_reflections_state(&request) {
-            return deny(&ProviderError::from_reject(reject, "selection"));
+            return deny(&ProviderError::from_validator(reject));
         }
         if let Some(error) = cognition_refusal(request.cognition_filter.is_some()) {
             return deny(&error);
@@ -4223,12 +4253,15 @@ impl MemoryPort for LocalMemoryProvider {
             .as_ref()
             .map(|filter| filter.source_context_ids.clone());
         // §7.25: the basis is published content-free and its digest is composed
-        // over the *current* authorized basis inside the store read (C-042 —
-        // no eager invalidation writes exist), so every basis-affecting fact
-        // shows up at the next read.
-        let snapshot = match self
+        // over the *current* authorized basis (C-042 — no eager invalidation
+        // writes exist), so every basis-affecting fact shows up at the next
+        // read. The basis and the visible reflections come from ONE store
+        // read — one snapshot (inspector round 2) — so `state_digest`,
+        // `stale` and `last_reflection_id` can never disagree about which
+        // basis a caller is looking at.
+        let (snapshot, rows) = match self
             .store
-            .reflection_basis(
+            .reflection_state_snapshot(
                 request.space_id.as_str(),
                 request.subject_id.as_str(),
                 &selection,
@@ -4237,7 +4270,7 @@ impl MemoryPort for LocalMemoryProvider {
             )
             .await
         {
-            Ok(snapshot) => snapshot,
+            Ok(parts) => parts,
             Err(error) => return deny(&store_error(error)),
         };
         let state_digest = match reflection_state_digest(
@@ -4257,23 +4290,10 @@ impl MemoryPort for LocalMemoryProvider {
             profile_projection(&snapshot.profile_revisions);
         // The read-side narrowing is the same one `list` uses: the newest
         // envelope this caller may see under this selection and provenance
-        // filter, excluding tombstoned-basis rows (C-077). With no envelope
-        // to compare against, `stale` is honestly false — there is no pinned
-        // basis that could have gone stale.
-        let (rows, ..) = match self
-            .store
-            .reflections(
-                request.space_id.as_str(),
-                request.subject_id.as_str(),
-                Some(&selection),
-                filter.as_deref(),
-                principal_id,
-            )
-            .await
-        {
-            Ok(rows) => rows,
-            Err(error) => return deny(&store_error(error)),
-        };
+        // filter, excluding tombstoned-basis rows (C-077) — read in the same
+        // snapshot as the basis above. With no envelope to compare against,
+        // `stale` is honestly false — there is no pinned basis that could
+        // have gone stale.
         let last = rows.first();
         let stale = last.is_some_and(|visible| visible.stale);
         respond(json!({
@@ -4305,7 +4325,7 @@ impl MemoryPort for LocalMemoryProvider {
         if let SpokeResult::Reject(reject) =
             validate_memory_reflections_list(&request, policy::MAX_PAGE_SIZE_BOUND)
         {
-            return deny(&ProviderError::from_reject(reject, "selection"));
+            return deny(&ProviderError::from_validator(reject));
         }
         if let Some(error) = cognition_refusal(request.cognition_filter.is_some()) {
             return deny(&error);
@@ -4396,7 +4416,7 @@ impl MemoryPort for LocalMemoryProvider {
         }
         let selection = wire_generate_selection(&request.selection);
         if let SpokeResult::Reject(reject) = validate_memory_reflections_generate(&request) {
-            return deny(&ProviderError::from_reject(reject, "selection"));
+            return deny(&ProviderError::from_validator(reject));
         }
         if let Some(error) = cognition_refusal(request.cognition_filter.is_some()) {
             return deny(&error);
@@ -4530,8 +4550,112 @@ impl MemoryPort for LocalMemoryProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::{created_at_cmp, describe_body};
+    use super::{
+        created_at_cmp, describe_body, policy, schemas, validate_memory_reflections_generate,
+        validate_memory_reflections_list, validate_memory_reflections_state, ProviderError,
+    };
+    use serde_json::json;
+    use spoke_operations::{SpokeReject, SpokeRejectCode, SpokeResult};
     use std::cmp::Ordering;
+
+    fn dto<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
+        serde_json::from_value(value).expect("request payload deserializes")
+    }
+
+    /// The top-level request member a validator refusal publishes as
+    /// `details.field` (inspector round 2, may-fix): the provider maps the
+    /// member the validator actually refused, never a hardcoded
+    /// `"selection"`.
+    fn mapped_field(result: SpokeResult<()>) -> String {
+        let mapped = match result {
+            SpokeResult::Ok(()) => panic!("the malformed request must be refused"),
+            SpokeResult::Reject(reject) => ProviderError::from_validator(reject),
+        };
+        match mapped {
+            ProviderError::InvalidInput { field, .. } => field,
+            other => panic!("a validator refusal maps onto INVALID_INPUT: {other:?}"),
+        }
+    }
+
+    /// Per-entry-point mapping: over-bound `limit` → `limit` (agreeing with
+    /// `details.limit`, §7.0.7 and the `validate_memory_spaces_list`
+    /// exemplar); an empty selected-contexts selection → `selection`; an
+    /// empty provenance filter → `filter`.
+    #[test]
+    fn reflection_validator_refusals_name_the_refused_field() {
+        assert_eq!(
+            mapped_field(validate_memory_reflections_list(
+                &dto(json!({
+                    "space_id": "sp",
+                    "subject_id": "sbj",
+                    "limit": 101,
+                })),
+                policy::MAX_PAGE_SIZE_BOUND,
+            )),
+            "limit"
+        );
+        assert_eq!(
+            mapped_field(validate_memory_reflections_state(&dto(json!({
+                "space_id": "sp",
+                "subject_id": "sbj",
+                "selection": { "mode": "selected_contexts", "context_ids": [] },
+            })))),
+            "selection"
+        );
+        assert_eq!(
+            mapped_field(validate_memory_reflections_list(
+                &dto(json!({
+                    "space_id": "sp",
+                    "subject_id": "sbj",
+                    "filter": { "source_context_ids": [] },
+                })),
+                policy::MAX_PAGE_SIZE_BOUND,
+            )),
+            "filter"
+        );
+        assert_eq!(
+            mapped_field(validate_memory_reflections_generate(&dto(json!({
+                "space_id": "sp",
+                "subject_id": "sbj",
+                "selection": { "mode": "selected_contexts", "context_ids": [] },
+                "expected_state_digest":
+                    "a7b4c2d0e9f183726554433f2e1d0c9b8a7968594a3b2c1d0e9f887766554433",
+                "idempotency_key": "k",
+            })))),
+            "selection"
+        );
+    }
+
+    /// A validator reject that attaches no machine-readable field keeps the
+    /// `"selection"` default — the only shape reflection validators can
+    /// refuse without one today.
+    #[test]
+    fn validator_field_defaults_to_selection() {
+        let mapped = ProviderError::from_validator(SpokeReject {
+            code: SpokeRejectCode::InvalidInput,
+            message: "no field attached".to_owned(),
+            details: None,
+        });
+        assert!(matches!(
+            mapped,
+            ProviderError::InvalidInput { ref field, .. } if field == "selection"
+        ));
+    }
+
+    /// The wire request types accept the shapes the mapping tests build (a
+    /// deserialization regression guard for the tests above).
+    #[test]
+    fn reflection_request_shapes_deserialize() {
+        let _: schemas::MemoryReflectionsStateRequest = dto(json!({
+            "space_id": "sp",
+            "subject_id": "sbj",
+            "selection": { "mode": "subject_all" },
+        }));
+        let _: schemas::MemoryReflectionsListRequest = dto(json!({
+            "space_id": "sp",
+            "subject_id": "sbj",
+        }));
+    }
 
     /// §4.1: the advertisement names the reflection sub-capability exactly when
     /// the instance serves the three reflection ops — the same switch the

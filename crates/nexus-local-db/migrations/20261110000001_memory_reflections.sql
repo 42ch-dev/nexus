@@ -53,6 +53,16 @@ CREATE TABLE IF NOT EXISTS memory_reflections (
     CHECK ((cost_unit_kind IS NULL) = (cost_units IS NULL))
 ) WITHOUT ROWID;
 
+-- Generation liveness (§7.0.3, inspector round 2): a *pending* generate
+-- receipt carries the owner that is running its generation and the instant its
+-- lease expires, so a reopen recovery can tell a crash orphan (lease expired)
+-- from a generation another process is executing right now (lease live) and
+-- terminalize only the former. Both stay NULL on terminal receipts; the
+-- writers on this table are already fenced by the receipt guards above (the
+-- receipt table predates this migration, so the columns ride it as ALTERs).
+ALTER TABLE memory_receipts ADD COLUMN owner_id TEXT;
+ALTER TABLE memory_receipts ADD COLUMN lease_expires_at TEXT;
+
 -- §7.26 list/state reads over a subject's reflections: newest-first by the
 -- store-assigned insertion order.
 CREATE INDEX IF NOT EXISTS idx_memory_reflections_subject_seq

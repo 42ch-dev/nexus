@@ -393,7 +393,7 @@ fn digest(value: &Value) -> Result<String, SpokeReject> {
     }
 }
 
-fn timestamp_text(value: DateTime<Utc>) -> String {
+pub fn timestamp_text(value: DateTime<Utc>) -> String {
     value.to_rfc3339_opts(SecondsFormat::Micros, true)
 }
 
@@ -1315,10 +1315,17 @@ pub async fn stage_receipt_in_tx(
 /// `Pending` receipt, later settle it to `Committed` or `Failed` on the caller's
 /// connection and never return it to pending. The fault and retention slices
 /// drive this transition; a synchronous op skips it and commits directly.
+///
+/// `owner` is the generation-lease owner for the §7.27 two-transaction
+/// generate flow: the guarded update then matches only the receipt this owner
+/// still holds pending, so a reopen recovery (or another instance) settling it
+/// first answers the typed uncertain refusal instead of claiming the effect
+/// (§7.0.3, inspector round 2). Every other caller passes `None`.
 pub async fn settle_receipt_in_tx(
     conn: &mut SqliteConnection,
     space_id: &str,
     receipt_id: &str,
+    owner: Option<&str>,
     state: ReceiptState,
     now: DateTime<Utc>,
 ) -> Result<MemoryReceipt, SpokeReject> {
@@ -1336,10 +1343,13 @@ pub async fn settle_receipt_in_tx(
     // declared recoverability windows.
     let body_expires_at = timestamp_text(body_expiry(now));
     let tombstone_expires_at = timestamp_text(tombstone_expiry(now));
+    // A generate receipt settles only for its lease owner; every other
+    // receipt carries no owner. `IS` is SQLite's NULL-safe equality, so the
+    // None shape matches the unowned rows exactly.
     let settled = sqlx::query(
         "UPDATE receipts SET status = ?, result_json = ?, error_json = ?, completed_at = ?, \
          body_expires_at = ? \
-         WHERE space_id = ? AND receipt_id = ? AND status = 'pending'",
+         WHERE space_id = ? AND receipt_id = ? AND status = 'pending' AND owner_id IS ?",
     )
     .bind(status)
     .bind(result)
@@ -1348,13 +1358,27 @@ pub async fn settle_receipt_in_tx(
     .bind(&body_expires_at)
     .bind(space_id)
     .bind(receipt_id)
+    .bind(owner)
     .execute(&mut *conn)
     .await
     .map_err(internal_failure)?;
     if settled.rows_affected() != 1 {
-        return Err(internal(format!(
-            "receipt {receipt_id} was not pending and cannot be settled"
-        )));
+        return Err(match owner {
+            // The lease was lost, not the store (§7.0.3): the receipt stays
+            // replayable and this caller resolves it through replay or
+            // memory.receipts.get — never a fabricated terminal outcome.
+            Some(_) => SpokeReject {
+                code: SpokeRejectCode::OutcomeUncertain,
+                message: format!(
+                    "receipt {receipt_id} was settled by another owner before this terminal \
+                     commit; resolve with the same idempotency key or memory.receipts.get"
+                ),
+                details: None,
+            },
+            None => internal(format!(
+                "receipt {receipt_id} was not pending and cannot be settled"
+            )),
+        });
     }
     sqlx::query(
         "UPDATE idempotency_namespace SET last_known_status = ?, tombstone_expires_at = ? \
@@ -4248,6 +4272,7 @@ mod tests {
             &mut transaction,
             &space,
             "rcpt_pending_probe",
+            None,
             ReceiptState::Committed(json!({ "candidate_ids": [], "classified": 0 })),
             now,
         )
@@ -4311,6 +4336,7 @@ mod tests {
             &mut transaction,
             &space,
             "rcpt_failed_probe",
+            None,
             ReceiptState::Failed(reject(
                 SpokeRejectCode::NotFound,
                 "the generation input no longer exists",
@@ -7692,6 +7718,7 @@ mod tests {
             &mut transaction,
             &scenario.space_id,
             "rcpt_pending_retention",
+            None,
             ReceiptState::Committed(json!({ "candidate_ids": [], "classified": 0 })),
             settle_at,
         )
