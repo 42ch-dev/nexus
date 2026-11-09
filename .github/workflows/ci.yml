@@ -661,6 +661,7 @@ jobs:
               -p nexus-cloud-domain
               -p nexus-config-metadata
               -p nexus-memory-conformance
+              -p nexus-spoke-adapter
           - group: orchestration-core
             packages: >-
               -p nexus-orchestration

@@ -63,9 +63,14 @@ async fn seed_character_carrier(pool: &sqlx::SqlitePool) -> String {
 }
 
 fn mind_state_for_carrier(carrier_id: &str, mind_state_id: &str) -> Value {
+    // The historical fixture pins the pre-0.16.0 bare delta path; the 0.16.0
+    // gate requires RFC 6901 pointers rooted at /modules/mental/<field> (see
+    // mind_state_gate.rs), so gate-facing wires built from it rewrite the
+    // delta path while the fixture bytes stay untouched in nexus-local-db.
     let mut wire: Value = serde_json::from_str(LEGACY_MIND_STATE_WIRE_FIXTURE).unwrap();
     wire["mind_state_id"] = json!(mind_state_id);
     wire["holder_entry_id"] = json!(carrier_id);
+    wire["deltas"][0]["path"] = json!("/modules/mental/attention");
     wire
 }
 
@@ -89,7 +94,10 @@ async fn revision(pool: &sqlx::SqlitePool, carrier_id: &str) -> i64 {
 }
 
 #[tokio::test]
-async fn legacy_mind_state_wire_fixture_still_validates_through_gate() {
+async fn legacy_mind_state_fixture_derived_wire_validates_through_gate() {
+    // The fixture itself keeps the pre-0.16.0 bare delta path as a storage
+    // pin; the gate-facing wire built from it (RFC 6901 delta path) must
+    // still validate and round-trip through the gate into storage.
     let (pool, _dir) = setup_db().await;
     let carrier = seed_character_carrier(&pool).await;
     let wire = mind_state_for_carrier(&carrier, "ms_legacy_pin");
