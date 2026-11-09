@@ -2969,10 +2969,26 @@ mod tests {
 
     // ── V1.52 T-A P0: outline 五问 heuristic gate ───────────────────────
 
+    // Serialize every test that can trigger `outline_five_q_check`'s info!
+    // callsite: the first trigger registers the callsite process-wide, and a
+    // first registration from a dispatcher-less test can race the capture
+    // test's interest rebuild, leaving the capture vector empty (CI-only
+    // flake in `outline_five_q_nogo_info_logs_dimensions`).
+    static TRACING_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn tracing_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        TRACING_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     #[test]
     fn outline_five_q_passes_on_complete_outline() {
         let outline = "## Opening\n- Lin Xia enters the tavern and confronts the stranger.\n- She discovers the stranger carries her brother's blade.\n## Middle\n- Stakes rise: the stranger knows where the blade was found.\n- F001: he plants a seed about the eastern gate.\n## End\n- Lin Xia must decide: trust him or draw her sword?\n";
-        let verdict = outline_five_q_check(outline);
+        let verdict = {
+            let _lock = tracing_test_lock();
+            outline_five_q_check(outline)
+        };
         assert!(verdict.go, "expected GO, got: {verdict:?}");
         assert!(verdict.dimensions.structure);
         assert!(verdict.dimensions.arc);
@@ -2984,7 +3000,10 @@ mod tests {
 
     #[test]
     fn outline_five_q_fails_on_empty_outline() {
-        let verdict = outline_five_q_check("");
+        let verdict = {
+            let _lock = tracing_test_lock();
+            outline_five_q_check("")
+        };
         assert!(!verdict.go);
         assert!(!verdict.dimensions.structure);
         assert!(!verdict.dimensions.pacing);
@@ -2995,7 +3014,10 @@ mod tests {
     fn outline_five_q_fails_without_arc_or_hook() {
         // Structured and paced, but no conflict/change and no hook.
         let outline = "## Scene 1\n- The party walks through the forest.\n- They see many trees.\n## Scene 2\n- They stop for lunch.\n";
-        let verdict = outline_five_q_check(outline);
+        let verdict = {
+            let _lock = tracing_test_lock();
+            outline_five_q_check(outline)
+        };
         assert!(!verdict.go);
         assert!(verdict.dimensions.structure);
         assert!(!verdict.dimensions.arc);
@@ -3010,7 +3032,10 @@ mod tests {
     fn outline_five_q_detects_hook_via_question() {
         // Minimal structured outline with arc and foreshadow words; hook via '?'.
         let outline = "## Beat 1\n- Kael must steal the map before dawn.\n- He plants a promise that the guard will return.\n## Beat 2\n- Will he make it out alive?";
-        let verdict = outline_five_q_check(outline);
+        let verdict = {
+            let _lock = tracing_test_lock();
+            outline_five_q_check(outline)
+        };
         assert!(verdict.go, "expected GO, got: {verdict:?}");
     }
 
@@ -3019,11 +3044,14 @@ mod tests {
     // log is the primary operator observability for why the heuristic gate
     // blocked draft generation.
     #[test]
-    // The captured-log lock is held through the assertion (the failure message
-    // reads `msgs`); early-drop adds nothing in this test.
+    // The tracing-serialization lock and the captured `msgs` guard are both
+    // held through the assertion (the failure message reads `msgs`);
+    // early-drop adds nothing in this test.
     #[allow(clippy::significant_drop_tightening)]
     fn outline_five_q_nogo_info_logs_dimensions() {
         use std::sync::{Arc, Mutex};
+
+        let _tracing_lock = tracing_test_lock();
 
         #[derive(Clone)]
         struct CaptureLayer {
@@ -3061,6 +3089,11 @@ mod tests {
             );
 
         tracing::subscriber::with_default(subscriber, || {
+            // Re-register callsite interest under THIS test's subscriber: an
+            // earlier trigger from a dispatcher-less context may have cached
+            // `Interest::NEVER` for the gate's info! callsite, which would
+            // silently skip our capture layer (process-wide cache).
+            tracing::callsite::rebuild_interest_cache();
             // Structured and paced, but lacks arc, foreshadow, and hook.
             let outline = "## Scene 1\n\
                 - The party walks through the ancient forest in the late afternoon light.\n\
