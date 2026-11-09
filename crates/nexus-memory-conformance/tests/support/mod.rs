@@ -737,9 +737,13 @@ pub struct Matrix {
 
 /// Open the real local provider and its operator/peer mapping over a prepared
 /// home (the migration/character preparation stayed with the caller).
+/// `reflections: false` opens the deliberately-unadvertised shape (staging
+/// spec §4 N4-R): describe omits `spoke-memory-reflection` and the three
+/// reflection ops answer the not-served refusal.
 async fn open_local_workspace(
     home_dir: TempDir,
     creator_id: Option<String>,
+    reflections: bool,
 ) -> (
     Home,
     Provider,
@@ -750,9 +754,15 @@ async fn open_local_workspace(
 ) {
     let user_home = home_dir.path().to_path_buf();
     let admin_id = creator_id.unwrap_or_else(|| LOCAL_ADMIN_ID.to_owned());
-    let provider = LocalMemoryProvider::open(user_home.clone(), &admin_id, LOCAL_WORKSPACE)
-        .await
-        .expect("open the local provider");
+    let provider = if reflections {
+        LocalMemoryProvider::open(user_home.clone(), &admin_id, LOCAL_WORKSPACE)
+            .await
+            .expect("open the local provider")
+    } else {
+        LocalMemoryProvider::open_unadvertised(user_home.clone(), &admin_id, LOCAL_WORKSPACE)
+            .await
+            .expect("open the unadvertised local provider")
+    };
     let space_id = provider.space_id().to_owned();
     let directory = Arc::new(
         PeerDirectory::new()
@@ -816,7 +826,21 @@ async fn open_remote_workspace(
 impl Matrix {
     /// A fresh run over the requested provider implementation.
     pub async fn start(kind: Kind) -> Self {
-        Self::assemble(kind, TempDir::new().expect("temporary matrix home"), None).await
+        Self::assemble(kind, TempDir::new().expect("temporary matrix home"), None, true).await
+    }
+
+    /// A local run whose provider deliberately withholds the
+    /// `spoke-memory-reflection` sub-capability (staging spec §4 N4-R): the
+    /// Connect dispatch gate refuses the reflection family, which is the shape
+    /// C-003/C-073's continuity rows stay green on.
+    pub async fn local_unadvertised() -> Self {
+        Self::assemble(
+            Kind::Local,
+            TempDir::new().expect("temporary matrix home"),
+            None,
+            false,
+        )
+        .await
     }
 
     /// A local run whose workspace already holds a real Character and its
@@ -825,7 +849,7 @@ impl Matrix {
     pub async fn local_character() -> (Self, CharacterFixture) {
         let home = TempDir::new().expect("temporary matrix home");
         let (fixture, creator_id) = create_character_fixture(home.path()).await;
-        let matrix = Self::assemble(Kind::Local, home, Some(creator_id)).await;
+        let matrix = Self::assemble(Kind::Local, home, Some(creator_id), true).await;
         (matrix, fixture)
     }
 
@@ -841,14 +865,19 @@ impl Matrix {
     }
 
     /// Assemble a run over a prepared home.
-    async fn assemble(kind: Kind, home_dir: TempDir, creator_id: Option<String>) -> Self {
+    async fn assemble(
+        kind: Kind,
+        home_dir: TempDir,
+        creator_id: Option<String>,
+        reflections: bool,
+    ) -> Self {
         let host_id = match kind {
             Kind::Local => "c-matrix-local",
             Kind::Remote => "c-matrix-remote",
         }
         .to_owned();
         let (home, provider, space_id, directory, admin_principal, peer_principal) = match kind {
-            Kind::Local => open_local_workspace(home_dir, creator_id).await,
+            Kind::Local => open_local_workspace(home_dir, creator_id, reflections).await,
             Kind::Remote => open_remote_workspace(home_dir).await,
         };
         let service = build_service(&provider, &directory);
