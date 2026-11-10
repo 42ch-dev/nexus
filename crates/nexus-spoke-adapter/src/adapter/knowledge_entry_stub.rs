@@ -71,14 +71,18 @@ impl KnowledgeEntryPort for StubKnowledgeEntryPort {
         state.mutations.push(StubKnowledgeEntryMutation::Get {
             entry_id: entry_id.to_owned(),
         });
-        match state.entries.get(entry_id) {
-            Some(entry) => SpokeResult::Ok(entry.clone()),
-            None => SpokeResult::Reject(SpokeReject {
-                code: SpokeRejectCode::KnowledgeEntryNotFound,
-                message: format!("KnowledgeEntry not found: {entry_id}"),
-                details: None,
-            }),
-        }
+        let result = state.entries.get(entry_id).map_or_else(
+            || {
+                SpokeResult::Reject(SpokeReject {
+                    code: SpokeRejectCode::KnowledgeEntryNotFound,
+                    message: format!("KnowledgeEntry not found: {entry_id}"),
+                    details: None,
+                })
+            },
+            |entry| SpokeResult::Ok(entry.clone()),
+        );
+        drop(state);
+        result
     }
 
     // shortcut: no CAS — a put always replaces by `entry_id`. Upgrade when P2
@@ -94,6 +98,7 @@ impl KnowledgeEntryPort for StubKnowledgeEntryPort {
             expected_base_revision,
         });
         state.entries.insert(entry.entry_id.clone(), entry.clone());
+        drop(state);
         SpokeResult::Ok(entry)
     }
 }
