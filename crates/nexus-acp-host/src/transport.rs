@@ -835,9 +835,9 @@ impl ManagedAcpProcess {
     /// ([`AgentSpawner::spawn_with_env_policy`]), not from this helper; a
     /// caller-built `kill_on_drop` child keeps its own policy on that branch.
     ///
-    /// Without a current Tokio runtime there is no task and therefore no drop
-    /// path: the handle is retained by [`Self::retain_unreaped`], which never
-    /// signals it.
+    /// Without a current Tokio runtime there is no task; that branch goes to
+    /// [`Self::reap_without_runtime`], which never drops and never signals the
+    /// child.
     fn hand_to_reaper(mut child: tokio::process::Child) {
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
@@ -845,27 +845,45 @@ impl ManagedAcpProcess {
                     let _ = child.wait().await;
                 });
             }
-            Err(_) => Self::retain_unreaped(child),
+            Err(_) => Self::reap_without_runtime(child),
         }
     }
 
-    /// Retain a child that no reaper can own, without ever dropping it.
+    /// Reap a child that no Tokio runtime can own, without ever dropping it.
     ///
-    /// This is the only place an owned handle is kept outside any reaper: a
-    /// non-Tokio executor cannot run the reaping task, and dropping the handle
-    /// would signal a `kill_on_drop` child — exactly the kill a cleanup
-    /// refusal must never perform. The handle stays owned for the life of the
-    /// process, so its child is never signalled by us and the OS collects it
-    /// when this process exits. The managed launch path spawns and drives on
-    /// Tokio, so this branch is a guarantee for any executor, not a planned
-    /// path.
-    fn retain_unreaped(child: tokio::process::Child) {
-        static RETAINED: std::sync::Mutex<Vec<tokio::process::Child>> =
-            std::sync::Mutex::new(Vec::new());
-        RETAINED
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(child);
+    /// No reactor is available, so `Child::wait` cannot run; the handle is
+    /// therefore leaked (`mem::forget`) — the one alternative to leaking it is
+    /// dropping it, which delivers `kill_on_drop`'s signal to a child the
+    /// cleanup refusal declined to signal. Its pid is then reaped from a plain
+    /// thread: `waitpid` blocks without a reactor and only ever resolves a
+    /// child of this process, so there is no PID-reuse hazard and no zombie
+    /// once the child exits (the thread lives exactly as long as the child).
+    ///
+    /// Summary of that branch: the handle is never dropped, the child is never
+    /// signalled by us, and the thread reaps it when it exits. If the child is
+    /// still running when this process exits it survives as an orphan — the OS
+    /// reparents a live process, it does not collect it.
+    #[cfg(unix)]
+    fn reap_without_runtime(child: tokio::process::Child) {
+        let pid = child
+            .id()
+            .map(|pid| nix::unistd::Pid::from_raw(pid.cast_signed()));
+        std::mem::forget(child);
+        if let Some(pid) = pid {
+            std::thread::spawn(move || {
+                let _ = nix::sys::wait::waitpid(pid, None);
+            });
+        }
+    }
+
+    /// Non-Unix: no `waitpid`-style child wait is available here, and the
+    /// managed launch path never reaches this branch. The handle is leaked
+    /// rather than dropped, so the child is never signalled by us; its exit
+    /// status is never collected, and if it is still running when this process
+    /// exits it survives as an orphan.
+    #[cfg(not(unix))]
+    fn reap_without_runtime(child: tokio::process::Child) {
+        std::mem::forget(child);
     }
 
     /// Bounded teardown of an owned child that failed to launch/connect.
@@ -2185,12 +2203,13 @@ mod tests {
         let _ = nix::sys::wait::waitpid(leader_pid, None);
     }
 
-    /// The no-runtime branch must never drop a handle it cannot own: a
-    /// `kill_on_drop` child handed to the reaper without a current runtime is
-    /// retained, so the refusal cannot become the kill it declined to send.
+    /// The no-runtime branch must neither signal the child nor leave it a
+    /// zombie: a `kill_on_drop` handle handed to the reaper without a current
+    /// runtime is never dropped, and a plain `waitpid` thread reaps the child
+    /// once it exits.
     #[cfg(unix)]
     #[test]
-    fn reaper_without_runtime_never_signals_the_child() {
+    fn reaper_without_runtime_never_signals_and_reaps_the_child() {
         // A Tokio child needs a reactor at spawn time; the handle then moves
         // out of that runtime's context (a plain test thread).
         let inner = tokio::runtime::Builder::new_current_thread()
@@ -2209,17 +2228,25 @@ mod tests {
         });
         let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
 
-        // No current runtime on this thread: the handle has no reaper, so it
-        // must be retained — a drop would deliver `kill_on_drop`'s SIGKILL.
+        // No current runtime on this thread: the handle is leaked (a drop would
+        // deliver `kill_on_drop`'s SIGKILL) and its pid is reaped off-thread.
         ManagedAcpProcess::hand_to_reaper(child);
 
-        assert_survives_without_signal(leader, "the reaper's no-runtime retention");
+        assert_survives_without_signal(leader, "the reaper's no-runtime fallback");
 
-        // Fixture-owned termination and reap; the retained handle is never
-        // dropped, so it can never signal this (reaped) pid again.
+        // Nothing in this test waits for the child: ESRCH can only come from
+        // the fallback's `waitpid` thread, i.e. it reaps rather than leaving a
+        // zombie.
         nix::sys::signal::kill(leader_pid, nix::sys::signal::Signal::SIGKILL)
-            .expect("SIGKILL the retained fixture");
-        let _ = nix::sys::wait::waitpid(leader_pid, None);
+            .expect("SIGKILL the fixture");
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while nix::sys::signal::kill(leader_pid, None).is_ok() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the no-runtime fallback must reap the child once it exits"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     /// Bounded liveness proof for a child that must not have been signalled:
