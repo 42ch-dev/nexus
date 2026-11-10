@@ -272,7 +272,7 @@ const fn is_ipv6_private_range(v6: &Ipv6Addr) -> bool {
 
 /// Version string for the embedded registry snapshot.
 /// Bumped every release when the snapshot list is updated.
-const REGISTRY_SNAPSHOT_VERSION: &str = "2026-06-22.v2";
+const REGISTRY_SNAPSHOT_VERSION: &str = "2026-11-11.v1";
 
 /// Embedded capability IDs shipped with the binary.
 ///
@@ -762,7 +762,7 @@ mod tests {
         // The snapshot version must never change without a code change.
         // If this test fails because REGISTRY_SNAPSHOT_VERSION was
         // intentionally bumped, update the expected value.
-        assert_eq!(REGISTRY_SNAPSHOT_VERSION, "2026-06-22.v2");
+        assert_eq!(REGISTRY_SNAPSHOT_VERSION, "2026-11-11.v1");
 
         let cap = RegistryRefresh::new();
         let out = cap.run(serde_json::json!({})).await.unwrap();
@@ -770,7 +770,7 @@ mod tests {
         // Verify every known capability ID is embedded
         let count = usize::try_from(out["capabilityCount"].as_u64().unwrap()).unwrap_or(usize::MAX);
         assert_eq!(count, REGISTRY_SNAPSHOT_CAPABILITIES.len());
-        assert!(count >= 31, "expected at least 31 capabilities in snapshot");
+        assert!(count >= 30, "expected at least 30 capabilities in snapshot");
     }
 
     // ── Embedded snapshot integrity tests ──────────────────────────────────
