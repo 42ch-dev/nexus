@@ -56,6 +56,16 @@ pub enum AcpError {
         details: String,
     },
 
+    /// The owned process group's liveness could not be proven: the leader may
+    /// still be running or descendants may survive teardown. Distinct from
+    /// [`AcpError::AgentCrashed`] so hosts can classify teardown failures by
+    /// kind — never by message text.
+    #[error("cleanup unconfirmed: {reason}")]
+    CleanupUnconfirmed {
+        /// Human-readable reason the cleanup could not be confirmed.
+        reason: String,
+    },
+
     /// The requested agent is not installed and cannot be resolved.
     #[error("agent not installed: {agent_id}. Run `nexus42 agent run {agent_id}` to start, or install it first.")]
     NotInstalled {
@@ -152,6 +162,14 @@ impl AcpError {
             agent_path,
             stderr_output,
             details,
+        }
+    }
+
+    /// Create a cleanup-unconfirmed error for the given reason: the owned
+    /// process group's liveness could not be proven.
+    pub fn cleanup_unconfirmed(reason: impl Into<String>) -> Self {
+        Self::CleanupUnconfirmed {
+            reason: reason.into(),
         }
     }
 
