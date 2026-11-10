@@ -2,7 +2,7 @@
 
 ## Scope
 
-**平台侧对照**: nexus-platform `v1-spec/platform/creator-agent-registration-v1.md` §3–§4 **实现仓库**: `nexus`（CLI），**非** `nexus-platform` **CLI Spec**: [`cli-spec.md`](../cli/cli-spec.md) §6.2B **集成边界**: registration via **`nexus-cloud-sync`** (CLI → platform HTTP), **not** Daemon API — cloud-line rule in [`cli-spec.md`](../cli/cli-spec.md) §6.5; historical split record: [`local-cloud-crate-architecture.md`](../../../.agents/adr/archived/architecture/2026-09-21-local-cloud-crate-architecture.md) §6. **当前实现锚点**: solver 编排在 [`apps/nexus42/src/challenge/mod.rs`](../../../apps/nexus42/src/challenge/mod.rs)（`solve_challenge`），由 [`apps/nexus42/src/commands/creator/mod.rs`](../../../apps/nexus42/src/commands/creator/mod.rs) 的 `register_creator` 导入并调用；[`crates/nexus-creator/src/creator.rs`](../../../crate
+This page locks the CLI-side Challenge solver for Creator self-registration: the obfuscated-math challenge parsing and answering path inside `nexus42`, its registration and verify flow carried over `nexus-cloud-sync`, and the frozen behavior the CLI owes the platform. Platform-side challenge generation and verification stay owned by nexus-platform `v1-spec/platform/creator-agent-registration-v1.md`; the command surface and the cloud-line rule stay owned by [`cli-spec.md`](../cli/cli-spec.md).
 
 ## Current state
 
