@@ -18,13 +18,13 @@ Source: migrated from the retired tracked specs corpus
 | **Status** | **Proposed** — not authorization to execute. Nothing here is registered as a workflow, no stage is scheduled, and no feature is claimed shipped. Every "Current" statement is a snapshot of the repository as read on 2026-10-28. |
 | **Document class** | Exploration |
 | **Scope** | How nexus would adopt the `spoke-memory` family: the two-layer landing model (protocol adoption ≠ data merge), the target architecture (`MemoryPort` in-process provider + application authorization adapter), the caller-migration inventory, the staged roadmap `NXM-*` with its gates, the deferred triggers, and the adoption-program definition of done. |
-| **Coordinates with** | [spoke-memory-protocol.md](2026-10-28-spoke-memory-protocol.md) (wire symbols and `MEM-R###` invariants — referenced, never redefined here), [spoke-memory-conformance.md](2026-10-28-spoke-memory-conformance.md) (`C-*` scenarios and the acceptance matrix this plan's stages trace to), [spoke-adapter-architecture.md](../../../../docs/specs/architecture/spoke-adapter-architecture.md) (the consumption boundary and port-delegation rules the provider must fit) |
+| **Coordinates with** | [spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md) (wire symbols and `MEM-R###` invariants — referenced, never redefined here), [spoke-memory-conformance.md](2026-10-28-spoke-memory-conformance.md) (`C-*` scenarios and the acceptance matrix this plan's stages trace to), [spoke-adapter-architecture.md](../../../../docs/specs/architecture/spoke-adapter-architecture.md) (the consumption boundary and port-delegation rules the provider must fit) |
 
 **Landing reconciliation (2026-11-01).** This plan was written against SPOKE 0.14.1, where the family was still proposed. Upstream 0.15.0 (2026-10-30) landed it additively and 0.15.1 (2026-10-31) is docs/CI only; crates.io and npm publish 0.15.1, so the protocol side of the two-layer model is now available to consume. The reference policy engine stays `fixtures/memory-engine/rust` (`spoke-fixture-memory-engine`, path-dependency-only, unpublished) — provider-private implementation, not a published protocol participant, so plans that treat it as an upstream dependency must vendor or reimplement rather than depend on it. This nexus repository has since moved its five lockstep pins to 0.15.1 (the re-pin also carries the upstream generated-type rename sweep in its consumers), but the adoption stages below remain unscheduled and unconsumed; upstream task IDs from the discarded implementation plan are replaced by "already landed upstream".
 
 #### Original framing (research provenance)
 
-> This plan was **not** authorization to execute, does not register any workflow, and did not claim any feature shipped. Wire-level symbols are owned by [spoke-memory-protocol.md](2026-10-28-spoke-memory-protocol.md) (naming contract v2.0, 2026-10-28) and are **referenced, never redefined** here. Upstream implementation task IDs cited as dependencies were owned by the upstream implementation plan, which is superseded by the landed 0.15.0 shape and is deliberately not promoted: the family now exists, so a staging plan for building it is dead weight.
+> This plan was **not** authorization to execute, does not register any workflow, and did not claim any feature shipped. Wire-level symbols are owned by [spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md) (naming contract v2.0, 2026-10-28) and are **referenced, never redefined** here. Upstream implementation task IDs cited as dependencies were owned by the upstream implementation plan, which is superseded by the landed 0.15.0 shape and is deliberately not promoted: the family now exists, so a staging plan for building it is dead weight.
 
 ### 1. Purpose and scope
 
@@ -37,14 +37,14 @@ them through one provider boundary. Remote (cloud or third-party) providers
 implement the same service semantics over SPOKE Connect.
 
 Non-goals for this document: defining wire fields (owned by
-[spoke-memory-protocol.md](2026-10-28-spoke-memory-protocol.md)), changing SPOKE source
+[spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md)), changing SPOKE source
 (upstream owns its own releases), executing any task below, and re-enabling the
 currently refused automatic run-capture path (§6.4, Decision D-4).
 
 ### 2. Protocol symbol reference (frozen names, cited from the protocol spec)
 
 > Shorthand used by the `Owner` column and body prose: `01` =
-> [spoke-memory-protocol.md](2026-10-28-spoke-memory-protocol.md); `04` =
+> [spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md); `04` =
 > [spoke-memory-conformance.md](2026-10-28-spoke-memory-conformance.md); `02` = the
 > upstream implementation plan, **not tracked here** — it is superseded by the
 > landed 0.15.0 shape, so its task series (A1–A3, B1–B4, C1–C3, D1–D5, E1–E4,

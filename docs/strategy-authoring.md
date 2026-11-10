@@ -39,10 +39,10 @@ for the end-to-end loop; this doc is the authoring reference.
 Two forkable bundles ship as worked examples (details in
 [Worked examples](#worked-examples)):
 
-- [`game-narrative/`](../strategy-samples/game-narrative/) — lore import:
+- [`game-narrative/`](../strategy-samples/game-narrative) — lore import:
   trigger (game event) + scheduled (interval sweep) lanes extracting
   worldview / character-sheet KnowledgeEntry drafts + Relation hints.
-- [`react-trpg-turn/`](../strategy-samples/react-trpg-turn/) — TRPG turn
+- [`react-trpg-turn/`](../strategy-samples/react-trpg-turn) — TRPG turn
   loop: mechanical-op lane (settle-first) + natural-language-turn lane
   (propose → settle → narrate), plus the browse-guard contract in its README.
 
@@ -353,13 +353,13 @@ read-only; only user bundles under `~/.nexus42/presets/<id>/` are patchable
 
 ## Worked examples
 
-- [`react-trpg-turn/`](../strategy-samples/react-trpg-turn/) — README
+- [`react-trpg-turn/`](../strategy-samples/react-trpg-turn) — README
   carries the full turn contract: browse guard, the two lanes, the
   idempotency/completion contract, and the distillation mapping to the
   partner's turn contract. `preset.yaml` shows both lane graphs; templates/
   shows the stepwise prompt chain (`intent → op request → settle receipt →
   narration`).
-- [`game-narrative/`](../strategy-samples/game-narrative/) — `preset.yaml`
+- [`game-narrative/`](../strategy-samples/game-narrative) — `preset.yaml`
   shows the trigger + scheduled lane split and the lane-selector judge;
   templates/ shows the extraction → KnowledgeEntry/Relation wire contract
   (the exact draft shape your backend writes over Connect).

@@ -291,7 +291,7 @@ P0 MAY start after this Exploration is merged, even if the #486 *implementation*
 - [holder-governance.md](../../../../docs/specs/architecture/holder-governance.md)
 - [llm-extract.md](../../../../docs/specs/orchestration/llm-extract.md)
 - [local-db-schema.md](../../../../docs/specs/runtime/local-db-schema.md)
-- Spoke memory Explorations under `proposed/architecture/spoke-memory-*.md`
+- Spoke memory records under `.agents/adr/{implemented,proposed}/architecture/spoke-memory-*.md`
 - Sibling IR Explorations: [PR #483](https://github.com/42ch-dev/nexus/pull/483) (Workflow IR), [PR #485](https://github.com/42ch-dev/nexus/pull/485) (Work Artifact IR)
 - Implementation evidence: `crates/nexus-spoke-adapter/src/conversion/knowledge_entry.rs`, `crates/nexus-spoke-adapter/src/adapter/knowledge_entry_port.rs` (`KnowledgeEntryPort` / `NexusAdapter`), `crates/nexus-knowledge/src/world_kb/store.rs` (`KbStore`), `crates/nexus-local-db/src/kb_store.rs` (`SqliteKbStore`), `crates/nexus-knowledge` `KnowledgeEntryRecord`, `crates/nexus-moment-context-assembly` World KB slot
 

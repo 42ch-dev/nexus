@@ -1,6 +1,6 @@
-# ADR: SPOKE Memory Protocol — RFC-style Proposal (spoke-memory)
+# ADR: SPOKE Memory Protocol
 
-Status: proposed — not implement authority. The upstream protocol surface is landed and published; **no nexus code implements or serves this family**, and this document authorizes no work.
+Status: implemented — upstream protocol published (spoke 0.16.0) and the base family plus reflection are wired in nexus; transfer remains explicitly unsupported
 Date: 2026-10-28
 Scope: The `spoke-memory` wire and service contract: operation names, wire fields, capability IDs, normative invariants (`MEM-R###`), data models, lifecycle, error codes, and the amendment it makes to the "Author Memory is product-local" boundary. Behavior is owned by upstream SPOKE; this document is the nexus-side reading of it plus the adoption constraints.
 Source: migrated from the retired tracked specs corpus
@@ -9,28 +9,30 @@ Source: migrated from the retired tracked specs corpus
 
 **Landing reconciliation (2026-11-01).** Written as a research proposal against SPOKE 0.14.1, this family has since landed upstream: release 0.15.0 (2026-10-30) added it additively (schemas + codegen, `MemoryPort` + validators, Connect dispatch rows, `RemoteMemoryService`, and a fixtures-only reference engine), and 0.15.1 (2026-10-31) is docs/CI only; both crates.io and npm publish 0.15.1. The reference policy engine is `fixtures/memory-engine/rust` (`spoke-fixture-memory-engine`), a path-dependency-only crate that is **never published** — it is implementation, not protocol, so it is not part of the surface a conforming provider must reproduce (§1.1 still binds: the protocol surface is schemas + operations + Connect arbitration). This nexus repository moved its five lockstep pins 0.14.1 →
 
-## Proposal
+## Decision
+
+The `spoke-memory` family is the published wire and service contract for per-subject long-term memory, and nexus consumes it as a Connect memory client: the local provider is the default, remote binding is opt-in, and the base operations plus reflection are wired through `MemoryPort`. Transfer/import-export remain explicitly unsupported and are tracked as N4-T in the conformance staging spec. The sections below record the adopted contract.
 
 ### 0. Document position
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | **Proposed** — not implement authority. The upstream protocol surface is landed and published; **no nexus code implements or serves this family**, and this document authorizes no work. |
+| **Status** | **Implemented** — upstream protocol published; nexus consumes the base contract and serves reflection, with transfer deferred as N4-T. |
 | **Document class** | Exploration |
 | **Scope** | The `spoke-memory` wire and service contract: operation names, wire fields, capability IDs, normative invariants (`MEM-R###`), data models, lifecycle, error codes, and the amendment it makes to the "Author Memory is product-local" boundary. Behavior is owned by upstream SPOKE; this document is the nexus-side reading of it plus the adoption constraints. |
-| **Coordinates with** | [spoke-memory-adoption-plan.md](2026-10-28-spoke-memory-adoption-plan.md) (nexus rollout stages `NXM-*`), [spoke-memory-conformance.md](2026-10-28-spoke-memory-conformance.md) (`C-*` conformance matrix), [spoke-adapter-architecture.md](../../../../docs/specs/architecture/spoke-adapter-architecture.md) (the SPOKE consumption boundary this family would join), [entity-scope-model.md](../../../../docs/specs/architecture/entity-scope-model.md) (scope hierarchy a memory space is provisioned against) |
+| **Coordinates with** | [spoke-memory-adoption-plan.md](../../proposed/architecture/2026-10-28-spoke-memory-adoption-plan.md) (nexus rollout stages `NXM-*`), [spoke-memory-conformance.md](../../proposed/architecture/2026-10-28-spoke-memory-conformance.md) (`C-*` conformance matrix), [spoke-adapter-architecture.md](../../../../docs/specs/architecture/spoke-adapter-architecture.md) (the SPOKE consumption boundary this family would join), [entity-scope-model.md](../../../../docs/specs/architecture/entity-scope-model.md) (scope hierarchy a memory space is provisioned against) |
 
 **Landing reconciliation (2026-11-01).** Written as a research proposal against SPOKE 0.14.1, this family has since landed upstream: release 0.15.0 (2026-10-30) added it additively (schemas + codegen, `MemoryPort` + validators, Connect dispatch rows, `RemoteMemoryService`, and a fixtures-only reference engine), and 0.15.1 (2026-10-31) is docs/CI only; both crates.io and npm publish 0.15.1. The reference policy engine is `fixtures/memory-engine/rust` (`spoke-fixture-memory-engine`), a path-dependency-only crate that is **never published** — it is implementation, not protocol, so it is not part of the surface a conforming provider must reproduce (§1.1 still binds: the protocol surface is schemas + operations + Connect arbitration). This nexus repository moved its five lockstep pins 0.14.1 → 0.15.1 in the same round as this promotion (the re-pin also carries the upstream generated-type rename sweep in its consumers), but consumes neither side of the family: nothing below is adopted, and §18.3's "not current" statements describe the pre-landing repository snapshot, not today's upstream.
 
 #### Original framing (research provenance)
 
-- **Status:** Proposed. Nothing in this document was implemented in the SPOKE repository at research time. Every normative statement below (RFC 2119 MUST/SHOULD/MAY) binds only a conforming implementation of this proposal. §18 records the repository state the proposal was written against and the exact boundary it amends.
+- **Status:** Implemented upstream and adopted in nexus. Every normative statement below (RFC 2119 MUST/SHOULD/MAY) binds a conforming implementation of this contract. §18 records the research state and the amended boundary.
 - **Protocol family:** `spoke-memory` — optional, independent capability family. It does not extend `spoke-baseline`, does not add fields to `KnowledgeEntry`, and does not use `modules.memory` (which does not exist; see §18).
 - **Wire protocol version:** `memory_protocol_version = 1` (integer, independent of SPOKE package versions).
-- **SSOT roles:** This document is the single source of truth for all memory operation names, wire field definitions, capability IDs, and common semantic invariants. Companion documents ([spoke-memory-adoption-plan.md](2026-10-28-spoke-memory-adoption-plan.md), [spoke-memory-conformance.md](2026-10-28-spoke-memory-conformance.md)) cite these symbols and never redefine them.
+- **SSOT roles:** This document is the single source of truth for all memory operation names, wire field definitions, capability IDs, and common semantic invariants. Companion documents ([spoke-memory-adoption-plan.md](../../proposed/architecture/2026-10-28-spoke-memory-adoption-plan.md), [spoke-memory-conformance.md](../../proposed/architecture/2026-10-28-spoke-memory-conformance.md)) cite these symbols and never redefine them.
 
 
-The key words MUST, MUST NOT, SHOULD, and MAY in this document are to be interpreted as described in RFC 2119, and apply exclusively to implementations claiming conformance to this proposal.
+The key words MUST, MUST NOT, SHOULD, and MAY in this document are to be interpreted as described in RFC 2119, and apply exclusively to implementations claiming conformance to this contract.
 
 ---
 
@@ -92,7 +94,7 @@ Rules:
 
 ### 5. Normative invariants
 
-Anchors `MEM-R###` are the conformance reference points; [spoke-memory-conformance.md](2026-10-28-spoke-memory-conformance.md) owns the `C-*` scenario IDs that exercise them.
+Anchors `MEM-R###` are the conformance reference points; [spoke-memory-conformance.md](../../proposed/architecture/2026-10-28-spoke-memory-conformance.md) owns the `C-*` scenario IDs that exercise them.
 
 | Anchor | Invariant |
 |---|---|
@@ -744,7 +746,7 @@ For async pending receipts (§7.0.3): the pending receipt is durable; after a pr
 
 ### 15. Complete JSON examples
 
-All examples are complete, valid JSON documents conforming to this proposal. They are illustrative vectors, not execution receipts from a running provider. Every `payload_digest`/`digest`/`content_digest` value below was computed as SHA-256 over the RFC 8785 JCS canonicalization (§6.1) of its matching object — not a decorative constant.
+All examples are complete, valid JSON documents conforming to this contract. They are illustrative vectors, not execution receipts from a running provider. Every `payload_digest`/`digest`/`content_digest` value below was computed as SHA-256 over the RFC 8785 JCS canonicalization (§6.1) of its matching object — not a decorative constant.
 
 #### 15.1 `RetainedRecord`
 
@@ -1096,17 +1098,17 @@ Doc 04 owns `C-*` scenarios; each MUST cite at least one `MEM-R###` anchor from 
 - Capability gate: `crates/spoke-connect/src/core/dispatch.rs:13-24` defines `spoke-baseline`, `l2-computable`, `ke-extraction`, `ke-ownership`; `dispatch_allowed` fails closed for unknown ops (lines 52-58). The `port.*` D4 catalogue's requirement map lives in `crates/spoke-connect/src/remote/responder.rs:107-129`; client mapping in `crates/spoke-connect/src/remote/remote_adapter.rs:1412-1539`. `RemoteExtractService` (connect-owned service seam, distinct from the in-process port) is in `crates/spoke-connect/src/remote/serve_ports.rs`.
 - Manifest carrier: `schemas/data/host-capability-manifest.schema.json` — `capabilities[]` open string vocabulary.
 - Error shape: `schemas/common/error-envelope.schema.json` (`code`/`message`/`details`/`extensions`); existing ops-layer codes in `crates/spoke-operations/src/result.rs:8-35` (incl. `REVISION_CONFLICT`, `INTERNAL_ERROR`).
-- Idempotency today: `idempotency_key` on `UpsertRequest` is documented "no server semantics in v0.1" (`schemas/ops/upsert-request.schema.json:16-19`); tool `idempotent` is advisory only (`schemas/data/tool-descriptor.schema.json:56-60`). **This proposal adds real, durable, payload-bound idempotency for the memory family only.**
+- Idempotency today: `idempotency_key` on `UpsertRequest` is documented "no server semantics in v0.1" (`schemas/ops/upsert-request.schema.json:16-19`); tool `idempotent` is advisory only (`schemas/data/tool-descriptor.schema.json:56-60`). **The adopted contract adds real, durable, payload-bound idempotency for the memory family only.**
 - OCC precedent: TS `KnowledgeEntryPort.putKnowledgeEntry` documents `expectedBaseRevision` conditional-put semantics (`packages/spoke-operations/src/adapter/ports.ts:25-42`).
 - Schema conventions: `schemas/README.md` (draft-07, closed objects, extensions required, one type per file, `<op>-request`/`<op>-response` pairing, codegen via `pnpm run codegen`).
 
-#### 18.2 Boundary amendment this proposal makes
+#### 18.2 Boundary amendment this decision makes
 
 The "Author Memory is product-local" boundary statements cited in §18.1 are amended to: *Author Memory is standardized as the optional `spoke-memory` capability family (this document); products that do not implement it keep memory product-local and MUST NOT emulate it through baseline objects (MEM-R019).* World KB and ToM/mental-state surfaces (`modules.mental`, `modules.belief`, `MindState`) remain independent and referenceable; nothing is copied into memory.
 
-#### 18.3 Proposed, not current in nexus
+#### 18.3 Adopted in nexus
 
-Everything in §§3–17. At the research pin (SPOKE 0.14.1) there was no `spoke-memory` capability, no `MemoryPort`, no memory schemas, and no memory ops in the dispatch table; upstream has since landed and published them (see *Landing reconciliation* in §0), while **this repository still consumes neither side of the family** — no `MemoryPort` wiring, no served memory ops, no memory capabilities in the host manifest. This document authorizes none of that work by itself.
+The base family is implemented in this repository. `spoke-schemas`, `spoke-operations`, and `spoke-connect` are pinned at the published 0.16.0 lockstep; `nexus-core` wires `MemoryPort`, the local provider is the default, remote binding is an opt-in Connect client, and the reflection sub-capability is served. Transfer/import-export operations remain explicitly unsupported and are carried as N4-T in [`spoke-memory-conformance-staging.md`](../../../../docs/specs/architecture/spoke-memory-conformance-staging.md). No Nexus memory responder is added, and World KB / ToM surfaces remain independent.
 
 ## Alternatives considered
 
@@ -1131,11 +1133,9 @@ Everything in §§3–17. At the research pin (SPOKE 0.14.1) there was no `spoke
 - `authority_generation` — removal would make stale post-cutover bindings indistinguishable; kept for MEM-R027.
 - Tombstones — removal would lose delete-vs-audit reconciliation; kept for MEM-R014.
 
-## Acceptance criteria
+## Consequences
 
-Not stated as a separate acceptance list; where the proposal defines a landing or promotion sequence, it stays in the proposal.
-
-## Risks
+The adopted contract fixes these boundaries and non-goals:
 
 #### 1.1 In scope
 

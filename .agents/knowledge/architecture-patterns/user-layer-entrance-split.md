@@ -91,5 +91,5 @@ See §3 table for the four enforcement-path failures and fixes. Structural ancho
 - Concept: `CONCEPTS.md` § Entrance (canonical definition — this doc does not redefine it)
 - Settings host pattern: [settings-modal-primary-host.md](settings-modal-primary-host.md)
 - `setup_completed` asymmetry: [asymmetric-setup-completed-context.md](asymmetric-setup-completed-context.md)
-- Shell IA: [web-rebuild-ia.md](../../adr/proposed/feature/2026-10-22-web-rebuild-ia.md)
+- Shell IA: [web-rebuild-ia.md](../../adr/implemented/feature/2026-10-22-web-rebuild-ia.md)
 - Specs: `.agents/adr/archived/feature/2026-10-22-web-ui-retired-historical-notes.md`, `docs/specs/surfaces/desktop-shell.md`

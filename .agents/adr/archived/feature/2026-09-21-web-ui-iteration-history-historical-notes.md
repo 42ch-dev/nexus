@@ -402,7 +402,7 @@ The authoring surface consumes new chapter-content schemas (additive, owned by T
 #### at pre-freeze line ~235
 
 ```markdown
-*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup); V1.65 §13 Content-Authoring stage amendment promotes at V1.65 P-last. Design tokens: `apps/web/DESIGN.md` (V1.64 Standard + V1.65 Standard+ editor/table/context-menu increment); design intent input: [web-ui-design-requirements.md](../../../../.agents/adr/proposed/surfaces/web-ui-design-requirements.md).*
+*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup); V1.65 §13 Content-Authoring stage amendment promotes at V1.65 P-last. Design tokens: `apps/web/DESIGN.md` (V1.64 Standard + V1.65 Standard+ editor/table/context-menu increment); design intent input: [web-ui-design-requirements.md](../../proposed/surfaces/web-ui-design-requirements.md).*
 ```
 
 #### at pre-freeze line ~237

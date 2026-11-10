@@ -12,7 +12,7 @@ This is the **public open-source monorepo** containing the `nexus42` CLI and the
 
 **Not in this repo:** `nexus-platform` (private TypeScript monorepo for web/API/services) — do not reference its tech stack here.
 
-**Harness coordination:** Shared results are [`.agents/knowledge/`](.agents/knowledge/), [`.agents/adr/`](.agents/adr/), [`docs/specs/`](docs/specs/), and [`.mstar/AGENTS.md`](.mstar/AGENTS.md). Directory declarations live in the tracked [`.mstarc`](.mstarc). Delivery state is local process (gitignored) — not clone SSOT. Runtime: upstream **[Morning Star (mstar-harness)](https://github.com/btspoony/mstar-harness)** `mstar-*` skills.
+**Harness coordination:** Shared results are [`.agents/knowledge/`](.agents/knowledge), [`.agents/adr/`](.agents/adr), [`docs/specs/`](docs/specs), and [`.mstar/AGENTS.md`](.mstar/AGENTS.md). Directory declarations live in the tracked [`.mstarc`](.mstarc). Delivery state is local process (gitignored) — not clone SSOT. Runtime: upstream **[Morning Star (mstar-harness)](https://github.com/btspoony/mstar-harness)** `mstar-*` skills.
 
 ## Morning Star harness (layering)
 
@@ -205,7 +205,7 @@ git submodule update --init --recursive   # after pull if skill dirs are empty
 ```
 
 - **`--filter=blob:none`:** faster first clone (blobs fetched on checkout as needed).
-- **`--recurse-submodules`:** required for developers — [`.agents/skills/`](.agents/skills/) (ACP skill root) must be present. Two submodules (~272 KB total) are not a clone bottleneck.
+- **`--recurse-submodules`:** required for developers — [`.agents/skills/`](.agents/skills) (ACP skill root) must be present. Two submodules (~272 KB total) are not a clone bottleneck.
 - Optional user `~/.gitconfig`: `[clone] filter = blob:none`, `[fetch] prune = true`, `[maintenance] auto = true`. Do **not** set `recurseSubmodules = false` globally.
 
 **Submodule policy:**

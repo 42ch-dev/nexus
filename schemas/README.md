@@ -8,23 +8,23 @@
 
 | Directory | Files (approx.) | Purpose |
 | --- | --- | --- |
-| [common/](common/) | 3 | Shared IDs, enums, `SourceAnchor`, `VersionRef` |
-| [domain/](domain/) | 12 | Wire entities (Creator, World, Character, ActorRef, …) |
-| [platform/http-bff/](platform/http-bff/) | 34 | Platform HTTP request/response bodies |
-| [platform/sync/](platform/sync/) | 7 | CLI ↔ platform sync protocol (bundle, delta, pull, conflict) |
-| [daemon-api/common/](daemon-api/common/) | 1 | Shared Daemon API envelopes — `ErrorResponse` (F-E1, V1.64) |
-| [daemon-api/compute/](daemon-api/compute/) | 2 | WASM compute ABI envelopes (ComputeInput / ComputeOutput). V1.61 origin, V1.62 moved. |
-| [daemon-api/works/](daemon-api/works/) | 10 | Works CRUD request/response schemas (V1.63) |
-| [daemon-api/kb/](daemon-api/kb/) | 8 | Work-scope KB entry CRUD schemas + shared `PaginationInfo` (V1.63) |
-| [daemon-api/findings/](daemon-api/findings/) | 6 | Quality findings CRUD schemas + cursor list response (V1.63; list-response F-P2 V1.64) |
-| [daemon-api/schedule/](daemon-api/schedule/) | 14 | Schedule + core-context CRUD schemas (V1.63) |
-| [daemon-api/workspace/](daemon-api/workspace/) | 8 | Workspace management CRUD schemas (V1.63) |
-| [daemon-api/creators/](daemon-api/creators/) | 8 | Creator management CRUD schemas (V1.63) |
-| [daemon-api/characters/](daemon-api/characters/) | 9 | Character identity + ActorWorldBinding DTOs (v1.184 P0) |
-| [daemon-api/agent-host/](daemon-api/agent-host/) | 12 | Agent Host scan/session/operation contracts + optional Actor/Viewpoint pair (v1.184 P2) |
-| [daemon-api/orchestration/sessions/](daemon-api/orchestration/sessions/) | 4 | Orchestration engine session READ schemas (V1.63 P3) |
-| [daemon-api/orchestration/capabilities/](daemon-api/orchestration/capabilities/) | 2 | Capability registry READ schemas (V1.63 P3) |
-| [daemon-api/preset-management/](daemon-api/preset-management/) | 7 | Preset management full-surface schemas (V1.63 P3) |
+| [common/](common) | 3 | Shared IDs, enums, `SourceAnchor`, `VersionRef` |
+| [domain/](domain) | 12 | Wire entities (Creator, World, Character, ActorRef, …) |
+| [platform/http-bff/](platform/http-bff) | 34 | Platform HTTP request/response bodies |
+| [platform/sync/](platform/sync) | 7 | CLI ↔ platform sync protocol (bundle, delta, pull, conflict) |
+| [daemon-api/common/](daemon-api/common) | 1 | Shared Daemon API envelopes — `ErrorResponse` (F-E1, V1.64) |
+| [daemon-api/compute/](daemon-api/compute) | 2 | WASM compute ABI envelopes (ComputeInput / ComputeOutput). V1.61 origin, V1.62 moved. |
+| [daemon-api/works/](daemon-api/works) | 10 | Works CRUD request/response schemas (V1.63) |
+| [daemon-api/kb/](daemon-api/kb) | 8 | Work-scope KB entry CRUD schemas + shared `PaginationInfo` (V1.63) |
+| [daemon-api/findings/](daemon-api/findings) | 6 | Quality findings CRUD schemas + cursor list response (V1.63; list-response F-P2 V1.64) |
+| [daemon-api/schedule/](daemon-api/schedule) | 14 | Schedule + core-context CRUD schemas (V1.63) |
+| [daemon-api/workspace/](daemon-api/workspace) | 8 | Workspace management CRUD schemas (V1.63) |
+| [daemon-api/creators/](daemon-api/creators) | 8 | Creator management CRUD schemas (V1.63) |
+| [daemon-api/characters/](daemon-api/characters) | 9 | Character identity + ActorWorldBinding DTOs (v1.184 P0) |
+| [daemon-api/agent-host/](daemon-api/agent-host) | 12 | Agent Host scan/session/operation contracts + optional Actor/Viewpoint pair (v1.184 P2) |
+| [daemon-api/orchestration/sessions/](daemon-api/orchestration/sessions) | 4 | Orchestration engine session READ schemas (V1.63 P3) |
+| [daemon-api/orchestration/capabilities/](daemon-api/orchestration/capabilities) | 2 | Capability registry READ schemas (V1.63 P3) |
+| [daemon-api/preset-management/](daemon-api/preset-management) | 7 | Preset management full-surface schemas (V1.63 P3) |
 
 **Removed paths (do not recreate):**
 

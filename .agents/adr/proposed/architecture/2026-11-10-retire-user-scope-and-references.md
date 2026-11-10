@@ -296,7 +296,7 @@ Pre-1.0 local persistence already MAY be wiped rather than migrated ([reference-
 - [reference-store-layout.md](../../../../docs/specs/runtime/reference-store-layout.md), [reference-knowledge.md](../../../../docs/specs/runtime/reference-knowledge.md)
 - [cli-spec.md](../../../../docs/specs/cli/cli-spec.md) (`creator knowledge`, `creator reference`, `creator kb`, assemble-moment)
 - [world-kb-runtime-architecture.md](../../../../docs/specs/architecture/world-kb-runtime-architecture.md)
-- Spoke memory Explorations: `proposed/architecture/spoke-memory-protocol.md`, `spoke-memory-adoption-plan.md` (N4-T / N5 still open; no KnowledgeEntry-in-memory)
+- Spoke memory records: `implemented/architecture/spoke-memory-protocol.md`, `proposed/architecture/spoke-memory-adoption-plan.md` (N4-T / N5 still open; no KnowledgeEntry-in-memory)
 - Sibling strategy / work Explorations: [PR #483](https://github.com/42ch-dev/nexus/pull/483), [PR #485](https://github.com/42ch-dev/nexus/pull/485)
 - Stacked follow-up: `proposed/architecture/knowledge-ir.md` (lands in the child PR; not present on this branch alone)
 - Implementation evidence: `crates/nexus-local-db/src/knowledge_store.rs`, `crates/nexus-core/src/knowledge.rs` (`DEFAULT_USER_ID`, work-scope file index, `queue_kb_extract`), `crates/nexus-core/src/host.rs` (`with_user(creator_id)`), `crates/nexus-moment-context-assembly/src/moment.rs`, `apps/nexus42/src/commands/creator/knowledge.rs`, `apps/nexus42/src/commands/creator/reference.rs`, `apps/nexus42/src/commands/creator/kb.rs`, `apps/nexus42/src/commands/creator/mod.rs` (demo seed), `apps/nexus-service/src/knowledge.ts`, `crates/nexus-orchestration/src/capability/builtins/reference_refresh.rs`

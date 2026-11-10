@@ -1,6 +1,6 @@
-# ADR: Web Rebuild IA — App-Shell Architecture (Proposal)
+# ADR: Web Rebuild IA — App-Shell Architecture
 
-Status: proposed — direction confirmed by the product owner against the clickable prototype (2026-10-22); not yet implemented
+Status: implemented — the app-shell IA, module rail, profile/workspace switchers and first-run wizard ship in `apps/web`
 Date: 2026-10-22
 Scope: The information architecture and onboarding flow for the in-place rebuild of `apps/web`: app-shell layout, module-as-app rail, Creator-profile switcher, workspace switcher placement, first-run onboarding for both entrances
 Source: migrated from the retired tracked specs corpus
@@ -9,12 +9,15 @@ Source: migrated from the retired tracked specs corpus
 
 Nexus is a local-first, AI-driven narrative-orchestration studio. The one-line promise to creators: **your world remembers, so your story never contradicts itself**.
 
-## Proposal
+## Decision
+
+`apps/web` ships one SPA with the app-shell IA: a topnav that carries identity rather than navigation, a module/app rail, a Creator-profile switcher, workspace chips on content surfaces, and a first-run wizard for both entrances. The landing routes are World Timeline for creators and the developer Hub (操作台) for developers. The implementation landed across v1.219–v1.222; the sections below record the IA contract that now holds.
+
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | **Proposed** — direction confirmed by the product owner against the clickable prototype (2026-10-22); not yet implemented |
-| **Document class** | Product/UX architecture proposal |
+| **Status** | **Implemented** — app-shell IA, onboarding and landing routes ship in `apps/web` (v1.219–v1.222) |
+| **Document class** | Architecture decision record |
 | **Scope** | The information architecture and onboarding flow for the in-place rebuild of `apps/web`: app-shell layout, module-as-app rail, Creator-profile switcher, workspace switcher placement, first-run onboarding for both entrances |
 | **Prototype** | `.mstar/projects/web-rebuild/prototypes/onboarding-v3.html` (clickable, verified in-browser; local-only, gitignored) |
 | **Supersedes** | the retired web-ui spec (retired 2026-10-22; carried-over invariants are listed in §7) |
@@ -114,12 +117,6 @@ Guided empty state, not a blank dashboard:
 
 Rail registry: 操作台 / Harness / 模块 / 能力 / 会话. Hub cards: local service status, agent (ACP) status, Harness summary (presets, running sessions), installed modules. Every rail app beyond Hub lazy-loads on first visit.
 
-### 5. Rebuild execution notes
-
-- **In-place, single SPA**: same `apps/web`, same build, no second scaffold (STRATEGY lock). Routes migrate screen by screen; the legacy tree is deleted as each replacement lands.
-- **Component source**: all new screens compose from `@42ch/nexus-ui` (V1.148–V1.150 complete); Design Studio fixtures are the visual reference (`pnpm dev:design-studio`).
-- **Web-first development**: the entire build/test loop runs in the browser against `apps/nexus-service`; Electron packaging is the last step and reuses the same SPA.
-
 ### 7. Carried-over invariants from the retired spec
 
 These survive the retirement of `web-ui.md` and bind the rebuild:
@@ -130,25 +127,13 @@ These survive the retirement of `web-ui.md` and bind the rebuild:
 4. **AI owns prose** — no body full-text editor; the UI is the planning/structure surface, the runtime drafts body prose (retired spec §13.2).
 5. **Local-first** — works fully offline; cloud sync opt-in; loopback service with no new auth surface.
 
-### 8. Open decisions (to resolve during implementation)
-
-| # | Question | Current lean |
-| --- | --- | --- |
-| O1 | `creative_root` derivation for onboarding's default workspace | `~/Nexus/<slugified-name>`; confirm against `home.rs` discovery |
-| O2 | Does the legacy setup-time `workspaceRoot` become the first workspace's `creative_root`? | Yes; verify no consumer treats it as a global root |
-| O3 | SOUL maturity % shown in the profile dropdown | Display-only; formula owned by creator-memory-soul-lifecycle |
-| O4 | Locked-module unlock events beyond Brief → 作品 | Defined per app during its rebuild plan; persisted per creator |
-| O5 | Group-chip row on list pages vs detail pages | List pages only; detail pages show workspace as breadcrumb context |
-
 ## Alternatives considered
 
-Not stated as a separate comparison in the migrated proposal; where the body names a rejected direction, that record stays in the proposal.
+The rebuild was constrained to the in-place single SPA: no second scaffold, no new design system, no second build target. Those rejected directions are recorded in the decision body and consequences where they apply.
 
-## Acceptance criteria
+## Consequences
 
-Not stated as a separate acceptance list; where the proposal defines a landing or promotion sequence, it stays in the proposal.
-
-## Risks
+The shipped rebuild stays within these boundaries:
 
 - No visual redesign, no new tokens/colors/typography — `DESIGN.md` / `DESIGN.dark.md` remain the sole token source.
 - No second SPA, no new build target, no native player app (PD-09 unchanged).

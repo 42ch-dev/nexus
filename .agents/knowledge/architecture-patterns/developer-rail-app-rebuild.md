@@ -4,7 +4,7 @@ Promoted to: `.agents/knowledge/architecture-patterns/developer-rail-app-rebuild
 
 ## When to use
 
-Rebuilding an `apps/web` rail app to the post-2026-10-22 generation standard (single SPA, app-shell IA per `.agents/adr/proposed/feature/2026-10-22-web-rebuild-ia.md`, web-first). Verified three times in v1.221 (modules, capabilities, sessions) after v1.220 established it (Hub, Harness).
+Rebuilding an `apps/web` rail app to the post-2026-10-22 generation standard (single SPA, app-shell IA per `.agents/adr/implemented/feature/2026-10-22-web-rebuild-ia.md`, web-first). Verified three times in v1.221 (modules, capabilities, sessions) after v1.220 established it (Hub, Harness).
 
 ## The recipe (per rail app)
 

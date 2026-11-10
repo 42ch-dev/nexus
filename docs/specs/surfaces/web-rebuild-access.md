@@ -11,7 +11,7 @@ Browser/dev entry: plain HTTP (local + LAN), tokenized startup URL → session c
 | **Status** | **Shipped** — iteration v1.219-web-rebuild (2026-10-22), plans `v1219-shell-and-access` T1/T4 + `v1219-onboarding` |
 | **Scope** | Browser/dev entry: plain HTTP (local + LAN), tokenized startup URL → session cookie, derived first-run gate, 401 recovery, workspace family exposure + in-process promotion |
 | **Owners** | `apps/nexus-service` (transport/auth), `crates/nexus-core-node` (admission/promotion), `apps/web` (gate/recovery UI) |
-| **Related** | [web-rebuild-ia.md](../../../.agents/adr/proposed/feature/2026-10-22-web-rebuild-ia.md) (IA), I-000059/I-000060/I-000061/I-000062 (entry gaps), I-000063 (workspace create deferred) |
+| **Related** | [web-rebuild-ia.md](../../../.agents/adr/implemented/feature/2026-10-22-web-rebuild-ia.md) (IA), I-000059/I-000060/I-000061/I-000062 (entry gaps), I-000063 (workspace create deferred) |
 
 ### 1. Entry and transport
 

@@ -11,7 +11,7 @@ The saved agent profile was reachable from only two places: the desktop `get_age
 | **Status** | Active |
 | **Owner** | Daemon API (agent-host family) + web client seam |
 | **Origin** | I-000064, delivered in iteration v1.220-developer-shell (plan `v1220-harness-profile`); promoted from the iteration package by its Phase 3 compound round |
-| **Related** | [schemas-directory-layout.md](../architecture/schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../architecture/schemas-external-consumer-boundary.md), compass decision D6 (single additive daemon-api exception of the web rebuild IA) |
+| **Related** | [schemas-directory-layout.md](schemas-directory-layout.md), [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md), compass decision D6 (single additive daemon-api exception of the web rebuild IA) |
 | **Invariants** | Desktop IPC path unchanged; browser path persists on the service; one daemon-global profile |
 
 ### 1. Problem

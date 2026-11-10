@@ -34,7 +34,7 @@ cd nexus
 pnpm install --frozen-lockfile
 ```
 
-`--recurse-submodules` initializes [`.agents/skills/`](../.agents/skills/) (ACP skill root). After a plain clone or pull, if skill dirs are empty:
+`--recurse-submodules` initializes [`.agents/skills/`](../.agents/skills) (ACP skill root). After a plain clone or pull, if skill dirs are empty:
 
 ```bash
 git submodule update --init --recursive

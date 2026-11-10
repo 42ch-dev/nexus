@@ -12,7 +12,7 @@ Write one when all three hold:
 
 Exempt: mechanical edits, local edits whose whole rationale is visible in the code or PR description, and decisions already recorded — update or supersede the existing record, never write a second record for the same decision.
 
-A record is the history of a change, not a description of the system it left behind: it states the decision and why the alternatives lost. The current state that decision produced belongs to [`docs/specs/`](../../docs/specs/), which the same PR keeps true to the code.
+A record is the history of a change, not a description of the system it left behind: it states the decision and why the alternatives lost. The current state that decision produced belongs to [`docs/specs/`](../../docs/specs), which the same PR keeps true to the code.
 
 ## Directory shape
 

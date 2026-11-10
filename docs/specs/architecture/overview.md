@@ -175,7 +175,7 @@ When designing or reviewing a change:
 2. This file — orientation
 3. [`entity-scope-model.md`](entity-scope-model.md) — ownership
 4. [`rust-core-service-boundary.md`](rust-core-service-boundary.md) §4.2 — dependency cohorts, local/cloud line split & forbidden accidental edges (historical origin: archived [`local-cloud-crate-architecture.md`](../../../.agents/adr/archived/architecture/2026-09-21-local-cloud-crate-architecture.md))
-5. Domain Master for the subsystem (local-runtime-boundary, rust-core-service-boundary, orchestration, CLI, web-ui, desktop-shell, …) under [`docs/specs/`](../../../docs/specs/)
+5. Domain Master for the subsystem (local-runtime-boundary, rust-core-service-boundary, orchestration, CLI, web-ui, desktop-shell, …) under [`docs/specs/`](..)
 
 Iteration plans and audit compasses record delivery history; they are not architecture SSOT. Prefer Master specs over dated gap tables when deciding what “should” be true.
 

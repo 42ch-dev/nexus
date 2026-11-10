@@ -12,8 +12,8 @@ Behavioral rules for the harness **knowledge** tree. **Do not** duplicate file i
 
 | Kind of content | Where | Must not |
 | --- | --- | --- |
-| CLI / daemon / ACP / orchestration **behavior contracts** | [`docs/specs/`](../../docs/specs/) | Live in knowledge root long-term |
-| One decision among real alternatives, with its consequences | [`../adr/`](../adr/) | Restate current state or plan text |
+| CLI / daemon / ACP / orchestration **behavior contracts** | [`docs/specs/`](../../docs/specs) | Live in knowledge root long-term |
+| One decision among real alternatives, with its consequences | [`../adr/`](../adr) | Restate current state or plan text |
 | Schema ↔ contracts boundary, crate policy | `knowledge/` root | Restate normative command/API detail |
 | Time-boxed delivery, plans, residuals, roadmaps | local process only | Be tracked here or treated as clone SSOT |
 
@@ -25,9 +25,9 @@ End-user docs stay in repo-root `docs/`.
 
 ## Specs and ADRs
 
-Current-state specs live in **[`docs/specs/`](../../docs/specs/)**, one page per subject at `<class>/<topic>.md`, latest-only. Rules and the navigation index: [`docs/specs/README.md`](../../docs/specs/README.md). The catalog in `.mstar/store.db` is the registry (`mstar catalog list`).
+Current-state specs live in **[`docs/specs/`](../../docs/specs)**, one page per subject at `<class>/<topic>.md`, latest-only. Rules and the navigation index: [`docs/specs/README.md`](../../docs/specs/README.md). The catalog in `.mstar/store.db` is the registry (`mstar catalog list`).
 
-Decisions live in **[`../adr/`](../adr/)**. Contract: [`../adr/README.md`](../adr/README.md).
+Decisions live in **[`../adr/`](../adr)**. Contract: [`../adr/README.md`](../adr/README.md).
 
 When implementing runtime behavior, read the cited spec body, then the relevant knowledge pattern. **Do not silently diverge** from a cited spec; record the change via spec revision or ADR.
 

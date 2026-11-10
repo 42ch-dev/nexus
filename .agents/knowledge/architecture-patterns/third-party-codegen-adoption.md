@@ -127,7 +127,7 @@ Typify inlines a distinct struct copy for every schema that references a shared 
 
 | Resource | Role |
 | --- | --- |
-| [`tooling/codegen/`](../../../tooling/codegen/) | Pipeline orchestrator, prep, ts-gen, rust-gen binary |
+| [`tooling/codegen/`](../../../tooling/codegen) | Pipeline orchestrator, prep, ts-gen, rust-gen binary |
 | [`tooling/codegen/README.md`](../../../tooling/codegen/README.md) | Stage table, env contract, output layout |
 | [`crates/nexus-contracts/AGENTS.md`](../../../crates/nexus-contracts/AGENTS.md) | Generated-crate rules, `enum_conversions.rs` |
 | [`schemas/AGENTS.md`](../../../schemas/AGENTS.md) | Schema authoring + codegen flow |

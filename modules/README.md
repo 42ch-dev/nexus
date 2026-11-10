@@ -15,7 +15,7 @@ timeline events, new key blocks, battle report). This directory holds their
 
 ## Authoring is SDK-first
 
-The official [`nexus-module-sdk`](nexus-module-sdk/) owns **every** ABI-facing
+The official [`nexus-module-sdk`](nexus-module-sdk) owns **every** ABI-facing
 symbol: `nexus_entry!` generates the three exports (`alloc`, `init`,
 `compute`) and wires the global allocator, and the typed envelope skeleton +
 key-block accessors + host-import wrappers + manifest helper cover the full V1
@@ -32,7 +32,7 @@ fn my_compute(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {
 nexus_entry!(my_compute);
 ```
 
-The [`nexus42` CLI `compute` group](../apps/nexus42/) turns the authoring loop
+The [`nexus42` CLI `compute` group](../apps/nexus42) turns the authoring loop
 into commands: `build` / `validate` / `install` are **service-host-free** (the
 author loop needs no runtime). The `run` leaf was retired in v1.193 P2 with the
 rest of the daemon-mediated execution entrances — see “Three invoke paths”
@@ -219,7 +219,7 @@ A module you install is reachable through three lanes:
 
 ## The reference module: `basic-combat`
 
-[`basic-combat/`](basic-combat/) is the in-repo reference implementation — a
+[`basic-combat/`](basic-combat) is the in-repo reference implementation — a
 sample ATK−DEF combat resolution that doubles as the host's integration test.
 It is authored on the SDK and **embedded** into `nexus-wasm-host`:
 `crates/nexus-wasm-host/build.rs` compiles its source into
@@ -243,13 +243,13 @@ intentionally: the per-invocation instance is discarded right after the call.
 
 ## Reference
 
-- Template scaffold: [`_template/`](_template/) — SDK hello-world (dice tick).
-- Sample module: [`basic-combat/`](basic-combat/) — ATK−DEF combat resolution.
-- SDK crate: [`nexus-module-sdk/`](nexus-module-sdk/) — the authoring surface.
+- Template scaffold: [`_template/`](_template) — SDK hello-world (dice tick).
+- Sample module: [`basic-combat/`](basic-combat) — ATK−DEF combat resolution.
+- SDK crate: [`nexus-module-sdk/`](nexus-module-sdk) — the authoring surface.
 - Authoring guide: [`docs/module-authoring.md`](../docs/module-authoring.md).
 - ABI spec (normative):
   [`docs/specs/compute/compute-module-abi.md`](../docs/specs/compute/compute-module-abi.md).
-- Host crate: [`crates/nexus-wasm-host/`](../crates/nexus-wasm-host/) — engine,
+- Host crate: [`crates/nexus-wasm-host/`](../crates/nexus-wasm-host) — engine,
   sandbox, host-function ABI, embedded-module loader, registry module.
 - `compute-module-author` skill:
   [`42ch-dev/agent-toolkit`](https://github.com/42ch-dev/agent-toolkit)

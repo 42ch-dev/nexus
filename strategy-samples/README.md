@@ -11,7 +11,7 @@ This repository ships everything you use together:
 | Piece | Where | What it is |
 |---|---|---|
 | Headless runtime | `nexus-runtime` binary (see [Install and boot the runtime](#1-install-and-boot-the-runtime)) | A Connect-only host serving the full N-C2 invoke surface (`upsert` / `promote` / `relate` / `check` / `assemble` / `compute`, world- and module-scoped) against your World KB. No creator UI, no HTTP router. |
-| Strategy samples | [`game-narrative/`](game-narrative/) and [`react-trpg-turn/`](react-trpg-turn/) | Forkable strategy bundles: capability routing + prompt templates for lore import lanes (game-narrative) and for a TRPG turn loop (react-trpg-turn). Nothing here is compiled into any binary. |
+| Strategy samples | [`game-narrative/`](game-narrative) and [`react-trpg-turn/`](react-trpg-turn) | Forkable strategy bundles: capability routing + prompt templates for lore import lanes (game-narrative) and for a TRPG turn loop (react-trpg-turn). Nothing here is compiled into any binary. |
 | Validator | [`validate.sh`](validate.sh) | One command, service-host-free: runs the real validator core on any strategy directory. |
 | WASM compute modules | `~/.nexus42/modules/<id>/` (see [Compute](#5-compute-basic-combat-n-c2-compute-half)) | Operator-installed, host-local compute modules (e.g. `modules/basic-combat`) the runtime invokes over Connect. Bytes are never peer-supplied. |
 | Connect SDK | `@42ch/spoke-connect` (npm, **the pinned upstream lockstep release**) | Your backend's connection + invoke surface to the runtime (and to any SPOKE connect host). |
@@ -493,7 +493,7 @@ contract is
 (exports `memory` / `alloc` / `compute` / optional `init`, the host-import
 whitelist, the marshalling convention, and the `manifest.json` contract), or
 copy the reference implementation:
-[`modules/basic-combat/`](../modules/basic-combat/) (`manifest.json`,
+[`modules/basic-combat/`](../modules/basic-combat) (`manifest.json`,
 `Cargo.toml`, `src/lib.rs`) — its `alloc`/`compute` marshalling is the
 pattern to reuse.
 
@@ -680,7 +680,7 @@ world-aware CAS / structured-failure rules — never a forced overwrite).
 | `op_unsupported` | `project` and unknown ops (zero side effects) |
 
 This op is the settlement step the TRPG turn strategies reference — see
-[`react-trpg-turn/`](react-trpg-turn/) for the settle → receipt → narrate
+[`react-trpg-turn/`](react-trpg-turn) for the settle → receipt → narrate
 discipline.
 
 ---
@@ -776,8 +776,8 @@ idempotency ledger.
 ## 7. References
 
 - Docs index: [`../docs/README.md`](../docs/README.md)
-- Strategy bundles: [`game-narrative/`](game-narrative/),
-  [`react-trpg-turn/`](react-trpg-turn/)
+- Strategy bundles: [`game-narrative/`](game-narrative),
+  [`react-trpg-turn/`](react-trpg-turn)
 - Strategy authoring guide (manifest format, lanes, prompt templates,
   validator, fork flow): [`../docs/strategy-authoring.md`](../docs/strategy-authoring.md)
 - Runtime usage guide: [`../docs/nexus-runtime.md`](../docs/nexus-runtime.md)
@@ -785,7 +785,7 @@ idempotency ledger.
 - WASM compute ABI: [`../docs/specs/compute/compute-module-abi.md`](../docs/specs/compute/compute-module-abi.md)
 - Module authoring guide (ABI at a glance, `manifest.json` incl. `wasm_sha256`, `module_scope`, operator install, read-only compute): [`../docs/module-authoring.md`](../docs/module-authoring.md)
 - Module authoring walkthrough: [`../modules/README.md`](../modules/README.md)
-- Reference module: [`../modules/basic-combat/`](../modules/basic-combat/)
+- Reference module: [`../modules/basic-combat/`](../modules/basic-combat)
 - Headless runtime boundary spec: [`../docs/specs/architecture/rust-core-service-boundary.md`](../docs/specs/architecture/rust-core-service-boundary.md) §4.2 (the retired `daemon-runtime.md` documented the deleted Rust host, not this runtime)
 - Connect invoke surface (N-C2 E2): `apps/nexus42/src/commands/connect/invoke.rs`
 - Connect SDK + wire family: `@42ch/spoke-connect` on npm (the pinned upstream lockstep release)
