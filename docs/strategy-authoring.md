@@ -326,7 +326,7 @@ same id.
 Once a strategy is installed under `~/.nexus42/presets/<id>/`, the **write
 path is the local service host's strategy canvas API**
 (`POST /v1/daemon/strategies/…`, served by the Electron/TS service) through the
-retained CLI leaves (`nexus42 preset patch state|transition|prompt` — see [cli-spec §6.2G.4](../.mstar/specs/active/cli/cli-spec.md)):
+retained CLI leaves (`nexus42 preset patch state|transition|prompt` — see [cli-spec §6.2G.4](specs/cli/cli-spec.md)):
 
 ```bash
 # Patch a state node (rename via --label, or update --description).

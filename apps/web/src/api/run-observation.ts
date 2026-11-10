@@ -2,7 +2,7 @@
  * Run observation hook (v1.201 P1-T2, audit DIR-03) — the client-side state
  * machine over T1's `NexusClient.subscribeWorkflowEvents`.
  *
- * Frozen contract: `.mstar/knowledge/api-design/sse-fetch-stream-consumer.md`
+ * Frozen contract: `.agents/knowledge/api-design/sse-fetch-stream-consumer.md`
  * (Guidance — resume/reconnect/terminal policy and the inferred replay/live
  * boundary). This
  * hook owns only *observation state*: it never renders and it never touches the

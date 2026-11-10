@@ -3,7 +3,7 @@
 //!
 //! These tests exercise [`auto_chain::persist_review_findings_for_schedule`]
 //! with an explicit `workspace_dir` to verify both branches of spec
-//! `.mstar/specs/active/novel-writing/quality-loop.md` §9.1:
+//! `docs/specs/novel-writing/quality-loop.md` §9.1:
 //!
 //! - **Parsed path (§1.2)**: when `Works/<work_ref>/Logs/review/review-report.md`
 //!   exists and parses, persisted findings carry the parsed `kind` /
@@ -138,7 +138,7 @@ fn write_report_file(work_ref: &str, content: &str) -> PathBuf {
 //
 // Minimal self-contained tracing capture for asserting that fallback
 // `tracing::warn!` events emitted by `try_persist_parsed_findings` carry the
-// `chapter` field per `.mstar/specs/active/novel-writing/quality-loop.md`
+// `chapter` field per `docs/specs/novel-writing/quality-loop.md`
 // §9.1. Uses only workspace deps (`tracing` + `tracing-subscriber`); no new
 // dev-dependency.
 

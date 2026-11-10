@@ -12,7 +12,7 @@ This is the **public open-source monorepo** containing the `nexus42` CLI and the
 
 **Not in this repo:** `nexus-platform` (private TypeScript monorepo for web/API/services) — do not reference its tech stack here.
 
-**Harness coordination:** Shared results are [`.mstar/knowledge/`](.mstar/knowledge/), [`.mstar/specs/`](.mstar/specs/), and [`.mstar/AGENTS.md`](.mstar/AGENTS.md). Delivery state is local process (gitignored) — not clone SSOT. Runtime: upstream **[Morning Star (mstar-harness)](https://github.com/btspoony/mstar-harness)** `mstar-*` skills.
+**Harness coordination:** Shared results are [`.agents/knowledge/`](.agents/knowledge/), [`.agents/adr/`](.agents/adr/), [`docs/specs/`](docs/specs/), and [`.mstar/AGENTS.md`](.mstar/AGENTS.md). Directory declarations live in the tracked [`.mstarc`](.mstarc). Delivery state is local process (gitignored) — not clone SSOT. Runtime: upstream **[Morning Star (mstar-harness)](https://github.com/btspoony/mstar-harness)** `mstar-*` skills.
 
 ## Morning Star harness (layering)
 
@@ -21,10 +21,10 @@ This repo is a **consumer** of Morning Star, not the harness maintenance repo.
 | Layer | File | Holds |
 |-------|------|-------|
 | Project | Root `AGENTS.md` (this file) | Repo identity, tech stack, build/test policy, git hygiene, crate index |
-| Harness | [`.mstar/AGENTS.md`](.mstar/AGENTS.md) | Process vs results; `specs/` / `knowledge/` / `docs/` / `schemas/` boundaries |
+| Harness | [`.mstar/AGENTS.md`](.mstar/AGENTS.md) | Process vs results; `.agents/knowledge/` / `.agents/adr/` / `docs/specs/` / `docs/` / `schemas/` boundaries |
 | Runtime | `mstar-*` skills | State machine, phase gates, dispatch, QC/QA, SDD, iteration |
 
-**Do not** duplicate `mstar-*` runtime rules here. **Do not** put plan progress, residual detail, or QC conclusions in this file — share durable outcomes via `.mstar/knowledge/` and `.mstar/specs/`.
+**Do not** duplicate `mstar-*` runtime rules here. **Do not** put plan progress, residual detail, or QC conclusions in this file — share durable outcomes via `.agents/knowledge/`, `.agents/adr/`, and `docs/specs/`.
 
 ## Tech Stack & Protocol Decisions
 
@@ -76,12 +76,13 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `crates/nexus-narrative/` | Worlds, forks, timelines, manuscripts | [`crates/nexus-narrative/AGENTS.md`](crates/nexus-narrative/AGENTS.md) |
 | `crates/nexus-cloud-domain/` | User + pairing (cloud sync domain) | [`crates/nexus-cloud-domain/AGENTS.md`](crates/nexus-cloud-domain/AGENTS.md) |
 | `crates/nexus-moment-context-assembly/` | Per-moment context assembly | [`crates/nexus-moment-context-assembly/AGENTS.md`](crates/nexus-moment-context-assembly/AGENTS.md) |
-| `.mstar/` | Harness infrastructure | [`.mstar/AGENTS.md`](.mstar/AGENTS.md) |
-| `.agents/` | Code-agent skills only (ACP workspace skill root) | [`.agents/AGENTS.md`](.agents/AGENTS.md) |
+| `.mstar/` | Harness process directory (gitignored except `AGENTS.md`) | [`.mstar/AGENTS.md`](.mstar/AGENTS.md) |
+| `.agents/` | Code-agent skills + tracked knowledge and ADR results | [`.agents/AGENTS.md`](.agents/AGENTS.md) |
+| `docs/specs/` | Current-state specification corpus | [`docs/specs/README.md`](docs/specs/README.md) |
 
 **`apps/` is the polyglot product-surfaces directory.** Any product surface — regardless of language (Rust CLI, Electron desktop host, web SPA, etc.) — lives under `apps/`. Reusable Rust libraries live under `crates/`. See [`apps/AGENTS.md`](apps/AGENTS.md) for the durable placement rule.
 
-**Directory split:** `{HARNESS_DIR}` = `.mstar/`. `.agents/` holds optional `.agents/skills/` for IDE/ACP — not harness SSOT.
+**Directory split:** `{HARNESS_DIR}` = `.mstar/` (process, gitignored except `AGENTS.md`). Tracked results resolve through [`.mstarc`](.mstarc): `{KNOWLEDGE_DIR}` = `.agents/knowledge/`, `{ADR_DIR}` = `.agents/adr/`, `{SPECS_DIR}` = `docs/specs/`.
 
 **New crate policy:** when adding a new package or crate to the monorepo, create an `AGENTS.md` in that directory — even if minimal — documenting its purpose, key rules, and dependencies.
 
@@ -116,8 +117,8 @@ UI work in this repo follows a **studio-first** routing rule. The visual proving
 
 - Studio boundaries + `@web-*` aliases: [`apps/design-studio/AGENTS.md`](apps/design-studio/AGENTS.md)
 - Promotion rules + package boundary: [`packages/nexus-ui/AGENTS.md`](packages/nexus-ui/AGENTS.md)
-- Canonical workflow + classification labels (`promoted primitive` / `studio-local fixture` / `web-only wrapper` / `future web product component`): [`.mstar/knowledge/architecture-patterns/ui-component-promotion-workflow.md`](.mstar/knowledge/architecture-patterns/ui-component-promotion-workflow.md)
-- Studio spec: [`.mstar/specs/active/surfaces/design-studio.md`](.mstar/specs/active/surfaces/design-studio.md)
+- Canonical workflow + classification labels (`promoted primitive` / `studio-local fixture` / `web-only wrapper` / `future web product component`): [`.agents/knowledge/architecture-patterns/ui-component-promotion-workflow.md`](.agents/knowledge/architecture-patterns/ui-component-promotion-workflow.md)
+- Studio spec: [`docs/specs/surfaces/design-studio.md`](docs/specs/surfaces/design-studio.md)
 
 ## Release Policy (decoupled from development)
 
@@ -253,7 +254,7 @@ Running the raw command in place of the initializer is not equivalent: the initi
 | Rule | Practice |
 |------|----------|
 | Iteration / hotfix landing | GitHub PR → `target_branch` only (never local `git merge` onto the protected branch). **Merge method by PR commit count** (commits on the PR head vs base): **≤30 → merge commit** (`gh pr merge --merge`); **>30 → squash** (`gh pr merge --squash`). Rationale: harness process noise stays local, so most PRs stay small enough for a merge commit; squash only when the history is too long to keep. |
-| Harness **results** | Commit `.mstar/knowledge/`, `.mstar/specs/`, `.mstar/AGENTS.md` when shared; do **not** commit ignored process under `.mstar/` |
+| Harness **results** | Commit `.mstarc`, `.agents/knowledge/`, `.agents/adr/`, `docs/specs/`, and `.mstar/AGENTS.md` when shared; do **not** commit ignored process under `.mstar/` |
 | Codegen | Schema changes and generated output in the **same commit** (see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)) |
 | Never commit | `target/`, `.worktrees/`, `node_modules/`, `.mstar` process paths above (gitignored — agents must self-check) |
 

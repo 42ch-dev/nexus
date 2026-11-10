@@ -17,8 +17,8 @@
 //! helpers.
 //!
 //! Spec refs:
-//! - [novel-writing/quality-loop.md §9.3](../../../../../.mstar/specs/active/novel-writing/quality-loop.md) (rules runtime)
-//! - [novel-writing/workflow-profile.md §5.5.4](../../../../../.mstar/specs/active/novel-writing/workflow-profile.md)
+//! - [novel-writing/quality-loop.md §9.3](../../../../../docs/specs/novel-writing/quality-loop.md) (rules runtime)
+//! - [novel-writing/workflow-profile.md §5.5.4](../../../../../docs/specs/novel-writing/workflow-profile.md)
 
 use std::io::IsTerminal;
 

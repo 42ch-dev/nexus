@@ -7,7 +7,7 @@
 # updating struct-literal callsites in downstream crates. Rust E0063 only
 # surfaces when those consumer crates compile — not when the contracts crate
 # is regenerated. This is the post-codegen assertion from
-# .mstar/knowledge/build-errors/codegen-optional-field-callsite-coverage.md:
+# .agents/knowledge/build-errors/codegen-optional-field-callsite-coverage.md:
 #   SQLX_OFFLINE=true cargo check --workspace
 #
 # SQLX_OFFLINE is mandatory: bare `cargo check` fails sqlx macros without the

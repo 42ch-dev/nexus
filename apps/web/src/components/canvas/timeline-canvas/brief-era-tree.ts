@@ -6,7 +6,7 @@
  * rendering (DF-V1123-ERA-TAXONOMY).
  *
  * Architect-locked contract — see
- * `.mstar/specs/active/surfaces/canvas-strategy-surface.md` §3.3.3 (V1.159 amendment;
+ * `docs/specs/surfaces/canvas-strategy-surface.md` §3.3.3 (V1.159 amendment;
  * VC-1 option c, Q1–Q3 — local record):
  *   - Input entities: `block_type === "era"` KnowledgeEntry projections.
  *   - Nesting carrier: `relation_type === "custom"` AND

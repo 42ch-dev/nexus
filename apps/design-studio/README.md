@@ -49,7 +49,7 @@ Edit those files in your IDE, then refresh the studio to see the effect.
 | Studio-local | `@/fixtures/*`, `@/pages/*`, `@/components/*`, `@/lib/*` | Gallery composition only |
 
 Surfaces nested routes: Overview, Setup, Shell, AgentPicker, Canvas, Daemon,
-Launch, Selection Submenu — see `.mstar/specs/active/surfaces/design-studio.md` §6–§7.
+Launch, Selection Submenu — see `docs/specs/surfaces/design-studio.md` §6–§7.
 
 
 ## Visual review (surfaces)
@@ -137,11 +137,11 @@ No daemon required for any command.
 - **Toolchain**: Vite 8 + React 19 + TypeScript strict + Tailwind 4 + Vitest 5 — mirrors `apps/web`
 - **Boundaries**: no daemon transport, no `NexusClient`, no `@42ch/nexus-contracts`, no product-page imports
 
-For detailed rules see [`AGENTS.md`](./AGENTS.md).
+For detailed rules see [`AGENTS.md`](AGENTS.md).
 
 ## Docs
 
-- [Studio spec](../../.mstar/specs/active/surfaces/design-studio.md) — normative target contract, audiences, boundaries, gallery inventory
+- [Studio spec](../../docs/specs/surfaces/design-studio.md) — normative target contract, audiences, boundaries, gallery inventory
 - [DESIGN.md SSOT](../../DESIGN.md) — sole normative design token source (light/default)
 - [DESIGN.dark.md](../../DESIGN.dark.md) — dark companion with identical token paths
-- [Import boundaries and conventions](./AGENTS.md) — Studio-specific agent rules
+- [Import boundaries and conventions](AGENTS.md) — Studio-specific agent rules

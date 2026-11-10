@@ -44,4 +44,4 @@ process adapters. It normalizes ACP providers and native CLI providers behind na
 
 ## Design Reference
 
-See `.mstar/specs/active/agents/agent-host.md` for the authoritative design spec.
+See `docs/specs/agents/agent-host.md` for the authoritative design spec.

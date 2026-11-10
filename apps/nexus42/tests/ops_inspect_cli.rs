@@ -1,7 +1,7 @@
 //! `nexus42 ops inspect` CLI contract tests (V1.182 P1 BL-04, Task 2).
 //!
 //! Hermetic daemon-free scenarios against the APPROVED inspect contract
-//! (`.mstar/specs/active/cli/cli-spec.md` §6.3B):
+//! (`docs/specs/cli/cli-spec.md` §6.3B):
 //!
 //! - hidden `ops` group; `inspect [SESSION_ID] [--json]` surface;
 //! - list mode over non-terminal rows + honest empty/absent-db states;

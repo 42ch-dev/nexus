@@ -42,4 +42,4 @@ fixture CLIs; this crate stays provider-neutral.
 
 ## Design Reference
 
-See `.mstar/specs/active/agents/agent-host.md` §3.4.
+See `docs/specs/agents/agent-host.md` §3.4.
