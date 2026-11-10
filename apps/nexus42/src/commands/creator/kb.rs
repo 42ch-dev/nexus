@@ -25,8 +25,7 @@
 //!
 //! World-scoped narrative KB lives on the canonical `creator world kb` surface
 //! (`commands::creator::world::kb`); `creator kb` serves the work-scope file
-//! index only (entity-scope-model §5.3). User-scoped global knowledge is
-//! `creator knowledge`.
+//! index only (entity-scope-model §5.3).
 
 use crate::config::CliConfig;
 use crate::core::{finish_direct, map_core_error, open_direct_core, open_engine_owned_core};
@@ -53,8 +52,7 @@ pub use rescan::{
 /// Knowledge base subcommands.
 ///
 /// All of them serve the work-scope file index (entity-scope-model §5.3).
-/// For World-scoped narrative KB entries use `creator world kb`; for
-/// User-scoped global knowledge entries use `creator knowledge`.
+/// For World-scoped narrative KB entries use `creator world kb`.
 #[derive(Debug, clap::Subcommand)]
 pub enum KbCommand {
     /// List work-scope entries from the local workspace file index

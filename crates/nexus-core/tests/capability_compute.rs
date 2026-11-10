@@ -893,69 +893,6 @@ async fn execute_tool_accepts_the_owners_own_principal() {
     assert!(response.success);
 }
 
-/// C2: `nexus.research.query` is creator-scoped.
-///
-/// Both the direct-id lookup and the list must be scoped, and a foreign row
-/// must be indistinguishable from a missing one (`NotFound`, never Forbidden —
-/// a 403 would confirm the row exists).
-#[tokio::test]
-#[serial_test::serial]
-async fn research_query_is_scoped_to_the_creator() {
-    let f = fixture().await;
-
-    // Seed a reference source owned by ANOTHER creator, straight into the
-    // durable store the fixture's pool serves.
-    sqlx::query(
-        "INSERT OR IGNORE INTO reference_sources \
-         (reference_source_id, creator_id, workspace_id, title, uri, source_type, \
-          tags, scan_status, created_at, updated_at) \
-         VALUES ('ref_foreign', 'intruder', 'local', 'Foreign Source', \
-                 'https://example.invalid/f', 'web', '', 'pending', \
-                 datetime('now'), datetime('now'))",
-    )
-    .execute(f.core.pool())
-    .await
-    .unwrap();
-
-    // Direct id lookup of a FOREIGN row: NotFound, and no existence leak.
-    let request = ToolsApi {
-        tool_name: "nexus.research.query".to_string(),
-        parameters: json!({ "reference_source_id": "ref_foreign" }),
-        session_id: None,
-        request_id: None,
-        caller_kind: None,
-    };
-    let err = nexus_core::execution::capabilities::execute_tool(&f.context, &request)
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(err, nexus_core::CoreError::NotFound { .. }),
-        "a foreign reference source must be NotFound, got {err:?}"
-    );
-
-    // The LIST must not surface the foreign row either.
-    let request = ToolsApi {
-        tool_name: "nexus.research.query".to_string(),
-        parameters: json!({}),
-        session_id: None,
-        request_id: None,
-        caller_kind: None,
-    };
-    let value = nexus_core::execution::capabilities::execute_tool(&f.context, &request)
-        .await
-        .expect("list succeeds");
-    let ids: Vec<String> = value["results"]
-        .as_array()
-        .expect("results array")
-        .iter()
-        .filter_map(|r| r["reference_source_id"].as_str().map(ToString::to_string))
-        .collect();
-    assert!(
-        !ids.contains(&"ref_foreign".to_string()),
-        "an unscoped list would leak a foreign row, got {ids:?}"
-    );
-}
-
 /// The retired `nexus.reference.refresh` write entrance is no longer admitted.
 ///
 /// The capability row and the orchestration builtin were removed with the

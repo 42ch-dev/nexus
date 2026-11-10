@@ -1326,31 +1326,6 @@ impl NativeCore {
         })
         .await
     }
-
-    // ── Reference registry reads (P1-T3) ────────────────────────────────────
-
-    /// `GET /v1/daemon/references` — the core projection serializes to the
-    /// schema-owned `{references: [...]}` envelope.
-    #[napi]
-    pub async fn list_references(&self, principal_handle: String) -> Result<Buffer> {
-        self.json_call(principal_handle, async move |core, principal| {
-            core.list_references(&principal).await
-        })
-        .await
-    }
-
-    /// `GET /v1/daemon/references/{reference_id}`.
-    #[napi]
-    pub async fn get_reference(
-        &self,
-        principal_handle: String,
-        reference_id: String,
-    ) -> Result<Buffer> {
-        self.json_call(principal_handle, async move |core, principal| {
-            core.get_reference(&principal, reference_id).await
-        })
-        .await
-    }
 }
 
 /// Work detail wire projection. Field-for-field with the schema-owned

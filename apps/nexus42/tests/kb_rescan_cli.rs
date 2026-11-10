@@ -14,15 +14,12 @@
 //! - **AC3**: `--dry-run` shows the diff without writing.
 //! - **AC4**: cross-author attempt returns `403` (`WORLD_KB_FORBIDDEN`).
 //!
-//! v1.193 P0-T13 retires the deprecated `creator kb --scope world` forwarding
-//! and the `creator reference refresh` entrance. Those two contracts are pinned
+//! v1.193 P0-T13 retires the deprecated `creator kb --scope world` forwarding,
+//! and v231 retires the whole `creator reference` / `creator knowledge` groups
+//! with the User-knowledge and reference stores. Those contracts are pinned
 //! here through the real binary against a hermetic direct-core home
-//! (`common/direct.rs`): the refused legacy scope leaves the home untouched,
-//! `reference refresh` is unknown, and the surviving read leaves still render.
-//!
-//! v231 retires the reference and User-knowledge **write** entrances with their
-//! stores: `creator reference register` and `creator knowledge add` must be
-//! unknown subcommands that touch nothing.
+//! (`common/direct.rs`): the refused legacy scope leaves the home untouched and
+//! both retired groups are unknown subcommands that touch nothing.
 //!
 //! Run with: cargo test -p nexus42 --test `kb_rescan_cli`
 
@@ -476,111 +473,22 @@ async fn work_kb_scope_rejects_legacy_world_without_mutation() {
     );
 }
 
-/// The retired reference refresh entrance is unknown.
+/// The retired `creator knowledge` / `creator reference` groups are unknown.
 ///
-/// Regression: `creator reference refresh` must not remain a parseable no-op
-/// (it had no complete direct CLI operation), so the parser refuses it before
-/// any handler — and therefore before any registry write — runs.
+/// Regression: every leaf of both groups read the retiring User-knowledge and
+/// reference stores, so the parser must refuse the group names before any
+/// handler runs — and no registry row or `body.md` may be produced.
 #[tokio::test]
-async fn retired_reference_refresh_is_unknown() {
-    let fixture = DirectFixture::new().await;
-
-    let output = fixture
-        .command()
-        .args(["creator", "reference", "refresh", "all"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "`creator reference refresh` must be an unknown subcommand, got {output:?}"
-    );
-    assert!(
-        stderr.contains("refresh"),
-        "the refusal must name the retired subcommand, got:\n{stderr}"
-    );
-}
-
-/// The surviving help surfaces render, and neither advertises a retired leaf.
-#[tokio::test]
-async fn reference_and_knowledge_help_survive_without_retired_leaves() {
-    let fixture = DirectFixture::new().await;
-
-    let reference_help = fixture
-        .command()
-        .args(["creator", "reference", "--help"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        reference_help.status.success(),
-        "`creator reference --help` must still render: {}",
-        String::from_utf8_lossy(&reference_help.stderr)
-    );
-    let reference_help_text = String::from_utf8_lossy(&reference_help.stdout).into_owned();
-    let reference_subcommands: Vec<&str> = subcommands(&reference_help_text).collect();
-    for subcommand in ["list", "show"] {
-        assert!(
-            reference_subcommands.contains(&subcommand),
-            "`creator reference --help` must still offer '{subcommand}', got:\n{reference_help_text}"
-        );
-    }
-    for retired in ["register", "refresh"] {
-        assert!(
-            !reference_subcommands.contains(&retired),
-            "`creator reference --help` must not advertise the retired '{retired}' leaf, got:\n{reference_help_text}"
-        );
-    }
-
-    let knowledge_help = fixture
-        .command()
-        .args(["creator", "knowledge", "--help"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        knowledge_help.status.success(),
-        "`creator knowledge --help` must still render: {}",
-        String::from_utf8_lossy(&knowledge_help.stderr)
-    );
-    let knowledge_help_text = String::from_utf8_lossy(&knowledge_help.stdout).into_owned();
-    let knowledge_subcommands: Vec<&str> = subcommands(&knowledge_help_text).collect();
-    for subcommand in ["list", "search"] {
-        assert!(
-            knowledge_subcommands.contains(&subcommand),
-            "`creator knowledge --help` must still offer '{subcommand}', got:\n{knowledge_help_text}"
-        );
-    }
-    assert!(
-        !knowledge_subcommands.contains(&"add"),
-        "`creator knowledge --help` must not advertise the retired 'add' leaf, got:\n{knowledge_help_text}"
-    );
-}
-
-/// The retired reference-store write entrances are unknown.
-///
-/// Regression: both leaves wrote the retiring stores (`reference_sources` +
-/// `body.md` for `register`, `knowledge_entries` for `add`). They must be
-/// refused at parse time, before any core call, registry row or body file.
-#[tokio::test]
-async fn retired_reference_store_write_leaves_are_unknown() {
+async fn retired_knowledge_and_reference_groups_are_unknown() {
     let fixture = DirectFixture::new().await;
 
     for args in [
-        vec![
-            "creator",
-            "reference",
-            "register",
-            "--source",
-            "https://example.invalid/retired",
-            "--title",
-            "Retired reference",
-            "--body",
-            "Reference body.",
-        ],
-        vec!["creator", "knowledge", "add", "Retired knowledge entry"],
+        vec!["creator", "knowledge", "--help"],
+        vec!["creator", "knowledge", "list"],
+        vec!["creator", "reference", "--help"],
+        vec!["creator", "reference", "list"],
+        vec!["creator", "reference", "refresh", "all"],
     ] {
-        let leaf = args[2];
         let output = fixture
             .command()
             .args(&args)
@@ -590,29 +498,14 @@ async fn retired_reference_store_write_leaves_are_unknown() {
         assert_eq!(
             output.status.code(),
             Some(2),
-            "`{args:?}` must be refused as a usage error, got {output:?}"
+            "`{args:?}` must be refused as an unknown subcommand, got {output:?}"
         );
         assert!(
-            stderr.contains(leaf),
-            "the refusal must name the retired '{leaf}' leaf, got:\n{stderr}"
+            stderr.contains(args[1]),
+            "the refusal must name the retired '{}' group, got:\n{stderr}",
+            args[1]
         );
     }
-
-    let list = fixture
-        .command()
-        .args(["creator", "reference", "list"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        list.status.success(),
-        "the surviving read leaf must still render: {}",
-        String::from_utf8_lossy(&list.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&list.stdout).contains("No registered references."),
-        "no reference row may have been created, got:\n{}",
-        String::from_utf8_lossy(&list.stdout)
-    );
 }
 
 /// The retained work-scope index leaves round-trip through the direct core.
@@ -767,14 +660,4 @@ async fn corrupt_work_index_is_reported_as_empty_not_an_error() {
         "a corrupt index must read as empty, got:\n{}",
         String::from_utf8_lossy(&list.stdout)
     );
-}
-
-/// The subcommand names a clap help text lists under its `Commands:` section.
-fn subcommands(help_text: &str) -> impl Iterator<Item = &str> {
-    help_text
-        .lines()
-        .skip_while(|line| line.trim_end() != "Commands:")
-        .skip(1)
-        .take_while(|line| !line.trim().is_empty())
-        .filter_map(|line| line.split_whitespace().next())
 }

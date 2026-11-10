@@ -1,12 +1,10 @@
 //! Local knowledge surfaces over the guarded core workspace: the
 //! creator-scoped work file index (`creator kb`, V1.20 Batch 5 T39 — scope
-//! clarified KCA-003 C2; V1.27 H3 scope honesty), the work-entry extract
+//! clarified KCA-003 C2; V1.27 H3 scope honesty) and the work-entry extract
 //! queue (`creator kb queue-extract` / `extract-status`; core producer added
-//! by v1.207 P1 item 6) and the User-scoped global knowledge entries
-//! (`creator knowledge`, entity-scope-model §5.3–5.4).
-//! Extracted from the legacy daemon `kb.rs` handlers plus the CLI-local
-//! `SqliteKnowledgeStore` composition (P1-T3). This is NOT the World narrative
-//! KB graph (`nexus-kb` / P0 `world_kb`).
+//! by v1.207 P1 item 6).
+//! Extracted from the legacy daemon `kb.rs` handlers. This is NOT the World
+//! narrative KB graph (`nexus-kb` / P0 `world_kb`).
 //! The file-index surface is deliberately `async` despite syncing only against
 //! `std::fs`: it keeps a uniform `CoreService` method surface for the P6 CLI
 //! composition and the daemon adapters.
@@ -23,12 +21,7 @@ use nexus_contracts::daemon_api::kb::{
 };
 use nexus_contracts::PaginationInfo;
 use nexus_home_layout::sanitize_entry_id;
-use nexus_knowledge::knowledge::{
-    KnowledgeQuery, KnowledgeResult, KnowledgeTag, UserKnowledgeEntry,
-};
-use nexus_knowledge::store::KnowledgeStore;
 use nexus_local_db::kb_extract_job::KbExtractJob;
-use nexus_local_db::SqliteKnowledgeStore;
 
 use crate::content::wire_cast;
 use crate::error::db_err;
@@ -41,9 +34,6 @@ const DEFAULT_WORKSPACE_SLUG: &str = "default";
 const DEFAULT_LIMIT: usize = 50;
 /// Maximum page limit.
 const MAX_LIMIT: usize = 250;
-
-/// Default User ID for local knowledge usage (until platform `usr_*` mapping).
-const DEFAULT_USER_ID: &str = "user_default";
 
 /// Knowledge-family fault carrying the legacy classification until the
 /// adapter boundary. `InvalidInput` keeps the legacy 400 mapping; legacy
@@ -96,7 +86,7 @@ fn validate_scope(scope: Option<&str>) -> Result<(), KnowledgeFault> {
             format!(
                 "scope '{other}' is not supported. These endpoints serve the \
                  work-scope file index only (entity-scope-model §5.3). \
-                 World KB and User knowledge are served by separate routes."
+                 World KB is served by a separate route."
             ),
         )),
     }
@@ -159,7 +149,7 @@ fn chapter_locator(chapter: Option<i32>) -> Result<ArtifactLocator, KnowledgeFau
 // ─── Work-scope KB Index types ─────────────────────────────────────────────
 //
 // These types represent the local work file index, NOT the World KB graph
-// (nexus-kb) or User knowledge (nexus-knowledge).
+// (`nexus-knowledge::world_kb`).
 
 /// KB index on disk: `{"entries": [{"entry_id": "...", "title": "...", "created_at": "..."}]}`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -258,7 +248,7 @@ fn deduplicate_entry_id(base_id: &str, index: &KbIndex) -> String {
 // ─── Work-scope KB Entry Index (QC3 W-005) ─────────────────────────────────
 //
 // In-memory index over work-scope entry files for O(1) lookup by entry_id.
-// Only covers the local work file index — no World KB or User knowledge.
+// Only covers the local work file index — no World KB.
 
 /// Key for the KB entry index: [`String`] → (`creator_id`, `workspace_slug`).
 type EntryLocationMap = HashMap<String, (String, String)>;
@@ -408,27 +398,12 @@ fn foreign_creator_holds_entry(
     false
 }
 
-/// Map a knowledge-store failure onto the family fault.
-fn knowledge_err(error: nexus_knowledge::errors::KnowledgeError) -> KnowledgeFault {
-    match error {
-        nexus_knowledge::errors::KnowledgeError::ValidationError(message) => {
-            invalid_input("knowledge", message)
-        }
-        other @ nexus_knowledge::errors::KnowledgeError::InvalidUri { .. } => {
-            KnowledgeFault::Internal {
-                code: "DATABASE_ERROR".into(),
-                message: other.to_string(),
-            }
-        }
-    }
-}
-
 impl CoreService {
     // ── Work-scope file index (`creator kb` / `/v1/daemon/kb/entries`) ──
 
     /// List/search work-scope entries for a creator/workspace.
     ///
-    /// Only `scope=work` is supported; no World KB or User knowledge access.
+    /// Only `scope=work` is supported; no World KB access.
     /// The request `creator_id` must match the principal's creator (the
     /// ownership correction: this index is creator-scoped, never World).
     ///
@@ -964,99 +939,6 @@ impl CoreService {
             }
             other => Ok(other),
         }
-    }
-
-    // ── User-scoped global knowledge (`creator knowledge`) ──────────────
-
-    /// Store a User-scoped global knowledge entry (entity-scope-model §5.4).
-    /// The active creator's default user identity (`user_default` until the
-    /// platform `usr_*` mapping exists) owns the entry.
-    ///
-    /// # Errors
-    /// Returns [`CoreError::AuthRequired`] when the principal fails
-    /// verification, [`CoreError::Forbidden`] under read-only core access,
-    /// and [`CoreError::InvalidInput`] for store-side validation rejections
-    /// (empty user/content).
-    pub async fn add_user_knowledge(
-        &self,
-        principal: &Principal,
-        content: String,
-        tags: Option<Vec<String>>,
-    ) -> CoreResult<UserKnowledgeEntry> {
-        self.verify_principal(principal)?;
-        self.require_work_write()?;
-        let tag_list = tags
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| KnowledgeTag::new(&s))
-            .collect();
-        let entry = UserKnowledgeEntry::new(DEFAULT_USER_ID, tag_list, &content);
-        let stored = SqliteKnowledgeStore::new(self.inner.pool.clone())
-            .store(entry)
-            .await
-            .map_err(knowledge_err)?;
-        self.verify_principal(principal)?;
-        Ok(stored)
-    }
-
-    /// List User-scoped knowledge entries with optional tag filter and
-    /// offset pagination.
-    ///
-    /// # Errors
-    /// As [`CoreService::add_user_knowledge`] minus write validation.
-    pub async fn list_user_knowledge(
-        &self,
-        principal: &Principal,
-        tags: Option<Vec<String>>,
-        limit: u32,
-        offset: u32,
-    ) -> CoreResult<KnowledgeResult> {
-        self.verify_principal(principal)?;
-        let mut query = KnowledgeQuery::for_user(DEFAULT_USER_ID)
-            .with_limit(limit)
-            .with_offset(offset);
-        if let Some(tag_strs) = tags {
-            let tag_list: Vec<KnowledgeTag> = tag_strs
-                .into_iter()
-                .map(|s| KnowledgeTag::new(&s))
-                .collect();
-            query = query.with_tags(tag_list);
-        }
-        let result = SqliteKnowledgeStore::new(self.inner.pool.clone())
-            .list(&query)
-            .await
-            .map_err(knowledge_err)?;
-        self.verify_principal(principal)?;
-        Ok(result)
-    }
-
-    /// Text-search User-scoped knowledge entries with optional tag filter.
-    ///
-    /// # Errors
-    /// As [`CoreService::list_user_knowledge`].
-    pub async fn search_user_knowledge(
-        &self,
-        principal: &Principal,
-        query_text: &str,
-        tags: Option<Vec<String>>,
-        limit: u32,
-        offset: u32,
-    ) -> CoreResult<KnowledgeResult> {
-        self.verify_principal(principal)?;
-        let tag_refs: Option<Vec<KnowledgeTag>> =
-            tags.map(|ts| ts.into_iter().map(|s| KnowledgeTag::new(&s)).collect());
-        let result = SqliteKnowledgeStore::new(self.inner.pool.clone())
-            .search(
-                DEFAULT_USER_ID,
-                query_text,
-                tag_refs.as_deref(),
-                limit,
-                offset,
-            )
-            .await
-            .map_err(knowledge_err)?;
-        self.verify_principal(principal)?;
-        Ok(result)
     }
 }
 

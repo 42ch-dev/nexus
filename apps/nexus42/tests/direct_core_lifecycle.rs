@@ -18,13 +18,10 @@
 //! to the whole `creator world kb` surface — the two direct-core leaves and the
 //! local leaves whose pool open used to migrate the workspace first.
 //!
-//! `anonymous_selection_is_refused_at_every_reference_entrance` and
-//! `anonymous_selection_is_refused_at_world_event_add` extend the same
-//! admission to the retained local storage entrances the migration kept
-//! (`creator reference list|show` and `creator world event-add`), and pin that
-//! a refusal leaves the home byte-identical — no workspace directory and no
-//! `state.db`. The retired `reference register` write entrance is a usage error
-//! and never reaches the seam.
+//! `anonymous_selection_is_refused_at_world_event_add` extends the same
+//! admission to the retained local storage entrance the migration kept
+//! (`creator world event-add`), and pins that a refusal leaves the home
+//! byte-identical — no workspace directory and no `state.db`.
 //!
 //! `unreadable_workspace_db_is_not_reported_as_an_unset_selection` pins the
 //! other half of the same admission: a metadata failure on the selected
@@ -721,73 +718,6 @@ fn warm_home(home: &Path) {
         !warm.status.success(),
         "the warm-up direct-core leaf is itself refused: {}",
         stdout(&warm)
-    );
-}
-
-/// The retained `creator reference` registry opens the workspace pool itself
-/// (`create_dir_all` + `Schema::init`), so an anonymous selection must be
-/// refused by the same admission the KB entrances inherit — and must leave the
-/// home byte-identical.
-#[test]
-fn anonymous_selection_is_refused_at_every_reference_entrance() {
-    let home = tempfile::tempdir().expect("temp home");
-    let creator_id = anonymous_home(home.path());
-    warm_home(home.path());
-    let before = home_tree(home.path());
-
-    let entrances: [&[&str]; 2] = [
-        &["creator", "reference", "list"],
-        &["creator", "reference", "show", "ref_absent"],
-    ];
-
-    for args in entrances {
-        let refused = assert_cmd::Command::cargo_bin("nexus42")
-            .expect("nexus42 binary")
-            .args(args)
-            .env("HOME", home.path())
-            .env("RUST_LOG", "off")
-            .output()
-            .expect("spawn nexus42 reference leaf");
-        assert!(
-            !refused.status.success(),
-            "{args:?} must be refused: {}",
-            stdout(&refused)
-        );
-        assert_eq!(
-            refused.status.code(),
-            Some(1),
-            "{args:?}: {}",
-            stderr(&refused)
-        );
-        let refusal = stderr(&refused);
-        assert!(
-            refusal.contains("Creator not selected"),
-            "the declared selection refusal for {args:?}: {refusal}"
-        );
-        for leak in [
-            "migration.lock",
-            "database_error",
-            "No such file or directory",
-        ] {
-            assert!(
-                !refusal.contains(leak),
-                "no raw storage I/O may leak through {args:?} ({leak}): {refusal}"
-            );
-        }
-    }
-
-    let workspace_db =
-        nexus_home_layout::workspace_state_db_path(home.path(), &creator_id, "default");
-    let workspace_dir = workspace_db.parent().expect("workspace dir");
-    assert!(
-        !workspace_dir.exists(),
-        "no reference entrance may materialize a workspace: {}",
-        workspace_dir.display()
-    );
-    assert_eq!(
-        before,
-        home_tree(home.path()),
-        "a refused reference entrance must leave the home byte-identical"
     );
 }
 

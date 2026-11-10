@@ -35,7 +35,6 @@ pub mod js_provider_journal;
 pub mod kb_extract_job;
 pub mod kb_relationships;
 pub mod kb_store;
-pub mod knowledge_store;
 pub mod memory_fragment;
 pub mod mind_state_store;
 pub mod moment_directive;
@@ -48,7 +47,6 @@ pub mod pending_review;
 pub mod prompt_injection;
 pub mod read_scope;
 pub mod reading;
-pub mod reference_source;
 pub mod runtime_lock;
 pub mod soul_meta;
 pub mod soul_narrative;
@@ -184,7 +182,7 @@ pub use character_soul_narrative::{
 /// to `1..=MAX_CHARACTER_MEMORY_LIST_LIMIT` before issuing SQL, so a caller
 /// cannot force unbounded materialization (SQLite treats `LIMIT -1` as
 /// "no limit"). Follows the local-db pagination convention (clamp, as in
-/// [`reference_source`](crate::reference_source)).
+/// [`character_memory_fragment`](crate::character_memory_fragment)).
 pub const MAX_CHARACTER_MEMORY_LIST_LIMIT: i64 = 500;
 
 // Re-export mind_state_store types (V1.164 P2, l5-mind when-axis storage)
@@ -204,22 +202,12 @@ pub use narrative_write::{
     NarrativeWriteError,
 };
 
-// Re-export knowledge_store types
-pub use knowledge_store::SqliteKnowledgeStore;
-
 // Re-export kb_relationships types (V1.74 A2)
 pub use kb_relationships::{
     delete_relationship_in_tx, generate_relationship_id, get_relationship,
     insert_relationship_in_tx, list_confirmed_relationships_paginated,
     list_relationships_for_world, update_relationship_in_tx, InsertRelationshipParams,
     KbRelationshipRow, RelationshipCursor, UpdateRelationshipParams,
-};
-
-// Re-export reference_source types
-pub use reference_source::{
-    find_by_id_for_creator as find_reference_by_id_for_creator, get_by_id as get_reference_by_id,
-    list as list_references, register as register_reference, ReferenceSourceRow, RegisterParams,
-    SourceMutability,
 };
 
 // Re-export kb_extract_job types

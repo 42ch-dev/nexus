@@ -6,18 +6,16 @@
 //! - **Work plane (DF-60/61)**: `works` — atomic single-purpose ops (inspire,
 //!   reopen, reconcile-chapters, completion-lock, pool, …)
 //! - **Primary**: `register`, `use`, `list`
-//! - **Assets**: `workspace`, `soul`, `memory`, `kb`, `knowledge`, `reference`, `world`
+//! - **Assets**: `workspace`, `soul`, `memory`, `kb`, `world`
 //! - **Platform bridge**: `status`, `pair`, `unpair`, `credentials`
 //! - **Maintenance**: `demo-seed`, `logout`
 
 pub mod character;
 pub mod inspector;
 pub mod kb;
-pub mod knowledge;
 pub mod memory;
 pub mod moment_directive;
 pub mod reading;
-pub mod reference;
 pub mod rules_runtime;
 pub mod soul;
 pub mod work_utils;
@@ -403,24 +401,9 @@ pub enum CreatorCommand {
     /// local extract queue, and `rescan` over chapter prose. There is no World
     /// scope here — World narrative KB entries live on `creator world kb`, and
     /// the old `--scope world` compatibility spelling is gone.
-    ///
-    /// For User-scoped global knowledge, use `creator knowledge` instead.
-    /// See entity-scope-model §5.3–5.4 for the three KB namespaces.
     Kb {
         #[command(subcommand)]
         command: KbCommand,
-    },
-
-    /// User-scoped global knowledge entries (list, search)
-    ///
-    /// Reads unstructured knowledge entries scoped to the User (not Creator).
-    /// The `add` write entrance is retired; entries can no longer be created.
-    /// For Work-scope file index use `creator kb`; for World narrative KB use
-    /// `creator world kb`.
-    /// See entity-scope-model §5.3–§5.4 for the three KB namespaces.
-    Knowledge {
-        #[command(subcommand)]
-        command: knowledge::KnowledgeCommand,
     },
 
     /// Moment Directive author surface (V1.150 P1, DF-75)
@@ -435,11 +418,6 @@ pub enum CreatorCommand {
         command: moment_directive::MomentDirectiveCommand,
     },
 
-    /// Reference source management (V1.26 reference store)
-    Reference {
-        #[command(subcommand)]
-        command: reference::ReferenceCommand,
-    },
     /// Narrative world management (create worlds, add events, list timelines)
     World {
         #[command(subcommand)]
@@ -502,7 +480,7 @@ pub enum CreatorCommand {
     },
 
     // ── Maintenance tier ────────────────────────────────────────────
-    /// Seed demo data: creates a demo world, event, KB block, and knowledge entry
+    /// Seed demo data: creates a demo world, event, and KB block
     ///
     /// Idempotent by default — skips if demo world already exists.
     /// Use --force to recreate (deletes existing demo data first).
@@ -584,13 +562,11 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Workspace { command } => run_creator_workspace(config, command).await,
         CreatorCommand::Soul { command } => soul::run(command, config).await,
         CreatorCommand::Memory { command } => memory::run(command, config).await,
-        CreatorCommand::Reference { command } => reference::run(command, config).await,
         CreatorCommand::Kb { command } => kb::run(command, config).await,
         CreatorCommand::World { command } => world::run(command, config).await,
         CreatorCommand::Character { command } => character::run(command, config).await,
         CreatorCommand::Reading { command } => reading::run(command, config).await,
         CreatorCommand::Inspector { command } => inspector::run(command, config).await,
-        CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,
         CreatorCommand::MomentDirective { command } => moment_directive::run(command, config).await,
         CreatorCommand::Works { command } => works::handle_works(command, config).await,
         CreatorCommand::DemoSeed { force } => run_demo_seed(config, force).await,

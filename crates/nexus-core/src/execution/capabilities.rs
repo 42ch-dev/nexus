@@ -2769,86 +2769,6 @@ fn execute_workspace_paths(
     }))
 }
 
-/// T7: `nexus.research.query` — query local-only `ReferenceSource` index.
-async fn execute_research_query(
-    req: &ToolsApi,
-    context: &ToolContext,
-    creator_id: &str,
-) -> Result<serde_json::Value, NexusApiError> {
-    // Direct lookup by reference_source_id takes precedence.
-    let pool = context.pool();
-    if let Some(id) = req.parameters["reference_source_id"].as_str() {
-        // Scoped lookup: a source belonging to another creator must be
-        // indistinguishable from one that does not exist, so the refusal is
-        // the SAME `NotFound` either way — a 403 would confirm existence.
-        let row = nexus_local_db::reference_source::find_by_id_for_creator(pool, id, creator_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                category: format!("DATABASE_ERROR: {e}"),
-            })?
-            .ok_or_else(|| NexusApiError::NotFound {
-                resource: id.to_string(),
-            })?;
-
-        return Ok(serde_json::json!({
-            "results": [serde_json::json!({
-                "reference_source_id": row.reference_source_id,
-                "title": row.title,
-                "uri": row.uri,
-                "source_type": row.source_type,
-                "tags": row.tags,
-                "scan_status": row.scan_status,
-            })],
-            "count": 1,
-        }));
-    }
-
-    let limit = req.parameters["limit"]
-        .as_i64()
-        .map_or(50, |v| v.clamp(1, 1000));
-
-    // Scoped list: an unscoped call returns every creator's rows.
-    let rows = nexus_local_db::reference_source::list(pool, Some(limit), None, Some(creator_id))
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            category: format!("DATABASE_ERROR: {e}"),
-        })?;
-
-    // Optional client-side tag filter.
-    let tag_filter: Option<&str> = req.parameters["tags"].as_str();
-    let filtered: Vec<_> = tag_filter.map_or_else(
-        || rows.iter().collect(),
-        |tag| {
-            rows.iter()
-                .filter(|r| {
-                    r.tags
-                        .as_deref()
-                        .is_some_and(|t| t.split(',').any(|x| x.trim() == tag))
-                })
-                .collect()
-        },
-    );
-
-    let results: Vec<serde_json::Value> = filtered
-        .iter()
-        .map(|r| {
-            serde_json::json!({
-                "reference_source_id": r.reference_source_id,
-                "title": r.title,
-                "uri": r.uri,
-                "source_type": r.source_type,
-                "tags": r.tags,
-                "scan_status": r.scan_status,
-            })
-        })
-        .collect();
-
-    Ok(serde_json::json!({
-        "results": results,
-        "count": results.len(),
-    }))
-}
-
 /// T8: `nexus.runtime.health` — agent-visible runtime health (distinct from
 /// `nexus.observability.daemon.health` which exposes uptime + lifecycle).
 ///
@@ -2959,15 +2879,6 @@ pub(crate) fn registry_workspace_paths<'a>(
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
     let result = execute_workspace_paths(req, context, creator_id);
     Box::pin(async move { result })
-}
-
-/// Registry wrapper: `nexus.research.query` — async passthrough.
-pub(crate) fn registry_research_query<'a>(
-    req: &'a ToolsApi,
-    context: &'a ToolContext,
-    creator_id: &'a str,
-) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
-    Box::pin(execute_research_query(req, context, creator_id))
 }
 
 /// Registry wrapper: `nexus.runtime.health` — sync → async wrapper.
@@ -4108,28 +4019,6 @@ pub fn build_registry() -> CapabilityRegistry {
             description: "workspace paths returns allowed roots from active workspace",
             expected_outcome: "success",
             test_fn_name: "workspace_paths_returns_allowed_roots",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.research.query",
-        access: Access::Read,
-        admission: ADMISSION_READ_WORKSPACE,
-        handler: registry_research_query,
-        catalog: CatalogDescriptor {
-            description: "Query the local reference-source index by id, tag, or a bounded limit.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"reference_source_id":{"type":"string"},"tags":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":1000}}}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"results":{"type":"array","items":{"type":"object"}},"count":{"type":"integer"}},"required":["results","count"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::InvalidInput,
-        handler_test_vector: TestVector {
-            description: "research query returns reference sources from local index",
-            expected_outcome: "success",
-            test_fn_name: "research_query_returns_reference_sources",
         },
     });
 
