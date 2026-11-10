@@ -38,13 +38,14 @@ The Masters at the time placed a **User knowledge index** beside Creator under `
 | MCA fourth domain | `nexus-moment-context-assembly` | Heading `## User Knowledge`; field `MomentContext.user_knowledge`; `fetch_user_knowledge` via `KnowledgeStore`; budget applied last after world_state / timeline / world_kb. Activation ran between World KB fetch and this slot. |
 | Production Host | `crates/nexus-core/src/host.rs` | For a Creator actor, `MomentRequest::with_user(creator_id)` — **not** `user_default`, so Host assembly typically could not see rows the CLI had just written. |
 | Inspector / CLI assemble | `apps/nexus42/src/commands/platform/context.rs` | `--user-id` defaulted to `user_default`. Same mismatch if a caller passed a creator id. |
+| HTTP inspector / Moment assembly | `crates/nexus-core/src/context.rs` (`CoreService::inspect_moment`), reached from `crates/nexus-core-node/src/actors.rs` → `apps/nexus-service/src/context.ts` (`POST /v1/daemon/inspector/moment`) | Assembled the Moment through `.with_user(creator_id)` with a `SqliteKnowledgeStore::new(pool)`. This was the HTTP entry path for Moment assembly, but the response body (`MomentInspectResponse`) carries only `modules` / `slot_map` / `budget` / `moment_directive` / `hygiene` — never the User Knowledge content itself. |
 | Demo seed | `apps/nexus42/src/commands/creator/mod.rs` demo world seed | On `--force`, `DELETE FROM knowledge_entries WHERE user_id = 'user_default'`, then inserted a demo `UserKnowledgeEntry` under `user_default`. |
 
 Why it was a placeholder rather than a product:
 
 1. No real User / Pairing identity in the local product. The store keyed a `user_id` that the platform never issued.
 2. The write path (`user_default`) and the production Host read path (`creator_id`) disagreed.
-3. No HTTP or UI for User knowledge.
+3. No HTTP or UI **write/management** surface for User knowledge. The daemon inspector's Moment assembly (`POST /v1/daemon/inspector/moment`) did read the store, but the User Knowledge content never entered the response body.
 4. The specified promotion path (entity-scope §6.3, User knowledge → World KB with provenance) had no implementation.
 5. `reference_uri` existed on the row type but had no CLI/Core write entrance.
 6. `spoke-memory` explicitly MUST NOT grow `KnowledgeEntry` fields or fake memory with knowledge rows; memory N4-T (export/import/transfer) is not started and is not a dump for this table.
@@ -76,7 +77,7 @@ Masters at the time: [entity-scope-model.md](../../../../docs/specs/architecture
 | HTTP | `GET\|POST /v1/daemon/kb/entries`, `GET\|DELETE /v1/daemon/kb/entries/{id}` | Work-scope file-index daemon-api (`apps/nexus-service/src/knowledge.ts`, `schemas/daemon-api/kb/*-kb-entry*.schema.json`). Not World KB `/kb/` or `/kb/key-blocks/`, and not World pack `/v1/daemon/worlds/:world_id/kb/pack/*`. |
 | Generated clients | web `browser-client` `listKbEntries` / add / get / delete; `packages/nexus-native` same wrappers | No in-tree web page called them. |
 | Operator extract entrances hanging off this group | `queue-extract` (historically keyed by a file-index `work_entry_id`, with `--chapter N` sugar that located a Work chapter body); `extract-status`; `rescan` | These enqueued or refreshed World KB extract work. `rescan` did **not** use the file index as SSOT — it read chapter prose and confirmed `KnowledgeEntryRecord` rows. The **command spellings** retired with this group; the **World KB extract pipeline** stayed and was rebound. |
-| Masters at the time | entity-scope §5.3–§5.4, cli-spec work-scope rows, [world-kb-runtime-architecture.md](../../../../docs/specs/architecture/world-kb-runtime-architecture.md) extract-status/rescan mentions, [workflow-profile.md](../../../../docs/specs/novel-writing/workflow-profile.md) persist stage, [work-experience-model.md](../../../../docs/specs/creator/work-experience-model.md) | Described `creator kb` as a live work-scope index and as the Work → World KB extract entrance. |
+| Masters at the time | entity-scope §5.3–§5.4, cli-spec work-scope rows, [world-kb-runtime-architecture.md](../../../../docs/specs/architecture/world-kb-runtime-architecture.md) extract-status/rescan mentions, [spoke-adapter-architecture.md](../../../../docs/specs/architecture/spoke-adapter-architecture.md) §6.1 route table, [workflow-profile.md](../../../../docs/specs/novel-writing/workflow-profile.md) persist stage, [work-experience-model.md](../../../../docs/specs/creator/work-experience-model.md), [creator-workflow.md](../../../../docs/specs/creator/creator-workflow.md) Work-vs-work-scope row | Described `creator kb` as a live work-scope index and as the Work → World KB extract entrance. |
 
 The file index was a leftover rather than a product face: no production consumer existed, and narrative knowledge already had a home (Spoke `KnowledgeEntry` → `KnowledgeEntryRecord` → `KbStore`). Keeping a parallel filesystem index added a second authoring and consumption path. Extract and rescan belonged to World KB and were rebound; they were not a reason to keep the old index as a compatibility layer.
 
@@ -196,7 +197,7 @@ Four directions were genuinely weighed. Each was available at the point of decis
 - [local-db-schema.md](../../../../docs/specs/runtime/local-db-schema.md) (`knowledge_entries`, `reference_sources`)
 - [reference-store-layout.md](../../../../docs/specs/runtime/reference-store-layout.md), [reference-knowledge.md](../../../../docs/specs/runtime/reference-knowledge.md)
 - [cli-spec.md](../../../../docs/specs/cli/cli-spec.md) (`creator knowledge`, `creator reference`, `creator kb`, assemble-moment)
-- [world-kb-runtime-architecture.md](../../../../docs/specs/architecture/world-kb-runtime-architecture.md)
+- [world-kb-runtime-architecture.md](../../../../docs/specs/architecture/world-kb-runtime-architecture.md), [spoke-adapter-architecture.md](../../../../docs/specs/architecture/spoke-adapter-architecture.md) (§6.1 route stability), [creator-workflow.md](../../../../docs/specs/creator/creator-workflow.md)
 - Spoke memory records: `implemented/architecture/2026-10-28-spoke-memory-protocol.md`, `proposed/architecture/2026-10-28-spoke-memory-adoption-plan.md` (N4-T / N5 still open; no KnowledgeEntry-in-memory)
 - Sibling strategy / work IRs: [PR #483](https://github.com/42ch-dev/nexus/pull/483), [PR #485](https://github.com/42ch-dev/nexus/pull/485)
 - Companion record: `proposed/architecture/2026-11-10-knowledge-ir.md` — the Knowledge IR design built on this retirement
