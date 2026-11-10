@@ -9,6 +9,11 @@
 //!   tags / state), and
 //! - the stub answers exactly what was put, fails closed on an unknown id, and
 //!   records every intent in call order for that report.
+//!
+//! The same file also guards the seam's architecture: one conversion mapper per
+//! direction and no parallel `KnowledgePort` trait beside `KnowledgeEntryPort`.
+
+use std::path::{Path, PathBuf};
 
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::{KnowledgeEntryBody, KnowledgeEntryRecord};
@@ -114,4 +119,81 @@ async fn mutation_log_records_intents_in_order_and_drains() {
         port.mutations().is_empty(),
         "drain_mutations leaves the log empty"
     );
+}
+
+/// The scan covers both source trees, skipping `target/` build output.
+const SCAN_ROOTS: [&str; 2] = ["crates", "apps"];
+
+// Split literals keep this guard's own needles out of its hit count.
+const CONVERSION_MAPPERS: [&str; 2] = [
+    concat!("pub fn knowledge_record_to_spoke", "("),
+    concat!("pub fn spoke_to_knowledge_record", "("),
+];
+const PARALLEL_PORT_TRAIT: [&str; 2] = [
+    concat!("trait ", "KnowledgePort"),
+    concat!("impl ", "KnowledgePort for"),
+];
+
+fn rust_sources(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).expect("readable workspace directory") {
+            let path = entry.expect("readable directory entry").path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|name| name != "target") {
+                    pending.push(path);
+                }
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
+fn hits(sources: &[(PathBuf, String)], needle: &str) -> Vec<String> {
+    let mut hits = Vec::new();
+    for (path, text) in sources {
+        for (index, line) in text.lines().enumerate() {
+            if line.contains(needle) {
+                hits.push(format!("{}:{}", path.display(), index + 1));
+            }
+        }
+    }
+    hits
+}
+
+#[test]
+fn one_conversion_mapper_per_direction_and_no_parallel_port_trait() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("the crate sits two levels below the workspace root")
+        .to_path_buf();
+    let sources: Vec<(PathBuf, String)> = SCAN_ROOTS
+        .iter()
+        .flat_map(|root| rust_sources(&workspace.join(root)))
+        .map(|path| {
+            let bytes = std::fs::read(&path).expect("readable source file");
+            (path, String::from_utf8_lossy(&bytes).into_owned())
+        })
+        .collect();
+
+    for needle in CONVERSION_MAPPERS {
+        let found = hits(&sources, needle);
+        assert_eq!(
+            found.len(),
+            1,
+            "exactly one definition of `{needle}` must exist across crates/ and apps/, found {found:?}"
+        );
+    }
+
+    for needle in PARALLEL_PORT_TRAIT {
+        let found = hits(&sources, needle);
+        assert!(
+            found.is_empty(),
+            "`{needle}` must not exist; KnowledgeEntryPort is the only knowledge port, found {found:?}"
+        );
+    }
 }
