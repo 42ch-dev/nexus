@@ -12,13 +12,13 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use nexus_contracts::tristate::presence_string;
 use nexus_contracts::{
-    AddKbEntryRequest, AppendInspirationRequest, AppendInspirationResponse,
+    AppendInspirationRequest, AppendInspirationResponse,
     BatchUpdateFindingsRequest, BatchUpdateFindingsResponse, ChapterBody, ChapterDetail,
     ChapterOutline, CoreChapterContentQuery as WireChapterContentQuery,
     CoreTimelineEventsQuery as WireTimelineEventsQuery,
     CoreTimelineOverviewQuery as WireTimelineOverviewQuery, CoreWorkSelection, CreateForkRequest,
-    CreateWorkRequest, FindingDetailResponse, FindingsApi, GetKbEntryResponse, ListChaptersQuery,
-    ListKbEntriesQuery, ListWorksQuery, ListWorksResponse, PackExportRequest, PackImportRequest,
+    CreateWorkRequest, FindingDetailResponse, FindingsApi, ListChaptersQuery,
+    ListWorksQuery, ListWorksResponse, PackExportRequest, PackImportRequest,
     PatchChapterRequest, ReadingAnnotation, ReadingAnnotationCreateRequest,
     ReadingAnnotationListQuery, ReadingAnnotationListResponse, ReadingAnnotationPatchRequest,
     ReadingProgressQuery, ReadingProgressRequest, ReadingProgressResponse,
@@ -924,59 +924,6 @@ impl NativeCore {
         self.json_call(principal_handle, async move |core, principal| {
             core.patch_timeline_event(&principal, HTTP_HOLDER, work_id, request)
                 .await
-        })
-        .await
-    }
-
-    // ── Work KB index (P1-T3) ───────────────────────────────────────────────
-
-    /// `GET /v1/daemon/kb/entries` — local work-scope file index (`scope=work`).
-    #[napi]
-    pub async fn list_kb_entries(
-        &self,
-        principal_handle: String,
-        query_json: Buffer,
-    ) -> Result<Buffer> {
-        let query: ListKbEntriesQuery = decode(query_json, "query")?;
-        self.json_call(principal_handle, async move |core, principal| {
-            core.list_kb_entries(&principal, query).await
-        })
-        .await
-    }
-
-    /// `POST /v1/daemon/kb/entries` (201 at the adapter).
-    #[napi]
-    pub async fn add_kb_entry(
-        &self,
-        principal_handle: String,
-        request_json: Buffer,
-    ) -> Result<Buffer> {
-        let request: AddKbEntryRequest = decode(request_json, "request")?;
-        self.json_call(principal_handle, async move |core, principal| {
-            core.add_kb_entry(&principal, request).await
-        })
-        .await
-    }
-
-    /// `GET /v1/daemon/kb/entries/{entry_id}`.
-    #[napi]
-    pub async fn get_kb_entry(&self, principal_handle: String, entry_id: String) -> Result<Buffer> {
-        self.json_call(principal_handle, async move |core, principal| {
-            let response: GetKbEntryResponse = core.get_kb_entry(&principal, entry_id).await?;
-            Ok(response)
-        })
-        .await
-    }
-
-    /// `DELETE /v1/daemon/kb/entries/{entry_id}`.
-    #[napi]
-    pub async fn delete_kb_entry(
-        &self,
-        principal_handle: String,
-        entry_id: String,
-    ) -> Result<Buffer> {
-        self.json_call(principal_handle, async move |core, principal| {
-            core.delete_kb_entry(&principal, entry_id).await
         })
         .await
     }

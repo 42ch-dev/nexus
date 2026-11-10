@@ -162,10 +162,6 @@ export interface NativeCoreBinding {
     requestJson: Uint8Array,
   ): Promise<Uint8Array>;
   patchTimelineEvent(principal: string, workId: string, requestJson: Uint8Array): Promise<Uint8Array>;
-  listKbEntries(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
-  addKbEntry(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
-  getKbEntry(principal: string, entryId: string): Promise<Uint8Array>;
-  deleteKbEntry(principal: string, entryId: string): Promise<Uint8Array>;
   createFinding(principal: string, workId: string, requestJson: Uint8Array): Promise<Uint8Array>;
   createFindingFromReview(
     principal: string,

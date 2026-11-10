@@ -66,7 +66,12 @@ async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir
 // CLI surface (assert_cmd)
 // =============================================================================
 
-/// `creator world kb --help` lists all four subcommands.
+/// `creator world kb --help` lists the author and the rebound extract/rescan
+/// leaves.
+///
+/// The last three entries are the v231 retire-file-index rebind: the extract
+/// and refreshable-scan entrances are flat leaves of this group, not a
+/// dedicated sub-group.
 #[test]
 fn world_kb_help_lists_subcommands() {
     let output = Command::cargo_bin("nexus42")
@@ -79,12 +84,46 @@ fn world_kb_help_lists_subcommands() {
         .clone();
 
     let help_text = String::from_utf8(output).unwrap();
-    for subcmd in &["list", "show", "edit", "delete"] {
+    for subcmd in &[
+        "list",
+        "show",
+        "edit",
+        "delete",
+        "pending",
+        "adopt",
+        "reject",
+        "queue-extract",
+        "extract-status",
+        "rescan",
+    ] {
         assert!(
             help_text.contains(subcmd),
             "creator world kb --help must list '{subcmd}' subcommand: {help_text}"
         );
     }
+}
+
+/// `creator world kb rescan --help` advertises the work-scoped `--work` mode.
+#[test]
+fn world_kb_rescan_help_shows_the_work_mode() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "world", "kb", "rescan", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--work"),
+        "rescan --help must list --work: {help_text}"
+    );
+    assert!(
+        help_text.contains("WORK_REF"),
+        "rescan --help must name the --work value: {help_text}"
+    );
 }
 
 /// `creator world kb list --help` documents the `world_ref` arg and `--json`.

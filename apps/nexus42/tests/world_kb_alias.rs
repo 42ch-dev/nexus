@@ -1,7 +1,8 @@
 //! Canonical World KB surface after the v1.52 alias retirement (R19; v1.193 P0-T13).
 //!
 //! The legacy `creator kb --scope world` forwarding alias and its deprecation
-//! warning are gone: `creator kb` serves the work-scope file index only, and
+//! warning are gone: the `creator kb` work-scope group is itself retired
+//! (V1.231, ADR K1 §5.3), and
 //! World-scoped narrative KB entries live on the canonical `creator world kb`
 //! surface. What remains covered here is that canonical surface itself — the
 //! `world::kb` logic functions (`kb_list` / `kb_show` / `kb_delete`) driven

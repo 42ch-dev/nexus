@@ -11,12 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **BREAKING — reference-source daemon read contract (V231 pre-1.0 API simplification, ADR K1 §2.3 ruling 3):** removed `GET /v1/daemon/references` and `GET /v1/daemon/references/{reference_id}` together with their schemas (`schemas/core/references/*`) and the Core-slice operations `listReferences` / `getReference`. The removal is part of a contract simplification, not a deprecation cycle: no 410/sunset handler or compatibility shim was added, so both identities now fall through to the framework's default not-found answer. Add a **new** contract if the capability returns; do not revive these routes.
+- **BREAKING — work-scope KB entry daemon contract (V231 pre-1.0 API simplification, ADR K1 §2.4 ruling 3):** removed `GET /v1/daemon/kb/entries`, `POST /v1/daemon/kb/entries` and `GET|DELETE /v1/daemon/kb/entries/{entry_id}` together with their schemas (`schemas/daemon-api/kb/*-kb-entry*.schema.json`) and the Core-slice operations `listKbEntries` / `addKbEntry` / `getKbEntry` / `deleteKbEntry`. Same rule as the reference removal: no 410/sunset handler or compatibility shim, so all four identities fall through to the framework's default not-found answer.
 
 ### Consumer Impact
 
 - TypeScript: `ReferenceListResponse`, `ReferenceGetResponse` and `ReferenceSourceInfo` are no longer exported, and `CoreSliceClient.listReferences` / `getReference` are gone. The `apps/web` `browser-client` and `@42ch/nexus-native` wrappers were removed with them.
+- TypeScript: `ListKbEntriesQuery`, `ListKbEntriesResponse`, `AddKbEntryRequest`, `AddKbEntryResponse`, `GetKbEntryResponse`, `DeleteKbEntryResponse` and `KbEntrySummary` are no longer exported; `CoreSliceClient` and the `@42ch/nexus-native` facade lose `listKbEntries` / `addKbEntry` / `getKbEntry` / `deleteKbEntry`, and the `apps/web` `browser-client` methods of the same names are removed. `PaginationInfo` remains exported but no longer has a list response using it.
 - Rust: `nexus_contracts::generated::core::references::*` is deleted; the core no longer exposes reference handlers, so no generated wire type has a producer.
-- Replacement guidance: reference sources have no successor surface. World-scoped knowledge stays on World KB (`/v1/daemon/worlds/{world_id}/kb/*`); the local work-scope file index stays on `/v1/daemon/kb/entries`.
+- Rust: `nexus_contracts::generated::daemon_api::kb::*KbEntry*` and `*kb_entries*` are deleted. The `nexus-core` file-index handlers and their `nexus-core-node` bindings are removed with the CLI group; the extract-job methods keep their own wire types.
+- Replacement guidance: reference sources have no successor surface. World-scoped knowledge stays on World KB (`/v1/daemon/worlds/{world_id}/kb/*`); the retired work-scope file index has no successor contract — the creator KB extract pipeline is an operator surface (`creator world kb queue-extract` / `extract-status` / `rescan`), not a wire API.
 
 ## [0.31.1] - 2026-09-02
 

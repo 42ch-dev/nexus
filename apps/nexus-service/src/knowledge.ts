@@ -1,25 +1,18 @@
 /**
  * Knowledge family HTTP surface (P1-T3 authority over the single Rust core):
- * the local work-scope KB file index, Work/creator findings (including the
- * tri-state PATCH, batch triage, stale banner and retention prune) and reading
- * depth (progress + annotations).
+ * Work/creator findings (including the tri-state PATCH, batch triage, stale
+ * banner and retention prune) and reading depth (progress + annotations).
  * Scope validation, enum/transition validation, batch semantics and retention
  * math stay in the core; these handlers keep transport translation only.
  */
 import type {
-  AddKbEntryRequest,
-  AddKbEntryResponse,
   BatchUpdateFindingsRequest,
   BatchUpdateFindingsResponse,
   CreateFindingRequest,
-  DeleteKbEntryResponse,
   FindingDetailResponse,
   FindingsPruneResponse,
-  GetKbEntryResponse,
   ListFindingsQuery,
   ListFindingsResponse,
-  ListKbEntriesQuery,
-  ListKbEntriesResponse,
   ReadingAnnotation,
   ReadingAnnotationCreateRequest,
   ReadingAnnotationListResponse,
@@ -34,53 +27,6 @@ import type { ServiceCore } from './lifecycle.js';
 import { HttpError } from './errors.js';
 import type { DomainRoute } from './routes.js';
 import { parseOptionalInteger, withPrincipal, wirePayload } from './world-kb.js';
-
-// ── Work KB index (scope=work only) ────────────────────────────────────────
-
-/** `GET /v1/daemon/kb/entries`. */
-export function listKbEntries(
-  service: ServiceCore,
-  searchParams: URLSearchParams,
-): Promise<ListKbEntriesResponse> {
-  const creator_id = searchParams.get('creator_id');
-  const workspace_slug = searchParams.get('workspace_slug');
-  const scope = searchParams.get('scope');
-  const q = searchParams.get('q');
-  const cursor = searchParams.get('cursor');
-  const query: ListKbEntriesQuery = {
-    ...(creator_id !== null ? { creator_id } : {}),
-    ...(workspace_slug !== null ? { workspace_slug } : {}),
-    ...(scope !== null ? { scope } : {}),
-    ...(q !== null ? { q } : {}),
-    ...(cursor !== null ? { cursor } : {}),
-    ...boundedLimit(searchParams),
-  };
-  return withPrincipal(service, (principal) => service.core.listKbEntries(principal, query));
-}
-
-/** `POST /v1/daemon/kb/entries` — 201 created. */
-export function addKbEntry(
-  service: ServiceCore,
-  request: AddKbEntryRequest,
-): Promise<AddKbEntryResponse> {
-  return withPrincipal(service, (principal) => service.core.addKbEntry(principal, request));
-}
-
-/** `GET /v1/daemon/kb/entries/{entry_id}`. */
-export function getKbEntry(
-  service: ServiceCore,
-  entryId: string,
-): Promise<GetKbEntryResponse> {
-  return withPrincipal(service, (principal) => service.core.getKbEntry(principal, entryId));
-}
-
-/** `DELETE /v1/daemon/kb/entries/{entry_id}`. */
-export function deleteKbEntry(
-  service: ServiceCore,
-  entryId: string,
-): Promise<DeleteKbEntryResponse> {
-  return withPrincipal(service, (principal) => service.core.deleteKbEntry(principal, entryId));
-}
 
 // ── Findings ───────────────────────────────────────────────────────────────
 
@@ -294,36 +240,6 @@ export async function deleteAnnotation(
 
 /** Exact path/verb/tier identities this family owns (composer input). */
 export const KNOWLEDGE_ROUTES: readonly DomainRoute[] = [
-  {
-    method: 'GET',
-    pattern: /^\/v1\/daemon\/kb\/entries$/,
-    tier: 'tier2',
-    family: 'knowledge',
-    handle: async (service, _params, search) => ({ body: await listKbEntries(service, search) }),
-  },
-  {
-    method: 'POST',
-    pattern: /^\/v1\/daemon\/kb\/entries$/,
-    tier: 'tier2',
-    family: 'knowledge',
-    handle: async (service, _params, _search, body) => ({
-      body: await addKbEntry(service, wirePayload<AddKbEntryRequest>(body, 'request')),
-    }),
-  },
-  {
-    method: 'GET',
-    pattern: /^\/v1\/daemon\/kb\/entries\/([^/]+)$/,
-    tier: 'tier2',
-    family: 'knowledge',
-    handle: async (service, params) => ({ body: await getKbEntry(service, params[0]) }),
-  },
-  {
-    method: 'DELETE',
-    pattern: /^\/v1\/daemon\/kb\/entries\/([^/]+)$/,
-    tier: 'tier2',
-    family: 'knowledge',
-    handle: async (service, params) => ({ body: await deleteKbEntry(service, params[0]) }),
-  },
   {
     method: 'GET',
     pattern: /^\/v1\/daemon\/works\/([^/]+)\/findings$/,

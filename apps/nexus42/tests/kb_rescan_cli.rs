@@ -1,9 +1,9 @@
-//! V1.50 T-B P2 — `creator kb rescan` hermetic round-trip.
+//! V1.50 T-B P2 — `creator world kb rescan` hermetic round-trip.
 //!
 //! Plan: `2026-06-18-v1.50-kb-refreshable-scan` (local plan record)
 //! Spec: `docs/specs/architecture/entity-scope-model.md` §5.5
 //!
-//! Drives `nexus42::commands::creator::kb::rescan::kb_rescan_hermetic` against
+//! Drives `nexus42::commands::creator::world::kb::rescan::kb_rescan_hermetic` against
 //! a fresh temp DB + temp workspace so the rescan can be exercised without
 //! `$HOME` or a daemon.
 //!
@@ -29,10 +29,9 @@
 mod direct;
 
 use direct::DirectFixture;
-use nexus42::commands::creator::kb::rescan::{kb_rescan_hermetic, WORLD_KB_FORBIDDEN_CODE};
+use nexus42::commands::creator::world::kb::rescan::{kb_rescan_hermetic, WORLD_KB_FORBIDDEN_CODE};
 use nexus42::commands::creator::world::kb::kb_adopt;
 use nexus42::errors::CliError;
-use nexus_home_layout::{creator_kb_dir, nexus_root_from_home};
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{insert_pending, list_pending_for_world};
@@ -394,95 +393,20 @@ async fn rescan_reuses_preexisting_pending_candidate_without_duplicate() {
 // v1.193 P0-T13 — obsolete entrances retired, retained neighbours intact
 // ═══════════════════════════════════════════════════════════════════════
 
-/// Every file under `root` as `(relative path, byte length, mtime)`, sorted.
+/// The retired `creator kb` / `creator knowledge` / `creator reference` groups
+/// are unknown.
 ///
-/// A refused parser invocation must leave this identical: the retired
-/// world-scope branch opened — and therefore migrated/created — the selected
-/// workspace before it could fail.
-fn snapshot_tree(root: &Path) -> Vec<(std::path::PathBuf, u64, Option<std::time::SystemTime>)> {
-    fn walk(
-        dir: &Path,
-        root: &Path,
-        out: &mut Vec<(std::path::PathBuf, u64, Option<std::time::SystemTime>)>,
-    ) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
-            let metadata = std::fs::metadata(&path).ok();
-            out.push((
-                relative,
-                metadata.as_ref().map_or(0, std::fs::Metadata::len),
-                metadata.and_then(|m| m.modified().ok()),
-            ));
-            if path.is_dir() {
-                walk(&path, root, out);
-            }
-        }
-    }
-    let mut out = Vec::new();
-    walk(root, root, &mut out);
-    out.sort();
-    out
-}
-
-/// The retired `creator kb --scope world` spelling is refused by the parser,
-/// and the refused invocation writes nothing.
-///
-/// Regression: the compatibility branch must not survive as a parseable no-op
-/// (`--scope world` was a forwarding alias whose target surface never gained a
-/// `search`/`add` leaf), and a refused invocation must not materialize — or
-/// migrate — the selected workspace the way the old forwarding arm did. The
-/// canonical World KB behavior itself is unchanged and stays covered by
-/// `world_kb_alias.rs` (`kb_list` / `kb_show` / `kb_delete`).
-#[tokio::test]
-async fn work_kb_scope_rejects_legacy_world_without_mutation() {
-    let fixture = DirectFixture::new().await;
-    let before = snapshot_tree(fixture.home.path());
-
-    let output = fixture
-        .command()
-        .args([
-            "creator",
-            "kb",
-            "list",
-            "--scope",
-            "world",
-            "--world-id",
-            "wld_legacy",
-        ])
-        .output()
-        .expect("spawn the real nexus42 binary");
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "the legacy world scope must be a usage error, got {output:?}"
-    );
-    assert!(
-        stderr.contains("--scope"),
-        "the refusal must name the removed flag, got:\n{stderr}"
-    );
-    assert_eq!(
-        snapshot_tree(fixture.home.path()),
-        before,
-        "a refused legacy-world invocation must not write anything"
-    );
-}
-
-/// The retired `creator knowledge` / `creator reference` groups are unknown.
-///
-/// Regression: every leaf of both groups read the retiring User-knowledge and
-/// reference stores, so the parser must refuse the group names before any
-/// handler runs — and no registry row or `body.md` may be produced.
+/// Regression: every leaf of these groups read the retiring work-scope file
+/// index, the User-knowledge store or the reference store, so the parser must
+/// refuse the group names before any handler runs — and no registry row,
+/// `kb/index.json` or `body.md` may be produced.
 #[tokio::test]
 async fn retired_knowledge_and_reference_groups_are_unknown() {
     let fixture = DirectFixture::new().await;
 
     for args in [
+        vec!["creator", "kb", "--help"],
+        vec!["creator", "kb", "list"],
         vec!["creator", "knowledge", "--help"],
         vec!["creator", "knowledge", "list"],
         vec!["creator", "reference", "--help"],
@@ -508,156 +432,45 @@ async fn retired_knowledge_and_reference_groups_are_unknown() {
     }
 }
 
-/// The retained work-scope index leaves round-trip through the direct core.
+/// The rebound `creator world kb rescan` leaf fails closed unless exactly one
+/// scan scope is named, and the refusal names the supported spellings.
 ///
-/// Regression: `list|search|show|add|remove` must keep working against the
-/// local file index with no daemon probe and no HTTP fallback — the same
-/// surface the core owns through `list_kb_entries` / `add_kb_entry` /
-/// `get_kb_entry` / `delete_kb_entry`. Covered together because the id the
-/// `add` leaf reports is the only handle the other three accept.
+/// Reachable without a seeded Work: the scope check runs before the pool open,
+/// so this pins the rebound entrance's dispatch, not the rescan heuristic
+/// (`kb_rescan_hermetic` / `kb_rescan_work_hermetic` cover that).
 #[tokio::test]
-async fn work_kb_index_leaves_round_trip_without_a_daemon() {
+async fn rebound_rescan_requires_exactly_one_scope() {
     let fixture = DirectFixture::new().await;
-    let source = fixture.home.path().join("retained-note.md");
-    std::fs::write(&source, "Chapter notes for the retained work index.\n").unwrap();
-    let source_path = source.to_str().unwrap();
 
-    let add = fixture
+    let neither = fixture
+        .command()
+        .args(["creator", "world", "kb", "rescan"])
+        .output()
+        .expect("spawn the real nexus42 binary");
+    assert!(!neither.status.success(), "rescan without a scope must fail");
+    let stderr = String::from_utf8_lossy(&neither.stderr);
+    assert!(
+        stderr.contains("or --work <work_ref>"),
+        "the refusal must name both supported scopes, got:\n{stderr}"
+    );
+
+    let both = fixture
         .command()
         .args([
             "creator",
+            "world",
             "kb",
-            "add",
-            "--file",
-            source_path,
-            "--title",
-            "Retained note",
+            "rescan",
+            "my-novel/05",
+            "--work",
+            "my-novel",
         ])
         .output()
         .expect("spawn the real nexus42 binary");
+    assert!(!both.status.success(), "both scopes must be refused");
+    let stderr = String::from_utf8_lossy(&both.stderr);
     assert!(
-        add.status.success(),
-        "`kb add` must stay callable: {}",
-        String::from_utf8_lossy(&add.stderr)
-    );
-    let entry_id = String::from_utf8_lossy(&add.stdout)
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("✓ Local work entry added: "))
-        .expect("`kb add` must report the stored entry id")
-        .trim()
-        .to_string();
-    assert!(
-        entry_id.starts_with("kb_") && entry_id.len() == 15,
-        "the core's entry-id contract is `kb_` + 12 hex chars, got {entry_id:?}"
-    );
-
-    let list = fixture
-        .command()
-        .args(["creator", "kb", "list"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        list.status.success(),
-        "`kb list` must stay callable: {}",
-        String::from_utf8_lossy(&list.stderr)
-    );
-    let list_stdout = String::from_utf8_lossy(&list.stdout).into_owned();
-    assert!(
-        list_stdout.contains(&entry_id) && list_stdout.contains("Retained note"),
-        "the added entry must be listed, got:\n{list_stdout}"
-    );
-
-    let search = fixture
-        .command()
-        .args(["creator", "kb", "search", "Retained"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        search.status.success(),
-        "`kb search` must stay callable: {}",
-        String::from_utf8_lossy(&search.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&search.stdout).contains(&entry_id),
-        "`kb search` must find the entry by title"
-    );
-
-    let show = fixture
-        .command()
-        .args(["creator", "kb", "show", &entry_id])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        show.status.success(),
-        "`kb show` must stay callable: {}",
-        String::from_utf8_lossy(&show.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&show.stdout)
-            .contains("Chapter notes for the retained work index."),
-        "`kb show` must render the stored entry body"
-    );
-
-    let remove = fixture
-        .command()
-        .args(["creator", "kb", "remove", &entry_id])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        remove.status.success(),
-        "`kb remove` must stay callable: {}",
-        String::from_utf8_lossy(&remove.stderr)
-    );
-
-    let after = fixture
-        .command()
-        .args(["creator", "kb", "list"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        after.status.success(),
-        "`kb list` must stay callable after a removal"
-    );
-    assert!(
-        !String::from_utf8_lossy(&after.stdout).contains(&entry_id),
-        "the removed entry must be gone from the index"
-    );
-}
-
-/// A corrupt local work index is reported as empty, not as an error.
-///
-/// Retained behavior (R-KB-001) now served by the core's own index reader: the
-/// leaf must stay callable and show an empty index instead of failing. The
-/// former CLI-side unit tests covered a duplicate reader that this task removes.
-#[tokio::test]
-async fn corrupt_work_index_is_reported_as_empty_not_an_error() {
-    let fixture = DirectFixture::new().await;
-    let creators_root = nexus_root_from_home(fixture.home.path()).join("creators");
-    let creator_id = std::fs::read_dir(&creators_root)
-        .expect("the fixture created the creators root")
-        .filter_map(Result::ok)
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .next()
-        .expect("the fixture registered exactly one creator");
-
-    let kb_dir = creator_kb_dir(fixture.home.path(), &creator_id, "default");
-    std::fs::create_dir_all(&kb_dir).expect("create the kb dir");
-    std::fs::write(kb_dir.join("index.json"), "not json at all {{{").expect("write corrupt index");
-
-    let list = fixture
-        .command()
-        .args(["creator", "kb", "list"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        list.status.success(),
-        "a corrupt index must not fail the leaf: {}",
-        String::from_utf8_lossy(&list.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&list.stdout)
-            .contains("No local work entries in workspace default"),
-        "a corrupt index must read as empty, got:\n{}",
-        String::from_utf8_lossy(&list.stdout)
+        stderr.contains("not both"),
+        "the refusal must reject the double scope, got:\n{stderr}"
     );
 }

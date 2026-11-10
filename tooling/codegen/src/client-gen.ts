@@ -109,13 +109,7 @@ const IMPORT_TYPES = [
   'OutlinePatchResponse',
   'OutlinePatchChapterRequest',
   'TimelinePatchEventRequest',
-  // Knowledge family (P5-T1 kb entries/findings/reading)
-  'ListKbEntriesQuery',
-  'ListKbEntriesResponse',
-  'AddKbEntryRequest',
-  'AddKbEntryResponse',
-  'GetKbEntryResponse',
-  'DeleteKbEntryResponse',
+  // Knowledge family (P5-T1 findings/reading)
   'ListFindingsQuery',
   'ListFindingsResponse',
   'CreateFindingRequest',

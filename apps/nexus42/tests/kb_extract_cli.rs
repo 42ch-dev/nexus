@@ -1,4 +1,4 @@
-//! Direct-core CLI tests — `creator kb queue-extract|extract-status`
+//! Direct-core CLI tests — `creator world kb queue-extract|extract-status`
 //! (v1.207 P1 Task 4, R-V1190-KB-EXTRACT-QUEUE-GAP).
 //!
 //! The leaves run on the typed core seam (`CoreService::queue_kb_extract` /
@@ -10,6 +10,10 @@
 //! `kb_extract_jobs` is guarded to an engine writer at the schema level, so the
 //! enqueue leaf takes the workspace's engine-owned admission; the status leaf
 //! stays on the direct-writer read path.
+//!
+//! The leaves are the rebound World KB entrances (v231 retire-file-index
+//! Task 1): the job names a Work artifact through `--work-id` / `--chapter`,
+//! and no leaf touches the retired work-scope file index.
 
 #![allow(clippy::too_many_lines)] // one end-to-end CLI scenario per test
 
@@ -27,20 +31,20 @@ fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
-/// Run `creator kb queue-extract` with `args`.
+/// Run `creator world kb queue-extract` with `args`.
 fn queue_extract(fixture: &DirectFixture, args: &[&str]) -> Output {
-    let mut command_args = vec!["creator", "kb", "queue-extract"];
+    let mut command_args = vec!["creator", "world", "kb", "queue-extract"];
     command_args.extend_from_slice(args);
     fixture
         .command()
         .args(&command_args)
         .output()
-        .expect("run kb queue-extract")
+        .expect("run world kb queue-extract")
 }
 
-/// Run `creator kb extract-status` with `args`.
+/// Run `creator world kb extract-status` with `args`.
 fn extract_status(fixture: &DirectFixture, args: &[&str]) -> Output {
-    let mut command_args = vec!["creator", "kb", "extract-status"];
+    let mut command_args = vec!["creator", "world", "kb", "extract-status"];
     command_args.extend_from_slice(args);
     fixture
         .command()

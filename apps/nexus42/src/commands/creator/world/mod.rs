@@ -93,7 +93,8 @@ pub enum WorldCommand {
     ///
     /// Per entity-scope-model §5.5, `creator world kb` is the canonical author
     /// CLI for inspecting and editing World-scoped `KnowledgeEntryRecord` rows. This is a
-    /// separate surface from `creator kb --scope world` (the legacy ingest path).
+    /// separate surface from the retired work-scope `creator kb` group (V1.231,
+    /// ADR K1 §5.3).
     Kb {
         #[command(subcommand)]
         command: kb::WorldKbCommand,
