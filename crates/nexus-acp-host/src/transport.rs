@@ -762,6 +762,31 @@ impl ManagedAcpProcess {
         Ok(())
     }
 
+    /// Hand a still-unreaped child to a detached, non-signalling reaper
+    /// (I-000359).
+    ///
+    /// A cleanup-deadline refusal must not signal the child it refused to
+    /// signal, but it may not leak the handle either: dropping it fires
+    /// `kill_on_drop` (an implicit kill), and forgetting it leaves a later
+    /// exit unreaped for the life of the host. The reaper owns the handle and
+    /// waits for the exit whenever it happens, reaping it then.
+    ///
+    /// No runtime means no task can outlive this call; the handle is dropped
+    /// there instead. Every owned child is spawned by this crate's
+    /// `AgentSpawner` inside a Tokio runtime, and both fallible teardown
+    /// paths run in async context. A runtime that shuts down before the child
+    /// exits drops the still-pending reaper and so applies the child's own
+    /// `kill_on_drop` policy — the same policy every other `AgentSpawner`
+    /// consumer keeps, not a signal introduced by this refusal.
+    fn hand_to_reaper(mut child: tokio::process::Child) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        handle.spawn(async move {
+            let _ = child.wait().await;
+        });
+    }
+
     /// Bounded teardown of an owned child that failed to launch/connect.
     ///
     /// Used on launch-failure paths: the spawned child has no ACP session to
@@ -795,14 +820,14 @@ impl ManagedAcpProcess {
                 // No birth token: the platform cannot prove ownership. Reap
                 // the leader if it is already dead and report unconfirmed
                 // cleanup, never signal. Every wait is bounded, and a
-                // deadline expiry leaks the child handle (mem::forget)
-                // instead of dropping it: dropping would fire kill_on_drop
-                // and turn the refusal into an implicit kill.
+                // deadline expiry hands the child to the non-signalling
+                // reaper instead of dropping it: dropping would fire
+                // kill_on_drop and turn the refusal into an implicit kill.
                 match timeout(grace, child.wait()).await {
                     Ok(Ok(_)) => {}
                     Ok(Err(e)) => return Err(AcpError::cleanup_unconfirmed(e.to_string())),
                     Err(_) => {
-                        std::mem::forget(child);
+                        Self::hand_to_reaper(child);
                         return Err(AcpError::cleanup_unconfirmed(
                             "No process-birth token; owned ACP process left unreaped past the cleanup deadline",
                         ));
@@ -871,7 +896,7 @@ impl ManagedAcpProcess {
                     // quiescence check after the reap proves the outcome.
                     if !Self::signal_group_guarded(&birth, Signal::SIGKILL) {
                         if timeout(grace, child.wait()).await.is_err() {
-                            std::mem::forget(child);
+                            Self::hand_to_reaper(child);
                         }
                         return Err(AcpError::cleanup_unconfirmed(
                             "Owned ACP process group cleanup unconfirmed (identity invalidated before SIGKILL)",
@@ -884,7 +909,7 @@ impl ManagedAcpProcess {
                         Ok(Ok(status)) => status,
                         Ok(Err(e)) => return Err(AcpError::cleanup_unconfirmed(e.to_string())),
                         Err(_) => {
-                            std::mem::forget(child);
+                            Self::hand_to_reaper(child);
                             return Err(AcpError::cleanup_unconfirmed(
                                 "Owned ACP process group cleanup unconfirmed (leader reap deadline expired)",
                             ));
@@ -945,7 +970,7 @@ impl ManagedAcpProcess {
                             );
                             if !Self::signal_group_guarded(&birth, Signal::SIGKILL) {
                                 if timeout(grace, child.wait()).await.is_err() {
-                                    std::mem::forget(child);
+                                    Self::hand_to_reaper(child);
                                 }
                                 return Err(AcpError::cleanup_unconfirmed(
                                     "Owned ACP process group cleanup unconfirmed (identity invalidated before SIGKILL)",
@@ -957,7 +982,7 @@ impl ManagedAcpProcess {
                                     return Err(AcpError::cleanup_unconfirmed(e.to_string()));
                                 }
                                 Err(_) => {
-                                    std::mem::forget(child);
+                                    Self::hand_to_reaper(child);
                                     return Err(AcpError::cleanup_unconfirmed(
                                         "Owned ACP process group cleanup unconfirmed (leader reap deadline expired)",
                                     ));
@@ -972,7 +997,7 @@ impl ManagedAcpProcess {
                                 return Ok(());
                             }
                             if timeout(grace, child.wait()).await.is_err() {
-                                std::mem::forget(child);
+                                Self::hand_to_reaper(child);
                             }
                             return Err(AcpError::cleanup_unconfirmed(
                                 "Owned ACP process group cleanup unconfirmed after SIGKILL",
@@ -997,14 +1022,14 @@ impl ManagedAcpProcess {
             // confirmed gone (the observed macOS CI launch-failure case)
             // instead of misreported, then let bounded waits and the
             // quiescence check decide. All waits are bounded; a deadline
-            // expiry leaks the handle instead of dropping it into an
-            // implicit kill.
+            // expiry hands the live child to the non-signalling reaper, so
+            // the refusal neither kills it nor leaves it unreaped.
             let _ = child.try_wait();
             match timeout(grace, child.wait()).await {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => return Err(AcpError::cleanup_unconfirmed(e.to_string())),
                 Err(_) => {
-                    std::mem::forget(child);
+                    Self::hand_to_reaper(child);
                     return Err(AcpError::cleanup_unconfirmed(
                         "Owned ACP process group cleanup unconfirmed (signal refused; leader alive past the cleanup deadline)",
                     ));
@@ -1947,9 +1972,11 @@ mod tests {
     }
 
     /// A live leader with an unprovable identity must not hang the cleanup
-    /// deadline: terminate(grace) returns the typed refusal within the bound,
-    /// and never drops the `kill_on_drop` child into an implicit kill (the
-    /// fixture leader is left running and killed explicitly afterwards).
+    /// deadline: terminate(grace) returns the typed refusal within the bound
+    /// and never drops the `kill_on_drop` child into an implicit kill. The
+    /// still-running child is owned by the detached non-signalling reaper, so
+    /// once it exits it is reaped instead of staying a host-lifetime zombie
+    /// (I-000359).
     #[cfg(unix)]
     #[tokio::test]
     async fn terminate_returns_within_bound_when_identity_unprovable_and_leader_alive() {
@@ -1965,9 +1992,9 @@ mod tests {
             child,
             PathBuf::from("/bin/sleep"),
         );
-        // Fixture-owned cleanup before any fallible step: the forgotten
-        // handle after the refusal cannot be dropped into an implicit kill,
-        // so this guard is what kills the leader on every failure path.
+        // Fixture-owned cleanup before any fallible step: the reaper owns the
+        // handle after the refusal, so this guard is what kills the leader on
+        // every failure path.
         let _guard = KillGroupOnDrop(leader_pid);
         proc.birth = Some(ProcessBirthToken {
             pid: leader,
@@ -1994,12 +2021,23 @@ mod tests {
             "the refused teardown must not have killed the leader"
         );
 
-        // The handle was deliberately leaked (no implicit kill on drop):
-        // kill the still-running fixture explicitly and reap it so nothing
-        // outlives the test.
+        // I-000359: the handle is neither dropped into an implicit kill nor
+        // forgotten — a detached reaper waits for the exit. Kill the fixture
+        // explicitly and prove the reap: a zombie still answers `kill(pid, 0)`
+        // (so it would stay `Ok` forever without an owner), while ESRCH means
+        // the reaper collected it.
         nix::sys::signal::kill(leader_pid, nix::sys::signal::Signal::SIGKILL)
-            .expect("SIGKILL the leaked live fixture");
-        nix::sys::wait::waitpid(leader_pid, None).expect("reap the explicit kill");
+            .expect("SIGKILL the refused live fixture");
+        let reaped = tokio::time::timeout(Duration::from_secs(5), async {
+            while nix::sys::signal::kill(leader_pid, None).is_ok() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(
+            reaped.is_ok(),
+            "the non-signalling reaper must reap leader {leader} once it exits"
+        );
     }
 
     /// Waits until `pid` is in the kernel's zombie state (exit status
