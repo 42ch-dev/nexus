@@ -4,7 +4,7 @@
 //! **V1.149 P0 (DF-74): default-on lore activation engine.** The flag-gated
 //! V1.146 spike is promoted to a consumer of the spoke `modules.activation`
 //! dialect — the handbook field table is
-//! `spoke/docs/specs/domain-profile-lore-activation.md` §"`modules.activation`
+//! `spoke/.agents/specs/domain-profiles/domain-profile-lore-activation.md` §"`modules.activation`
 //! — portable subset" (normative contract:
 //! `docs/specs/architecture/spoke-adapter-architecture.md` §7.4). Nexus parses
 //! the portable subset, never invents nexus-private portable fields, and keeps

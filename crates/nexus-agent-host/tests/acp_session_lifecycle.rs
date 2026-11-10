@@ -835,6 +835,75 @@ async fn eof_after_initialize_is_typed_failure() {
     );
 }
 
+#[tokio::test]
+#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide
+async fn eof_failure_with_surviving_descendant_classifies_teardown() {
+    let _lock = env_lock();
+    let ws = setup_workspace();
+    let provider_cfg = acp_provider_config(
+        "mock-acp",
+        &ws.fixture_log,
+        // Run 1 is the bounded readiness probe (passes); run 2 is the launch
+        // that fails after initialize while a same-group descendant lives on.
+        &[("DESCENDANT", "1"), ("EOF_AFTER_INIT_FROM_RUN", "2")],
+        true,
+    );
+    let (_manager, host) = build_host(&ws, provider_cfg).await;
+
+    let result = host
+        .create_session(CreateSessionRequest {
+            provider_id: ProviderId::new("mock-acp"),
+            cwd: ws.creator_ws_a.join("sub"),
+            model: None,
+            mode: None,
+            mcp_servers: vec![],
+            metadata: serde_json::Value::Null,
+            owner: owner("ctr_a", ws.creator_ws_a.clone()),
+        })
+        .await;
+
+    // Fixture-owned cleanup BEFORE any assertion that can fail: the failed
+    // launch leaves the fixture's descendant alive (that is the state under
+    // test), so kill it and await bounded disappearance first.
+    let log = read_fixture_log(&ws.fixture_log);
+    let descendant_pid = u32::try_from(
+        log.iter()
+            .rev()
+            .find(|e| e["event"] == "descendant_spawned")
+            .expect("fixture recorded its descendant")["child_pid"]
+            .as_u64()
+            .expect("descendant pid"),
+    )
+    .expect("descendant pid fits u32");
+    let _ = std::process::Command::new("kill")
+        .arg("-9")
+        .arg(descendant_pid.to_string())
+        .status();
+    let cleanup_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while process_alive(descendant_pid) {
+        assert!(
+            tokio::time::Instant::now() < cleanup_deadline,
+            "fixture descendant {descendant_pid} must disappear after the cleanup SIGKILL"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    // The classification follows the teardown OUTCOME: with the fixture
+    // owning its descendant's lifetime, the descendant is reaped before the
+    // leader exits and stdio reaches EOF, so terminate() finds the group
+    // quiescent (ESRCH) on every platform — even when the handshake `wait()`
+    // arm won and reaped the leader early (I-000358), where terminate only
+    // refuses the signal, reaps the already-exited leader and confirms — and
+    // the typed `launch_failed` stands. Real survivor/refusal coverage lives
+    // in the transport tests, where that state is explicitly constructed.
+    let err = result.expect_err("EOF launch must fail session creation");
+    assert_eq!(
+        err.category(),
+        "launch_failed",
+        "surviving-descendant teardown classification, got: {err}"
+    );
+}
+
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
     // `kill -0 <pid>` returns Ok while the process exists (or is a zombie

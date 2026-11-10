@@ -1,4 +1,5 @@
 import type { NarrativeWorldState } from '@42ch/nexus-contracts';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 
 export const ALL_WORLDS = null;
@@ -16,7 +17,7 @@ export function countFragmentsByWorld(fragments: { world_id?: string | null }[])
 export function worldOptionLabel(
   world: NarrativeWorldState,
   fragmentCount: number,
-  t: (key: string, options?: Record<string, unknown>) => string,
+  t: TFunction<'memory'>,
 ): string {
   // NarrativeWorldState.title is a required wire field; fall back to the id
   // only for the degenerate empty-string case.

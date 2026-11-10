@@ -302,12 +302,10 @@ def main():
             reply_error(req, -32601, "method not found: %s" % method)
 
     log({"event": "eof"})
-    if _descendant is not None:
-        try:
-            _descendant.kill()
-        except OSError:
-            # The descendant already exited; nothing to reap.
-            pass
+    # The descendant's lifetime is owned by the __main__ `finally`, so every
+    # exit path — normal return, the initialize-EOF return, an exception, a
+    # log-write failure — reaps it; Rust-side records are for assertions, not
+    # ownership.
 
 
 if __name__ == "__main__":
@@ -316,3 +314,18 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         # Interactive Ctrl-C during a manual run is a normal exit.
         pass
+    finally:
+        # The descendant stays in THIS process group on purpose (the host's
+        # owned-group teardown semantics depend on it), so a process-group
+        # kill would take the fixture down too — SIGKILL the acquired pid
+        # and reap it instead. Never dependent on reaching main()'s tail.
+        if _descendant is not None:
+            try:
+                _descendant.kill()
+            except OSError:
+                # The descendant already exited; nothing to reap.
+                pass
+            try:
+                _descendant.wait()
+            except OSError:
+                pass

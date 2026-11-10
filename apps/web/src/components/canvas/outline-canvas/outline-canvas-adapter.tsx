@@ -15,6 +15,7 @@
  */
 import type { MutableRefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
+import type { TFunction } from 'i18next';
 
 import type {
   ChapterSummary,
@@ -81,7 +82,7 @@ export interface OutlineCanvasAdapterContext {
   translateFallback: (chapter: number) => string;
 
   // Summary-time i18n — drives `outlineGraphSummary` interpolation.
-  t: (key: string, options?: Record<string, unknown>) => string;
+  t: TFunction<'canvas'>;
 
   // Inspector routing + ChapterInspector write-boundary props.
   workId: string;

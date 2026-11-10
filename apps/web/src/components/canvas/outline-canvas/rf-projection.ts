@@ -21,6 +21,7 @@
  * deterministic grid, matching the World KB approach.
  */
 import type { Edge, Node } from '@xyflow/react';
+import type { TFunction } from 'i18next';
 import type {
   ChapterStatus,
   ChapterSummary,
@@ -574,7 +575,7 @@ export function selectedBeatIdFromNodes(nodes: Node[]): string | null {
 export function outlineGraphSummary(
   outline: WorkOutline | undefined,
   chapterCount: number,
-  t: (key: string, options?: Record<string, unknown>) => string,
+  t: TFunction<'canvas'>,
 ): string {
   if (!outline) return t('outlineCanvas.graphSummary.notLoaded');
   const volumeCount = outline.volumes.length;
