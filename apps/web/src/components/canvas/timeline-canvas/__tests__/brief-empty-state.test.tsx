@@ -237,12 +237,10 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     expect(container.querySelectorAll('[data-depth="0"]')).toHaveLength(2);
     expect(container.querySelectorAll('[data-depth="1"]')).toHaveLength(0);
     // Default color on both; no type badges at all.
-    expect(bandOf(container, 'kb-era-1')).toHaveStyle({
-      backgroundColor: 'var(--color-canvas-layer-brief-accent)',
-    });
-    expect(bandOf(container, 'kb-era-2')).toHaveStyle({
-      backgroundColor: 'var(--color-canvas-layer-brief-accent)',
-    });
+    // `toHaveStyle` cannot see `var()` through jsdom's computed style (jsdom 31
+    // resolves it to transparent), so assert the declared inline value.
+    expect(bandOf(container, 'kb-era-1').style.backgroundColor).toBe('var(--color-canvas-layer-brief-accent)');
+    expect(bandOf(container, 'kb-era-2').style.backgroundColor).toBe('var(--color-canvas-layer-brief-accent)');
     expect(screen.queryByTestId('brief-time-band-type-badge')).toBeNull();
   });
 
@@ -260,15 +258,11 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     const { container } = renderBands(tree);
 
     const typedBand = bandOf(container, 'kb-kingdom');
-    expect(typedBand).toHaveStyle({
-      backgroundColor: 'var(--color-amber-900)',
-    });
+    expect(typedBand.style.backgroundColor).toBe('var(--color-amber-900)');
     expect(typedBand).toHaveTextContent('kingdom');
 
     const untypedBand = bandOf(container, 'kb-era-1');
-    expect(untypedBand).toHaveStyle({
-      backgroundColor: 'var(--color-canvas-layer-brief-accent)',
-    });
+    expect(untypedBand.style.backgroundColor).toBe('var(--color-canvas-layer-brief-accent)');
 
     // Exactly one badge — only the typed era carries one.
     const badges = screen.getAllByTestId('brief-time-band-type-badge');

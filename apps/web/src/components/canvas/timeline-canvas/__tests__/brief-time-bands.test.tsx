@@ -179,15 +179,9 @@ describe('BriefTimeBands', () => {
     const { container } = renderBands(tree);
 
     // kingdom/age/sub-age map to distinct DESIGN.md token colors.
-    expect(bandOf(container, 'kb-kingdom')).toHaveStyle({
-      backgroundColor: 'var(--color-amber-900)',
-    });
-    expect(bandOf(container, 'kb-age')).toHaveStyle({
-      backgroundColor: 'var(--color-amber-800)',
-    });
-    expect(bandOf(container, 'kb-sub-age')).toHaveStyle({
-      backgroundColor: 'var(--color-gray-700)',
-    });
+    expect(bandOf(container, 'kb-kingdom').style.backgroundColor).toBe('var(--color-amber-900)');
+    expect(bandOf(container, 'kb-age').style.backgroundColor).toBe('var(--color-amber-800)');
+    expect(bandOf(container, 'kb-sub-age').style.backgroundColor).toBe('var(--color-gray-700)');
     const kingdomColor = bandOf(container, 'kb-kingdom').style.backgroundColor;
     const ageColor = bandOf(container, 'kb-age').style.backgroundColor;
     const subAgeColor = bandOf(container, 'kb-sub-age').style.backgroundColor;
