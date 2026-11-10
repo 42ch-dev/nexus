@@ -18,7 +18,7 @@ Source: migrated from the retired tracked specs corpus
 | **Status** | **Proposed** — nothing here authorizes execution, and no scenario has been run in this repository. |
 | **Document class** | Exploration |
 | **Scope** | The `C-*` scenario ID space for the `spoke-memory` family: two conformance classes (single-provider semantics, cross-provider transfer), fixture semantics, the scenario matrix, nexus acceptance traceability to the `NXM-*` stages, and the execution/evidence policy. |
-| **Coordinates with** | [spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md) §5 (`MEM-R001`–`MEM-R027` — referenced, never redefined), [spoke-memory-adoption-plan.md](2026-10-28-spoke-memory-adoption-plan.md) §7 (rollout stages `NXM-*` named in the Stage column) |
+| **Coordinates with** | [spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md) (`MEM-R001`–`MEM-R027` are owned by the published upstream protocol at the 0.16.0 lockstep — referenced, never redefined here), [spoke-memory-adoption-plan.md](2026-10-28-spoke-memory-adoption-plan.md) §7 (rollout stages `NXM-*` named in the Stage column) |
 
 **Landing reconciliation (2026-11-01).** Written against SPOKE 0.14.1, where the family was proposed; upstream 0.15.0 (2026-10-30) landed it and 0.15.1 (2026-10-31) is docs/CI only, published on crates.io and npm. That makes the matrix executable against real upstream participants rather than a proposed shape, with one caveat: the reference policy engine (`spoke-fixture-memory-engine`) ships only as an unpublished path-dependency fixture, so it can serve as the algorithm-variable reference but never as a shipped conformance participant. Nexus has since moved its lockstep pins to 0.15.1 but has run none of these scenarios.
 
@@ -28,7 +28,7 @@ Source: migrated from the retired tracked specs corpus
 > naming contract v1, extended through contract v2.0, 2026-10-28). Protocol
 > symbols, operation semantics, and the normative invariants
 > (`MEM-R001`–`MEM-R027`) are owned by
-> [spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md) §5 and are referenced,
+> [spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md) and the upstream 0.16.0 publication, and are referenced,
 > never redefined. Nexus rollout stages (`NXM-*`) referenced in the Stage
 > column are defined in [spoke-memory-adoption-plan.md](2026-10-28-spoke-memory-adoption-plan.md) §7.
 

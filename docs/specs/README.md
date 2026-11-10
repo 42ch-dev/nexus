@@ -19,7 +19,7 @@ The corpus is organized by subject area under `docs/specs/<class>/`. Every page 
 - **Disjoint layers.** Experience belongs in `.agents/knowledge/`, a snapshot of current behavior belongs here, and "we chose X over Y and why" belongs in `.agents/adr/` (contract: `.agents/adr/README.md`).
 - **Updated in place, no version suffixes.** A spec describes the latest state. Its history lives in Git and, where a change encodes a decision, in an ADR — never in a sibling `-v2` file.
 - **No plan text.** These pages contain no acceptance criteria, local plan/iteration identifiers, merge references, or harness-internal process paths.
-- **The registry is the store.** Catalog rows in `.mstar/store.db` are the registry (`mstar catalog list`); the table below is navigation, not a registry.
+- **The registry is the catalog.** `mstar catalog list` reads a local, gitignored harness store; the table below is navigation, not a registry. Registration is a maintainer-local act and is not clone-shared.
 
 ## Where it lives
 
@@ -30,9 +30,9 @@ The corpus is organized by subject area under `docs/specs/<class>/`. Every page 
 ## Change obligations
 
 - **Same-PR update duty.** A change that alters a path, name, default, command, or contract described in this corpus updates the affected spec in the same PR.
-- **Adding a page.** Give it a subject directory, use the five sections in order, add it to the index below, and register it in the catalog.
+- **Adding a page.** Give it a subject directory, use the five sections in order, add it to the index below, and register it in the local catalog when one is active.
 - **Removing a page.** Delete it instead of keeping a history directory; Git holds the history, and an ADR holds any decision worth outliving it.
-- **Renaming or moving.** Fix every inbound link in the same change and re-register the catalog row.
+- **Renaming or moving.** Fix every inbound link in the same change and re-register the local catalog row when one is active.
 
 ## Index
 

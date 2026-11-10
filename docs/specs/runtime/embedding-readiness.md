@@ -1,4 +1,4 @@
-# Embedding Readiness Contract (RN-OGA-3)
+# Embedding Readiness Contract
 
 ## Scope
 
@@ -6,14 +6,14 @@ the embedding identity tuple, the fail-closed derived-index protocol, the `Embed
 
 ## Current state
 
-> **Status:** Normative — V1.181 P0 (readiness-contract form; posture user-locked 2026-09-02 grill-me). Promoted from the iteration-package draft in the v1.181 package (historical provenance; iteration packages are local process artifacts, not tracked at HEAD). Review-chain locks (product-manager → architect, 2026-09-02) are recorded inline as **Lock** notes.
+> **Status:** Normative — readiness-contract form; posture user-locked 2026-09-02 (grill-me). Review-chain locks (product-manager → architect, 2026-09-02) are recorded inline as **Lock** notes.
 > **Document class:** Master
 > **Scope:** the embedding identity tuple, the fail-closed derived-index protocol, the `EmbeddingProvider` trait seam, the `NoEmbeddings` OSS posture, and the platform injection contract. Governs the `crates/nexus-embedding/` contract crate. **No OSS embedding execution.**
 > **Coordinates with:** [local-cloud-crate-architecture.md](../../../.agents/adr/archived/architecture/2026-09-21-local-cloud-crate-architecture.md) (historical record), [world-kb-runtime-architecture.md](../architecture/world-kb-runtime-architecture.md), [spoke-adapter-architecture.md](../architecture/spoke-adapter-architecture.md)
 
 ### 0. Document Position
 
-This spec is the durable, tracked SSOT for the embedding readiness contract (roadmap row `harness` RN-OGA-3, delivered in readiness-contract form). It records locked contract facts — identity semantics, fail-closed verdicts, trait shape, crate placement — not iteration archaeology. The runtime trigger ("first embedding/vector feature start") moves to the platform era (DF-78) behind this contract; closing RN-OGA-3 does **not** ship DF-78.
+This spec is the durable, tracked SSOT for the embedding readiness contract. It records locked contract facts — identity semantics, fail-closed verdicts, trait shape, crate placement — not iteration archaeology. The runtime trigger ("first embedding/vector feature start") moves to the platform era (DF-78) behind this contract; this contract does **not** ship DF-78.
 
 ### 1. Posture (user-locked, 2026-09-02 grill-me)
 
@@ -31,7 +31,7 @@ Embeddings are a **Nexus Platform-provided advanced feature**. The OSS product s
 
 ### 2. Embedding identity
 
-**Lock (architect, v1.181):** the identity tuple is
+**Lock (architect):** the identity tuple is
 
 ```text
 EmbeddingIdentity = (provider_id, model_id, model_version, dim)
@@ -47,7 +47,7 @@ Semantics (normative):
 - Every derived vector index records the identity it was built with (the **populate stamp**).
 - Identity comparison is structural equality over all four components; **any** component difference invalidates the index.
 - On mismatch, the verdict evidence names the changed component(s) — `IdentityComponent::{ProviderId, ModelId, ModelVersion, Dim}` — so operators see *why* a rebuild is required.
-- **Serialization:** identity and protocol types are plain Rust types with **no `serde` derives this iteration** (Lock — architect, v1.181): no storage or wire consumer exists yet; adding serde later is additive and breaks nothing. Index persistence schema lands with the first platform-era consumer.
+- **Serialization:** identity and protocol types are plain Rust types with **no `serde` derives this iteration** (Lock — architect): no storage or wire consumer exists yet; adding serde later is additive and breaks nothing. Index persistence schema lands with the first platform-era consumer.
 
 Rationale (research §7 P0-2): mixing vectors from different models/versions silently corrupts similarity semantics; the only safe behavior is explicit rebuild.
 
@@ -72,11 +72,11 @@ A derived vector index is **rebuildable data**; the authoritative store is the W
 3. **Rebuild**: explicit, consumer-driven re-embed after `RebuildRequired`. Never automatic on the read path.
 4. **Lexical fallback is explicit**: when the verdict is not `Usable`, the caller decides keyword-only operation and must be able to *state* it (trace/inspector note). The protocol never silently degrades.
 
-**Empty-index lock (architect, v1.181 — resolves the draft §3 open lock):** an index whose populate stamp matches the expected identity and whose scope is complete is `Usable` **even with zero vector records** — a freshly scoped world legitimately has no entries, and forcing `RebuildRequired` on empty is a liveness trap (rebuild produces the same empty index). Bare absence of records **without** a populate stamp is `Unavailable` ("no index at all"), not `RebuildRequired`. Fail-closed is preserved: the populate stamp is the verification anchor, so an unverified store is never served.
+**Empty-index lock (architect — resolves the draft §3 open lock):** an index whose populate stamp matches the expected identity and whose scope is complete is `Usable` **even with zero vector records** — a freshly scoped world legitimately has no entries, and forcing `RebuildRequired` on empty is a liveness trap (rebuild produces the same empty index). Bare absence of records **without** a populate stamp is `Unavailable` ("no index at all"), not `RebuildRequired`. Fail-closed is preserved: the populate stamp is the verification anchor, so an unverified store is never served.
 
 ### 4. `EmbeddingProvider` trait (seam)
 
-**Lock (architect, v1.181) — trait shape:**
+**Lock (architect) — trait shape:**
 
 ```rust
 #[async_trait]
@@ -93,9 +93,9 @@ pub trait EmbeddingProvider: Send + Sync {
 
 ### 5. Contract crate placement
 
-**Lock (architect, v1.181):** new workspace crate **`crates/nexus-embedding/`** — a neutral, dependency-light contract crate confirmed over relocation into an existing seam.
+**Lock (architect):** new workspace crate **`crates/nexus-embedding/`** — a neutral, dependency-light contract crate confirmed over relocation into an existing seam.
 
-Rationale (dep-graph facts, v1.181): the two planned consumers are lore activation (`nexus-moment-context-assembly`, DF-78 era) and Creator Memory (`nexus-creator-memory`, which already reserves `memory_item.embedding_ref`). `nexus-creator-memory` does **not** depend on `nexus-knowledge`; hosting the contract in `nexus-knowledge` would pull that crate's weight (`tokio`, `uuid`, `spoke-schemas`, `async-trait`) into Creator Memory's graph for a pure-types contract. A dedicated zero-heavy-dep crate lets both consumers depend on the contract without cross-domain coupling.
+Rationale (dep-graph facts): the two planned consumers are lore activation (`nexus-moment-context-assembly`, DF-78 era) and Creator Memory (`nexus-creator-memory`, which already reserves `memory_item.embedding_ref`). `nexus-creator-memory` does **not** depend on `nexus-knowledge`; hosting the contract in `nexus-knowledge` would pull that crate's weight (`tokio`, `uuid`, `spoke-schemas`, `async-trait`) into Creator Memory's graph for a pure-types contract. A dedicated zero-heavy-dep crate lets both consumers depend on the contract without cross-domain coupling.
 
 Dependency posture (normative):
 
@@ -103,7 +103,7 @@ Dependency posture (normative):
 - **No `serde`** this iteration (§2); plain Rust types only.
 - The crate compiles and tests with **zero I/O**; no daemon route, no DB migration, no runtime caller this iteration. Index *storage* lands with the platform-era consumer; this crate owns the contract types + protocol logic.
 
-### 6. Consumers (planned, not wired in v1.181)
+### 6. Consumers (planned, not wired in )
 
 | Role | Authoritative store | Derived index | Status this iteration |
 |------|--------------------|---------------|------------------------|
@@ -125,7 +125,7 @@ No additional consumer is in scope. CLI, daemon, and MCA paths must not call `em
 
 ### 8. Roadmap close (product)
 
-When this contract ships, the harness RN-OGA-3 roadmap item is closeable: Done-definition (identity invalidates index; mismatch fail-closed; lexical fallback explicit) is satisfied in contract form. the harness DF-78 roadmap item stays open; annotate its gate to "RN-OGA-3 contract locked v1.181". Runtime trigger moves with DF-78 to the platform era.
+When this contract is implemented, the embedding readiness item is closeable: the Done-definition (identity invalidates the index; mismatch is fail-closed; lexical fallback is explicit) is satisfied in contract form. DF-78 stays open behind this contract; the runtime trigger moves with it to the platform era.
 
 ## Invariants
 
