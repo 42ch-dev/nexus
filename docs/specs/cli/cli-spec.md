@@ -48,7 +48,7 @@ Ordinary CLI 使用默认 `cli` cohort；可选 `connect-host` 独立。Connect 
 
 - **产品名**：对外统一为 **Nexus**。
 - **CLI 可执行名**：**`nexus42`**（与 **42ch / Creative Hub** 品牌同源；下文命令示例一律使用 `nexus42`）。无本地 daemon single-binary runtime mode（无 `nexus42 daemon start` / hidden `daemon-run`）；不引入第二个 CLI 产品二进制（`nexus-runtime` 仍是同一 `nexus42` crate 的独立 Connect-host 二进制，见 [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) §3.1–§3.2；[daemon-runtime.md](../../../.agents/adr/archived/architecture/2026-09-21-daemon-runtime.md) 为退役宿主记录）；Electron/TS 持有长期运行的服务进程。
-- **`v1-notes/ideas/` 与 `v1-notes/` 的扩展需求**：视为路线图输入。CLI 必须保证：**协议与 schema 的可扩展字段**、保留的 `/v1/daemon/*` wire 家族（由 TS 服务提供，见 §6.7）/ ACP 能力面的**演进位**、以及已写入合同的能力（如 **`research.*` 等 ACP 能力名**、context assembly、`manuscript_phase` 等）的**最小可用实现或安全默认（no-op）**，避免把后续实现空间钉死。
+- **`v1-notes/ideas/` 与 `v1-notes/` 的扩展需求**：视为路线图输入。CLI 必须保证：**协议与 schema 的可扩展字段**、保留的 `/v1/daemon/*` wire 家族（由 TS 服务提供，见 §6.7）/ ACP 能力面的**演进位**、以及已写入合同的能力（如 **`manuscript.*`**、context assembly、`manuscript_phase` 等）的**最小可用实现或安全默认（no-op）**，避免把后续实现空间钉死。
 
 #### 0.2 V2 重定位（pre-release）
 
@@ -1233,7 +1233,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 - 只允许操作工作区白名单路径；**默认**正文树根为 **`Works/<work_ref>/Stories/`**（章节文件如 **`ch<nn>-<slug>.md`**）；**`work_ref`** 与 **`work_id`** 的映射以 **preset + 本地 DB `works` 表** 为准，不得仅靠目录名推断（见 [novel-writing/workflow-profile.md](../novel-writing/workflow-profile.md)）
 - **研究型产出**默认在 **`{$workspace_dir}/.nexus42/references/<run-id>/`**（见 §6.6B）；`init` 不默认创建 `References/<creator_ref>/` 布局
-- **`research.*`**（若暴露为 ACP 工具名）仍与 `manuscript.*` 分离，防止越权读写任意文件；`ReferenceSource` 索引合同已随 V1.231 退役，不再存在
+- **`research.*`** 已随 V1.231 退役（`nexus.research.query` 删除，见 §6.6/§6.7），不存在需要与 `manuscript.*` 分离的 ACP 能力；研究型产出仍落在上一条的 run artifact 目录
 - 当 `output_manuscript=false` 时，`manuscript.write` 不作为默认创作路径，但能力本身仍存在；平台托管与本地 Agent 的能力面保持一致
 - 平台托管 Creator 的服务端沙箱应与本地 **同一 preset 产物布局** 同构（物理路径不同），以便同一套能力语义复用
 
