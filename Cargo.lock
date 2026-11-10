@@ -695,9 +695,9 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.317"
+version = "2.1.319"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea76f7bec146da449f38f9aa9d1c09d34bdc3744b20e79e59f0747c15333f851"
+checksum = "f77b7a27b5605ed56a9521a31af8b77cf89bfdd4a64f9584a3214200a5bb9ed4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1373,9 +1373,9 @@ dependencies = [
 
 [[package]]
 name = "deepseek-harness-sdk"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a49954df5cd9e5d44ee483c852cb0c503987643df118ca184e12586655077bc"
+checksum = "095fd3629645136387b9834a41d9d47554326d198064b7377f68bbf5b6e910d6"
 dependencies = [
  "nix 0.29.0",
  "serde",
@@ -5315,9 +5315,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "3.8.0"
+version = "3.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8be15815186873ea063bf005011d16c356804973489e40c39116ae3a2878d1f"
+checksum = "d24a7e92f4bcaa36b97fa93c4fa7ca8f3e669eced949345b3462dba333c7f909"
 dependencies = [
  "chrono",
  "futures",
@@ -5328,6 +5328,7 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
@@ -6752,9 +6753,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.29.0"
+version = "1.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a0e2d11620c50695fe12bbbfde96b3477fe606e7284c22d505c12ce51214514"
+checksum = "4a06f08a856b009bc7bbaf7d3e79808595d032dd19074c0c2ef26e49e03e6bdc"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
