@@ -27,7 +27,23 @@ Modes (env vars, all optional):
   - STALL_AFTER_INIT=1    respond to initialize then stall without further input.
   - DESCENDANT=1     spawn a child process that outlives the fixture; the
                      host's owned process-tree shutdown must reap the exact
-                     child (never a reused/unowned PID).
+                     child (never a reused/unowned PID). By default the
+                     fixture kills and reaps that child on every exit path, so
+                     tests that expect the descendant to be gone after a
+                     surviving-leader teardown stay leak-free.
+  - DESCENDANT_SURVIVES=1  leave the DESCENDANT running when the fixture exits
+                     on its own AND let it inherit this process' stdout, so a
+                     leader can exit while a live same-group descendant stays
+                     behind and the ACP output pipe stays open (no EOF can
+                     complete a pending request). The test then owns that
+                     descendant's cleanup; a host that signals the group reaps
+                     it anyway.
+  - EXIT_BEFORE_INIT_REPLY_FROM_RUN=n  exit on the n-th (and later) run upon
+                     receiving `initialize`, WITHOUT replying, so only the exit
+                     watcher can report the death.
+  - EXIT_ON_SESSION_NEW_FROM_RUN=n  exit on the n-th (and later) run upon
+                     receiving `session/new`, WITHOUT replying — the same
+                     watcher evidence for the second handshake step.
   - ACP_FIXTURE_PROMPT_GATE_DIR=<dir>  hold every prompt until the test
                      releases it: the prompt is logged (its evidence recorded)
                      and then the peer waits for `<dir>/release-<n>`, where
@@ -64,6 +80,7 @@ import time
 LOG_PATH = os.environ.get("ACP_FIXTURE_LOG")
 BLOCK_PROMPT = os.environ.get("BLOCK_PROMPT") == "1"
 DESCENDANT = os.environ.get("DESCENDANT") == "1"
+DESCENDANT_SURVIVES = os.environ.get("DESCENDANT_SURVIVES") == "1"
 DELAYED_CANCEL_ACK = os.environ.get("DELAYED_CANCEL_ACK") == "1"
 OVERSIZED_UPDATE = os.environ.get("OVERSIZED_UPDATE") == "1"
 STALL_AFTER_INIT = os.environ.get("STALL_AFTER_INIT") == "1"
@@ -111,7 +128,28 @@ def _eof_after_init_enabled():
     return (_prior_run_count() + 1) >= threshold
 
 
+def _exit_at_stage(knob):
+    """Exit on the n-th (and later) run named by `knob`, before replying.
+
+    Lets a test select WHICH host handshake exit watcher sees the leader's
+    death (initialize or session/new), with no reply and no EOF on the output
+    pipe to complete the SDK request first.
+    """
+    from_run = os.environ.get(knob)
+    if not from_run:
+        return False
+    try:
+        threshold = int(from_run)
+    except ValueError:
+        return False
+    return (_prior_run_count() + 1) >= threshold
+
+
 EOF_AFTER_INIT = _eof_after_init_enabled()
+# Exit without replying, on the selected run: the host's exit watcher (never an
+# EOF on the still-open output pipe) must observe the death.
+EXIT_BEFORE_INIT_REPLY = _exit_at_stage("EXIT_BEFORE_INIT_REPLY_FROM_RUN")
+EXIT_ON_SESSION_NEW = _exit_at_stage("EXIT_ON_SESSION_NEW_FROM_RUN")
 
 _descendant = None
 
@@ -196,10 +234,13 @@ def main():
 
     if DESCENDANT:
         # Spawn a child that outlives us; the host must reap the exact
-        # owned process tree on shutdown.
+        # owned process tree on shutdown. A descendant that must SURVIVE the
+        # leader also inherits this process' stdout, so the ACP output pipe
+        # stays open after the leader exits and the host's pending request
+        # cannot complete by EOF — the exit watcher must observe the death.
         _descendant = subprocess.Popen(
             [sys.executable, "-c", "import time; time.sleep(3600)"],
-            stdout=subprocess.DEVNULL,
+            stdout=None if DESCENDANT_SURVIVES else subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
         log({"event": "descendant_spawned", "child_pid": _descendant.pid})
@@ -218,6 +259,9 @@ def main():
         log({"event": "request", "method": method, "id": req.get("id")})
 
         if method == "initialize":
+            if EXIT_BEFORE_INIT_REPLY:
+                log({"event": "exit_before_init_reply"})
+                return
             send({
                 "jsonrpc": "2.0",
                 "id": req.get("id"),
@@ -235,6 +279,9 @@ def main():
                 time.sleep(3600)
                 return
         elif method == "session/new":
+            if EXIT_ON_SESSION_NEW:
+                log({"event": "exit_on_session_new"})
+                return
             session_id = "mock-session-%d" % os.getpid()
             log({"event": "session_new", "session_id": session_id, "cwd": params.get("cwd")})
             reply(req, {"sessionId": session_id})
@@ -319,7 +366,9 @@ if __name__ == "__main__":
         # owned-group teardown semantics depend on it), so a process-group
         # kill would take the fixture down too — SIGKILL the acquired pid
         # and reap it instead. Never dependent on reaching main()'s tail.
-        if _descendant is not None:
+        # DESCENDANT_SURVIVES is the one exception: a test that needs a live
+        # group member after the leader exits owns that cleanup itself.
+        if _descendant is not None and not DESCENDANT_SURVIVES:
             try:
                 _descendant.kill()
             except OSError:
