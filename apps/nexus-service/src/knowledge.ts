@@ -1,8 +1,8 @@
 /**
  * Knowledge family HTTP surface (P1-T3 authority over the single Rust core):
  * the local work-scope KB file index, Work/creator findings (including the
- * tri-state PATCH, batch triage, stale banner and retention prune), reading
- * depth (progress + annotations) and the reference-source registry reads.
+ * tri-state PATCH, batch triage, stale banner and retention prune) and reading
+ * depth (progress + annotations).
  * Scope validation, enum/transition validation, batch semantics and retention
  * math stay in the core; these handlers keep transport translation only.
  */
@@ -16,12 +16,10 @@ import type {
   FindingDetailResponse,
   FindingsPruneResponse,
   GetKbEntryResponse,
-  ReferenceGetResponse,
   ListFindingsQuery,
   ListFindingsResponse,
   ListKbEntriesQuery,
   ListKbEntriesResponse,
-  ReferenceListResponse,
   ReadingAnnotation,
   ReadingAnnotationCreateRequest,
   ReadingAnnotationListResponse,
@@ -294,23 +292,6 @@ export async function deleteAnnotation(
   );
 }
 
-// ── Reference registry ─────────────────────────────────────────────────────
-
-/** `GET /v1/daemon/references`. */
-export function listReferences(service: ServiceCore): Promise<ReferenceListResponse> {
-  return withPrincipal(service, (principal) => service.core.listReferences(principal));
-}
-
-/** `GET /v1/daemon/references/{reference_id}` — 404 for an unknown id. */
-export function getReference(
-  service: ServiceCore,
-  referenceId: string,
-): Promise<ReferenceGetResponse> {
-  return withPrincipal(service, (principal) =>
-    service.core.getReference(principal, referenceId),
-  );
-}
-
 /** Exact path/verb/tier identities this family owns (composer input). */
 export const KNOWLEDGE_ROUTES: readonly DomainRoute[] = [
   {
@@ -522,20 +503,6 @@ export const KNOWLEDGE_ROUTES: readonly DomainRoute[] = [
       await deleteAnnotation(service, params[0]);
       return { body: null };
     },
-  },
-  {
-    method: 'GET',
-    pattern: /^\/v1\/daemon\/references$/,
-    tier: 'tier2',
-    family: 'knowledge',
-    handle: async (service) => ({ body: await listReferences(service) }),
-  },
-  {
-    method: 'GET',
-    pattern: /^\/v1\/daemon\/references\/([^/]+)$/,
-    tier: 'tier2',
-    family: 'knowledge',
-    handle: async (service, params) => ({ body: await getReference(service, params[0]) }),
   },
 ];
 

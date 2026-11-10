@@ -9,7 +9,6 @@ export * from './core';
 export * from './core/findings';
 export * from './core/narrative';
 export * from './core/orchestration-presets';
-export * from './core/references';
 export * from './core/works';
 export * from './daemon-api/actor-knowledge';
 export * from './daemon-api/agent-host';
@@ -113,9 +112,6 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ProviderEventBatch: 1,
   ProviderHostEvent: 1,
   ProviderReply: 1,
-  ReferenceGetResponse: 2,
-  ReferenceListResponse: 1,
-  ReferenceSourceInfo: 1,
   RuntimeApi: 1,
   ToolsApi: 1,
   ValidatedProviderRecipe: 1,

@@ -109,7 +109,7 @@ const IMPORT_TYPES = [
   'OutlinePatchResponse',
   'OutlinePatchChapterRequest',
   'TimelinePatchEventRequest',
-  // Knowledge family (P5-T1 kb entries/findings/reading/references)
+  // Knowledge family (P5-T1 kb entries/findings/reading)
   'ListKbEntriesQuery',
   'ListKbEntriesResponse',
   'AddKbEntryRequest',
@@ -131,8 +131,6 @@ const IMPORT_TYPES = [
   'ReadingAnnotation',
   'ReadingAnnotationPatchRequest',
   'ReadingAnnotationListResponse',
-  'ReferenceListResponse',
-  'ReferenceGetResponse',
 ];
 
 function formatArgs(args: OperationArg[] | undefined): string {

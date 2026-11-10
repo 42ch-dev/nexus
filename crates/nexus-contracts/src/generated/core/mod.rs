@@ -4,7 +4,6 @@
 pub mod findings;
 pub mod narrative;
 pub mod orchestration_presets;
-pub mod references;
 pub mod works;
 pub mod core_actor_admission_request;
 pub mod core_actor_context;
@@ -64,7 +63,6 @@ pub mod validated_provider_recipe;
 pub use findings::*;
 pub use narrative::*;
 pub use orchestration_presets::*;
-pub use references::*;
 pub use works::*;
 pub use core_actor_admission_request::*;
 pub use core_actor_context::*;
