@@ -297,7 +297,7 @@ world_refs: [string]        # optional; list of World KB item ids referenced in 
 
 #### 4.4 Embedded preset templates
 
-Template stubs live under `crates/nexus-orchestration/embedded-presets/novel-writing/templates/` (or documented equivalent). Prompts reference `Works/{{work_ref}}/…` variables.
+Template stubs live under `crates/nexus-preset/embedded-presets/novel-writing/templates/` (or documented equivalent). Prompts reference `Works/{{work_ref}}/…` variables.
 
 #### 4.5 Multi-chapter and multi-volume semantics
 
@@ -649,7 +649,7 @@ Works/
 
 ##### 5.4.2 Template sources
 
-All template files live under `crates/nexus-orchestration/embedded-presets/novel-project-init/templates/` (P1 deliverable). The init preset's scaffold capability:
+All template files live under `crates/nexus-preset/embedded-presets/novel-project-init/templates/` (P1 deliverable). The init preset's scaffold capability:
 
 1. Reads each template from the embedded asset.
 2. Substitutes preset input vars (`work_ref`, `title`, `world_id`, etc.) using `handlebars-rust` (per [orchestration-engine.md](../orchestration/orchestration-engine.md) §7.3).
@@ -987,11 +987,11 @@ The normative constraints for this surface are stated in §Current state; a chan
 
 ## Where it lives
 
-- `crates/nexus-orchestration/embedded-presets/novel-writing/templates/`
+- `crates/nexus-preset/embedded-presets/novel-writing/templates/`
 - `crates/nexus-local-db/tests/v142_migration_fixes.rs`
 - `crates/nexus-local-db/tests/v179_dr67_acceptance.rs`
 - `apps/nexus-service`
-- `crates/nexus-orchestration/embedded-presets/novel-project-init/templates/`
+- `crates/nexus-preset/embedded-presets/novel-project-init/templates/`
 - `apps/nexus42/src/commands/creator/works/cron.rs::DEFAULT_SCHEDULE`
 
 ## Change obligations
