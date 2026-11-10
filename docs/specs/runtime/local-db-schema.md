@@ -83,7 +83,7 @@ V1 规范中，禁止继续引入语义模糊的统一键名（例如单一 `sch
 
 ##### 4.1.1 `reference_sources` (retired)
 
-The reference-source registry is retired (V1.231, ADR K1 §3.2): the table, its `body.md` units under `references/units/<id>/`, the `nexus42 creator reference` CLI group, the `GET /v1/daemon/references[/{id}]` routes and the `nexus.reference.refresh` capability are all gone. A source-material registry may return only as a future independent proposal; it MUST NOT revive this table as a staging shim.
+The reference-source registry is retired (V1.231, [ADR K1 — Data handling](../../../.agents/adr/implemented/architecture/2026-11-10-retire-user-scope-and-references.md#data-handling)): the table, its `body.md` units under `references/units/<id>/`, the `nexus42 creator reference` CLI group, the `GET /v1/daemon/references[/{id}]` routes and the `nexus.reference.refresh` capability are all gone. A source-material registry may return only as a future independent proposal; it MUST NOT revive this table as a staging shim.
 
 ##### 4.1.2 Narrative + World KB persistence
 
@@ -197,7 +197,7 @@ CREATE INDEX IF NOT EXISTS idx_kb_source_anchors_key_block_id
 
 ##### 4.1.3 Knowledge entries persistence (retired)
 
-The User-scoped `knowledge_entries` table is retired (V1.231, ADR K1 §3.1) and dropped by migration `20261111000001_retire_user_and_reference_stores.sql`. There is no User Knowledge domain in Moment context assembly, no `creator knowledge` CLI group and no `KnowledgeStore` adapter. A User-scope knowledge surface may return only as a future independent proposal.
+The User-scoped `knowledge_entries` table is retired (V1.231, [ADR K1 — Data handling](../../../.agents/adr/implemented/architecture/2026-11-10-retire-user-scope-and-references.md#data-handling)) and dropped by migration `20261111000001_retire_user_and_reference_stores.sql`. There is no User Knowledge domain in Moment context assembly, no `creator knowledge` CLI group and no `KnowledgeStore` adapter. A User-scope knowledge surface may return only as a future independent proposal.
 
 Column notes:
 

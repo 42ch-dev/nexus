@@ -11,7 +11,7 @@ Former `nexus.reference.refresh` capability and the refreshable reference-body p
 | **Status** | **Retired (V1.231)** — no live surface. Kept only as the retirement pointer. |
 | **Document class** | Master (retired) |
 | **Scope** | The former reference refresh policy model, `reference_sources` refresh columns, `nexus.reference.refresh` capability and its scheduler hook |
-| **Retired by** | [ADR K1 §3.2](../../../.agents/adr/proposed/architecture/2026-11-10-retire-user-scope-and-references.md); [local-db-schema.md](local-db-schema.md) §4.1.1 |
+| **Retired by** | [ADR K1 — Data handling](../../../.agents/adr/implemented/architecture/2026-11-10-retire-user-scope-and-references.md#data-handling); [local-db-schema.md](local-db-schema.md) §4.1.1 |
 
 ### 1. What was retired
 
@@ -21,7 +21,7 @@ Former `nexus.reference.refresh` capability and the refreshable reference-body p
 - The scheduler hook in `crates/nexus-core/src/execution/schedules/refresh.rs`, and the refresh lifecycle DAOs (`set_refresh_policy`, `mark_refreshing`, `mark_refreshed`, `mark_refresh_error`, `find_stale_sources`).
 - The `nexus.reference.refresh_policy.get` / `nexus.reference.refresh_status` backlog placeholders — withdrawn with the family.
 
-In-flight refresh work was cancelled or failed closed before the table and body tree were removed (ADR K1 §3.2 step 3).
+In-flight refresh work was cancelled or failed closed before the table and body tree were removed ([ADR K1 — Data handling](../../../.agents/adr/implemented/architecture/2026-11-10-retire-user-scope-and-references.md#data-handling), third step).
 
 ### 2. Replacement
 
@@ -34,7 +34,7 @@ None. The surface no longer exists; this page records only its retirement.
 ## Where it lives
 
 - `crates/nexus-local-db/migrations/20261111000001_retire_user_and_reference_stores.sql` — the drop
-- `.agents/adr/proposed/architecture/2026-11-10-retire-user-scope-and-references.md` — the authority (K1)
+- `.agents/adr/implemented/architecture/2026-11-10-retire-user-scope-and-references.md` — the authority (K1)
 
 ## Change obligations
 
