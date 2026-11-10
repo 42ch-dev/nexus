@@ -1,8 +1,7 @@
 //! Work-entry extract queue over the guarded core workspace
 //! (`creator world kb queue-extract` / `extract-status`; core producer added by
 //! v1.207 P1 item 6, operator entrance rebound by v231).
-//! Extracted from the legacy daemon `kb.rs` handlers. This is NOT the World
-//! narrative KB graph (`nexus-kb` / P0 `world_kb`).
+//! This is NOT the World narrative KB graph (`nexus-kb` / P0 `world_kb`).
 
 use nexus_home_layout::sanitize_entry_id;
 use nexus_local_db::kb_extract_job::KbExtractJob;
@@ -53,8 +52,7 @@ pub struct QueueKbExtractParams {
     /// Idempotency label for the job.
     ///
     /// The extractor reads the Work artifact named by [`Self::work_id`] /
-    /// [`Self::chapter`]; this label only keys the job, so it never resolves
-    /// to a work-scope file-index entry.
+    /// [`Self::chapter`]; this label only keys the job.
     pub work_entry_id: String,
     /// Target world ID for the resulting `KnowledgeEntryRecord`.
     pub world_id: String,
@@ -156,9 +154,9 @@ impl CoreService {
     /// such job exists.
     ///
     /// A job that exists but belongs to another creator is refused with
-    /// [`CoreError::Forbidden`] — the same `kb_owner:` classification the
-    /// work-index reads use — rather than reported as absent, so ownership
-    /// stays classified the same way on every read.
+    /// [`CoreError::Forbidden`] (the `kb_owner:` classification) rather than
+    /// reported as absent, so ownership stays classified the same way on
+    /// every read.
     ///
     /// # Errors
     /// As [`CoreService::list_kb_extract_jobs`] plus [`CoreError::Forbidden`]

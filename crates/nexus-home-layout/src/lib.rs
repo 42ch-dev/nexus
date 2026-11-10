@@ -207,22 +207,6 @@ pub fn creator_inspiration_dir(home: &Path, creator_id: &str, workspace_slug: &s
         .join("Ideas")
 }
 
-/// `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/kb/`
-///
-/// Knowledge base directory for a workspace (ADR-014 layout, flat files + JSON index).
-#[must_use]
-pub fn creator_kb_dir(home: &Path, creator_id: &str, workspace_slug: &str) -> PathBuf {
-    operational_workspace_dir(home, creator_id, workspace_slug).join("kb")
-}
-
-/// `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/kb/entries/`
-///
-/// Individual KB entry files (`<entry_id>.md`).
-#[must_use]
-pub fn creator_kb_entries_dir(home: &Path, creator_id: &str, workspace_slug: &str) -> PathBuf {
-    creator_kb_dir(home, creator_id, workspace_slug).join("entries")
-}
-
 /// `$HOME/.nexus42/tls/` — directory for persistent TLS certificate + key.
 ///
 /// The daemon creates this directory with mode `0o700` on first boot.
@@ -876,24 +860,6 @@ mod tests {
         assert_eq!(
             creator_inspiration_dir(&home, "ctr_test", "ws1"),
             PathBuf::from("/h/.nexus42/creators/ctr_test/workspaces/ws1/Pool/Ideas")
-        );
-    }
-
-    #[test]
-    fn creator_kb_dir_layout() {
-        let home = PathBuf::from("/h");
-        assert_eq!(
-            creator_kb_dir(&home, "ctr_test", "ws1"),
-            PathBuf::from("/h/.nexus42/creators/ctr_test/workspaces/ws1/kb")
-        );
-    }
-
-    #[test]
-    fn creator_kb_entries_dir_layout() {
-        let home = PathBuf::from("/h");
-        assert_eq!(
-            creator_kb_entries_dir(&home, "ctr_test", "ws1"),
-            PathBuf::from("/h/.nexus42/creators/ctr_test/workspaces/ws1/kb/entries")
         );
     }
 
