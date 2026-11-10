@@ -363,6 +363,15 @@ impl AcpProvider {
         let session_created = match session_result {
             Ok(created) => created,
             Err(error) => {
+                // The `select!` arms above observe an exit only when the
+                // `wait()` arm wins the race. An exit that already happened
+                // but lost the race (dead-but-unreaped leader at teardown
+                // time) is equally observed: reap it non-blockingly so the
+                // typed launch classification stays authoritative no matter
+                // how the teardown reports.
+                if owned_process.poll_exit().is_some() {
+                    exit_observed = true;
+                }
                 match owned_process
                     .terminate(self.timeouts.shutdown_duration())
                     .await

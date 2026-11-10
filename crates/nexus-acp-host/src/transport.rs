@@ -760,6 +760,14 @@ impl ManagedAcpProcess {
             };
             let pgrp = nix::unistd::Pid::from_raw(birth.pid.cast_signed());
 
+            // Reap a leader that already exited but is not reaped yet
+            // (zombie): once reaped, `id()` is `None` and the branch below
+            // proves group quiescence. Without this, the birth-token check
+            // fails on a zombie (the OS no longer reports its start time) and
+            // an already-dead tree is misreported as "signal refused" — the
+            // observed macOS CI launch-failure misclassification.
+            let _ = child.try_wait();
+
             // If the leader already exited, confirm the whole owned group is
             // quiescent before reporting clean teardown; survivors are
             // SIGKILLed as a unit (no early Ok on leader exit).
@@ -782,8 +790,9 @@ impl ManagedAcpProcess {
                 ));
             }
 
-            // SIGTERM the owned group; a refused/invalid birth token
-            // escalates straight to guarded SIGKILL.
+            // SIGTERM the owned group. A refused/invalid birth token is never
+            // signalled in any form: identity cannot be proven, so cleanup is
+            // reported unconfirmed (no escalation is safe).
             if !Self::signal_group_guarded(&birth, Signal::SIGTERM) {
                 let _ = child.wait().await;
                 let agent_path = self.agent_path.clone();
@@ -1475,5 +1484,47 @@ mod tests {
             killpg(pgrp, None).is_err(),
             "the whole owned group must be quiescent"
         );
+    }
+
+    /// A leader that already exited but is not reaped yet (zombie) is
+    /// confirmed cleanup, never "signal refused" — the CI-observed macOS
+    /// launch-failure misclassification route: `id()` is still `Some` (tokio
+    /// reports `None` only after reaping) and the birth-token check cannot
+    /// read a zombie's start time. The zombie state is reached
+    /// deterministically: SIGKILL, then stdout EOF (only the child holds the
+    /// pipe write end) proves exit while tokio still owns the unreaped
+    /// zombie.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn terminate_confirms_leader_already_exited_at_teardown() {
+        use tokio::io::AsyncReadExt;
+
+        let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
+        let (child, _stdin, mut stdout) = spawner
+            .spawn("/bin/sleep", &["300"])
+            .expect("spawn grouped sleep fixture");
+        let leader = child.id().expect("owned child pid");
+        let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
+
+        let mut proc = ManagedAcpProcess::new(
+            "zombie-fixture".to_string(),
+            child,
+            PathBuf::from("/bin/sleep"),
+        );
+        assert!(proc.pid().is_some(), "leader not yet reaped at spawn");
+
+        nix::sys::signal::kill(leader_pid, nix::sys::signal::Signal::SIGKILL)
+            .expect("SIGKILL the owned child");
+        let mut buf = [0u8; 1];
+        let read = stdout.read(&mut buf).await.expect("read stdout to EOF");
+        assert_eq!(read, 0, "EOF proves the leader exited without a reap");
+        assert!(
+            proc.pid().is_some(),
+            "the leader is dead but tokio has not reaped it yet"
+        );
+
+        proc.terminate(Duration::from_secs(5))
+            .await
+            .expect("teardown of an already-exited leader must be confirmed cleanup");
     }
 }
