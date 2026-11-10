@@ -23,9 +23,9 @@ tags:
 | --- | --- |
 | **Status** | **Proposed** — not implement authority. Nothing here schedules crates, migrates tables, or claims a shipped feature. |
 | **Document class** | Exploration |
-| **Scope** | Implementation design for a **Knowledge IR** after the leftover UserScope and reference-source surfaces are retired. The IR **is** the existing Spoke `KnowledgeEntry` protocol (plus the already-specified `extensions.nexus` contract). Local Nexus code uses **read/write adapters** around that protocol: wire `KnowledgeEntry` → domain `KnowledgeEntryRecord` → `KbStore` / `SqliteKbStore` (`kb_key_blocks.body_json`, plus anchors, relationships, holders, extract jobs). |
+| **Scope** | Implementation design for a **Knowledge IR** after the leftover UserScope, reference-source, and `creator kb` work-scope file-index surfaces are retired. The IR **is** the existing Spoke `KnowledgeEntry` protocol (plus the already-specified `extensions.nexus` contract). Local Nexus code uses **read/write adapters** around that protocol: wire `KnowledgeEntry` → domain `KnowledgeEntryRecord` → `KbStore` / `SqliteKbStore` (`kb_key_blocks.body_json`, plus anchors, relationships, holders, extract jobs). The retired `creator kb` file index is **not** an adapter of this IR. |
 | **Coordinates with** | [spoke-adapter-architecture.md](../../active/architecture/spoke-adapter-architecture.md) (conversion seam, `/kb/` HTTP stability, `extensions.nexus`), [world-kb-runtime-architecture.md](../../active/architecture/world-kb-runtime-architecture.md), [entity-scope-model.md](../../active/architecture/entity-scope-model.md) §5.1 / §5.5–§5.6, [holder-governance.md](../../active/architecture/holder-governance.md), [llm-extract.md](../../active/orchestration/llm-extract.md), [local-db-schema.md](../../active/runtime/local-db-schema.md), stacked base [retire-user-scope-and-references.md](retire-user-scope-and-references.md) ([PR #486](https://github.com/42ch-dev/nexus/pull/486)) |
-| **Depends on** | [PR #486](https://github.com/42ch-dev/nexus/pull/486) (`proposal/retire-user-scope-and-references`). This branch is stacked on that one. **Merge order is #486 then this PR.** Implementation of this design SHOULD wait until #486 is at least merged as direction, and SHOULD prefer waiting until the *retirement implementation* has removed UserScope / reference sources (or a written waiver records why a knowledge-adapter PR must start earlier without reintroducing those stores). |
+| **Depends on** | [PR #486](https://github.com/42ch-dev/nexus/pull/486) (`proposal/retire-user-scope-and-references`). This branch is stacked on that one. **Merge order is #486 then this PR.** Implementation of this design SHOULD wait until #486 is at least merged as direction, and SHOULD prefer waiting until the *retirement implementation* has removed UserScope, reference sources, and the `creator kb` file index (or a written waiver records why a knowledge-adapter PR must start earlier without reintroducing those stores or the old index). |
 | **Path choice** | Lands under `proposed/architecture/` next to World KB and Spoke adapter Masters. There is no `knowledge/` class axis. This is not a `creator/` or `orchestration/` spec. |
 
 The key words MUST, MUST NOT, SHOULD, and MAY are RFC 2119 terms for a conforming implementation of this proposal only (if adopted).
@@ -41,7 +41,7 @@ World KB already *is* "protocol → domain record → SQLite adapter":
 - `nexus-spoke-adapter` (`conversion/knowledge_entry.rs`: `knowledge_record_to_spoke` / reverse) is the sole conversion seam.
 - `KbStore` / `SqliteKbStore` persist `body_json` (and related columns) in workspace `state.db` table `kb_key_blocks`, with source anchors, relationships, holders, and extract jobs beside it.
 
-The remaining problem is **not** "we lack a knowledge model." It is that several leftover I/O faces made the family look like four stores. After [PR #486](https://github.com/42ch-dev/nexus/pull/486) withdraws UserScope and reference sources, this document records how the **remaining** local implementation must keep walking one IR (Spoke `KnowledgeEntry`) through ports, instead of growing new ad-hoc writers.
+The remaining problem is **not** "we lack a knowledge model." It is that several leftover I/O faces made the family look like four stores. After [PR #486](https://github.com/42ch-dev/nexus/pull/486) withdraws UserScope, reference sources, and the `creator kb` work-scope file index, this document records how the **remaining** local implementation must keep walking one IR (Spoke `KnowledgeEntry`) through ports, instead of growing new ad-hoc writers or keeping the old filesystem index as a staging shim.
 
 **Anti-pattern:** inventing a parallel "Knowledge IR" schema, document, or crate that restates `KnowledgeEntry`. The protocol is the IR. Local types are projections and adapters.
 
@@ -52,8 +52,9 @@ The remaining problem is **not** "we lack a knowledge model." It is that several
 1. treat `KnowledgeEntryRecord` as an in-process projection of that SSOT, not a second authority;
 2. treat `SqliteKbStore` (and any future store) as a persistence adapter, not an informal SSOT of its own;
 3. treat HTTP `/kb/` and `creator world kb` as wire / operator adapters on the same port;
-4. treat `creator kb` work-scope files, if retained, as an **import / staging** adapter only;
-5. stub the write port in Simulate / dry-run / extract-preview paths so they cannot insert real `kb_key_blocks` rows.
+4. stub the write port in Simulate / dry-run / extract-preview paths so they cannot insert real `kb_key_blocks` rows.
+
+The `creator kb` work-scope file index is **out of this IR**. #486 retires it. This design MUST NOT keep it as an import / staging / compatibility adapter.
 
 Today's Shipped Masters remain implement authority until a later promotion PR. This file is the migration destination for "how local I/O is allowed to touch knowledge," not a silent rewrite of promotion state machines, relationship semantics, or holder/governance.
 
@@ -63,6 +64,7 @@ Today's Shipped Masters remain implement authority until a later promotion PR. T
 | --- | --- | --- |
 | User KnowledgeStore / UserScope (`knowledge_entries`, `creator knowledge`, MCA `## User Knowledge`) | Retired by [PR #486](https://github.com/42ch-dev/nexus/pull/486) | Unfinished placeholder. Future User-scope notes, if any, are a **separate** Exploration. MUST NOT be re-keyed as `KnowledgeEntry`. |
 | Reference sources (`reference_sources` + `references/units/<id>/body.md`) | Retired by #486 | Source-material leftover. A future source-material port is a **separate** Exploration. MUST NOT be upserted into `kb_key_blocks` as a migration. |
+| `creator kb` work-scope file index (`kb/index.json` + `kb/entries/<id>.md`, `nexus42 creator kb`, HTTP `/v1/daemon/kb/entries`) | Retired by #486 | Leftover filesystem-core face. MUST NOT be kept as an import / staging / compatibility adapter in this IR. A future workspace staging design, if any, is a **separate** Exploration. Retiring the code itself belongs to #486's implementation PR; this PR does not delete it. |
 | Creator / Character memory | `spoke-memory` / `MemoryPort` (N1–N3 / N4-R shipped; N4-T / N5 open) | Different Spoke family. Protocol already MUST NOT grow `KnowledgeEntry` fields or simulate memory with knowledge rows. |
 | Workflow IR | [PR #483](https://github.com/42ch-dev/nexus/pull/483) | Strategy orchestration SSOT only. |
 | Work Artifact IR | [PR #485](https://github.com/42ch-dev/nexus/pull/485) | Work-tree artifacts only. `Works/.../Logs/kb/` rejected-candidate logs stay Work artifacts. |
@@ -93,11 +95,16 @@ Draft/Master promotion of this design (optional staging: start P0 against curren
         ▼
 §5 P2  Simulate / extract-preview stub
         │
-        ├─ §5 P3  creator kb import adapter (if retained)
+        ▼
+§5 P3  after #486 implementation: drop leftover UserScope /
+       reference / creator kb file-index references
+        │
         └─ holder/governance / extract promotion remain on existing Masters
 ```
 
-**Anti-pattern:** starting Knowledge "cleanup" PRs that still read `knowledge_entries` or register references "for compatibility."
+The previous "P3: keep `creator kb` as an import adapter" default is withdrawn; retiring that surface is #486.
+
+**Anti-pattern:** starting Knowledge "cleanup" PRs that still read `knowledge_entries`, register references, or scan `kb/index.json` "for compatibility."
 
 ---
 
@@ -136,10 +143,9 @@ state.db  kb_key_blocks.body_json
 
 ### 1.2 Pain points (why an Exploration is still warranted)
 
-1. **Several leftover faces** (UserScope, references) sat beside this stack and invited "one more store" thinking. #486 removes them; this file must lock the door.
-2. **Extract and some CLI/demo paths** can still look like direct `insert_knowledge_entry` calls. The target is that every durable write is visibly a port commit (production or stub), including extract-apply.
-3. **`creator kb` file index** (`kb/index.json` + `kb/entries/<id>.md`) is a work-scope staging tree, sometimes queued into extract. It is easy to mistake for a second knowledge SSOT.
-4. **Dry-run / Simulate** of workflows that extract or preview KB changes must not write `kb_key_blocks`. That stub is not specified today as part of a shared knowledge port (Workflow IR #483 calls out the same class of risk for Work artifacts).
+1. **Several leftover faces** (UserScope, references, the `creator kb` file index) sat beside this stack and invited "one more store" thinking. #486 removes them; this file must lock the door and MUST NOT reintroduce the file index as a staging adapter.
+2. **Extract and some CLI/demo paths** can still look like direct `insert_knowledge_entry` calls. The target is that every durable write is visibly a port commit (production or stub), including extract-apply. Operator entrances formerly spelled `creator kb queue-extract` / `rescan` are rebound by #486 onto the World KB surface; they still commit through this port after the author gate.
+3. **Dry-run / Simulate** of workflows that extract or preview KB changes must not write `kb_key_blocks`. That stub is not specified today as part of a shared knowledge port (Workflow IR #483 calls out the same class of risk for Work artifacts).
 
 ### 1.3 What does *not* need reinventing
 
@@ -171,11 +177,12 @@ This Exploration MAY later amend those Masters only to say "writes go through th
                          KnowledgePort
                     (load / validate / commit / stub)
                                  │
-        ┌──────────────┬─────────┴──────────┬─────────────────┐
-        ▼              ▼                    ▼                 ▼
-  SqliteKbStore   HTTP / CLI          extract-apply      creator kb
-  (durable        adapters            (commit after      import adapter
-   adapter)                           author gate)       (staging only)
+        ┌──────────────┬─────────┴──────────┐
+        ▼              ▼                    ▼
+  SqliteKbStore   HTTP / CLI          extract-apply
+  (durable        adapters            (commit after
+   adapter)       (`/kb/`,            author gate)
+                  `creator world kb`)
         │
         ▼
   kb_key_blocks + anchors / relationships / holders / jobs
@@ -189,7 +196,7 @@ Simulate / dry-run / extract-preview ──► stub adapter (no durable writes)
 2. **One write port.** Durable creates/updates/deletes of KnowledgeEntries (and their relationship rows when the same transaction applies) MUST go through a documented `KnowledgePort` (today: `KbStore`, possibly a thin façade that also exposes a stub). Callers MUST NOT open ad-hoc SQL against `kb_key_blocks` outside the adapter.
 3. **Projection, not authority.** If `KnowledgeEntryRecord` and a Spoke `KnowledgeEntry` disagree after a round-trip through the conversion seam, the seam is buggy; do not "fix" it by treating the SQLite row as authoritative *over* the protocol. SQLite is how the IR persists locally. Reconcile / OCC remain as today's Masters specify (`revision`, terminal-status guards).
 4. **Stub in non-apply paths.** Simulate, dry-run, extract *preview*, and any Workflow IR Simulate that would touch knowledge MUST bind a stub adapter. The stub MAY record intended mutations for inspection. It MUST NOT insert or update `kb_key_blocks` (or extract-job rows that auto-apply).
-5. **Do not absorb other families.** The port MUST NOT grow User-knowledge APIs, reference-registry APIs, memory APIs, or Work-tree file APIs.
+5. **Do not absorb other families.** The port MUST NOT grow User-knowledge APIs, reference-registry APIs, memory APIs, Work-tree file APIs, or a `creator kb` / `kb/index.json` import API.
 6. **Holder/governance is not a second kitchen.** Authz checks stay on holder-governance / world-owner / source-work gates. The knowledge port calls them; it does not reimplement them.
 
 ### 2.2 What "IR + adapters" means here (vs #483 / #485)
@@ -220,15 +227,13 @@ HTTP `/kb/` and `/kb/key-blocks/`, plus `nexus42 creator world kb` (list / show 
 
 LLM / heuristic extract produces *candidates* (`kb_extract_jobs`, relationship `needs_review` rows). Confirmed KnowledgeEntries appear only after the existing author gate (or the already-specified auto-adopt paths). The apply step MUST be a port commit. Preview / Simulate MUST use the stub.
 
-### 3.5 `creator kb` import / staging adapter (if retained)
+### 3.5 `creator kb` is not an adapter of this IR
 
-The work-scope file index is **not** retired by #486 and is **not** a knowledge SSOT. If it remains:
+#486 retires the work-scope file index and the `nexus42 creator kb` command group. This Exploration MUST NOT specify an import / staging adapter over `kb/index.json` + `kb/entries/<id>.md`, and MUST NOT keep that tree as a compatibility layer.
 
-- `kb/index.json` + `kb/entries/<id>.md` are staging inputs;
-- they MAY be queued into the existing extract/promote pipeline;
-- they MUST NOT be treated as live World KB, MUST NOT write `knowledge_entries` (gone), and MUST NOT skip the author gate for confirmed entries.
+Retiring the code itself belongs to #486's implementation PR. This PR does not delete it. Until that implementation lands, leftover files MAY still exist on disk; Knowledge IR work MUST NOT grow new readers against them.
 
-If maintainers later drop the file index, that is a separate decision; this design does not require keeping it.
+If authors later need workspace staging inputs, that is a **separate** Exploration and must be designed against this port (candidates still go through the extract/promote gate). World KB extract operator entrances rebound by #486 (`queue-extract` / `extract-status` / `rescan` onto the `creator world kb` family, or a dedicated leaf there) remain extract-apply callers of §3.4, not a revival of the file index.
 
 ### 3.6 Moment read adapter
 
@@ -262,22 +267,21 @@ Extract jobs and relationship suggestions are *inputs* to this lifecycle, not a 
 | **P0** | Name the existing conversion + `KbStore` as the knowledge port; add/adjust tests that prove round-trip and "no second mapper." Docs only + tests if needed. No behavior change. | Adapter conformance tests green; no new schema. |
 | **P1** | Audit remaining direct writers; route them through the port façade. | `rg` inventory of `kb_key_blocks` writers outside `SqliteKbStore` is empty (tests/fixtures excepted or listed). |
 | **P2** | Introduce the stub adapter; bind it in Simulate / extract-preview / Workflow Simulate paths that can touch knowledge. | A documented dry-run extracts or previews **without** inserting `kb_key_blocks`. |
-| **P3** | If `creator kb` is retained, document and (if needed) tighten it as import-only (queue extract; no confirmed writes). | cli-spec / entity-scope wording matches; no User-knowledge language left once #486 implementation has landed. |
-| **P4** | After #486 implementation: drop any leftover compile-time references to `KnowledgeStore` / `reference_sources` in knowledge paths; amend Masters if promotion is in the same window. | UserScope / reference types are gone from the knowledge crate graph. |
+| **P3** | After #486 implementation: drop any leftover compile-time references to `KnowledgeStore` / `reference_sources` / the `creator kb` file index in knowledge paths; amend Masters if promotion is in the same window. | UserScope / reference / work-scope index types are gone from the knowledge crate graph; no new `kb/index.json` reader. |
 
-P0 MAY start after this Exploration is merged, even if the #486 *implementation* PR is still in flight, but P4 depends on that retirement landing. Prefer not to ship P1–P2 features that reintroduce retired stores.
+P0 MAY start after this Exploration is merged, even if the #486 *implementation* PR is still in flight, but P3 depends on that retirement landing. Prefer not to ship P1–P2 features that reintroduce retired stores or the old file index. The previous "P3: keep `creator kb` as an import adapter" default is withdrawn.
 
 ### 5.2 Must keep / must not break
 
 - Must keep: OCC / `revision`, terminal-status behavior, adopt/reject gates, relationship semantics, holder/governance, `/kb/` paths, Spoke conversion extras.
 - Must not break: World KB HTTP/CLI, extract jobs already in `pending`, MCA World KB reads, Actor knowledge ownership, memory ports.
-- Must not: auto-migrate archived User knowledge or reference bodies into `kb_key_blocks`.
+- Must not: auto-migrate archived User knowledge, reference bodies, or `creator kb` markdown into `kb_key_blocks`.
 
 ### 5.3 Acceptance
 
 - [ ] Spec and later code review can point to one port and one conversion seam, not a new IR schema.
 - [ ] Simulate / preview cannot persist knowledge rows.
-- [ ] `creator kb`, if present, is documented as import/staging only.
+- [ ] No `creator kb` / `kb/index.json` import or staging adapter on the knowledge port. Retiring that surface itself belongs to #486; this PR does not delete the code.
 - [ ] No UserScope or reference-registry APIs on the knowledge port.
 - [ ] No absorption of Workflow IR or Work Artifact IR types.
 - [ ] Existing World KB, extract, and memory tests still pass.
@@ -299,9 +303,9 @@ P0 MAY start after this Exploration is merged, even if the #486 *implementation*
 ## 7. Open questions
 
 1. **Façade vs status quo name.** Is `KbStore` already the port (document + stub implementation only), or should a thin `KnowledgePort` wrapper be introduced so Simulate can bind without touching SQLite types? Default: keep `KbStore`, add an explicit stub implementation.
-2. **When P0 may start.** After this spec merges, or only after #486's implementation PR removes UserScope / references? Default: P0 docs/tests MAY start after merge; P4 and any crate-graph cleanup wait for #486 implementation.
+2. **When P0 may start.** After this spec merges, or only after #486's implementation PR removes UserScope / references / the `creator kb` file index? Default: P0 docs/tests MAY start after merge; P3 and any crate-graph cleanup wait for #486 implementation.
 3. **Relationships and extract jobs on the same port.** Should relationship writes and extract-job apply share the KnowledgePort surface, or remain sibling ports with the same stub policy? Default: sibling ports, same stub rule.
-4. **`creator kb` long-term.** Keep as import adapter, or schedule a later retirement once authors work only through World KB? Default: keep as import/staging unless maintainers decide otherwise later.
+4. **`creator kb`.** The previous default ("keep as import/staging") is withdrawn. #486 retires the file index; this PR does not implement that deletion. A future staging face, if any, is a new Exploration — not an open question of keeping the old tree.
 5. **Promotion of this file.** Fold "writes go through the port" into world-kb-runtime / spoke-adapter Masters, or keep a short Feature/Master after Draft? Decide at promotion; do not fork state machines into this document.
 
 ---
@@ -310,10 +314,10 @@ P0 MAY start after this Exploration is merged, even if the #486 *implementation*
 
 - Inventing a new Knowledge IR schema or document format beside Spoke `KnowledgeEntry`.
 - Replacing or widening `spoke-memory`, including N4-T / N5.
-- Re-introducing UserScope or reference sources, or migrating their archives into World KB.
+- Re-introducing UserScope, reference sources, or the `creator kb` file index, or migrating their archives into World KB.
 - Redesigning holder/governance, the promotion state machine, or relationship taxonomy.
 - Changing Workflow IR (#483) or Work Artifact IR (#485) except the cross-stub rule.
-- Retiring `creator kb` in this PR (out of #486 as well).
+- Retiring `creator kb` itself (that retirement belongs to #486). This PR does not implement that code deletion.
 - Moving knowledge bodies onto the Work-tree filesystem as a new SSOT (the Work family is #485; knowledge persistence stays the store adapter).
 - Implementing adapters or stubs in this PR (docs only).
 - Cloud User/Pairing identity work (that would belong to a future User-scope Exploration, not here).
