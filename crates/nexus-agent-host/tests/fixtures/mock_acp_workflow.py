@@ -27,7 +27,15 @@ Modes (env vars, all optional):
   - STALL_AFTER_INIT=1    respond to initialize then stall without further input.
   - DESCENDANT=1     spawn a child process that outlives the fixture; the
                      host's owned process-tree shutdown must reap the exact
-                     child (never a reused/unowned PID).
+                     child (never a reused/unowned PID). By default the
+                     fixture kills and reaps that child on every exit path, so
+                     tests that expect the descendant to be gone after a
+                     surviving-leader teardown stay leak-free.
+  - DESCENDANT_OUTLIVES=1  leave the DESCENDANT running when the fixture exits
+                     on its own, so a leader can exit while a live same-group
+                     descendant stays behind (the handshake/teardown ordering
+                     cases). The test then owns that descendant's cleanup; a
+                     host that signals the group reaps it anyway.
   - ACP_FIXTURE_PROMPT_GATE_DIR=<dir>  hold every prompt until the test
                      releases it: the prompt is logged (its evidence recorded)
                      and then the peer waits for `<dir>/release-<n>`, where
@@ -64,6 +72,7 @@ import time
 LOG_PATH = os.environ.get("ACP_FIXTURE_LOG")
 BLOCK_PROMPT = os.environ.get("BLOCK_PROMPT") == "1"
 DESCENDANT = os.environ.get("DESCENDANT") == "1"
+DESCENDANT_OUTLIVES = os.environ.get("DESCENDANT_OUTLIVES") == "1"
 DELAYED_CANCEL_ACK = os.environ.get("DELAYED_CANCEL_ACK") == "1"
 OVERSIZED_UPDATE = os.environ.get("OVERSIZED_UPDATE") == "1"
 STALL_AFTER_INIT = os.environ.get("STALL_AFTER_INIT") == "1"
@@ -319,7 +328,9 @@ if __name__ == "__main__":
         # owned-group teardown semantics depend on it), so a process-group
         # kill would take the fixture down too — SIGKILL the acquired pid
         # and reap it instead. Never dependent on reaching main()'s tail.
-        if _descendant is not None:
+        # DESCENDANT_OUTLIVES is the one exception: a test that needs a live
+        # group member after the leader exits owns that cleanup itself.
+        if _descendant is not None and not DESCENDANT_OUTLIVES:
             try:
                 _descendant.kill()
             except OSError:

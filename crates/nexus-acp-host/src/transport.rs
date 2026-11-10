@@ -379,7 +379,11 @@ impl ManagedAcpProcess {
     pub fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(tokio::process::Child::id)
     }
-    /// Wait for the owned leader while retaining its captured birth identity.
+    /// Wait for the owned leader, reaping it.
+    ///
+    /// Lifecycle exit watches must use [`observe_exit`](Self::observe_exit)
+    /// instead: reaping here destroys the birth token a later guarded
+    /// teardown needs.
     ///
     /// # Errors
     /// Returns the child's `wait` error, or a typed error when the child was
@@ -390,6 +394,66 @@ impl ManagedAcpProcess {
             None => Err(std::io::Error::other(
                 "owned ACP child already taken for teardown",
             )),
+        }
+    }
+
+    /// Observe the owned leader's exit WITHOUT reaping it (I-000358).
+    ///
+    /// Linux reports the exit through `waitid(WEXITED | WNOWAIT | WNOHANG)`
+    /// and leaves the zombie in place, so the birth token of a leader that
+    /// exited while a same-group descendant stays alive still resolves and
+    /// [`terminate`](Self::terminate) can deliver its guarded group signal to
+    /// the survivor. A reaping `wait` here would delete that identity and turn
+    /// a live descendant into an unconfirmed refusal.
+    ///
+    /// PLATFORM LIMITATION (macOS / other unix): an exit status is released
+    /// only by a reaping wait, and a reaped leader has no readable start time
+    /// — macOS cannot read a zombie's either — so there is no identity to
+    /// preserve. This reaps there, and teardown reports a surviving
+    /// descendant as unconfirmed cleanup instead of silently claiming
+    /// success.
+    ///
+    /// # Errors
+    /// Returns the platform probe error, or a typed error when the child was
+    /// already taken for teardown.
+    pub async fn observe_exit(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        #[cfg(target_os = "linux")]
+        {
+            use nix::sys::wait::{waitid, Id, WaitPidFlag, WaitStatus};
+            use std::os::unix::process::ExitStatusExt;
+
+            let pid = self
+                .pid()
+                .ok_or_else(|| std::io::Error::other("owned ACP child already reaped"))?;
+            let pid = nix::unistd::Pid::from_raw(pid.cast_signed());
+            loop {
+                match waitid(
+                    Id::Pid(pid),
+                    WaitPidFlag::WEXITED | WaitPidFlag::WNOWAIT | WaitPidFlag::WNOHANG,
+                ) {
+                    Ok(WaitStatus::StillAlive) => {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    // `waitid` carries the exit code in `si_status`; rebuild
+                    // the `wait(2)` status word `from_raw` expects.
+                    Ok(WaitStatus::Exited(_, code)) => {
+                        return Ok(std::process::ExitStatus::from_raw(code << 8));
+                    }
+                    Ok(WaitStatus::Signaled(_, signal, _)) => {
+                        return Ok(std::process::ExitStatus::from_raw(signal as i32));
+                    }
+                    Ok(status) => {
+                        return Err(std::io::Error::other(format!(
+                            "unexpected waitid status for {pid}: {status:?}"
+                        )));
+                    }
+                    Err(e) => return Err(std::io::Error::from(e)),
+                }
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            self.wait().await
         }
     }
 

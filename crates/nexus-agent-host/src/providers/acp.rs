@@ -251,14 +251,18 @@ impl AcpProvider {
 
         // Any handshake failure below must run the owned teardown/reap
         // sequence (A5): dropping a plain Child is not an awaited process-tree
-        // reap. `child` stays borrowed during the handshake for EOF watch and
-        // is consumed into `ManagedAcpProcess` only on success or teardown.
+        // reap.
         // I-000320: the launch classification reads the teardown OUTCOME —
         // teardown that proves the owned group gone keeps the typed
         // `launch_failed`; teardown that reports group-liveness uncertainty
         // surfaces `cleanup_unconfirmed`. The caller never probes or reaps
         // the leader itself: a caller-side reap would destroy the birth
         // identity the teardown's first guarded signal needs.
+        // I-000358: the exit watch below is `observe_exit`, never `wait`: on
+        // Linux it reports the exit without reaping, so a leader that exits
+        // while a same-group descendant stays alive keeps the provable birth
+        // identity that lets the teardown signal the survivor. Reaping here
+        // would make that signal refuse and leak the descendant.
         let session_result: HostResult<NexusSessionCreated> = async {
             // The SDK connection is established asynchronously by
             // `with_connection`; wait (bounded by the launch timeout) for it
@@ -311,7 +315,7 @@ impl AcpProvider {
                             )
                         })?
                 }
-                status = owned_process.wait() => {
+                status = owned_process.observe_exit() => {
                     return Err(HostError::launch_failed(
                         self.provider_id.clone(),
                         "ACP process exited during initialize handshake",
@@ -349,7 +353,7 @@ impl AcpProvider {
                             )
                         })
                 }
-                status = owned_process.wait() => {
+                status = owned_process.observe_exit() => {
                     Err(HostError::launch_failed(
                         self.provider_id.clone(),
                         "ACP process exited during session creation",
