@@ -828,23 +828,44 @@ impl ManagedAcpProcess {
     /// (I-000359).
     ///
     /// A cleanup-deadline refusal must not signal the child it refused to
-    /// signal, and it may not leak the handle either: `mem::forget` leaves a
-    /// later exit unreaped for the life of the host. The managed launch path
-    /// spawns with `kill_on_drop(false)`
-    /// ([`AgentSpawner::spawn_with_env_policy`]), so no owner drop can turn
-    /// the refusal into a kill: the task reaps promptly when the child exits,
-    /// and if its runtime is cancelled first the handle drop still signals
-    /// nothing (Tokio's orphan queue owns the child until it exits).
+    /// signal, so ownership never lands on a drop: the task waits for the exit
+    /// whenever it happens and reaps it then, and a task cancelled by its
+    /// runtime leaves the handle to Tokio's orphan queue, which reaps without
+    /// signalling.
+    ///
+    /// Without a current Tokio runtime there is no task to own it, and
+    /// dropping the handle is the one action that would deliver
+    /// `kill_on_drop`'s SIGKILL to the child this refusal declined to signal.
+    /// The handle is therefore retained by [`Self::retain_unreaped`], never
+    /// dropped.
     fn hand_to_reaper(mut child: tokio::process::Child) {
-        let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            // No runtime: dropping the handle is non-signalling for a
-            // managed-policy child; a `kill_on_drop` handle (never produced
-            // by the managed launch path) falls back to its own policy.
-            return;
-        };
-        handle.spawn(async move {
-            let _ = child.wait().await;
-        });
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.spawn(async move {
+                    let _ = child.wait().await;
+                });
+            }
+            Err(_) => Self::retain_unreaped(child),
+        }
+    }
+
+    /// Retain a child that no reaper can own, without ever dropping it.
+    ///
+    /// This is the only place an owned child outlives the teardown call: a
+    /// non-Tokio executor cannot run the reaping task, and dropping the handle
+    /// would signal a `kill_on_drop` child — exactly the kill a cleanup
+    /// refusal must never perform. The handle stays owned for the life of the
+    /// process, so its child is never signalled by us and the OS collects it
+    /// when this process exits. The managed launch path spawns and drives on
+    /// Tokio, so this branch is a guarantee for any executor, not a planned
+    /// path.
+    fn retain_unreaped(child: tokio::process::Child) {
+        static RETAINED: std::sync::Mutex<Vec<tokio::process::Child>> =
+            std::sync::Mutex::new(Vec::new());
+        RETAINED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(child);
     }
 
     /// Bounded teardown of an owned child that failed to launch/connect.
@@ -2156,33 +2177,74 @@ mod tests {
         // killed right here.
         inner.shutdown_timeout(Duration::from_secs(5));
 
-        // Liveness proof: an exit status (`waitpid`) or a zombie state is the
-        // observed death of a killed child. The drop-kill, were it issued, is
-        // a syscall in the runtime's task teardown, so it surfaces inside this
-        // bounded state window; an alive `/bin/sleep` never does.
+        assert_survives_without_signal(leader, "the runtime shutdown of the reaper");
+
+        // Fixture-owned termination and reap.
+        nix::sys::signal::kill(leader_pid, nix::sys::signal::Signal::SIGKILL)
+            .expect("SIGKILL the surviving fixture");
+        let _ = nix::sys::wait::waitpid(leader_pid, None);
+    }
+
+    /// The no-runtime branch must never drop a handle it cannot own: a
+    /// `kill_on_drop` child handed to the reaper without a current runtime is
+    /// retained, so the refusal cannot become the kill it declined to send.
+    #[cfg(unix)]
+    #[test]
+    fn reaper_without_runtime_never_signals_the_child() {
+        // A Tokio child needs a reactor at spawn time; the handle then moves
+        // out of that runtime's context (a plain test thread).
+        let inner = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("inner runtime");
+        let (leader, child) = inner.block_on(async {
+            let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
+            // The hard case: the default policy, whose drop WOULD signal.
+            let (child, stdin, stdout) = spawner
+                .spawn("/bin/sleep", &["300"])
+                .expect("spawn kill_on_drop sleep fixture");
+            let leader = child.id().expect("leader pid");
+            drop((stdin, stdout));
+            (leader, child)
+        });
+        let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
+
+        // No current runtime on this thread: the handle has no reaper, so it
+        // must be retained — a drop would deliver `kill_on_drop`'s SIGKILL.
+        ManagedAcpProcess::hand_to_reaper(child);
+
+        assert_survives_without_signal(leader, "the reaper's no-runtime retention");
+
+        // Fixture-owned termination and reap; the retained handle is never
+        // dropped, so it can never signal this (reaped) pid again.
+        nix::sys::signal::kill(leader_pid, nix::sys::signal::Signal::SIGKILL)
+            .expect("SIGKILL the retained fixture");
+        let _ = nix::sys::wait::waitpid(leader_pid, None);
+    }
+
+    /// Bounded liveness proof for a child that must not have been signalled:
+    /// neither a waitable exit status nor a zombie state may appear. The
+    /// drop-kill, were it issued, is a syscall in the owner's teardown, so it
+    /// surfaces inside this window; an alive `/bin/sleep` never does.
+    #[cfg(unix)]
+    fn assert_survives_without_signal(pid: u32, context: &str) {
+        let child = nix::unistd::Pid::from_raw(pid.cast_signed());
         let deadline = std::time::Instant::now() + Duration::from_millis(500);
         loop {
-            match nix::sys::wait::waitpid(leader_pid, Some(nix::sys::wait::WaitPidFlag::WNOHANG)) {
+            match nix::sys::wait::waitpid(child, Some(nix::sys::wait::WaitPidFlag::WNOHANG)) {
                 Ok(nix::sys::wait::WaitStatus::StillAlive) => {}
-                other => panic!(
-                    "the refused child must survive the reaper runtime's shutdown, got {other:?}"
-                ),
+                other => panic!("{context} must leave the child alive, got {other:?}"),
             }
             assert_eq!(
-                leader_state_is_zombie(leader),
+                leader_state_is_zombie(pid),
                 Ok(false),
-                "the reaper runtime's shutdown must not leave the refused child dead"
+                "{context} must not leave the child dead"
             );
             if std::time::Instant::now() >= deadline {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-
-        // Fixture-owned termination and reap.
-        nix::sys::signal::kill(leader_pid, nix::sys::signal::Signal::SIGKILL)
-            .expect("SIGKILL the surviving fixture");
-        let _ = nix::sys::wait::waitpid(leader_pid, None);
     }
 
     /// `waitid` reports the exit in `si_status`; the synthesized `wait(2)`

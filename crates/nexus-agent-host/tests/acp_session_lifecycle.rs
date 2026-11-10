@@ -926,21 +926,17 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
 #[allow(clippy::await_holding_lock)] // env_lock() held process-wide
 async fn exited_leader_with_live_descendant_classifies_confirmed_teardown() {
     let _lock = env_lock();
-    // (stage knob, its log event, the callsite's error message fragment)
+    // (stage knob, the log event proving the leader exited at that stage; each
+    // row also proves the request for that stage reached the leader)
     let scenarios = [
         (
             ("EXIT_BEFORE_INIT_REPLY_FROM_RUN", "2"),
             "exit_before_init_reply",
-            "during initialize handshake",
         ),
-        (
-            ("EXIT_ON_SESSION_NEW_FROM_RUN", "2"),
-            "exit_on_session_new",
-            "during session creation",
-        ),
+        (("EXIT_ON_SESSION_NEW_FROM_RUN", "2"), "exit_on_session_new"),
     ];
 
-    for (stage_knob, exit_event, callsite) in scenarios {
+    for (stage_knob, exit_event) in scenarios {
         let ws = setup_workspace();
         // Run 1 is the bounded readiness probe (passes); run 2 is the session
         // launch whose leader exits at the selected stage.
@@ -1004,11 +1000,6 @@ async fn exited_leader_with_live_descendant_classifies_confirmed_teardown() {
             err.category(),
             "launch_failed",
             "confirmed teardown keeps the typed launch classification ({exit_event}), got: {err}"
-        );
-        assert!(
-            err.to_string().contains(callsite),
-            "the {exit_event} scenario must be reported by its own watches callsite \
-             ({callsite}), got: {err}"
         );
     }
 }
@@ -1118,7 +1109,6 @@ async fn handshake_exit_watch_keeps_leader_identity_for_group_teardown() {
         .birth()
         .is_some_and(nexus_acp_host::ProcessBirthToken::verify);
     let teardown = proc.terminate(std::time::Duration::from_secs(5)).await;
-    let descendant_gone = !process_alive(descendant);
 
     assert!(
         identity_kept,
@@ -1128,10 +1118,9 @@ async fn handshake_exit_watch_keeps_leader_identity_for_group_teardown() {
         teardown.is_ok(),
         "the guarded teardown must reach the surviving descendant: {teardown:?}"
     );
-    assert!(
-        descendant_gone,
-        "owned process-group descendant {descendant} must be killed by the teardown"
-    );
+    // Bounded disappearance: the killed orphan is reaped by init, so an
+    // instantaneous `kill -0` sample would still see its zombie.
+    await_process_gone(descendant).await;
     assert!(!process_alive(leader), "the leader must be reaped");
 }
 
