@@ -28,6 +28,7 @@ pub mod finding_port;
 pub mod fork_port;
 pub mod host_manifest_port;
 pub mod knowledge_entry_port;
+pub mod knowledge_entry_stub;
 pub mod mca_read;
 pub mod mind_state;
 pub mod narrative_read;

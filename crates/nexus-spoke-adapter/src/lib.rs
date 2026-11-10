@@ -212,3 +212,7 @@ pub use extraction::{
 // cross this single choke point.
 pub use adapter::knowledge_entry_port::put_knowledge_entry_in_tx;
 pub use adapter::rule_query_port::orchestrate_check_world_scoped;
+
+// K2 §5.1 P0 — the in-memory `KnowledgeEntryPort` stub (mutation log included).
+// Not wired into any production path; dry-run / preview callers bind it in P2.
+pub use adapter::knowledge_entry_stub::{StubKnowledgeEntryMutation, StubKnowledgeEntryPort};
