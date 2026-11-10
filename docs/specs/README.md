@@ -130,8 +130,8 @@ The corpus is organized by subject area under `docs/specs/<class>/`. Every page 
 | [`runtime/embedding-readiness.md`](runtime/embedding-readiness.md) | Embedding Readiness Contract (RN-OGA-3) |
 | [`runtime/local-db-schema.md`](runtime/local-db-schema.md) | Nexus Local DB Schema Spec |
 | [`runtime/outbox-consolidation.md`](runtime/outbox-consolidation.md) | Outbox Consolidation — Single-Writer Contract & Schema Ownership |
-| [`runtime/reference-knowledge.md`](runtime/reference-knowledge.md) | Reference Knowledge — Reference Body Refreshable Scan Pipeline |
-| [`runtime/reference-store-layout.md`](runtime/reference-store-layout.md) | Reference Store Layout |
+| [`runtime/reference-knowledge.md`](runtime/reference-knowledge.md) | Reference Knowledge — Reference Body Refresh Pipeline (Retired V1.231) |
+| [`runtime/reference-store-layout.md`](runtime/reference-store-layout.md) | Reference Store Layout (Retired V1.231) |
 | [`runtime/web-ui-static-serve.md`](runtime/web-ui-static-serve.md) | Web UI Static Serve Contract |
 
 ### `surfaces/`

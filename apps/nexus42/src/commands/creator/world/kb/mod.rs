@@ -5,7 +5,8 @@
 //! The clap declarations and the human/JSON formatting for
 //! `creator world kb graph` and `creator world kb entity patch` live in this
 //! module; only the service invocation lives in [`service`]. The local-DB
-//! author leaves (`list`/`show`/`edit`/`delete`/`pending`/`adopt`/`reject`)
+//! author leaves (`list`/`show`/`edit`/`delete`/`pending`/`adopt`/`reject`),
+//! the extract-queue leaves ([`extract`]), the refreshable scan ([`rescan`])
 //! and the pack I/O surface ([`pack`]) are the rest of the author CLI.
 //!
 //! Both the direct-core leaves and the local leaves are admitted by
@@ -13,7 +14,9 @@
 //! is opened, so no `creator world kb` entrance can migrate — and therefore
 //! create — a workspace the selection never had.
 
+pub mod extract;
 pub mod pack;
+pub mod rescan;
 pub mod service;
 
 use crate::commands::creator::world::{active_creator_id, open_workspace_pool};
@@ -334,6 +337,69 @@ pub enum WorldKbCommand {
         extract_job_id: String,
     },
 
+    /// Queue a Work artifact for KB extraction into a target world.
+    ///
+    /// Idempotent: if a non-failed job already exists for the same
+    /// work entry + world combination, returns the existing job.
+    ///
+    /// Use `--chapter N` to locate the Work's chapter N body and set
+    /// `source_kind=work_chapter`, `profile_hint=novel` automatically.
+    QueueExtract {
+        /// Idempotency label for the job (the source the extractor reads is
+        /// the Work artifact named by `--work-id` / `--chapter`)
+        work_entry_id: String,
+        /// Target world ID for the resulting `KnowledgeEntryRecord`
+        #[arg(long)]
+        world_id: String,
+        /// Source work ID (parent of the chapter artifact)
+        #[arg(long)]
+        work_id: Option<String>,
+        /// Chapter number sugar for novel profile (locates the chapter N body)
+        #[arg(long)]
+        chapter: Option<i32>,
+    },
+
+    /// Show extract job status for the active creator.
+    ///
+    /// Without `--job-id`, lists up to 100 most recent jobs for the active creator.
+    ExtractStatus {
+        /// Specific job ID to inspect
+        #[arg(long)]
+        job_id: Option<String>,
+    },
+
+    /// Re-scan KB extract candidates + KB rows.
+    ///
+    /// V1.50 T-B P2: `creator world kb rescan <work_ref>/<chapter>` re-runs
+    /// the review-time heuristic over one chapter's current prose, idempotently
+    /// upserts `kb_extract_jobs` candidates, refreshes confirmed
+    /// `KnowledgeEntryRecord` bodies so KB rows reflect the current text, and
+    /// reports the diff. Cross-author attempts return `403`
+    /// (`WORLD_KB_FORBIDDEN`).
+    ///
+    /// V1.51 T-A P1: `--work <work_ref>` is a mutually exclusive work-scoped
+    /// mode that iterates all chapters in `Works/<work_ref>/Stories/` and
+    /// reconciles candidates by `canonical_name` across chapters (closes
+    /// R-V150KBED-08). Exactly one of the positional `<work_ref>/<chapter>` or
+    /// `--work <work_ref>` must be supplied; supplying both (or neither)
+    /// fails closed.
+    Rescan {
+        /// `<work_ref>/<chapter>` — e.g. `my-novel/05`. Mutually exclusive with
+        /// `--work`.
+        target: Option<String>,
+        /// Work-scoped cross-chapter rescan: iterate all chapters in
+        /// `Works/<work_ref>/Stories/` and reconcile by `canonical_name`.
+        /// Mutually exclusive with the positional `<work_ref>/<chapter>`.
+        #[arg(long, value_name = "WORK_REF")]
+        work: Option<String>,
+        /// Show what would change without writing
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Portable Knowledge-pack I/O (export / import a world's lore as a
     /// single spoke-compatible JSON file).
     Pack {
@@ -383,6 +449,30 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
         WorldKbCommand::Entity { command } => run_entity(command, config).await,
         WorldKbCommand::Graph { args } => run_graph(args, config).await,
         WorldKbCommand::Pack { command } => pack::run(command, config).await,
+        WorldKbCommand::QueueExtract {
+            work_entry_id,
+            world_id,
+            work_id,
+            chapter,
+        } => {
+            extract::queue_extract(
+                config,
+                &work_entry_id,
+                &world_id,
+                work_id.as_deref(),
+                chapter,
+            )
+            .await
+        }
+        WorldKbCommand::ExtractStatus { job_id } => {
+            extract::extract_status(config, job_id.as_deref()).await
+        }
+        WorldKbCommand::Rescan {
+            target,
+            work,
+            dry_run,
+            json,
+        } => rescan::run(config, target.as_deref(), work.as_deref(), dry_run, json).await,
         cmd => run_local(cmd, config).await,
     }
 }
@@ -462,8 +552,11 @@ async fn run_local(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
         // `run` routes these to the seam before this pool is opened.
         WorldKbCommand::Pack { .. }
         | WorldKbCommand::Entity { .. }
-        | WorldKbCommand::Graph { .. } => {
-            unreachable!("direct-core KB leaves are routed before the local pool opens")
+        | WorldKbCommand::Graph { .. }
+        | WorldKbCommand::QueueExtract { .. }
+        | WorldKbCommand::ExtractStatus { .. }
+        | WorldKbCommand::Rescan { .. } => {
+            unreachable!("direct-seam KB leaves are routed before the local pool opens")
         }
     }
 }

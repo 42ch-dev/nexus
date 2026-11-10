@@ -83,7 +83,7 @@ persist → kb-extract (schedule) → World KB KnowledgeEntries + SourceAnchors
 
 ### 5. Generic ingest job model
 
-`kb_extract_jobs` remains for async ingest, retry, and `creator kb extract-status`. Jobs are **artifact-locator** based (multi creative-type ready):
+`kb_extract_jobs` remains for async ingest, retry, and `creator world kb extract-status`. Jobs are **artifact-locator** based (multi creative-type ready):
 
 ```text
 job {
@@ -172,15 +172,15 @@ complete the γ surface; see entity-scope-model §5.6.7 + llm-extract.md §5.2.
 #### 5.5.1 Cross-chapter reconciliation (Normative)
 
 T-A P1 closes `R-V150KBED-08` by extending the chapter-scoped
-`creator kb rescan <work_ref>/<chapter>` (T-B P2) with a work-scoped mode
-`creator kb rescan --work <work_ref>`. The work-scoped mode reconciles
+`creator world kb rescan <work_ref>/<chapter>` (T-B P2) with a work-scoped mode
+`creator world kb rescan --work <work_ref>`. The work-scoped mode reconciles
 extraction candidates **across all chapters** of a Work so a recurring
 entity (e.g. a character appearing in chapters 3, 5, 7) collapses to a
 single `pending` candidate row carrying cross-chapter provenance, rather
 than N independent pending rows the author must adopt one-by-one.
 
 ```text
-creator kb rescan --work <work_ref>
+creator world kb rescan --work <work_ref>
   → resolve_work(work_ref) → world_id
   → require_world_owner(world_id, creator)         (§5.5.3 author gate)
   → work_chapters::list_chapters(work_id)          (ordered by volume, chapter)

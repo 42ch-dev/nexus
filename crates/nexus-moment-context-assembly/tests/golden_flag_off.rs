@@ -12,7 +12,6 @@
 
 use nexus_contracts::{BlockType, TimePolicy, Visibility};
 use nexus_knowledge::world_kb::{InMemoryKbStore, KbStore};
-use nexus_knowledge::{InMemoryKnowledgeStore, KnowledgeStore, KnowledgeTag};
 use nexus_moment_context_assembly::stage0::Stage0Assembly;
 use nexus_moment_context_assembly::{assemble_moment, MomentRequest};
 use nexus_narrative::timeline_event::TimelineEventType;
@@ -23,12 +22,10 @@ use nexus_narrative::InMemoryNarrativeGateway;
 fn build_deterministic_fixture() -> (
     InMemoryNarrativeGateway<InMemoryKbStore>,
     InMemoryKbStore,
-    InMemoryKnowledgeStore,
     Stage0Assembly,
 ) {
     let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
     let kb = InMemoryKbStore::new();
-    let knowledge = InMemoryKnowledgeStore::new();
 
     // ── World (frozen created_at) ──
     let mut world = nexus_narrative::world::World::new(
@@ -63,11 +60,11 @@ fn build_deterministic_fixture() -> (
         ..Stage0Assembly::default()
     };
 
-    (narrative, kb, knowledge, stage0)
+    (narrative, kb, stage0)
 }
 
-/// Seed KB entry and user knowledge into the in-memory stores (async).
-async fn seed_stores(kb: &InMemoryKbStore, knowledge: &InMemoryKnowledgeStore) {
+/// Seed the KB entry into the in-memory store (async).
+async fn seed_stores(kb: &InMemoryKbStore) {
     // KB entry with activation module (tests that flag OFF still includes it)
     use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
     let mut kb_entry = KnowledgeEntryRecord::new("wld_golden", BlockType::Character, "Hero");
@@ -79,32 +76,20 @@ async fn seed_stores(kb: &InMemoryKbStore, knowledge: &InMemoryKnowledgeStore) {
     kb.insert_knowledge_entry(kb_entry)
         .await
         .expect("insert kb entry");
-
-    // User knowledge entry (frozen id + timestamps)
-    let mut uke = nexus_knowledge::UserKnowledgeEntry::new(
-        "user_golden",
-        vec![KnowledgeTag::new("lore")],
-        "The hero wields a legendary sword forged in dragon fire.",
-    );
-    uke.id = "kno_golden_001".to_string();
-    uke.created_at = "2026-01-01T00:00:03Z".to_string();
-    uke.updated_at = "2026-01-01T00:00:03Z".to_string();
-    knowledge.store(uke).await.expect("store knowledge");
 }
 
 #[tokio::test]
 async fn assemble_moment_flag_off_golden() {
-    let (narrative, kb, knowledge, stage0) = build_deterministic_fixture();
-    seed_stores(&kb, &knowledge).await;
+    let (narrative, kb, stage0) = build_deterministic_fixture();
+    seed_stores(&kb).await;
 
     // activation_enabled: false (explicit off-switch) — no activation
     // filtering even with activation modules present.
     let request = MomentRequest::new(stage0)
         .with_world("wld_golden")
-        .with_user("user_golden")
         .with_activation_enabled(false);
 
-    let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+    let ctx = assemble_moment(&request, &narrative, &kb).await;
     let output = ctx.to_full_context();
 
     // Read golden from checked-in file

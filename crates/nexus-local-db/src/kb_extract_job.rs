@@ -540,7 +540,7 @@ pub enum UpsertOutcome {
 }
 
 /// List promotion candidates (any `promotion_status`) sourced from a specific
-/// chapter of a work. Used by `creator kb rescan` to compute the diff baseline
+/// chapter of a work. Used by `creator world kb rescan` to compute the diff baseline
 /// against the freshly-extracted candidate set.
 ///
 /// # Errors
@@ -668,7 +668,7 @@ pub async fn upsert_pending_candidate(
 
 /// Delete a stale `pending` candidate sourced from a specific chapter.
 ///
-/// Used by `creator kb rescan` to remove candidates that were previously
+/// Used by `creator world kb rescan` to remove candidates that were previously
 /// extracted from the rescanned chapter but no longer appear in its current
 /// text. Only `pending` rows are deleted — `confirmed`/`rejected` rows are
 /// terminal (§5.5.2) and are never removed by a rescan.

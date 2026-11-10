@@ -372,26 +372,6 @@
           "returns": "OutlinePatchResponse"
         },
         {
-          "name": "listKbEntries",
-          "args": [{ "name": "query", "type": "ListKbEntriesQuery", "optional": true }],
-          "returns": "ListKbEntriesResponse"
-        },
-        {
-          "name": "addKbEntry",
-          "args": [{ "name": "request", "type": "AddKbEntryRequest" }],
-          "returns": "AddKbEntryResponse"
-        },
-        {
-          "name": "getKbEntry",
-          "args": [{ "name": "entryId", "type": "string" }],
-          "returns": "GetKbEntryResponse"
-        },
-        {
-          "name": "deleteKbEntry",
-          "args": [{ "name": "entryId", "type": "string" }],
-          "returns": "DeleteKbEntryResponse"
-        },
-        {
           "name": "listFindings",
           "args": [
             { "name": "workId", "type": "string" },
@@ -512,16 +492,6 @@
           "name": "deleteReadingAnnotation",
           "args": [{ "name": "annotationId", "type": "string" }],
           "returns": "void"
-        },
-        {
-          "name": "listReferences",
-          "args": [],
-          "returns": "ReferenceListResponse"
-        },
-        {
-          "name": "getReference",
-          "args": [{ "name": "referenceId", "type": "string" }],
-          "returns": "ReferenceGetResponse"
         },
         {
           "name": "worldKbPromoteCandidate",

@@ -56,7 +56,6 @@ mod presets;
 mod principal;
 mod provider_journal;
 mod reading;
-mod references;
 mod service;
 mod soul;
 mod storage_status;
@@ -122,12 +121,6 @@ pub use memory_selection::{MemoryProviderSelection, RemoteMemoryProviderSelectio
 pub use nexus_home_layout::MemoryProviderConfig;
 pub use presets::PresetError;
 pub use principal::Principal;
-pub use references::{RegisterReferenceParams, REFERENCE_SOURCE_TYPES};
-// Reference read envelopes are schema-owned (core lane); re-exported here so
-// direct-core callers keep naming them through `nexus_core`.
-pub use nexus_contracts::core::references::{
-    ReferenceGetResponse, ReferenceListResponse, ReferenceSourceInfo,
-};
 // Provider-owned memory contract objects (spoke §6): the E1/E2 direct-core
 // callers name the Creator record and SOUL profile documents through
 // `nexus_core` instead of a second DTO set.

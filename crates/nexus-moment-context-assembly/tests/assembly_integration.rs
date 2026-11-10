@@ -1,12 +1,11 @@
 //! Integration tests for moment context assembly with all domain stores.
 //!
 //! These tests verify that `assemble_moment` correctly aggregates context from
-//! all four domain sources:
+//! all three domain sources:
 //!
 //! 1. Creator Memory (SOUL sections, long-term memories, fragment keywords)
 //! 2. Narrative (World/Timeline/Event state)
 //! 3. World KB (key blocks)
-//! 4. User Knowledge (entries)
 //!
 //! All tests use in-memory implementations — no I/O or network required.
 
@@ -14,7 +13,6 @@
 
 use nexus_contracts::{BlockType, TimePolicy, Visibility};
 use nexus_knowledge::world_kb::{InMemoryKbStore, KbStore};
-use nexus_knowledge::{InMemoryKnowledgeStore, KnowledgeStore};
 use nexus_moment_context_assembly::stage0::Stage0Assembly;
 use nexus_moment_context_assembly::{assemble_moment, MomentContext, MomentRequest};
 use nexus_narrative::InMemoryNarrativeGateway;
@@ -26,7 +24,6 @@ mod common;
 struct FixtureStores {
     narrative: InMemoryNarrativeGateway<InMemoryKbStore>,
     kb: InMemoryKbStore,
-    knowledge: InMemoryKnowledgeStore,
 }
 
 impl FixtureStores {
@@ -34,7 +31,6 @@ impl FixtureStores {
         Self {
             narrative: InMemoryNarrativeGateway::new(InMemoryKbStore::new()),
             kb: InMemoryKbStore::new(),
-            knowledge: InMemoryKnowledgeStore::new(),
         }
     }
 }
@@ -102,20 +98,6 @@ async fn seed_kb_block(stores: &FixtureStores, world_id: &str, block_type: Block
         .expect("insert key block");
 }
 
-/// Seed a knowledge entry.
-async fn seed_knowledge(stores: &FixtureStores, user_id: &str, tags: &[&str], content: &str) {
-    let tag_vec: Vec<nexus_knowledge::KnowledgeTag> = tags
-        .iter()
-        .map(|t| nexus_knowledge::KnowledgeTag::new(t))
-        .collect();
-    let entry = nexus_knowledge::UserKnowledgeEntry::new(user_id, tag_vec, content);
-    stores
-        .knowledge
-        .store(entry)
-        .await
-        .expect("store knowledge");
-}
-
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -123,7 +105,7 @@ async fn creator_memory_fixtures_appear_in_stage0() {
     let stores = FixtureStores::empty();
     let request = MomentRequest::new(stage0_with_soul_sections());
 
-    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
     // Personality section is present
     assert!(
@@ -166,7 +148,7 @@ async fn narrative_context_provides_world_and_timeline() {
 
     let request = MomentRequest::new(Stage0Assembly::default()).with_world("wld_narnia");
 
-    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
     // World state
     let ws = ctx.world_state.expect("world state must be present");
@@ -207,7 +189,7 @@ async fn world_kb_assets_are_included_by_block_type() {
 
     let request = MomentRequest::new(Stage0Assembly::default()).with_world("wld_rpg");
 
-    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
     let kb_text = ctx.world_kb.expect("world KB must be present");
     assert!(
@@ -225,73 +207,23 @@ async fn world_kb_assets_are_included_by_block_type() {
 }
 
 #[tokio::test]
-async fn user_knowledge_entries_are_included_with_tags() {
-    let stores = FixtureStores::empty();
-    seed_knowledge(
-        &stores,
-        "user_42",
-        &["worldbuilding", "magic"],
-        "Magic requires a price.",
-    )
-    .await;
-    seed_knowledge(
-        &stores,
-        "user_42",
-        &["character"],
-        "Villains need motivations.",
-    )
-    .await;
-    seed_knowledge(&stores, "user_99", &["worldbuilding"], "Other user's note.").await;
-
-    let request = MomentRequest::new(Stage0Assembly::default()).with_user("user_42");
-
-    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
-
-    let uk_text = ctx.user_knowledge.expect("user knowledge must be present");
-    assert!(
-        uk_text.contains("Magic requires a price"),
-        "must include first entry"
-    );
-    assert!(
-        uk_text.contains("Villains need motivations"),
-        "must include second entry"
-    );
-    assert!(
-        !uk_text.contains("Other user's note"),
-        "must NOT include other user's entries"
-    );
-    // Tags are present in formatted output
-    assert!(
-        uk_text.contains("worldbuilding"),
-        "formatted output must show tags"
-    );
-}
-
-#[tokio::test]
 async fn full_assembly_produces_correct_moment_context() {
     let stores = FixtureStores::empty();
 
-    // Seed all four domain sources
+    // Seed all three domain sources
     seed_world(&stores, "wld_epic", "The Great Epic");
     seed_event(&stores, "wld_epic", "fbk_root", 1, "The Call to Adventure");
     seed_kb_block(&stores, "wld_epic", BlockType::Character, "Protagonist").await;
-    seed_knowledge(&stores, "user_writer", &["style"], "Use active voice.").await;
 
-    let request = MomentRequest::new(stage0_with_soul_sections())
-        .with_world("wld_epic")
-        .with_user("user_writer");
+    let request = MomentRequest::new(stage0_with_soul_sections()).with_world("wld_epic");
 
-    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
     // All fields populated
     assert!(!ctx.stage0_context.is_empty(), "stage0 must be non-empty");
     assert!(ctx.world_state.is_some(), "world_state must be populated");
     assert!(ctx.timeline.is_some(), "timeline must be populated");
     assert!(ctx.world_kb.is_some(), "world_kb must be populated");
-    assert!(
-        ctx.user_knowledge.is_some(),
-        "user_knowledge must be populated"
-    );
 
     // Full context combines everything
     let full = ctx.to_full_context();
@@ -308,10 +240,6 @@ async fn full_assembly_produces_correct_moment_context() {
         "full must have timeline"
     );
     assert!(full.contains("Protagonist"), "full must have KB");
-    assert!(
-        full.contains("Use active voice"),
-        "full must have knowledge"
-    );
 }
 
 #[tokio::test]
@@ -321,28 +249,19 @@ async fn moment_context_default_is_all_none_except_stage0() {
     assert!(ctx.world_state.is_none());
     assert!(ctx.timeline.is_none());
     assert!(ctx.world_kb.is_none());
-    assert!(ctx.user_knowledge.is_none());
 }
 
 #[tokio::test]
-async fn missing_world_yields_no_narrative_or_kb_but_keeps_knowledge() {
+async fn missing_world_yields_no_narrative_or_kb() {
     let stores = FixtureStores::empty();
-    seed_knowledge(&stores, "user_42", &["test"], "Some knowledge.").await;
 
-    // Request a non-existent world + valid user
-    let request = MomentRequest::new(Stage0Assembly::default())
-        .with_world("wld_ghost")
-        .with_user("user_42");
+    let request = MomentRequest::new(Stage0Assembly::default()).with_world("wld_ghost");
 
-    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
     assert!(ctx.world_state.is_none(), "missing world → no world state");
     assert!(ctx.timeline.is_none(), "missing world → no timeline");
     assert!(ctx.world_kb.is_none(), "missing world → no KB");
-    assert!(
-        ctx.user_knowledge.is_some(),
-        "user knowledge is independent of world"
-    );
 }
 
 // ── v1.191 P1 T11: ActorView-only model / inspect emission (durable §4.2) ──
@@ -411,7 +330,7 @@ async fn v1191_holder_context_model_and_inspect_emit_admitted_rows_only() {
         CharacterViewInput::from_entries(vec![admitted]),
     ));
 
-    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
     let kb_text = ctx.world_kb.clone().expect("admitted snapshot renders");
     assert!(kb_text.contains("AdmittedShared"), "{kb_text}");
     assert!(

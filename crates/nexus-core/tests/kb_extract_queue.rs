@@ -2,8 +2,8 @@
 //! R-V1190-KB-EXTRACT-QUEUE-GAP).
 //!
 //! Pins the core `queue_kb_extract` / `list_kb_extract_jobs` /
-//! `get_kb_extract_job` producer the `creator kb queue-extract` and
-//! `creator kb extract-status` CLI leaves now run on: the job lands under the
+//! `get_kb_extract_job` producer the `creator world kb queue-extract` and
+//! `creator world kb extract-status` CLI leaves now run on: the job lands under the
 //! admitted principal's creator/workspace binding, the `--chapter` sugar
 //! derives the artifact locator, the enqueue is idempotent on its key, and a
 //! foreign creator's job is refused rather than reported absent.

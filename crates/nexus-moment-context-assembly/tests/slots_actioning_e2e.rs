@@ -19,7 +19,6 @@
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::{InMemoryKbStore, KbStore};
-use nexus_knowledge::InMemoryKnowledgeStore;
 use nexus_moment_context_assembly::stage0::Stage0Assembly;
 use nexus_moment_context_assembly::{assemble_moment, MomentRequest};
 use nexus_narrative::InMemoryNarrativeGateway;
@@ -107,7 +106,6 @@ async fn seed_slot_fixture(kb: &InMemoryKbStore) {
 async fn slots_actioning_routes_and_orders_end_to_end() {
     let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
     let kb = InMemoryKbStore::new();
-    let knowledge = InMemoryKnowledgeStore::new();
     seed_slot_fixture(&kb).await;
 
     let stage0 = Stage0Assembly {
@@ -117,7 +115,7 @@ async fn slots_actioning_routes_and_orders_end_to_end() {
         ..Stage0Assembly::default()
     };
     let request = MomentRequest::new(stage0).with_world(WORLD_ID);
-    let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+    let ctx = assemble_moment(&request, &narrative, &kb).await;
     let kb_text = ctx.world_kb.clone().expect("world_kb must be present");
 
     // 1. Slot sections render in the locked emit order (spec §2 / Q5):

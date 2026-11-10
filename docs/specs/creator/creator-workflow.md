@@ -153,7 +153,7 @@ Wire contract: `schemas/daemon-api/memory/memory-fragment-info.schema.json` exte
 
 | Topic | Rule |
 | --- | --- |
-| Work vs `creator kb --scope work` | Index entries may tag `work_id`; index does not define Work |
+| Work vs work-scope KB | The retired `creator kb` work-scope index never defined Work; `creator world kb queue-extract` / `rescan` records provenance only and does not define Work |
 | Agent tools vs presets | Agent may read/patch Work via `nexus.work.*`; production presets still run via orchestration |
 | Conditional routing | **Not** used for stage selection (DF-56) |
 | Novel project init | Separate preset `novel-project-init` (DF-58); **not** part of the `novel-writing` chain |

@@ -214,7 +214,6 @@ pub const CREATOR_RETAINED_TABLES: &[&str] = &[
     "orchestration_sessions",
     "reading_annotations",
     "reading_progress",
-    "reference_sources",
     "soul_meta",
     "works",
     "works_idempotency",

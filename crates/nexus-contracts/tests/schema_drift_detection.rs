@@ -221,22 +221,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             PresetProfileState
         ),
-        // core/references/
-        entry!(
-            "schemas/core/references/reference-get-response.schema.json",
-            Strict,
-            ReferenceGetResponse
-        ),
-        entry!(
-            "schemas/core/references/reference-list-response.schema.json",
-            Strict,
-            ReferenceListResponse
-        ),
-        entry!(
-            "schemas/core/references/reference-source-info.schema.json",
-            Strict,
-            ReferenceSourceInfo
-        ),
         // core/works/
         entry!(
             "schemas/core/works/work-inspiration-add-request.schema.json",
@@ -609,44 +593,9 @@ fn build_schema_map() -> Vec<SchemaEntry> {
         ),
         // ── daemon-api/kb/ (V1.63 P1) ─────────────────────────────────────
         entry!(
-            "schemas/daemon-api/kb/list-kb-entries-query.schema.json",
-            Strict,
-            ListKbEntriesQuery
-        ),
-        entry!(
-            "schemas/daemon-api/kb/kb-entry-summary.schema.json",
-            Strict,
-            KbEntrySummary
-        ),
-        entry!(
             "schemas/daemon-api/kb/pagination-info.schema.json",
             Strict,
             PaginationInfo
-        ),
-        entry!(
-            "schemas/daemon-api/kb/list-kb-entries-response.schema.json",
-            Strict,
-            ListKbEntriesResponse
-        ),
-        entry!(
-            "schemas/daemon-api/kb/add-kb-entry-request.schema.json",
-            Strict,
-            AddKbEntryRequest
-        ),
-        entry!(
-            "schemas/daemon-api/kb/add-kb-entry-response.schema.json",
-            Strict,
-            AddKbEntryResponse
-        ),
-        entry!(
-            "schemas/daemon-api/kb/get-kb-entry-response.schema.json",
-            Strict,
-            GetKbEntryResponse
-        ),
-        entry!(
-            "schemas/daemon-api/kb/delete-kb-entry-response.schema.json",
-            Strict,
-            DeleteKbEntryResponse
         ),
         // ── daemon-api/findings/ (V1.63 P1) ───────────────────────────────
         entry!(

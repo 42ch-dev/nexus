@@ -24,7 +24,6 @@ use std::collections::{HashMap, HashSet};
 use nexus_contracts::{BlockType, TimePolicy, Visibility};
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::{InMemoryKbStore, KbStore};
-use nexus_knowledge::{InMemoryKnowledgeStore, KnowledgeStore, KnowledgeTag};
 use nexus_moment_context_assembly::stage0::Stage0Assembly;
 use nexus_moment_context_assembly::{assemble_moment, MomentContext, MomentRequest};
 use nexus_narrative::timeline_event::TimelineEventType;
@@ -416,7 +415,7 @@ async fn assemble_harbor(
         // Generous budget: depth + cycle only bound the pull (spec Q1);
         // budget semantics are unit-covered in activation.rs.
         .with_hop_max_tokens(100_000);
-    assemble_moment(&request, narrative, kb, &InMemoryKnowledgeStore::new()).await
+    assemble_moment(&request, narrative, kb).await
 }
 
 fn trace_by_id(ctx: &MomentContext) -> HashMap<String, Vec<ActivationTraceEntry>> {
@@ -600,12 +599,10 @@ async fn dogfood_world_a_activation_hops_end_to_end() {
 fn build_neutral_world_b() -> (
     InMemoryNarrativeGateway<InMemoryKbStore>,
     InMemoryKbStore,
-    InMemoryKnowledgeStore,
     Stage0Assembly,
 ) {
     let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
     let kb = InMemoryKbStore::new();
-    let knowledge = InMemoryKnowledgeStore::new();
 
     let mut world = nexus_narrative::world::World::new(
         WORLD_B_ID,
@@ -637,13 +634,10 @@ fn build_neutral_world_b() -> (
         ..Stage0Assembly::default()
     };
 
-    (narrative, kb, knowledge, stage0)
+    (narrative, kb, stage0)
 }
 
-async fn seed_neutral_world_b(
-    kb: &InMemoryKbStore,
-    knowledge: &InMemoryKnowledgeStore,
-) -> Vec<KnowledgeEntryRecord> {
+async fn seed_neutral_world_b(kb: &InMemoryKbStore) -> Vec<KnowledgeEntryRecord> {
     let entries = vec![
         entry(
             WORLD_B_ID,
@@ -692,45 +686,22 @@ async fn seed_neutral_world_b(
             .expect("insert neutral kb entry");
     }
 
-    let mut uke1 = nexus_knowledge::UserKnowledgeEntry::new(
-        "user_dogfood_b",
-        vec![KnowledgeTag::new("lore")],
-        "The hero carries a compass that always points home.",
-    );
-    uke1.id = "kno_nb_001".to_string();
-    uke1.created_at = "2026-01-01T00:00:04Z".to_string();
-    uke1.updated_at = "2026-01-01T00:00:04Z".to_string();
-    knowledge.store(uke1).await.expect("store knowledge");
-
-    let mut uke2 = nexus_knowledge::UserKnowledgeEntry::new(
-        "user_dogfood_b",
-        vec![KnowledgeTag::new("lore")],
-        "The old fisher owes the hero a favor from the storm year.",
-    );
-    uke2.id = "kno_nb_002".to_string();
-    uke2.created_at = "2026-01-01T00:00:05Z".to_string();
-    uke2.updated_at = "2026-01-01T00:00:05Z".to_string();
-    knowledge.store(uke2).await.expect("store knowledge");
-
     entries
 }
 
 #[tokio::test]
 async fn dogfood_world_b_neutral_only_byte_equivalent() {
-    let (narrative, kb, knowledge, stage0) = build_neutral_world_b();
-    let seeded = seed_neutral_world_b(&kb, &knowledge).await;
+    let (narrative, kb, stage0) = build_neutral_world_b();
+    let seeded = seed_neutral_world_b(&kb).await;
 
     // Default-on: `MomentRequest::new` leaves activation_enabled = true.
-    let default_on_request = MomentRequest::new(stage0.clone())
-        .with_world(WORLD_B_ID)
-        .with_user("user_dogfood_b");
+    let default_on_request = MomentRequest::new(stage0.clone()).with_world(WORLD_B_ID);
     let explicit_off_request = MomentRequest::new(stage0)
         .with_world(WORLD_B_ID)
-        .with_user("user_dogfood_b")
         .with_activation_enabled(false);
 
-    let default_on = assemble_moment(&default_on_request, &narrative, &kb, &knowledge).await;
-    let explicit_off = assemble_moment(&explicit_off_request, &narrative, &kb, &knowledge).await;
+    let default_on = assemble_moment(&default_on_request, &narrative, &kb).await;
+    let explicit_off = assemble_moment(&explicit_off_request, &narrative, &kb).await;
 
     assert_eq!(
         default_on.to_full_context(),

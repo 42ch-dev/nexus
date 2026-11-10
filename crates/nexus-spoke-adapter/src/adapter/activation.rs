@@ -11,9 +11,9 @@
 //! all matching/scan logic product-local — no `spoke-operations` matchers
 //! (spoke owns the dialect wire only).
 //!
-//! MCA calls `apply_activation` between `WorldKB` fetch and User Knowledge
-//! assembly; the engine operates on the already-fetched entries — MCA stays
-//! generic (spec Architecture Lock Decision 5).
+//! MCA calls `apply_activation` on the fetched `WorldKB` entries; the engine
+//! operates on the already-fetched entries — MCA stays generic (spec
+//! Architecture Lock Decision 5).
 //!
 //! # Emit ordering (V1.149 P0 T3 — spec §4)
 //!

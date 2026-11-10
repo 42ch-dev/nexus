@@ -12,22 +12,21 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use nexus_contracts::tristate::presence_string;
 use nexus_contracts::{
-    AddKbEntryRequest, AppendInspirationRequest, AppendInspirationResponse,
-    BatchUpdateFindingsRequest, BatchUpdateFindingsResponse, ChapterBody, ChapterDetail,
-    ChapterOutline, CoreChapterContentQuery as WireChapterContentQuery,
+    AppendInspirationRequest, AppendInspirationResponse, BatchUpdateFindingsRequest,
+    BatchUpdateFindingsResponse, ChapterBody, ChapterDetail, ChapterOutline,
+    CoreChapterContentQuery as WireChapterContentQuery,
     CoreTimelineEventsQuery as WireTimelineEventsQuery,
     CoreTimelineOverviewQuery as WireTimelineOverviewQuery, CoreWorkSelection, CreateForkRequest,
-    CreateWorkRequest, FindingDetailResponse, FindingsApi, GetKbEntryResponse, ListChaptersQuery,
-    ListKbEntriesQuery, ListWorksQuery, ListWorksResponse, PackExportRequest, PackImportRequest,
-    PatchChapterRequest, ReadingAnnotation, ReadingAnnotationCreateRequest,
-    ReadingAnnotationListQuery, ReadingAnnotationListResponse, ReadingAnnotationPatchRequest,
-    ReadingProgressQuery, ReadingProgressRequest, ReadingProgressResponse,
-    TimelineOverviewResponse, WorkDetailResponse, WorkInspirationAddRequest,
-    WorkInspirationAddResponse, WorkInspirationArchiveRequest, WorkInspirationItem,
-    WorkInspirationListQuery, WorkInspirationListResponse, WorkInspirationPromoteRequest,
-    WorkInspirationPromoteResponse, WorkPoolArchiveRequest as WirePoolArchiveRequest,
-    WorkPoolEntry, WorkPoolListQuery, WorkPoolListResponse, WorkPoolPromoteRequest,
-    WorkPoolSetActiveRequest, WorkReconcileReport,
+    CreateWorkRequest, FindingDetailResponse, FindingsApi, ListChaptersQuery, ListWorksQuery,
+    ListWorksResponse, PackExportRequest, PackImportRequest, PatchChapterRequest,
+    ReadingAnnotation, ReadingAnnotationCreateRequest, ReadingAnnotationListQuery,
+    ReadingAnnotationListResponse, ReadingAnnotationPatchRequest, ReadingProgressQuery,
+    ReadingProgressRequest, ReadingProgressResponse, TimelineOverviewResponse, WorkDetailResponse,
+    WorkInspirationAddRequest, WorkInspirationAddResponse, WorkInspirationArchiveRequest,
+    WorkInspirationItem, WorkInspirationListQuery, WorkInspirationListResponse,
+    WorkInspirationPromoteRequest, WorkInspirationPromoteResponse,
+    WorkPoolArchiveRequest as WirePoolArchiveRequest, WorkPoolEntry, WorkPoolListQuery,
+    WorkPoolListResponse, WorkPoolPromoteRequest, WorkPoolSetActiveRequest, WorkReconcileReport,
 };
 use nexus_core::{
     AddInspirationRequest, ArchiveInspirationRequest, ArchivePoolRequest, CoreChapterContentQuery,
@@ -928,59 +927,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Work KB index (P1-T3) ───────────────────────────────────────────────
-
-    /// `GET /v1/daemon/kb/entries` — local work-scope file index (`scope=work`).
-    #[napi]
-    pub async fn list_kb_entries(
-        &self,
-        principal_handle: String,
-        query_json: Buffer,
-    ) -> Result<Buffer> {
-        let query: ListKbEntriesQuery = decode(query_json, "query")?;
-        self.json_call(principal_handle, async move |core, principal| {
-            core.list_kb_entries(&principal, query).await
-        })
-        .await
-    }
-
-    /// `POST /v1/daemon/kb/entries` (201 at the adapter).
-    #[napi]
-    pub async fn add_kb_entry(
-        &self,
-        principal_handle: String,
-        request_json: Buffer,
-    ) -> Result<Buffer> {
-        let request: AddKbEntryRequest = decode(request_json, "request")?;
-        self.json_call(principal_handle, async move |core, principal| {
-            core.add_kb_entry(&principal, request).await
-        })
-        .await
-    }
-
-    /// `GET /v1/daemon/kb/entries/{entry_id}`.
-    #[napi]
-    pub async fn get_kb_entry(&self, principal_handle: String, entry_id: String) -> Result<Buffer> {
-        self.json_call(principal_handle, async move |core, principal| {
-            let response: GetKbEntryResponse = core.get_kb_entry(&principal, entry_id).await?;
-            Ok(response)
-        })
-        .await
-    }
-
-    /// `DELETE /v1/daemon/kb/entries/{entry_id}`.
-    #[napi]
-    pub async fn delete_kb_entry(
-        &self,
-        principal_handle: String,
-        entry_id: String,
-    ) -> Result<Buffer> {
-        self.json_call(principal_handle, async move |core, principal| {
-            core.delete_kb_entry(&principal, entry_id).await
-        })
-        .await
-    }
-
     // ── Findings (P1-T3) ────────────────────────────────────────────────────
 
     /// Map a generated create-finding wire body onto the core carrier,
@@ -1323,31 +1269,6 @@ impl NativeCore {
         self.json_call(principal_handle, async move |core, principal| {
             core.delete_annotation(&principal, annotation_id).await?;
             Ok(())
-        })
-        .await
-    }
-
-    // ── Reference registry reads (P1-T3) ────────────────────────────────────
-
-    /// `GET /v1/daemon/references` — the core projection serializes to the
-    /// schema-owned `{references: [...]}` envelope.
-    #[napi]
-    pub async fn list_references(&self, principal_handle: String) -> Result<Buffer> {
-        self.json_call(principal_handle, async move |core, principal| {
-            core.list_references(&principal).await
-        })
-        .await
-    }
-
-    /// `GET /v1/daemon/references/{reference_id}`.
-    #[napi]
-    pub async fn get_reference(
-        &self,
-        principal_handle: String,
-        reference_id: String,
-    ) -> Result<Buffer> {
-        self.json_call(principal_handle, async move |core, principal| {
-            core.get_reference(&principal, reference_id).await
         })
         .await
     }

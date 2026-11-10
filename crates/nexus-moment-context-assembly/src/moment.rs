@@ -1,6 +1,6 @@
 //! Moment-scoped context assembly — aggregates from all local domains.
 //!
-//! The [`MomentAssembly`] pulls context from four domain sources:
+//! The [`MomentAssembly`] pulls context from three domain sources:
 //!
 //! 1. **Creator Memory** (`nexus-creator-memory`): SOUL sections, long-term memories,
 //!    fragment keywords (via [`Stage0Assembly`]).
@@ -8,8 +8,6 @@
 //!    (via [`NarrativeGateway`](nexus_narrative::NarrativeGateway)).
 //! 3. **Knowledge Base** (`nexus-kb`): World-scoped KB assets / key blocks
 //!    (via [`KbStore`](nexus_knowledge::world_kb::KbStore)).
-//! 4. **Knowledge** (`nexus-knowledge`): User-scoped knowledge entries
-//!    (via [`KnowledgeStore`](nexus_knowledge::KnowledgeStore)).
 //!
 //! # Entity scope model (§4)
 //!
@@ -31,7 +29,6 @@ use crate::world_context::CharacterViewInput;
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::{KbQuery, KbStore};
-use nexus_knowledge::KnowledgeStore;
 use nexus_narrative::NarrativeGateway;
 use nexus_spoke_adapter::adapter::activation::{
     apply_activation_with_hops, ActivationBudget, HopConfig, HopEdge,
@@ -45,9 +42,6 @@ const TIMELINE_HEADING: &str = "## Timeline";
 
 /// Section heading for World Knowledge Base in assembled context.
 const WORLD_KB_HEADING: &str = "## World Knowledge Base";
-
-/// Section heading for User Knowledge in assembled context.
-const USER_KNOWLEDGE_HEADING: &str = "## User Knowledge";
 
 /// Section heading for the reserved Moment Directive slot (V1.150 P0 —
 /// spec §2 / Q1 provisional lock). Placed between `## Timeline` and
@@ -246,8 +240,6 @@ pub struct MomentRequest {
     pub branch_id: Option<String>,
     /// Event ID to focus context around (optional).
     pub event_id: Option<String>,
-    /// User ID to pull knowledge entries for.
-    pub user_id: Option<String>,
     /// Stage-0 assembly inputs (SOUL, memories, fragments, prompt).
     pub stage0: Stage0Assembly,
     /// Cross-domain token budget (approximate chars/4 heuristic).
@@ -260,14 +252,12 @@ pub struct MomentRequest {
     pub kb_text_search: Option<String>,
     /// KB query: filter by block type.
     pub kb_block_type: Option<BlockType>,
-    /// User knowledge query: maximum number of entries to return.
-    pub knowledge_limit: Option<usize>,
     /// Enable lore activation filtering on `WorldKB` entries (V1.146 P4 T2,
     /// default-on since V1.149 P0 T2).
     ///
-    /// When `true`, the activation pass runs between `WorldKB` fetch and
-    /// User Knowledge assembly, calling `apply_activation` to filter/inspect
-    /// entries by their `modules.activation` fire-conditions.
+    /// When `true`, the activation pass runs after the `WorldKB` fetch,
+    /// calling `apply_activation` to filter/inspect entries by their
+    /// `modules.activation` fire-conditions.
     /// Default `true` — activation is the shipped product behavior; `false`
     /// restores V1.146 flag-off semantics (all entries returned unchanged).
     pub activation_enabled: bool,
@@ -314,13 +304,11 @@ impl MomentRequest {
             creator_id: None,
             branch_id: None,
             event_id: None,
-            user_id: None,
             stage0,
             max_tokens: None,
             kb_limit: None,
             kb_text_search: None,
             kb_block_type: None,
-            knowledge_limit: None,
             activation_enabled: true,
             hop_edges: None,
             hop_max_tokens: None,
@@ -366,13 +354,6 @@ impl MomentRequest {
         self
     }
 
-    /// Set the user ID for knowledge lookup.
-    #[must_use]
-    pub fn with_user(mut self, user_id: impl Into<String>) -> Self {
-        self.user_id = Some(user_id.into());
-        self
-    }
-
     /// Set cross-domain token budget.
     #[must_use]
     pub const fn with_max_tokens(mut self, max_tokens: usize) -> Self {
@@ -398,13 +379,6 @@ impl MomentRequest {
     #[must_use]
     pub const fn with_kb_block_type(mut self, block_type: BlockType) -> Self {
         self.kb_block_type = Some(block_type);
-        self
-    }
-
-    /// Set user knowledge result limit.
-    #[must_use]
-    pub const fn with_knowledge_limit(mut self, limit: usize) -> Self {
-        self.knowledge_limit = Some(limit);
         self
     }
 
@@ -463,8 +437,6 @@ pub struct MomentContext {
     pub timeline: Option<String>,
     /// World KB summary text (key blocks for the world).
     pub world_kb: Option<String>,
-    /// User knowledge summary text (entries for the user).
-    pub user_knowledge: Option<String>,
     /// Moment Directive slot (V1.150 P0 reserved — V1.150 P1 fills it): the
     /// `## Moment Directive` top-level section within the directive region
     /// (above lore, below system/personality). `None` means no directive is
@@ -520,7 +492,6 @@ impl MomentContext {
     /// 4. Moment Directive (V1.150 P0 reserved — only rendered when P1
     ///    fills the slot)
     /// 5. World KB (key blocks — V1.150 P0 slots subdivide this section)
-    /// 6. User knowledge
     ///
     /// Empty sections are omitted.
     ///
@@ -541,7 +512,6 @@ impl MomentContext {
         let timeline = section(self.timeline.as_ref(), TIMELINE_HEADING);
         let directive = section(self.moment_directive.as_ref(), MOMENT_DIRECTIVE_HEADING);
         let world_kb = section(self.world_kb.as_ref(), WORLD_KB_HEADING);
-        let user_knowledge = section(self.user_knowledge.as_ref(), USER_KNOWLEDGE_HEADING);
         let character_mind = self
             .character_mind
             .as_ref()
@@ -554,21 +524,18 @@ impl MomentContext {
                 parts.push(world_state);
                 parts.push(timeline);
                 parts.push(world_kb);
-                parts.push(user_knowledge);
             }
             DirectiveDepth::Mid => {
                 parts.push(world_state);
                 parts.push(directive);
                 parts.push(timeline);
                 parts.push(world_kb);
-                parts.push(user_knowledge);
             }
             DirectiveDepth::Tail => {
                 parts.push(world_state);
                 parts.push(timeline);
                 parts.push(directive);
                 parts.push(world_kb);
-                parts.push(user_knowledge);
             }
         }
         parts.into_iter().flatten().collect::<Vec<_>>().join("\n")
@@ -578,7 +545,7 @@ impl MomentContext {
     ///
     /// Personality section inside Stage-0 is never truncated.
     /// The remaining budget (after personality) is distributed across
-    /// `world_state`, `timeline`, `world_kb`, and `user_knowledge` in order.
+    /// `world_state`, `timeline`, and `world_kb` in order.
     ///
     /// Token count uses chars/4 heuristic (spec §9.3).
     pub fn apply_cross_domain_truncation(&mut self, max_tokens: usize) {
@@ -594,7 +561,6 @@ impl MomentContext {
         remaining = Self::truncate_section(&mut self.world_state, remaining);
         remaining = Self::truncate_section(&mut self.timeline, remaining);
         remaining = Self::truncate_section(&mut self.world_kb, remaining);
-        remaining = Self::truncate_section(&mut self.user_knowledge, remaining);
 
         // Truncate remaining stage0 content (non-personality)
         if rest_stage0.chars().count() > remaining {
@@ -741,20 +707,17 @@ fn hop_budget_tokens(
 ///
 /// - `G`: A [`NarrativeGateway`] implementation for narrative state queries.
 /// - `K`: A [`KbStore`] implementation for World-scoped KB queries.
-/// - `S`: A [`KnowledgeStore`] implementation for User-scoped knowledge queries.
 #[allow(clippy::future_not_send)]
-pub async fn assemble_moment<G, K, S>(
+pub async fn assemble_moment<G, K>(
     request: &MomentRequest,
     narrative: &G,
     kb_store: &K,
-    knowledge: &S,
 ) -> MomentContext
 where
     G: NarrativeGateway,
     K: KbStore,
-    S: KnowledgeStore,
 {
-    assemble_moment_with_directive(request, narrative, kb_store, knowledge, &NoDirectiveStore).await
+    assemble_moment_with_directive(request, narrative, kb_store, &NoDirectiveStore).await
 }
 
 /// Assemble moment context with a Moment Directive store (V1.150 P1, DF-75).
@@ -781,25 +744,23 @@ where
 ///
 /// # Type parameters
 ///
-/// - `G`, `K`, `S`: as in [`assemble_moment`].
+/// - `G`, `K`: as in [`assemble_moment`].
 /// - `D`: A [`DirectiveStore`] implementation (composition root adapter over
 ///   `nexus-local-db`; in-memory stub in tests).
 #[allow(clippy::future_not_send)]
-// Four-domain assembly orchestrator (stage-0 → world_state → timeline →
-// world-kb → user-knowledge → directive) — the per-section blocks keep the
-// function at ~114 lines; splitting would scatter one assembly's steps.
+// Three-domain assembly orchestrator (stage-0 → world_state → timeline →
+// world-kb → directive) — the per-section blocks keep the function at ~114
+// lines; splitting would scatter one assembly's steps.
 #[allow(clippy::too_many_lines)]
-pub async fn assemble_moment_with_directive<G, K, S, D>(
+pub async fn assemble_moment_with_directive<G, K, D>(
     request: &MomentRequest,
     narrative: &G,
     kb_store: &K,
-    knowledge: &S,
     directives: &D,
 ) -> MomentContext
 where
     G: NarrativeGateway,
     K: KbStore,
-    S: KnowledgeStore,
     D: DirectiveStore,
 {
     // 1. Stage-0: always assemble from creator memory inputs
@@ -857,9 +818,9 @@ where
         match fetch_world_kb_entries(kb_store, world_id, request).await {
             Ok(entries) if !entries.is_empty() => {
                 let entries = if request.activation_enabled {
-                    // V1.149 P0 T2: default-on lore activation between WorldKB
-                    // fetch and User Knowledge assembly. Scan text = Stage-0 +
-                    // timeline outline beats (reused from step 2). Unmatched
+                    // V1.149 P0 T2: default-on lore activation over the
+                    // fetched WorldKB entries. Scan text = Stage-0 + timeline
+                    // outline beats (reused from step 2). Unmatched
                     // entries are filtered out (activation gate). Neutral
                     // entries (no activation module) remain in matched.
                     // V1.146 P4 T3: capture the full ActivationResult for
@@ -939,24 +900,7 @@ where
         None
     };
 
-    // 4. User knowledge (if user_id provided). Character mode omits Creator
-    //    user-knowledge fallback entirely.
-    let user_knowledge = if request
-        .actor
-        .as_ref()
-        .is_some_and(MomentActorContext::is_character)
-    {
-        None
-    } else if let Some(ref user_id) = request.user_id {
-        match fetch_user_knowledge(knowledge, user_id, request.knowledge_limit).await {
-            Ok(Some(uk_text)) => Some(uk_text),
-            _ => None,
-        }
-    } else {
-        None
-    };
-
-    // 5. Moment Directive (V1.150 P1, spec §3): resolve + load the active
+    // 4. Moment Directive (V1.150 P1, spec §3): resolve + load the active
     //    directive for the work-bound moment (scope resolution spec §3.2 —
     //    Work wins, else World override for the Work's bound World, else
     //    none), then run the post-injection lifecycle. The plain
@@ -980,7 +924,6 @@ where
         world_state,
         timeline,
         world_kb,
-        user_knowledge,
         // V1.150 P0 reserved the slot; P1 fills it with the active directive
         // body. `None` ⇒ no `## Moment Directive` section (neutral-only).
         moment_directive: directive.as_ref().map(|d| d.body.clone()),
@@ -1168,39 +1111,6 @@ async fn fetch_world_kb_entries<K: KbStore>(
     Ok(result.items)
 }
 
-/// Fetch User knowledge entries and format as context text.
-async fn fetch_user_knowledge<S: KnowledgeStore>(
-    knowledge: &S,
-    user_id: &str,
-    knowledge_limit: Option<usize>,
-) -> Result<Option<String>, nexus_knowledge::KnowledgeError> {
-    let limit = knowledge_limit.unwrap_or(20);
-    let query = nexus_knowledge::KnowledgeQuery::for_user(user_id)
-        .with_limit(u32::try_from(limit).unwrap_or(u32::MAX));
-    let result = knowledge.list(&query).await?;
-    if result.entries.is_empty() {
-        return Ok(None);
-    }
-    let lines: Vec<String> = result
-        .entries
-        .iter()
-        .map(|entry| {
-            let tags = entry
-                .tags
-                .iter()
-                .map(nexus_knowledge::KnowledgeTag::as_str)
-                .collect::<Vec<_>>()
-                .join(", ");
-            if tags.is_empty() {
-                format!("- {}", entry.content)
-            } else {
-                format!("- [{}] {}", tags, entry.content)
-            }
-        })
-        .collect();
-    Ok(Some(lines.join("\n")))
-}
-
 /// Format a [`WorldState`] into a human-readable context string.
 fn format_world_state(ws: &nexus_narrative::WorldState) -> String {
     let mut parts = Vec::new();
@@ -1242,7 +1152,6 @@ mod tests {
     use super::*;
     use crate::directive::DirectiveTtlKind;
     use nexus_knowledge::world_kb::InMemoryKbStore;
-    use nexus_knowledge::InMemoryKnowledgeStore;
     use nexus_narrative::InMemoryNarrativeGateway;
     use std::sync::Arc;
 
@@ -1260,7 +1169,6 @@ mod tests {
     struct TestStores {
         narrative: InMemoryNarrativeGateway<InMemoryKbStore>,
         kb: InMemoryKbStore,
-        knowledge: InMemoryKnowledgeStore,
     }
 
     impl TestStores {
@@ -1268,7 +1176,6 @@ mod tests {
             Self {
                 narrative: InMemoryNarrativeGateway::new(InMemoryKbStore::new()),
                 kb: InMemoryKbStore::new(),
-                knowledge: InMemoryKnowledgeStore::new(),
             }
         }
     }
@@ -1278,13 +1185,12 @@ mod tests {
         let stores = TestStores::new();
         let request = MomentRequest::new(minimal_stage0());
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
         assert!(!ctx.stage0_context.contains("World State"));
         assert!(ctx.world_state.is_none());
         assert!(ctx.timeline.is_none());
         assert!(ctx.world_kb.is_none());
-        assert!(ctx.user_knowledge.is_none());
     }
 
     #[tokio::test]
@@ -1302,7 +1208,7 @@ mod tests {
 
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
         assert!(ctx.world_state.is_some());
         let ws = ctx.world_state.unwrap();
@@ -1333,7 +1239,7 @@ mod tests {
 
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
         assert!(ctx.timeline.is_some());
         let tl = ctx.timeline.unwrap();
@@ -1345,7 +1251,7 @@ mod tests {
         let stores = TestStores::new();
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_ghost");
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
         assert!(ctx.world_state.is_none());
         assert!(ctx.timeline.is_none());
@@ -1384,19 +1290,9 @@ mod tests {
         );
         stores.kb.insert_knowledge_entry(kb).await.unwrap();
 
-        // Set up knowledge
-        let entry = nexus_knowledge::UserKnowledgeEntry::new(
-            "user_1",
-            vec![nexus_knowledge::KnowledgeTag::new("writing")],
-            "Show, don't tell.",
-        );
-        stores.knowledge.store(entry).await.unwrap();
+        let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
 
-        let request = MomentRequest::new(minimal_stage0())
-            .with_world("wld_1")
-            .with_user("user_1");
-
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
         let full = ctx.to_full_context();
         assert!(
@@ -1405,14 +1301,9 @@ mod tests {
         );
         assert!(full.contains(TIMELINE_HEADING), "should have timeline");
         assert!(full.contains(WORLD_KB_HEADING), "should have world KB");
-        assert!(
-            full.contains(USER_KNOWLEDGE_HEADING),
-            "should have user knowledge"
-        );
         assert!(full.contains("Full World"));
         assert!(full.contains("The Beginning"));
         assert!(full.contains("Hero"));
-        assert!(full.contains("Show, don't tell."));
     }
 
     #[tokio::test]
@@ -1420,13 +1311,12 @@ mod tests {
         let stores = TestStores::new();
         let request = MomentRequest::new(minimal_stage0());
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let full = ctx.to_full_context();
 
         assert!(!full.contains(WORLD_STATE_HEADING));
         assert!(!full.contains(TIMELINE_HEADING));
         assert!(!full.contains(WORLD_KB_HEADING));
-        assert!(!full.contains(USER_KNOWLEDGE_HEADING));
         assert!(!full.contains(CHARACTER_SOUL_HEADING));
         assert!(!full.contains(CHARACTER_MEMORY_HEADING));
         assert!(!full.contains(CHARACTER_TOM_L1_HEADING));
@@ -1470,12 +1360,11 @@ mod tests {
             ..Stage0Assembly::default()
         })
         .with_world("wld_1")
-        .with_user("user_1")
         .with_actor(MomentActorContext::character(
             CharacterViewInput::from_entries(vec![allowed]),
         ));
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let full = ctx.to_full_context();
         assert!(full.contains(CHARACTER_SOUL_HEADING));
         assert!(full.contains(CHARACTER_MEMORY_HEADING));
@@ -1485,7 +1374,6 @@ mod tests {
         assert!(!full.contains("SecretWorldRow"));
         assert!(!full.contains("SecretNarrativeWorld"));
         assert!(!full.contains("SecretTimelineBeat"));
-        assert!(ctx.user_knowledge.is_none());
         assert!(!full.contains(WORLD_STATE_HEADING));
         assert!(!full.contains(TIMELINE_HEADING));
         let soul = full.find(CHARACTER_SOUL_HEADING).unwrap();
@@ -1514,7 +1402,7 @@ mod tests {
             .with_actor(MomentActorContext::creator_with_view(
                 CharacterViewInput::from_entries(vec![admitted]),
             ));
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let full = ctx.to_full_context();
         assert!(full.contains("AdmittedUnionRow"));
         assert!(!full.contains("SecretWorldRow"));
@@ -1541,7 +1429,7 @@ mod tests {
             .with_actor(MomentActorContext::character(
                 CharacterViewInput::from_entries(vec![huge]),
             ));
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let full = ctx.to_full_context();
         assert!(full.chars().count() < 8000);
         assert!(full.contains(CHARACTER_SOUL_HEADING));
@@ -1569,11 +1457,9 @@ mod tests {
         // assembly leaves `moment_directive` None and renders no
         // `## Moment Directive` section (AC-I1b neutral-only promise).
         let stores = TestStores::new();
-        let request = MomentRequest::new(minimal_stage0())
-            .with_world("wld_1")
-            .with_user("user_1");
+        let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         assert!(
             ctx.moment_directive.is_none(),
             "P0 must leave the reserved directive slot empty"
@@ -1732,14 +1618,8 @@ mod tests {
             .with_creator("ctr_1")
             .with_work("wrk_1")
             .with_event("evt_1");
-        let ctx = assemble_moment_with_directive(
-            &request,
-            &stores.narrative,
-            &stores.kb,
-            &stores.knowledge,
-            &store,
-        )
-        .await;
+        let ctx =
+            assemble_moment_with_directive(&request, &stores.narrative, &stores.kb, &store).await;
 
         assert_eq!(
             ctx.moment_directive.as_deref(),
@@ -1799,14 +1679,9 @@ mod tests {
         ] {
             let store = TestDirectiveStore::with_directive(active_directive(depth));
             let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
-            let ctx = assemble_moment_with_directive(
-                &request,
-                &stores.narrative,
-                &stores.kb,
-                &stores.knowledge,
-                &store,
-            )
-            .await;
+            let ctx =
+                assemble_moment_with_directive(&request, &stores.narrative, &stores.kb, &store)
+                    .await;
             let full = ctx.to_full_context();
 
             let marker = |label: &str| -> usize {
@@ -1843,16 +1718,9 @@ mod tests {
             .with_creator("ctr_1")
             .with_work("wrk_1")
             .with_event("evt_1");
-        let plain =
-            assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
-        let with_store = assemble_moment_with_directive(
-            &request,
-            &stores.narrative,
-            &stores.kb,
-            &stores.knowledge,
-            &store,
-        )
-        .await;
+        let plain = assemble_moment(&request, &stores.narrative, &stores.kb).await;
+        let with_store =
+            assemble_moment_with_directive(&request, &stores.narrative, &stores.kb, &store).await;
 
         assert_eq!(
             plain.to_full_context(),
@@ -1893,14 +1761,8 @@ mod tests {
         let request = MomentRequest::new(stage0)
             .with_world("wld_1")
             .with_creator("ctr_1");
-        let ctx = assemble_moment_with_directive(
-            &request,
-            &stores.narrative,
-            &stores.kb,
-            &stores.knowledge,
-            &store,
-        )
-        .await;
+        let ctx =
+            assemble_moment_with_directive(&request, &stores.narrative, &stores.kb, &store).await;
 
         // The directive IS injected into the slot.
         assert_eq!(
@@ -1936,7 +1798,7 @@ mod tests {
         let stores = TestStores::new();
         let request = MomentRequest::new(minimal_stage0());
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
         assert!(ctx.stage0_context.contains("A creative writer."));
         assert!(ctx.stage0_context.contains("Write chapter 3."));
@@ -1963,7 +1825,7 @@ mod tests {
 
         // Without limit: both blocks
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.unwrap();
         assert!(kb_text.contains("Hero"), "unlimited KB should contain Hero");
         assert!(
@@ -1975,7 +1837,7 @@ mod tests {
         let request = MomentRequest::new(minimal_stage0())
             .with_world("wld_1")
             .with_kb_limit(1);
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.unwrap();
         // One of them, not both
         let has_hero = kb_text.contains("Hero");
@@ -2007,7 +1869,7 @@ mod tests {
         let request = MomentRequest::new(minimal_stage0())
             .with_world("wld_1")
             .with_kb_text_search("her");
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.unwrap();
         assert!(
             kb_text.contains("Hero"),
@@ -2043,39 +1905,16 @@ mod tests {
         );
         stores.kb.insert_knowledge_entry(kb).await.unwrap();
 
-        // Set up knowledge
-        let entry = nexus_knowledge::UserKnowledgeEntry::new(
-            "user_1",
-            vec![nexus_knowledge::KnowledgeTag::new("writing")],
-            "A long knowledge entry that should also be truncated when budget is tight.",
-        );
-        stores.knowledge.store(entry).await.unwrap();
-
         // Without truncation: full content
-        let request_no_budget = MomentRequest::new(minimal_stage0())
-            .with_world("wld_1")
-            .with_user("user_1");
-        let ctx_full = assemble_moment(
-            &request_no_budget,
-            &stores.narrative,
-            &stores.kb,
-            &stores.knowledge,
-        )
-        .await;
+        let request_no_budget = MomentRequest::new(minimal_stage0()).with_world("wld_1");
+        let ctx_full = assemble_moment(&request_no_budget, &stores.narrative, &stores.kb).await;
         let full_len = ctx_full.to_full_context().chars().count();
 
         // With small budget
         let request_budget = MomentRequest::new(minimal_stage0())
             .with_world("wld_1")
-            .with_user("user_1")
             .with_max_tokens(50); // 200 chars budget
-        let ctx_budget = assemble_moment(
-            &request_budget,
-            &stores.narrative,
-            &stores.kb,
-            &stores.knowledge,
-        )
-        .await;
+        let ctx_budget = assemble_moment(&request_budget, &stores.narrative, &stores.kb).await;
         let budget_len = ctx_budget.to_full_context().chars().count();
 
         assert!(
@@ -2108,7 +1947,6 @@ mod tests {
             world_state: Some("World state data.".to_string()),
             timeline: None,
             world_kb: None,
-            user_knowledge: None,
             moment_directive: None,
             moment_directive_depth: DirectiveDepth::default(),
             activation_trace: None,
@@ -2152,7 +1990,6 @@ mod tests {
             world_state: Some("Some world state.".to_string()),
             timeline: Some("Timeline events.".to_string()),
             world_kb: None,
-            user_knowledge: None,
             moment_directive: None,
             moment_directive_depth: DirectiveDepth::default(),
             activation_trace: None,
@@ -2267,7 +2104,7 @@ mod tests {
         let request = MomentRequest::new(minimal_stage0())
             .with_world("wld_1")
             .with_activation_enabled(false);
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.unwrap();
         assert!(kb_text.contains("Hero"), "flag OFF: all entries appear");
         assert!(kb_text.contains("Castle"), "flag OFF: all entries appear");
@@ -2320,7 +2157,7 @@ mod tests {
         let request = MomentRequest::new(minimal_stage0())
             .with_world("wld_1")
             .with_activation_enabled(false);
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.expect("world_kb must be present");
 
         // Every candidate entry appears unchanged (off-switch: no filtering).
@@ -2368,7 +2205,7 @@ mod tests {
             .with_world("wld_1")
             .with_activation_enabled(true);
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.unwrap();
         assert!(kb_text.contains("Hero"));
         assert!(kb_text.contains("Castle"));
@@ -2424,7 +2261,7 @@ mod tests {
         // No with_activation_enabled call — the default is ON since V1.149.
         let request = MomentRequest::new(stage0).with_world("wld_1");
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.unwrap();
         assert!(
             kb_text.contains("Hero"),
@@ -2469,7 +2306,7 @@ mod tests {
             ..Stage0Assembly::default()
         };
         let request = MomentRequest::new(stage0).with_world("wld_1");
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
         let kb_text = ctx.world_kb.expect("world_kb must render");
         assert!(
@@ -2517,7 +2354,7 @@ mod tests {
         }
 
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.expect("world_kb must render");
         assert!(kb_text.contains("Hero summary"));
         assert!(kb_text.contains("Castle summary"));
@@ -2579,7 +2416,7 @@ mod tests {
             ..Stage0Assembly::default()
         };
         let request = MomentRequest::new(stage0).with_world("wld_1");
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.expect("world_kb must render");
         assert!(
             kb_text.contains("wyrm"),
@@ -2612,7 +2449,7 @@ mod tests {
         };
         let request = MomentRequest::new(stage0).with_world("wld_1");
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         assert!(ctx.world_kb.is_some(), "all 3 keys matched → entry present");
         assert!(ctx.world_kb.unwrap().contains("Royal Guard"));
     }
@@ -2643,7 +2480,7 @@ mod tests {
         // Default-on (no explicit flag).
         let request = MomentRequest::new(stage0).with_world("wld_1");
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         assert!(
             ctx.world_kb.is_none(),
             "Orc Warlord excluded by not_any (secondary 'army' matched) → no entries remain"
@@ -2656,7 +2493,7 @@ mod tests {
         let stores = TestStores::new();
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_ghost");
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         assert!(ctx.world_kb.is_none());
     }
 
@@ -2704,7 +2541,7 @@ mod tests {
         };
         let request = MomentRequest::new(stage0).with_world("wld_1");
 
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.expect("world_kb must be present");
         assert!(
             kb_text.contains("Dawn Dock"),
@@ -2789,7 +2626,7 @@ mod tests {
         let request = MomentRequest::new(stage0_with("A king rules the land."))
             .with_world("wld_1")
             .with_hop_edges(hop_fixture_edges());
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
         let kb_text = ctx.world_kb.expect("world_kb must be present");
         assert!(kb_text.contains("Harbor"), "primary hit present");
@@ -2825,7 +2662,7 @@ mod tests {
         seed_hop_fixture(&stores).await;
 
         let request = MomentRequest::new(stage0_with("A king rules the land.")).with_world("wld_1");
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
         let kb_text = ctx.world_kb.expect("world_kb must be present");
         assert!(kb_text.contains("Harbor"), "primary hit present");
@@ -2844,7 +2681,7 @@ mod tests {
             .with_world("wld_1")
             .with_activation_enabled(false)
             .with_hop_edges(hop_fixture_edges());
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
         let kb_text = ctx.world_kb.expect("world_kb must be present");
         assert!(kb_text.contains("Harbor"));
@@ -2883,24 +2720,12 @@ mod tests {
         }
 
         let request_plain = MomentRequest::new(stage0_with("Any text.")).with_world("wld_1");
-        let ctx_plain = assemble_moment(
-            &request_plain,
-            &stores.narrative,
-            &stores.kb,
-            &stores.knowledge,
-        )
-        .await;
+        let ctx_plain = assemble_moment(&request_plain, &stores.narrative, &stores.kb).await;
 
         let request_edges = MomentRequest::new(stage0_with("Any text."))
             .with_world("wld_1")
             .with_hop_edges(hop_fixture_edges());
-        let ctx_edges = assemble_moment(
-            &request_edges,
-            &stores.narrative,
-            &stores.kb,
-            &stores.knowledge,
-        )
-        .await;
+        let ctx_edges = assemble_moment(&request_edges, &stores.narrative, &stores.kb).await;
 
         assert_eq!(
             ctx_edges.world_kb, ctx_plain.world_kb,
@@ -3013,7 +2838,7 @@ mod tests {
             .with_world("wld_1")
             .with_max_tokens(14)
             .with_hop_edges(hop_fixture_edges());
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
         // Personality survives the tight budget untouched (never truncated):
         // the section content + heading are preserved (the truncation
@@ -3150,7 +2975,7 @@ mod tests {
         .with_actor(MomentActorContext::character(
             CharacterViewInput::from_entries(vec![allowed.clone()]),
         ));
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let empty_full = ctx.to_full_context();
         assert!(empty_full.contains("## Character SOUL\n\n## Character Memory\n\n"));
 
@@ -3172,7 +2997,7 @@ mod tests {
             CharacterViewInput::from_entries(vec![allowed]),
             projected,
         ));
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let full = ctx.to_full_context();
         assert!(full.contains("# Ava\nSOUL\n"));
         assert!(full.contains("- SHAREDMEMORYMARKER\n- LOCALMEMORYMARKER\n"));
@@ -3229,7 +3054,7 @@ mod tests {
             .with_actor(MomentActorContext::character(
                 CharacterViewInput::from_entries(vec![shared_world, own_character, binding_local]),
             ));
-        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.expect("admitted snapshot must render");
 
         assert!(
@@ -3282,8 +3107,7 @@ mod tests {
             let request = MomentRequest::new(minimal_stage0())
                 .with_world("wld_1")
                 .with_actor(actor);
-            let ctx =
-                assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+            let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
             assert!(
                 ctx.world_kb.is_none(),
                 "an empty snapshot must not fall back to the store's rows"

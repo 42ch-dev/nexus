@@ -41,7 +41,6 @@ pub fn builtin_input_schema(name: &str) -> Option<&'static str> {
         "narrative.compute" => Some(NARRATIVE_COMPUTE_INPUT_SCHEMA),
         "nexus.fork.create" => Some(NEXUS_FORK_CREATE_INPUT_SCHEMA),
         "nexus.llm.extract" => Some(NEXUS_LLM_EXTRACT_INPUT_SCHEMA),
-        "nexus.reference.refresh" => Some(NEXUS_REFERENCE_REFRESH_INPUT_SCHEMA),
         "nexus.timeline.event.append" => Some(NEXUS_TIMELINE_EVENT_APPEND_INPUT_SCHEMA),
         "nexus.world.delta.apply" => Some(NEXUS_WORLD_DELTA_APPLY_INPUT_SCHEMA),
         "nexus.world.delta.propose" => Some(NEXUS_WORLD_DELTA_PROPOSE_INPUT_SCHEMA),
@@ -175,9 +174,6 @@ pub const NEXUS_LLM_EXTRACT_INPUT_SCHEMA: &str = r#"{
                 "_session_id": { "type": "string" }
             }
         }"#;
-
-/// Input schema for `nexus.reference.refresh`.
-pub const NEXUS_REFERENCE_REFRESH_INPUT_SCHEMA: &str = r#"{"type":"object","properties":{"reference_source_id":{"type":"string","description":"Registry ID of the reference source to refresh"},"url":{"type":"string","description":"Optional override URL for ad-hoc refresh"}},"required":["reference_source_id"],"additionalProperties":false}"#;
 
 /// Input schema for `nexus.timeline.event.append`.
 pub const NEXUS_TIMELINE_EVENT_APPEND_INPUT_SCHEMA: &str = r#"{"type":"object","properties":{"world_id":{"type":"string"},"creator_id":{"type":"string"},"branch_id":{"type":"string"},"event_type":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"},"event_id":{"type":"string"}},"required":["world_id","creator_id","branch_id","event_type"],"additionalProperties":false}"#;

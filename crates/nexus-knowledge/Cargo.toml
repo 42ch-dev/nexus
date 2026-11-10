@@ -20,7 +20,6 @@ nexus-contracts = { path = "../nexus-contracts" }
 # stays because `world_kb/mod.rs` re-exports the spoke `KnowledgeEntry` wire
 # type for consumers (e.g. nexus-orchestration) that read it through this crate.
 spoke-schemas.workspace = true
-async-trait.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
 serde.workspace = true
 serde_json.workspace = true

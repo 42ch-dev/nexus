@@ -84,12 +84,6 @@ import type {
   OutlinePatchStructureRequest,
   OutlinePatchChapterRequest,
   TimelinePatchEventRequest,
-  ListKbEntriesQuery,
-  ListKbEntriesResponse,
-  AddKbEntryRequest,
-  AddKbEntryResponse,
-  GetKbEntryResponse,
-  DeleteKbEntryResponse,
   CreateFindingRequest,
   FindingDetailResponse,
   ListFindingsQuery,
@@ -107,8 +101,6 @@ import type {
   ReadingAnnotationCreateRequest,
   ReadingAnnotation,
   ReadingAnnotationPatchRequest,
-  ReferenceListResponse,
-  ReferenceGetResponse,
   NarrativeWorldsListResponse,
   NarrativeWorldResponse,
   ListCharactersQuery,
@@ -499,10 +491,6 @@ export interface NativeCore {
     workId: string,
     request: TimelinePatchEventRequest,
   ): Promise<OutlinePatchResponse>;
-  listKbEntries(principal: PrincipalHandle, query: ListKbEntriesQuery): Promise<ListKbEntriesResponse>;
-  addKbEntry(principal: PrincipalHandle, request: AddKbEntryRequest): Promise<AddKbEntryResponse>;
-  getKbEntry(principal: PrincipalHandle, entryId: string): Promise<GetKbEntryResponse>;
-  deleteKbEntry(principal: PrincipalHandle, entryId: string): Promise<DeleteKbEntryResponse>;
   createFinding(
     principal: PrincipalHandle,
     workId: string,
@@ -567,8 +555,6 @@ export interface NativeCore {
     request: ReadingAnnotationPatchRequest,
   ): Promise<ReadingAnnotation>;
   deleteAnnotation(principal: PrincipalHandle, annotationId: string): Promise<void>;
-  listReferences(principal: PrincipalHandle): Promise<ReferenceListResponse>;
-  getReference(principal: PrincipalHandle, referenceId: string): Promise<ReferenceGetResponse>;
   // ── P5-T2 Actor / memory / context family surface ─────────────────────────
   // Same owned-JSON-payload policy as the P5-T1 block above: the stored
   // Principal is minted natively, the handle only proves it, and every
@@ -1032,10 +1018,6 @@ type DomainSurface = Pick<
   | 'patchOutlineStructure'
   | 'patchOutlineChapter'
   | 'patchTimelineEvent'
-  | 'listKbEntries'
-  | 'addKbEntry'
-  | 'getKbEntry'
-  | 'deleteKbEntry'
   | 'createFinding'
   | 'createFindingFromReview'
   | 'listFindings'
@@ -1053,8 +1035,6 @@ type DomainSurface = Pick<
   | 'createAnnotation'
   | 'patchAnnotation'
   | 'deleteAnnotation'
-  | 'listReferences'
-  | 'getReference'
   | 'listCharacters'
   | 'createCharacter'
   | 'getCharacter'
@@ -1288,18 +1268,6 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     async patchTimelineEvent(principal, workId, request) {
       return json(await inner.patchTimelineEvent(principal, workId, wire(request, 'request')));
     },
-    async listKbEntries(principal, query) {
-      return json(await inner.listKbEntries(principal, wire(query, 'query')));
-    },
-    async addKbEntry(principal, request) {
-      return json(await inner.addKbEntry(principal, wire(request, 'request')));
-    },
-    async getKbEntry(principal, entryId) {
-      return json(await inner.getKbEntry(principal, entryId));
-    },
-    async deleteKbEntry(principal, entryId) {
-      return json(await inner.deleteKbEntry(principal, entryId));
-    },
     async createFinding(principal, workId, request) {
       return json(await inner.createFinding(principal, workId, wire(request, 'request')));
     },
@@ -1350,12 +1318,6 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     },
     async deleteAnnotation(principal, annotationId) {
       await inner.deleteAnnotation(principal, annotationId);
-    },
-    async listReferences(principal) {
-      return json(await inner.listReferences(principal));
-    },
-    async getReference(principal, referenceId) {
-      return json(await inner.getReference(principal, referenceId));
     },
     // ── P5-T2 Actor / memory / context family surface ────────────────────────
     async listCharacters(principal, query) {

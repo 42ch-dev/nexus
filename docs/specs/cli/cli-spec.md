@@ -2,16 +2,16 @@
 
 ## Scope
 
-无 `--scope` flag：`creator kb` 只服务 work-scope 文件索引；World-scoped narrative KB 走 canonical `creator world kb ...`（`apps/nexus42/src/commands/creator/kb.rs` module docs，§6.2F）。无 no-op 兼容拼写。
+work-scope `creator kb` 命令组及其文件索引已退役（V1.231，ADR K1；[`entity-scope-model.md`](../architecture/entity-scope-model.md) §5.3）。KB 操作入口只有 canonical `creator world kb ...`（§6.2D、§6.2G）：无 `--scope` flag，无 no-op 兼容拼写，无 410/sunset 路由。
 
 ## Current state
 
 **Status**: Normative  
 **Document class**: Master  
 
-`creator run`、`creator bootstrap`、`creator works intake|resume-chain`、`preset run`、`creator character run|soul reflect`、reference refresh、`compute run` 与 `capability list` 没有 CLI 入口——它们的完整 production ports、runtime catalog 或 terminal/capture observation 不作为完整直连 CLI 操作提供。底层 core Work/execution/Host/capture/SOUL/reference/compute API 与既有 TS routes 保留；不得宣传未交付的等价 TS workflow。TS 暴露 schedule add/signal（非全部旧 schedule 操作）、reference list/get（非 refresh），且不暴露 compute run。
+`creator run`、`creator bootstrap`、`creator works intake|resume-chain`、`preset run`、`creator character run|soul reflect`、`compute run` 与 `capability list` 没有 CLI 入口——它们的完整 production ports、runtime catalog 或 terminal/capture observation 不作为完整直连 CLI 操作提供。底层 core Work/execution/Host/capture/SOUL/compute API 与既有 TS routes 保留；不得宣传未交付的等价 TS workflow。TS 暴露 schedule add/signal（非全部旧 schedule 操作），且不暴露 compute run。
 
-保留的本地表面：`creator demo-seed`、`creator world event-add`、chronology `set|show|advance`、Work/pool inspiration、holder-governed Character CRUD/bindings/knowledge/memory/ToM、reading 与 directives。`creator kb --scope world`、World create `--name`、`system preset`、隐藏顶层 `sync`、`preset validate --offline` 均不存在；canonical 拼写是 World KB、`--title`、`preset`、`platform sync`、positional `preset validate <path>`。无 no-op alias。Graph/entity patch 保留 `--expected-version`；Character edits 保留显式 revision CAS。
+保留的本地表面：`creator demo-seed`、`creator world event-add`、chronology `set|show|advance`、Work/pool inspiration、holder-governed Character CRUD/bindings/knowledge/memory/ToM、reading 与 directives。`creator kb` 命令组（含 `--scope world`）、World create `--name`、`system preset`、隐藏顶层 `sync`、`preset validate --offline` 均不存在；canonical 拼写是 World KB、`--title`、`preset`、`platform sync`、positional `preset validate <path>`。无 no-op alias。Graph/entity patch 保留 `--expected-version`；Character edits 保留显式 revision CAS。
 
 Ordinary CLI 使用默认 `cli` cohort；可选 `connect-host` 独立。Connect runtime 保留 scoped compute/WASM 与共享 module cache，无 ACP/agent-host、scheduler startup、HTTP/SPA 或 Node。Core Model B/MCP libraries 保留；无 TS launcher 替代已删除的 Model A child descriptor。见 [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) §3.2 的依赖与生命周期合同。
 
@@ -48,7 +48,7 @@ Ordinary CLI 使用默认 `cli` cohort；可选 `connect-host` 独立。Connect 
 
 - **产品名**：对外统一为 **Nexus**。
 - **CLI 可执行名**：**`nexus42`**（与 **42ch / Creative Hub** 品牌同源；下文命令示例一律使用 `nexus42`）。无本地 daemon single-binary runtime mode（无 `nexus42 daemon start` / hidden `daemon-run`）；不引入第二个 CLI 产品二进制（`nexus-runtime` 仍是同一 `nexus42` crate 的独立 Connect-host 二进制，见 [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) §3.1–§3.2；[daemon-runtime.md](../../../.agents/adr/archived/architecture/2026-09-21-daemon-runtime.md) 为退役宿主记录）；Electron/TS 持有长期运行的服务进程。
-- **`v1-notes/ideas/` 与 `v1-notes/` 的扩展需求**：视为路线图输入。CLI 必须保证：**协议与 schema 的可扩展字段**、保留的 `/v1/daemon/*` wire 家族（由 TS 服务提供，见 §6.7）/ ACP 能力面的**演进位**、以及已写入合同的能力（如 **`research.*` 等 ACP 能力名**、context assembly、`manuscript_phase` 等）的**最小可用实现或安全默认（no-op）**，避免把后续实现空间钉死。
+- **`v1-notes/ideas/` 与 `v1-notes/` 的扩展需求**：视为路线图输入。CLI 必须保证：**协议与 schema 的可扩展字段**、保留的 `/v1/daemon/*` wire 家族（由 TS 服务提供，见 §6.7）/ ACP 能力面的**演进位**、以及已写入合同的能力（如 **`manuscript.*`**、context assembly、`manuscript_phase` 等）的**最小可用实现或安全默认（no-op）**，避免把后续实现空间钉死。
 
 #### 0.2 V2 重定位（pre-release）
 
@@ -57,7 +57,7 @@ Ordinary CLI 使用默认 `cli` cohort；可选 `connect-host` 独立。Connect 
 - **定位**：Nexus CLI 是 **ACP-first 控制面** + **Creator 本地知识面**，不是执行逻辑聚合层。
 - **执行边界**：推理、工具调用、文件输出等执行能力统一经 ACP capability invocation。
 - **运行边界**：编排运行态由 TS/Electron 与 `nexus-core` execution 持有；CLI 不提供 daemon 控制面（控制、声明与可观测经 CLI one-shot 命令与 TS 服务）。
-- **知识边界**：`SOUL` / `memory` 归属 Creator；CLI `creator kb`（work-scope 索引；无 `--scope` flag）仅表示活跃 Creator + workspace 下的**本地工作资料索引**；World/narrative KB 归属 `nexus-kb` + `nexus-narrative`，User/global knowledge 归属 `nexus-knowledge`。
+- **知识边界**：`SOUL` / `memory` 归属 Creator；World/narrative KB 归属 `nexus-kb` + `nexus-narrative`，只在 canonical `creator world kb ...` 下暴露；工作资料是 Work 产物（章节/小节正文），经 `creator world kb queue-extract` / `rescan` 进入 World KB。work-scope 文件索引（`creator kb`）与 User/global knowledge 均已退役（V1.231，ADR K1）。
 
 ---
 
@@ -197,14 +197,14 @@ CLI 不默认同步：
 1. **内部主键始终是 `creator_id`**（`creator.id`）；CLI 不得把 `display_name` 当身份主键。
 2. `creator use` 可接受 `creator_id` 或 `handle` 输入，但落盘活跃主体时必须规范化为 `creator_id`。
 3. `creator status` / `creator list` 需稳定显示三层标识：`creator_id`（权威）、`handle`（可路由别名）、`display_name`（UI 展示）。
-4. 任何 `creator soul|memory|kb` 子命令，均绑定当前活跃 `creator_id`，不得以 `display_name` 隐式路由。
+4. 任何 `creator soul|memory|world kb` 子命令，均绑定当前活跃 `creator_id`，不得以 `display_name` 隐式路由。
 5. `sync` / `context` / `publish` 等 Creator-context 请求，仍遵守 nexus-platform `v1-spec/platform/auth-session-model-v1.md` §4 的身份头约束（Creator API key 路径 vs User+`X-Creator-Id` 路径）。
 
 #### 6.0B V2 命令信息架构（权威）
 
 V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。
 
-- `nexus42 creator`：**Creator 身份 hub** — Work（`works` 子命令组）、workspace、SOUL、memory、kb/knowledge、world（默认用户创意入口）。无 `creator run` / `creator bootstrap` 执行入口；Work/World/Character 的直连 core 读写保留
+- `nexus42 creator`：**Creator 身份 hub** — Work（`works` 子命令组）、workspace、SOUL、memory、world（含 canonical World KB 作者面；默认用户创意入口）。无 `creator run` / `creator bootstrap` 执行入口；Work/World/Character 的直连 core 读写保留
 - `nexus42 daemon`：不存在（无 daemon 命令组，无 launcher / status / ui 别名 — §6.3）
 - `nexus42 acp`：独立 ACP 能力面（探测、协商、调用、诊断）
 - `nexus42 platform`：User 会话 — auth、**sync**、explore、context、publish（cloud 边界；local-only 时可跳过）
@@ -218,8 +218,8 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。
 设计约束：
 
 - 无 CLI daemon 运行控制；`acp` 保留 registry/probe/agent/session/policy/permission/run，不提供 `acp status|doctor` loopback 诊断。
-- `creator` 统一承载 Creator 本地知识资产：`soul` / `memory` / `kb`（work-scope 索引；无 `--scope` flag）作为 Creator 子命令，不再分散为平级心智入口。
-- `creator kb` 只承载 work-scope 文件索引（work 是唯一 scope；无 `--scope` flag）；World-scoped narrative KB 必须走 canonical `creator world kb ...`（`nexus-kb` + `nexus-narrative`）；User/global knowledge 不属于 `creator kb`，应走 `nexus-knowledge` 对应的 CLI 入口。
+- `creator` 统一承载 Creator 本地知识资产：`soul` / `memory` / `world kb` 作为 Creator 子命令，不再分散为平级心智入口。
+- KB 操作入口只有 canonical `creator world kb ...`（`nexus-kb` + `nexus-narrative`）。work-scope `creator kb` 命令组及其文件索引已退役（V1.231，ADR K1），User/global knowledge 同样已退役；两者都没有兼容别名或替代命令组。
 
 #### 6.1 `nexus42 system`（系统命令组）
 
@@ -343,13 +343,12 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。
 - 同一活跃 Creator 下仅一个活跃 `workspace_slug`（默认 `default`）。
 - 支持多 world 并发，但每个 job/sync 请求必须显式携带 `world_id`。
 
-#### 6.2D `nexus42 creator soul|memory|kb|world|knowledge`（知识资产子命令）
+#### 6.2D `nexus42 creator soul|memory|world`（知识资产子命令）
 
 - `nexus42 creator soul ...`：维护 `SOUL.md`（`Personality` / `Experience`）
 - `nexus42 creator memory ...`：长期记忆与回顾沉淀管理
-- `nexus42 creator kb ...`：**work-scope** 知识资产索引（唯一 scope；World-scoped narrative KB 走 canonical `nexus42 creator world kb ...` — 见 §6.2G.2）
+- `nexus42 creator world kb ...`：**唯一** KB 操作入口（World-scoped narrative KB — §6.2G）；work-scope 文件索引 `creator kb` 已退役（§6.2G.2）
 - `nexus42 creator world ...`：World 创建、浏览与 narrative 状态查询（`create` 返回 `world_id`；`list`/`show` read-only；platform fork 不在本地范围 — PD-01）
-- `nexus42 creator knowledge ...`：User knowledge / reference 管理入口（`nexus-knowledge`）
 - `nexus42 creator demo-seed ...`：演示数据填充（world + KB seed）
 
 补充叶子：
@@ -358,31 +357,28 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。
 - `nexus42 creator memory pending-show <id>` — show detail of a single pending memory item
 - `nexus42 creator memory pending-dismiss <id>` — dismiss a pending memory item (no promotion)
 - `nexus42 creator soul refresh-experience` — deterministic one-shot SOUL `## Experience` aggregation via embedded preset; updates `SOUL.md` Experience section
-- `nexus42 creator kb queue-extract <work-entry-id> --world-id <id>` — enqueue a work entry for KB extraction into a World (idempotent)
-- `nexus42 creator kb extract-status [--job-id]` — check extraction job status (all jobs or specific)
+- `nexus42 creator world kb queue-extract <label> --world-id <id> [--work-id <id>] [--chapter N]` — enqueue a Work artifact for KB extraction into a World (idempotent; the positional label is the idempotency key, `--chapter` locates the chapter body)
+- `nexus42 creator world kb extract-status [--job-id]` — check extraction job status (all jobs or specific)
+- `nexus42 creator world kb rescan <work_ref>/<chapter>` or `--work <work_ref>` — chapter- and work-scoped rescan (see §6.2G)
 
 **World context debugging**: To debug the World context block injected into `novel-writing` prompts, use the canonical World KB surface `nexus42 creator world kb list|show --world-id <id>`. No new subcommand is needed; the prompt-time block is assembled by `nexus-moment-context-assembly` (`build_chapter_kb_block`) and passed as `world_kb_block` template var.
 
-`creator kb` scope 约束（对齐 [`entity-scope-model.md`](../architecture/entity-scope-model.md) §5.3）：
+KB scope 约束（对齐 [`entity-scope-model.md`](../architecture/entity-scope-model.md) §5.3）：
 
-- **work scope（唯一 scope）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。实现直接读 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引——无 HTTP 回退。它是工作资料/文件索引，**不是** `nexus-kb` 的 World graph，**也不是** `nexus-knowledge` 的 User/global knowledge index。World-scoped narrative KB 只通过 canonical `nexus42 creator world kb ...` 暴露（§6.2G.2）。
-- **User/global knowledge（未来目标）**：不得塞进 `creator kb` 或 `creator kb --scope user`。User-scoped global knowledge/reference material 应通过 `nexus-knowledge` 的 CLI 入口暴露；在六组顶层命令锁定下，推荐入口为 `nexus42 platform knowledge ...`（或等价的 platform/user knowledge 子命令），并由 `nexus-knowledge` 处理存储、标签检索与供 Moment assembly 读取的切片。**Durable roadmap:** DR-52 (user/global knowledge entry surface).
-
-命名与行为建议：
-
-- 保持 `nexus42 creator kb` 作为现有命令组；它是 work-scope 文件索引，help/文案中写明“local work index”。
-- 未引入 `creator assets` / `creator work-index` 等别名；`nexus42 creator kb` 是唯一 work-scope 拼写，无 no-op 兼容拼写。
-- **不推荐硬改为泛化 KB**：不要把 `creator kb` 解释成“所有知识入口”。World KB、User knowledge、Creator memory 三者的 owning crate 与 entity scope 不同，CLI 只能做路由，不能在 `nexus42` 内实现第二套领域模型。
+- **World KB（唯一 KB 面）**：所有 KB 操作都在 canonical `nexus42 creator world kb ...` 上，输入是 Work 章节正文与已确认的 `KnowledgeEntryRecord` 行；提取与重扫都不读本地文件索引。它承载 `nexus-knowledge` 的 World graph，不是本地资料库。
+- **work-scope 文件索引（已退役，V1.231）**：`nexus42 creator kb` 命令组、`kb/index.json` / `kb/entries/<id>.md` 与 `nexus-home-layout` 的 work-scope kb helper 均已删除（ADR K1）；parser 直接拒绝该组，无别名、无 410/sunset 路由、无兼容 shim。需要本地资料暂存时，那是**新** Exploration，不得复活该组或其文件。
+- **User/global knowledge（已退役，V1.231）**：`nexus42 creator knowledge` / `nexus42 creator reference` 命令组、`knowledge_entries` / `reference_sources` 表与 `nexus.reference.refresh` 能力均已删除（ADR K1）。User-scope knowledge / source material 若要回归，只能是独立的新提案，不得复活旧表或旧命令组作为兼容层。
 
 #### 6.2E KB / knowledge 术语禁用简写
 
 在本规格及后续架构 / 实现文档中，`KB` 一词必须按 [`entity-scope-model.md`](../architecture/entity-scope-model.md) §5.4 限定语义后使用：
 
 - **World KB** / **narrative KB**：指 `nexus-knowledge` 所有的 World-scoped narrative KB graph（KnowledgeEntries、SourceAnchors、graph insertion/query），由 `nexus-narrative` 协调 World/Timeline/Event 语境。
-- **User knowledge** / **global knowledge index**：指 `nexus-knowledge` 所有的 User-scoped global knowledge/reference material。
-- **CLI local work KB index** / **local work index**：指 `nexus42 creator kb` 的活跃 Creator + workspace 本地文件索引（work scope 是唯一 scope）。
+- **CLI local work KB index** / **local work index** / **work-scope KB**：已退役（V1.231，[`entity-scope-model.md`](../architecture/entity-scope-model.md) §5.4）——它们指代已删除的 `nexus42 creator kb` 命令组及其文件索引，不再指代任何 live surface。
 
-禁止在存在歧义的上下文中单独写“KB”来同时指代以上三者；CLI help、错误提示、spec、ADR、计划任务均应使用限定词。
+**User knowledge** / **global knowledge index** 自 V1.231 起已退役（ADR K1），不再指代任何 live owner；禁止用它命名新的存储、命令或 Moment 域。
+
+禁止在存在歧义的上下文中单独写“KB”来同时指代以上两者；CLI help、错误提示、spec、ADR、计划任务均应使用限定词。
 
 #### 6.2F KB / knowledge target CLI model
 
@@ -390,13 +386,12 @@ KB / knowledge 相关 CLI 路由目标固定为：
 
 | User intent | CLI command model | Required scope inputs | Owning crates / modules | Behavior |
 | --- | --- | --- | --- | --- |
-| Manage local work files / notes as workspace assets | `nexus42 creator kb ...` (work-scope index; no `--scope` flag) | active `creator_id`, active `workspace_slug` | `nexus42` command router + local workspace storage; later storage may move behind local-domain crates | List/search/show/add/remove local work index entries only. Must not create World KnowledgeEntries or User knowledge rows. |
-| Manage narrative knowledge inside a World | `nexus42 creator world kb ... --world-id <world_id>` (canonical — §6.2G.2) | active `creator_id`, `workspace_slug`, explicit/resolved `world_id` | `nexus-narrative` + `nexus-knowledge` | Route to World-scoped narrative KB graph. Must preserve KnowledgeEntry / SourceAnchor provenance and narrative ownership. No silent fallback to work index. |
-| Manage User/global reference knowledge | `nexus42 creator knowledge ...` | authenticated User / Pairing context; optional Creator only as acting context, not owner | `nexus-knowledge` | Store/search/list user-scoped global knowledge/reference material. May be pulled into Moment assembly; promotion into World KB is an explicit cross-scope operation. **Durable roadmap:** DR-52 (user/global knowledge entry surface). |
+| Manage local work files / notes as workspace assets | **retired (V1.231)** — no CLI entrance | — | — | The work-scope `creator kb` file index and its `/v1/daemon/kb/entries` HTTP face are gone (ADR K1). Local work material is a Work artifact (chapter/section prose) and reaches the World KB only through `creator world kb queue-extract` / `rescan`. |
+| Manage narrative knowledge inside a World | `nexus42 creator world kb ... --world-id <world_id>` (canonical — §6.2G) | active `creator_id`, `workspace_slug`, explicit/resolved `world_id` | `nexus-narrative` + `nexus-knowledge` | Route to World-scoped narrative KB graph. Must preserve KnowledgeEntry / SourceAnchor provenance and narrative ownership. No fallback to a local work index (none exists). |
 | Create / browse World narrative state | `nexus42 creator world create\|list\|show ...` | active `creator_id`, workspace_slug; `create` requires `--title`; narrative kind is implicit | `nexus-narrative` + `nexus-kb` | `create` returns `world_id` and persists World row. `list`/`show` are read-only. No local fork (PD-01: fork is platform-only). |
 | Seed demo data | `nexus42 creator demo-seed ...` | active `creator_id`, workspace_slug | `nexus-creator` + `nexus-narrative` + `nexus-kb` | Populate demo world + KB entries for testing. |
 | Assemble direct platform cloud context | `nexus42 platform context assemble` | `--world-id`; optional workspace/creator and include/limit flags | Future direct platform context assembly path | **Deferred.** Platform cloud assembly is not yet available; CLI exits with clear guidance to use `assemble-moment`. |
-| **Assemble local four-domain Moment snapshot (single SSOT)** | `nexus42 platform context assemble-moment` | optional `--world-id`, `--user-id`, `--branch-id`, `--event-id`; **frozen flags:** `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit` | `assemble_moment` in `nexus-moment-context-assembly` reading Stage-0 context plus local narrative, World KB, and User knowledge slices | **Shipped (local).** Single assembly SSOT. Runs in-process and calls `assemble_moment`; narrative and World KB are read through persistent local stores, while User knowledge reads from SQLite. No platform cloud assembly and no daemon context-assemble route. |
+| **Assemble local three-domain narrative Moment snapshot (single SSOT)** | `nexus42 platform context assemble-moment` | optional `--world-id`, `--work-id`, `--branch-id`, `--event-id`; **frozen flags:** `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type` | `assemble_moment` in `nexus-moment-context-assembly` reading Stage-0 context plus local narrative and World KB slices | **Shipped (local).** Single assembly SSOT. Runs in-process and calls `assemble_moment`; narrative and World KB are read through persistent local stores. No User Knowledge slot (retired V1.231), no platform cloud assembly and no daemon context-assemble route. |
 
 
 #### 6.3 Runtime 控制面（无 daemon 命令组）
@@ -453,16 +448,16 @@ gate (§5.5.3 of entity-scope-model) and `ValidationMode::Novel` re-run are
 unchanged.
 
 
-**`creator kb rescan --work <work_ref>` cross-chapter reconciliation.**
-`creator kb rescan` has two mutually-exclusive modes — the chapter-scoped
+**`creator world kb rescan --work <work_ref>` cross-chapter reconciliation.**
+`creator world kb rescan` has two mutually-exclusive modes — the chapter-scoped
 positional target and the work-scoped `--work` flag. Exactly one of the
 positional `<work_ref>/<chapter>` target or the `--work <work_ref>` flag must
 be supplied; supplying both (or neither) fails closed with remediation.
 
 | Command | Purpose |
 | --- | --- |
-| `nexus42 creator kb rescan <work_ref>/<chapter> [--dry-run] [--json]` | Chapter-scoped rescan. Re-syncs `kb_extract_jobs` candidates + confirmed KnowledgeEntry bodies from one chapter's current text. |
-| `nexus42 creator kb rescan --work <work_ref> [--dry-run] [--json]` | Work-scoped rescan. Iterates **all** chapters in `Works/<work_ref>/Stories/`, aggregates candidates by `canonical_name` across chapters, and reconciles so a recurring entity collapses to a single `pending` candidate carrying cross-chapter provenance (e.g. `source_chapters: [3,5,7]`). |
+| `nexus42 creator world kb rescan <work_ref>/<chapter> [--dry-run] [--json]` | Chapter-scoped rescan. Re-syncs `kb_extract_jobs` candidates + confirmed KnowledgeEntry bodies from one chapter's current text. |
+| `nexus42 creator world kb rescan --work <work_ref> [--dry-run] [--json]` | Work-scoped rescan. Iterates **all** chapters in `Works/<work_ref>/Stories/`, aggregates candidates by `canonical_name` across chapters, and reconciles so a recurring entity collapses to a single `pending` candidate carrying cross-chapter provenance (e.g. `source_chapters: [3,5,7]`). |
 
 Rules (build on the §6.2G rules; see also
 [world-kb-runtime-architecture.md §5.5.1](../architecture/world-kb-runtime-architecture.md)):
@@ -524,7 +519,7 @@ Rules:
 - Missing candidates are **advisory only** — they are not written to
   `kb_extract_jobs` and cannot be adopted directly. The author may add them to
   the World KB through the normal `creator world kb adopt` flow after creating a
-  `pending` candidate (e.g. via `creator kb rescan`).
+  `pending` candidate (e.g. via `creator world kb rescan`).
 
 
 #### 6.2G.1 World KB CLI consolidation + `--auto` flag
@@ -546,9 +541,9 @@ Rules:
 - Audit logs are written under `Works/<work_ref>/Logs/kb/auto-promoted/<YYYY-MM-DD>-<extract_job_id>.md` when a workspace root is bound.
 - The canonical World KB surface remains `creator world kb ...`; this surface carries no aliases or deprecations.
 
-#### 6.2G.2 `creator kb --scope world` alias（不存在）
+#### 6.2G.2 `creator kb` 命令组（已退役，无别名）
 
-无 `--scope` flag：`creator kb` 只服务 work-scope 文件索引；World-scoped narrative KB 走 canonical `creator world kb ...`（`apps/nexus42/src/commands/creator/kb.rs` module docs，§6.2F）。无 no-op 兼容拼写。
+`nexus42 creator kb` 及其 `--scope world` / `--scope work` 拼写在 V1.231 全部退役（ADR K1，[`entity-scope-model.md`](../architecture/entity-scope-model.md) §5.3）：parser 拒绝该组，help 不再列出它，没有 `creator assets` / `creator work-index` 之类替代别名，也没有 410/sunset 路由或兼容 shim。World-scoped narrative KB 的唯一拼写是 `nexus42 creator world kb ...`（§6.2G）。
 
 #### 6.2G.3 Reading, fork, and inspector leaves
 
@@ -1037,16 +1032,16 @@ Implementation authorities: `apps/nexus42/src/commands/ops.rs`,
 - `nexus42 platform auth login|logout|status|profiles`
 - `nexus42 platform sync pull|push|status|resolve`（**canonical sync surface** — §6.5）
 - `nexus42 platform context assemble` (**Deferred** — future direct platform cloud assembly)
-- `nexus42 platform context assemble-moment` (local four-domain Moment assembly SSOT; frozen flags: `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit`)
+- `nexus42 platform context assemble-moment` (local three-domain Moment assembly SSOT; frozen flags: `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`)
 
 > There is no `platform context assemble-local` command; `assemble-moment` is the single local context assembly command.
 
 说明：
 
 - `platform context assemble` is **Deferred**. Direct platform cloud assembly is not yet available; the command returns clear guidance to use `assemble-moment` instead.
-- `platform context assemble-moment` is the **single local assembly SSOT**. It is a four-domain Moment assembly command that calls `assemble_moment` in-process. Narrative and World KB slices read from persistent local stores; User knowledge reads from SQLite. It is distinct from the deferred platform cloud `assemble` path.
+- `platform context assemble-moment` is the **single local assembly SSOT**. It is a three-domain Moment assembly command that calls `assemble_moment` in-process. Narrative and World KB slices read from persistent local stores; Creator memory is the Stage-0 input. The former User Knowledge fourth domain is retired (V1.231, ADR K1): there is no `## User Knowledge` slot, no `--user-id` and no `--knowledge-limit`. It is distinct from the deferred platform cloud `assemble` path.
 - `publish.*` 表示内容跨平台边界动作，不与 `platform sync push` 混用。
-- `manuscript.*` / `publish.*` / `research.*` 作为 ACP 或 preset contract 保留，不再作为独立顶层命令组。
+- `manuscript.*` / `publish.*` 作为 ACP 或 preset contract 保留，不再作为独立顶层命令组。`research.*` 随 `nexus.research.query` 一并退役（V1.231, ADR K1），不是可用的 ACP capability。
 
 #### 6.7 V2 CLI / ACP / Preset 边界总结
 
@@ -1055,9 +1050,9 @@ Implementation authorities: `apps/nexus42/src/commands/ops.rs`,
 | Structured state sync | `nexus42 platform sync ...`（canonical — §6.5） | `sync.*` + bundle/delta contracts |
 | Runtime orchestration control | 无 CLI 组 | No CLI orchestration-control surface exists; session control lives in the TS service's orchestration schedules control plane (`current_session_id` + supervisor signal cascade). The retained scheduling surface is `creator works cron` declaration editing |
 | ACP capability negotiation | `nexus42 acp ...` | registry/probe/session capability negotiation |
-| Context assembly snapshot | `nexus42 platform context assemble` (**Deferred platform cloud**); `nexus42 platform context assemble-moment` (local four-domain Moment — single SSOT) | shipped path is CLI in-process; `assemble-moment` calls local `assemble_moment` with persistent narrative / World KB stores and SQLite User knowledge. Frozen flags: `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit`. No daemon context-assemble route (KCA-002 B2); no `assemble-local` command. |
+| Context assembly snapshot | `nexus42 platform context assemble` (**Deferred platform cloud**); `nexus42 platform context assemble-moment` (local three-domain Moment — single SSOT) | shipped path is CLI in-process; `assemble-moment` calls local `assemble_moment` with persistent narrative / World KB stores. Frozen flags: `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`. No User Knowledge slot (retired V1.231). No daemon context-assemble route (KCA-002 B2); no `assemble-local` command. |
 | Manuscript read/write | 无顶层独立命令组 | `manuscript.*` ACP capabilities + preset roots |
-| Research / references | 无顶层独立命令组 | preset orchestration + `research.*` ACP tools |
+| Research run artifacts | 无顶层独立命令组 | preset orchestration; run output stays under the workspace `.nexus42/references/<run-id>/` artifact dir. No `research.*` ACP capability (retired V1.231). |
 | Content publication | `nexus42 platform publish ...`（或 preset 显式动作） | `publish.*` + confirmation policy |
 
 ---
@@ -1238,7 +1233,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 - 只允许操作工作区白名单路径；**默认**正文树根为 **`Works/<work_ref>/Stories/`**（章节文件如 **`ch<nn>-<slug>.md`**）；**`work_ref`** 与 **`work_id`** 的映射以 **preset + 本地 DB `works` 表** 为准，不得仅靠目录名推断（见 [novel-writing/workflow-profile.md](../novel-writing/workflow-profile.md)）
 - **研究型产出**默认在 **`{$workspace_dir}/.nexus42/references/<run-id>/`**（见 §6.6B）；`init` 不默认创建 `References/<creator_ref>/` 布局
-- **`research.*`**（若暴露为 ACP 工具名）与 **`ReferenceSource`** 索引合同仍与 `manuscript.*` 分离，防止越权读写任意文件
+- **`research.*`** 已随 V1.231 退役（`nexus.research.query` 删除，见 §6.6/§6.7），不存在需要与 `manuscript.*` 分离的 ACP 能力；研究型产出仍落在上一条的 run artifact 目录
 - 当 `output_manuscript=false` 时，`manuscript.write` 不作为默认创作路径，但能力本身仍存在；平台托管与本地 Agent 的能力面保持一致
 - 平台托管 Creator 的服务端沙箱应与本地 **同一 preset 产物布局** 同构（物理路径不同），以便同一套能力语义复用
 
@@ -1304,7 +1299,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 - **世界设定内容**跨作品（Work）共享，归 **World KB**（见 [entity-scope-model.md §5.4](../architecture/entity-scope-model.md)）；World 内容通过 `work.world_id` 绑定，无 `Works/<work_ref>/Worldbuilding/` 子树。
 - 工作区根 **`Stories/<StoryRef>/`** 不存在 — 无兼容 shim。
 - **`.nexus42/references/<run-id>/`**
-  - **研究 / 采风型**机读产出默认位置；`report.md` + 可选 `artifacts/`；与 **`ReferenceSource`** 索引合同衔接。
+  - **研究 / 采风型**机读产出默认位置；`report.md` + 可选 `artifacts/`。它是 run artifact 目录，不是已退役的 `references/units/<id>/body.md` reference registry（V1.231）。
 - **`{$workspace_dir}/.agents/skills/`**
   - 项目可读技能根（可符号链接到 **`$HOME/.nexus42/skills/`**），供 **ACP `recommended_skills`** 与会话首轮加载解析。
 
@@ -1328,12 +1323,12 @@ game-bible 布局（`works_profile: game_bible`）：`Works/<work_ref>/Design/`�
 
 - Preset metadata：`preset_id=novel-writing`、版本、`workspace_slug`、`world_id`、`creator_id`、`work_id`、`work_ref`、`work_profile: novel`（来自本地 DB `works` 表，而非仅目录名）。
 - 正文产物：`Works/<work_ref>/Stories/<chapter-id>.md` 及 manifest / phase metadata（映射到 existing bundle fields such as `manuscript_phase`, source anchors, canonical hashes）。详见 [novel-writing/sync-contract.md](../novel-writing/sync-contract.md)。
-- 研究产物：`.nexus42/references/<run-id>/report.md` 与可选 `artifacts/`，只把合同允许的摘要、引用锚点、`ReferenceSource` / `MemoryItem` 摘录纳入结构化 sync。
+- 研究产物：`.nexus42/references/<run-id>/report.md` 与可选 `artifacts/`，只把合同允许的摘要、引用锚点、`MemoryItem` 摘录纳入结构化 sync。
 - Session hints：ACP `recommended_skills[]` 解析结果与 agent session metadata（仅作为审计 / 可复现上下文，不作为全文上传许可）。
 
 **Outputs**：
 
-- Default `platform sync push` 输出既有 **Bundle / Delta**：world/key-block/timeline/reference/manuscript metadata、source anchors、idempotency key、canonical hash、audit command metadata。
+- Default `platform sync push` 输出既有 **Bundle / Delta**：world/key-block/timeline/manuscript metadata、source anchors、idempotency key、canonical hash、audit command metadata。
 - Local packaging 可生成 preset manifest / staging records，但这些是本地实现细节；跨平台 wire 仍引用 `cli-spec` §14、`shared/domain/data-model-v1.md` 与 schema codegen 生成合同。
 - `platform sync pull` 只回填平台结构化状态与冲突 / cursor；不得把平台内容静默覆盖到 `Works/<work_ref>/Stories/` 正文。
 
@@ -1356,7 +1351,7 @@ game-bible 布局（`works_profile: game_bible`）：`Works/<work_ref>/Design/`�
 - **`SOUL.md`**（单文件 Markdown）：推荐路径 **`$HOME/.nexus42/creators/<creator_id>/SOUL.md`**，**必须**包含二级标题 **`## Personality`**（人格轨，人改、为锚）与 **`## Experience`**（经验轨，由长期记忆聚合生成）。  
 - **规范性警告**：在 **`## Experience`** 标题下至下一个同级 `##` 或 EOF 的范围内，**用户手改会在下一次经验聚合时被覆盖**；持久内容应写入 **`## Personality`** 或 **`creators/<creator_id>/memory/long-term/*.md`**（路径与 frontmatter 见该规格 §3–§5）。  
 - **CLI / 长期运行服务（Electron/TS 持有）**：负责 Session 收尾写入 **待回顾队列**、**定时回顾**、**经验段聚合**、以及 **发起新 ACP Session 前的 Context 终局合并**（与 `context-assembly` 平台响应组合）。  
-- **与 §6.6**：`nexus42 platform context assemble` 是 **Deferred** 的未来平台云上下文入口；当前已发货路径是 `assemble-moment`（local four-domain，single SSOT）。这些命令**不**替代 SOUL + 本地长期记忆的合并职责。
+- **与 §6.6**：`nexus42 platform context assemble` 是 **Deferred** 的未来平台云上下文入口；当前已发货路径是 `assemble-moment`（local three-domain，single SSOT）。这些命令**不**替代 SOUL + 本地长期记忆的合并职责。
 
 #### 12.1A 服务端沙箱（平台托管 Creator）
 
@@ -1399,7 +1394,7 @@ $HOME/.nexus42/
         <workspace_slug>/  # 用户可读、每 Creator 唯一；默认目录名 **default**
           meta.json        # 不可变：local_root、creator_id、workspace_slug、可选 wire workspace_id、created_at 等
           config.toml      # 与该 workspace 绑定的本地配置（可选）
-          state.db         # 结构化 working copy、outbox、ReferenceSource 索引等（与 local-db-schema 一致）
+          state.db         # 结构化 working copy、outbox 等（与 local-db-schema 一致）
 ```
 
 职责：
@@ -1559,7 +1554,7 @@ The normative constraints for this surface are stated in §Current state; a chan
 - `apps/nexus-service`
 - `apps/nexus42/src/commands/creator/mod.rs`
 - `apps/nexus42/tests/integration.rs`
-- `apps/nexus42/src/commands/creator/kb.rs`
+- `apps/nexus42/src/commands/creator/world/kb/{extract.rs,rescan.rs}`
 - `apps/nexus42/src/commands/creator/{reading/mod.rs,world/fork.rs,inspector.rs}`
 - `apps/nexus42/src/core.rs::map_core_error`
 - `apps/nexus-service/src/knowledge.ts`

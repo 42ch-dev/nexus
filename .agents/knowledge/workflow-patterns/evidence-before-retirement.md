@@ -167,3 +167,14 @@ Checklist for a field or symbol with no readers:
 3. Close the PRs; record final states and URLs.
 Never close a PR merely because a feature worktree deleted files — verified main merge is the precondition.
 ```
+
+## Cutover collateral lands in the same commit as the contract removal
+
+Deleting a public wire or CLI surface (JSON Schema, generated slice, CLI group) makes the
+workspace uncompilable while its Rust/TS producers still consume the generated types.
+Treat producer removal as cutover collateral in the same commit — core handlers, napi
+bindings, the CLI group and generated clients — and let a later task shrink to helpers and
+docs. An intermediate "red but committed" state is a bisect hazard and a false CI signal,
+so do not split it across two plan tasks. When the collateral is larger than the receiver
+task's declared Files, record it as an explicit deviation and keep the tree green at every
+commit.

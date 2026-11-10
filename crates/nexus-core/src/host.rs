@@ -50,7 +50,6 @@ use nexus_contracts::generated::daemon_api::agent_host::{
 };
 use nexus_contracts::{CoreCloseReport, CoreCloseReportState, ProviderEventBatch};
 use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
-use nexus_local_db::SqliteKnowledgeStore;
 use nexus_moment_context_assembly::{
     assemble_moment, CharacterViewInput, MomentActorContext, MomentRequest, Stage0Assembly,
     DEFAULT_WORLD_CONTEXT_TOKEN_BUDGET,
@@ -2000,9 +1999,6 @@ impl HostHandle {
         if let Some(event) = ctx.event_id.clone() {
             request = request.with_event(event);
         }
-        if matches!(ctx.actor, AdmittedActor::Creator { .. }) {
-            request = request.with_user(creator_id);
-        }
         let narrative = SqliteNarrativeGateway::new(pool.clone());
         // Durable §4.2: the host prompt consumes the same complete ActorView
         // snapshot its admitted context was built from — the exact admitted
@@ -2017,8 +2013,7 @@ impl HostHandle {
             )
             .await?;
         let kb = SpokeBackedKbStore::new(pool.clone(), view_scope);
-        let knowledge = SqliteKnowledgeStore::new(pool);
-        let assembled = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+        let assembled = assemble_moment(&request, &narrative, &kb).await;
         Ok(assembled.to_full_context())
     }
 }

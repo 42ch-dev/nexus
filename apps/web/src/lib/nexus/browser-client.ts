@@ -153,17 +153,9 @@ import type {
   AppendInspirationResponse,
   ReleaseCompletionLockRequest,
   WorkReconcileReport,
-  ListKbEntriesQuery,
-  ListKbEntriesResponse,
-  AddKbEntryRequest,
-  AddKbEntryResponse,
-  GetKbEntryResponse,
-  DeleteKbEntryResponse,
   CreateFindingRequest,
   StaleFindingsResponse,
   FindingsPruneResponse,
-  ReferenceListResponse,
-  ReferenceGetResponse,
   // ── P4-T3 generated Core slice DTOs (`schemas/core/*`) ─────────────────────
   AgentHostListSessionsQuery,
   CancelOperationResponse,
@@ -589,38 +581,6 @@ export class BrowserClient implements NexusClient {
   getFinding(findingId: string): Promise<FindingDetailResponse> {
     return this.get<FindingDetailResponse>(
       `/v1/daemon/findings/${encodeURIComponent(findingId)}`,
-    );
-  }
-  // ── Work KB index (P5-T1, tier2 family routes) ─────────────────────────────
-  /** `GET /v1/daemon/kb/entries` — cursor list of KB index entries. */
-  listKbEntries(query?: ListKbEntriesQuery): Promise<ListKbEntriesResponse> {
-    return this.get<ListKbEntriesResponse>('/v1/daemon/kb/entries', query);
-  }
-  /** `POST /v1/daemon/kb/entries` — add a KB index entry. */
-  addKbEntry(request: AddKbEntryRequest): Promise<AddKbEntryResponse> {
-    return this.post<AddKbEntryResponse>('/v1/daemon/kb/entries', request);
-  }
-  /** `GET /v1/daemon/kb/entries/{entry_id}` — one KB index entry. */
-  getKbEntry(entryId: string): Promise<GetKbEntryResponse> {
-    return this.get<GetKbEntryResponse>(
-      `/v1/daemon/kb/entries/${encodeURIComponent(entryId)}`,
-    );
-  }
-  /** `DELETE /v1/daemon/kb/entries/{entry_id}` — remove a KB index entry. */
-  deleteKbEntry(entryId: string): Promise<DeleteKbEntryResponse> {
-    return this.delete<DeleteKbEntryResponse>(
-      `/v1/daemon/kb/entries/${encodeURIComponent(entryId)}`,
-    );
-  }
-  // ── Reference registry (P5-T1, tier2 family routes) ────────────────────────
-  /** `GET /v1/daemon/references` — list registered references. */
-  listReferences(): Promise<ReferenceListResponse> {
-    return this.get<ReferenceListResponse>('/v1/daemon/references');
-  }
-  /** `GET /v1/daemon/references/{reference_id}` — one reference (404 unknown). */
-  getReference(referenceId: string): Promise<ReferenceGetResponse> {
-    return this.get<ReferenceGetResponse>(
-      `/v1/daemon/references/${encodeURIComponent(referenceId)}`,
     );
   }
 

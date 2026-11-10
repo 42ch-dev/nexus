@@ -27,9 +27,7 @@ use nexus_local_db::moment_directive::{
     upsert_chapter_anchor, MomentDirectiveRow, NewMomentDirective,
 };
 use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
-use nexus_local_db::{
-    get_work, is_novel_profile, narrative_write, LocalDbError, SqliteKnowledgeStore,
-};
+use nexus_local_db::{get_work, is_novel_profile, narrative_write, LocalDbError};
 use nexus_moment_context_assembly::directive::{
     ActiveDirective, DirectiveDepth, DirectiveStore, DirectiveTtlKind,
 };
@@ -728,8 +726,7 @@ impl CoreService {
         // packet never renders stage-0 content (spec §2).
         let mut request = MomentRequest::new(Stage0Assembly::default())
             .with_world(req.world_id.as_str())
-            .with_creator(creator_id)
-            .with_user(creator_id);
+            .with_creator(creator_id);
         if let Some(work_id) = req.work_id.as_deref() {
             request = request.with_work(work_id);
         }
@@ -774,7 +771,7 @@ impl CoreService {
             request = request.with_hop_edges(edges);
         }
 
-        // Four-domain assembly over the same persistent stores the CLI uses
+        // Three-domain assembly over the same persistent stores the CLI uses
         // + a **read-only** directive store (W-001 / QC2-W-001 + QC3-W-1):
         // the packet's `moment_directive` section reflects the active
         // directive (Work scope → World override fallback) without running
@@ -783,11 +780,8 @@ impl CoreService {
         // omitted sections, they never reject.
         let narrative = SqliteNarrativeGateway::new(pool.clone());
         let kb = SpokeBackedKbStore::new(pool.clone(), view_scope.clone());
-        let knowledge = SqliteKnowledgeStore::new(pool.clone());
         let directives = ReadOnlyDirectiveStore::new(pool.clone());
-        let ctx =
-            assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &directives)
-                .await;
+        let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
 
         // Enriched packet → generated wire DTO via JSON round-trip at the
         // boundary (validates the builder output against the wire contract —

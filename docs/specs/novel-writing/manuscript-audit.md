@@ -40,7 +40,7 @@ The manuscript reading surface is distinct from this on-demand audit line: readi
 | `novel-chapter-review` | Default FL-E `review` stage | Yes |
 | `novel-review-master` | Master decisions on **existing** findings | Auxiliary schedule only |
 | `kb-extract` preset | Queue claim → job lifecycle | No (queue path) |
-| `creator kb queue-extract --chapter N` | CLI sugar → `kb_extract_jobs` row | No (queue path) |
+| `creator world kb queue-extract --chapter N` | CLI sugar → `kb_extract_jobs` row | No (queue path) |
 | **`novel-manuscript-audit` (this spec)** | On-demand read chapter → review report and/or sync extract | **No** |
 
 ---

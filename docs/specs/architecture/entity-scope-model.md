@@ -25,21 +25,22 @@ Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb
 ```text
 Global
 └── User
-    ├── Creator
-    │   └── World
-    │       ├── Timeline
-    │       │   └── Event
-    │       │       └── Moment
-    │       └── KB graph / narrative knowledge assets
-    └── User knowledge index
+    └── Creator
+        └── World
+            ├── Timeline
+            │   └── Event
+            │       └── Moment
+            └── KB graph / narrative knowledge assets
 ```
+
+> **Retired leaf (V1.231, ADR K1):** the former `User knowledge index` child of `User` is retired with the User KnowledgeStore (`knowledge_entries`) and the reference registry (`reference_sources`), and is not a live scope. A User-scope knowledge surface may return only as a future independent proposal ([ADR K1 §2.5](../../../.agents/adr/proposed/architecture/2026-11-10-retire-user-scope-and-references.md)).
 
 #### 1.2 Scope definitions
 
 | Scope | Meaning | Parent | Normative notes |
 | --- | --- | --- | --- |
 | `Global` | Product-wide global scope | None | Contains product-level contracts, schema/version conventions, and process-wide constants. It is not a tenant or actor scope. |
-| `User` | Human user scope | `Global` | Owns human account/session concepts and user-level knowledge. User is the cloud account and pairing actor, not the operational agent identity. |
+| `User` | Human user scope | `Global` | Owns human account/session concepts. It no longer owns a local knowledge index — that leaf is retired (V1.231, §1.1). User is the cloud account and pairing actor, not the operational agent identity. |
 | `Creator` | Agent / creator persona scope | `User` | Owns Creator identity, local workspace partitioning, SOUL, long-term memory, and agent-facing operational context. A Creator may be created independently and later paired to a User, but once paired it is modeled under the User scope. |
 | `World` | World / narrative universe scope | `Creator` | Owns creative-work narrative state: world state, story/manuscript projections, forks, memberships, and the narrative KB graph. |
 | `Timeline` | Timeline scope inside a world | `World` | Owns ordered narrative history inside one World. Timeline history is append/fork oriented; rewriting prior history requires a Fork, not in-place mutation. |
@@ -150,7 +151,7 @@ No new scope-ownership rule. No new uniqueness constraint. No new transition rul
 | Scope | Entity types that live here | Primary owner crate(s) |
 | --- | --- | --- |
 | `Global` | Schema bundle identity, contract schema versions, product-wide command/capability names, global runtime constants | `nexus-contracts`; `nexus42` for the CLI and headless `nexus-runtime` process (`apps/nexus42/src/bin/nexus-runtime.rs`) |
-| `User` | User account/profile, platform session, Pairing records, user-level knowledge index, user-global reference corpus | `nexus-cloud-domain` for User/Pairing invariants; `nexus-cloud-sync` for HTTP transport; `nexus-knowledge` for user-scoped knowledge/reference index |
+| `User` | User account/profile, platform session, Pairing records. The former user-level knowledge index and user-global reference corpus were retired in V1.231 (ADR K1) and are not entity types | `nexus-cloud-domain` for User/Pairing invariants; `nexus-cloud-sync` for HTTP transport |
 | `Creator` | Creator aggregate, Creator credentials/cache records, active Creator selection, workspace registrations, SOUL, long-term memory, review queue/personality I/O | `nexus-creator`; `nexus-creator-memory`; `nexus-home-layout`; `nexus-local-db` for local persistence mechanics |
 | `World` | World aggregate, world membership, fork branches, story manifests, manuscript state/projections, narrative KB graph, KnowledgeEntries, SourceAnchors | `nexus-narrative`; `nexus-knowledge` for KB graph insertion/query and KnowledgeEntry/SourceAnchor logic |
 | `Timeline` | Timeline branches/ordered history, timeline events, fork positions, recent timeline query projections | `nexus-narrative` |
@@ -221,10 +222,10 @@ explicitly declares uniqueness.
 | `nexus-cloud-sync` | Cloud transport for User/Pairing and sync bundles | Owns platform HTTP and sync transport. It MUST use `nexus-cloud-domain` for User/Pairing invariants instead of reimplementing or bypassing them; current Cargo wiring includes this dependency. |
 | `nexus-creator` | `Creator` | Owns Creator aggregate logic, credential/cache hooks, active Creator local state, and conversions over contract types. No platform HTTP. |
 | `nexus-creator-memory` | `Creator` memory subdomain | Owns SOUL, long-term memory, review, and personality/experience I/O under Creator scope. |
-| `nexus-knowledge` | `World` (narrative KB) + `User` (global knowledge) | Two-tier knowledge crate merged from the former `nexus-kb`. World-scoped: narrative KnowledgeEntries, SourceAnchors, graph insertion/query, narrative KB lifecycle; holds spoke `KnowledgeEntry` natively with `extensions.nexus` accessors via `nexus-spoke-adapter`. User-scoped: global knowledge/reference indexing and storage; tag-driven, may be pulled into Moment context assembly. Does not own Creator memory semantics. |
+| `nexus-knowledge` | `World` (narrative KB) | World-scoped narrative knowledge crate (formerly the World tier of the merged `nexus-kb`): narrative KnowledgeEntries, SourceAnchors, graph insertion/query, narrative KB lifecycle; holds spoke `KnowledgeEntry` natively with `extensions.nexus` accessors via `nexus-spoke-adapter`. The former User-scoped tier (global knowledge/reference indexing and storage) was retired in V1.231 with `knowledge_entries` and `reference_sources` (ADR K1); the crate is World-KB-only. Does not own Creator memory semantics. |
 | `nexus-narrative` | `World`, `Timeline`, `Event` | Owns creative-work narrative domain models: world state, `World::fork` / `ForkBranch`, timelines, events, story/manuscript projections, and narrative consistency. Domain fork models do not imply populated local world-fork metadata: local authoring forks use branch-level marker lineage, while the SQLite gateway returns world-level fork fields as `false` / `None` (§6.6). |
 | `nexus-spoke-adapter` | SPOKE consumption boundary | Constructs spoke standard objects with `extensions.nexus` populated; delegates standard lifecycle ops to `spoke-operations`. Enforces the spoke-operations call-boundary invariant (spoke-standard operands only). The sole crate that directly depends on `spoke-operations`. |
-| `nexus-moment-context-assembly` | `Moment` | Owns session-start moment context aggregation. It runs before a session begins and aggregates relevant local domains: Creator memory, narrative state, World KB assets, and User knowledge. Optional `cloud-stage` may merge platform context, but daemon default remains local Stage-0. |
+| `nexus-moment-context-assembly` | `Moment` | Owns session-start moment context aggregation. It runs before a session begins and aggregates relevant local domains: Creator memory, narrative state, and World KB assets. The former User Knowledge slot was retired in V1.231 (ADR K1). Optional `cloud-stage` may merge platform context, but daemon default remains local Stage-0. |
 | `nexus-daemon-runtime` (retired) | Former runtime host, not entity owner | Hosted local APIs, DB handles, orchestration, and agent-host before retirement. This is a historical ownership boundary, not a current implementation anchor; current service-family authority is `nexus-core` (see [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md) §2.1). |
 | `nexus-orchestration` | Execution sessions/schedules, not hierarchy owner | Owns presets, schedules, workers, and capability registry. It carries `creator_id`/workspace/world references as execution context, but it does not redefine entity ownership. |
 
@@ -602,29 +603,38 @@ Minimum common `body` shape for script items:
 
 **Cross-reference.** Frontend create affordance contract: [`canvas-strategy-surface.md`](../surfaces/canvas-strategy-surface.md) §3.3.3 "Create entry". Orchestrator create path + tests: `orchestrate_upsert` → `put_create` (`knowledge_entry_port.rs`), `orchestrate_upsert_happy_create` / `orchestrate_upsert_happy_create_path`.
 
-#### 5.2 `nexus-knowledge` — two-tier knowledge (World + User)
+#### 5.2 `nexus-knowledge` — World-scoped knowledge only
 
-`nexus-knowledge` is the two-tier knowledge crate merged from the former `nexus-kb`:
+`nexus-knowledge` is the World-scoped knowledge crate (the World tier of the former `nexus-kb`):
 
-- **`nexus-knowledge` (World-scoped):** Narrative KB graph assets (KnowledgeEntries, SourceAnchors, graph insertion/query, narrative KB lifecycle) coordinated with `nexus-narrative`. Holds spoke `KnowledgeEntry` natively; `extensions.nexus` typed accessors via `nexus-spoke-adapter`. Formerly the separate `nexus-kb` crate.
-- **`nexus-knowledge` (User-scoped):** Global knowledge/reference material. Tag-driven, may be pulled into Moment context assembly. Not Creator-scoped; does not own Creator memory semantics.
+- **World-scoped:** Narrative KB graph assets (KnowledgeEntries, SourceAnchors, graph insertion/query, narrative KB lifecycle) coordinated with `nexus-narrative`. Holds spoke `KnowledgeEntry` natively; `extensions.nexus` typed accessors via `nexus-spoke-adapter`.
+- **The former User-scoped tier is retired (V1.231, ADR K1).** There is no User-tier store, no global tagged knowledge index, and no reference-source registry in the crate; `knowledge_entries` and `reference_sources` are dropped. The crate is World-KB-only, and the stacked Knowledge IR assumes that single family. A User-scope knowledge surface may return only as a future independent proposal — it MUST NOT be re-added as a tier of this crate.
 
-#### 5.3 CLI `creator kb` — local work-scope file index
+#### 5.3 CLI `creator world kb` — the only KB operator entrance
 
-`nexus42 creator kb` is a CLI command group for local knowledge-asset workflows:
+The work-scope `nexus42 creator kb` command group and its filesystem index (`kb/index.json`, `kb/entries/<id>.md`) are **retired** (V1.231, ADR K1). No compatibility layer exists: the parser refuses the group, the daemon no longer serves `/v1/daemon/kb/entries`, and `nexus-home-layout` exposes no work-scope kb directory. A future local note/document staging surface would be a **new** Exploration — it must not revive this command group or these files.
 
-- Today, its default `work` scope is a local file/index workflow under the active `creator_id` and `workspace_slug`.
-- Its current implementation is not equivalent to the World-scoped narrative KB model.
+Every KB operator action now runs through the canonical World KB surface `nexus42 creator world kb ...`:
 
-> **Durable roadmap:** DR-46 (`creator kb --scope world` / user-global knowledge routing).
+| Command | Role |
+| --- | --- |
+| `creator world kb queue-extract <label> --world-id <id> [--work-id <id>] [--chapter N]` | Idempotent enqueue of a Work artifact into `kb_extract_jobs` (§5.5). |
+| `creator world kb extract-status [--job-id]` | Inspect those jobs (without `--job-id`: up to 100 most recent for the active creator). |
+| `creator world kb rescan <work_ref>/<chapter>` \| `--work <work_ref>` `[--dry-run] [--json]` | Re-sync `kb_extract_jobs` candidates + confirmed KnowledgeEntry bodies (§5.5) — see [world-kb-runtime-architecture.md §5.5.1](world-kb-runtime-architecture.md#551-cross-chapter-reconciliation-normative) for the cross-chapter mode. |
+| `creator world kb pending \| adopt \| reject \| list \| show \| edit \| delete` | The promotion state machine (§5.5.1–§5.5.3). |
+| `creator world kb pack export\|import`, `graph`, `entity patch` | Portable pack I/O and the direct-core entity/graph surface. |
+
+The extract/rescan leaves read the Work's chapter prose and the confirmed `KnowledgeEntryRecord` rows — never a local file index.
+
+> **Durable roadmap:** DR-46 (`creator kb --scope world` / user-global knowledge routing) has no live target after this retirement: the user-global tier is gone (§5.2) and no work-scope index remains to route.
 
 #### 5.4 Prohibited shorthand
 
 The term `KB` MUST be qualified in architecture/spec text when ambiguity matters:
 
-- Use **World KB** or **narrative KB** for `nexus-knowledge` (World-scoped).
-- Use **User knowledge** or **global knowledge index** for `nexus-knowledge`.
-- Use **CLI local work KB index** for `nexus42 creator kb --scope work`.
+- Use **World KB** or **narrative KB** for `nexus-knowledge` (World-scoped) — the only KB owner reachable from the CLI.
+- Do not use **CLI local work KB index** / **local work index** / **work-scope KB**: those named the retired `creator kb` group (§5.3) and are not live-owner shorthand.
+- Do not use **User knowledge** or **global knowledge index**: that surface is retired (V1.231, §5.2) and the shorthand no longer names a live owner.
 
 #### 5.5 World KB promotion state machine (normative)
 
@@ -813,19 +823,13 @@ Cross-scope references do not transfer ownership. A lower-scope entity may refer
 an ancestor ID, and an ancestor may index descendants, but the canonical owner remains
 the entity's declared scope.
 
-#### 6.2 User knowledge → Moment
+#### 6.2 User knowledge → Moment (retired)
 
-`nexus-moment-context-assembly` may read user-scoped knowledge from
-`nexus-knowledge` and include selected slices in a Moment snapshot. This produces a
-read-only assembled context view; it does not move the underlying knowledge out of
-User scope.
+Retired in V1.231 (ADR K1). `nexus-moment-context-assembly` no longer reads a User-scoped knowledge store; there is no `## User Knowledge` slot, no `user_knowledge` field and no `fetch_user_knowledge` path in the assembled Moment. A Moment aggregates Creator memory, narrative state and World KB assets only (§6.4–§6.5).
 
-#### 6.3 User knowledge → World KB
+#### 6.3 User knowledge → World KB (retired)
 
-Promoting User knowledge into a World creates or updates a World-scoped narrative KB
-asset through `nexus-knowledge`/`nexus-narrative`. The promoted World KB asset MUST carry
-source/anchor provenance back to the User knowledge material when available. The
-source material remains User-scoped.
+Retired in V1.231 (ADR K1). There is no User-knowledge promotion path: `knowledge_entries` is dropped and nothing may be upserted from it into World KB. Author-originated knowledge now enters a World only through the World KB extract/adopt gate (§5.5). A future source-material or User-scope surface MUST bring its own promotion design as an independent proposal; it MUST NOT revive the withdrawn table as a staging shim.
 
 #### 6.4 Creator memory → Moment
 
