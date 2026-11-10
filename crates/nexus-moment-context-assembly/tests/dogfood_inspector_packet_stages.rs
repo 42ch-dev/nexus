@@ -45,7 +45,6 @@ use std::sync::{Arc, Mutex};
 use nexus_contracts::{BlockType, TimePolicy, Visibility};
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::{InMemoryKbStore, KbStore};
-use nexus_knowledge::InMemoryKnowledgeStore;
 use nexus_moment_context_assembly::directive::{
     ActiveDirective, DirectiveDepth, DirectiveStore, DirectiveTtlKind,
 };
@@ -266,7 +265,6 @@ fn directive() -> ActiveDirective {
 async fn assemble(stage: GenerationStage) -> (MomentContext, StubDirectiveStore) {
     let (narrative, kb, stage0) = build_world();
     seed_kb(&kb).await;
-    let knowledge = InMemoryKnowledgeStore::new();
     let store = StubDirectiveStore::with_directive(directive());
 
     let request = MomentRequest::new(stage0)
@@ -276,7 +274,7 @@ async fn assemble(stage: GenerationStage) -> (MomentContext, StubDirectiveStore)
         .with_hop_edges(hop_edges())
         .with_hop_max_tokens(HOP_CAP)
         .with_generation_stage(stage);
-    let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &store).await;
+    let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &store).await;
     (ctx, store)
 }
 

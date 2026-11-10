@@ -1143,7 +1143,6 @@ mod tests {
         let narrative =
             nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
         let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-        let knowledge = nexus_local_db::SqliteKnowledgeStore::new(pool.clone());
         let directives = LocalDirectiveStore::new(pool.clone());
 
         let stage0 = Stage0Assembly {
@@ -1157,9 +1156,7 @@ mod tests {
             .with_event("evt_e2e");
 
         // First assemble: the directive injects and its TTL drops to 0.
-        let ctx =
-            assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &directives)
-                .await;
+        let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
         assert_eq!(
             ctx.moment_directive.as_deref(),
             Some("Keep the prose terse.")
@@ -1172,9 +1169,7 @@ mod tests {
 
         // Second assemble: the directive is gone (TTL-0 ⇒ no injection) and
         // the output is byte-identical to the no-directive path (AC-I1b).
-        let ctx2 =
-            assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &directives)
-                .await;
+        let ctx2 = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
         assert!(ctx2.moment_directive.is_none());
         assert!(!ctx2.to_full_context().contains("## Moment Directive"));
         assert_eq!(
@@ -1225,7 +1220,6 @@ mod tests {
         let narrative =
             nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
         let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-        let knowledge = nexus_local_db::SqliteKnowledgeStore::new(pool.clone());
         let directives = LocalDirectiveStore::new(pool.clone());
 
         let stage0 = Stage0Assembly {
@@ -1240,9 +1234,7 @@ mod tests {
 
         // Calls 1–3: the directive injects and the TTL counts down 3→2→1.
         for expected_remaining in [2, 1, 0] {
-            let ctx =
-                assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &directives)
-                    .await;
+            let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
             assert_eq!(
                 ctx.moment_directive.as_deref(),
                 Some("Keep the prose terse."),
@@ -1257,9 +1249,7 @@ mod tests {
         assert_eq!(expired.status, "expired");
 
         // Call 4: no injection (expired rows never inject, spec §3.3).
-        let ctx4 =
-            assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &directives)
-                .await;
+        let ctx4 = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
         assert!(
             ctx4.moment_directive.is_none(),
             "4th assemble must not inject the expired directive"

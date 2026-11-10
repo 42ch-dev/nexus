@@ -7,8 +7,8 @@
 //! fragment keywords, and the user prompt.
 //!
 //! **Moment assembly** (default, local-only):
-//! Aggregates from all four local domains: creator memory (SOUL), narrative state,
-//! World KB, and User knowledge. This is the primary entry point for V1.23+.
+//! Aggregates from all three local domains: creator memory (SOUL), narrative state,
+//! and World KB. This is the primary entry point for V1.23+.
 //!
 //! **Two-Stage** (`local_first` / `cloud_enhanced` modes, requires `cloud-stage` feature):
 //! Stage-1 calls platform `context/assemble` API; Stage-2 merges with local data.
@@ -24,7 +24,6 @@
 //!   carries long-term memories and fragments (E10 recall inputs, NXM-7)
 //! - `nexus-narrative` — World state, timeline, events (via `NarrativeGateway`)
 //! - `nexus-kb` — World-scoped key blocks (via `KbStore`)
-//! - `nexus-knowledge` — User-scoped knowledge entries (via `KnowledgeStore`)
 
 pub mod directive;
 pub mod generation;
