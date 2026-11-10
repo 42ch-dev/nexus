@@ -70,7 +70,7 @@ Multi-byte (CJK) keys + `whole_word` match: advancing `offset = start + 1` split
 - V1.149 P0 `crates/nexus-spoke-adapter/src/adapter/activation.rs` (default-on engine, truth-table logic, `regex` crate match, char-boundary whole_word, neutral-only golden).
 - V1.149 P1 `expand_relation_hops` + `NexusAdapter::list_hop_edges_for_world` (graph hops via storage list, pre_visited dedup).
 - Spec: `docs/specs/architecture/spoke-adapter-architecture.md` §7.4 Lore activation engine (normative contract).
-- Spoke handbook: `spoke/docs/specs/domain-profile-lore-activation.md` (the dialect — consumer-only).
+- Spoke handbook: `spoke/.agents/specs/domain-profiles/domain-profile-lore-activation.md` (the dialect — consumer-only).
 
 ---
 

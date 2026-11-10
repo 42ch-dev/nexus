@@ -16,7 +16,7 @@ Harness-layer **process** directory for this repo. Project identity and tech sta
   - [`../.agents/knowledge/`](../.agents/knowledge/AGENTS.md) — distilled engineering experience and methodology.
   - [`../.agents/adr/`](../.agents/adr/README.md) — one decision among real alternatives, its rationale and consequences.
   - [`../docs/specs/`](../docs/specs/README.md) — the project's current state: layers, boundaries, contracts, data flow, current paths and commands.
-- **Catalog is the registry.** Document identity, path, kind, relations, and lifecycle live in [`store.db`](store.db) catalog rows (`mstar catalog list` / `show`). README tables are prose navigation, not registries.
+- **Catalog is the registry.** Document identity, path, kind, relations, and lifecycle live in `store.db` catalog rows (`mstar catalog list` / `show`). README tables are prose navigation, not registries.
 - **`docs/`** is human contributor and integrator documentation. Wire/schema **code** SSOT is repo-root `schemas/`.
 - Do not put plan progress, residual prose, or QC narratives in root `AGENTS.md`.
 - Waiving a test/QC finding as “pre-existing” requires reproducing it against current `origin/<target_branch>` HEAD.
