@@ -29,7 +29,7 @@
 //! with status `running`, `paused`, or `waiting_for_input` so the in-memory
 //! tracker can be repopulated.
 //!
-//! Design: `.mstar/specs/active/orchestration/orchestration-engine.md` §4.3.
+//! Design: `docs/specs/orchestration/orchestration-engine.md` §4.3.
 
 use async_trait::async_trait;
 use graph_flow::{Session, SessionStorage};

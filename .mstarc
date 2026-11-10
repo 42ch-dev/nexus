@@ -1,0 +1,6 @@
+# repo-local harness config (git tracked; see mstar-conventions)
+[config]
+harness_dir=.mstar
+knowledge_dir=.agents/knowledge
+specs_dir=docs/specs
+adr_dir=.agents/adr

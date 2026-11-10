@@ -4,7 +4,7 @@
 //! normal edge) and `nexus-core` / `nexus-core-node` boot through the
 //! `provider-host` feature. The retired per-creator worker composition no
 //! longer defines the linkage boundary; see
-//! `.mstar/specs/active/agents/acp-client-tech-spec.md` §1.1 for the retained
+//! `docs/specs/agents/acp-client-tech-spec.md` §1.1 for the retained
 //! dependency and SDK boundary.
 
 #![deny(clippy::unwrap_used)]

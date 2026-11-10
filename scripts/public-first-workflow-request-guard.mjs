@@ -1,6 +1,6 @@
 /**
  * P3-T3 upstream request-budget guard — v1.195 current-host contracts §6.3 (local
- * record); tracked pattern: `.mstar/knowledge/workflow-patterns/single-live-action-request-guard.md`.
+ * record); tracked pattern: `.agents/knowledge/workflow-patterns/single-live-action-request-guard.md`.
  *
  * This file is a **Node ESM preload**, not a library: loading it installs the
  * ceiling in the current process, and it exports nothing. The supported load

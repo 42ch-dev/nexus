@@ -834,7 +834,7 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
 // ── Workflow observation stream (v1.201 P1 T1) ─────────────────────────────
 //
 // The same-run observation route's frozen client contract
-// (`.mstar/knowledge/api-design/sse-fetch-stream-consumer.md`):
+// (`.agents/knowledge/api-design/sse-fetch-stream-consumer.md`):
 // `{id, event, data}` triples whose control frames are first-class values
 // (a data-less `gap` and an `id`-less `history_unavailable` must survive — the
 // data-only agent-host parser drops both), streaming decoding is chunk-split

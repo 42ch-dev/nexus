@@ -3,7 +3,7 @@
  * Public first-workflow driver (P3-T1).
  *
  * Contract: the v1.195 current-host contracts §6.1 (local record); tracked pattern:
- * `.mstar/knowledge/workflow-patterns/single-live-action-request-guard.md`.
+ * `.agents/knowledge/workflow-patterns/single-live-action-request-guard.md`.
  *
  * This is an executable developer example / proof driver, not a CLI product and
  * not an HTTP authority. It orchestrates only existing public CLI and HTTP

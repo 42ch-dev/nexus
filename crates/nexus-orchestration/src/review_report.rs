@@ -1,7 +1,7 @@
 //! `review-report.md` parser (V1.48 P0 T1).
 //!
 //! Implements the producer-side parsing contract folded into
-//! `.mstar/specs/active/novel-writing/quality-loop.md` §9.1, with the vocabulary
+//! `docs/specs/novel-writing/quality-loop.md` §9.1, with the vocabulary
 //! table in the same spec §8 / §2.1.
 //!
 //! ## Hermeticity

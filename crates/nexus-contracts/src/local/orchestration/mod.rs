@@ -3,7 +3,7 @@
 //! Capability input/output schemas and related types that are local-only
 //! (not observed by `nexus-platform`).
 //!
-//! Design: `.mstar/specs/active/orchestration/orchestration-engine.md` §5.3.
+//! Design: `docs/specs/orchestration/orchestration-engine.md` §5.3.
 
 pub mod http;
 pub mod preset;

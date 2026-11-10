@@ -3,7 +3,7 @@
 //! Manages the monotonic version sequence per Schedule, applying [`DerivationStep`]
 //! operations and persisting each version as an immutable row in `core_context_versions`.
 //!
-//! Design: `.mstar/specs/active/orchestration/creator-schedule-and-core-context.md` §6.
+//! Design: `docs/specs/orchestration/creator-schedule-and-core-context.md` §6.
 
 use std::collections::HashMap;
 use std::sync::Arc;

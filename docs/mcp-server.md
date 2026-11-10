@@ -1,6 +1,6 @@
 # MCP & peer-tool surface
 
-Nexus exposes MCP as a **tools-only** surface over the single capability-registry / dispatch spine. The transport-neutral implementation lives in the core library — `nexus_core::connect` behind the `connect-client` / `embedded-mcp` features (peer tool registry, shared rmcp bridge core, embedded Model B server, `VisibilityPolicy`, peer-control lane) — and is composed by the native/TS consumers. No `nexus42` command spawns an MCP server. (The removed Model A `nexus42 mcp serve` stdio bridge is recorded in [`../.mstar/specs/archived/architecture/2026-10-13-mcp-server-historical-notes.md`](../.mstar/specs/archived/architecture/2026-10-13-mcp-server-historical-notes.md).) See [`.mstar/specs/active/architecture/rust-core-service-boundary.md`](../.mstar/specs/active/architecture/rust-core-service-boundary.md) §3–§4 and [`ARCHITECTURE.md`](ARCHITECTURE.md).
+Nexus exposes MCP as a **tools-only** surface over the single capability-registry / dispatch spine. The transport-neutral implementation lives in the core library — `nexus_core::connect` behind the `connect-client` / `embedded-mcp` features (peer tool registry, shared rmcp bridge core, embedded Model B server, `VisibilityPolicy`, peer-control lane) — and is composed by the native/TS consumers. No `nexus42` command spawns an MCP server. (The removed Model A `nexus42 mcp serve` stdio bridge is recorded in [`../.agents/adr/archived/architecture/2026-10-13-mcp-server-historical-notes.md`](../.agents/adr/archived/architecture/2026-10-13-mcp-server-historical-notes.md).) See [`docs/specs/architecture/rust-core-service-boundary.md`](specs/architecture/rust-core-service-boundary.md) §3–§4 and [`ARCHITECTURE.md`](specs/architecture/overview.md).
 
 ## Integrator & operator duties (retained contract)
 
@@ -82,8 +82,8 @@ configuration — the native-CLI providers (`ClaudeCliProvider`, `CodexNativePro
 `mcp_http` / `mcp_sse` / `mcp_stdio = false`, so MCP servers are not part of a
 native-hosted session. Nexus is an ACP **client** that forwards generic
 `newSession.mcp_servers` descriptors to the agent (owned by
-[acp-client-tech-spec.md](../.mstar/specs/active/agents/acp-client-tech-spec.md) and
-[agent-host.md](../.mstar/specs/active/agents/agent-host.md)); native MCP
+[acp-client-tech-spec.md](specs/agents/acp-client-tech-spec.md) and
+[agent-host.md](specs/agents/agent-host.md)); native MCP
 services belong to the agent, and `rmcp` stays out of the shipped graph.
 
 ## Implementation ownership

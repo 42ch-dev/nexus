@@ -6,6 +6,21 @@ SQLite-backed persistence using sqlx. Used by the daemon runtime and `nexus-orch
 
 Migration files under `migrations/` are committed — the schema is fully reproducible. **sqlx orders migrations numerically** by the leading version prefix (the digits before the first `_` or non-digit separator).
 
+**Published migration files are checksum-frozen.** sqlx pins each file's checksum; editing a shipped migration — even a comment — changes the checksum and makes existing databases fail `VersionMismatch`. Never edit a published `.sql` file. Current documentation references for those headers are kept here instead of in the SQL:
+
+| Migration | Current reference |
+| --- | --- |
+| `20260418_orchestration_sessions.sql` | `docs/specs/orchestration/orchestration-engine.md` §4.3 |
+| `202606170001_extend_findings_status.sql` | `docs/specs/contracts/findings-lifecycle.md` §2 |
+| `202606180001_works_schedule_json.sql` | `docs/specs/novel-writing/workflow-profile.md` §11 (cron staggering) |
+| `202606180004_works_schedule_json_partial_idx.sql` | `docs/specs/novel-writing/workflow-profile.md` §11 |
+| `202606180005_works_auto_chronology.sql` | `docs/specs/novel-writing/workflow-profile.md` §11.5.3 |
+| `202606180006_kb_extract_jobs_llm_payload.sql` | `docs/specs/orchestration/llm-extract.md` §3.2; `docs/specs/architecture/entity-scope-model.md` §5.5.6 |
+| `202606190002_kb_extract_jobs_auto_promote.sql` | `docs/specs/novel-writing/quality-loop.md` §5.6; `docs/specs/architecture/entity-scope-model.md` §5.5 |
+| `20260812_drop_legacy_outbox.sql` | `docs/specs/runtime/outbox-consolidation.md` §6 |
+| `20260918000001_holder_registry.sql` | `docs/specs/architecture/holder-governance.md` §§2, 3, 5 |
+
+
 Common filename shapes in this crate:
 
 - `YYYYMMDD_<description>.sql` — e.g. `20260812_drop_legacy_outbox.sql`
@@ -17,15 +32,15 @@ Use a **14-digit prefix** when the migration must run **after** existing 14-digi
 ## Key Rules
 
 - **Compile-time checked queries only** — use `sqlx::query!()` / `sqlx::query_as!()` for all static SQL. Runtime `sqlx::query()` only for DDL, PRAGMAs, or truly dynamic SQL with a `// SAFETY:` comment.
-- See [`.mstar/knowledge/crate-selection-best-practices.md`](../../.mstar/knowledge/crate-selection-best-practices.md) §3.2 for the workspace sqlx compile-time rules and the `cargo sqlx prepare` + committed `.sqlx/` + `SQLX_OFFLINE=true` CI conventions (the former `nexus-daemon-runtime` crate this bullet named was deleted in v1.193 P2).
+- See [`.agents/knowledge/crate-selection-best-practices.md`](../../.agents/knowledge/crate-selection-best-practices.md) §3.2 for the workspace sqlx compile-time rules and the `cargo sqlx prepare` + committed `.sqlx/` + `SQLX_OFFLINE=true` CI conventions (the former `nexus-daemon-runtime` crate this bullet named was deleted in v1.193 P2).
 - Do not add local sqlx features beyond what the workspace declares.
-- **Pure storage (V1.145 P1b):** this crate is storage-only — DB CRUD primitives (`SqliteKbStore`, `open_pool`, `run_migrations`, CAS helpers). The production adapter (`NexusAdapter`, V1.146 rename) + 6 spoke port impls **moved to `nexus-spoke-adapter/src/adapter/`** (spec §7.4 / §8). `nexus-local-db` has **no `nexus-spoke-adapter` dependency**; the `extensions.nexus` round-trip helpers (`build_extensions_nexus`, `is_known_nexus_key`) are inlined as private local fns in `kb_store.rs` so the legacy INSERT/UPDATE wrappers stay spoke-unaware. See `.mstar/specs/active/architecture/spoke-adapter-architecture.md` §7.4 for the family matrix (production vs stub).
-- **Timeline ordering (V1.146 P1):** the former `SqliteNarrativeGateway::get_timeline_ordered` (which called the spoke `order_timeline_events_by_ids` helper via a direct `spoke-operations` dep) was **removed** — it never had a production call site, and the ordered-timeline facet now lives on the spoke-adapter boundary as `NexusAdapter::list_timeline_events_ordered` in `nexus-spoke-adapter` (spec §7.4). `nexus-local-db` no longer depends on `spoke-operations`. See `.mstar/specs/active/architecture/spoke-adapter-architecture.md` §7.4 "Read-path ScopeQuery adoption".
+- **Pure storage (V1.145 P1b):** this crate is storage-only — DB CRUD primitives (`SqliteKbStore`, `open_pool`, `run_migrations`, CAS helpers). The production adapter (`NexusAdapter`, V1.146 rename) + 6 spoke port impls **moved to `nexus-spoke-adapter/src/adapter/`** (spec §7.4 / §8). `nexus-local-db` has **no `nexus-spoke-adapter` dependency**; the `extensions.nexus` round-trip helpers (`build_extensions_nexus`, `is_known_nexus_key`) are inlined as private local fns in `kb_store.rs` so the legacy INSERT/UPDATE wrappers stay spoke-unaware. See `docs/specs/architecture/spoke-adapter-architecture.md` §7.4 for the family matrix (production vs stub).
+- **Timeline ordering (V1.146 P1):** the former `SqliteNarrativeGateway::get_timeline_ordered` (which called the spoke `order_timeline_events_by_ids` helper via a direct `spoke-operations` dep) was **removed** — it never had a production call site, and the ordered-timeline facet now lives on the spoke-adapter boundary as `NexusAdapter::list_timeline_events_ordered` in `nexus-spoke-adapter` (spec §7.4). `nexus-local-db` no longer depends on `spoke-operations`. See `docs/specs/architecture/spoke-adapter-architecture.md` §7.4 "Read-path ScopeQuery adoption".
 
 ## Holder governance storage (v1.191 P1 — shipped)
 
 This crate owns the storage half of the holder contract
-([holder-governance.md](../../.mstar/specs/active/architecture/holder-governance.md) §§2–6); policy stays
+([holder-governance.md](../../docs/specs/architecture/holder-governance.md) §§2–6); policy stays
 in `nexus-core`:
 
 - **Registry.** `src/holders.rs` owns `knowledge_holders`: one row per stored Creator

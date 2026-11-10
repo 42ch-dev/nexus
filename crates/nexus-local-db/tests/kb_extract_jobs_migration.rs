@@ -3,8 +3,8 @@
 //!
 //! Plan: `2026-06-18-v1.50-kb-auto-promotion` (local plan record) (V1.50),
 //!       `2026-06-18-v1.51-llm-extraction` (local plan record) (V1.51 T-A P0)
-//! Spec: `.mstar/specs/active/architecture/entity-scope-model.md` §5.5 + §5.5.6,
-//!       `.mstar/specs/active/orchestration/llm-extract.md` §3.2
+//! Spec: `docs/specs/architecture/entity-scope-model.md` §5.5 + §5.5.6,
+//!       `docs/specs/orchestration/llm-extract.md` §3.2
 //!
 //! Covers:
 //! - **Forward migration**: `run_migrations` adds `promotion_status`,

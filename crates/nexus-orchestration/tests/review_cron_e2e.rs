@@ -2,8 +2,8 @@
 //! KB-extraction hook chain test.
 //!
 //! Plan: `2026-06-18-v1.50-cron-review-staggering` (local plan record)
-//! Spec: `.mstar/specs/active/novel-writing/workflow-profile.md` §11.2 / §11.4,
-//!       `.mstar/specs/active/novel-writing/quality-loop.md` §3
+//! Spec: `docs/specs/novel-writing/workflow-profile.md` §11.2 / §11.4,
+//!       `docs/specs/novel-writing/quality-loop.md` §3
 //!
 //! Verifies the full chain that T-A P2 wires:
 //! 1. The daemon cron evaluator fires the per-Work `review` role at a matching

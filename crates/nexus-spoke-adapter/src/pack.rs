@@ -43,7 +43,7 @@
 //! **library-level** error type (not a spoke port), used by the CLI for exit
 //! code mapping.
 //!
-//! [pack-handbook]: https://github.com/42ch-dev/spoke/blob/main/.mstar/specs/domain-profile-narrative-knowledge-pack.md
+//! [pack-handbook]: https://github.com/42ch-dev/spoke/blob/main/docs/specs/domain-profile-narrative-knowledge-pack.md
 
 use serde_json::{Map, Value};
 use spoke_schemas::{KnowledgeEntry, Relation, SourceAnchor};

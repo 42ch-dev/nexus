@@ -1,7 +1,7 @@
 /**
  * Studio fixtures for setup wizard chrome (V1.105 P2 portrait shell).
  *
- * Normative contract: `.mstar/specs/active/surfaces/design-studio.md` §7.5 (Surfaces fixture families)
+ * Normative contract: `docs/specs/surfaces/design-studio.md` §7.5 (Surfaces fixture families)
  * Studio-local only — no product pages, no daemon client, no contracts.
  */
 

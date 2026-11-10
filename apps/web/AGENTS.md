@@ -21,7 +21,7 @@ Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
 ## SSOT & authority
 
 - **Design tokens**: Root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) are the **sole normative SSOT** (Production completeness). Shared CSS variables + Tailwind preset live in `tooling/design-tokens` (`@nexus/design-tokens`). `src/index.css` + `tailwind.config.ts` *consume* them via `@import '@nexus/design-tokens/tokens.css'` and the shared preset; they do not invent tokens. If a token you need is missing, **report** it to the architect — do not fabricate a value.
-- **Product contract**: [`web-rebuild-ia.md`](../../.mstar/specs/proposed/surfaces/web-rebuild-ia.md) (rebuild direction).
+- **Product contract**: [`web-rebuild-ia.md`](../../.agents/adr/implemented/feature/2026-10-22-web-rebuild-ia.md) (implemented IA decision).
 - **Transport boundary**: the `NexusClient` interface
   (`src/lib/nexus/types.ts`). Screens must depend only on the interface, never
   on `fetch`/`window.nexusDesktop` directly — the client factory selects
@@ -116,4 +116,4 @@ and consumed by the screens. Remaining gaps the UI adapts around:
   test fixtures, and manuscript body text.
 - **Normative spec:**
   the V1.112 frontend i18n amendments (shipped); the distilled pattern note lives at
-  [`.mstar/knowledge/architecture-patterns/web-i18n-pattern.md`](../../.mstar/knowledge/architecture-patterns/web-i18n-pattern.md).
+  [`.agents/knowledge/architecture-patterns/web-i18n-pattern.md`](../../.agents/knowledge/architecture-patterns/web-i18n-pattern.md).

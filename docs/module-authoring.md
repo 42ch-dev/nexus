@@ -11,7 +11,7 @@ compute is **read-only** — the module never commits state itself (see
 [Read-only compute](#read-only-compute)).
 
 The normative ABI contract is
-[`.mstar/specs/active/compute/compute-module-abi.md`](../.mstar/specs/active/compute/compute-module-abi.md) —
+[`docs/specs/compute/compute-module-abi.md`](specs/compute/compute-module-abi.md) —
 this doc is the authoring reference: the contract at a glance, the
 `manifest.json` contract (incl. `wasm_sha256`), the allowlist gate, and the
 operator install. The module-authoring walkthrough lives in
@@ -20,11 +20,11 @@ operator install. The module-authoring walkthrough lives in
 ## Author with the SDK
 
 New modules should be authored on the official `nexus-module-sdk`
-([`modules/nexus-module-sdk/`](../modules/nexus-module-sdk/)): `nexus_entry!`
+([`modules/nexus-module-sdk/`](../modules/nexus-module-sdk)): `nexus_entry!`
 generates the three ABI exports (`alloc` / `init` / `compute`) and wires the
 global allocator, and the typed envelope skeleton + accessor helpers cover the
 V1 surface — zero hand-copied marshalling. Scaffold from the in-repo template
-([`modules/_template/`](../modules/_template/)) and drive the authoring loop
+([`modules/_template/`](../modules/_template)) and drive the authoring loop
 with `nexus42 compute build|validate|install` (see the walkthrough in
 [`modules/README.md`](../modules/README.md)) — the loop is service-host-free;
 execution happens in a host: the Control Room's Run Studio, the Connect
@@ -309,7 +309,7 @@ The module's `ComputeOutput` (state deltas, timeline events, new blocks) is
 what the host *would* apply in a settling surface; the read-only lane hands the
 receipt back to the caller instead. The settle → receipt → narrate discipline
 is documented in the
-[TRPG turn strategy](../strategy-samples/react-trpg-turn/).
+[TRPG turn strategy](../strategy-samples/react-trpg-turn).
 
 ## Next steps
 
@@ -321,5 +321,5 @@ is documented in the
 - [Docs index](README.md) — all docs.
 - Module guide: [`modules/README.md`](../modules/README.md) — authoring
   walkthrough + embedding procedure.
-- Reference implementation: [`modules/basic-combat/`](../modules/basic-combat/).
-- ABI spec (normative): [`.mstar/specs/active/compute/compute-module-abi.md`](../.mstar/specs/active/compute/compute-module-abi.md).
+- Reference implementation: [`modules/basic-combat/`](../modules/basic-combat).
+- ABI spec (normative): [`docs/specs/compute/compute-module-abi.md`](specs/compute/compute-module-abi.md).

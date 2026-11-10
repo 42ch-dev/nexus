@@ -6,10 +6,10 @@ Query + React Router. Transport-agnostic via the `NexusClient` adapter
 (`BrowserClient` today; `DesktopClient` in the Electron shell). This is an OSS
 local-first surface — **not** the private cloud SaaS.
 
-- Product contract: [`.mstar/specs/proposed/surfaces/web-rebuild-ia.md`](../../.mstar/specs/proposed/surfaces/web-rebuild-ia.md) (rebuild direction)
+- Product contract: [`.agents/adr/implemented/feature/2026-10-22-web-rebuild-ia.md`](../../.agents/adr/implemented/feature/2026-10-22-web-rebuild-ia.md) (implemented IA decision)
 - Design tokens (SSOT): [`DESIGN.md`](../../DESIGN.md)
 - Plan: `2026-06-24-v1.64-web-app-scaffold` (local plan record)
-- Frontend conventions: [`AGENTS.md`](./AGENTS.md)
+- Frontend conventions: [`AGENTS.md`](AGENTS.md)
 
 ## Scripts
 

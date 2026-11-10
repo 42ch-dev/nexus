@@ -1,7 +1,7 @@
 //! V1.50 T-B P2 — `creator kb rescan` hermetic round-trip.
 //!
 //! Plan: `2026-06-18-v1.50-kb-refreshable-scan` (local plan record)
-//! Spec: `.mstar/specs/active/architecture/entity-scope-model.md` §5.5
+//! Spec: `docs/specs/architecture/entity-scope-model.md` §5.5
 //!
 //! Drives `nexus42::commands::creator::kb::rescan::kb_rescan_hermetic` against
 //! a fresh temp DB + temp workspace so the rescan can be exercised without

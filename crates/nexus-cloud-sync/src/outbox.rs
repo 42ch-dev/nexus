@@ -20,7 +20,7 @@
 //!
 //! The sync `outbox_entries` table, its relationship to the daemon `outbox` queue,
 //! and the `schema_version` rollout are documented by the tracked outbox
-//! consolidation spec (`.mstar/specs/active/runtime/outbox-consolidation.md`);
+//! consolidation spec (`docs/specs/runtime/outbox-consolidation.md`);
 //! the v1.1 → v1.2 steps are historical.
 
 use std::path::Path;

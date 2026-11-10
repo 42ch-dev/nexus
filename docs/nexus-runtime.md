@@ -286,7 +286,7 @@ that same build (`--web-dist <dir>`, or auto-discovery of
 - `index.html`/fallback are `no-store`, `/assets/*` is `public, max-age=3600`,
   and `nosniff` is set everywhere.
 
-Auth model: [header-key auth is its own CSRF defence](../.mstar/knowledge/architecture-patterns/header-key-csrf-defence.md).
+Auth model: [header-key auth is its own CSRF defence](../.agents/knowledge/architecture-patterns/header-key-csrf-defence.md).
 
 ## Allowlist and module scope
 
@@ -402,4 +402,4 @@ distinct trust role from `identity.key`) and prints the signed wire proof
 - [Integrator walkthrough](../strategy-samples/README.md) — worked example
   end to end.
 - [Docs index](README.md) — all docs.
-- ABI spec: [`.mstar/specs/active/compute/compute-module-abi.md`](../.mstar/specs/active/compute/compute-module-abi.md).
+- ABI spec: [`docs/specs/compute/compute-module-abi.md`](specs/compute/compute-module-abi.md).

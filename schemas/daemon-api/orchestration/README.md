@@ -6,10 +6,10 @@ JSON Schema subtree for the **Orchestration** daemon endpoints under `/v1/daemon
 
 | Directory | Contents | Wave |
 |-----------|----------|------|
-| [sessions/](sessions/) | Engine session list + detail-status (READ-only) | V1.63 P3 |
-| [capabilities/](capabilities/) | Capability registry list | V1.63 P3 |
+| [sessions/](sessions) | Engine session list + detail-status (READ-only) | V1.63 P3 |
+| [capabilities/](capabilities) | Capability registry list | V1.63 P3 |
 
-**Note:** Schedule list DTOs live under [`daemon-api/schedule/`](../schedule/) (V1.63 P1) — no duplication needed. Preset management DTOs live under [`daemon-api/preset-management/`](../preset-management/) (V1.63 P3).
+**Note:** Schedule list DTOs live under [`daemon-api/schedule/`](../schedule) (V1.63 P1) — no duplication needed. Preset management DTOs live under [`daemon-api/preset-management/`](../preset-management) (V1.63 P3).
 
 ## Deferred (V1.64+)
 
