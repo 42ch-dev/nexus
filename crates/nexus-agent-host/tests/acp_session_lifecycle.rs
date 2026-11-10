@@ -905,87 +905,112 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
     );
 }
 
-/// I-000358 (Linux): a session launch that fails after initialize while a live
-/// same-group descendant survives must be classified by the teardown OUTCOME.
-/// The handshake watches the leader's exit with `observe_exit`, which leaves
-/// the exited leader unreaped: its birth identity still verifies, so the
-/// guarded group SIGTERM reaches the descendant, cleanup is confirmed and the
-/// typed `launch_failed` stands. The pre-fix reaping `wait` destroyed that
-/// identity whenever its select arm won, the signal was refused, and the same
-/// state surfaced as `cleanup_unconfirmed` with the descendant still running.
+/// I-000358 (Linux): a handshake that loses its leader while a live
+/// same-group descendant survives must be classified by the teardown OUTCOME,
+/// at BOTH handshake exit callsites.
 ///
-/// Nothing reaps the leader before the teardown, so the signal is provable
-/// whichever handshake select arm wins. macOS cannot observe an exit without
-/// reaping (the documented platform limit), hence Linux-only.
+/// The fixture's descendant inherits the ACP output pipe and outlives the
+/// leader, and the leader exits without a reply at the selected stage, so the
+/// SDK request cannot complete (no reply, no EOF): the `biased` SDK arm stays
+/// pending and the exit watcher MUST be the arm that reports the death. The
+/// watcher is `observe_exit`, which leaves the exited leader unreaped, so its
+/// birth identity still verifies and the guarded group SIGTERM reaches the
+/// descendant — confirmed cleanup, typed `launch_failed`. A reaping `wait` at
+/// either callsite would destroy that identity, refuse the signal and surface
+/// `cleanup_unconfirmed` with the descendant still running.
+///
+/// macOS cannot observe an exit without reaping (the documented platform
+/// limit), hence Linux-only.
 #[cfg(target_os = "linux")]
 #[tokio::test]
-#[allow(clippy::await_holding_lock, clippy::cast_possible_truncation)] // env_lock() held process-wide; OS pid fits u32
+#[allow(clippy::await_holding_lock)] // env_lock() held process-wide
 async fn exited_leader_with_live_descendant_classifies_confirmed_teardown() {
     let _lock = env_lock();
-    let ws = setup_workspace();
-    let provider_cfg = acp_provider_config(
-        "mock-acp",
-        &ws.fixture_log,
+    // (stage knob, its log event, the callsite's error message fragment)
+    let scenarios = [
+        (
+            ("EXIT_BEFORE_INIT_REPLY_FROM_RUN", "2"),
+            "exit_before_init_reply",
+            "during initialize handshake",
+        ),
+        (
+            ("EXIT_ON_SESSION_NEW_FROM_RUN", "2"),
+            "exit_on_session_new",
+            "during session creation",
+        ),
+    ];
+
+    for (stage_knob, exit_event, callsite) in scenarios {
+        let ws = setup_workspace();
         // Run 1 is the bounded readiness probe (passes); run 2 is the session
-        // launch that exits after initialize, leaving its descendant alive.
-        &[
+        // launch whose leader exits at the selected stage.
+        let extra_env = [
             ("DESCENDANT", "1"),
-            ("DESCENDANT_OUTLIVES", "1"),
-            ("EOF_AFTER_INIT_FROM_RUN", "2"),
-        ],
-        true,
-    );
-    let (_manager, host) = build_host(&ws, provider_cfg).await;
+            ("DESCENDANT_SURVIVES", "1"),
+            stage_knob,
+        ];
+        let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log, &extra_env, true);
+        let (_manager, host) = build_host(&ws, provider_cfg).await;
 
-    let result = host
-        .create_session(CreateSessionRequest {
-            provider_id: ProviderId::new("mock-acp"),
-            cwd: ws.creator_ws_a.join("sub"),
-            model: None,
-            mode: None,
-            mcp_servers: vec![],
-            metadata: serde_json::Value::Null,
-            owner: owner("ctr_a", ws.creator_ws_a.clone()),
-        })
-        .await;
+        let result = host
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("mock-acp"),
+                cwd: ws.creator_ws_a.join("sub"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+                owner: owner("ctr_a", ws.creator_ws_a.clone()),
+            })
+            .await;
 
-    // Evidence and fixture-owned cleanup before any assertion that can fail.
-    let log = read_fixture_log(&ws.fixture_log);
-    let descendant_pid = u32::try_from(
-        log.iter()
-            .rev()
-            .find(|e| e["event"] == "descendant_spawned")
-            .expect("fixture recorded its descendant")["child_pid"]
-            .as_u64()
-            .expect("descendant pid"),
-    )
-    .expect("descendant pid fits u32");
-    let leader_pid = u32::try_from(
-        session_start_events(&log, &ws)
-            .last()
-            .expect("session launch start recorded")["pid"]
-            .as_u64()
-            .expect("leader pid"),
-    )
-    .expect("leader pid fits u32");
-    let _guard = KillGroupOnDrop(leader_pid);
-    let eof_logged = log.iter().any(|e| e["event"] == "eof_after_init");
-    let err = result.expect_err("EOF launch must fail session creation");
-    await_process_gone(descendant_pid).await;
+        // Evidence and fixture-owned cleanup before any assertion that can
+        // fail.
+        let log = read_fixture_log(&ws.fixture_log);
+        let descendant_pid = u32::try_from(
+            log.iter()
+                .rev()
+                .find(|e| e["event"] == "descendant_spawned")
+                .expect("fixture recorded its descendant")["child_pid"]
+                .as_u64()
+                .expect("descendant pid"),
+        )
+        .expect("descendant pid fits u32");
+        let leader_pid = u32::try_from(
+            session_start_events(&log, &ws)
+                .last()
+                .expect("session launch start recorded")["pid"]
+                .as_u64()
+                .expect("leader pid"),
+        )
+        .expect("leader pid fits u32");
+        let _guard = KillGroupOnDrop(leader_pid);
+        // The fixture logs the exit from inside the branch of the request it
+        // received, so this event proves the selected stage request reached
+        // the leader (the probe run never logs it).
+        let exit_logged = log.iter().any(|e| e["event"] == exit_event);
+        let err = result.expect_err("the selected-stage exit must fail the launch");
+        await_process_gone(descendant_pid).await;
 
-    assert!(
-        eof_logged,
-        "the leader must have exited during the handshake: {log:?}"
-    );
-    assert!(
-        !process_alive(leader_pid),
-        "owned leader {leader_pid} must be reaped"
-    );
-    assert_eq!(
-        err.category(),
-        "launch_failed",
-        "confirmed teardown keeps the typed launch classification, got: {err}"
-    );
+        assert!(
+            exit_logged,
+            "{exit_event}: the leader must have exited during the handshake: {log:?}"
+        );
+        assert!(
+            !process_alive(leader_pid),
+            "owned leader {leader_pid} must be reaped ({exit_event})"
+        );
+        assert_eq!(
+            err.category(),
+            "launch_failed",
+            "confirmed teardown keeps the typed launch classification ({exit_event}), got: {err}"
+        );
+        assert!(
+            err.to_string().contains(callsite),
+            "the {exit_event} scenario must be reported by its own watches callsite \
+             ({callsite}), got: {err}"
+        );
+    }
 }
 
 /// Bounded disappearance: a killed orphan is reaped by init, which is a
@@ -1020,12 +1045,14 @@ impl Drop for KillGroupOnDrop {
     }
 }
 
-/// I-000358 (Linux): the launch handshake observes the leader's exit WITHOUT
-/// reaping it. A leader that exits while a same-group descendant stays alive
-/// keeps its provable birth identity, so the guarded teardown still reaches
-/// the survivor: the descendant is killed and cleanup is confirmed. A reaping
-/// watch (the pre-fix `wait`) deleted the start tick, the guarded signal was
-/// refused, and the live descendant was reported as unconfirmed cleanup.
+/// I-000358 (Linux): the handshake's exit watch observes the leader's exit
+/// WITHOUT reaping it. A leader that exits while a same-group descendant stays
+/// alive keeps its provable birth identity, so the guarded teardown still
+/// reaches the survivor: the descendant is killed and cleanup is confirmed. A
+/// reaping watch (the pre-fix `wait`) deleted the start tick, the guarded
+/// signal was refused, and the live descendant was reported as unconfirmed
+/// cleanup. This pins the watch invariant directly; the provider callsites are
+/// pinned by `exited_leader_with_live_descendant_classifies_confirmed_teardown`.
 /// macOS cannot observe an exit without reaping, so there the same state is a
 /// documented platform limit — hence the Linux-only regression.
 #[cfg(target_os = "linux")]
@@ -1037,7 +1064,7 @@ async fn handshake_exit_watch_keeps_leader_identity_for_group_teardown() {
     let log_path = tmp.path().join("fixture.log");
     let spawner = AgentSpawner::new(tmp.path().to_path_buf());
     let (child, stdin, _stdout) = spawner
-        .spawn_with_env(
+        .spawn_with_env_policy(
             FIXTURE,
             &[],
             &[
@@ -1046,8 +1073,9 @@ async fn handshake_exit_watch_keeps_leader_identity_for_group_teardown() {
                     log_path.to_str().expect("utf-8 fixture log path"),
                 ),
                 ("DESCENDANT", "1"),
-                ("DESCENDANT_OUTLIVES", "1"),
+                ("DESCENDANT_SURVIVES", "1"),
             ],
+            false,
         )
         .expect("spawn grouped fixture");
     let leader = child.id().expect("leader pid");

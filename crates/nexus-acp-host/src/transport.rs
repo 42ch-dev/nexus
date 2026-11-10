@@ -190,6 +190,42 @@ impl AgentSpawner {
         tokio::process::ChildStdin,
         tokio::process::ChildStdout,
     )> {
+        self.spawn_with_env_policy(program, args, env, true)
+    }
+
+    /// Spawn an agent subprocess with an explicit child drop policy.
+    ///
+    /// `kill_on_drop` is the owner of last resort for callers that drop the
+    /// raw child (the CLI probe/run paths keep it `true`, exactly as before).
+    /// The managed path passes `false`: `ManagedAcpProcess` owns its teardown,
+    /// and a cleanup refusal must never become an implicit kill — not even
+    /// when the runtime running the reaper shuts down (I-000359).
+    ///
+    /// # Arguments
+    ///
+    /// * `program` — The executable to run
+    /// * `args` — Command-line arguments
+    /// * `env` — Key-value pairs to set in the child's environment
+    /// * `kill_on_drop` — Whether dropping the raw child handle kills it
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the program cannot be found or spawned.
+    ///
+    /// # Panics
+    ///
+    /// Panics if stdin/stdout pipes cannot be extracted (pipe configuration error).
+    pub fn spawn_with_env_policy(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+        kill_on_drop: bool,
+    ) -> AcpResult<(
+        tokio::process::Child,
+        tokio::process::ChildStdin,
+        tokio::process::ChildStdout,
+    )> {
         // Construct the command
         let mut cmd = Command::new(program);
         cmd.args(args)
@@ -197,7 +233,7 @@ impl AgentSpawner {
             .stdin(Stdio::piped()) // stdin for JSON-RPC requests
             .stdout(Stdio::piped()) // stdout for JSON-RPC responses
             .stderr(Stdio::inherit()) // stderr for agent logs (visible in terminal)
-            .kill_on_drop(true); // Ensure subprocess is killed if the handle is dropped
+            .kill_on_drop(kill_on_drop);
 
         // Owned process-group identity (A5): on Unix the child becomes a new
         // process-group leader (PGID == child PID), so the owned process tree
@@ -308,6 +344,33 @@ fn read_start_tick(_pid: u32) -> Option<u64> {
     None
 }
 
+/// Project a non-reaping `waitid` observation onto an `ExitStatus`.
+///
+/// `waitid` reports the exit code or terminating signal in `si_status`;
+/// `ExitStatus::from_raw` wants a `wait(2)` status word, so an exit code is
+/// shifted into the high byte and a signal carries the `0x80` core-dump flag
+/// when the kernel reported `CLD_DUMPED`. `None` means the status is not an
+/// exit transition (the caller surfaces it instead of guessing).
+#[cfg(target_os = "linux")]
+fn exit_status_from_wait_status(
+    status: nix::sys::wait::WaitStatus,
+) -> Option<std::process::ExitStatus> {
+    use nix::sys::wait::WaitStatus;
+    use std::os::unix::process::ExitStatusExt;
+
+    match status {
+        WaitStatus::Exited(_, code) => Some(std::process::ExitStatus::from_raw(code << 8)),
+        WaitStatus::Signaled(_, signal, core) => Some(std::process::ExitStatus::from_raw(
+            signal as i32 | if core { 0x80 } else { 0 },
+        )),
+        WaitStatus::StillAlive
+        | WaitStatus::Stopped(..)
+        | WaitStatus::Continued(_)
+        | WaitStatus::PtraceEvent(..)
+        | WaitStatus::PtraceSyscall(_) => None,
+    }
+}
+
 impl ProcessBirthToken {
     /// Capture the birth token for a freshly spawned child.
     ///
@@ -363,6 +426,12 @@ impl ManagedAcpProcess {
     /// still alive; a platform that cannot provide one yields no token, and
     /// cleanup must then be reported unconfirmed rather than signalling on a
     /// PID alone.
+    ///
+    /// The child must come from the managed drop policy
+    /// ([`AgentSpawner::spawn_with_env_policy`] with `kill_on_drop = false`):
+    /// this struct owns teardown, so no owner drop may signal a child that a
+    /// cleanup refusal declined to signal (I-000359). A `kill_on_drop` handle
+    /// cannot be disarmed after spawn.
     #[must_use]
     pub fn new(agent_id: String, child: tokio::process::Child, agent_path: PathBuf) -> Self {
         let birth = child.id().and_then(ProcessBirthToken::capture);
@@ -420,7 +489,6 @@ impl ManagedAcpProcess {
         #[cfg(target_os = "linux")]
         {
             use nix::sys::wait::{waitid, Id, WaitPidFlag, WaitStatus};
-            use std::os::unix::process::ExitStatusExt;
 
             let pid = self
                 .pid()
@@ -434,18 +502,12 @@ impl ManagedAcpProcess {
                     Ok(WaitStatus::StillAlive) => {
                         tokio::time::sleep(Duration::from_millis(10)).await;
                     }
-                    // `waitid` carries the exit code in `si_status`; rebuild
-                    // the `wait(2)` status word `from_raw` expects.
-                    Ok(WaitStatus::Exited(_, code)) => {
-                        return Ok(std::process::ExitStatus::from_raw(code << 8));
-                    }
-                    Ok(WaitStatus::Signaled(_, signal, _)) => {
-                        return Ok(std::process::ExitStatus::from_raw(signal as i32));
-                    }
                     Ok(status) => {
-                        return Err(std::io::Error::other(format!(
-                            "unexpected waitid status for {pid}: {status:?}"
-                        )));
+                        return exit_status_from_wait_status(status).ok_or_else(|| {
+                            std::io::Error::other(format!(
+                                "unexpected waitid status for {pid}: {status:?}"
+                            ))
+                        });
                     }
                     Err(e) => return Err(std::io::Error::from(e)),
                 }
@@ -766,20 +828,18 @@ impl ManagedAcpProcess {
     /// (I-000359).
     ///
     /// A cleanup-deadline refusal must not signal the child it refused to
-    /// signal, but it may not leak the handle either: dropping it fires
-    /// `kill_on_drop` (an implicit kill), and forgetting it leaves a later
-    /// exit unreaped for the life of the host. The reaper owns the handle and
-    /// waits for the exit whenever it happens, reaping it then.
-    ///
-    /// No runtime means no task can outlive this call; the handle is dropped
-    /// there instead. Every owned child is spawned by this crate's
-    /// `AgentSpawner` inside a Tokio runtime, and both fallible teardown
-    /// paths run in async context. A runtime that shuts down before the child
-    /// exits drops the still-pending reaper and so applies the child's own
-    /// `kill_on_drop` policy — the same policy every other `AgentSpawner`
-    /// consumer keeps, not a signal introduced by this refusal.
+    /// signal, and it may not leak the handle either: `mem::forget` leaves a
+    /// later exit unreaped for the life of the host. The managed launch path
+    /// spawns with `kill_on_drop(false)`
+    /// ([`AgentSpawner::spawn_with_env_policy`]), so no owner drop can turn
+    /// the refusal into a kill: the task reaps promptly when the child exits,
+    /// and if its runtime is cancelled first the handle drop still signals
+    /// nothing (Tokio's orphan queue owns the child until it exits).
     fn hand_to_reaper(mut child: tokio::process::Child) {
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            // No runtime: dropping the handle is non-signalling for a
+            // managed-policy child; a `kill_on_drop` handle (never produced
+            // by the managed launch path) falls back to its own policy.
             return;
         };
         handle.spawn(async move {
@@ -1973,16 +2033,15 @@ mod tests {
 
     /// A live leader with an unprovable identity must not hang the cleanup
     /// deadline: terminate(grace) returns the typed refusal within the bound
-    /// and never drops the `kill_on_drop` child into an implicit kill. The
-    /// still-running child is owned by the detached non-signalling reaper, so
-    /// once it exits it is reaped instead of staying a host-lifetime zombie
-    /// (I-000359).
+    /// and never signals the child it refused to signal. The still-running
+    /// child is owned by the detached non-signalling reaper, so once it exits
+    /// it is reaped instead of staying a host-lifetime zombie (I-000359).
     #[cfg(unix)]
     #[tokio::test]
     async fn terminate_returns_within_bound_when_identity_unprovable_and_leader_alive() {
         let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
         let (child, _stdin, _stdout) = spawner
-            .spawn("/bin/sleep", &["300"])
+            .spawn_with_env_policy("/bin/sleep", &["300"], &[], false)
             .expect("spawn live sleep fixture");
         let leader = child.id().expect("leader pid");
         let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
@@ -2037,6 +2096,130 @@ mod tests {
         assert!(
             reaped.is_ok(),
             "the non-signalling reaper must reap leader {leader} once it exits"
+        );
+    }
+
+    /// I-000359 / F-001: a refused live child must survive the shutdown of the
+    /// runtime that ran the refusal. The managed launch policy spawns the child
+    /// with `kill_on_drop(false)`, so cancelling the pending reaper cannot turn
+    /// the refusal into a signal. The fixture kills and reaps it afterwards.
+    #[cfg(unix)]
+    #[test] // sync: it owns the inner runtime whose shutdown is under test
+    fn refused_child_survives_reaper_runtime_shutdown() {
+        // A Tokio child needs a reactor at spawn time, so the fixture is
+        // spawned on — and torn down with — this dedicated runtime.
+        let inner = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("inner runtime");
+        let (leader, proc) = inner.block_on(async {
+            let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
+            let (child, stdin, stdout) = spawner
+                .spawn_with_env_policy("/bin/sleep", &["300"], &[], false)
+                .expect("spawn managed-policy sleep fixture");
+            let leader = child.id().expect("leader pid");
+            let mut proc = ManagedAcpProcess::new(
+                "refused-fixture".to_string(),
+                child,
+                PathBuf::from("/bin/sleep"),
+            );
+            // An identity that can never verify: the refusal path runs to its
+            // deadline and hands the child to the reaper.
+            proc.birth = Some(ProcessBirthToken {
+                pid: leader,
+                start_tick: u64::MAX,
+            });
+            // The pipes are registered with this runtime; drop them here.
+            drop((stdin, stdout));
+            (leader, proc)
+        });
+        let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
+        let _guard = KillGroupOnDrop(leader_pid);
+
+        let err = inner
+            .block_on(async move {
+                tokio::time::timeout(
+                    Duration::from_secs(10),
+                    proc.terminate(Duration::from_secs(1)),
+                )
+                .await
+            })
+            .expect("terminate must return within the bound")
+            .expect_err("an unprovable identity must refuse to signal");
+        assert!(
+            matches!(err, AcpError::CleanupUnconfirmed { .. }),
+            "the refusal must be typed as a liveness failure: {err}"
+        );
+
+        // The refused child was handed to a reaper on this runtime; shutting
+        // the runtime down cancels that task. A `kill_on_drop` child would be
+        // killed right here.
+        inner.shutdown_timeout(Duration::from_secs(5));
+
+        // Liveness proof: an exit status (`waitpid`) or a zombie state is the
+        // observed death of a killed child. The drop-kill, were it issued, is
+        // a syscall in the runtime's task teardown, so it surfaces inside this
+        // bounded state window; an alive `/bin/sleep` never does.
+        let deadline = std::time::Instant::now() + Duration::from_millis(500);
+        loop {
+            match nix::sys::wait::waitpid(leader_pid, Some(nix::sys::wait::WaitPidFlag::WNOHANG)) {
+                Ok(nix::sys::wait::WaitStatus::StillAlive) => {}
+                other => panic!(
+                    "the refused child must survive the reaper runtime's shutdown, got {other:?}"
+                ),
+            }
+            assert_eq!(
+                leader_state_is_zombie(leader),
+                Ok(false),
+                "the reaper runtime's shutdown must not leave the refused child dead"
+            );
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // Fixture-owned termination and reap.
+        nix::sys::signal::kill(leader_pid, nix::sys::signal::Signal::SIGKILL)
+            .expect("SIGKILL the surviving fixture");
+        let _ = nix::sys::wait::waitpid(leader_pid, None);
+    }
+
+    /// `waitid` reports the exit in `si_status`; the synthesized `wait(2)`
+    /// status word must keep the exit code and the core-dump flag (F-003). No
+    /// real core file is needed: the flag is part of the reported status.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn wait_status_conversion_preserves_exit_code_and_core_dump_bit() {
+        use nix::sys::signal::Signal;
+        use nix::sys::wait::WaitStatus;
+        use nix::unistd::Pid;
+        use std::os::unix::process::ExitStatusExt;
+
+        let pid = Pid::from_raw(1);
+
+        let exited = exit_status_from_wait_status(WaitStatus::Exited(pid, 3)).expect("exited");
+        assert_eq!((exited.code(), exited.signal()), (Some(3), None));
+
+        let signalled =
+            exit_status_from_wait_status(WaitStatus::Signaled(pid, Signal::SIGTERM, false))
+                .expect("signalled");
+        assert_eq!(
+            (signalled.signal(), signalled.core_dumped()),
+            (Some(15), false)
+        );
+
+        let core_dumped =
+            exit_status_from_wait_status(WaitStatus::Signaled(pid, Signal::SIGSEGV, true))
+                .expect("core-dumped");
+        assert_eq!(
+            (core_dumped.signal(), core_dumped.core_dumped()),
+            (Some(11), true)
+        );
+
+        assert!(
+            exit_status_from_wait_status(WaitStatus::StillAlive).is_none(),
+            "a non-exit status must not be projected onto an exit status"
         );
     }
 

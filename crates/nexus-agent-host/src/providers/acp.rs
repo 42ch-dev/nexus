@@ -214,8 +214,14 @@ impl AcpProvider {
             .collect();
 
         let spawner = AgentSpawner::new(cwd.clone());
-        let (child, stdin, stdout) =
-            spawner.spawn_with_env(&command, &args, &env).map_err(|e| {
+        // I-000359: `ManagedAcpProcess` owns this child's teardown, so the
+        // managed path spawns with a NON-killing drop policy. A cleanup
+        // refusal must never become an implicit kill — not even when the
+        // runtime running the non-signalling reaper shuts down and drops the
+        // handle. The CLI's raw-child consumers keep `kill_on_drop(true)`.
+        let (child, stdin, stdout) = spawner
+            .spawn_with_env_policy(&command, &args, &env, false)
+            .map_err(|e| {
                 HostError::launch_failed(
                     self.provider_id.clone(),
                     "ACP process spawn failed",
