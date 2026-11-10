@@ -33,7 +33,7 @@ Global
             └── KB graph / narrative knowledge assets
 ```
 
-> **Retired leaf (V1.231, ADR K1):** the former `User knowledge index` child of `User` is retired with the User KnowledgeStore (`knowledge_entries`) and the reference registry (`reference_sources`), and is not a live scope. A User-scope knowledge surface may return only as a future independent proposal ([ADR K1 §2.5](../../../.agents/adr/proposed/architecture/2026-11-10-retire-user-scope-and-references.md)).
+> **Retired leaf (V1.231, ADR K1):** the former `User knowledge index` child of `User` is retired with the User KnowledgeStore (`knowledge_entries`) and the reference registry (`reference_sources`), and is not a live scope. A User-scope knowledge surface may return only as a future independent proposal ([ADR K1 — Future demand returns as a new record](../../../.agents/adr/implemented/architecture/2026-11-10-retire-user-scope-and-references.md#future-demand-returns-as-a-new-record)).
 
 #### 1.2 Scope definitions
 
