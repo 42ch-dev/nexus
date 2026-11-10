@@ -27,7 +27,6 @@
 use nexus_contracts::{BlockType, TimePolicy, Visibility};
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::{InMemoryKbStore, KbStore};
-use nexus_knowledge::InMemoryKnowledgeStore;
 use nexus_moment_context_assembly::directive::{
     ActiveDirective, DirectiveDepth, DirectiveStore, DirectiveTtlKind,
 };
@@ -212,13 +211,12 @@ async fn assemble(
 ) {
     let (narrative, kb, stage0) = build_world();
     seed_routing_shapes(&kb).await;
-    let knowledge = InMemoryKnowledgeStore::new();
     let store = StubDirectiveStore::with_directive(directive());
 
     let request = MomentRequest::new(stage0)
         .with_world(WORLD_ID)
         .with_generation_stage(stage);
-    let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &store).await;
+    let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &store).await;
     (ctx, store, narrative)
 }
 

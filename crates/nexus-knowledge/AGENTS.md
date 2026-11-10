@@ -1,19 +1,15 @@
-# nexus-knowledge — Knowledge entries (World + User) + Reference Sources
+# nexus-knowledge — World Knowledge entries
 
 `nexus-knowledge` owns the **World KnowledgeEntry** domain (merged from the
-former `nexus-kb` in V1.139 P1 T1) alongside **User-scoped global knowledge**
-and **local reference-source** domain types. After the V1.139 merger it
-consolidates three knowledge tiers in one crate.
+former `nexus-kb` in V1.139 P1 T1) and nothing else. The User-scoped knowledge
+tier and the local reference-source domain it once carried were retired in
+V1.231 (ADR K1), so the crate is World-KB-only.
 
 ## Module layout
 
 | Module | Domain | Scope |
 |--------|--------|-------|
 | `world_kb` | World KB — `KnowledgeEntryRecord` + `SourceAnchor`, `KbStore`, KB extraction/sync/query/validation. `KnowledgeEntryRecord` converts to/from spoke `KnowledgeEntry` at the wire boundary. | World entity (narrative KB) |
-| `knowledge` | User knowledge — `UserKnowledgeEntry` (tag-driven, indexed per `user_id`), selectable by Moment context assembly | User entity |
-| `reference_source` | Reference sources — local-only research/reference registration | Creator / workspace |
-| `store` | `KnowledgeStore` abstraction + `InMemoryKnowledgeStore` (User knowledge) | trait / test impl |
-| `errors` | `KnowledgeError` (User knowledge errors) | — |
 
 > **World KB scope inversion (V1.139):** the previous `nexus-knowledge` AGENTS.md
 > stated "It is not Creator-scoped and does not own World/narrative KeyBlocks
@@ -57,9 +53,6 @@ the spoke `KnowledgeEntry` wire type for consumers that read it through this cra
   null/array/object shapes). When spoke later extends the body, **extend only the
   two free functions in `nexus-spoke-adapter::conversion`** — the validation
   engine and all consumers are unaffected (minimal future delta).
-- **Name collision resolved (R-V1139P0-004):** the User-scoped struct is
-  `UserKnowledgeEntry` (in `knowledge`); the World KB spoke boundary type is
-  `spoke_schemas::KnowledgeEntry` (re-exported from `world_kb`).
 
 ## Holder governance and read selection (v1.191 P1 — shipped)
 
@@ -102,18 +95,15 @@ stays in `nexus-core` admission, never in a client value (durable
 - **Contracts-first**: use `nexus-contracts` for retained nexus-local enums
   (`BlockType`, `KeyBlockStatus`) and `nexus-contracts` daemon-api envelopes.
   World KB wire identity is the spoke `KnowledgeEntry` (via the conversion seam).
-- **Scope clarity**: qualify "knowledge" as World KB (`world_kb` /
-  `KnowledgeEntryRecord`) vs User knowledge (`knowledge` / `UserKnowledgeEntry`) when
-  ambiguity matters; do not use this crate for Creator memory semantics.
+- **Scope clarity**: "knowledge" here means World KB (`world_kb` /
+  `KnowledgeEntryRecord`) only; do not use this crate for Creator memory semantics.
 - **Lifecycle delegation boundary**: spoke-provided standard lifecycle
   invariants (promote gate, status transitions, extension merge) **and the
   `KnowledgeEntryRecord ↔ KnowledgeEntry` conversion seam** live in
   `nexus-spoke-adapter` (since V1.145 P1a — dep-graph reversal, spec §8), **not**
-  in this crate. This crate owns domain types and the `KbStore` /
-  `KnowledgeStore` traits only.
+  in this crate. This crate owns domain types and the `KbStore` trait only.
 - **Persistence boundary (DF-43)**: `nexus-local-db` is the sole production
-  SQLite persistence owner (both for User knowledge via
-  `SqliteKnowledgeStore` and for World KB via its `kb_store`). This crate
+  SQLite persistence owner (World KB via its `kb_store`). This crate
   provides domain types, traits, and `InMemory*` test stores only. Do not add a
   second SQLite connection, file-backed store, or migration path in this crate.
 

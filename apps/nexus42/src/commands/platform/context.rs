@@ -21,10 +21,6 @@ use nexus_moment_context_assembly::{
 
 use crate::domain::{DegradationGuard, DomainRuntimeMode};
 
-// Four-domain Moment assembly — persistent knowledge store
-// (narrative, KB, and knowledge all use persistent stores from nexus-local-db)
-use nexus_local_db::SqliteKnowledgeStore;
-
 #[cfg(test)]
 use crate::domain::DegradationPolicy;
 #[cfg(test)]
@@ -34,7 +30,7 @@ use nexus_moment_context_assembly::cloud_stage::{
 
 #[derive(Debug, Subcommand)]
 pub enum ContextCommand {
-    /// Assemble four-domain Moment context from local persistent stores (SSOT)
+    /// Assemble three-domain Moment context from local persistent stores (SSOT)
     AssembleMoment {
         /// World ID to include in Moment context
         #[arg(long)]
@@ -44,10 +40,6 @@ pub enum ContextCommand {
         /// scope resolution + chapter-advance TTL)
         #[arg(long)]
         work_id: Option<String>,
-
-        /// User ID for knowledge lookup
-        #[arg(long)]
-        user_id: Option<String>,
 
         /// Branch ID within the world
         #[arg(long)]
@@ -80,10 +72,6 @@ pub enum ContextCommand {
         /// Filter KB by block type (character, ability, scene, etc.)
         #[arg(long)]
         kb_type: Option<String>,
-
-        /// Maximum number of user knowledge entries to return (default: 20)
-        #[arg(long, default_value_t = 20)]
-        knowledge_limit: usize,
 
         /// Emit diagnostic inspector packet JSON (lore activation is on by default; `NEXUS_MCA_LORE_ACTIVATION=off` disables)
         #[arg(long)]
@@ -125,7 +113,6 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
         ContextCommand::AssembleMoment {
             world_id,
             work_id,
-            user_id,
             branch_id,
             event_id,
             max_tokens,
@@ -134,7 +121,6 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             kb_limit,
             kb_search,
             kb_type,
-            knowledge_limit,
             emit_packet,
             inspect,
             packet_out,
@@ -144,7 +130,6 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
                 config,
                 world_id.as_deref(),
                 work_id.as_deref(),
-                user_id.as_deref(),
                 branch_id.as_deref(),
                 event_id.as_deref(),
                 max_tokens,
@@ -153,7 +138,6 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
                 kb_limit,
                 kb_search.as_deref(),
                 kb_type.as_deref(),
-                Some(knowledge_limit),
                 emit_packet,
                 inspect,
                 packet_out.as_deref(),
@@ -205,15 +189,6 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
                     "absent"
                 }
             );
-            eprintln!(
-                "User knowledge: {}",
-                if ctx.user_knowledge.is_some() {
-                    "present"
-                } else {
-                    "absent"
-                }
-            );
-
             Ok(())
         }
     }
@@ -527,7 +502,7 @@ async fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
     keywords
 }
 
-// ── V1.26: Four-domain Moment assembly (persistent stores) ──────────
+// ── V1.26: Three-domain Moment assembly (persistent stores) ─────────
 
 /// Open a shared `SqlitePool` for persistent stores.
 async fn open_shared_pool(config: &CliConfig) -> Result<sqlx::SqlitePool> {
@@ -554,10 +529,10 @@ fn lore_activation_value_is_off(value: &str) -> bool {
     )
 }
 
-/// Run four-domain Moment assembly using persistent narrative + KB + knowledge stores.
+/// Run three-domain Moment assembly using persistent narrative + KB stores.
 ///
-/// Uses `SqliteNarrativeGateway`, `SqliteKbStore`, and `SqliteKnowledgeStore`
-/// from `nexus-local-db` for all four domain slices.
+/// Uses `SqliteNarrativeGateway` and the admitted `SpokeBackedKbStore` from
+/// `nexus-local-db` / `nexus-spoke-adapter` for both domain slices.
 ///
 /// Returns `None` when `--emit-packet` writes diagnostic JSON to stdout or
 /// `--inspect` renders the readable inspector view (normal context output
@@ -627,7 +602,6 @@ pub async fn run_assemble_moment(
     config: &CliConfig,
     world_id: Option<&str>,
     work_id: Option<&str>,
-    user_id: Option<&str>,
     branch_id: Option<&str>,
     event_id: Option<&str>,
     max_tokens: Option<usize>,
@@ -636,7 +610,6 @@ pub async fn run_assemble_moment(
     kb_limit: Option<usize>,
     kb_search: Option<&str>,
     kb_type: Option<&str>,
-    knowledge_limit: Option<usize>,
     emit_packet: bool,
     inspect: bool,
     packet_out: Option<&str>,
@@ -690,15 +663,12 @@ pub async fn run_assemble_moment(
             .ok()
             .filter(|edges| !edges.is_empty())
     };
-    let uid = user_id.unwrap_or("user_default");
-    let knowledge = SqliteKnowledgeStore::new(pool.clone());
-
     // Build Stage0Assembly — load from creator memory if available
     let stage0 = build_stage0_from_local(config, hint, max_tokens, include_fragments)
         .await
         .unwrap_or_else(|_| Stage0Assembly {
             personality: "Local Moment assembly.".to_string(),
-            experience: "Four-domain context from persistent stores.".to_string(),
+            experience: "Three-domain context from persistent stores.".to_string(),
             long_term_memories: Vec::new(),
             fragment_keywords: Vec::new(),
             system_prefix: String::new(),
@@ -707,7 +677,7 @@ pub async fn run_assemble_moment(
         });
 
     // Build MomentRequest with KB query + budget fields
-    let mut request = MomentRequest::new(stage0).with_world(wid).with_user(uid);
+    let mut request = MomentRequest::new(stage0).with_world(wid);
 
     // V1.150 P1 (DF-75): Moment Directive scope resolution is keyed on the
     // creator + work of the moment (spec §3.2). The active creator is always
@@ -741,10 +711,6 @@ pub async fn run_assemble_moment(
             request = request.with_kb_block_type(bt);
         }
     }
-    if let Some(limit) = knowledge_limit {
-        request = request.with_knowledge_limit(limit);
-    }
-
     // V1.149 P0 T2: `MomentRequest` defaults to activation ON; only the
     // off-switch needs an explicit call here.
     if activation_off {
@@ -790,8 +756,7 @@ pub async fn run_assemble_moment(
     // (`nexus_core::LocalDirectiveStore`); the old
     // `nexus_daemon_runtime::directive_store` path was only a core re-export.
     let directives = nexus_core::LocalDirectiveStore::new(pool);
-    let ctx =
-        assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &directives).await;
+    let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
 
     // V1.146 P4 T3: emit diagnostic inspector packet when --emit-packet is set.
     if emit_packet {
@@ -1000,7 +965,6 @@ mod tests {
         let _ = ContextCommand::AssembleMoment {
             world_id: Some("wld_test".to_string()),
             work_id: Some("wrk_test".to_string()),
-            user_id: Some("user_test".to_string()),
             branch_id: None,
             event_id: None,
             max_tokens: Some(1000),
@@ -1009,7 +973,6 @@ mod tests {
             kb_limit: Some(5),
             kb_search: Some("hero".to_string()),
             kb_type: Some("character".to_string()),
-            knowledge_limit: 10,
             emit_packet: true,
             inspect: false,
             packet_out: Some("packet.json".to_string()),
@@ -1018,7 +981,6 @@ mod tests {
         let _ = ContextCommand::AssembleMoment {
             world_id: None,
             work_id: None,
-            user_id: None,
             branch_id: None,
             event_id: None,
             max_tokens: None,
@@ -1027,7 +989,6 @@ mod tests {
             kb_limit: None,
             kb_search: None,
             kb_type: None,
-            knowledge_limit: 20,
             emit_packet: false,
             inspect: true,
             packet_out: None,
@@ -1086,7 +1047,6 @@ mod tests {
         let narrative =
             nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
         let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-        let knowledge = SqliteKnowledgeStore::new(pool.clone());
 
         // Build request
         let stage0 = Stage0Assembly {
@@ -1098,12 +1058,10 @@ mod tests {
             user_prompt: "Test prompt.".to_string(),
             max_tokens: None,
         };
-        let request = MomentRequest::new(stage0)
-            .with_world("wld_test")
-            .with_user("user_test");
+        let request = MomentRequest::new(stage0).with_world("wld_test");
 
         // Run assembly
-        let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+        let ctx = assemble_moment(&request, &narrative, &kb).await;
 
         // Verify world state from persistent store
         assert!(
@@ -1150,7 +1108,6 @@ mod tests {
         let narrative =
             nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
         let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-        let knowledge = SqliteKnowledgeStore::new(pool.clone());
 
         let stage0 = Stage0Assembly {
             personality: "Test.".to_string(),
@@ -1163,7 +1120,7 @@ mod tests {
         };
         let request = MomentRequest::new(stage0).with_world("wld_ghost");
 
-        let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+        let ctx = assemble_moment(&request, &narrative, &kb).await;
 
         assert!(
             ctx.world_state.is_none(),
@@ -1179,15 +1136,13 @@ mod tests {
         );
     }
 
-    /// C3.1: Persistent E2E — demo seed + assemble-moment, all four domains non-empty.
+    /// C3.1: Persistent E2E — demo seed + assemble-moment, all three domains non-empty.
     ///
-    /// Seeds a world, event, KB block, and knowledge entry into a fresh DB,
-    /// then runs `assemble_moment` and verifies all four domain sections
-    /// are present (world state, timeline, world KB, user knowledge).
+    /// Seeds a world, event, and KB block into a fresh DB, then runs
+    /// `assemble_moment` and verifies all three domain sections are present
+    /// (world state, timeline, world KB).
     #[tokio::test]
-    async fn assemble_moment_persistent_four_domains() {
-        use nexus_knowledge::{KnowledgeStore, KnowledgeTag, UserKnowledgeEntry};
-
+    async fn assemble_moment_persistent_three_domains() {
         // Create fresh SQLite DB
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
@@ -1225,23 +1180,10 @@ mod tests {
         )
         .await;
 
-        // Seed knowledge entry (persistent)
-        let knowledge_store = nexus_local_db::SqliteKnowledgeStore::new(pool.clone());
-        let entry = UserKnowledgeEntry::new(
-            "user_default",
-            vec![
-                KnowledgeTag::new("demo"),
-                KnowledgeTag::new("worldbuilding"),
-            ],
-            "Demo knowledge entry for testing Moment context assembly.",
-        );
-        knowledge_store.store(entry).await.unwrap();
-
         // Build persistent stores from the pool
         let narrative =
             nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
         let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-        let knowledge = nexus_local_db::SqliteKnowledgeStore::new(pool);
 
         // Build request
         let stage0 = Stage0Assembly {
@@ -1253,14 +1195,12 @@ mod tests {
             user_prompt: "Test prompt.".to_string(),
             max_tokens: None,
         };
-        let request = MomentRequest::new(stage0)
-            .with_world("wld_demo")
-            .with_user("user_default");
+        let request = MomentRequest::new(stage0).with_world("wld_demo");
 
         // Run assembly
-        let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+        let ctx = assemble_moment(&request, &narrative, &kb).await;
 
-        // Verify ALL four domains are present
+        // Verify ALL three domains are present
         assert!(
             ctx.world_state.is_some(),
             "world_state should be present from persistent store"
@@ -1284,60 +1224,11 @@ mod tests {
             "KB should contain demo key block name"
         );
 
-        assert!(
-            ctx.user_knowledge.is_some(),
-            "user_knowledge should be present from persistent store"
-        );
-        assert!(
-            ctx.user_knowledge
-                .as_ref()
-                .unwrap()
-                .contains("Demo knowledge"),
-            "user knowledge should contain demo entry"
-        );
-
         // Verify full context
         let full = ctx.to_full_context();
         assert!(full.contains("## World State"));
         assert!(full.contains("## Timeline"));
         assert!(full.contains("## World Knowledge Base"));
-        assert!(full.contains("## User Knowledge"));
-    }
-
-    /// C3.2: Restart test — second invocation sees same knowledge.
-    ///
-    /// Creates two separate store instances from the same DB file,
-    /// simulating a process restart. Verifies knowledge persists.
-    #[tokio::test]
-    async fn assemble_moment_restart_sees_same_knowledge() {
-        use nexus_knowledge::{KnowledgeStore, KnowledgeTag, UserKnowledgeEntry};
-
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-        nexus_local_db::run_migrations(&pool).await.unwrap();
-        nexus_local_db::seed_versions(&pool).await.unwrap();
-
-        // Process 1: seed knowledge
-        let store1 = nexus_local_db::SqliteKnowledgeStore::new(pool);
-        let entry = UserKnowledgeEntry::new(
-            "user_default",
-            vec![KnowledgeTag::new("restart-test")],
-            "Knowledge that survives restart.",
-        );
-        let id = entry.id.clone();
-        store1.store(entry).await.unwrap();
-        drop(store1);
-
-        // Process 2: read knowledge (simulating restart)
-        let pool2 = nexus_local_db::open_pool(&db_path).await.unwrap();
-        let store2 = nexus_local_db::SqliteKnowledgeStore::new(pool2);
-        let retrieved = store2.get("user_default", &id).await.unwrap();
-        assert!(retrieved.is_some());
-        assert_eq!(
-            retrieved.unwrap().content,
-            "Knowledge that survives restart."
-        );
     }
 
     // ── T6.7 / T6.8: Mode-aware routing tests ────────────────────────────
@@ -1767,7 +1658,6 @@ mod tests {
         async fn run<K: KbStore>(pool: &sqlx::SqlitePool, kb_store: &K) -> MomentContext {
             let narrative =
                 nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
-            let knowledge = SqliteKnowledgeStore::new(pool.clone());
             let stage0 = Stage0Assembly {
                 personality: "P.".to_string(),
                 experience: "E.".to_string(),
@@ -1775,7 +1665,7 @@ mod tests {
                 ..Stage0Assembly::default()
             };
             let request = MomentRequest::new(stage0).with_world("wld_t4");
-            assemble_moment(&request, &narrative, kb_store, &knowledge).await
+            assemble_moment(&request, &narrative, kb_store).await
         }
 
         let (pool, _dir) = fresh_pool().await;

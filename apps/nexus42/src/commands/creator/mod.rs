@@ -6,18 +6,16 @@
 //! - **Work plane (DF-60/61)**: `works` — atomic single-purpose ops (inspire,
 //!   reopen, reconcile-chapters, completion-lock, pool, …)
 //! - **Primary**: `register`, `use`, `list`
-//! - **Assets**: `workspace`, `soul`, `memory`, `kb`, `knowledge`, `reference`, `world`
+//! - **Assets**: `workspace`, `soul`, `memory`, `kb`, `world`
 //! - **Platform bridge**: `status`, `pair`, `unpair`, `credentials`
 //! - **Maintenance**: `demo-seed`, `logout`
 
 pub mod character;
 pub mod inspector;
 pub mod kb;
-pub mod knowledge;
 pub mod memory;
 pub mod moment_directive;
 pub mod reading;
-pub mod reference;
 pub mod rules_runtime;
 pub mod soul;
 pub mod work_utils;
@@ -41,7 +39,6 @@ use nexus_cloud_sync::platform_client::{PlatformClient, VerifyStatus};
 use nexus_contracts::{Creator, SetActiveWorkspaceRequest};
 use nexus_core::CoreHomeService;
 use nexus_knowledge::world_kb::KbStore;
-use nexus_knowledge::KnowledgeStore;
 use soul::SoulCommand;
 use std::path::PathBuf;
 
@@ -404,23 +401,9 @@ pub enum CreatorCommand {
     /// local extract queue, and `rescan` over chapter prose. There is no World
     /// scope here — World narrative KB entries live on `creator world kb`, and
     /// the old `--scope world` compatibility spelling is gone.
-    ///
-    /// For User-scoped global knowledge, use `creator knowledge` instead.
-    /// See entity-scope-model §5.3–5.4 for the three KB namespaces.
     Kb {
         #[command(subcommand)]
         command: KbCommand,
-    },
-
-    /// User-scoped global knowledge entries (add, list, search)
-    ///
-    /// Stores unstructured knowledge entries scoped to the User (not Creator).
-    /// For Work-scope file index use `creator kb`; for World narrative KB use
-    /// `creator world kb`.
-    /// See entity-scope-model §5.3–§5.4 for the three KB namespaces.
-    Knowledge {
-        #[command(subcommand)]
-        command: knowledge::KnowledgeCommand,
     },
 
     /// Moment Directive author surface (V1.150 P1, DF-75)
@@ -435,11 +418,6 @@ pub enum CreatorCommand {
         command: moment_directive::MomentDirectiveCommand,
     },
 
-    /// Reference source management (V1.26 reference store)
-    Reference {
-        #[command(subcommand)]
-        command: reference::ReferenceCommand,
-    },
     /// Narrative world management (create worlds, add events, list timelines)
     World {
         #[command(subcommand)]
@@ -502,7 +480,7 @@ pub enum CreatorCommand {
     },
 
     // ── Maintenance tier ────────────────────────────────────────────
-    /// Seed demo data: creates a demo world, event, KB block, and knowledge entry
+    /// Seed demo data: creates a demo world, event, and KB block
     ///
     /// Idempotent by default — skips if demo world already exists.
     /// Use --force to recreate (deletes existing demo data first).
@@ -584,13 +562,11 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Workspace { command } => run_creator_workspace(config, command).await,
         CreatorCommand::Soul { command } => soul::run(command, config).await,
         CreatorCommand::Memory { command } => memory::run(command, config).await,
-        CreatorCommand::Reference { command } => reference::run(command, config).await,
         CreatorCommand::Kb { command } => kb::run(command, config).await,
         CreatorCommand::World { command } => world::run(command, config).await,
         CreatorCommand::Character { command } => character::run(command, config).await,
         CreatorCommand::Reading { command } => reading::run(command, config).await,
         CreatorCommand::Inspector { command } => inspector::run(command, config).await,
-        CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,
         CreatorCommand::MomentDirective { command } => moment_directive::run(command, config).await,
         CreatorCommand::Works { command } => works::handle_works(command, config).await,
         CreatorCommand::DemoSeed { force } => run_demo_seed(config, force).await,
@@ -609,8 +585,8 @@ fn validate_workspace_slug(slug: &str) -> Result<()> {
 
 /// Seed demo data for testing and development.
 ///
-/// Creates a demo world, event, KB block, and knowledge entry using
-/// Plan 1 write APIs + knowledge store. Idempotent unless `--force`.
+/// Creates a demo world, event and KB block using the Plan 1 write APIs.
+/// Idempotent unless `--force`.
 async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
     let creator_id = config
         .active_creator_id
@@ -643,10 +619,6 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
         }
         // Delete existing demo data (cascade handles events, KB blocks)
         // SAFETY: DELETE against known tables
-        sqlx::query("DELETE FROM knowledge_entries WHERE user_id = 'user_default'")
-            .execute(&pool)
-            .await
-            .map_err(|e| CliError::Other(format!("Failed to clean demo knowledge: {e}")))?;
         sqlx::query("DELETE FROM narrative_worlds WHERE world_id = ?")
             .bind(wid)
             .execute(&pool)
@@ -702,22 +674,6 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
         .await
         .map_err(|e| CliError::Other(format!("Failed to create demo KB block: {e}")))?;
     println!("✓ Demo KB block: {}", kb_result.entry_id);
-
-    // 4. Create demo knowledge entry
-    let knowledge_store = nexus_local_db::SqliteKnowledgeStore::new(pool);
-    let entry = nexus_knowledge::UserKnowledgeEntry::new(
-        "user_default",
-        vec![
-            nexus_knowledge::KnowledgeTag::new("demo"),
-            nexus_knowledge::KnowledgeTag::new("worldbuilding"),
-        ],
-        "Demo knowledge entry for Moment context assembly testing.",
-    );
-    let stored = knowledge_store
-        .store(entry)
-        .await
-        .map_err(|e| CliError::Other(format!("Failed to create demo knowledge: {e}")))?;
-    println!("✓ Demo knowledge: {}", stored.id);
 
     println!();
     println!("Demo seed complete. Run `nexus42 platform context assemble-moment` to verify.");

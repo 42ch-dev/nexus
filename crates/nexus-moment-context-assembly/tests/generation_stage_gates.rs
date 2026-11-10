@@ -17,7 +17,6 @@
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::{InMemoryKbStore, KbStore};
-use nexus_knowledge::InMemoryKnowledgeStore;
 use nexus_moment_context_assembly::directive::{
     ActiveDirective, DirectiveDepth, DirectiveStore, DirectiveTtlKind,
 };
@@ -91,7 +90,6 @@ async fn seed_stage_fixture(kb: &InMemoryKbStore) {
 async fn assemble_for(stage: Option<GenerationStage>) -> String {
     let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
     let kb = InMemoryKbStore::new();
-    let knowledge = InMemoryKnowledgeStore::new();
     seed_stage_fixture(&kb).await;
 
     let stage0 = Stage0Assembly {
@@ -104,7 +102,7 @@ async fn assemble_for(stage: Option<GenerationStage>) -> String {
     if let Some(stage) = stage {
         request = request.with_generation_stage(stage);
     }
-    let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+    let ctx = assemble_moment(&request, &narrative, &kb).await;
     ctx.to_full_context()
 }
 
@@ -273,7 +271,6 @@ async fn directive_injects_regardless_of_stage() {
     ] {
         let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
         let kb = InMemoryKbStore::new();
-        let knowledge = InMemoryKnowledgeStore::new();
         seed_stage_fixture(&kb).await;
         let store = StubDirectiveStore::with_directive(stub_directive());
 
@@ -284,8 +281,7 @@ async fn directive_injects_regardless_of_stage() {
         let request = MomentRequest::new(stage0)
             .with_world(WORLD_ID)
             .with_generation_stage(stage);
-        let ctx =
-            assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &store).await;
+        let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &store).await;
 
         let full = ctx.to_full_context();
         assert!(

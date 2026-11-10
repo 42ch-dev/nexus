@@ -14,12 +14,12 @@
 //! - **AC3**: `--dry-run` shows the diff without writing.
 //! - **AC4**: cross-author attempt returns `403` (`WORLD_KB_FORBIDDEN`).
 //!
-//! v1.193 P0-T13 retires the deprecated `creator kb --scope world` forwarding
-//! and the `creator reference refresh` entrance. Those two contracts are pinned
+//! v1.193 P0-T13 retires the deprecated `creator kb --scope world` forwarding,
+//! and v231 retires the whole `creator reference` / `creator knowledge` groups
+//! with the User-knowledge and reference stores. Those contracts are pinned
 //! here through the real binary against a hermetic direct-core home
-//! (`common/direct.rs`): the refused legacy scope leaves the home untouched,
-//! `reference refresh` is unknown, and the retained local registry plus the
-//! User-knowledge leaves stay callable.
+//! (`common/direct.rs`): the refused legacy scope leaves the home untouched and
+//! both retired groups are unknown subcommands that touch nothing.
 //!
 //! Run with: cargo test -p nexus42 --test `kb_rescan_cli`
 
@@ -473,187 +473,39 @@ async fn work_kb_scope_rejects_legacy_world_without_mutation() {
     );
 }
 
-/// The retired reference refresh entrance is unknown.
+/// The retired `creator knowledge` / `creator reference` groups are unknown.
 ///
-/// Regression: `creator reference refresh` must not remain a parseable no-op
-/// (it had no complete direct CLI operation), so the parser refuses it before
-/// any handler — and therefore before any registry write — runs.
+/// Regression: every leaf of both groups read the retiring User-knowledge and
+/// reference stores, so the parser must refuse the group names before any
+/// handler runs — and no registry row or `body.md` may be produced.
 #[tokio::test]
-async fn retired_reference_refresh_is_unknown() {
+async fn retired_knowledge_and_reference_groups_are_unknown() {
     let fixture = DirectFixture::new().await;
 
-    let output = fixture
-        .command()
-        .args(["creator", "reference", "refresh", "all"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "`creator reference refresh` must be an unknown subcommand, got {output:?}"
-    );
-    assert!(
-        stderr.contains("refresh"),
-        "the refusal must name the retired subcommand, got:\n{stderr}"
-    );
-}
-
-/// The surviving help surfaces render, and neither advertises a retired leaf.
-#[tokio::test]
-async fn reference_and_knowledge_help_survive_without_retired_leaves() {
-    let fixture = DirectFixture::new().await;
-
-    let reference_help = fixture
-        .command()
-        .args(["creator", "reference", "--help"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        reference_help.status.success(),
-        "`creator reference --help` must still render: {}",
-        String::from_utf8_lossy(&reference_help.stderr)
-    );
-    let reference_help_text = String::from_utf8_lossy(&reference_help.stdout).into_owned();
-    let reference_subcommands: Vec<&str> = subcommands(&reference_help_text).collect();
-    for subcommand in ["register", "list", "show"] {
+    for args in [
+        vec!["creator", "knowledge", "--help"],
+        vec!["creator", "knowledge", "list"],
+        vec!["creator", "reference", "--help"],
+        vec!["creator", "reference", "list"],
+        vec!["creator", "reference", "refresh", "all"],
+    ] {
+        let output = fixture
+            .command()
+            .args(&args)
+            .output()
+            .expect("spawn the real nexus42 binary");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "`{args:?}` must be refused as an unknown subcommand, got {output:?}"
+        );
         assert!(
-            reference_subcommands.contains(&subcommand),
-            "`creator reference --help` must still offer '{subcommand}', got:\n{reference_help_text}"
+            stderr.contains(args[1]),
+            "the refusal must name the retired '{}' group, got:\n{stderr}",
+            args[1]
         );
     }
-    assert!(
-        !reference_subcommands.contains(&"refresh"),
-        "`creator reference --help` must not advertise the retired leaf, got:\n{reference_help_text}"
-    );
-
-    let knowledge_help = fixture
-        .command()
-        .args(["creator", "knowledge", "--help"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        knowledge_help.status.success(),
-        "`creator knowledge --help` must still render: {}",
-        String::from_utf8_lossy(&knowledge_help.stderr)
-    );
-    let knowledge_help_text = String::from_utf8_lossy(&knowledge_help.stdout).into_owned();
-    let knowledge_subcommands: Vec<&str> = subcommands(&knowledge_help_text).collect();
-    for subcommand in ["add", "list", "search"] {
-        assert!(
-            knowledge_subcommands.contains(&subcommand),
-            "`creator knowledge --help` must still offer '{subcommand}', got:\n{knowledge_help_text}"
-        );
-    }
-}
-
-/// The retained reference registry stays callable end to end without a daemon.
-#[tokio::test]
-async fn retained_reference_registry_round_trips_without_a_daemon() {
-    let fixture = DirectFixture::new().await;
-
-    let register = fixture
-        .command()
-        .args([
-            "creator",
-            "reference",
-            "register",
-            "--source",
-            "https://example.invalid/t13-notes",
-            "--source-type",
-            "url",
-            "--title",
-            "Retained reference",
-            "--body",
-            "Reference body retained by the local registry.",
-        ])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        register.status.success(),
-        "`reference register` must stay callable: {}",
-        String::from_utf8_lossy(&register.stderr)
-    );
-    let reference_id = String::from_utf8_lossy(&register.stdout)
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("✓ Reference registered: "))
-        .expect("`reference register` must report the new reference id")
-        .trim()
-        .to_string();
-
-    let list = fixture
-        .command()
-        .args(["creator", "reference", "list"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        list.status.success(),
-        "`reference list` must stay callable: {}",
-        String::from_utf8_lossy(&list.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&list.stdout).contains(&reference_id),
-        "the registered reference must be listed"
-    );
-
-    let show = fixture
-        .command()
-        .args(["creator", "reference", "show", &reference_id])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        show.status.success(),
-        "`reference show` must stay callable: {}",
-        String::from_utf8_lossy(&show.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&show.stdout).contains("Retained reference"),
-        "`reference show` must render the registered title"
-    );
-}
-
-/// The retained User-knowledge leaves stay callable through the typed core.
-#[tokio::test]
-async fn retained_knowledge_leaves_round_trip_through_the_core() {
-    let fixture = DirectFixture::new().await;
-
-    let add = fixture
-        .command()
-        .args([
-            "creator",
-            "knowledge",
-            "add",
-            "Retained knowledge entry",
-            "--tags",
-            "t13,smoke",
-        ])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        add.status.success(),
-        "`knowledge add` must stay callable: {}",
-        String::from_utf8_lossy(&add.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&add.stdout).contains("Knowledge entry added"),
-        "`knowledge add` must confirm the stored entry"
-    );
-
-    let search = fixture
-        .command()
-        .args(["creator", "knowledge", "search", "Retained"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        search.status.success(),
-        "`knowledge search` must stay callable: {}",
-        String::from_utf8_lossy(&search.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&search.stdout).contains("Retained knowledge entry"),
-        "`knowledge search` must find the entry just added through the core"
-    );
 }
 
 /// The retained work-scope index leaves round-trip through the direct core.
@@ -808,14 +660,4 @@ async fn corrupt_work_index_is_reported_as_empty_not_an_error() {
         "a corrupt index must read as empty, got:\n{}",
         String::from_utf8_lossy(&list.stdout)
     );
-}
-
-/// The subcommand names a clap help text lists under its `Commands:` section.
-fn subcommands(help_text: &str) -> impl Iterator<Item = &str> {
-    help_text
-        .lines()
-        .skip_while(|line| line.trim_end() != "Commands:")
-        .skip(1)
-        .take_while(|line| !line.trim().is_empty())
-        .filter_map(|line| line.split_whitespace().next())
 }

@@ -799,32 +799,19 @@ fn v135_kb_help_disambiguates_scopes() {
         "V1.35 P3: creator kb --help must mention 'world' scope"
     );
 
-    // Must disambiguate by pointing to `creator knowledge`
-    assert!(
-        help_text.contains("creator knowledge"),
-        "V1.35 P3: creator kb --help must mention 'creator knowledge' for disambiguation"
-    );
 }
 
-/// V1.35 P3: `creator knowledge --help` disambiguates from `kb`.
+/// v231: the retired `creator knowledge` / `creator reference` groups are
+/// unregistered, so the parser rejects them as unknown subcommands.
 #[test]
-fn v135_knowledge_help_disambiguates_from_kb() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "knowledge", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    // Must point to `creator kb` as alternative
-    assert!(
-        help_text.contains("creator kb"),
-        "V1.35 P3: creator knowledge --help must mention 'creator kb' for disambiguation"
-    );
+fn v231_retired_creator_knowledge_and_reference_groups_are_unknown() {
+    for group in ["knowledge", "reference"] {
+        Command::cargo_bin("nexus42")
+            .unwrap()
+            .args(["creator", group, "--help"])
+            .assert()
+            .code(2);
+    }
 }
 
 /// V1.35 P3: `creator --help` mentions tier grouping hints in descriptions.

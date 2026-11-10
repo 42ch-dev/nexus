@@ -9,8 +9,9 @@
 //! Per the entity scope model, this module owns narrative knowledge assets
 //! under a **World** entity — not generic Creator or User knowledge. It was
 //! relocated (V1.139 P1 T1) from the former `nexus-kb` crate, which has been
-//! merged into `nexus-knowledge` alongside the existing User-scoped knowledge
-//! and reference-source domains.
+//! merged into `nexus-knowledge`. The User-scoped knowledge tier and the
+//! reference-source domain this crate once carried were retired in V1.231
+//! (ADR K1), so `nexus-knowledge` is World-KB-only.
 //!
 //! # Uniqueness constraint
 //!

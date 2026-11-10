@@ -104,7 +104,7 @@ The three profile-set IDs (`nexus.profile.minimal`, `nexus.profile.writer`, `nex
 > **Roster governance:** This table is the logical catalog and V1.60 delivery record, not the current executable allowlist.
 > Host-tool binding and dispatch are owned by `nexus_core::execution::capabilities::host_tool_registry()` in [`crates/nexus-core/src/execution/capabilities.rs`](../../../crates/nexus-core/src/execution/capabilities.rs): `execute_tool` dispatches through it, and `admission_pipeline` uses the same `spine_resolves` authority.
 > The [`nexus-orchestration` `CapabilityRegistry`](../../../crates/nexus-orchestration/src/capability/mod.rs) is a **separate** registry of orchestration `Capability` implementations, not the owner of the core's static host-tool table. Its admitted user capabilities can participate in the core dispatch spine after builtin and peer lookup.
-> The retained core registry has **30 static host tools: 28 `nexus.*` + 2 `fs/*`**; [`retained_peer_contracts.rs`](../../../crates/nexus-core/tests/retained_peer_contracts.rs) pins that roster and excludes `nexus.profile.*` grouping metadata. The historical `nexus.reference.refresh` row below records its V1.58 P1 orchestration binding; a core host-tool binding also shipped in V1.58 P3 and is in today's registry. The retained ID `nexus.observability.daemon.health` does not restore the deleted daemon host.
+> The retained core registry has **28 static host tools: 26 `nexus.*` + 2 `fs/*`**; [`retained_peer_contracts.rs`](../../../crates/nexus-core/tests/retained_peer_contracts.rs) pins that roster and excludes `nexus.profile.*` grouping metadata. The retired `nexus.reference.refresh` and `nexus.research.query` ids were removed with the reference store (V1.231, ADR K1) and are **not** in today's registry. The retained ID `nexus.observability.daemon.health` does not restore the deleted daemon host.
 > Cross-references: [`agent-nexus-tool-bridge.md`](agent-nexus-tool-bridge.md) (retained admission/execution boundary and historical agent transport), [`capability-registry.md`](capability-registry.md) (Master — current runtime dispatch contract).
 >
 > **Status tags (V1.60 delivery snapshot)**: `shipped` (runtime handler bound at that stage), `scaffold-equivalent` (§3.3 metadata, not an action ID), `OUT` (explicitly non-implemented), `catalog-only` (logical contract; runtime binding deferred or in orchestration engine), `deferred-to-V2.0+` (platform-gated). Current binding authority is the code-backed registry above.
@@ -144,7 +144,6 @@ The three profile-set IDs (`nexus.profile.minimal`, `nexus.profile.writer`, `nex
 | `nexus.manuscript.chapter.update` | Update chapter content and block metadata for a work | shipped | V1.54 P0 | `host_tool` |
 | `nexus.publish.chapter` | User-attested publish flow for a chapter artifact | OUT | — | DF-59 Backlog |
 | `nexus.publish.story` | User-attested publish flow for a story artifact | OUT | — | DF-59 Backlog |
-| `nexus.research.query` | Query local-only `ReferenceSource` index / excerpts | shipped | V1.59 P0 | `host_tool` |
 | `nexus.trace.correlation` | Propagate correlation IDs across tool calls | shipped | V1.59 P0 | `host_tool` |
 | `nexus.runtime.health` | Agent-visible health, registry reachability, sync state | shipped | V1.59 P0 | `host_tool` |
 | `nexus.observability.daemon.health` | Daemon runtime status (uptime, lifecycle, registry) | shipped | V1.53 P1 | `host_tool` |
@@ -152,7 +151,6 @@ The three profile-set IDs (`nexus.profile.minimal`, `nexus.profile.writer`, `nex
 | `nexus.work.schedule.set` | Link/unlink schedules to a work (schedule DAO write) | shipped | V1.54 P0 | `host_tool` |
 | `nexus.finding.resolve` | Resolve/close a finding entry (findings DAO write) | shipped | V1.54 P0 | `host_tool` |
 | `nexus.pool.entry.manage` | Add/remove entries from the selection pool (pool DAO write) | shipped | V1.54 P0 | `host_tool` |
-| `nexus.reference.refresh` | Refresh a reference source body by fetching its URL and comparing content hash; honors refresh_policy (on_change / scheduled / offline) | shipped | V1.58 P1 | orchestration |
 
 > **Note:** `sync.*` runtime binding deferred — tracked DF-46 (§2.3) / PD-05 (§2.1).
 

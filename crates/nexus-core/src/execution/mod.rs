@@ -91,9 +91,7 @@ pub use lifecycle::{
     ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError, ExecutionSubscriptionObserver,
     RunnerDeps,
 };
-pub use schedules::{
-    AutoChronologyConfig, CronSupervisorConfig, RefreshSchedulerConfig, StaleFindingsWatcherConfig,
-};
+pub use schedules::{AutoChronologyConfig, CronSupervisorConfig, StaleFindingsWatcherConfig};
 pub use workflow::{
     drive_preset_run, resume_driven_sessions, CancelOutcome, DriveDisposition, PresetRunConfig,
     PresetRunOutcome, ResumeDecision, RunControlError, RunControlResult, RunSignal,

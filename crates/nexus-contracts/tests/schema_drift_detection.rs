@@ -221,22 +221,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             PresetProfileState
         ),
-        // core/references/
-        entry!(
-            "schemas/core/references/reference-get-response.schema.json",
-            Strict,
-            ReferenceGetResponse
-        ),
-        entry!(
-            "schemas/core/references/reference-list-response.schema.json",
-            Strict,
-            ReferenceListResponse
-        ),
-        entry!(
-            "schemas/core/references/reference-source-info.schema.json",
-            Strict,
-            ReferenceSourceInfo
-        ),
         // core/works/
         entry!(
             "schemas/core/works/work-inspiration-add-request.schema.json",

@@ -199,8 +199,6 @@ export interface NativeCoreBinding {
     requestJson: Uint8Array,
   ): Promise<Uint8Array>;
   deleteAnnotation(principal: string, annotationId: string): Promise<Uint8Array>;
-  listReferences(principal: string): Promise<Uint8Array>;
-  getReference(principal: string, referenceId: string): Promise<Uint8Array>;
   // ── P5-T2 Actor / memory / context family surface ─────────────────────────
   listCharacters(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
   createCharacter(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;

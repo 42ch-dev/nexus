@@ -22,7 +22,6 @@
 
 use nexus_contracts::{BlockType, TimePolicy, Visibility};
 use nexus_knowledge::world_kb::{InMemoryKbStore, KbStore};
-use nexus_knowledge::{InMemoryKnowledgeStore, KnowledgeStore, KnowledgeTag};
 use nexus_moment_context_assembly::stage0::Stage0Assembly;
 use nexus_moment_context_assembly::{assemble_moment, MomentRequest};
 use nexus_narrative::timeline_event::TimelineEventType;
@@ -41,12 +40,10 @@ const SLOT_HEADINGS: [&str; 4] = [
 fn build_neutral_fixture() -> (
     InMemoryNarrativeGateway<InMemoryKbStore>,
     InMemoryKbStore,
-    InMemoryKnowledgeStore,
     Stage0Assembly,
 ) {
     let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
     let kb = InMemoryKbStore::new();
-    let knowledge = InMemoryKnowledgeStore::new();
 
     // ── World (frozen created_at) ──
     let mut world = nexus_narrative::world::World::new(
@@ -81,15 +78,15 @@ fn build_neutral_fixture() -> (
         ..Stage0Assembly::default()
     };
 
-    (narrative, kb, knowledge, stage0)
+    (narrative, kb, stage0)
 }
 
-/// Seed a single neutral KB entry (no modules map) + user knowledge.
+/// Seed a single neutral KB entry (no modules map).
 ///
 /// NOTE: exactly ONE KB entry — `InMemoryKbStore::query` iterates a `HashMap`
 /// without sorting, so multi-entry fixtures would make the byte-exact golden
 /// order nondeterministic (same convention as the V1.149 goldens).
-async fn seed_neutral_stores(kb: &InMemoryKbStore, knowledge: &InMemoryKnowledgeStore) {
+async fn seed_neutral_stores(kb: &InMemoryKbStore) {
     use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 
     let mut kb_plain = KnowledgeEntryRecord::new("wld_golden_slots", BlockType::Character, "Hero");
@@ -98,16 +95,6 @@ async fn seed_neutral_stores(kb: &InMemoryKbStore, knowledge: &InMemoryKnowledge
     kb.insert_knowledge_entry(kb_plain)
         .await
         .expect("insert kb entry");
-
-    let mut uke = nexus_knowledge::UserKnowledgeEntry::new(
-        "user_golden",
-        vec![KnowledgeTag::new("lore")],
-        "The hero wields a legendary sword forged in dragon fire.",
-    );
-    uke.id = "kno_slots_neutral_001".to_string();
-    uke.created_at = "2026-01-01T00:00:04Z".to_string();
-    uke.updated_at = "2026-01-01T00:00:04Z".to_string();
-    knowledge.store(uke).await.expect("store knowledge");
 }
 
 /// Assemble with default activation (ON) and return the full context bytes.
@@ -115,12 +102,9 @@ async fn assemble_default_on(
     stage0: Stage0Assembly,
     narrative: &InMemoryNarrativeGateway<InMemoryKbStore>,
     kb: &InMemoryKbStore,
-    knowledge: &InMemoryKnowledgeStore,
 ) -> String {
-    let request = MomentRequest::new(stage0)
-        .with_world("wld_golden_slots")
-        .with_user("user_golden");
-    assemble_moment(&request, narrative, kb, knowledge)
+    let request = MomentRequest::new(stage0).with_world("wld_golden_slots");
+    assemble_moment(&request, narrative, kb)
         .await
         .to_full_context()
 }
@@ -130,19 +114,19 @@ async fn dump_slots_neutral_only_golden_for_regeneration() {
     // Temporary helper: prints the neutral-only output so the golden file can
     // be regenerated (documented regen path, same pattern as the V1.149
     // goldens).
-    let (narrative, kb, knowledge, stage0) = build_neutral_fixture();
-    seed_neutral_stores(&kb, &knowledge).await;
+    let (narrative, kb, stage0) = build_neutral_fixture();
+    seed_neutral_stores(&kb).await;
 
-    let output = assemble_default_on(stage0, &narrative, &kb, &knowledge).await;
+    let output = assemble_default_on(stage0, &narrative, &kb).await;
     println!("===GOLDEN-BEGIN===\n{output}\n===GOLDEN-END===");
 }
 
 #[tokio::test]
 async fn slots_neutral_only_byte_equivalent_golden() {
-    let (narrative, kb, knowledge, stage0) = build_neutral_fixture();
-    seed_neutral_stores(&kb, &knowledge).await;
+    let (narrative, kb, stage0) = build_neutral_fixture();
+    seed_neutral_stores(&kb).await;
 
-    let output = assemble_default_on(stage0, &narrative, &kb, &knowledge).await;
+    let output = assemble_default_on(stage0, &narrative, &kb).await;
 
     // 1. P0 reservation: no Moment Directive section renders when no
     //    directive is active.

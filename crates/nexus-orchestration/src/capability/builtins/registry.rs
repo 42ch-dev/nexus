@@ -310,8 +310,6 @@ const REGISTRY_SNAPSHOT_CAPABILITIES: &[&str] = &[
     "nexus.manuscript.phase.get",
     "nexus.manuscript.phase.set",
     "nexus.manuscript.chapter.update",
-    // §4.6A Research
-    "nexus.research.query",
     // §4.7 Observability
     "nexus.trace.correlation",
     "nexus.runtime.health",
@@ -321,8 +319,6 @@ const REGISTRY_SNAPSHOT_CAPABILITIES: &[&str] = &[
     "nexus.pool.entry.manage",
     // ── registry.refresh itself ──
     "nexus.registry.refresh",
-    // ── V1.58 P1: DF-44 ──
-    "nexus.reference.refresh",
 ];
 
 // ─── CDN configuration (constructor-injected; V1.57 P1) ────────────────────

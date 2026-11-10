@@ -61,7 +61,6 @@ mod tests {
 
         assert!(tables.contains(&"workspace_meta".to_string()));
         assert!(tables.contains(&"creators".to_string()));
-        assert!(tables.contains(&"reference_sources".to_string()));
     }
 
     #[tokio::test]
@@ -92,42 +91,5 @@ mod tests {
             .into_iter()
             .flatten()
             .any(|x| x == "workspace_meta"));
-    }
-
-    #[tokio::test]
-    async fn reference_sources_has_content_column() {
-        let tmp = tempfile::tempdir().unwrap();
-        let db_path = tmp.path().join("test.db");
-        let pool = Schema::init(&db_path).await.unwrap();
-
-        // Verify content column exists (drift fix validation)
-        let ref_id = "ref_test";
-        let ws_id = "local";
-        let src_type = "pdf";
-        let source_mutability = "static";
-        let uri = "test.pdf";
-        let title = "Test";
-        let content = "Extracted text";
-        let scan_status = "pending";
-        let created_at = "2026-01-01T00:00:00Z";
-        sqlx::query!(
-            "INSERT INTO reference_sources
-             (reference_source_id, workspace_id, source_type, source_mutability, uri, title, content, scan_status, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ref_id, ws_id, src_type, source_mutability, uri, title, content, scan_status, created_at
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let result: Option<String> = sqlx::query_scalar!(
-            "SELECT content FROM reference_sources WHERE reference_source_id = ?",
-            ref_id
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-
-        assert_eq!(result, Some("Extracted text".to_string()));
     }
 }

@@ -150,8 +150,6 @@ describe('domain-http (P5-T1)', () => {
       ['POST', '/v1/daemon/reading/annotations'],
       ['PATCH', '/v1/daemon/reading/annotations/([^/]+)'],
       ['DELETE', '/v1/daemon/reading/annotations/([^/]+)'],
-      ['GET', '/v1/daemon/references'],
-      ['GET', '/v1/daemon/references/([^/]+)'],
     ];
     const mounted = new Set(inventory.map((route) => `${route.method} ${route.path}`));
     for (const [method, path] of required) {
@@ -159,6 +157,13 @@ describe('domain-http (P5-T1)', () => {
         mounted.has(`${method} ${path}`),
         `missing mounted identity: ${method} ${path}\nmounted:\n${[...mounted].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join('\n')}`,
       );
+    }
+    // Retired reference registry (v231): the routes are gone from the composer
+    // and no sunset handler replaced them, so the framework fallback answers.
+    for (const path of ['/v1/daemon/references', '/v1/daemon/references/ref_missing']) {
+      const retired = await jsonFetch(`${baseUrl}${path}`);
+      assert.equal(retired.status, 501, retired.text);
+      assert.equal(retired.payload.error.code, 'route_not_migrated');
     }
     // Tier parity (daemon mod.rs authority): the Creator home family is
     // tier1 (API-key only, no active creator); every P5-T1 family route is

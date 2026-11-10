@@ -893,94 +893,16 @@ async fn execute_tool_accepts_the_owners_own_principal() {
     assert!(response.success);
 }
 
-/// C2: `nexus.research.query` is creator-scoped.
+/// The retired `nexus.reference.refresh` write entrance is no longer admitted.
 ///
-/// Both the direct-id lookup and the list must be scoped, and a foreign row
-/// must be indistinguishable from a missing one (`NotFound`, never Forbidden —
-/// a 403 would confirm the row exists).
+/// The capability row and the orchestration builtin were removed with the
+/// reference store, so the id no longer resolves at the allowlist gate: the
+/// refusal lands before any handler, DB write, body.md rewrite or network
+/// fetch.
 #[tokio::test]
 #[serial_test::serial]
-async fn research_query_is_scoped_to_the_creator() {
+async fn reference_refresh_is_not_admitted() {
     let f = fixture().await;
-
-    // Seed a reference source owned by ANOTHER creator, straight into the
-    // durable store the fixture's pool serves.
-    sqlx::query(
-        "INSERT OR IGNORE INTO reference_sources \
-         (reference_source_id, creator_id, workspace_id, title, uri, source_type, \
-          tags, scan_status, created_at, updated_at) \
-         VALUES ('ref_foreign', 'intruder', 'local', 'Foreign Source', \
-                 'https://example.invalid/f', 'web', '', 'pending', \
-                 datetime('now'), datetime('now'))",
-    )
-    .execute(f.core.pool())
-    .await
-    .unwrap();
-
-    // Direct id lookup of a FOREIGN row: NotFound, and no existence leak.
-    let request = ToolsApi {
-        tool_name: "nexus.research.query".to_string(),
-        parameters: json!({ "reference_source_id": "ref_foreign" }),
-        session_id: None,
-        request_id: None,
-        caller_kind: None,
-    };
-    let err = nexus_core::execution::capabilities::execute_tool(&f.context, &request)
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(err, nexus_core::CoreError::NotFound { .. }),
-        "a foreign reference source must be NotFound, got {err:?}"
-    );
-
-    // The LIST must not surface the foreign row either.
-    let request = ToolsApi {
-        tool_name: "nexus.research.query".to_string(),
-        parameters: json!({}),
-        session_id: None,
-        request_id: None,
-        caller_kind: None,
-    };
-    let value = nexus_core::execution::capabilities::execute_tool(&f.context, &request)
-        .await
-        .expect("list succeeds");
-    let ids: Vec<String> = value["results"]
-        .as_array()
-        .expect("results array")
-        .iter()
-        .filter_map(|r| r["reference_source_id"].as_str().map(ToString::to_string))
-        .collect();
-    assert!(
-        !ids.contains(&"ref_foreign".to_string()),
-        "an unscoped list would leak a foreign row, got {ids:?}"
-    );
-}
-
-/// C3: `nexus.reference.refresh` is a WRITE tool.
-///
-/// It writes DB state, rewrites body.md and performs a network fetch, so a
-/// policy that grants reads only must refuse it — and the refusal must land
-/// before any of those effects.
-#[tokio::test]
-#[serial_test::serial]
-async fn reference_refresh_is_refused_under_a_read_only_policy() {
-    let f = fixture().await;
-
-    // A policy that grants READS (via `nexus.*.read`) but not writes. With
-    // `default = "ask"` the two paths differ observably: the read predicate
-    // consults `nexus.*.read` and grants, while the write predicate consults
-    // only the tool name and `nexus.*` and refuses. Under `default = "deny"`
-    // BOTH would refuse, so this test could not tell the fix from the bug.
-    let workspace_dir = f.tmp.path().join("policy-ws");
-    std::fs::create_dir_all(workspace_dir.join(".nexus42")).unwrap();
-    std::fs::write(
-        workspace_dir.join(".nexus42").join("permissions.toml"),
-        "default = \"ask\"\n[grant]\n\"nexus.*.read\" = true\n",
-    )
-    .unwrap();
-
-    let mut context = f.context.clone();
-    context.set_workspace_path(Some(workspace_dir.to_string_lossy().into_owned()));
 
     let request = ToolsApi {
         tool_name: "nexus.reference.refresh".to_string(),
@@ -989,35 +911,13 @@ async fn reference_refresh_is_refused_under_a_read_only_policy() {
         request_id: None,
         caller_kind: None,
     };
-    let err = nexus_core::execution::capabilities::execute_tool(&context, &request)
+    let err = nexus_core::execution::capabilities::execute_tool(&f.context, &request)
         .await
         .unwrap_err();
     assert!(
-        matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "policy_blocked"),
-        "a read-only policy must refuse a write tool, got {err:?}"
+        matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "not_supported"),
+        "the retired refresh entrance must be an unknown tool, got {err:?}"
     );
-
-    // The refusal precedes the effects: the seeded row is untouched.
-    let status: Option<String> = sqlx::query_scalar(
-        "SELECT scan_status FROM reference_sources WHERE reference_source_id = 'ref_any'",
-    )
-    .fetch_optional(f.core.pool())
-    .await
-    .unwrap();
-    assert!(status.is_none(), "no refresh effect may have run");
-
-    // CONTROL: the same policy still ADMITS a read tool, so the refusal above
-    // is the write classification and not the policy denying everything.
-    let request = ToolsApi {
-        tool_name: "nexus.workspace.info".to_string(),
-        parameters: json!({}),
-        session_id: None,
-        request_id: None,
-        caller_kind: None,
-    };
-    nexus_core::execution::capabilities::execute_tool(&context, &request)
-        .await
-        .expect("a read tool still passes under the same policy");
 }
 
 // ---------------------------------------------------------------------------

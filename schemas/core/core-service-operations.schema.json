@@ -514,16 +514,6 @@
           "returns": "void"
         },
         {
-          "name": "listReferences",
-          "args": [],
-          "returns": "ReferenceListResponse"
-        },
-        {
-          "name": "getReference",
-          "args": [{ "name": "referenceId", "type": "string" }],
-          "returns": "ReferenceGetResponse"
-        },
-        {
           "name": "worldKbPromoteCandidate",
           "args": [
             { "name": "worldId", "type": "string" },
