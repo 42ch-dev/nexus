@@ -835,6 +835,68 @@ async fn eof_after_initialize_is_typed_failure() {
     );
 }
 
+#[tokio::test]
+#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide
+async fn eof_failure_with_surviving_descendant_classifies_teardown() {
+    let _lock = env_lock();
+    let ws = setup_workspace();
+    let provider_cfg = acp_provider_config(
+        "mock-acp",
+        &ws.fixture_log,
+        // Run 1 is the bounded readiness probe (passes); run 2 is the launch
+        // that fails after initialize while a same-group descendant lives on.
+        &[("DESCENDANT", "1"), ("EOF_AFTER_INIT_FROM_RUN", "2")],
+        true,
+    );
+    let (_manager, host) = build_host(&ws, provider_cfg).await;
+
+    let err = host
+        .create_session(CreateSessionRequest {
+            provider_id: ProviderId::new("mock-acp"),
+            cwd: ws.creator_ws_a.join("sub"),
+            model: None,
+            mode: None,
+            mcp_servers: vec![],
+            metadata: serde_json::Value::Null,
+            owner: owner("ctr_a", ws.creator_ws_a.clone()),
+        })
+        .await
+        .expect_err("EOF launch must fail session creation");
+
+    // The classification follows the teardown OUTCOME, not the leader exit
+    // alone: where the platform can still prove the exited leader's identity
+    // (Linux), the group SIGTERM reaches the survivor and the typed
+    // `launch_failed` stands; where it cannot (macOS), the surviving group is
+    // reported unconfirmed — never a silently clean launch failure with a
+    // possibly-live tree.
+    let expected = if cfg!(target_os = "macos") {
+        "cleanup_unconfirmed"
+    } else {
+        "launch_failed"
+    };
+    assert_eq!(
+        err.category(),
+        expected,
+        "surviving-descendant teardown classification, got: {err}"
+    );
+
+    // Fixture-owned cleanup: the failed launch leaves the fixture's
+    // descendant alive (that is the state under test); kill it explicitly so
+    // nothing outlives the test.
+    let log = read_fixture_log(&ws.fixture_log);
+    let descendant_pid = log
+        .iter()
+        .rev()
+        .find(|e| e["event"] == "descendant_spawned")
+        .expect("fixture recorded its descendant")["child_pid"]
+        .as_u64()
+        .expect("descendant pid");
+    let _ = std::process::Command::new("kill")
+        .arg("-9")
+        .arg(descendant_pid.to_string())
+        .status();
+}
+
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
     // `kill -0 <pid>` returns Ok while the process exists (or is a zombie

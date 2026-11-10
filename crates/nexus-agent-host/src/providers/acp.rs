@@ -253,11 +253,12 @@ impl AcpProvider {
         // sequence (A5): dropping a plain Child is not an awaited process-tree
         // reap. `child` stays borrowed during the handshake for EOF watch and
         // is consumed into `ManagedAcpProcess` only on success or teardown.
-        // I-000320: set by this function's own `wait()` arms or discovered at
-        // teardown entry (`poll_exit`) — a leader exit OBSERVED by either
-        // makes the typed `launch_failed` classification authoritative for
-        // the teardown that follows.
-        let mut exit_observed = false;
+        // I-000320: the launch classification reads the teardown OUTCOME —
+        // teardown that proves the owned group gone keeps the typed
+        // `launch_failed`; teardown that reports group-liveness uncertainty
+        // surfaces `cleanup_unconfirmed`. The caller never probes or reaps
+        // the leader itself: a caller-side reap would destroy the birth
+        // identity the teardown's first guarded signal needs.
         let session_result: HostResult<NexusSessionCreated> = async {
             // The SDK connection is established asynchronously by
             // `with_connection`; wait (bounded by the launch timeout) for it
@@ -311,7 +312,6 @@ impl AcpProvider {
                         })?
                 }
                 status = owned_process.wait() => {
-                    exit_observed = true;
                     return Err(HostError::launch_failed(
                         self.provider_id.clone(),
                         "ACP process exited during initialize handshake",
@@ -350,7 +350,6 @@ impl AcpProvider {
                         })
                 }
                 status = owned_process.wait() => {
-                    exit_observed = true;
                     Err(HostError::launch_failed(
                         self.provider_id.clone(),
                         "ACP process exited during session creation",
@@ -363,74 +362,41 @@ impl AcpProvider {
 
         let session_created = match session_result {
             Ok(created) => created,
-            Err(error) => {
-                // The `select!` arms above observe an exit only when the
-                // `wait()` arm wins the race. An exit that already happened
-                // but lost the race (dead-but-unreaped leader at teardown
-                // time) is equally observed: reap it non-blockingly so the
-                // typed launch classification stays authoritative no matter
-                // how the teardown reports.
-                if owned_process.poll_exit().is_some() {
-                    exit_observed = true;
+            Err(error) => match owned_process
+                .terminate(self.timeouts.shutdown_duration())
+                .await
+            {
+                // Teardown proved the owned group gone: the typed launch
+                // classification stands.
+                Ok(()) => return Err(error),
+                // Group liveness could not be proven (survivors, or an
+                // identity that cannot be proven): the documented distinction
+                // between "cleanly torn down" and "tree possibly still alive"
+                // (L2 Issue 4) must survive the classification.
+                Err(reap_err @ AcpError::CleanupUnconfirmed { .. }) => {
+                    tracing::warn!(
+                        provider_id = %self.provider_id,
+                        error = %reap_err,
+                        "launch failure left owned ACP process group liveness unconfirmed"
+                    );
+                    return Err(HostError::cleanup_unconfirmed(format!(
+                        "launch of '{}' failed ({error}) and owned ACP process cleanup is unconfirmed: {reap_err}",
+                        self.provider_id
+                    ))
+                    .with_provider(self.provider_id.clone()));
                 }
-                match owned_process
-                    .terminate(self.timeouts.shutdown_duration())
-                    .await
-                {
-                    Ok(()) => return Err(error),
-                    // I-000320: `exit_observed` means the leader's exit
-                    // status was DETERMINED (reaped by a `wait()` arm above
-                    // or at teardown entry) — not that the owned group was
-                    // cleaned up. A group-liveness teardown failure
-                    // (`CleanupUnconfirmed`: survivors, or an identity that
-                    // cannot be proven) must still surface as
-                    // `cleanup_unconfirmed`; only teardown noise that says
-                    // nothing about group liveness keeps the typed launch
-                    // classification. A reap failure on an already-dead
-                    // process must not upgrade `launch_failed` into
-                    // `cleanup_unconfirmed` (a confirmed-exit launch failure
-                    // is not an unconfirmed-cleanup state).
-                    Err(reap_err) if exit_observed => {
-                        if matches!(reap_err, AcpError::CleanupUnconfirmed { .. }) {
-                            tracing::warn!(
-                                provider_id = %self.provider_id,
-                                error = %reap_err,
-                                "launch failure left owned ACP process group liveness unconfirmed (leader exit already observed)"
-                            );
-                            return Err(HostError::cleanup_unconfirmed(format!(
-                                "launch of '{}' failed ({error}) and owned ACP process cleanup is unconfirmed: {reap_err}",
-                                self.provider_id
-                            ))
-                            .with_provider(self.provider_id.clone()));
-                        }
-                        tracing::warn!(
-                            provider_id = %self.provider_id,
-                            error = %reap_err,
-                            "launch failure left owned ACP process unconfirmed reaped (process exit already observed)"
-                        );
-                        return Err(error);
-                    }
-                    Err(reap_err) => {
-                        // The caller must distinguish a cleanly torn-down
-                        // failed launch from an unconfirmed live process
-                        // (L2 Issue 4): a failed reap becomes the returned
-                        // typed error, never hidden behind the original
-                        // launch error. Reachable when the leader was still
-                        // alive at teardown entry and its identity could not
-                        // be proven.
-                        tracing::warn!(
-                            provider_id = %self.provider_id,
-                            error = %reap_err,
-                            "launch failure left owned ACP process unconfirmed reaped"
-                        );
-                        return Err(HostError::cleanup_unconfirmed(format!(
-                            "launch of '{}' failed ({error}) and owned ACP process cleanup is unconfirmed: {reap_err}",
-                            self.provider_id
-                        ))
-                        .with_provider(self.provider_id.clone()));
-                    }
+                // Teardown noise that says nothing about group liveness
+                // (e.g. an already-consumed handle) keeps the launch
+                // classification.
+                Err(reap_err) => {
+                    tracing::warn!(
+                        provider_id = %self.provider_id,
+                        error = %reap_err,
+                        "launch failure left owned ACP process unconfirmed reaped"
+                    );
+                    return Err(error);
                 }
-            }
+            },
         };
 
         let process = Arc::new(Mutex::new(owned_process));

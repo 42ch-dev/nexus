@@ -516,11 +516,7 @@ impl ManagedAcpProcess {
                     error = %e,
                     "Failed to wait for owned ACP process exit"
                 );
-                return Err(AcpError::agent_crashed(
-                    None,
-                    self.agent_path.clone(),
-                    Some(e.to_string()),
-                ));
+                return Err(AcpError::cleanup_unconfirmed(e.to_string()));
             }
             Err(_) => {
                 tracing::warn!(
@@ -544,19 +540,18 @@ impl ManagedAcpProcess {
             let Some(birth) = self.birth.clone() else {
                 // No birth token: the platform cannot prove ownership. Reap
                 // the leader and report unconfirmed cleanup, never signal.
-                let agent_path = self.agent_path.clone();
-                let status = self.child_mut()?.wait().await.map_err(|e| {
-                    AcpError::agent_crashed(None, agent_path.clone(), Some(e.to_string()))
-                })?;
+                let status = self
+                    .child_mut()?
+                    .wait()
+                    .await
+                    .map_err(|e| AcpError::cleanup_unconfirmed(e.to_string()))?;
                 tracing::warn!(
                     agent_id = %self.agent_id,
                     exit_code = ?status.code(),
                     "no process-birth token; owned ACP cleanup unconfirmed (leader reaped)"
                 );
-                return Err(AcpError::agent_crashed(
-                    None,
-                    agent_path,
-                    Some("No process-birth token; owned ACP process cleanup unconfirmed".into()),
+                return Err(AcpError::cleanup_unconfirmed(
+                    "No process-birth token; owned ACP process cleanup unconfirmed",
                 ));
             };
             let pgrp = nix::unistd::Pid::from_raw(birth.pid.cast_signed());
@@ -567,9 +562,11 @@ impl ManagedAcpProcess {
             // are still SIGKILLed as a unit.
             if self.child_mut()?.id().is_none() {
                 if Self::wait_group_quiescent(pgrp, grace).await {
-                    let status = self.child_mut()?.wait().await.map_err(|e| {
-                        AcpError::agent_crashed(None, self.agent_path.clone(), Some(e.to_string()))
-                    })?;
+                    let status = self
+                        .child_mut()?
+                        .wait()
+                        .await
+                        .map_err(|e| AcpError::cleanup_unconfirmed(e.to_string()))?;
                     tracing::info!(
                         agent_id = %self.agent_id,
                         exit_code = ?status.code(),
@@ -583,10 +580,8 @@ impl ManagedAcpProcess {
                     let _ = self.child_mut()?.wait().await;
                     return Ok(());
                 }
-                return Err(AcpError::agent_crashed(
-                    None,
-                    self.agent_path.clone(),
-                    Some("Owned ACP process group cleanup unconfirmed after SIGKILL".into()),
+                return Err(AcpError::cleanup_unconfirmed(
+                    "Owned ACP process group cleanup unconfirmed after SIGKILL",
                 ));
             }
 
@@ -602,10 +597,8 @@ impl ManagedAcpProcess {
                 // cleanup is not confirmed.
                 if !Self::signal_group_guarded(&birth, Signal::SIGKILL) {
                     let _ = self.child_mut()?.wait().await;
-                    return Err(AcpError::agent_crashed(
-                        None,
-                        self.agent_path.clone(),
-                        Some("Owned ACP process group cleanup unconfirmed (signal refused)".into()),
+                    return Err(AcpError::cleanup_unconfirmed(
+                        "Owned ACP process group cleanup unconfirmed (signal refused)",
                     ));
                 }
             }
@@ -642,10 +635,8 @@ impl ManagedAcpProcess {
                         agent_id = %self.agent_id,
                         "Owned ACP process group still not quiescent after SIGKILL"
                     );
-                    return Err(AcpError::agent_crashed(
-                        None,
-                        self.agent_path.clone(),
-                        Some("Owned ACP process group cleanup unconfirmed after SIGKILL".into()),
+                    return Err(AcpError::cleanup_unconfirmed(
+                        "Owned ACP process group cleanup unconfirmed after SIGKILL",
                     ));
                 }
                 Err(_) => {
@@ -654,13 +645,11 @@ impl ManagedAcpProcess {
                         "Owned ACP process did not exit after group SIGTERM, proceeding to SIGKILL"
                     );
                     if Self::signal_group_guarded(&birth, Signal::SIGKILL) {
-                        let status = self.child_mut()?.wait().await.map_err(|e| {
-                            AcpError::agent_crashed(
-                                None,
-                                self.agent_path.clone(),
-                                Some(e.to_string()),
-                            )
-                        })?;
+                        let status = self
+                            .child_mut()?
+                            .wait()
+                            .await
+                            .map_err(|e| AcpError::cleanup_unconfirmed(e.to_string()))?;
                         if Self::wait_group_quiescent(pgrp, grace).await {
                             tracing::info!(
                                 agent_id = %self.agent_id,
@@ -675,10 +664,8 @@ impl ManagedAcpProcess {
                         "Owned ACP process group cleanup unconfirmed after SIGKILL"
                     );
                     let _ = self.child_mut()?.wait().await;
-                    return Err(AcpError::agent_crashed(
-                        None,
-                        self.agent_path.clone(),
-                        Some("Owned ACP process group cleanup unconfirmed after SIGKILL".into()),
+                    return Err(AcpError::cleanup_unconfirmed(
+                        "Owned ACP process group cleanup unconfirmed after SIGKILL",
                     ));
                 }
                 Ok(Err(e)) => {
@@ -687,11 +674,7 @@ impl ManagedAcpProcess {
                         error = %e,
                         "Failed to wait after group SIGTERM"
                     );
-                    return Err(AcpError::agent_crashed(
-                        None,
-                        self.agent_path.clone(),
-                        Some(e.to_string()),
-                    ));
+                    return Err(AcpError::cleanup_unconfirmed(e.to_string()));
                 }
             }
         }
@@ -744,9 +727,23 @@ impl ManagedAcpProcess {
         #[cfg(unix)]
         {
             use nix::sys::signal::Signal;
-
             let Some(birth) = self.birth.clone() else {
-                let _ = child.wait().await;
+                // No birth token: the platform cannot prove ownership. Reap
+                // the leader if it is already dead and report unconfirmed
+                // cleanup, never signal. Every wait is bounded, and a
+                // deadline expiry leaks the child handle (mem::forget)
+                // instead of dropping it: dropping would fire kill_on_drop
+                // and turn the refusal into an implicit kill.
+                match timeout(grace, child.wait()).await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => return Err(AcpError::cleanup_unconfirmed(e.to_string())),
+                    Err(_) => {
+                        std::mem::forget(child);
+                        return Err(AcpError::cleanup_unconfirmed(
+                            "No process-birth token; owned ACP process left unreaped past the cleanup deadline",
+                        ));
+                    }
+                }
                 tracing::warn!(
                     agent_id = %self.agent_id,
                     "no process-birth token; owned ACP launch teardown unconfirmed"
@@ -757,8 +754,8 @@ impl ManagedAcpProcess {
             };
             let pgrp = nix::unistd::Pid::from_raw(birth.pid.cast_signed());
 
-            // Signal FIRST, while identity is still provable: on platforms
-            // where a zombie leader's start time stays readable (Linux), the
+            // 1. Signal FIRST, while identity is provable: on platforms where
+            // a zombie leader's start time stays readable (Linux), the
             // SIGTERM reaches live descendants even though the leader already
             // exited. A refusal means identity cannot be proven — the
             // dead-but-unreaped-leader case — handled by reap-on-sight below;
@@ -769,38 +766,139 @@ impl ManagedAcpProcess {
                     agent_id = %self.agent_id,
                     "SIGTERM sent to owned ACP process group"
                 );
-                let wait_result = timeout(grace, child.wait()).await;
-                match wait_result {
-                    Ok(Ok(_)) => {
-                        // Confirm the whole owned group is quiescent;
-                        // survivors are SIGKILLed as a unit, not reported
-                        // clean.
-                        if Self::wait_group_quiescent(pgrp, grace).await {
-                            return Ok(());
+
+                #[cfg(target_os = "linux")]
+                {
+                    // 2. Observe the leader's exit WITHOUT reaping (Linux:
+                    // safe `waitid(WEXITED | WNOWAIT | WNOHANG)` leaves the
+                    // zombie unreaped; bounded by the cleanup deadline).
+                    // Reaping here would invalidate the birth token and
+                    // permanently disable the SIGKILL escalation — the
+                    // group leak this ordering prevents. A probe failure
+                    // surfaces immediately; deadline expiry only means the
+                    // leader ignored SIGTERM and is escalated while its
+                    // identity verifies below.
+                    let observed = tokio::time::timeout(grace, async {
+                        loop {
+                            match nix::sys::wait::waitid(
+                                nix::sys::wait::Id::Pid(pgrp),
+                                nix::sys::wait::WaitPidFlag::WEXITED
+                                    | nix::sys::wait::WaitPidFlag::WNOWAIT
+                                    | nix::sys::wait::WaitPidFlag::WNOHANG,
+                            ) {
+                                Ok(nix::sys::wait::WaitStatus::StillAlive) => {
+                                    tokio::time::sleep(Duration::from_millis(10)).await;
+                                }
+                                Ok(_) => return Ok(()),
+                                Err(e) => return Err(AcpError::cleanup_unconfirmed(e.to_string())),
+                            }
                         }
-                        tracing::warn!(
-                            agent_id = %self.agent_id,
-                            "Descendants remain after group SIGTERM, proceeding to group SIGKILL"
-                        );
-                        if Self::signal_group_guarded(&birth, Signal::SIGKILL)
-                            && Self::wait_group_quiescent(pgrp, grace).await
-                        {
-                            return Ok(());
+                    })
+                    .await;
+                    if let Ok(Err(e)) = observed {
+                        return Err(e);
+                    }
+
+                    // 3. One guarded SIGKILL while the token still verifies:
+                    // lethal for SIGTERM-ignoring survivors, a no-op for the
+                    // leader zombie and already-dead members. The leader's
+                    // own zombie keeps `killpg(_, 0)` non-ESRCH, so proving
+                    // group quiescence BEFORE the reap is impossible — the
+                    // quiescence check after the reap proves the outcome.
+                    if !Self::signal_group_guarded(&birth, Signal::SIGKILL) {
+                        if timeout(grace, child.wait()).await.is_err() {
+                            std::mem::forget(child);
                         }
                         return Err(AcpError::cleanup_unconfirmed(
-                            "Owned ACP process group cleanup unconfirmed after SIGKILL",
+                            "Owned ACP process group cleanup unconfirmed (identity invalidated before SIGKILL)",
                         ));
                     }
-                    Err(_) => {
-                        tracing::warn!(
+
+                    // 4. Reap the leader (bounded), then prove the whole
+                    // group gone.
+                    let status = match timeout(grace, child.wait()).await {
+                        Ok(Ok(status)) => status,
+                        Ok(Err(e)) => return Err(AcpError::cleanup_unconfirmed(e.to_string())),
+                        Err(_) => {
+                            std::mem::forget(child);
+                            return Err(AcpError::cleanup_unconfirmed(
+                                "Owned ACP process group cleanup unconfirmed (leader reap deadline expired)",
+                            ));
+                        }
+                    };
+                    if Self::wait_group_quiescent(pgrp, grace).await {
+                        tracing::info!(
                             agent_id = %self.agent_id,
-                            "Owned ACP process did not exit after group SIGTERM, proceeding to SIGKILL"
+                            exit_code = ?status.code(),
+                            "Owned ACP process group quiescent after teardown; leader reaped"
                         );
-                        if Self::signal_group_guarded(&birth, Signal::SIGKILL) {
-                            let status = child
-                                .wait()
-                                .await
-                                .map_err(|e| AcpError::cleanup_unconfirmed(e.to_string()))?;
+                        return Ok(());
+                    }
+                    return Err(AcpError::cleanup_unconfirmed(
+                        "Owned ACP process group cleanup unconfirmed after SIGKILL",
+                    ));
+                }
+
+                #[cfg(not(target_os = "linux"))]
+                {
+                    // PLATFORM LIMITATION (macOS / other unix): nix exposes
+                    // `waitid` only on Linux/FreeBSD, and once the leader
+                    // exits its zombie identity is unreadable here, so an
+                    // escalation after exit is impossible. This is not the
+                    // intended ordering — it is the best safe ordering this
+                    // platform allows: graceful leader exit (bounded), then
+                    // quiescence; survivors are refused (honest
+                    // CleanupUnconfirmed), and a leader still alive past the
+                    // grace still gets its guarded SIGKILL while provable.
+                    let wait_result = timeout(grace, child.wait()).await;
+                    match wait_result {
+                        Ok(Ok(_)) => {
+                            // Leader reaped: remaining members are the
+                            // descendants, and the identity to signal them
+                            // is gone on this platform.
+                            if Self::wait_group_quiescent(pgrp, grace).await {
+                                tracing::info!(
+                                    agent_id = %self.agent_id,
+                                    "Owned ACP process group quiescent after group SIGTERM"
+                                );
+                                return Ok(());
+                            }
+                            tracing::warn!(
+                                agent_id = %self.agent_id,
+                                "Descendants remain after group SIGTERM; identity unprovable after leader exit, refusing to signal"
+                            );
+                            return Err(AcpError::cleanup_unconfirmed(
+                                "Owned ACP process group cleanup unconfirmed (signal refused)",
+                            ));
+                        }
+                        Err(_) => {
+                            // Leader ignored SIGTERM and is still alive —
+                            // identity provable: guarded SIGKILL, bounded
+                            // reap, quiescence.
+                            tracing::warn!(
+                                agent_id = %self.agent_id,
+                                "Owned ACP process did not exit after group SIGTERM, proceeding to SIGKILL"
+                            );
+                            if !Self::signal_group_guarded(&birth, Signal::SIGKILL) {
+                                if timeout(grace, child.wait()).await.is_err() {
+                                    std::mem::forget(child);
+                                }
+                                return Err(AcpError::cleanup_unconfirmed(
+                                    "Owned ACP process group cleanup unconfirmed (identity invalidated before SIGKILL)",
+                                ));
+                            }
+                            let status = match timeout(grace, child.wait()).await {
+                                Ok(Ok(status)) => status,
+                                Ok(Err(e)) => {
+                                    return Err(AcpError::cleanup_unconfirmed(e.to_string()));
+                                }
+                                Err(_) => {
+                                    std::mem::forget(child);
+                                    return Err(AcpError::cleanup_unconfirmed(
+                                        "Owned ACP process group cleanup unconfirmed (leader reap deadline expired)",
+                                    ));
+                                }
+                            };
                             if Self::wait_group_quiescent(pgrp, grace).await {
                                 tracing::info!(
                                     agent_id = %self.agent_id,
@@ -809,15 +907,17 @@ impl ManagedAcpProcess {
                                 );
                                 return Ok(());
                             }
+                            if timeout(grace, child.wait()).await.is_err() {
+                                std::mem::forget(child);
+                            }
+                            return Err(AcpError::cleanup_unconfirmed(
+                                "Owned ACP process group cleanup unconfirmed after SIGKILL",
+                            ));
                         }
-                        let _ = child.wait().await;
-                        return Err(AcpError::cleanup_unconfirmed(
-                            "Owned ACP process group cleanup unconfirmed after SIGKILL",
-                        ));
-                    }
-                    Ok(Err(e)) => {
-                        // A failed reap leaves liveness unproven.
-                        return Err(AcpError::cleanup_unconfirmed(e.to_string()));
+                        Ok(Err(e)) => {
+                            // A failed reap leaves liveness unproven.
+                            return Err(AcpError::cleanup_unconfirmed(e.to_string()));
+                        }
                     }
                 }
             }
@@ -829,24 +929,27 @@ impl ManagedAcpProcess {
             // SIGTERM refused: identity cannot be proven — the
             // dead-but-unreaped-leader case, or an invalidated token — and
             // an unprovable identity is never signalled in any form. Reap a
-            // leader that already exited (zombie): once reaped, `id()` is
-            // `None` and the quiescence check proves an already-dead tree is
-            // fully gone (the observed macOS CI launch-failure case) instead
-            // of misreporting it as a refused signal.
+            // leader that already exited (zombie) so an already-dead tree is
+            // confirmed gone (the observed macOS CI launch-failure case)
+            // instead of misreported, then let bounded waits and the
+            // quiescence check decide. All waits are bounded; a deadline
+            // expiry leaks the handle instead of dropping it into an
+            // implicit kill.
             let _ = child.try_wait();
-            if child.id().is_none() {
-                if Self::wait_group_quiescent(pgrp, grace).await {
-                    let _ = child.wait().await;
-                    return Ok(());
+            match timeout(grace, child.wait()).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => return Err(AcpError::cleanup_unconfirmed(e.to_string())),
+                Err(_) => {
+                    std::mem::forget(child);
+                    return Err(AcpError::cleanup_unconfirmed(
+                        "Owned ACP process group cleanup unconfirmed (signal refused; leader alive past the cleanup deadline)",
+                    ));
                 }
-                // Survivors cannot be signalled on an unprovable identity.
-                return Err(AcpError::cleanup_unconfirmed(
-                    "Owned ACP process group cleanup unconfirmed (signal refused)",
-                ));
             }
-            // Leader alive with an invalidated token: genuinely unsafe to
-            // signal.
-            let _ = child.wait().await;
+            if Self::wait_group_quiescent(pgrp, grace).await {
+                return Ok(());
+            }
+            // Survivors cannot be signalled on an unprovable identity.
             Err(AcpError::cleanup_unconfirmed(
                 "Owned ACP process group cleanup unconfirmed (signal refused)",
             ))
@@ -1548,27 +1651,24 @@ mod tests {
             .expect("teardown of an already-exited leader must be confirmed cleanup");
     }
 
-    /// A leader that exits while a same-group descendant stays alive: while
-    /// identity is provable (Linux reads a zombie's start time), the guarded
-    /// SIGTERM must reach the survivor and the teardown must be confirmed
-    /// with the leader reaped. Reap-before-signal would destroy exactly that
-    /// provable identity and leak the descendant — the A5 outcome this
-    /// module prevents.
-    #[cfg(target_os = "linux")]
-    #[tokio::test]
-    async fn terminate_signals_surviving_descendant_while_identity_is_provable() {
+    /// Fixture-owned cleanup for a spawned same-group descendant: fires on
+    /// every exit path (including panics) so no fixture process outlives the
+    /// test, independent of the production call under test.
+    struct KillDescendantOnDrop(nix::unistd::Pid);
+
+    impl Drop for KillDescendantOnDrop {
+        fn drop(&mut self) {
+            let _ = nix::sys::signal::kill(self.0, nix::sys::signal::Signal::SIGKILL);
+        }
+    }
+
+    /// Reads the `sh -c 'sleep 300 & echo $!; …'` fixture's descendant pid:
+    /// shell sequencing writes it before the leader exits, so the read needs
+    /// no polling.
+    async fn read_descendant_pid(stdout: tokio::process::ChildStdout) -> u32 {
         use tokio::io::AsyncBufReadExt;
 
-        let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
-        let (child, _stdin, stdout) = spawner
-            .spawn("/bin/sh", &["-c", "sleep 300 & echo $!; exit 0"])
-            .expect("spawn grouped fixture");
-        let leader = child.id().expect("leader pid");
-        let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
-
-        // Shell sequencing: the descendant pid is echoed before the leader
-        // exits, so reading the line needs no polling.
-        let descendant: u32 = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(5), async {
             let mut lines = tokio::io::BufReader::new(stdout).lines();
             lines
                 .next_line()
@@ -1580,8 +1680,27 @@ mod tests {
                 .expect("descendant pid is numeric")
         })
         .await
-        .expect("descendant pid line within bound");
+        .expect("descendant pid line within bound")
+    }
+
+    /// A leader that exits while a same-group descendant stays alive: while
+    /// identity is provable (Linux reads a zombie's start time), the guarded
+    /// SIGTERM must reach the survivor and the teardown must be confirmed
+    /// with the leader reaped. Reap-before-signal would destroy exactly that
+    /// provable identity and leak the descendant — the A5 outcome this
+    /// module prevents.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn terminate_signals_surviving_descendant_while_identity_is_provable() {
+        let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
+        let (child, _stdin, stdout) = spawner
+            .spawn("/bin/sh", &["-c", "sleep 300 & echo $!; exit 0"])
+            .expect("spawn grouped fixture");
+        let leader = child.id().expect("leader pid");
+        let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
+        let descendant = read_descendant_pid(stdout).await;
         let descendant_pid = nix::unistd::Pid::from_raw(descendant.cast_signed());
+        let _guard = KillDescendantOnDrop(descendant_pid);
         assert_ne!(descendant, leader, "the descendant is not the leader");
 
         let mut proc =
@@ -1606,6 +1725,53 @@ mod tests {
         );
     }
 
+    /// A descendant that ignores SIGTERM must still be killed: the SIGKILL
+    /// escalation re-verifies the birth token, which only works when the
+    /// leader's reap is deferred until after the group is proven gone
+    /// (reap-before-escalation would invalidate the token and leak the
+    /// survivor). Linux-only: it needs a zombie leader whose start time the
+    /// identity check can still read.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn terminate_escalates_to_sigkill_when_descendant_ignores_sigterm() {
+        let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
+        let (child, _stdin, stdout) = spawner
+            .spawn(
+                "/bin/sh",
+                &["-c", "(trap \"\" TERM; sleep 300) & echo $!; exit 0"],
+            )
+            .expect("spawn grouped fixture");
+        let leader = child.id().expect("leader pid");
+        let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
+        let descendant = read_descendant_pid(stdout).await;
+        let descendant_pid = nix::unistd::Pid::from_raw(descendant.cast_signed());
+        let _guard = KillDescendantOnDrop(descendant_pid);
+
+        let mut proc =
+            ManagedAcpProcess::new("group-fixture".to_string(), child, PathBuf::from("/bin/sh"));
+        await_zombie_state(leader).await;
+        assert!(
+            nix::sys::signal::kill(descendant_pid, None).is_ok(),
+            "the SIGTERM-ignoring descendant must be alive before teardown"
+        );
+
+        // grace bounds both the SIGTERM quiescence observation (the trap
+        // ignores the signal, so this burns the full window) and the SIGKILL
+        // wait.
+        proc.terminate(Duration::from_secs(1))
+            .await
+            .expect("SIGKILL escalation must reap a SIGTERM-ignoring group");
+
+        assert!(
+            nix::sys::signal::kill(leader_pid, None).is_err(),
+            "the leader must be reaped"
+        );
+        assert!(
+            nix::sys::signal::kill(descendant_pid, None).is_err(),
+            "the SIGTERM-ignoring survivor must be SIGKILLed"
+        );
+    }
+
     /// An identity that cannot be proven must never be signalled: with the
     /// token invalidated, teardown refuses — the group survivor is untouched
     /// and the cleanup is reported as an unconfirmed liveness failure (the
@@ -1613,28 +1779,14 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn terminate_refuses_to_signal_survivors_when_identity_unprovable() {
-        use tokio::io::AsyncBufReadExt;
-
         let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
         let (child, _stdin, stdout) = spawner
             .spawn("/bin/sh", &["-c", "sleep 300 & echo $!; exit 0"])
             .expect("spawn grouped fixture");
         let leader = child.id().expect("leader pid");
-
-        let descendant: u32 = tokio::time::timeout(Duration::from_secs(5), async {
-            let mut lines = tokio::io::BufReader::new(stdout).lines();
-            lines
-                .next_line()
-                .await
-                .expect("descendant pid line readable")
-                .expect("descendant pid line present")
-                .trim()
-                .parse()
-                .expect("descendant pid is numeric")
-        })
-        .await
-        .expect("descendant pid line within bound");
+        let descendant = read_descendant_pid(stdout).await;
         let descendant_pid = nix::unistd::Pid::from_raw(descendant.cast_signed());
+        let _guard = KillDescendantOnDrop(descendant_pid);
 
         let mut proc =
             ManagedAcpProcess::new("group-fixture".to_string(), child, PathBuf::from("/bin/sh"));
@@ -1665,9 +1817,61 @@ mod tests {
             "the survivor must be untouched by a refused signal"
         );
 
-        // Cleanup: the survivor was reparented when the leader was reaped;
-        // kill it so no fixture process outlives the test.
+        // Fixture-owned cleanup: the guard above covers panic paths; the
+        // explicit kill here is redundant with it and keeps intent visible.
         let _ = nix::sys::signal::kill(descendant_pid, nix::sys::signal::Signal::SIGKILL);
+    }
+
+    /// A live leader with an unprovable identity must not hang the cleanup
+    /// deadline: terminate(grace) returns the typed refusal within the bound,
+    /// and never drops the `kill_on_drop` child into an implicit kill (the
+    /// fixture leader is left running and killed explicitly afterwards).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn terminate_returns_within_bound_when_identity_unprovable_and_leader_alive() {
+        let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
+        let (child, _stdin, _stdout) = spawner
+            .spawn("/bin/sleep", &["300"])
+            .expect("spawn live sleep fixture");
+        let leader = child.id().expect("leader pid");
+        let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
+
+        let mut proc = ManagedAcpProcess::new(
+            "live-fixture".to_string(),
+            child,
+            PathBuf::from("/bin/sleep"),
+        );
+        proc.birth = Some(ProcessBirthToken {
+            pid: leader,
+            start_tick: u64::MAX,
+        });
+
+        let grace = Duration::from_secs(1);
+        let started = std::time::Instant::now();
+        let err = proc
+            .terminate(grace)
+            .await
+            .expect_err("an unprovable identity must refuse to signal");
+        let elapsed = started.elapsed();
+        assert!(
+            matches!(err, AcpError::CleanupUnconfirmed { .. }),
+            "the refusal must be typed as a liveness failure: {err}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "terminate must return within the cleanup deadline, took {elapsed:?}"
+        );
+        assert!(
+            nix::sys::signal::kill(leader_pid, None).is_ok(),
+            "the refused teardown must not have killed the leader"
+        );
+
+        // The handle was deliberately leaked (no implicit kill on drop):
+        // kill the still-running fixture explicitly and reap it so nothing
+        // outlives the test.
+        nix::sys::signal::kill(leader_pid, nix::sys::signal::Signal::SIGKILL)
+            .expect("SIGKILL the leaked live fixture");
+        nix::sys::wait::waitpid(leader_pid, None).expect("reap the explicit kill");
     }
 
     /// Waits until `pid` is in the kernel's zombie state (exit status
