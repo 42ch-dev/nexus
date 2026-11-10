@@ -1739,7 +1739,7 @@ mod tests {
         let descendant_pid = nix::unistd::Pid::from_raw(descendant.cast_signed());
         assert_ne!(descendant, leader, "the descendant is not the leader");
 
-        let mut proc =
+        let proc =
             ManagedAcpProcess::new("group-fixture".to_string(), child, PathBuf::from("/bin/sh"));
         await_zombie_state(leader).await;
         assert!(
@@ -1789,7 +1789,7 @@ mod tests {
         let descendant = read_descendant_readiness(stdout).await;
         let descendant_pid = nix::unistd::Pid::from_raw(descendant.cast_signed());
 
-        let mut proc =
+        let proc =
             ManagedAcpProcess::new("group-fixture".to_string(), child, PathBuf::from("/bin/sh"));
         await_zombie_state(leader).await;
         assert!(
