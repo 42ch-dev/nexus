@@ -84,12 +84,6 @@ import type {
   OutlinePatchStructureRequest,
   OutlinePatchChapterRequest,
   TimelinePatchEventRequest,
-  ListKbEntriesQuery,
-  ListKbEntriesResponse,
-  AddKbEntryRequest,
-  AddKbEntryResponse,
-  GetKbEntryResponse,
-  DeleteKbEntryResponse,
   CreateFindingRequest,
   FindingDetailResponse,
   ListFindingsQuery,
@@ -497,10 +491,6 @@ export interface NativeCore {
     workId: string,
     request: TimelinePatchEventRequest,
   ): Promise<OutlinePatchResponse>;
-  listKbEntries(principal: PrincipalHandle, query: ListKbEntriesQuery): Promise<ListKbEntriesResponse>;
-  addKbEntry(principal: PrincipalHandle, request: AddKbEntryRequest): Promise<AddKbEntryResponse>;
-  getKbEntry(principal: PrincipalHandle, entryId: string): Promise<GetKbEntryResponse>;
-  deleteKbEntry(principal: PrincipalHandle, entryId: string): Promise<DeleteKbEntryResponse>;
   createFinding(
     principal: PrincipalHandle,
     workId: string,
@@ -1028,10 +1018,6 @@ type DomainSurface = Pick<
   | 'patchOutlineStructure'
   | 'patchOutlineChapter'
   | 'patchTimelineEvent'
-  | 'listKbEntries'
-  | 'addKbEntry'
-  | 'getKbEntry'
-  | 'deleteKbEntry'
   | 'createFinding'
   | 'createFindingFromReview'
   | 'listFindings'
@@ -1281,18 +1267,6 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     },
     async patchTimelineEvent(principal, workId, request) {
       return json(await inner.patchTimelineEvent(principal, workId, wire(request, 'request')));
-    },
-    async listKbEntries(principal, query) {
-      return json(await inner.listKbEntries(principal, wire(query, 'query')));
-    },
-    async addKbEntry(principal, request) {
-      return json(await inner.addKbEntry(principal, wire(request, 'request')));
-    },
-    async getKbEntry(principal, entryId) {
-      return json(await inner.getKbEntry(principal, entryId));
-    },
-    async deleteKbEntry(principal, entryId) {
-      return json(await inner.deleteKbEntry(principal, entryId));
     },
     async createFinding(principal, workId, request) {
       return json(await inner.createFinding(principal, workId, wire(request, 'request')));

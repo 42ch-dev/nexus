@@ -300,7 +300,6 @@ fn v2_target_creator_subcommands() {
         "workspace",
         "soul",
         "memory",
-        "kb",
     ] {
         assert!(
             help_text.contains(subcmd),
@@ -380,63 +379,9 @@ fn v2_target_system_subcommands() {
 // Part 3: Plan 5 KB scope contract tests (must pass immediately)
 // =============================================================================
 
-/// v1.193 P2-T12: the Plan-5 `creator kb list --scope` selector was removed in
-/// P0-T13, so the retained local `kb list` leaf accepts no scope option —
-/// `--scope` is clap's unexpected-argument error (exit 2) and the help page
-/// must not advertise it.
-///
-/// Discriminating regression: pre-retirement `creator kb list --scope work`
-/// parsed and selected the scope; post-retirement only the advertised
-/// `-o/--output` option remains on the leaf.
-#[test]
-fn retired_kb_scope_flag_is_rejected() {
-    let rejected = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "kb", "list", "--scope", "work"])
-        .assert()
-        .code(2)
-        .get_output()
-        .clone();
-    let stderr = String::from_utf8_lossy(&rejected.stderr).into_owned();
-    assert!(
-        stderr.contains("unexpected argument") && stderr.contains("--scope"),
-        "v1.193 P2-T12: `creator kb list --scope` must be an unknown argument: {stderr}"
-    );
-
-    let help = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "kb", "list", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
-    let help_text = String::from_utf8_lossy(&help.stdout).into_owned();
-    assert!(
-        !help_text.contains("--scope"),
-        "v1.193 P2-T12: `creator kb list --help` must not advertise the removed flag: {help_text}"
-    );
-}
-
-/// Verify `creator kb --help` shows list, search, show, add subcommands.
-#[test]
-fn v2_target_kb_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "kb", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    for subcmd in &["list", "search", "show", "add"] {
-        assert!(
-            help_text.contains(subcmd),
-            "creator kb --help must show subcommand '{subcmd}'"
-        );
-    }
-}
+// v231: `retired_kb_scope_flag_is_rejected` and `v2_target_kb_subcommands`
+// removed with the `creator kb` group (the parser now refuses the group; see
+// `kb_rescan_cli.rs`).
 
 // =============================================================================
 // Part 4: Plan 6 ACP execution path consolidation contract tests
@@ -775,37 +720,15 @@ fn v135_root_long_about_mentions_creator_works_and_workspace() {
 // Part 8: V1.35 P3 — Creator hub polish contract tests
 // =============================================================================
 
-/// V1.35 P3: `creator kb --help` mentions both scopes AND disambiguates from `knowledge`.
-#[test]
-fn v135_kb_help_disambiguates_scopes() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "kb", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
+// v231: `v135_kb_help_disambiguates_scopes` and
+// `v135_creator_help_mentions_kb_namespaces` removed with the `creator kb`
+// group.
 
-    let help_text = String::from_utf8(output).unwrap();
-
-    // Must mention both scopes
-    assert!(
-        help_text.contains("work"),
-        "V1.35 P3: creator kb --help must mention 'work' scope"
-    );
-    assert!(
-        help_text.contains("world"),
-        "V1.35 P3: creator kb --help must mention 'world' scope"
-    );
-
-}
-
-/// v231: the retired `creator knowledge` / `creator reference` groups are
-/// unregistered, so the parser rejects them as unknown subcommands.
+/// v231: the retired `creator kb` / `creator knowledge` / `creator reference`
+/// groups are unregistered, so the parser rejects them as unknown subcommands.
 #[test]
 fn v231_retired_creator_knowledge_and_reference_groups_are_unknown() {
-    for group in ["knowledge", "reference"] {
+    for group in ["kb", "knowledge", "reference"] {
         Command::cargo_bin("nexus42")
             .unwrap()
             .args(["creator", group, "--help"])
@@ -814,26 +737,7 @@ fn v231_retired_creator_knowledge_and_reference_groups_are_unknown() {
     }
 }
 
-/// V1.35 P3: `creator --help` mentions tier grouping hints in descriptions.
-#[test]
-fn v135_creator_help_mentions_kb_namespaces() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "kb", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    // Must mention entity-scope-model reference
-    assert!(
-        help_text.contains("entity-scope-model") || help_text.contains("scope"),
-        "V1.35 P3: creator kb --help must reference scope model"
-    );
-}
+// v231: the `creator kb --help` scope tests were removed with the group.
 
 // V1.45: `v135_chain_novel_writing_defaults_true`,
 // `v135_chain_novel_writing_opt_out_syntax_accepted`,
@@ -1391,7 +1295,7 @@ fn retired_creator_execution_is_unknown() {
             "v1.193 P2-T1: `creator` must not advertise '{leaf}': {creator_names:?}"
         );
     }
-    for leaf in ["works", "register", "status", "list", "kb", "world"] {
+    for leaf in ["works", "register", "status", "list", "world"] {
         assert!(
             creator_names.iter().any(|name| name == leaf),
             "v1.193 P2-T1: `creator` must keep '{leaf}': {creator_names:?}"

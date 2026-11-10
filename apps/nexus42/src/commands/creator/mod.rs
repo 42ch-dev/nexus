@@ -6,13 +6,12 @@
 //! - **Work plane (DF-60/61)**: `works` — atomic single-purpose ops (inspire,
 //!   reopen, reconcile-chapters, completion-lock, pool, …)
 //! - **Primary**: `register`, `use`, `list`
-//! - **Assets**: `workspace`, `soul`, `memory`, `kb`, `world`
+//! - **Assets**: `workspace`, `soul`, `memory`, `world`
 //! - **Platform bridge**: `status`, `pair`, `unpair`, `credentials`
 //! - **Maintenance**: `demo-seed`, `logout`
 
 pub mod character;
 pub mod inspector;
-pub mod kb;
 pub mod memory;
 pub mod moment_directive;
 pub mod reading;
@@ -41,10 +40,6 @@ use nexus_core::CoreHomeService;
 use nexus_knowledge::world_kb::KbStore;
 use soul::SoulCommand;
 use std::path::PathBuf;
-
-// Re-export KB types so `CreatorCommand::Kb` and `KbCommand` remain
-// accessible at the `creator` path for consumers and tests.
-pub use kb::KbCommand;
 
 /// Default registration source for the CLI.
 const DEFAULT_REGISTRATION_SOURCE: &str = "cli";
@@ -394,18 +389,6 @@ pub enum CreatorCommand {
         command: MemoryCommand,
     },
 
-    /// Work-scope file index (local per-creator, per-workspace documents under `kb/`)
-    ///
-    /// The work index is the only `creator kb` scope: `list|search|show|add|remove`
-    /// run against the local files, `queue-extract|extract-status` against the
-    /// local extract queue, and `rescan` over chapter prose. There is no World
-    /// scope here — World narrative KB entries live on `creator world kb`, and
-    /// the old `--scope world` compatibility spelling is gone.
-    Kb {
-        #[command(subcommand)]
-        command: KbCommand,
-    },
-
     /// Moment Directive author surface (V1.150 P1, DF-75)
     ///
     /// A short author-written instruction injected into the assembled prompt's
@@ -562,7 +545,6 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Workspace { command } => run_creator_workspace(config, command).await,
         CreatorCommand::Soul { command } => soul::run(command, config).await,
         CreatorCommand::Memory { command } => memory::run(command, config).await,
-        CreatorCommand::Kb { command } => kb::run(command, config).await,
         CreatorCommand::World { command } => world::run(command, config).await,
         CreatorCommand::Character { command } => character::run(command, config).await,
         CreatorCommand::Reading { command } => reading::run(command, config).await,
