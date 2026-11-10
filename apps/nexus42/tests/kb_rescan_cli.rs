@@ -18,8 +18,11 @@
 //! and the `creator reference refresh` entrance. Those two contracts are pinned
 //! here through the real binary against a hermetic direct-core home
 //! (`common/direct.rs`): the refused legacy scope leaves the home untouched,
-//! `reference refresh` is unknown, and the retained local registry plus the
-//! User-knowledge leaves stay callable.
+//! `reference refresh` is unknown, and the surviving read leaves still render.
+//!
+//! v231 retires the reference and User-knowledge **write** entrances with their
+//! stores: `creator reference register` and `creator knowledge add` must be
+//! unknown subcommands that touch nothing.
 //!
 //! Run with: cargo test -p nexus42 --test `kb_rescan_cli`
 
@@ -517,16 +520,18 @@ async fn reference_and_knowledge_help_survive_without_retired_leaves() {
     );
     let reference_help_text = String::from_utf8_lossy(&reference_help.stdout).into_owned();
     let reference_subcommands: Vec<&str> = subcommands(&reference_help_text).collect();
-    for subcommand in ["register", "list", "show"] {
+    for subcommand in ["list", "show"] {
         assert!(
             reference_subcommands.contains(&subcommand),
             "`creator reference --help` must still offer '{subcommand}', got:\n{reference_help_text}"
         );
     }
-    assert!(
-        !reference_subcommands.contains(&"refresh"),
-        "`creator reference --help` must not advertise the retired leaf, got:\n{reference_help_text}"
-    );
+    for retired in ["register", "refresh"] {
+        assert!(
+            !reference_subcommands.contains(&retired),
+            "`creator reference --help` must not advertise the retired '{retired}' leaf, got:\n{reference_help_text}"
+        );
+    }
 
     let knowledge_help = fixture
         .command()
@@ -540,47 +545,58 @@ async fn reference_and_knowledge_help_survive_without_retired_leaves() {
     );
     let knowledge_help_text = String::from_utf8_lossy(&knowledge_help.stdout).into_owned();
     let knowledge_subcommands: Vec<&str> = subcommands(&knowledge_help_text).collect();
-    for subcommand in ["add", "list", "search"] {
+    for subcommand in ["list", "search"] {
         assert!(
             knowledge_subcommands.contains(&subcommand),
             "`creator knowledge --help` must still offer '{subcommand}', got:\n{knowledge_help_text}"
         );
     }
+    assert!(
+        !knowledge_subcommands.contains(&"add"),
+        "`creator knowledge --help` must not advertise the retired 'add' leaf, got:\n{knowledge_help_text}"
+    );
 }
 
-/// The retained reference registry stays callable end to end without a daemon.
+/// The retired reference-store write entrances are unknown.
+///
+/// Regression: both leaves wrote the retiring stores (`reference_sources` +
+/// `body.md` for `register`, `knowledge_entries` for `add`). They must be
+/// refused at parse time, before any core call, registry row or body file.
 #[tokio::test]
-async fn retained_reference_registry_round_trips_without_a_daemon() {
+async fn retired_reference_store_write_leaves_are_unknown() {
     let fixture = DirectFixture::new().await;
 
-    let register = fixture
-        .command()
-        .args([
+    for args in [
+        vec![
             "creator",
             "reference",
             "register",
             "--source",
-            "https://example.invalid/t13-notes",
-            "--source-type",
-            "url",
+            "https://example.invalid/retired",
             "--title",
-            "Retained reference",
+            "Retired reference",
             "--body",
-            "Reference body retained by the local registry.",
-        ])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        register.status.success(),
-        "`reference register` must stay callable: {}",
-        String::from_utf8_lossy(&register.stderr)
-    );
-    let reference_id = String::from_utf8_lossy(&register.stdout)
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("✓ Reference registered: "))
-        .expect("`reference register` must report the new reference id")
-        .trim()
-        .to_string();
+            "Reference body.",
+        ],
+        vec!["creator", "knowledge", "add", "Retired knowledge entry"],
+    ] {
+        let leaf = args[2];
+        let output = fixture
+            .command()
+            .args(&args)
+            .output()
+            .expect("spawn the real nexus42 binary");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "`{args:?}` must be refused as a usage error, got {output:?}"
+        );
+        assert!(
+            stderr.contains(leaf),
+            "the refusal must name the retired '{leaf}' leaf, got:\n{stderr}"
+        );
+    }
 
     let list = fixture
         .command()
@@ -589,70 +605,13 @@ async fn retained_reference_registry_round_trips_without_a_daemon() {
         .expect("spawn the real nexus42 binary");
     assert!(
         list.status.success(),
-        "`reference list` must stay callable: {}",
+        "the surviving read leaf must still render: {}",
         String::from_utf8_lossy(&list.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&list.stdout).contains(&reference_id),
-        "the registered reference must be listed"
-    );
-
-    let show = fixture
-        .command()
-        .args(["creator", "reference", "show", &reference_id])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        show.status.success(),
-        "`reference show` must stay callable: {}",
-        String::from_utf8_lossy(&show.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&show.stdout).contains("Retained reference"),
-        "`reference show` must render the registered title"
-    );
-}
-
-/// The retained User-knowledge leaves stay callable through the typed core.
-#[tokio::test]
-async fn retained_knowledge_leaves_round_trip_through_the_core() {
-    let fixture = DirectFixture::new().await;
-
-    let add = fixture
-        .command()
-        .args([
-            "creator",
-            "knowledge",
-            "add",
-            "Retained knowledge entry",
-            "--tags",
-            "t13,smoke",
-        ])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        add.status.success(),
-        "`knowledge add` must stay callable: {}",
-        String::from_utf8_lossy(&add.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&add.stdout).contains("Knowledge entry added"),
-        "`knowledge add` must confirm the stored entry"
-    );
-
-    let search = fixture
-        .command()
-        .args(["creator", "knowledge", "search", "Retained"])
-        .output()
-        .expect("spawn the real nexus42 binary");
-    assert!(
-        search.status.success(),
-        "`knowledge search` must stay callable: {}",
-        String::from_utf8_lossy(&search.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&search.stdout).contains("Retained knowledge entry"),
-        "`knowledge search` must find the entry just added through the core"
+        String::from_utf8_lossy(&list.stdout).contains("No registered references."),
+        "no reference row may have been created, got:\n{}",
+        String::from_utf8_lossy(&list.stdout)
     );
 }
 

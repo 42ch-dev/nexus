@@ -1,17 +1,17 @@
 //! Reference source management subcommands.
 //!
-//! CLI surface for the V1.26 reference store (`SQLite` registry + body.md on
-//! disk). Every leaf goes through the `nexus-core` reference authority
-//! ([`CoreService::register_reference`], `list_references`, `get_reference`),
-//! which owns the registry writes/reads and the schema-owned response
-//! envelopes, so `reference show` renders the same fields over either
-//! transport. There is no loopback HTTP involved.
+//! CLI surface for the retired V1.26 reference store (`SQLite` registry +
+//! body.md on disk). The surviving read leaves go through the `nexus-core`
+//! reference authority (`list_references`, `get_reference`), which owns the
+//! registry reads and the schema-owned response envelopes, so `reference show`
+//! renders the same fields over either transport. There is no loopback HTTP
+//! involved.
 //!
-//! There is deliberately no `reference refresh` leaf: the retired V1.58 P3
-//! entrance only dispatched `nexus.reference.refresh` through the daemon
-//! host-call endpoint and had no complete direct CLI operation. The library
-//! refresh helpers (the reference capability and the execution refresh
-//! schedule) remain the real owners.
+//! There is deliberately no `reference register` leaf: writing a
+//! `reference_sources` row and its `body.md` is retired with the store. There is
+//! also no `reference refresh` leaf — the V1.58 P3 entrance only dispatched the
+//! retired `nexus.reference.refresh` host capability, and that capability and
+//! its execution schedule are gone with the write path.
 //!
 //! The direct-core open admits the selection at the seam
 //! ([`crate::core::open_direct_core`]) first: the writer pool migrates — and
@@ -22,44 +22,12 @@ use crate::config::CliConfig;
 use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_core::{CoreError, CoreService, Principal, RegisterReferenceParams};
+use nexus_core::{CoreError, CoreService, Principal};
 use std::fmt::Write as _;
-use std::path::PathBuf;
 
 /// Reference source subcommands.
 #[derive(Debug, Subcommand)]
 pub enum ReferenceCommand {
-    /// Register a new reference source
-    Register {
-        /// Path or URI of the source material
-        #[arg(long)]
-        source: String,
-
-        /// Source type: `file`, `url`, `pdf`, or `note`
-        #[arg(long, default_value = "note")]
-        source_type: String,
-
-        /// Human-readable title
-        #[arg(long)]
-        title: String,
-
-        /// Tags (comma-separated)
-        #[arg(long)]
-        tags: Option<String>,
-
-        /// Mutability policy: `static` (default) or `refreshable`
-        #[arg(long, default_value = "static")]
-        mutability: String,
-
-        /// Body text file path (reads from the file; use `-` for stdin)
-        #[arg(long)]
-        file: Option<PathBuf>,
-
-        /// Inline body text (mutually exclusive with `--file`)
-        #[arg(long)]
-        body: Option<String>,
-    },
-
     /// List registered references (metadata only, no body)
     List,
 
@@ -81,30 +49,6 @@ pub async fn run(cmd: ReferenceCommand, config: &CliConfig) -> Result<()> {
     let outcome = async {
         let principal = core.active_principal().await.map_err(map_core_error)?;
         match cmd {
-            ReferenceCommand::Register {
-                source,
-                source_type,
-                title,
-                tags,
-                mutability,
-                file,
-                body,
-            } => {
-                run_register(
-                    &core,
-                    &principal,
-                    &RegisterInput {
-                        source,
-                        source_type,
-                        title,
-                        tags,
-                        mutability,
-                        file,
-                        body,
-                    },
-                )
-                .await
-            }
             ReferenceCommand::List => run_list(&core, &principal).await,
             ReferenceCommand::Show { reference_id } => {
                 run_show(&core, &principal, &reference_id).await
@@ -116,68 +60,6 @@ pub async fn run(cmd: ReferenceCommand, config: &CliConfig) -> Result<()> {
         println!("{text}");
     }
     Ok(())
-}
-
-/// Collected input for the register command.
-struct RegisterInput {
-    source: String,
-    source_type: String,
-    title: String,
-    tags: Option<String>,
-    mutability: String,
-    file: Option<PathBuf>,
-    body: Option<String>,
-}
-
-/// `reference register` — create the registry row + body.md through the core.
-async fn run_register(
-    core: &CoreService,
-    principal: &Principal,
-    input: &RegisterInput,
-) -> Result<Option<String>> {
-    // Resolve body text
-    let body_text = resolve_body_text(input.file.as_ref(), input.body.as_ref())?;
-
-    // Resolve mutability
-    let source_mutability = match input.mutability.as_str() {
-        "static" => nexus_local_db::SourceMutability::Static,
-        "refreshable" => nexus_local_db::SourceMutability::Refreshable,
-        other => {
-            return Err(CliError::Other(format!(
-                "Invalid mutability {other:?}. Use 'static' or 'refreshable'."
-            )));
-        }
-    };
-
-    let reference = core
-        .register_reference(
-            principal,
-            RegisterReferenceParams {
-                source_type: input.source_type.clone(),
-                source_mutability,
-                uri: input.source.clone(),
-                title: input.title.clone(),
-                tags: input.tags.clone(),
-                body: body_text,
-            },
-        )
-        .await
-        .map_err(|error| classify_register_error(error, &input.source_type))?;
-
-    let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "✓ Reference registered: {}",
-        reference.reference_source_id
-    );
-    let _ = writeln!(out, "  Title:  {}", reference.title);
-    let _ = writeln!(out, "  Type:   {}", reference.source_type);
-    let _ = writeln!(out, "  URI:    {}", reference.uri);
-    if let Some(cp) = &reference.content_path {
-        let _ = writeln!(out, "  Body:   {cp}");
-    }
-
-    Ok(Some(finish_render(out)))
 }
 
 /// `reference list` — show metadata for all references.
@@ -269,60 +151,6 @@ fn finish_render(mut out: String) -> String {
     out
 }
 
-/// Map a `register_reference` refusal to the CLI taxonomy.
-///
-/// The core owns the `source_type` grammar; this leaf keeps the wording it
-/// rendered when the check lived here.
-fn classify_register_error(error: CoreError, source_type: &str) -> CliError {
-    match error {
-        CoreError::InvalidInput { field, .. } if field == "source_type" => {
-            invalid_source_type(source_type)
-        }
-        other => map_core_error(other),
-    }
-}
-
-/// The refusal wording for a `source_type` outside the contract enum.
-fn invalid_source_type(source_type: &str) -> CliError {
-    CliError::Other(format!(
-        "Invalid source type {source_type:?}. Must be one of: {}.",
-        nexus_core::REFERENCE_SOURCE_TYPES.join(", ")
-    ))
-}
-
-/// Resolve body text from `--file` or `--body` flags.
-fn resolve_body_text(file: Option<&PathBuf>, body: Option<&String>) -> Result<String> {
-    match (file, body) {
-        (Some(_), Some(_)) => Err(CliError::Other(
-            "Cannot specify both --file and --body. Choose one.".into(),
-        )),
-        (Some(path), None) => {
-            if path.to_string_lossy() == "-" {
-                // Read from stdin
-                use std::io::Read;
-                let mut buf = String::new();
-                std::io::stdin()
-                    .read_to_string(&mut buf)
-                    .map_err(|e| CliError::Other(format!("Failed to read stdin: {e}")))?;
-                Ok(buf)
-            } else if path.exists() {
-                std::fs::read_to_string(path).map_err(|e| {
-                    CliError::Other(format!("Failed to read body file {}: {e}", path.display()))
-                })
-            } else {
-                Err(CliError::Other(format!(
-                    "Body file not found: {}",
-                    path.display()
-                )))
-            }
-        }
-        (None, Some(text)) => Ok(text.clone()),
-        (None, None) => Err(CliError::Other(
-            "Body text is required. Use --file <path> or --body <text>.".into(),
-        )),
-    }
-}
-
 /// Truncate a string to `max_len` chars with ellipsis if needed.
 fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
@@ -342,57 +170,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn invalid_source_type_names_the_accepted_grammar() {
-        let message = invalid_source_type("image").to_string();
-        assert!(message.contains("\"image\""), "{message}");
-        assert!(message.contains("file, url, pdf, note"), "{message}");
-    }
-
-    #[test]
-    fn other_invalid_input_uses_the_shared_mapper() {
-        let mapped = classify_register_error(
-            CoreError::InvalidInput {
-                field: "title".to_string(),
-                reason: "empty".to_string(),
-            },
-            "note",
-        );
-        assert!(
-            mapped.to_string().contains("invalid input (title)"),
-            "{mapped}"
-        );
-    }
-
-    #[test]
     fn finish_render_drops_only_the_appended_delimiter() {
         assert_eq!(
             finish_render("  Body Path:    body.md  \n".to_string()),
             "  Body Path:    body.md  "
         );
         assert_eq!(finish_render("line".to_string()), "line");
-    }
-
-    #[test]
-    fn resolve_body_text_rejects_both_file_and_body() {
-        let result = resolve_body_text(
-            Some(&PathBuf::from("/tmp/test.txt")),
-            Some(&"inline text".into()),
-        );
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("both"));
-    }
-
-    #[test]
-    fn resolve_body_text_rejects_neither_file_nor_body() {
-        let result = resolve_body_text(None, None);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("required"));
-    }
-
-    #[test]
-    fn resolve_body_text_accepts_inline_body() {
-        let result = resolve_body_text(None, Some(&"hello".into()));
-        assert_eq!(result.unwrap(), "hello");
     }
 
     #[test]

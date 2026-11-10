@@ -20,10 +20,11 @@
 //!
 //! `anonymous_selection_is_refused_at_every_reference_entrance` and
 //! `anonymous_selection_is_refused_at_world_event_add` extend the same
-//! admission to the two retained local storage entrances the migration kept
-//! (`creator reference register|list|show` and `creator world event-add`), and
-//! pin that a refusal leaves the home byte-identical — no workspace directory
-//! and no `state.db`.
+//! admission to the retained local storage entrances the migration kept
+//! (`creator reference list|show` and `creator world event-add`), and pin that
+//! a refusal leaves the home byte-identical — no workspace directory and no
+//! `state.db`. The retired `reference register` write entrance is a usage error
+//! and never reaches the seam.
 //!
 //! `unreadable_workspace_db_is_not_reported_as_an_unset_selection` pins the
 //! other half of the same admission: a metadata failure on the selected
@@ -734,20 +735,7 @@ fn anonymous_selection_is_refused_at_every_reference_entrance() {
     warm_home(home.path());
     let before = home_tree(home.path());
 
-    let entrances: [&[&str]; 3] = [
-        &[
-            "creator",
-            "reference",
-            "register",
-            "--source",
-            "https://example.invalid/anon",
-            "--source-type",
-            "url",
-            "--title",
-            "Anon reference",
-            "--body",
-            "An unmaterialized selection must not store this.",
-        ],
+    let entrances: [&[&str]; 2] = [
         &["creator", "reference", "list"],
         &["creator", "reference", "show", "ref_absent"],
     ];

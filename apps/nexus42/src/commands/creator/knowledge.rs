@@ -5,18 +5,19 @@
 //! entries, use `creator world kb`. See entity-scope-model §5.3–5.4 for the
 //! three KB namespaces.
 //!
-//! All three leaves run on the shared direct-call seam (`crate::core`): one
+//! Both leaves run on the shared direct-call seam (`crate::core`): one
 //! owner-scoped `CoreService` is opened, the typed call is issued
-//! (`add_user_knowledge`, `list_user_knowledge`, `search_user_knowledge`), and
-//! the writer is released before anything is rendered. The core's own
-//! work-write admission and store validation are the authority, so the CLI
-//! holds no second `SqliteKnowledgeStore` caller and never probes (or falls
-//! back to) the daemon.
+//! (`list_user_knowledge`, `search_user_knowledge`), and the writer is released
+//! before anything is rendered. The core's own work-write admission and store
+//! validation are the authority, so the CLI holds no second
+//! `SqliteKnowledgeStore` caller and never probes (or falls back to) the daemon.
 //!
-//! Entries are stored under the core's default local user identity
-//! (`user_default` until the platform `usr_*` mapping exists), which is why
-//! these leaves carry no `--user-id`: the typed seam has no such parameter, and
-//! a flag no owner honours would be a silent no-op.
+//! There is deliberately no `knowledge add` leaf. The retired write entrance was
+//! removed with the User-knowledge store retirement; entries are stored under the
+//! core's default local user identity (`user_default` until the platform `usr_*`
+//! mapping exists), which is why these leaves carry no `--user-id`: the typed
+//! seam has no such parameter, and a flag no owner honours would be a silent
+//! no-op.
 
 use crate::config::CliConfig;
 use crate::core::{finish_direct, map_core_error, open_direct_core};
@@ -30,15 +31,6 @@ use nexus_knowledge::{KnowledgeResult, KnowledgeTag, UserKnowledgeEntry};
 /// For World narrative knowledge entries, use `creator world kb`.
 #[derive(Debug, Subcommand)]
 pub enum KnowledgeCommand {
-    /// Add a new User-scoped knowledge entry
-    Add {
-        /// Content text for the knowledge entry
-        content: String,
-        /// Comma-separated tags (e.g. "rust,tutorial")
-        #[arg(long, value_delimiter = ',')]
-        tags: Option<Vec<String>>,
-    },
-
     /// List knowledge entries
     List {
         /// Filter by comma-separated tags
@@ -80,13 +72,6 @@ pub async fn run(cmd: KnowledgeCommand, config: &CliConfig) -> Result<()> {
     let outcome = async {
         let principal = core.active_principal().await.map_err(map_core_error)?;
         match cmd {
-            KnowledgeCommand::Add { content, tags } => {
-                let entry = core
-                    .add_user_knowledge(&principal, content, tags)
-                    .await
-                    .map_err(map_core_error)?;
-                Ok(render_added(&entry))
-            }
             KnowledgeCommand::List {
                 tags,
                 limit,
@@ -117,17 +102,6 @@ pub async fn run(cmd: KnowledgeCommand, config: &CliConfig) -> Result<()> {
     let text = finish_direct(&core, outcome).await?;
     println!("{text}");
     Ok(())
-}
-
-/// Render the `knowledge add` confirmation.
-fn render_added(entry: &UserKnowledgeEntry) -> String {
-    [
-        format!("✓ Knowledge entry added: {}", entry.id),
-        format!("  User:    {}", entry.user_id),
-        format!("  Tags:    {}", join_tags(&entry.tags)),
-        format!("  Content: {}", truncate(&entry.content, 80)),
-    ]
-    .join("\n")
 }
 
 /// Render the `knowledge list` page.

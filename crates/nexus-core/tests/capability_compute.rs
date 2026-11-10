@@ -956,31 +956,16 @@ async fn research_query_is_scoped_to_the_creator() {
     );
 }
 
-/// C3: `nexus.reference.refresh` is a WRITE tool.
+/// The retired `nexus.reference.refresh` write entrance is no longer admitted.
 ///
-/// It writes DB state, rewrites body.md and performs a network fetch, so a
-/// policy that grants reads only must refuse it — and the refusal must land
-/// before any of those effects.
+/// The capability row and the orchestration builtin were removed with the
+/// reference store, so the id no longer resolves at the allowlist gate: the
+/// refusal lands before any handler, DB write, body.md rewrite or network
+/// fetch.
 #[tokio::test]
 #[serial_test::serial]
-async fn reference_refresh_is_refused_under_a_read_only_policy() {
+async fn reference_refresh_is_not_admitted() {
     let f = fixture().await;
-
-    // A policy that grants READS (via `nexus.*.read`) but not writes. With
-    // `default = "ask"` the two paths differ observably: the read predicate
-    // consults `nexus.*.read` and grants, while the write predicate consults
-    // only the tool name and `nexus.*` and refuses. Under `default = "deny"`
-    // BOTH would refuse, so this test could not tell the fix from the bug.
-    let workspace_dir = f.tmp.path().join("policy-ws");
-    std::fs::create_dir_all(workspace_dir.join(".nexus42")).unwrap();
-    std::fs::write(
-        workspace_dir.join(".nexus42").join("permissions.toml"),
-        "default = \"ask\"\n[grant]\n\"nexus.*.read\" = true\n",
-    )
-    .unwrap();
-
-    let mut context = f.context.clone();
-    context.set_workspace_path(Some(workspace_dir.to_string_lossy().into_owned()));
 
     let request = ToolsApi {
         tool_name: "nexus.reference.refresh".to_string(),
@@ -989,15 +974,15 @@ async fn reference_refresh_is_refused_under_a_read_only_policy() {
         request_id: None,
         caller_kind: None,
     };
-    let err = nexus_core::execution::capabilities::execute_tool(&context, &request)
+    let err = nexus_core::execution::capabilities::execute_tool(&f.context, &request)
         .await
         .unwrap_err();
     assert!(
-        matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "policy_blocked"),
-        "a read-only policy must refuse a write tool, got {err:?}"
+        matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "not_supported"),
+        "the retired refresh entrance must be an unknown tool, got {err:?}"
     );
 
-    // The refusal precedes the effects: the seeded row is untouched.
+    // The refusal precedes the effects: no row was created or touched.
     let status: Option<String> = sqlx::query_scalar(
         "SELECT scan_status FROM reference_sources WHERE reference_source_id = 'ref_any'",
     )
@@ -1005,19 +990,6 @@ async fn reference_refresh_is_refused_under_a_read_only_policy() {
     .await
     .unwrap();
     assert!(status.is_none(), "no refresh effect may have run");
-
-    // CONTROL: the same policy still ADMITS a read tool, so the refusal above
-    // is the write classification and not the policy denying everything.
-    let request = ToolsApi {
-        tool_name: "nexus.workspace.info".to_string(),
-        parameters: json!({}),
-        session_id: None,
-        request_id: None,
-        caller_kind: None,
-    };
-    nexus_core::execution::capabilities::execute_tool(&context, &request)
-        .await
-        .expect("a read tool still passes under the same policy");
 }
 
 // ---------------------------------------------------------------------------

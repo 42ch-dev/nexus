@@ -10,7 +10,7 @@ async fn registry_lookup_builtin_workspace_open() {
 }
 
 #[tokio::test]
-async fn registry_has_thirty_three_builtins() {
+async fn registry_has_thirty_two_builtins() {
     // V1.36 P1 added `novel.project_scaffold` (18→19);
     // P3 added `novel.chapter_transition` (19→20);
     // V1.51 T-A P0 added `nexus.llm.extract` (20→21);
@@ -18,7 +18,6 @@ async fn registry_has_thirty_three_builtins() {
     // V1.54 P1 added `game_bible.project_scaffold` (22→23);
     // V1.55 P3 added `script.project_scaffold` (23→24);
     // V1.56 P-last (R-V155P2-F002) added `game_bible.section_status.update` (24→25).
-    // V1.58 P1 (DF-44) added `nexus.reference.refresh` (25→26).
     // V1.60 P0 (DF-46) added 5 orchestration capabilities (26→31):
     //   world.state.query, world.delta.propose, world.delta.apply,
     //   timeline.event.append, fork.create.
@@ -26,9 +25,10 @@ async fn registry_has_thirty_three_builtins() {
     // V1.63 P2 added `essay.draft_status.finalize` (32→33).
     // V1.67 P2 (R-V160P1-QC1-W001) added `script.section_status.update` (33→34).
     // V1.186 P1 removed the obsolete `acp.session_load` placeholder (34→33).
+    // v231 removed `nexus.reference.refresh` with the reference store (33→32).
     // UPDATE THIS TEST when adding or removing a builtin.
     let reg = CapabilityRegistry::with_builtins();
-    assert_eq!(reg.len(), 33);
+    assert_eq!(reg.len(), 32);
 }
 
 #[tokio::test]

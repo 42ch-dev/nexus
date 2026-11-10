@@ -321,8 +321,6 @@ const REGISTRY_SNAPSHOT_CAPABILITIES: &[&str] = &[
     "nexus.pool.entry.manage",
     // ── registry.refresh itself ──
     "nexus.registry.refresh",
-    // ── V1.58 P1: DF-44 ──
-    "nexus.reference.refresh",
 ];
 
 // ─── CDN configuration (constructor-injected; V1.57 P1) ────────────────────

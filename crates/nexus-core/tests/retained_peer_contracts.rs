@@ -2054,7 +2054,8 @@ async fn reload_adopts_grants_at_session_boundaries_only() {
 
 // ── Retained core tool-registry integrity ─────────────────────────────────
 
-/// The 28 shipped `nexus.*` host-tool ids (V1.59 P0 roster).
+/// The 27 shipped `nexus.*` host-tool ids (V1.59 P0 roster, minus the retired
+/// `nexus.reference.refresh`).
 const NEXUS_TOOL_IDS: &[&str] = &[
     "nexus.context.whoami",
     "nexus.workspace.info",
@@ -2074,7 +2075,6 @@ const NEXUS_TOOL_IDS: &[&str] = &[
     "nexus.finding.resolve",
     "nexus.pool.entry.manage",
     "nexus.registry.refresh",
-    "nexus.reference.refresh",
     // V1.59 P0: DF-47 manuscript & misc parity batch (9 tools)
     "nexus.manuscript.list",
     "nexus.manuscript.read_range",
@@ -2113,8 +2113,8 @@ fn host_tool_registry_roster_is_the_declared_nexus_surface() {
     }
     assert_eq!(
         registry.len(),
-        30,
-        "the registry holds the 28 nexus.* ids plus the 2 fs/* ids"
+        29,
+        "the registry holds the 27 nexus.* ids plus the 2 fs/* ids"
     );
 
     for profile_id in [

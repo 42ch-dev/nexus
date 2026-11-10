@@ -433,10 +433,6 @@ fn check_nexus_tool_permission(
         "nexus.work.schedule.set",
         "nexus.finding.resolve",
         "nexus.pool.entry.manage",
-        // Writes DB state (refresh status + content hash), rewrites the
-        // on-disk `body.md`, and performs a network fetch — a read-policy
-        // grant must not authorize it.
-        "nexus.reference.refresh",
         // Writes the chapter body to disk (temp file + fsync + atomic rename).
         "nexus.manuscript.write",
         // Mutates the Work's persisted stage/stage_status.
@@ -1461,42 +1457,6 @@ pub(crate) fn registry_daemon_health<'a>(
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
     let result = execute_daemon_health(req, context, creator_id);
     Box::pin(async move { Ok(result) })
-}
-
-// ─── V1.58 P3: nexus.reference.refresh ──────────────────────────────────────
-
-/// `nexus.reference.refresh` — refresh a reference source body via the daemon.
-///
-/// Delegates to `nexus_orchestration::capability::builtins::ReferenceRefresh`.
-/// Requires an active creator (admission gate) and a pool. Creator context
-/// (home dir + `creator_id`) is wired so the handler can write refreshed body
-/// content to the on-disk `body.md`.
-async fn execute_reference_refresh(
-    req: &ToolsApi,
-    context: &ToolContext,
-    creator_id: &str,
-) -> Result<serde_json::Value, NexusApiError> {
-    use nexus_orchestration::capability::Capability;
-    let cap = nexus_orchestration::capability::builtins::ReferenceRefresh::with_pool(
-        context.pool().clone(),
-    )
-    .with_creator_context(context.nexus_home.clone(), creator_id.to_string());
-
-    let input = req.parameters.clone();
-    cap.run(input).await.map_err(|e| NexusApiError::Internal {
-        category: format!(
-            "REFERENCE_REFRESH_FAILED: {}",
-            format_args!("nexus.reference.refresh failed: {e}")
-        ),
-    })
-}
-
-pub(crate) fn registry_reference_refresh<'a>(
-    req: &'a ToolsApi,
-    context: &'a ToolContext,
-    creator_id: &'a str,
-) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
-    Box::pin(execute_reference_refresh(req, context, creator_id))
 }
 
 // ─── V1.56 P1: nexus.registry.refresh ──────────────────────────────────────
@@ -4018,30 +3978,6 @@ pub fn build_registry() -> CapabilityRegistry {
             description: "registry refresh returns synthetic output by default",
             expected_outcome: "success",
             test_fn_name: "registry_refresh_synthetic_smoke",
-        },
-    });
-
-    // ── V1.58 P3: nexus.reference.refresh ──
-    reg.register(CapabilityRow {
-        id: "nexus.reference.refresh",
-        access: Access::Write,
-        admission: ADMISSION_WRITE_WORKSPACE,
-        handler: registry_reference_refresh,
-        catalog: CatalogDescriptor {
-            description: "Refresh a reference source's body content and update its content hash.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"reference_source_id":{"type":"string","description":"Registry ID of the reference source to refresh"},"url":{"type":"string","description":"Optional override URL for ad-hoc refresh"}},"required":["reference_source_id"],"additionalProperties":false}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"reference_source_id":{"type":"string"},"refreshed":{"type":"boolean"},"content_changed":{"type":"boolean"},"new_content_hash":{"type":"string"},"refreshed_at":{"type":"string","format":"date-time"},"status":{"type":"string","enum":["fresh","stale","not_modified","policy_blocked","error"]},"bytes_fetched":{"type":"integer","minimum":0}},"required":["reference_source_id","refreshed","content_changed","status"],"additionalProperties":false}"#,
-            ),
-        },
-        failure_mode: FailureMode::InvalidInput,
-        handler_test_vector: TestVector {
-            description:
-                "reference refresh updates content hash and writes body.md for owned source",
-            expected_outcome: "success",
-            test_fn_name: "reference_refresh_happy_path",
         },
     });
 

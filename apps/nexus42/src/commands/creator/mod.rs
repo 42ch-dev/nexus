@@ -41,7 +41,6 @@ use nexus_cloud_sync::platform_client::{PlatformClient, VerifyStatus};
 use nexus_contracts::{Creator, SetActiveWorkspaceRequest};
 use nexus_core::CoreHomeService;
 use nexus_knowledge::world_kb::KbStore;
-use nexus_knowledge::KnowledgeStore;
 use soul::SoulCommand;
 use std::path::PathBuf;
 
@@ -412,9 +411,10 @@ pub enum CreatorCommand {
         command: KbCommand,
     },
 
-    /// User-scoped global knowledge entries (add, list, search)
+    /// User-scoped global knowledge entries (list, search)
     ///
-    /// Stores unstructured knowledge entries scoped to the User (not Creator).
+    /// Reads unstructured knowledge entries scoped to the User (not Creator).
+    /// The `add` write entrance is retired; entries can no longer be created.
     /// For Work-scope file index use `creator kb`; for World narrative KB use
     /// `creator world kb`.
     /// See entity-scope-model §5.3–§5.4 for the three KB namespaces.
@@ -609,8 +609,8 @@ fn validate_workspace_slug(slug: &str) -> Result<()> {
 
 /// Seed demo data for testing and development.
 ///
-/// Creates a demo world, event, KB block, and knowledge entry using
-/// Plan 1 write APIs + knowledge store. Idempotent unless `--force`.
+/// Creates a demo world, event and KB block using the Plan 1 write APIs.
+/// Idempotent unless `--force`.
 async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
     let creator_id = config
         .active_creator_id
@@ -643,10 +643,6 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
         }
         // Delete existing demo data (cascade handles events, KB blocks)
         // SAFETY: DELETE against known tables
-        sqlx::query("DELETE FROM knowledge_entries WHERE user_id = 'user_default'")
-            .execute(&pool)
-            .await
-            .map_err(|e| CliError::Other(format!("Failed to clean demo knowledge: {e}")))?;
         sqlx::query("DELETE FROM narrative_worlds WHERE world_id = ?")
             .bind(wid)
             .execute(&pool)
@@ -702,22 +698,6 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
         .await
         .map_err(|e| CliError::Other(format!("Failed to create demo KB block: {e}")))?;
     println!("✓ Demo KB block: {}", kb_result.entry_id);
-
-    // 4. Create demo knowledge entry
-    let knowledge_store = nexus_local_db::SqliteKnowledgeStore::new(pool);
-    let entry = nexus_knowledge::UserKnowledgeEntry::new(
-        "user_default",
-        vec![
-            nexus_knowledge::KnowledgeTag::new("demo"),
-            nexus_knowledge::KnowledgeTag::new("worldbuilding"),
-        ],
-        "Demo knowledge entry for Moment context assembly testing.",
-    );
-    let stored = knowledge_store
-        .store(entry)
-        .await
-        .map_err(|e| CliError::Other(format!("Failed to create demo knowledge: {e}")))?;
-    println!("✓ Demo knowledge: {}", stored.id);
 
     println!();
     println!("Demo seed complete. Run `nexus42 platform context assemble-moment` to verify.");
