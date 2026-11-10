@@ -29,7 +29,7 @@ The V1.91 reading-chrome surface had to:
 
 - Stay strictly read-only (no body, outline, or timeline mutation).
 - Derive the chrome profile from the existing `Work.work_profile` field.
-- Express every profile difference through `apps/web/DESIGN.md` tokens so the UI does not accumulate ad-hoc Tailwind or raw CSS values.
+- Express every profile difference through `DESIGN.md` tokens so the UI does not accumulate ad-hoc Tailwind or raw CSS values.
 - Be testable with component tests that assert profile-specific attributes rather than snapshotting rendered output.
 
 ## Guidance
@@ -152,7 +152,7 @@ CSS consumes the token names directly:
 
 ## Related
 
-- `apps/web/DESIGN.md` — `## Reading Chrome` token section (V1.91)
+- `DESIGN.md` — `## Reading Chrome` token section (V1.91)
 - `apps/web/src/components/reading/reading-prose.tsx`
 - `apps/web/src/components/reading/reading-chrome-renderers.tsx`
 - `apps/web/src/lib/reading-chrome.ts`

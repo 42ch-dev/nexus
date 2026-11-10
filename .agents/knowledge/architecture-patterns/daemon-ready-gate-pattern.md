@@ -63,7 +63,7 @@ The naive implementation would create two independent health-probe polls or two 
 - **Outer launch gate** (`apps/web/src/components/setup/daemon-launch-gate.tsx` + `daemon-ready-splash.tsx`): mount-time `getDaemonStatus` + `onDaemonStatusChanged`; 25s timeout; retry = reload; reset = `resetLocalDatabase` + reload; **no** happy-path `startDaemon` (D2 always-starts in the host `.setup()`).
 - **Marker routing** (`apps/web/src/components/setup/setup-gate.tsx`): after outer gate Ready — `!setup_completed` → `/setup`; else main shell. No splash/subscribe.
 - **Do not reintroduce a Setup Wizard Step 2** that owns wait + `startDaemon` inside the wizard (`setup-step-daemon.tsx` is gone).
-- **Crash banner** (`apps/web/src/components/layout/main-banner.tsx`): long-running-session consumer; appears when state degrades from `"running"` to `"degraded"`/`"error"`/`"stopped"`.
+- **Crash banner** (`apps/web/src/components/setup/service-degraded-surface.tsx`): long-running-session consumer; appears when state degrades from `"running"` to `"degraded"`/`"error"`/`"stopped"`.
 
 ## Anti-patterns
 

@@ -62,7 +62,7 @@ The same host downloads the identical URL correctly via `curl`, `node http.get`,
 
 Use the packager's own offline input instead of the download chain: `@electron/packager` supports `electronZipDir`, which makes `getElectronZipPath` resolve `electron-v<version>-<platform>-<arch>.zip` directly from a directory — no download, no checksum round-trip.
 
-For a driver whose options are code-fixed (this repo's `scripts/package.mjs` does not pass `electronZipDir`), a temporary local pass-through gets the same effect:
+For a driver whose options are code-fixed (this repo's `apps/desktop-electron/scripts/package.mjs` does not pass `electronZipDir`), a temporary local pass-through gets the same effect:
 
 ```sh
 # Environment pattern (local-only; restore the patched dependency afterwards):

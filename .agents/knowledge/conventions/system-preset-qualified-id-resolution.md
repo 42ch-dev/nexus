@@ -19,7 +19,7 @@ tags:
 
 ## Context
 
-System presets ship inside the app bundle under `presets/_system/<name>/preset.yaml`. Their ids are **qualified** with the `_system.` prefix (e.g. `_system.maintenance`). The on-disk directory is the **stripped** name (`maintenance`), not the qualified id. Two subsystems rely on this mapping:
+System presets are embedded under `crates/nexus-preset/embedded-presets/<name>/preset.yaml` and materialized at runtime under `<nexus_home>/presets/_system/<name>/preset.yaml`. Their ids are **qualified** with the `_system.` prefix (e.g. `_system.maintenance`). The on-disk directory is the **stripped** name (`maintenance`), not the qualified id. Two subsystems rely on this mapping:
 
 - **Preset handlers** (`crates/nexus-core/src/presets.rs`): `locate_preset` / `reload_preset` resolve an id to a filesystem bundle.
 - **Sessions list** (`handlers/orchestration/sessions.rs`): daemon auto-starts `_system.*` sessions at boot (`boot.rs` WS-D); these are hidden from the author-facing Sessions list via a `preset_id.starts_with("_system.")` filter (daemon primary + `filterVisibleSessions` client defensive).

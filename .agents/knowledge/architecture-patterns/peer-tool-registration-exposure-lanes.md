@@ -191,7 +191,7 @@ admitted ⇄ derivation, catalog ⇄ spine, `tools/list` ⇄ catalog, listing �
 table, hello ⇄ allowlist, default-deny, named negatives, duplicate collision,
 eviction, reconnect lockstep, static-table pins, and the MCP refusal mapping
 (`crates/nexus-core/src/connect/table.rs` +
-`apps/nexus42/tests/e2e_peer_mcp.rs`). A second dispatch table or an MCP-only
+`crates/nexus-core/tests/retained_peer_contracts.rs`). A second dispatch table or an MCP-only
 allowlist would silently re-open the authorization surface; the four-layer
 chain keeps all policy daemon-side.
 
@@ -208,9 +208,9 @@ chain keeps all policy daemon-side.
 - **Visibility ≠ authorization split (V1.180 RN-OGA-2)**: `tools/list`
   visibility (`VisibilityPolicy`, per-consumer subset in `daemon.json`
   `mcp_visibility`, fail-closed parse, slash ids allowed for `fs/*`)
-  is an additive layer evaluated at the two MCP construction sites
-  (Model A `load_visibility_policy()` in `apps/nexus42/src/commands/mcp/mod.rs`;
-  Model B `EmbeddedMcpServer.policy` injected at `establish()`). Execution
+  is an additive layer evaluated at the MCP construction site
+  (`EmbeddedMcpServer.policy` injected at `establish()` in
+  `crates/nexus-core/src/connect/mcp_embedded.rs`). Execution
   authz stays spine-owned (L0–L3 unchanged). Two refusal classes: a
   **hidden-tool** call is seam-minted `ToolCallOutcome::NotAuthorized` →
   MCP `METHOD_NOT_FOUND` + `tool_not_authorized: {id}` discriminator before
@@ -222,17 +222,17 @@ chain keeps all policy daemon-side.
 ## Examples
 
 - Spine + admission: `crates/nexus-core/src/execution/capabilities.rs`
-  (`dispatch_peer_tool`:3362 / `dispatch_user_cap`:3443 / `user_cap_catalog_admission`:3483);
+  (`dispatch_peer_tool` / `dispatch_user_cap` / `user_cap_catalog_admission`);
   the peer registry itself is `crates/nexus-core/src/execution/peer_tools.rs` (`PeerToolRegistry`),
-  `src/api/handlers/host_tool_executor.rs` (5-gate admission,
-  `dispatch_from_worker`), `src/api/handlers/tools.rs` (catalog route).
+  `crates/nexus-core/src/execution/capabilities.rs` (dispatch) and
+  `crates/nexus-core/src/execution/peer_tools.rs` (registry/admission).
 - Peer lane: `crates/nexus-core/src/connect/{accept.rs, session.rs,
   table.rs, config.rs, identity.rs}`; `connect/table.rs`
   (`McpCatalogRefusal::InputSchemaNotRootObject`).
 - Proof suites (all behind `connect-client`): `tests/peer_session.rs` (7),
   `tests/peer_tool.rs` (11), `tests/authz_hello.rs` (7),
   `tests/honesty_lockstep.rs` (4), `tests/worker_spine_peer.rs` (8),
-  `apps/nexus42/tests/e2e_peer_mcp.rs` (8).
+  `crates/nexus-core/tests/retained_peer_contracts.rs` (8).
 - Lock spec (v1.174 iteration snapshot): `v1.174-peer-tools-lock.md` (AR-66..77).
 - Companions: `architecture-patterns/connect-host-tools-serving.md` (serving
   side, separate process — frozen), `architecture-patterns/wasm-module-as-capability-executor.md`

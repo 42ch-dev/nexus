@@ -80,7 +80,7 @@ When promoting an assets-only package to a React component library:
 - **`<NexusLogo variant src label? className? size? draggable?>`** (`packages/nexus-ui/src/components/nexus-logo.tsx`) — accepts the consumer-resolved SVG URL via `src`; renders `<img>`. `logoVariants` / `logoSquareVariants`: plain wide marks vs `*-square.svg` plates. `draggable={false}` opts out of native image drag (titlebar chrome).
 - **`<NexusMark label? className? size?>`** (`packages/nexus-ui/src/components/nexus-mark.tsx`) — hand-authored wide timeline SVG JSX; `currentColor` inheritance; no asset import.
 - **Plate wrapper** (`apps/web/src/components/brand/nexus-logo.tsx`) — imports `logo-primary-square.svg` via Vite, passes `src` + `variant="primary"` at `logoShellHeightPx`. Studio shell does the same.
-- **Ink titlebar wrapper** (`apps/web/src/components/brand/nexus-ink-logo.tsx`) — imports `logo-white.svg` at `logoCompactMarkHeightPx`.
+- **Ink titlebar wrapper** (`apps/web/src/components/brand/nexus-logo.tsx`) — imports `logo-white.svg` at `logoCompactMarkHeightPx`.
 - **White plate exception:** import `logo-white-bg-square.svg` only when the surface must be a light/white plate (not default chrome).
 
 ## Related

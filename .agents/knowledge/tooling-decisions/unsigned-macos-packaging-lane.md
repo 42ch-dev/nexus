@@ -84,7 +84,7 @@ Stage into a temporary directory, verify completeness, then publish the per-arch
 
 ### 6. Verify with a separate read-only tool that does not build, mount, sign or launch
 
-`scripts/verify-package.mjs` consumes a published arch directory and checks: receipt schema/identity consistency, app metadata (name/id/version/minimum OS/arch), the app-file manifest, archive digests, Mach-O architecture and **minimum-OS load commands**, the unpacked native `.node` closure, and compiled-host policy (no `autoUpdater`/update route). It writes nothing, mounts nothing and invokes no signing tool, and it reports GUI qualification as **not claimed**.
+`apps/desktop-electron/scripts/verify-package.mjs` consumes a published arch directory and checks: receipt schema/identity consistency, app metadata (name/id/version/minimum OS/arch), the app-file manifest, archive digests, Mach-O architecture and **minimum-OS load commands**, the unpacked native `.node` closure, and compiled-host policy (no `autoUpdater`/update route). It writes nothing, mounts nothing and invokes no signing tool, and it reports GUI qualification as **not claimed**.
 
 A verifier must fail on absence, not default: a Mach-O with no `minos`/`LC_VERSION_MIN_MACOSX` load command must exit 1 with the named minimum-macOS failure (a fixture-based CLI regression covers exactly this — a `|| 'Nexus'`-style truthiness fallback had swallowed the missing value).
 
@@ -130,10 +130,10 @@ PATH="$SENTINEL:$PATH" pnpm build:desktop -- --arch arm64
 ### Fail-closed rejection vs named preflight failure
 
 ```text
-$ node scripts/package.mjs --signed-required --out /tmp/should-not-exist
+$ node apps/desktop-electron/scripts/package.mjs --signed-required --out /tmp/should-not-exist
 package.args.unknown                     # exit 1; /tmp/should-not-exist never created
 
-$ node scripts/package.mjs --arch arm64 --out /tmp/missing-web   # apps/web/dist absent
+$ node apps/desktop-electron/scripts/package.mjs --arch arm64 --out /tmp/missing-web   # apps/web/dist absent
 package.preflight.missing_web_dist — run pnpm run build:web       # exit 1; no output dir
 
 $ nexus42 desktop bundle --arch x64      # arm64 host
@@ -142,7 +142,7 @@ package.preflight.arch: target x64 requires a native x64 runner, got arm64
 
 ## Evidence
 
-- Driver + contract — `apps/desktop-electron/scripts/package.mjs`, `scripts/package-contract.mjs`, `scripts/compose-app-icon.mjs`; read-only verifier — `scripts/verify-package.mjs`; dev driver — `scripts/dev.mjs`.
+- Driver + contract — `apps/desktop-electron/scripts/package.mjs`, `apps/desktop-electron/scripts/package-contract.mjs`, `apps/desktop-electron/scripts/compose-app-icon.mjs`; read-only verifier — `apps/desktop-electron/scripts/verify-package.mjs`; dev driver — `apps/desktop-electron/scripts/dev.mjs`.
 - Tests — `apps/desktop-electron/tests/package-contract.test.mjs` (8 cases incl. missing-output/missing-closure preflight, signing-env rejection, source scan forbidding `osxSign|osxNotarize|APPLE_SIGNING_IDENTITY|entitlements`), `tests/verify-package.test.mjs` (missing-`minos` fixture), `tests/dev-driver.test.mjs` (bounded child teardown).
 - Native prerequisite — `packages/nexus-native/scripts/build.mjs` (no signing call sites, no stale compatibility fallback) and its real-load evidence in the platform package `packages/nexus-native-darwin-arm64/native/`.
 - CI — `.github/workflows/desktop-electron-build.yml` (native matrix, `process.arch` assertion, PATH sentinels, per-arch artifact uploads).

@@ -20,7 +20,7 @@ Not recorded in the ledger; the retirement pass preserved removed text instead o
 
 ## Consequences
 
-**Provenance**: frozen from [`.agents/knowledge/architecture-patterns/workspace-parent-shell-ia.md`](../../../knowledge/architecture-patterns/workspace-parent-shell-ia.md) on 2026-10-13 during the **v1.216** de-historicization pass (plan `2026-10-13-active-docs-dehistorize`).
+**Provenance**: frozen from the knowledge document `workspace-parent-shell-ia.md` (retired 2026-11-10; retained only in the local, gitignored archive) on 2026-10-13 during the **v1.216** de-historicization pass (plan `2026-10-13-active-docs-dehistorize`).
 **Evidenced supersession date**: 2026-10-13 (archive-move date; the removed text spans multiple iteration markers with no single uncontested calendar date, so the freeze date is used and stated here).
 **Freeze date**: 2026-10-13
 

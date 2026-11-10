@@ -28,7 +28,7 @@ separate `COUNT(*)`, which the daemon does not run for list reads). This is the
 canonical shape across `works`, `chapters`, `findings`, `kb_key_blocks`,
 `memory_pending_review`, etc.
 
-The contract is defined in `schemas/local-api/kb/pagination-info.schema.json`
+The contract is defined in `schemas/daemon-api/kb/pagination-info.schema.json`
 (`additionalProperties: false`) and codegen'd into `@42ch/nexus-contracts`
 `PaginationInfo`.
 
@@ -86,7 +86,7 @@ fix exposes a `truncated: boolean` derived from the last loaded page's
 `pagination.has_more`; `CountBadge` renders `"${count}+"` when truncated.
 
 The first fix-wave brief assumed `pagination.total` existed; the implementer
-verified the contract (`packages/nexus-contracts/src/generated/local-api/kb/PaginationInfo.ts`
+verified the contract (`packages/nexus-contracts/src/generated/daemon-api/kb/PaginationInfo.ts`
 → `{ limit, next_cursor?, has_more }`, no `total`) and implemented the
 `has_more` lower-bound label instead (qc3's option b). This avoided both the
 undercount AND a wire-contract drift.
@@ -112,7 +112,7 @@ return { count, truncated, label: truncated ? `${count}+` : `${count}` };
 ## Source
 
 - Surfaced: V1.79 P0 QC fix-wave (qc3 W-QC3-002; qc1 W-001 concurred).
-- Contract: `schemas/local-api/kb/pagination-info.schema.json`.
+- Contract: `schemas/daemon-api/kb/pagination-info.schema.json`.
 - Implementer verification: `PaginationInfo` generated TS has no `total`.
 - Related (distinct): `contracts-gap-on-shipped-backend.md` covers the
   schema/codegen gap pattern; this doc covers the pagination-count UX contract.

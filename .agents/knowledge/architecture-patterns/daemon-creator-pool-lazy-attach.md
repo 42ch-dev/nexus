@@ -33,7 +33,7 @@ The current core does **not** keep a long-lived creator pool with a lazy-open en
 
 ## Why This Matters
 
-Without per-operation resolution, the Setup wizard's Continue button would fail on every clean first run with HTTP 409 `uninitialized` ("Workspace not initialized"). The web-side error classifier (`classifySetupContinueError`) correctly classifies this as a soft error (no Reset shown), but the user cannot advance until a workspace/creator exists.
+Without per-operation resolution, the Setup wizard's Continue button would fail on every clean first run with HTTP 409 `uninitialized` ("Workspace not initialized"). The web-side error classifier treats this as a soft error (no Reset shown), but the user cannot advance until a workspace/creator exists.
 
 ## When to Apply
 
@@ -60,7 +60,7 @@ pool.close().await;
 
 ### Migration failure surfacing (do NOT expect Reset on this path)
 
-A schema-init / migration failure inside the per-operation pool open maps through `local_db_err` to `CoreError::Internal` (`crates/nexus-core/src/error.rs:202`, the `other =>` arm; the real cause is only carried in the internal `category`), and `mapNativeError` replaces it at the sanitization boundary with a generic `500 internal` / `"Internal server error"` (`apps/nexus-service/src/errors.ts:86-91`) — the migration detail never reaches the client. And `patch_creator` runs in the **display_name** phase, which `classifySetupContinueError` (`apps/web/src/lib/setup/continue-error.ts`) classifies unconditionally as `soft_display_name`; its `/migration/i` → `migration_db` (the only class that permits Reset) applies to the **bootstrap** phase only. So a `patch_creator` migration failure surfaces as a generic soft error, never as Reset.
+A schema-init / migration failure inside the per-operation pool open maps through `local_db_err` to `CoreError::Internal` (`crates/nexus-core/src/error.rs:202`, the `other =>` arm; the real cause is only carried in the internal `category`), and `mapNativeError` replaces it at the sanitization boundary with a generic `500 internal` / `"Internal server error"` (`apps/nexus-service/src/errors.ts:86-91`) — the migration detail never reaches the client. And `patch_creator` runs in the **display_name** phase, a soft-failure path where Reset is not offered; only a bootstrap-phase migration failure is classified as reset-worthy. So a `patch_creator` migration failure surfaces as a generic soft error, never as Reset.
 
 ## Prevention
 

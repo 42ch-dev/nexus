@@ -68,4 +68,4 @@ Settings chrome (five-section nav, modal size) must appear in Design Studio fixt
 
 - Spec: `shell-ia-finish.md`
 - Plans:  (gear), `…-p2-shell-ia-finish` (modal primary)
-- Related: [ui-component-promotion-workflow.md](ui-component-promotion-workflow.md), [creator-shell-content-mode-pattern.md](creator-shell-content-mode-pattern.md)
+- Related: [ui-component-promotion-workflow.md](ui-component-promotion-workflow.md)
