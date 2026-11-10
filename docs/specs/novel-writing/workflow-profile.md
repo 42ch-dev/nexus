@@ -162,7 +162,7 @@ The P0 gate evaluator already supports the `world_id` gate for `novel-writing`; 
 
 ##### 3.5.1.3 Prompt-time World context block
 
-For a World-bound Work (`world_id != NULL`), before each outline and draft prompt the orchestration engine injects a **World context block** sourced from a future `creator kb query world <world_id>` capability or equivalent `nexus-kb` query API. The block is a compact, prompt-safe object; it is not a replacement for full World KB retrieval.
+For a World-bound Work (`world_id != NULL`), before each outline and draft prompt the orchestration engine injects a **World context block** sourced from the World KB read surface (`creator world kb list|show` equivalents over `nexus-knowledge`; no `creator kb` query leaf exists — that group is retired). The block is a compact, prompt-safe object; it is not a replacement for full World KB retrieval.
 
 Minimum YAML shape:
 
@@ -206,7 +206,7 @@ For World-bound Works, `world_refs` is required by the validation contract: it m
 
 ##### 3.5.1.5 Chapter → World KB extraction and promotion
 
-The `creator-workflow.md` `persist` stage already maps Work → World KB to `creator kb queue-extract` + `kb-extract`. For novel Works, the extraction target is the Work's `world_id` when set:
+The `creator-workflow.md` `persist` stage already maps Work → World KB to `creator world kb queue-extract` + `kb-extract`. For novel Works, the extraction target is the Work's `world_id` when set:
 
 - **World-bound Work**: `kb-extract` reads finalized chapter body + outline/event/foreshadowing indexes, extracts entities, events, rules, locations, and relationships, then creates or updates World KB items under `work.world_id` with SourceAnchors back to the chapter path and, where available, the timeline event.
 - **Legacy worldless Work**: extraction is skipped or remains local Work scope; it MUST NOT silently create a new World or promote content into an arbitrary World.
@@ -501,7 +501,7 @@ The deterministic complement `outline_five_q_check` in `nexus-orchestration::qua
 
 When a Work has `world_id != NULL`:
 
-- Before drafting each chapter, the orchestration engine injects a **World context block** into the prompt: character names + 1-line descriptors, key locations, current timeline position. Sourced from World KB via `creator kb query world <world_id>` (or equivalent capability).
+- Before drafting each chapter, the orchestration engine injects a **World context block** into the prompt: character names + 1-line descriptors, key locations, current timeline position. Sourced from the World KB read surface (`nexus-knowledge`; the canonical CLI form is `creator world kb list|show --world-id <id>`).
 - The LLM is asked to **name characters / locations exactly as in World KB** unless the chapter is introducing a new one (new ones go to `Outlines/event-index.md` for later `kb-extract` promotion).
 - `world_refs: [char_xxx, loc_yyy]` frontmatter is filled by the agent based on what the chapter references; validation timing per §3.5.1.4.
 

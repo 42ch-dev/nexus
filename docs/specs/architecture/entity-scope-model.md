@@ -610,21 +610,30 @@ Minimum common `body` shape for script items:
 - **World-scoped:** Narrative KB graph assets (KnowledgeEntries, SourceAnchors, graph insertion/query, narrative KB lifecycle) coordinated with `nexus-narrative`. Holds spoke `KnowledgeEntry` natively; `extensions.nexus` typed accessors via `nexus-spoke-adapter`.
 - **The former User-scoped tier is retired (V1.231, ADR K1).** There is no User-tier store, no global tagged knowledge index, and no reference-source registry in the crate; `knowledge_entries` and `reference_sources` are dropped. The crate is World-KB-only, and the stacked Knowledge IR assumes that single family. A User-scope knowledge surface may return only as a future independent proposal — it MUST NOT be re-added as a tier of this crate.
 
-#### 5.3 CLI `creator kb` — local work-scope file index
+#### 5.3 CLI `creator world kb` — the only KB operator entrance
 
-`nexus42 creator kb` is a CLI command group for local knowledge-asset workflows:
+The work-scope `nexus42 creator kb` command group and its filesystem index (`kb/index.json`, `kb/entries/<id>.md`) are **retired** (V1.231, ADR K1). No compatibility layer exists: the parser refuses the group, the daemon no longer serves `/v1/daemon/kb/entries`, and `nexus-home-layout` exposes no work-scope kb directory. A future local note/document staging surface would be a **new** Exploration — it must not revive this command group or these files.
 
-- Today, its default `work` scope is a local file/index workflow under the active `creator_id` and `workspace_slug`.
-- Its current implementation is not equivalent to the World-scoped narrative KB model.
+Every KB operator action now runs through the canonical World KB surface `nexus42 creator world kb ...`:
 
-> **Durable roadmap:** DR-46 (`creator kb --scope world` / user-global knowledge routing).
+| Command | Role |
+| --- | --- |
+| `creator world kb queue-extract <label> --world-id <id> [--work-id <id>] [--chapter N]` | Idempotent enqueue of a Work artifact into `kb_extract_jobs` (§5.5). |
+| `creator world kb extract-status [--job-id]` | Inspect those jobs (without `--job-id`: up to 100 most recent for the active creator). |
+| `creator world kb rescan <work_ref>/<chapter>` \| `--work <work_ref>` `[--dry-run] [--json]` | Re-sync `kb_extract_jobs` candidates + confirmed KnowledgeEntry bodies (§5.5) — see [world-kb-runtime-architecture.md §5.5.1](world-kb-runtime-architecture.md#551-cross-chapter-reconciliation-normative) for the cross-chapter mode. |
+| `creator world kb pending \| adopt \| reject \| list \| show \| edit \| delete` | The promotion state machine (§5.5.1–§5.5.3). |
+| `creator world kb pack export\|import`, `graph`, `entity patch` | Portable pack I/O and the direct-core entity/graph surface. |
+
+The extract/rescan leaves read the Work's chapter prose and the confirmed `KnowledgeEntryRecord` rows — never a local file index.
+
+> **Durable roadmap:** DR-46 (`creator kb --scope world` / user-global knowledge routing) has no live target after this retirement: the user-global tier is gone (§5.2) and no work-scope index remains to route.
 
 #### 5.4 Prohibited shorthand
 
 The term `KB` MUST be qualified in architecture/spec text when ambiguity matters:
 
-- Use **World KB** or **narrative KB** for `nexus-knowledge` (World-scoped).
-- Use **CLI local work KB index** for `nexus42 creator kb --scope work`.
+- Use **World KB** or **narrative KB** for `nexus-knowledge` (World-scoped) — the only KB owner reachable from the CLI.
+- Do not use **CLI local work KB index** / **local work index** / **work-scope KB**: those named the retired `creator kb` group (§5.3) and are not live-owner shorthand.
 - Do not use **User knowledge** or **global knowledge index**: that surface is retired (V1.231, §5.2) and the shorthand no longer names a live owner.
 
 #### 5.5 World KB promotion state machine (normative)

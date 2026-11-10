@@ -277,21 +277,20 @@ The daemon API HTTP route paths under `/v1/daemon/.../kb/` are **not renamed** b
 |--------|--------|
 | Path stability | `kb` = knowledge base — semantically accurate. Changing it breaks other consuming clients unnecessarily. |
 | Deferred concern | Route path renaming is a separate CLI-IA concern, not a data-model refactor. **Durable roadmap:** DR-42 (holistic route-path review). |
-| Product alignment | The `nexus42 kb ...` CLI subcommand already stays as `kb` — consistent with the daemon path. |
 | Client impact | The `/v1/daemon/*` family is consumed by the bundled web UI (same repo) and by the Electron desktop host — both served today by the standalone TS service (v1.193 P2). Renaming paths would cascade into client-side URL builders for no data-model benefit. |
 
 **Affected paths (keep as-is):**
 
 | Current path | Behavior |
 |--------------|-----------------|
-| `/v1/daemon/kb/entries` | Keep |
-| `/v1/daemon/kb/entries/:entry_id` | Keep |
 | `/v1/daemon/worlds/:world_id/kb/patch-entity` | Keep |
 | `/v1/daemon/worlds/:world_id/kb/patch-relationship` | Keep |
 | `/v1/daemon/worlds/:world_id/kb/promote-candidate` | Keep |
 | `/v1/daemon/worlds/:world_id/kb/graph` | Keep |
 | `/v1/daemon/worlds/:world_id/kb/candidates` | Keep |
 | `/v1/daemon/worlds/:world_id/kb/key-blocks/:key_block_id/state` | Keep |
+
+The **work-scope** entry routes `/v1/daemon/kb/entries` and `/v1/daemon/kb/entries/:entry_id` are **not** kept: they were removed with the work-scope file index (V1.231, ADR K1; [`entity-scope-model.md`](entity-scope-model.md) §5.3), together with the `creator kb` CLI group. That removal is a contract simplification, not a path rename — no 410/sunset stub or alias route remains.
 
 DTO shapes, handler type signatures, and generated code update to `KnowledgeEntry` — only URL path segments remain stable.
 

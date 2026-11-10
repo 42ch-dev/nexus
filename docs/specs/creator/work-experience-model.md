@@ -41,7 +41,7 @@ Without Work, users must understand preset IDs, seed strings, and `core_context`
 | --- | --- | --- |
 | **Workspace** | Per-creator operational root (`workspace_slug`), `state.db`, filesystem layout | `nexus-home-layout`, CLI `creator workspace` |
 | **Work** | A single **creative effort** with stable `work_id`, long-term goal, structured brief, optional World binding, inspiration log, linked runs | Persistence: `nexus-local-db` (`works` table/DAO); operations: `nexus-core` + CLI `creator works` (§3.3) |
-| **Work index** | CLI `creator kb --scope work` local file index | Daemon `/v1/local/kb/entries` — **not** Work |
+| **Work index** (retired V1.231) | Was the CLI `creator kb` work-scope file index; gone with ADR K1. Work → World KB now goes through `creator world kb queue-extract` / `rescan` | No owned artifact; **not** Work |
 | **World** | Narrative universe (`world_id`) with timeline and World KB | `nexus-narrative`, `nexus-kb` |
 | **Creative brief** | Structured output of intake; required fields before `novel-writing` production states | Work.creative_brief (JSON) |
 | **Run** | One execution of a preset bound to a Work (via schedule/session) | Schedule + orchestration session |
@@ -93,7 +93,7 @@ Without Work, users must understand preset IDs, seed strings, and `core_context`
 #### 3.4 Invariants
 
 1. A Work is **never** a workspace and **never** a World.
-2. `creator kb --scope work` entries may **reference** a `work_id` tag in metadata but do not define Work.
+2. The retired work-scope `creator kb` index never defined Work; Work → World KB extraction (`creator world kb queue-extract` / `rescan`) records provenance only ([entity-scope-model.md](../architecture/entity-scope-model.md) §5.5.7) and does not define Work.
 3. At most one **active** `work_init` intake schedule per Work while `intake_status != complete` (unless user explicitly restarts intake).
 4. `work_continue` presets require `intake_status == complete` OR explicit `--force` (logged).
 
@@ -239,7 +239,7 @@ Presets relying on quality loops: `novel-writing` (gathering exit), `novel-chapt
 | During preset | `creator.read_memory` / `write_memory` → `memory_fragments` |
 | After ACP session | `session_capture` → pending review queue |
 | User promotion | `creator memory review` → LTM files |
-| Work → World KB | `creator kb queue-extract` + `kb-extract` preset |
+| Work → World KB | `creator world kb queue-extract` + `kb-extract` preset |
 | Verification | `platform context assemble-moment` |
 
 Closed loop requires daemon routes for review + fragments (P4).
@@ -266,7 +266,7 @@ Stage progression is **explicit** — schedule admission (`add_schedule`, `crate
 ## Invariants
 
 1. A Work is **never** a workspace and **never** a World.
-2. `creator kb --scope work` entries may **reference** a `work_id` tag in metadata but do not define Work.
+2. The retired work-scope `creator kb` index never defined Work; Work → World KB extraction (`creator world kb queue-extract` / `rescan`) records provenance only ([entity-scope-model.md](../architecture/entity-scope-model.md) §5.5.7) and does not define Work.
 3. At most one **active** `work_init` intake schedule per Work while `intake_status != complete` (unless user explicitly restarts intake).
 4. `work_continue` presets require `intake_status == complete` OR explicit `--force` (logged).
 
