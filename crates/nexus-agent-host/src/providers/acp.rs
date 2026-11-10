@@ -19,7 +19,7 @@ use futures_util::StreamExt;
 use tokio::sync::{Mutex, RwLock};
 
 use nexus_acp_host::{
-    AcpPermissionOutcome, AcpSdkAdapter, AcpStreamUpdate, AgentSpawner, LocalSetBridge,
+    AcpError, AcpPermissionOutcome, AcpSdkAdapter, AcpStreamUpdate, AgentSpawner, LocalSetBridge,
     ManagedAcpProcess, NexusAcpClient,
 };
 use nexus_contracts::local::acp::{
@@ -378,15 +378,31 @@ impl AcpProvider {
                     .await
                 {
                     Ok(()) => return Err(error),
-                    // I-000320: the leader's exit was already observed by a
-                    // `wait()` arm above or discovered at teardown entry, so
-                    // the typed launch classification is authoritative. A
-                    // reap failure on the already-dead process must not
-                    // upgrade `launch_failed` into `cleanup_unconfirmed` (a
-                    // confirmed-exit launch failure is not an
-                    // unconfirmed-cleanup state); the cleanup uncertainty is
-                    // still reported here, without replacing the category.
+                    // I-000320: `exit_observed` means the leader's exit
+                    // status was DETERMINED (reaped by a `wait()` arm above
+                    // or at teardown entry) — not that the owned group was
+                    // cleaned up. A group-liveness teardown failure
+                    // (`CleanupUnconfirmed`: survivors, or an identity that
+                    // cannot be proven) must still surface as
+                    // `cleanup_unconfirmed`; only teardown noise that says
+                    // nothing about group liveness keeps the typed launch
+                    // classification. A reap failure on an already-dead
+                    // process must not upgrade `launch_failed` into
+                    // `cleanup_unconfirmed` (a confirmed-exit launch failure
+                    // is not an unconfirmed-cleanup state).
                     Err(reap_err) if exit_observed => {
+                        if matches!(reap_err, AcpError::CleanupUnconfirmed { .. }) {
+                            tracing::warn!(
+                                provider_id = %self.provider_id,
+                                error = %reap_err,
+                                "launch failure left owned ACP process group liveness unconfirmed (leader exit already observed)"
+                            );
+                            return Err(HostError::cleanup_unconfirmed(format!(
+                                "launch of '{}' failed ({error}) and owned ACP process cleanup is unconfirmed: {reap_err}",
+                                self.provider_id
+                            ))
+                            .with_provider(self.provider_id.clone()));
+                        }
                         tracing::warn!(
                             provider_id = %self.provider_id,
                             error = %reap_err,
@@ -399,7 +415,9 @@ impl AcpProvider {
                         // failed launch from an unconfirmed live process
                         // (L2 Issue 4): a failed reap becomes the returned
                         // typed error, never hidden behind the original
-                        // launch error.
+                        // launch error. Reachable when the leader was still
+                        // alive at teardown entry and its identity could not
+                        // be proven.
                         tracing::warn!(
                             provider_id = %self.provider_id,
                             error = %reap_err,
