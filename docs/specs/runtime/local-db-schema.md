@@ -74,42 +74,20 @@ V1 规范中，禁止继续引入语义模糊的统一键名（例如单一 `sch
 | --- | --- | --- |
 | `workspace_meta` | 本地运行时元数据（版本、workspace路径、phase等） | Shared |
 | `creators` | Creator 本地缓存 | Shared |
-| `reference_sources` | 参考资料扫描索引与状态 | Shared |
 | `narrative_worlds` | Workspace-local World projections for narrative read paths | `nexus-narrative` domain; `nexus-local-db` migrations/storage mechanics |
 | `narrative_timeline_events` | Workspace-local timeline event projections used by `NarrativeGateway` | `nexus-narrative` domain; `nexus-local-db` migrations/storage mechanics |
 | `kb_key_blocks` | World-scoped narrative KB KnowledgeEntries persisted in workspace `state.db` | `nexus-knowledge` domain; `nexus-local-db` migrations/storage mechanics |
 | `kb_source_anchors` | Multi-anchor rows attached to `kb_key_blocks` for `KbStore::attach_source_anchor` / `get_anchors` | `nexus-kb` domain; `nexus-local-db` migrations/storage mechanics |
-| `knowledge_entries` | User-scoped knowledge entries for Moment context assembly (V1.27) | `nexus-knowledge` domain; `nexus-local-db` migrations/storage mechanics |
 
-##### 4.1.1 `reference_sources`
+> **Retired (V1.231, ADR K1):** `reference_sources` and `knowledge_entries` were dropped by migration `20261111000001_retire_user_and_reference_stores.sql` after their data was archived. No workspace `state.db` carries them, and no runtime path may recreate them.
 
-`reference_sources` is the registry table for User-scoped local reference units. The canonical body text is externalized to `body.md` under the active Creator root; see [reference-store-layout.md](reference-store-layout.md).
+##### 4.1.1 `reference_sources` (retired)
 
-Required V1.26 columns:
-
-| Column | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `reference_source_id` | `TEXT` | yes | Registry primary key and `references/units/<id>/` directory name. |
-| `workspace_id` | `TEXT` | yes | Workspace binding in `state.db`. |
-| `source_type` | `TEXT` | yes | Contract enum value such as `file`, `url`, `pdf`, or `note`. |
-| `source_mutability` | `TEXT` | yes | `NOT NULL DEFAULT 'static'`; allowed values: `static`, `refreshable`. |
-| `uri` | `TEXT` | yes | `nexus42://references/units/<id>` or original import URI. |
-| `title` | `TEXT` | yes | Human-readable title. |
-| `tags` | `TEXT` | no | Serialized tag list if present. |
-| `content_hash` | `TEXT` | no | Hash of canonical `body.md` when available. |
-| `content_path` | `TEXT` | no | Relative path from Creator root, e.g. `references/units/<id>/body.md`. |
-| `content` | `TEXT` | no | **Deprecated** inline body column; `NULL` for new rows. |
-| `scan_status` | `TEXT` | yes | Scan lifecycle status. |
-| `created_at` | `TEXT` | yes | Creation timestamp. |
-| `updated_at` | `TEXT` | no | Last registry update timestamp. |
-
-New code MUST write canonical body text to `content_path` on disk instead of `content`. Listing references MUST be satisfiable from registry metadata without reading full body text.
-
-**DF-43 ownership boundary**: `nexus-local-db` is the sole production persistence owner for reference sources. The `nexus-knowledge` crate provides domain types (`ReferenceSource`), traits (`KnowledgeStore`), and adapter seams (`From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource` in `nexus-local-db/src/reference_source.rs`) — it does **not** introduce its own SQLite/file-backed truth source. All production DB writes go through `nexus-local-db` DAO functions (`register`, `list`, `get_by_id`).
+The reference-source registry is retired (V1.231, ADR K1 §3.2): the table, its `body.md` units under `references/units/<id>/`, the `nexus42 creator reference` CLI group, the `GET /v1/daemon/references[/{id}]` routes and the `nexus.reference.refresh` capability are all gone. A source-material registry may return only as a future independent proposal; it MUST NOT revive this table as a staging shim.
 
 ##### 4.1.2 Narrative + World KB persistence
 
-These tables live in the same workspace `state.db` as `reference_sources` and support the persistent `NarrativeGateway` and `KbStore` adapters. Domain semantics remain owned by `nexus-narrative` and `nexus-kb`; `nexus-local-db` owns migration ordering and SQLite mechanics.
+These tables live in the workspace `state.db` and support the persistent `NarrativeGateway` and `KbStore` adapters. Domain semantics remain owned by `nexus-narrative` and `nexus-kb`; `nexus-local-db` owns migration ordering and SQLite mechanics.
 
 The narrative `block_type` vocabulary (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) on `kb_key_blocks.block_type` is validated at the application layer in the `nexus-kb::validation` module; `ValidationMode::Novel` enforces `body.attributes.novel_category` on insert/update. Minimum `body_json` shape per category is enforced in `nexus-kb`, not in raw SQL. `narrative_worlds` rows are added via `creator world create` without altering `kb_key_blocks` DDL beyond existing indexes.
 
@@ -217,38 +195,9 @@ CREATE INDEX IF NOT EXISTS idx_kb_source_anchors_key_block_id
     ON kb_source_anchors (key_block_id);
 ```
 
-##### 4.1.3 Knowledge entries persistence
+##### 4.1.3 Knowledge entries persistence (retired)
 
-`knowledge_entries` stores user-scoped knowledge for the `User Knowledge` domain in Moment context assembly. Each entry belongs to a single user and carries a JSON tags array for filtering.
-
-```sql
-CREATE TABLE IF NOT EXISTS knowledge_entries (
-    entry_id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    tags_json TEXT NOT NULL DEFAULT '[]',
-    content TEXT NOT NULL,
-    reference_uri TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_knowledge_entries_user_id
-    ON knowledge_entries (user_id);
-CREATE INDEX IF NOT EXISTS idx_knowledge_entries_tags
-    ON knowledge_entries (tags_json);
-CREATE INDEX IF NOT EXISTS idx_knowledge_entries_user_tags
-    ON knowledge_entries (user_id, tags_json);
-```
-
-| Column | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `entry_id` | `TEXT` | yes | Primary key; generated UUID |
-| `user_id` | yes | Owner scope for user isolation |
-| `tags_json` | `TEXT` | yes | JSON array of tag strings, e.g. `["rust","tutorial"]` |
-| `content` | `TEXT` | yes | Knowledge content text |
-| `reference_uri` | `TEXT` | no | Optional URI for provenance |
-| `created_at` | `TEXT` | yes | Creation timestamp |
-| `updated_at` | `TEXT` | yes | Last update timestamp |
+The User-scoped `knowledge_entries` table is retired (V1.231, ADR K1 §3.1) and dropped by migration `20261111000001_retire_user_and_reference_stores.sql`. There is no User Knowledge domain in Moment context assembly, no `creator knowledge` CLI group and no `KnowledgeStore` adapter. A User-scope knowledge surface may return only as a future independent proposal.
 
 Column notes:
 

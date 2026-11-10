@@ -2,7 +2,7 @@
 
 ## Scope
 
-Runtime SSOT for the retained Nexus host-tool registry and dispatch spine — **30 static host tools (28 `nexus.*` + 2 `fs/*`)**, peer/user-capability resolution, admission and audit ownership.
+Runtime SSOT for the retained Nexus host-tool registry and dispatch spine — **28 static host tools (26 `nexus.*` + 2 `fs/*`)**, retired reference ids removed (V1.231), peer/user-capability resolution, admission and audit ownership.
 
 ## Current state
 
@@ -10,7 +10,7 @@ Runtime SSOT for the retained Nexus host-tool registry and dispatch spine — **
 **Document class**: Master  
 **Created**: 2026-06-20  
 **Last updated**: 2026-09-29 — retained core dispatch and static roster
-**Scope**: Runtime SSOT for the retained Nexus host-tool registry and dispatch spine — **30 static host tools (28 `nexus.*` + 2 `fs/*`)**, peer/user-capability resolution, admission and audit ownership.
+**Scope**: Runtime SSOT for the retained Nexus host-tool registry and dispatch spine — **28 static host tools (26 `nexus.*` + 2 `fs/*`)**, retired reference ids removed (V1.231), peer/user-capability resolution, admission and audit ownership.
 **Coordinates with**: [acp-capability-set.md](acp-capability-set.md), [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md), [acp-client-tech-spec.md](acp-client-tech-spec.md), [orchestration-engine.md](../orchestration/orchestration-engine.md) (separate orchestration registry), [local-runtime-boundary.md](../architecture/local-runtime-boundary.md) (current host boundaries)
 
 ---
@@ -25,7 +25,7 @@ Non-overlap rule: **catalog = ID + one-liner**; **registry = handler + wire + fa
 
 [`nexus_core::execution::capabilities`](../../../crates/nexus-core/src/execution/capabilities.rs) owns `host_tool_registry()` and its process-global `LazyLock<CapabilityRegistry>`. `execute_tool` runs admission, calls that registry's `dispatch`, then audits success or refusal. The allowlist uses `spine_resolves`: static builtin → admitted peer → admitted user capability. Unknown IDs fail with `not_supported`; callers must not maintain a second lookup/allowlist table.
 
-The static registry contains **30 rows: 28 `nexus.*` and 2 `fs/*`**. `build_registry` is the row authority; [`retained_peer_contracts.rs`](../../../crates/nexus-core/tests/retained_peer_contracts.rs), `host_tool_registry_roster_is_the_declared_nexus_surface`, pins the same set and excludes `nexus.profile.*` grouping metadata. Dynamic peer/user entries are additional spine resolutions, not part of this static count.
+The static registry contains **28 rows: 26 `nexus.*` and 2 `fs/*`**. `build_registry` is the row authority; [`retained_peer_contracts.rs`](../../../crates/nexus-core/tests/retained_peer_contracts.rs), `host_tool_registry_roster_is_the_declared_nexus_surface`, pins the same set and excludes `nexus.profile.*` grouping metadata. Dynamic peer/user entries are additional spine resolutions, not part of this static count.
 
 The [`nexus-orchestration` `CapabilityRegistry`](../../../crates/nexus-orchestration/src/capability/mod.rs) is a **separate registry** of orchestration `Capability` implementations. Its live admitted user entries may be resolved by the core spine; it does not own the static host-tool dispatch table. ACP **agent discovery/selection** is yet another surface, governed by [registry-integration.md](registry-integration.md), not by this spec.
 
@@ -198,18 +198,6 @@ documents the runtime contract and per-ID test vectors (success + failure paths)
   - success: `workspace_paths_returns_allowed_roots` — returns ≥1 allowed root after `init_workspace`.
   - failure: `workspace_paths_rejects_without_workspace` — `INVALID_INPUT` when `workspace_path()` is `None`.
 
-#### `nexus.research.query`
-
-- **id**: `nexus.research.query`
-- **access**: `Read`
-- **admission**: `ADMISSION_READ_WORKSPACE`
-- **handler**: `execute_research_query` → queries `reference_sources` table; supports `reference_source_id` direct lookup or paginated list with optional tag filter.
-- **ACP wire**: `{reference_source_id?, tags?, limit?}` → `{results: [{reference_source_id, title, uri, source_type, tags, scan_status}], count}`
-- **failure mode**: `InvalidInput`; `NotFound` (unknown `reference_source_id`).
-- **test vectors**:
-  - success: `research_query_returns_reference_sources` — returns `results` array (empty or populated).
-  - failure: `research_query_rejects_unknown_reference_id` — `NOT_FOUND` for unknown `reference_source_id`.
-
 #### `nexus.runtime.health`
 
 - **id**: `nexus.runtime.health`
@@ -219,7 +207,7 @@ documents the runtime contract and per-ID test vectors (success + failure paths)
 - **ACP wire**: `{}` → `{runtime_mode, registry_reachable, registry_size, sync_state, cloud_enabled, pool_healthy}`
 - **failure mode**: `Forbidden` (missing active creator).
 - **test vectors**:
-  - success: `runtime_health_returns_agent_visible_status` — returns `registry_size=30`, `cloud_enabled=false`, `sync_state="disabled"` in local-only mode.
+  - success: `runtime_health_returns_agent_visible_status` — returns `registry_size=28`, `cloud_enabled=false`, `sync_state="disabled"` in local-only mode.
   - failure: `runtime_health_rejects_without_active_creator` — `FORBIDDEN` when no active creator.
 
 #### `nexus.trace.correlation`

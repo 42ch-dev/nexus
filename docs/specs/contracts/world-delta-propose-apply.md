@@ -132,7 +132,7 @@ The split is:
   guard), then applies all changes inside a single transaction and emits an
   audit entry. Returns a per-change result list.
 
-This mirrors the V1.58 P1 `nexus.reference.refresh` pattern: the orchestration
+This mirrors the V1.58 P1 orchestration-handler pattern: the orchestration
 handler owns policy + atomicity; the agent only supplies intent.
 
 ### 4. Policy gates

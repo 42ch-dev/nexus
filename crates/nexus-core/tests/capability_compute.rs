@@ -918,15 +918,6 @@ async fn reference_refresh_is_not_admitted() {
         matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "not_supported"),
         "the retired refresh entrance must be an unknown tool, got {err:?}"
     );
-
-    // The refusal precedes the effects: no row was created or touched.
-    let status: Option<String> = sqlx::query_scalar(
-        "SELECT scan_status FROM reference_sources WHERE reference_source_id = 'ref_any'",
-    )
-    .fetch_optional(f.core.pool())
-    .await
-    .unwrap();
-    assert!(status.is_none(), "no refresh effect may have run");
 }
 
 // ---------------------------------------------------------------------------
