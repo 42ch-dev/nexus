@@ -8,6 +8,7 @@
 import { useMemo } from 'react';
 import { BookOpen, ChevronRight } from 'lucide-react';
 import { List, type RowComponentProps } from 'react-window';
+import type { TFunction } from 'i18next';
 
 import { useTranslation } from 'react-i18next';
 
@@ -138,7 +139,7 @@ interface VolumeListData {
   selectedChapterId: number | null;
   onSelectChapter: (id: number | null) => void;
   onMoveChapter: (chapterId: number, volumeId: number) => void;
-  t: (key: string, options?: Record<string, unknown>) => string;
+  t: TFunction<'canvas'>;
 }
 
 function VolumeRow({
@@ -227,7 +228,7 @@ interface UnassignedListData {
   outline: WorkOutline;
   selectedChapterId: number | null;
   onSelectChapter: (id: number | null) => void;
-  t: (key: string, options?: Record<string, unknown>) => string;
+  t: TFunction<'canvas'>;
 }
 
 function UnassignedRow({
@@ -285,7 +286,7 @@ interface ChapterRowProps {
   outline: WorkOutline;
   selected: boolean;
   onSelect: () => void;
-  t: (key: string, options?: Record<string, unknown>) => string;
+  t: TFunction<'canvas'>;
 }
 
 function ChapterRow({ chapter, outline, selected, onSelect, t }: ChapterRowProps) {

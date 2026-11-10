@@ -24,6 +24,7 @@
  * in the inspectors below, which remain visible in both graph and alt modes.
  */
 import { useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@/components/ui/badge';
@@ -363,7 +364,7 @@ function sortButtonAria(
   dir: SortDir,
   dirAscWord: string,
   dirDescWord: string,
-  t: (key: string, options?: Record<string, unknown>) => string,
+  t: TFunction<'canvas'>,
 ): string {
   if (!active) return t('outlineAltView.sort.inactiveHint', { column: label });
   const dirWord = dir === 'asc' ? dirAscWord : dirDescWord;
@@ -389,7 +390,7 @@ interface ChapterRowProps {
   hasSceneBeatFixture: boolean;
   scenesByChapter: Map<number, SceneBeatFixturePayload['scenes']>;
   beatsByScene: Map<string, SceneBeatFixturePayload['beats']>;
-  t: (key: string, options?: Record<string, unknown>) => string;
+  t: TFunction<'canvas'>;
 }
 
 function ChapterRow({

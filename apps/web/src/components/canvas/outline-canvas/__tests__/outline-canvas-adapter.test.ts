@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { MutableRefObject } from 'react';
+import type { TFunction } from 'i18next';
 import type { ChapterSummary, WorkOutline } from '@42ch/nexus-contracts';
 
 import { createOutlineCanvasAdapter, type OutlineCanvasAdapterContext } from '../outline-canvas-adapter';
@@ -64,7 +65,7 @@ function beatFixture(partial: Partial<BeatFixture> = {}): BeatFixture {
 }
 
 const TRANSLATE_FALLBACK = (chapter: number) => `Chapter ${chapter}`;
-const T_STUB = (key: string) => key;
+const T_STUB = ((key: string) => key) as unknown as TFunction<'canvas'>;
 
 function makeCtx(): OutlineCanvasAdapterContext {
   return {
