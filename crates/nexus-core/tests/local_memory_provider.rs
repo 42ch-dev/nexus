@@ -4,10 +4,12 @@
 //! `memory.subjects.*`, `memory.grants.*`, and the round-B content families
 //! (`memory.capture`, `memory.candidates.*`, `memory.records.*`,
 //! `memory.recall`, `memory.profile.*`) end to end on a temp nexus home. The
-//! sub-capability gated families (reflection, transfer) and the NXM-2 receipt
-//! read must answer the dispatch-level denial — `CAPABILITY_PORT_MISSING`, the
-//! code upstream's responder serializes for an unimplemented op — never a
-//! success value and never an empty success.
+//! still-gated transfer family and the NXM-2 receipt read must answer the
+//! dispatch-level denial — `CAPABILITY_PORT_MISSING`, the code upstream's
+//! responder serializes for an unimplemented op — never a success value and
+//! never an empty success. The reflection family is genuinely served (N4-R):
+//! it answers its own admission verdicts, and the deliberately-unadvertised
+//! open keeps the selection denial.
 //!
 //! Every scenario runs on a temp nexus home. Import-boundary note: the shared
 //! `MemoryPort` vocabulary comes from `spoke_operations`, whose generated wire
@@ -287,13 +289,38 @@ async fn describe_reports_the_served_surface() {
             .any(|flag| flag == "spoke-memory"),
         "the served family is advertised: {body}"
     );
+    // Matrix-aware (N4-R): the default open genuinely serves the reflection
+    // family, so the honest advertisement names it; the unadvertised shape
+    // keeps the base family alone. `spoke-memory-transfer` stays gated in both.
+    assert!(
+        body["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|flag| flag == "spoke-memory-reflection"),
+        "the served reflection family is advertised: {body}"
+    );
+    let unadvertised =
+        LocalMemoryProvider::open_unadvertised(env.user_home.clone(), CREATOR, "default")
+            .await
+            .expect("unadvertised provider open");
+    let withheld = wire(
+        &unadvertised
+            .describe(&principal(CREATOR), dto(json!({})))
+            .await,
+    );
+    assert_eq!(
+        withheld["capabilities"],
+        json!(["spoke-memory"]),
+        "the deliberately-unadvertised shape names the base family alone: {withheld}"
+    );
     assert!(
         !body["capabilities"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|flag| flag == "spoke-memory-reflection" || flag == "spoke-memory-transfer"),
-        "the gated sub-capabilities are not advertised: {body}"
+            .any(|flag| flag == "spoke-memory-transfer"),
+        "the still-gated transfer family is not advertised: {body}"
     );
     assert!(
         body.get("spaces").is_none(),
@@ -692,7 +719,14 @@ async fn refusals_travel_the_reject_channel() {
         SpokeResult::Ok(_) => panic!("a refusal must never be a success value: {denied:?}"),
     }
 
-    let unsupported = provider
+    let unsupported =
+        LocalMemoryProvider::open_unadvertised(env.user_home.clone(), CREATOR, "default")
+            .await
+            .expect("unadvertised provider open");
+    // Matrix-aware (N4-R): the advertised open serves the reflection family,
+    // so the unserved-op refusal is asserted through the
+    // deliberately-unadvertised constructor.
+    let unsupported = unsupported
         .generate_reflection(
             &principal(CREATOR),
             dto(json!({
@@ -729,8 +763,16 @@ async fn gated_families_refuse_with_the_unsupported_code() {
     let provider = open_provider(&env).await;
     let p = principal(CREATOR);
 
+    // Matrix-aware (N4-R): the advertised open genuinely serves the reflection
+    // family, so the dispatch-deny refusal is asserted through the
+    // deliberately-unadvertised constructor; the advertised leg asserts the
+    // honest success class below.
+    let unadvertised =
+        LocalMemoryProvider::open_unadvertised(env.user_home.clone(), CREATOR, "default")
+            .await
+            .expect("unadvertised provider open");
     let reflections = wire(
-        &provider
+        &unadvertised
             .get_reflection_state(
                 &p,
                 dto(json!({
@@ -5118,4 +5160,112 @@ async fn stale_and_unauthorized_updates_change_nothing(
     assert_eq!(final_state["revision"], 3);
     assert_eq!(final_state["kind"], "fact");
     assert_eq!(final_state["content"]["text"], TEXT);
+}
+
+// ── BUG-01 regression: order-insensitive set keys ──────────────────────
+
+/// The bound-query keys and the list narrowing treat the selection/filter ids
+/// as a set (§7.25): a permuted or duplicate-containing request is the same
+/// state digest and the same page, and a digest read under one order
+/// authorizes a generate under the reordered identical set.
+#[tokio::test]
+async fn selection_and_filter_sets_are_order_insensitive() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+
+    let straight = reflection_state_with_selection(&provider, &["ctx-a", "ctx-b"]).await;
+    let permuted = reflection_state_with_selection(&provider, &["ctx-b", "ctx-a"]).await;
+    let duplicated = reflection_state_with_selection(&provider, &["ctx-a", "ctx-b", "ctx-a"]).await;
+    assert_eq!(
+        straight["state_digest"], permuted["state_digest"],
+        "a reordered identical selection is the same basis: {straight} vs {permuted}"
+    );
+    assert_eq!(
+        straight["state_digest"], duplicated["state_digest"],
+        "duplicates do not change the authorized set: {straight} vs {duplicated}"
+    );
+
+    // The digest read under one order authorizes a generate under the
+    // reordered identical set: the CAS matches, so the refusal is a later
+    // gate (the empty basis fails sufficiency), never the stale-CAS conflict.
+    let digest = straight["state_digest"].as_str().expect("digest");
+    let generated = wire(
+        &provider
+            .generate_reflection(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "selection": {
+                        "mode": "selected_contexts",
+                        "context_ids": ["ctx-b", "ctx-a"],
+                        "include_shared": false,
+                    },
+                    "expected_state_digest": digest,
+                    "idempotency_key": "k-canonical-generate",
+                })),
+            )
+            .await,
+    );
+    assert_ne!(
+        error_code(&generated),
+        "REVISION_CONFLICT",
+        "a reordered identical set must not invalidate the state digest: {generated}"
+    );
+
+    // A reordered provenance filter names the same page.
+    assert_eq!(
+        reflections_list_with_filter(&provider, &["ctx-a", "ctx-b"]).await,
+        reflections_list_with_filter(&provider, &["ctx-b", "ctx-a"]).await,
+        "a reordered identical filter returns the same page"
+    );
+}
+
+/// One `state` read over a `selected_contexts` selection, projected onto the
+/// wire shape the assertions read.
+async fn reflection_state_with_selection(
+    provider: &LocalMemoryProvider,
+    context_ids: &[&str],
+) -> Value {
+    wire(
+        &provider
+            .get_reflection_state(
+                &principal(CREATOR),
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "selection": {
+                        "mode": "selected_contexts",
+                        "context_ids": context_ids,
+                        "include_shared": false,
+                    },
+                })),
+            )
+            .await,
+    )
+}
+
+/// One `list` read over a provenance filter, projected onto the wire shape.
+async fn reflections_list_with_filter(
+    provider: &LocalMemoryProvider,
+    source_context_ids: &[&str],
+) -> Value {
+    wire(
+        &provider
+            .list_reflections(
+                &principal(CREATOR),
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "filter": { "source_context_ids": source_context_ids },
+                })),
+            )
+            .await,
+    )
 }

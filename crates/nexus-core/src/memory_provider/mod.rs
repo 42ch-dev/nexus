@@ -51,10 +51,12 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use spoke_operations::spoke_schemas as schemas;
 use spoke_operations::{
-    jcs_sha256_hex, validate_memory_candidates_list, validate_memory_candidates_review,
-    validate_memory_capture, validate_memory_grants_grant, validate_memory_grants_list,
-    validate_memory_recall, validate_memory_records_create, validate_memory_records_list,
-    validate_memory_records_update, validate_memory_spaces_list, validate_memory_subjects_fence,
+    grant_covers, jcs_sha256_hex, validate_memory_candidates_list,
+    validate_memory_candidates_review, validate_memory_capture, validate_memory_grants_grant,
+    validate_memory_grants_list, validate_memory_recall, validate_memory_records_create,
+    validate_memory_records_list, validate_memory_records_update,
+    validate_memory_reflections_generate, validate_memory_reflections_list,
+    validate_memory_reflections_state, validate_memory_spaces_list, validate_memory_subjects_fence,
     GrantRequirement, IssuedGrant, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult,
 };
 
@@ -63,8 +65,8 @@ use nexus_local_db::LocalDbError;
 use storage::{
     Admission, CandidateRow, CaptureError, Coverage, Fence, FenceAction, FenceTarget, GrantRow,
     MemoryStore, MigrationOutcome, NewCandidate, NewGrant, OpContext, Placement, ProfileRow,
-    ReceiptRow, RecordRead, RecordRow, ReviewDecision, Selection, SpaceRow, StoreError, SubjectRow,
-    RECEIPT_FAILED, RECEIPT_PENDING,
+    ReceiptRow, RecordRead, RecordRow, ReflectionRow, ReviewDecision, Selection, SpaceRow,
+    StoreError, SubjectRow, RECEIPT_FAILED, RECEIPT_PENDING,
 };
 
 /// The Character binding a binding-local capture stands on (compass D15).
@@ -106,6 +108,11 @@ const OP_RECORDS_LIST: &str = "memory.records.list";
 const OP_RECORDS_PROMOTE: &str = "memory.records.promote";
 const OP_RECALL: &str = "memory.recall";
 const OP_PROFILE_UPDATE: &str = "memory.profile.update";
+/// The §7.25–§7.27 reflection family (N4-R). Served under the
+/// `spoke-memory-reflection` sub-capability; Task 2 wires their admission.
+const OP_REFLECTIONS_STATE: &str = "memory.reflections.state";
+const OP_REFLECTIONS_LIST: &str = "memory.reflections.list";
+const OP_REFLECTIONS_GENERATE: &str = "memory.reflections.generate";
 /// NXM-5 Task 2's internal op: adopting a legacy-derived object into provider
 /// storage. It is never a wire op — it is the receipt identity of the
 /// just-in-time adoption a dismissal performs **inside the transaction that
@@ -184,6 +191,17 @@ enum ProviderError {
     RevisionConflict {
         current: i64,
     },
+    /// §7.25 state CAS (reflection generate): the recomputed basis digest no
+    /// longer matches `expected_state_digest`. Terminal; the recovery is
+    /// re-reading `memory.reflections.state` and retrying with the fresh
+    /// token, which `details.current_state_digest` names.
+    StateConflict {
+        current: String,
+    },
+    /// §7.27 data-sufficiency policy (C-079): the authorized basis cannot
+    /// support generation. Terminal; the recovery is authoring or capturing
+    /// source content, never a retry of the same request.
+    InsufficientData(String),
     IdempotencyConflict,
     /// §6.10/MEM-R021: the receipt body is past `receipt_retention_seconds`; the
     /// op is never re-executed and only the tombstone's last known status is
@@ -255,13 +273,41 @@ impl ProviderError {
         }
     }
 
+    /// The request member a published reflection validator refused: the
+    /// validator's own machine-readable `field` (e.g. `selection.context_ids`,
+    /// `filter.source_context_ids`, `limit`), cut to the top-level request
+    /// member a client repairs — the shape the `"limit"` exemplars publish, so
+    /// `details.field` and `details.limit` agree. A validator that attaches no
+    /// field keeps `"selection"`: every reflection validator refusal names
+    /// selection scope today.
+    fn validator_field(reject: &SpokeReject) -> String {
+        reject
+            .details
+            .as_ref()
+            .and_then(|details| details["field"].as_str())
+            .map_or_else(
+                || "selection".to_owned(),
+                |field| field.split('.').next().unwrap_or(field).to_owned(),
+            )
+    }
+
+    /// [`Self::from_reject`] over the field the validator actually named —
+    /// the reflection entry points' mapping (inspector round 2, may-fix).
+    fn from_validator(reject: SpokeReject) -> Self {
+        let field = Self::validator_field(&reject);
+        Self::from_reject(reject, &field)
+    }
+
     const fn reject_code(&self) -> SpokeRejectCode {
         match self {
             Self::NotFound(_) => SpokeRejectCode::NotFound,
             Self::NotAuthorized(_) | Self::ReadOnly(_) => SpokeRejectCode::NotAuthorized,
             Self::SpaceFrozen(_) => SpokeRejectCode::SpaceFrozen,
             Self::SubjectFenced { .. } => SpokeRejectCode::SubjectFenced,
-            Self::RevisionConflict { .. } => SpokeRejectCode::RevisionConflict,
+            Self::RevisionConflict { .. } | Self::StateConflict { .. } => {
+                SpokeRejectCode::RevisionConflict
+            }
+            Self::InsufficientData(_) => SpokeRejectCode::InsufficientData,
             Self::IdempotencyConflict => SpokeRejectCode::IdempotencyConflict,
             Self::ReceiptExpired { .. } => SpokeRejectCode::ReceiptExpired,
             Self::CandidateConsumed(_) => SpokeRejectCode::CandidateConsumed,
@@ -331,6 +377,14 @@ impl ProviderError {
             Self::RevisionConflict { current } => format!(
                 "expected_revision does not match the stored revision ({current}); re-read and retry"
             ),
+            Self::StateConflict { current } => format!(
+                "expected_state_digest does not match the current basis digest ({current}); \
+                 re-read memory.reflections.state and retry with the fresh digest"
+            ),
+            Self::InsufficientData(subject_id) => format!(
+                "the authorized basis of subject {subject_id} is insufficient for reflection \
+                 generation; capture or restore source records and retry"
+            ),
             Self::IdempotencyConflict => {
                 "this idempotency key was already used with a different payload".to_string()
             }
@@ -368,6 +422,9 @@ impl ProviderError {
             }
             Self::RevisionConflict { current } => {
                 details.insert("current_revision".to_string(), json!(current));
+            }
+            Self::StateConflict { current } => {
+                details.insert("current_state_digest".to_string(), json!(current));
             }
             Self::ReceiptExpired { last_known_status } => {
                 details.insert("last_known_status".to_string(), json!(last_known_status));
@@ -430,6 +487,23 @@ fn store_error(error: StoreError) -> ProviderError {
             context_id,
         },
         StoreError::RevisionConflict { current } => ProviderError::RevisionConflict { current },
+        StoreError::StateConflict { current } => ProviderError::StateConflict { current },
+        StoreError::GenerationLeaseLost { receipt_id } => ProviderError::OutcomeUncertain(format!(
+            "the pending receipt {receipt_id} was settled by another owner before this \
+                 terminal commit; the envelope was not published — resolve with the same \
+                 idempotency key or memory.receipts.get"
+        )),
+        StoreError::ProfileIncomplete {
+            subject_id,
+            missing,
+        } => ProviderError::ProfileIncomplete {
+            subject_id,
+            missing,
+        },
+        StoreError::InsufficientData { subject_id } => ProviderError::InsufficientData(format!(
+            "the authorized basis of subject {subject_id} is insufficient for reflection \
+             generation; capture or restore source records and retry"
+        )),
         StoreError::IdempotencyConflict => ProviderError::IdempotencyConflict,
         StoreError::ReceiptExpired { last_known_status } => {
             ProviderError::ReceiptExpired { last_known_status }
@@ -452,8 +526,9 @@ fn deny<T>(error: &ProviderError) -> SpokeResult<T> {
     spoke_operations::spoke_reject(error.reject_code(), error.message(), Some(error.details()))
 }
 
-/// The sub-capability gated families (reflection, transfer): the
-/// dispatch-level denial shape. A reject can only carry a
+/// The sub-capability gated families: the dispatch-level denial shape for a
+/// family this provider instance does not serve — transfer always, reflection
+/// only in the deliberately-unadvertised shape (§4.1). A reject can only carry a
 /// [`SpokeRejectCode`], and the port
 /// vocabulary has no `op_unsupported` variant — upstream's responder answers an
 /// unimplemented port op with `CapabilityPortMissing` (`responder.rs:367-371`)
@@ -561,6 +636,52 @@ fn pending_receipt(receipt: &ReceiptRow) -> Option<ProviderError> {
     })
 }
 
+/// The §7.0.3 pending receipt body for the async reflection generate op: no
+/// result, no terminal stamp, no error — the poll answer while generation is
+/// still running. Journaled pending states never take this shape (their
+/// pending means an unpublished file effect, and they answer the uncertain
+/// error instead).
+fn pending_receipt_body(receipt: &ReceiptRow) -> Result<Value, ProviderError> {
+    let mut body = receipt_body(receipt)?;
+    let object = body
+        .as_object_mut()
+        .expect("a receipt projection is always a JSON object");
+    object.remove("result");
+    object.remove("completed_at");
+    Ok(body)
+}
+
+/// The generate flow's receipt projection (§7.0.3): a committed receipt
+/// settles as the response; a failed one replays its recorded failure — the
+/// only class a generation failure records is retryable `INTERNAL_ERROR` —
+/// and a still-pending one (observable only under the park hook) answers
+/// uncertain until its terminal outcome commits.
+fn settle_generation_receipt<T: DeserializeOwned>(receipt: &ReceiptRow) -> SpokeResult<T> {
+    match receipt.status.as_str() {
+        "committed" => settle_receipt(receipt),
+        RECEIPT_FAILED => {
+            let recorded = receipt_failure(receipt).ok().and_then(|envelope| {
+                envelope
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            });
+            deny(&ProviderError::Internal(recorded.unwrap_or_else(|| {
+                format!(
+                    "receipt {} is failed: reflection generation recorded no outcome; nothing \
+                     was charged, and a new idempotency_key starts a fresh generation",
+                    receipt.receipt_id
+                )
+            })))
+        }
+        _ => deny(&ProviderError::OutcomeUncertain(format!(
+            "receipt {} is pending: reflection generation has not settled yet, so the outcome \
+             is not final — repeat the same idempotency_key or read memory.receipts.get",
+            receipt.receipt_id
+        ))),
+    }
+}
+
 /// §6.1 `payload_digest`, bound to the operation as the plan's memory identity
 /// requires: SHA-256 over the JCS canonicalization of `{"op", "payload"}`.
 fn payload_digest<T: Serialize>(op: &str, request: &T) -> Result<String, ProviderError> {
@@ -573,11 +694,18 @@ fn payload_digest<T: Serialize>(op: &str, request: &T) -> Result<String, Provide
 }
 
 /// §7.1 `memory.describe`'s response, shared with nothing: it is the provider's
-/// declaration of its own surface.
-fn describe_body() -> Value {
+/// declaration of its own surface. `reflections` is the instance's own switch,
+/// so the advertisement names `spoke-memory-reflection` exactly when the three
+/// reflection ops are served.
+fn describe_body(reflections: bool) -> Value {
+    let capabilities: &[&str] = if reflections {
+        &policy::CAPABILITIES
+    } else {
+        &policy::CAPABILITIES_WITHOUT_REFLECTION
+    };
     json!({
         "memory_protocol_version": policy::MEMORY_PROTOCOL_VERSION,
-        "capabilities": policy::CAPABILITIES,
+        "capabilities": capabilities,
         "limits": policy::limits(),
         "required_profile_kinds": policy::REQUIRED_PROFILE_KINDS,
         "engine_policy_version": policy::ENGINE_POLICY_VERSION,
@@ -648,6 +776,225 @@ fn grant_body(grant: &GrantRow) -> Result<Value, ProviderError> {
 fn grant_wire(grant: &GrantRow) -> Result<schemas::MemoryGrant, ProviderError> {
     serde_json::from_value(grant_body(grant)?)
         .map_err(|e| ProviderError::Internal(format!("grant projection: {e}")))
+}
+
+/// §6.5 coverage one reflection op needs for the §6.12 selection it names
+/// (§7.25–§7.27, N4-R): the `reflect` capability over that selection —
+/// unrestricted coverage for `subject_all` (C-075), every listed context, and
+/// shared access when shared rows are in scope. A `list` without a selection
+/// is a subject-wide read: it demands the same unrestricted coverage a
+/// `subject_all` selection does, matching the fixture's
+/// `ReflectionTarget::from_list(None)` (greptile P1#2 — fail closed, so a
+/// scoped grant can never list the whole subject by omitting the selection).
+fn reflect_requirement<'a>(
+    selection: Option<&'a Selection>,
+    subject_id: &'a str,
+) -> GrantRequirement<'a> {
+    let (context_ids, reads_shared, subject_all) = match selection {
+        Some(Selection::SubjectAll) => (Vec::new(), false, true),
+        Some(Selection::SharedOnly) => (Vec::new(), true, false),
+        Some(Selection::SelectedContexts {
+            context_ids,
+            include_shared,
+        }) => (context_ids.clone(), *include_shared, false),
+        None => (Vec::new(), true, true),
+    };
+    GrantRequirement {
+        capability: "reflect",
+        subject_id: Some(subject_id),
+        context_ids,
+        reads_shared,
+        subject_all,
+    }
+}
+
+/// §7.25 state digest shape: 64 lowercase hex, the exact form the `state` op
+/// publishes as its CAS token (locked D9 — the provider never widens the
+/// accepted token grammar).
+fn is_state_digest(token: &str) -> bool {
+    token.len() == 64
+        && token
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Locked D9: the provider serves no cognition family, so a present
+/// `cognition_filter` is refused outright on every reflection op — an honest
+/// refusal, never a silent widening of the selection.
+fn cognition_refusal(present: bool) -> Option<ProviderError> {
+    present.then(|| ProviderError::InvalidInput {
+        field: "cognition_filter".to_string(),
+        reason: "cognition_filter is not served by this provider; the selection is never widened \
+                 to cover it"
+            .to_string(),
+        details: None,
+    })
+}
+
+// ── Reflection read-time basis mechanism (§7.25–§7.27, N4-R) ────────────
+//
+// Staleness is computed, never stored (C-042/MEM-R013): every read recomposes
+// the canonical basis object over the *current* authorized set and compares
+// 64-hex digests. No eager invalidation writes exist — a basis-affecting
+// change (record create/update/delete/promote, profile update, any
+// authorization change altering the authorized set) is observed at the next
+// read, which is the whole mechanism. The storage layer owns the authorized
+// sets and runs the same compositions inside its read transaction.
+
+/// 64-hex over a canonical basis object. The error is the reject's message
+/// text: the composition runs on both sides of the module boundary (storage
+/// reads and this facade), and each wraps it in its own error type.
+fn digest_value(value: &Value) -> Result<String, String> {
+    match jcs_sha256_hex(value) {
+        SpokeResult::Ok(digest) => Ok(digest),
+        SpokeResult::Reject(reject) => Err(reject.message),
+    }
+}
+
+/// §7.27 `source_set_digest`: 64-hex over the authorized source record id +
+/// revision set — sorted `[record_id, revision]` pairs, the caller's contract.
+fn reflection_source_set_digest(records: &[(String, i64)]) -> Result<String, String> {
+    digest_value(&json!({ "records": records }))
+}
+
+/// §7.25 `state_digest`: the provider-composed canonical object of the
+/// current authorized basis — sorted record pairs, profile revisions, the
+/// selection/filter resolution, and the engine policy version. It is the
+/// shape both the `state` op publishes as its CAS token and a pinned basis
+/// carries, so the §7.26 staleness comparison is one recomputation.
+fn reflection_state_digest(
+    records: &[(String, i64)],
+    profile_revisions: &[(String, i64)],
+    selection: &Selection,
+    filter: Option<&[String]>,
+) -> Result<String, String> {
+    digest_value(&json!({
+        "engine_policy_version": policy::ENGINE_POLICY_VERSION,
+        "filter": filter_key(filter),
+        "profile_revisions": profile_revisions,
+        "records": records,
+        "selection": selection_key(selection),
+    }))
+}
+
+/// A pinned selection column parsed back into the §6.12 read selection. The
+/// column is verbatim wire JSON; anything else is a broken projection.
+fn pinned_selection(raw: &str) -> Result<Selection, String> {
+    let value = json_member(raw, "pinned selection").map_err(|error| error.message())?;
+    match value.get("mode").and_then(Value::as_str) {
+        Some("subject_all") => Ok(Selection::SubjectAll),
+        Some("shared_only") => Ok(Selection::SharedOnly),
+        Some("selected_contexts") => Ok(Selection::SelectedContexts {
+            context_ids: value
+                .get("context_ids")
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            include_shared: value
+                .get("include_shared")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        _ => Err(format!("pinned selection: unknown selection mode in {raw}")),
+    }
+}
+
+/// Whether a request's selection scope covers a reflection pinned to
+/// `pinned` (§7.26: a present request selection restricts the listing to the
+/// reflections it covers; an absent one names no restriction beyond the
+/// caller's own coverage). Coverage is scope containment — a pin never
+/// reaches past its request's scope.
+fn selection_scope_covers(pinned: &Selection, requested: Option<&Selection>) -> bool {
+    let Some(requested) = requested else {
+        return true;
+    };
+    match (pinned, requested) {
+        (_, Selection::SubjectAll) | (Selection::SharedOnly, Selection::SharedOnly) => true,
+        (Selection::SharedOnly, Selection::SelectedContexts { include_shared, .. }) => {
+            *include_shared
+        }
+        (
+            Selection::SelectedContexts {
+                context_ids,
+                include_shared,
+            },
+            Selection::SelectedContexts {
+                context_ids: requested_ids,
+                include_shared: requested_shared,
+            },
+        ) => {
+            context_ids
+                .iter()
+                .all(|context_id| requested_ids.contains(context_id))
+                && (!*include_shared || *requested_shared)
+        }
+        // A pin reaching past its request's scope — `subject_all` under a
+        // restricted request, context pins under `shared_only` — is uncovered.
+        _ => false,
+    }
+}
+
+/// §7.25 provider policy verdict over the authorized basis: the protocol
+/// defines no numeric thresholds, so this provider calls an empty authorized
+/// basis insufficient and any non-empty one sufficient. Generation refuses
+/// `INSUFFICIENT_DATA` on exactly the same verdict.
+pub(super) const fn data_sufficiency(record_count: usize) -> &'static str {
+    if record_count == 0 {
+        "insufficient"
+    } else {
+        "sufficient"
+    }
+}
+
+/// §7.27 envelope projection. The pinned `selection`/`filter`/`basis` columns
+/// are served verbatim (published array shapes preserved, absent optionals
+/// never `null`-substituted); `stale` is the read's own recomputation, never
+/// the stored write-time cache; `cost` and `generator.model` exist only when
+/// the row carries them.
+fn reflection_body(row: &ReflectionRow, stale: bool) -> Result<Value, ProviderError> {
+    let mut body = json!({
+        "reflection_id": row.reflection_id,
+        "space_id": row.space_id,
+        "subject_id": row.subject_id,
+        "revision": row.revision,
+        "schema_version": row.schema_version,
+        "created_at": row.created_at,
+        "selection": json_member(&row.selection_json, "reflection selection")?,
+        "basis": json_member(&row.basis_json, "reflection basis")?,
+        "body": { "body": row.body_text, "format": row.body_format },
+        "generator": { "engine_policy_version": row.engine_policy_version },
+        "extensions": json_member(&row.extensions_json, "reflection extensions")?,
+        "stale": stale,
+    });
+    let members = body
+        .as_object_mut()
+        .expect("reflection projection is an object");
+    if let Some(raw) = &row.filter_json {
+        members.insert("filter".to_string(), json_member(raw, "reflection filter")?);
+    }
+    if let Some(raw) = &row.cognition_filter_json {
+        members.insert(
+            "cognition_filter".to_string(),
+            json_member(raw, "reflection cognition_filter")?,
+        );
+    }
+    if let (Some(unit_kind), Some(units)) = (&row.cost_unit_kind, row.cost_units) {
+        members.insert(
+            "cost".to_string(),
+            json!({ "unit_kind": unit_kind, "units": units }),
+        );
+    }
+    if let Some(model) = &row.model {
+        if let Some(generator) = members.get_mut("generator").and_then(Value::as_object_mut) {
+            generator.insert("model".to_string(), json!(model));
+        }
+    }
+    Ok(body)
 }
 
 /// §6.10 receipt projection, as every mutating op returns it. A `failed` receipt
@@ -805,6 +1152,10 @@ fn page_limit(limit: Option<NonZeroU64>) -> u64 {
 pub struct LocalMemoryProvider {
     store: MemoryStore,
     space_id: String,
+    /// Whether this instance serves the `spoke-memory-reflection` family: the
+    /// §4.1 advertisement and the §7.25–§7.27 op entry share this one switch, so
+    /// `describe` and the ops can never disagree. Production opens turn it on.
+    reflections: bool,
 }
 
 /// Exclusive per-bearer memory-disposition section
@@ -917,6 +1268,7 @@ impl LocalMemoryProvider {
         Ok(Self {
             store,
             space_id: DEFAULT_SPACE_ID.to_string(),
+            reflections: true,
         })
     }
 
@@ -954,7 +1306,31 @@ impl LocalMemoryProvider {
         Ok(Self {
             store,
             space_id: DEFAULT_SPACE_ID.to_string(),
+            reflections: true,
         })
+    }
+
+    /// Open the same provider with the `spoke-memory-reflection` sub-capability
+    /// withheld: `describe` omits the flag and the three reflection ops answer
+    /// the not-served refusal, the deliberately-unadvertised shape staging spec
+    /// §4 N4-R keeps C-003 green on. Everything else is the writable open above.
+    ///
+    /// Compiled out of a production build: production builds always serve the
+    /// reflection family.
+    ///
+    /// # Errors
+    ///
+    /// The [`Self::open`] errors.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub async fn open_unadvertised(
+        user_home: PathBuf,
+        creator_id: &str,
+        workspace_slug: &str,
+    ) -> CoreResult<Self> {
+        let mut provider = Self::open(user_home, creator_id, workspace_slug).await?;
+        provider.reflections = false;
+        Ok(provider)
     }
 
     /// Whether this provider may write (`false` for a read-only open).
@@ -1606,6 +1982,32 @@ impl LocalMemoryProvider {
         self.store.park_next_capture(entered, release);
     }
 
+    /// §7.0.3/C-015/C-070 proof seam: park the next reflection generate after
+    /// its pending receipt committed and before its terminal commit (`entered`
+    /// signals the pending receipt is published, `release` frees the
+    /// generation), so a test can observe the published pending receipt
+    /// through `memory.receipts.get`. One-shot. Compiled out of a production
+    /// build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn park_next_generation(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Barrier>,
+    ) {
+        self.store.park_next_generation(entered, release);
+    }
+
+    /// §7.27/C-078 proof seam: fail the next reflection generation step so its
+    /// transaction 2 commits an honest `failed` receipt with no cost. One-shot:
+    /// a replay never runs a generation, so an armed fault stays armed across
+    /// one. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn inject_generation_fault(&self) {
+        self.store.inject_generation_fault();
+    }
+
     /// §5.2 step 2 proof seam: have every workspace flock **wait** report from
     /// its blocking task just before it blocks, so a test can cancel callers that
     /// have really reached the wait. Compiled out of a production build.
@@ -1984,8 +2386,134 @@ fn candidate_kind(hint: Option<&str>) -> String {
     }
 }
 
+/// The wire list selection mapped onto the provider-internal one.
+fn wire_read_selection(
+    selection: &schemas::memory_reflections_list_request::ReadSelection,
+) -> Selection {
+    match selection {
+        schemas::memory_reflections_list_request::ReadSelection::SubjectAll => {
+            Selection::SubjectAll
+        }
+        schemas::memory_reflections_list_request::ReadSelection::SharedOnly => {
+            Selection::SharedOnly
+        }
+        schemas::memory_reflections_list_request::ReadSelection::SelectedContexts {
+            context_ids,
+            include_shared,
+        } => Selection::SelectedContexts {
+            context_ids: context_ids.clone(),
+            include_shared: include_shared.unwrap_or(false),
+        },
+    }
+}
+
+/// The generate request's selection mapped onto the provider-internal one.
+fn wire_generate_selection(
+    selection: &schemas::memory_reflections_generate_request::ReadSelection,
+) -> Selection {
+    match selection {
+        schemas::memory_reflections_generate_request::ReadSelection::SubjectAll => {
+            Selection::SubjectAll
+        }
+        schemas::memory_reflections_generate_request::ReadSelection::SharedOnly => {
+            Selection::SharedOnly
+        }
+        schemas::memory_reflections_generate_request::ReadSelection::SelectedContexts {
+            context_ids,
+            include_shared,
+        } => Selection::SelectedContexts {
+            context_ids: context_ids.clone(),
+            include_shared: include_shared.unwrap_or(false),
+        },
+    }
+}
+
+/// The verbatim pins the generate columns stage: the wire selection/filter
+/// shapes serialized unaltered, an absent filter staying `None` — never
+/// null-substituted.
+fn pinned_request_shapes(
+    request: &schemas::MemoryReflectionsGenerateRequest,
+) -> Result<(String, Option<String>), ProviderError> {
+    let selection_json = serde_json::to_string(&request.selection)
+        .map_err(|error| ProviderError::Internal(format!("selection pin: {error}")))?;
+    let filter_json = request
+        .filter
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| ProviderError::Internal(format!("filter pin: {error}")))?;
+    Ok((selection_json, filter_json))
+}
+
+/// §9.2/§9.3, cut out of the wire method: score every authorized row, order
+/// by (score, recency, id) — deterministic for identical state, request and
+/// policy — apply the byte/item budget after the cursor, and project the
+/// kept bodies. Returns the bodies, the offset they consumed and the id the
+/// budget overflowed on, if any.
+fn recall_ranked_bodies(
+    rows: &[RecordRow],
+    terms: &[String],
+    start: usize,
+    max_items: u64,
+    max_bytes: Option<u64>,
+) -> Result<(Vec<Value>, usize, Option<String>), ProviderError> {
+    let mut ranked: Vec<(usize, &RecordRow)> = rows
+        .iter()
+        .map(|row| (policy::recall_score(&record_text(row), terms), row))
+        .collect();
+    ranked.sort_by(|(left_score, left), (right_score, right)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| created_at_cmp(&right.created_at, &left.created_at))
+            .then_with(|| left.record_id.cmp(&right.record_id))
+    });
+    let remaining = &ranked[start..];
+    let sizes: Vec<(String, usize)> = remaining
+        .iter()
+        .map(|(_, row)| (row.record_id.clone(), row.content_json.len()))
+        .collect();
+    let outcome = policy::apply_budget(&sizes, max_items, max_bytes);
+    let mut bodies = Vec::with_capacity(outcome.kept.len());
+    for index in &outcome.kept {
+        let Some((_, row)) = remaining.get(*index) else {
+            return Err(ProviderError::Internal(
+                "recall budget selected an out-of-range item".to_string(),
+            ));
+        };
+        bodies.push(record_body(row)?);
+    }
+    let consumed = start + bodies.len();
+    Ok((bodies, consumed, outcome.overflow_record_id))
+}
+
+/// A subject's profile kinds and the required ones it misses — the same
+/// projection the `state` op publishes and the generate gate refuses on.
+fn profile_projection(profile_revisions: &[(String, i64)]) -> (Vec<String>, Vec<String>) {
+    let kinds: Vec<String> = profile_revisions
+        .iter()
+        .map(|(kind, _)| kind.clone())
+        .collect();
+    let missing: Vec<String> = policy::REQUIRED_PROFILE_KINDS
+        .iter()
+        .filter(|required| !kinds.iter().any(|kind| kind == *required))
+        .map(|required| (*required).to_string())
+        .collect();
+    (kinds, missing)
+}
+
+/// The request's id set canonicalized for every place that treats it as a
+/// set (bound-query keys, digests, list narrowing): sorted, de-duplicated.
+pub(super) fn canonical_ids(ids: &[String]) -> Vec<String> {
+    let mut ids = ids.to_vec();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 /// The bound query a content page belongs to (MEM-R026): everything that
-/// changes which rows the page was cut from.
+/// changes which rows the page was cut from. The ids render canonically —
+/// two requests naming the same context/filter set in different orders or
+/// with duplicates are the same bound query and the same state digest.
 fn selection_key(selection: &Selection) -> String {
     match selection {
         Selection::SubjectAll => "subject_all".to_string(),
@@ -1995,14 +2523,19 @@ fn selection_key(selection: &Selection) -> String {
             include_shared,
         } => format!(
             "selected_contexts({}){}",
-            context_ids.join(","),
+            canonical_ids(context_ids).join(","),
             if *include_shared { "+shared" } else { "" }
         ),
     }
 }
 
+/// The provenance filter rendered into the bound-query/digest keys, the same
+/// set canonicalization as [`selection_key`].
 fn filter_key(filter: Option<&[String]>) -> String {
-    filter.map_or_else(|| "*".to_string(), |sources| sources.join(","))
+    filter.map_or_else(
+        || "*".to_string(),
+        |sources| canonical_ids(sources).join(","),
+    )
 }
 
 /// §9.2 ranking input: the record's untrusted text, never re-interpreted.
@@ -2600,6 +3133,58 @@ impl LocalMemoryProvider {
     }
 }
 
+impl LocalMemoryProvider {
+    /// §7.25–§7.27 reflection admission (N4-R Task 2): current `reflect`
+    /// coverage over the selection (§6.5 — one grant, never unioned). The
+    /// caller's grant set is read fresh (`grants_page_for`), so a revocation
+    /// or expiry that landed before this call is observed here — the
+    /// reflection surface never answers from a stale grant snapshot, and a
+    /// refusal discloses nothing but the refusal (no existence oracle for
+    /// foreign ids).
+    ///
+    /// The §8.2 freeze classification is not part of this facade check: it
+    /// lives in the store's transaction gate behind replay resolution, so an
+    /// authorized same-key retry discloses an already-committed receipt even
+    /// while the space is frozen (§7.0.5/MEM-R021/C-036).
+    ///
+    /// `simplify:` this provider-level coverage check samples the wall clock,
+    /// not the store's proof-seam clock; the authoritative store-clock
+    /// authorization lands with the reflection read/generate flows (plan
+    /// Tasks 3–4), which also move it inside the effect transaction. Upgrade:
+    /// when Task 4's transactional recheck lands, this pre-store gate either
+    /// moves with it or is superseded by it.
+    async fn reflect_admission(
+        &self,
+        principal: &schemas::Principal,
+        space_id: &str,
+        subject_id: &str,
+        selection: Option<&Selection>,
+    ) -> Result<(), ProviderError> {
+        let principal_id = principal_id(principal);
+        let (rows, ..) = self
+            .store
+            .grants_page_for(principal_id, space_id, None, None, None)
+            .await
+            .map_err(store_error)?;
+        let mut grants = Vec::with_capacity(rows.len());
+        for row in &rows {
+            grants.push(grant_wire(row)?);
+        }
+        let requirement = reflect_requirement(selection, subject_id);
+        let now = Utc::now();
+        if !grants
+            .iter()
+            .any(|grant| grant_covers(grant, principal_id, space_id, now, &requirement))
+        {
+            return Err(ProviderError::NotAuthorized(format!(
+                "principal {principal_id} holds no reflect grant covering the selection \
+                 in space {space_id}"
+            )));
+        }
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl MemoryPort for LocalMemoryProvider {
     async fn describe(
@@ -2607,7 +3192,7 @@ impl MemoryPort for LocalMemoryProvider {
         _principal: &schemas::Principal,
         _request: schemas::MemoryDescribeRequest,
     ) -> SpokeResult<schemas::MemoryDescribeResponse> {
-        respond(describe_body())
+        respond(describe_body(self.reflections))
     }
 
     async fn list_spaces(
@@ -3466,49 +4051,23 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(offset) => offset,
             Err(error) => return deny(&error),
         };
-        // §9.2 ranking: deterministic for identical state, request and policy.
-        let mut ranked: Vec<(usize, &RecordRow)> = rows
-            .iter()
-            .map(|row| (policy::recall_score(&record_text(row), &terms), row))
-            .collect();
-        ranked.sort_by(|(left_score, left), (right_score, right)| {
-            right_score
-                .cmp(left_score)
-                .then_with(|| created_at_cmp(&right.created_at, &left.created_at))
-                .then_with(|| left.record_id.cmp(&right.record_id))
-        });
-        // §9.3 budget over what remains after the cursor.
-        let start = usize::try_from(offset).unwrap_or(total).min(total);
-        let remaining = &ranked[start..];
-        let sizes: Vec<(String, usize)> = remaining
-            .iter()
-            .map(|(_, row)| (row.record_id.clone(), row.content_json.len()))
-            .collect();
-        let outcome = policy::apply_budget(
-            &sizes,
+        let (bodies, consumed, overflow_record_id) = match recall_ranked_bodies(
+            &rows,
+            &terms,
+            usize::try_from(offset).unwrap_or(total).min(total),
             request.budget.max_items.get(),
             request.budget.max_bytes.map(std::num::NonZero::get),
-        );
-        let mut bodies = Vec::with_capacity(outcome.kept.len());
-        for index in &outcome.kept {
-            let Some((_, row)) = remaining.get(*index) else {
-                return deny(&ProviderError::Internal(
-                    "recall budget selected an out-of-range item".to_string(),
-                ));
-            };
-            match record_body(row) {
-                Ok(body) => bodies.push(body),
-                Err(error) => return deny(&error),
-            }
-        }
-        let consumed = start + bodies.len();
+        ) {
+            Ok(kept) => kept,
+            Err(error) => return deny(&error),
+        };
         let next_cursor = (consumed < total)
             .then(|| encode_cursor(principal_id, &scope, consumed as u64, &marker));
         respond(json!({
             "records": bodies,
             "total_authorized": total,
             "truncated": consumed < total,
-            "overflow_record_id": outcome.overflow_record_id,
+            "overflow_record_id": overflow_record_id,
             "next_cursor": next_cursor,
             "engine_policy_version": policy::ENGINE_POLICY_VERSION,
         }))
@@ -3628,6 +4187,17 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(stored) => stored,
             Err(error) => return deny(&store_error(error)),
         };
+        // §7.0.3 async receipts (reflection generate): a pending receipt IS the
+        // poll answer — generation in progress, no effect and no cost yet
+        // (C-015/C-070). Journaled pending states keep the uncertain-error
+        // answer below: their pending means an unpublished file effect, not
+        // work in progress.
+        if stored.status == RECEIPT_PENDING && stored.op == OP_REFLECTIONS_GENERATE {
+            return match pending_receipt_body(&stored) {
+                Ok(body) => respond(json!({ "receipt": body })),
+                Err(error) => deny(&error),
+            };
+        }
         pending_receipt(&stored).map_or_else(
             || match receipt_body(&stored) {
                 Ok(body) => respond(json!({ "receipt": body })),
@@ -3639,30 +4209,302 @@ impl MemoryPort for LocalMemoryProvider {
         )
     }
 
-    // ── Sub-capability gated (never served in N1) ──────────────────────
+    // ── Sub-capability gated (N4-R reflection family) ──────────────────
 
     async fn get_reflection_state(
         &self,
-        _principal: &schemas::Principal,
-        _request: schemas::MemoryReflectionsStateRequest,
+        principal: &schemas::Principal,
+        request: schemas::MemoryReflectionsStateRequest,
     ) -> SpokeResult<schemas::MemoryReflectionsStateResponse> {
-        unsupported("memory.reflections.state")
+        use schemas::memory_reflections_state_request::ReadSelection;
+        if !self.reflections {
+            return unsupported(OP_REFLECTIONS_STATE);
+        }
+        let selection = match &request.selection {
+            ReadSelection::SubjectAll => Selection::SubjectAll,
+            ReadSelection::SharedOnly => Selection::SharedOnly,
+            ReadSelection::SelectedContexts {
+                context_ids,
+                include_shared,
+            } => Selection::SelectedContexts {
+                context_ids: context_ids.clone(),
+                include_shared: include_shared.unwrap_or(false),
+            },
+        };
+        if let SpokeResult::Reject(reject) = validate_memory_reflections_state(&request) {
+            return deny(&ProviderError::from_validator(reject));
+        }
+        if let Some(error) = cognition_refusal(request.cognition_filter.is_some()) {
+            return deny(&error);
+        }
+        if let Err(error) = self
+            .reflect_admission(
+                principal,
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                Some(&selection),
+            )
+            .await
+        {
+            return deny(&error);
+        }
+        let principal_id = principal_id(principal);
+        let filter = request
+            .filter
+            .as_ref()
+            .map(|filter| filter.source_context_ids.clone());
+        // §7.25: the basis is published content-free and its digest is composed
+        // over the *current* authorized basis (C-042 — no eager invalidation
+        // writes exist), so every basis-affecting fact shows up at the next
+        // read. The basis and the visible reflections come from ONE store
+        // read — one snapshot (inspector round 2) — so `state_digest`,
+        // `stale` and `last_reflection_id` can never disagree about which
+        // basis a caller is looking at.
+        let (snapshot, rows) = match self
+            .store
+            .reflection_state_snapshot(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                &selection,
+                filter.as_deref(),
+                principal_id,
+            )
+            .await
+        {
+            Ok(parts) => parts,
+            Err(error) => return deny(&store_error(error)),
+        };
+        let state_digest = match reflection_state_digest(
+            &snapshot.records,
+            &snapshot.profile_revisions,
+            &selection,
+            filter.as_deref(),
+        ) {
+            Ok(digest) => digest,
+            Err(error) => {
+                return deny(&ProviderError::Internal(format!(
+                    "{OP_REFLECTIONS_STATE} basis digest: {error}"
+                )));
+            }
+        };
+        let (profile_kinds, missing_required_profile_kinds) =
+            profile_projection(&snapshot.profile_revisions);
+        // The read-side narrowing is the same one `list` uses: the newest
+        // envelope this caller may see under this selection and provenance
+        // filter, excluding tombstoned-basis rows (C-077) — read in the same
+        // snapshot as the basis above. With no envelope to compare against,
+        // `stale` is honestly false — there is no pinned basis that could
+        // have gone stale.
+        let last = rows.first();
+        let stale = last.is_some_and(|visible| visible.stale);
+        respond(json!({
+            "basis": {
+                "profile_kinds": profile_kinds,
+                "record_count": snapshot.records.len(),
+            },
+            "data_sufficiency": data_sufficiency(snapshot.records.len()),
+            "missing_required_profile_kinds": missing_required_profile_kinds,
+            "stale": stale,
+            "state_digest": state_digest,
+            "last_reflection_id": last.map(|visible| visible.row.reflection_id.clone()),
+        }))
     }
 
     async fn list_reflections(
         &self,
-        _principal: &schemas::Principal,
-        _request: schemas::MemoryReflectionsListRequest,
+        principal: &schemas::Principal,
+        request: schemas::MemoryReflectionsListRequest,
     ) -> SpokeResult<schemas::MemoryReflectionsListResponse> {
-        unsupported("memory.reflections.list")
+        if !self.reflections {
+            return unsupported(OP_REFLECTIONS_LIST);
+        }
+        // An absent selection is a subject-wide listing, so its admission
+        // demands the same unrestricted grant an explicit `subject_all` does;
+        // a present one is covered like any other read selection (C-075).
+        let selection = request.selection.as_ref().map(wire_read_selection);
+        if let SpokeResult::Reject(reject) =
+            validate_memory_reflections_list(&request, policy::MAX_PAGE_SIZE_BOUND)
+        {
+            return deny(&ProviderError::from_validator(reject));
+        }
+        if let Some(error) = cognition_refusal(request.cognition_filter.is_some()) {
+            return deny(&error);
+        }
+        if let Err(error) = self
+            .reflect_admission(
+                principal,
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                selection.as_ref(),
+            )
+            .await
+        {
+            return deny(&error);
+        }
+        let principal_id = principal_id(principal);
+        let filter = request
+            .filter
+            .as_ref()
+            .map(|filter| filter.source_context_ids.clone());
+        // MEM-R026: the cursor binds everything that decides the page — the
+        // op, space, subject, the selection/filter resolution actually applied
+        // and the engine policy version. Any other request under it is
+        // `CURSOR_INVALID`.
+        let scope = format!(
+            "{}|sel={}|filter={}",
+            cursor_scope(
+                OP_REFLECTIONS_LIST,
+                Some(request.space_id.as_str()),
+                Some(request.subject_id.as_str()),
+                None,
+            ),
+            selection
+                .as_ref()
+                .map_or_else(|| "*".to_string(), selection_key),
+            filter_key(filter.as_deref()),
+        );
+        let (offset, claimed) =
+            match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
+                Ok(page) => page,
+                Err(error) => return deny(&error),
+            };
+        // §7.26: every envelope this caller may see under this selection,
+        // staleness recomputed per row against its pinned basis (the stored
+        // write-time cache is never served), tombstoned-basis rows excluded
+        // (C-077). The marker covers the whole visible set plus every record
+        // identity of the subject and the grant revisions, so any state or
+        // grant change invalidates the cursor with `CURSOR_INVALID`.
+        let (rows, marker, ..) = match self
+            .store
+            .reflections(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                selection.as_ref(),
+                filter.as_deref(),
+                principal_id,
+            )
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => return deny(&store_error(error)),
+        };
+        if let Err(error) = verify_cursor(claimed.as_deref(), &marker) {
+            return deny(&error);
+        }
+        let (page_rows, next) = page(rows, page_limit(request.limit), offset);
+        let mut bodies = Vec::with_capacity(page_rows.len());
+        for visible in &page_rows {
+            match reflection_body(&visible.row, visible.stale) {
+                Ok(body) => bodies.push(body),
+                Err(error) => return deny(&error),
+            }
+        }
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
+        respond(json!({
+            "reflections": bodies,
+            "next_cursor": next_cursor,
+        }))
     }
 
     async fn generate_reflection(
         &self,
-        _principal: &schemas::Principal,
-        _request: schemas::MemoryReflectionsGenerateRequest,
+        principal: &schemas::Principal,
+        request: schemas::MemoryReflectionsGenerateRequest,
     ) -> SpokeResult<schemas::MemoryReflectionsGenerateResponse> {
-        unsupported("memory.reflections.generate")
+        if !self.reflections {
+            return unsupported(OP_REFLECTIONS_GENERATE);
+        }
+        let selection = wire_generate_selection(&request.selection);
+        if let SpokeResult::Reject(reject) = validate_memory_reflections_generate(&request) {
+            return deny(&ProviderError::from_validator(reject));
+        }
+        if let Some(error) = cognition_refusal(request.cognition_filter.is_some()) {
+            return deny(&error);
+        }
+        if !is_state_digest(request.expected_state_digest.as_str()) {
+            return deny(&ProviderError::InvalidInput {
+                field: "expected_state_digest".to_string(),
+                reason:
+                    "expected_state_digest must be the 64 lowercase hex digest the state op published"
+                        .to_string(),
+                details: None,
+            });
+        }
+        // Generate is the cost-bearing mutation: its admission checks current
+        // coverage before any receipt disclosure, but the §8.2 freeze gate
+        // does not run here — the store's transaction gate applies freeze to
+        // fresh work only, after replay resolution (§7.0.5/MEM-R021/C-036),
+        // so an already-committed generation's same-key retry stays
+        // recoverable while the space is frozen.
+        if let Err(error) = self
+            .reflect_admission(
+                principal,
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                Some(&selection),
+            )
+            .await
+        {
+            return deny(&error);
+        }
+        // The §7.0.3 two-transaction flow: the store commits the pending
+        // receipt (transaction 1 — the point of no return) inside the same
+        // transaction that rechecks authorization, the §7.25 CAS and the
+        // sufficiency verdicts, then generation runs deterministically over
+        // the pinned basis and transaction 2 commits exactly one terminal
+        // receipt. Every refusal below is pre-effect: no receipt, no cost.
+        let principal_id = principal_id(principal);
+        let subject_id = request.subject_id.as_str();
+        let op = OP_REFLECTIONS_GENERATE;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let requirements = [reflect_requirement(Some(&selection), subject_id)];
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: Some(subject_id),
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        // Verbatim pins for the columns Task 1 staged (see
+        // [`pinned_request_shapes`]).
+        let (selection_json, filter_json) = match pinned_request_shapes(&request) {
+            Ok(pins) => pins,
+            Err(error) => return deny(&error),
+        };
+        let filter = request
+            .filter
+            .as_ref()
+            .map(|filter| filter.source_context_ids.clone());
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        match self
+            .store
+            .generate_reflection(
+                &ctx,
+                &admission,
+                subject_id,
+                &selection,
+                filter.as_deref(),
+                &selection_json,
+                filter_json.as_deref(),
+                request.expected_state_digest.as_str(),
+            )
+            .await
+        {
+            Ok(receipt) => settle_generation_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
     }
 
     async fn create_export(
@@ -3708,8 +4550,134 @@ impl MemoryPort for LocalMemoryProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::created_at_cmp;
+    use super::{
+        created_at_cmp, describe_body, policy, schemas, validate_memory_reflections_generate,
+        validate_memory_reflections_list, validate_memory_reflections_state, ProviderError,
+    };
+    use serde_json::json;
+    use spoke_operations::{SpokeReject, SpokeRejectCode, SpokeResult};
     use std::cmp::Ordering;
+
+    fn dto<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
+        serde_json::from_value(value).expect("request payload deserializes")
+    }
+
+    /// The top-level request member a validator refusal publishes as
+    /// `details.field` (inspector round 2, may-fix): the provider maps the
+    /// member the validator actually refused, never a hardcoded
+    /// `"selection"`.
+    fn mapped_field(result: SpokeResult<()>) -> String {
+        let mapped = match result {
+            SpokeResult::Ok(()) => panic!("the malformed request must be refused"),
+            SpokeResult::Reject(reject) => ProviderError::from_validator(reject),
+        };
+        match mapped {
+            ProviderError::InvalidInput { field, .. } => field,
+            other => panic!("a validator refusal maps onto INVALID_INPUT: {other:?}"),
+        }
+    }
+
+    /// Per-entry-point mapping: over-bound `limit` → `limit` (agreeing with
+    /// `details.limit`, §7.0.7 and the `validate_memory_spaces_list`
+    /// exemplar); an empty selected-contexts selection → `selection`; an
+    /// empty provenance filter → `filter`.
+    #[test]
+    fn reflection_validator_refusals_name_the_refused_field() {
+        assert_eq!(
+            mapped_field(validate_memory_reflections_list(
+                &dto(json!({
+                    "space_id": "sp",
+                    "subject_id": "sbj",
+                    "limit": 101,
+                })),
+                policy::MAX_PAGE_SIZE_BOUND,
+            )),
+            "limit"
+        );
+        assert_eq!(
+            mapped_field(validate_memory_reflections_state(&dto(json!({
+                "space_id": "sp",
+                "subject_id": "sbj",
+                "selection": { "mode": "selected_contexts", "context_ids": [] },
+            })))),
+            "selection"
+        );
+        assert_eq!(
+            mapped_field(validate_memory_reflections_list(
+                &dto(json!({
+                    "space_id": "sp",
+                    "subject_id": "sbj",
+                    "filter": { "source_context_ids": [] },
+                })),
+                policy::MAX_PAGE_SIZE_BOUND,
+            )),
+            "filter"
+        );
+        assert_eq!(
+            mapped_field(validate_memory_reflections_generate(&dto(json!({
+                "space_id": "sp",
+                "subject_id": "sbj",
+                "selection": { "mode": "selected_contexts", "context_ids": [] },
+                "expected_state_digest":
+                    "a7b4c2d0e9f183726554433f2e1d0c9b8a7968594a3b2c1d0e9f887766554433",
+                "idempotency_key": "k",
+            })))),
+            "selection"
+        );
+    }
+
+    /// A validator reject that attaches no machine-readable field keeps the
+    /// `"selection"` default — the only shape reflection validators can
+    /// refuse without one today.
+    #[test]
+    fn validator_field_defaults_to_selection() {
+        let mapped = ProviderError::from_validator(SpokeReject {
+            code: SpokeRejectCode::InvalidInput,
+            message: "no field attached".to_owned(),
+            details: None,
+        });
+        assert!(matches!(
+            mapped,
+            ProviderError::InvalidInput { ref field, .. } if field == "selection"
+        ));
+    }
+
+    /// The wire request types accept the shapes the mapping tests build (a
+    /// deserialization regression guard for the tests above).
+    #[test]
+    fn reflection_request_shapes_deserialize() {
+        let _: schemas::MemoryReflectionsStateRequest = dto(json!({
+            "space_id": "sp",
+            "subject_id": "sbj",
+            "selection": { "mode": "subject_all" },
+        }));
+        let _: schemas::MemoryReflectionsListRequest = dto(json!({
+            "space_id": "sp",
+            "subject_id": "sbj",
+        }));
+    }
+
+    /// §4.1: the advertisement names the reflection sub-capability exactly when
+    /// the instance serves the three reflection ops — the same switch the
+    /// `memory.reflections.*` entry guard reads, so both shapes stay honest and
+    /// `spoke-memory-transfer` is never advertised.
+    #[test]
+    fn describe_advertises_reflection_exactly_when_it_is_served() {
+        for (reflections, capabilities) in [
+            (
+                true,
+                serde_json::json!(["spoke-memory", "spoke-memory-reflection"]),
+            ),
+            (false, serde_json::json!(["spoke-memory"])),
+        ] {
+            let body = describe_body(reflections);
+            assert_eq!(
+                body["capabilities"], capabilities,
+                "reflections served: {reflections}: {body}"
+            );
+            assert_eq!(body["engine_policy_version"], "nexus-local-memory-v1");
+        }
+    }
 
     /// NXM-5 QC1-F1 fix round 2: the merged-read comparator must be a total
     /// order for every supported legacy timestamp format. The reported cycle —

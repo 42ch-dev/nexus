@@ -342,7 +342,11 @@ async fn optional_kind_absent_is_honest_empty_success() {
 }
 
 /// Outcome 3: the capability is absent ⇒ `CAPABILITY_PORT_MISSING` at
-/// selection, and neither code ever stands in for the other.
+/// selection, and neither code ever stands in for the other. Matrix-aware
+/// (N4-R): the served matrix admits the reflection family and answers its own
+/// verdict (the stale-CAS refusal, whose digest `details.current_state_digest`
+/// names); the capability-absence verdict survives on the still-gated transfer
+/// family and on the deliberately-unadvertised reflection shape.
 #[tokio::test]
 async fn capability_mismatch_is_distinct_from_profile_admission() {
     let env = seed_env();
@@ -350,7 +354,11 @@ async fn capability_mismatch_is_distinct_from_profile_admission() {
     ensure(&provider).await;
 
     let describe = wire(&provider.describe(&admin(), dto(json!({}))).await);
-    assert_eq!(describe["capabilities"], json!(["spoke-memory"]));
+    assert_eq!(
+        describe["capabilities"],
+        json!(["spoke-memory", "spoke-memory-reflection"]),
+        "the served reflection family is advertised: {describe}"
+    );
     assert_eq!(
         describe["required_profile_kinds"],
         json!([SOUL_PROFILE_KIND]),
@@ -373,14 +381,13 @@ async fn capability_mismatch_is_distinct_from_profile_admission() {
     );
     assert_eq!(
         error_code(&reflection),
-        "CAPABILITY_PORT_MISSING",
-        "an unserved family is a selection failure, not an admission verdict: {reflection}"
+        "REVISION_CONFLICT",
+        "a served family answers its own admission verdict, never a selection failure: {reflection}"
     );
-    assert_eq!(
-        error_details(&reflection)["op"],
-        "memory.reflections.generate"
+    assert!(
+        error_details(&reflection)["current_state_digest"].is_string(),
+        "the stale-CAS refusal names the current digest: {reflection}"
     );
-    assert_eq!(error_details(&reflection)["retry_class"], "terminal");
 
     let transfer = wire(
         &provider
@@ -396,11 +403,42 @@ async fn capability_mismatch_is_distinct_from_profile_admission() {
     );
     assert_eq!(error_code(&transfer), "CAPABILITY_PORT_MISSING");
 
+    // The deliberately-unadvertised matrix keeps the selection refusal for the
+    // reflection family: the same capability-absence verdict as transfer.
+    let unadvertised =
+        LocalMemoryProvider::open_unadvertised(env.user_home.clone(), CREATOR, "default")
+            .await
+            .expect("unadvertised provider open");
+    let gated = wire(
+        &unadvertised
+            .generate_reflection(
+                &admin(),
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                    "expected_state_digest": "0".repeat(64),
+                    "idempotency_key": "k-reflection-gated",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        error_code(&gated),
+        "CAPABILITY_PORT_MISSING",
+        "an unserved family is a selection failure, not an admission verdict: {gated}"
+    );
+
     // Non-collapse, both directions.
     assert_ne!(
         error_code(&reflection),
         "PROFILE_INCOMPLETE",
         "capability absence must never be reported as missing authored content"
+    );
+    assert_ne!(
+        error_code(&reflection),
+        "CAPABILITY_PORT_MISSING",
+        "a served family never answers a selection failure"
     );
     let reject = admission_rejection(&provider).await;
     assert_ne!(

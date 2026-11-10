@@ -51,8 +51,8 @@ use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVE
 use nexus_core::memory_provider::LocalMemoryProvider;
 use nexus_core::{CoreAccess, CoreHomeService, CoreOpenOptions, CoreService};
 use nexus_memory_conformance::{
-    FaultHold, FaultHoldLost, FaultPoint, FixtureMemoryProvider, PeerDirectory, RetentionSweep,
-    TargetHold,
+    FaultHold, FaultHoldLost, FaultPoint, FixtureFaults, FixtureMemoryProvider, PeerDirectory,
+    RetentionSweep, TargetHold,
 };
 use spoke_connect::core::{
     derive_peer_id_from_ed25519_pubkey, sign_hello_ed25519, verify_hello_ed25519, CoreError,
@@ -102,6 +102,12 @@ pub const HOST_SEED: [u8; 32] = [0x53; 32];
 /// The one capability both ends negotiate. The gated families stay
 /// unnegotiated, so their refusal is the real dispatch denial.
 const MEMORY_CAPABILITIES: [&str; 1] = ["spoke-memory"];
+
+/// The families the advertised fixture matrix negotiates: the base family plus
+/// the reflection family the provider genuinely serves. The deliberately
+/// unadvertised shape keeps the memory-only set, so its reflection refusal is
+/// the real dispatch denial (C-003/C-073 remote continuity).
+const MEMORY_REFLECTION_CAPABILITIES: [&str; 2] = ["spoke-memory", "spoke-memory-reflection"];
 
 /// Every wait in the harness is bounded.
 pub const BOUND: Duration = Duration::from_secs(20);
@@ -222,10 +228,6 @@ fn manifest_with(host_id: &str, capabilities: &[&str]) -> HostCapabilityManifest
     .expect("valid manifest")
 }
 
-fn manifest(host_id: &str) -> HostCapabilityManifest {
-    manifest_with(host_id, &MEMORY_CAPABILITIES)
-}
-
 fn connect_manifest_with(host_id: &str, capabilities: &[&str]) -> ConnectHelloManifest {
     serde_json::from_value(
         serde_json::to_value(manifest_with(host_id, capabilities)).expect("manifest serializes"),
@@ -319,15 +321,28 @@ pub async fn close_responder(responder: Arc<ConnectResponder>) -> Result<(), Str
     Ok(())
 }
 
-/// Serve one fresh loopback session for `seed` against `service`.
+/// Serve one fresh loopback session for `seed` against `service`, negotiating
+/// the harness's memory-only capability set on both ends.
 pub async fn open_endpoint(
     service: Arc<dyn RemoteMemoryService>,
     host_id: &str,
     seed: [u8; 32],
 ) -> Endpoint {
-    open_endpoint_expecting(service, host_id, seed, pubkey(&HOST_SEED))
+    open_endpoint_with(service, host_id, seed, &MEMORY_CAPABILITIES)
         .await
         .expect("the endpoint establishes with the published host key")
+}
+
+/// [`open_endpoint`] with the manifest families both ends negotiate explicitly,
+/// so the advertised fixture matrix can negotiate the reflection family it
+/// genuinely serves.
+pub async fn open_endpoint_with(
+    service: Arc<dyn RemoteMemoryService>,
+    host_id: &str,
+    seed: [u8; 32],
+    capabilities: &'static [&'static str],
+) -> Result<Endpoint, EndpointSetupFailure> {
+    open_endpoint_expecting(service, host_id, seed, pubkey(&HOST_SEED), capabilities).await
 }
 
 /// A real client transport that only forwards to the real `WsTransport` and
@@ -363,7 +378,7 @@ impl Transport for ObservedTransport {
 }
 
 /// The evidence of one real typed dial attempt that failed.
-struct DialAttemptFailure {
+pub struct DialAttemptFailure {
     error: RemoteAdapterError,
     first_inbound: Arc<std::sync::Mutex<Option<Vec<u8>>>>,
     client_socket: Weak<ObservedTransport>,
@@ -373,7 +388,7 @@ struct DialAttemptFailure {
 /// signed-dial rejection is modelled; every other setup failure still panics,
 /// so an `Err` proves the signed stage was reached and rejected.
 #[derive(Debug)]
-enum EndpointSetupFailure {
+pub enum EndpointSetupFailure {
     /// The SDK's own dial error from signed responder-hello verification, with
     /// the observation that the responder hello really arrived and both socket
     /// owners observed by the listener side.
@@ -428,8 +443,9 @@ async fn open_endpoint_expecting(
     host_id: &str,
     seed: [u8; 32],
     expected_host_pubkey: [u8; 32],
+    capabilities: &'static [&'static str],
 ) -> Result<Endpoint, EndpointSetupFailure> {
-    let (addr, host) = spawn_expected_endpoint_listener(service, host_id, seed).await;
+    let (addr, host) = spawn_expected_endpoint_listener(service, host_id, seed, capabilities).await;
     let port = addr.port();
     // The listener task is owned until the client side succeeds. A connect or
     // dial failure settles that exact task (abort + bounded join, closing a
@@ -441,6 +457,7 @@ async fn open_endpoint_expecting(
         seed,
         host_id,
         expected_host_pubkey,
+        capabilities,
     ))
     .catch_unwind()
     .await;
@@ -488,6 +505,7 @@ async fn spawn_expected_endpoint_listener(
     service: Arc<dyn RemoteMemoryService>,
     host_id: &str,
     seed: [u8; 32],
+    capabilities: &'static [&'static str],
 ) -> (
     std::net::SocketAddr,
     tokio::task::JoinHandle<ServedEndpoint>,
@@ -497,7 +515,7 @@ async fn spawn_expected_endpoint_listener(
         .expect("bind an ephemeral localhost port");
     let addr = listener.local_addr().expect("listener address");
     let peer = peer_id(&seed);
-    let host_manifest = manifest(host_id);
+    let host_manifest = manifest_with(host_id, capabilities);
     let host = tokio::spawn(async move {
         let (tcp, address) = tokio::time::timeout(BOUND, listener.accept())
             .await
@@ -552,6 +570,7 @@ async fn dial_expected_endpoint(
     seed: [u8; 32],
     host_id: &str,
     expected_host_pubkey: [u8; 32],
+    capabilities: &'static [&'static str],
 ) -> Result<(Arc<dyn Transport>, Arc<RemoteAdapter>), DialAttemptFailure> {
     let (ws, _response) = tokio::time::timeout(
         BOUND,
@@ -571,7 +590,7 @@ async fn dial_expected_endpoint(
     let dialed = connect_remote_adapter(RemoteAdapterOptions {
         transport: Arc::clone(&observed) as Arc<dyn Transport>,
         local_identity: RemoteIdentity { seed },
-        local_manifest: manifest(&format!("{host_id}-client")),
+        local_manifest: manifest_with(&format!("{host_id}-client"), capabilities),
         remote_pubkey: expected_host_pubkey,
         allowlist: vec![expected_peer],
         invoke_timeout_ms: None,
@@ -669,19 +688,24 @@ fn build_service(
     }
 }
 
-/// Provision the durable provider for `home` and reopen it where needed.
-async fn open_provider(home: &Home) -> Provider {
+/// Provision the durable provider for `home` and reopen it where needed, in
+/// the requested fixture advertisement shape.
+async fn open_provider_advertised(home: &Home, advertised: bool) -> Provider {
     match home {
         Home::Local { user_home, .. } => Provider::Local(Arc::new(
             LocalMemoryProvider::open(user_home.clone(), LOCAL_ADMIN_ID, LOCAL_WORKSPACE)
                 .await
                 .expect("open the local provider"),
         )),
-        Home::Remote { db, .. } => Provider::Fixture(Arc::new(
-            FixtureMemoryProvider::open(db)
-                .await
-                .expect("open the durable fixture provider"),
-        )),
+        Home::Remote { db, .. } => {
+            let provider = if advertised {
+                FixtureMemoryProvider::open(db).await
+            } else {
+                FixtureMemoryProvider::open_unadvertised(db).await
+            }
+            .expect("open the durable fixture provider");
+            Provider::Fixture(Arc::new(provider))
+        }
     }
 }
 
@@ -731,15 +755,23 @@ pub struct Matrix {
     peer_principal: Principal,
     space_id: String,
     host_id: String,
+    /// Whether this fixture run advertises (and its sessions negotiate) the
+    /// reflection family. The deliberately-unadvertised shape serves the same
+    /// operations but negotiates memory only (C-003/C-073 continuity).
+    advertises_reflection: bool,
     /// How far an earlier retention step moved the provider clock (local leg).
     advanced: AtomicI64,
 }
 
 /// Open the real local provider and its operator/peer mapping over a prepared
 /// home (the migration/character preparation stayed with the caller).
+/// `reflections: false` opens the deliberately-unadvertised shape (staging
+/// spec §4 N4-R): describe omits `spoke-memory-reflection` and the three
+/// reflection ops answer the not-served refusal.
 async fn open_local_workspace(
     home_dir: TempDir,
     creator_id: Option<String>,
+    reflections: bool,
 ) -> (
     Home,
     Provider,
@@ -750,9 +782,15 @@ async fn open_local_workspace(
 ) {
     let user_home = home_dir.path().to_path_buf();
     let admin_id = creator_id.unwrap_or_else(|| LOCAL_ADMIN_ID.to_owned());
-    let provider = LocalMemoryProvider::open(user_home.clone(), &admin_id, LOCAL_WORKSPACE)
-        .await
-        .expect("open the local provider");
+    let provider = if reflections {
+        LocalMemoryProvider::open(user_home.clone(), &admin_id, LOCAL_WORKSPACE)
+            .await
+            .expect("open the local provider")
+    } else {
+        LocalMemoryProvider::open_unadvertised(user_home.clone(), &admin_id, LOCAL_WORKSPACE)
+            .await
+            .expect("open the unadvertised local provider")
+    };
     let space_id = provider.space_id().to_owned();
     let directory = Arc::new(
         PeerDirectory::new()
@@ -776,6 +814,7 @@ async fn open_local_workspace(
 /// prepared home.
 async fn open_remote_workspace(
     home_dir: TempDir,
+    advertised: bool,
 ) -> (
     Home,
     Provider,
@@ -785,9 +824,12 @@ async fn open_remote_workspace(
     Principal,
 ) {
     let db = home_dir.path().join("fixture.sqlite");
-    let provider = FixtureMemoryProvider::open(&db)
-        .await
-        .expect("open the durable fixture provider");
+    let provider = if advertised {
+        FixtureMemoryProvider::open(&db).await
+    } else {
+        FixtureMemoryProvider::open_unadvertised(&db).await
+    }
+    .expect("open the durable fixture provider");
     let admin_id = format!("prn_{}", peer_id(&ADMIN_SEED));
     let second_id = format!("prn_{}", peer_id(&PEER_SEED));
     provider
@@ -816,7 +858,34 @@ async fn open_remote_workspace(
 impl Matrix {
     /// A fresh run over the requested provider implementation.
     pub async fn start(kind: Kind) -> Self {
-        Self::assemble(kind, TempDir::new().expect("temporary matrix home"), None).await
+        Self::start_advertised(kind, true).await
+    }
+
+    /// A fresh run whose advertised shape is chosen explicitly: the
+    /// deliberately-unadvertised provider serves the same operations but
+    /// advertises and negotiates only the base memory family.
+    async fn start_advertised(kind: Kind, advertised: bool) -> Self {
+        Self::assemble(
+            kind,
+            TempDir::new().expect("temporary matrix home"),
+            None,
+            advertised,
+        )
+        .await
+    }
+
+    /// A local run whose provider deliberately withholds the
+    /// `spoke-memory-reflection` sub-capability (staging spec §4 N4-R): the
+    /// Connect dispatch gate refuses the reflection family, which is the shape
+    /// C-003/C-073's continuity rows stay green on.
+    pub async fn local_unadvertised() -> Self {
+        Self::assemble(
+            Kind::Local,
+            TempDir::new().expect("temporary matrix home"),
+            None,
+            false,
+        )
+        .await
     }
 
     /// A local run whose workspace already holds a real Character and its
@@ -825,7 +894,7 @@ impl Matrix {
     pub async fn local_character() -> (Self, CharacterFixture) {
         let home = TempDir::new().expect("temporary matrix home");
         let (fixture, creator_id) = create_character_fixture(home.path()).await;
-        let matrix = Self::assemble(Kind::Local, home, Some(creator_id)).await;
+        let matrix = Self::assemble(Kind::Local, home, Some(creator_id), true).await;
         (matrix, fixture)
     }
 
@@ -841,29 +910,53 @@ impl Matrix {
     }
 
     /// Assemble a run over a prepared home.
-    async fn assemble(kind: Kind, home_dir: TempDir, creator_id: Option<String>) -> Self {
+    //
+    // clippy::too_many_lines: every branch below is the catch-unwind +
+    // settle-provider ownership dance; splitting it would either duplicate
+    // the settle order or abstract a move the tests must observe exactly.
+    #[allow(clippy::too_many_lines)]
+    async fn assemble(
+        kind: Kind,
+        home_dir: TempDir,
+        creator_id: Option<String>,
+        advertised: bool,
+    ) -> Self {
         let host_id = match kind {
             Kind::Local => "c-matrix-local",
             Kind::Remote => "c-matrix-remote",
         }
         .to_owned();
         let (home, provider, space_id, directory, admin_principal, peer_principal) = match kind {
-            Kind::Local => open_local_workspace(home_dir, creator_id).await,
-            Kind::Remote => open_remote_workspace(home_dir).await,
+            Kind::Local => open_local_workspace(home_dir, creator_id, advertised).await,
+            Kind::Remote => open_remote_workspace(home_dir, advertised).await,
+        };
+        let negotiated: &'static [&'static str] = match (kind, advertised) {
+            (Kind::Remote, true) => &MEMORY_REFLECTION_CAPABILITIES,
+            _ => &MEMORY_CAPABILITIES,
         };
         let service = build_service(&provider, &directory);
         // One owner at a time: if the admin endpoint fails, the provider is
         // settled; if the peer fails, the admin endpoint AND the provider are
         // settled, with both errors preserved on the re-raised failure.
-        let admin = match std::panic::AssertUnwindSafe(open_endpoint(
+        let admin = match std::panic::AssertUnwindSafe(open_endpoint_with(
             Arc::clone(&service),
             &host_id,
             ADMIN_SEED,
+            negotiated,
         ))
         .catch_unwind()
         .await
         {
-            Ok(endpoint) => endpoint,
+            Ok(Ok(endpoint)) => endpoint,
+            Ok(Err(failure)) => {
+                drop(service);
+                match settle_provider_setup(provider).await {
+                    Ok(()) => panic!("the admin endpoint setup failed: {failure:?}"),
+                    Err(problem) => panic!(
+                        "the admin endpoint setup failed ({failure:?}) and the provider settlement also failed: {problem}"
+                    ),
+                }
+            }
             Err(payload) => {
                 // The local service holds a provider reference; release it so
                 // the fixture's own bounded close can actually take ownership.
@@ -879,15 +972,34 @@ impl Matrix {
                 }
             }
         };
-        let peer = match std::panic::AssertUnwindSafe(open_endpoint(
+        let peer = match std::panic::AssertUnwindSafe(open_endpoint_with(
             Arc::clone(&service),
             &host_id,
             PEER_SEED,
+            negotiated,
         ))
         .catch_unwind()
         .await
         {
-            Ok(endpoint) => endpoint,
+            Ok(Ok(endpoint)) => endpoint,
+            Ok(Err(failure)) => {
+                let mut problems: Vec<String> = Vec::new();
+                if let Err(error) = admin.settle().await {
+                    problems.push(format!("the admin session did not settle: {error}"));
+                }
+                drop(service);
+                if let Err(error) = settle_provider_setup(provider).await {
+                    problems.push(format!("the provider did not settle: {error}"));
+                }
+                assert!(
+                    !problems.is_empty(),
+                    "the peer endpoint setup failed: {failure:?}"
+                );
+                panic!(
+                    "the peer endpoint setup failed ({failure:?}) and cleanup also failed: {}",
+                    problems.join("; ")
+                );
+            }
             Err(payload) => {
                 let mut problems: Vec<String> = Vec::new();
                 if let Err(error) = admin.settle().await {
@@ -922,6 +1034,7 @@ impl Matrix {
             peer_principal,
             space_id,
             host_id,
+            advertises_reflection: matches!((kind, advertised), (Kind::Remote, true)),
             advanced: AtomicI64::new(0),
         }
     }
@@ -936,8 +1049,34 @@ impl Matrix {
         Self::start(Kind::Remote).await
     }
 
+    /// A fresh run over the deliberately-unadvertised fixture shape: the same
+    /// served operations, `memory.describe` omitting the reflection family and
+    /// memory-only negotiation, so the reflection family's refusal is the real
+    /// dispatch denial (C-003/C-073 remote continuity).
+    pub async fn remote_unadvertised() -> Self {
+        Self::start_advertised(Kind::Remote, false).await
+    }
+
+    /// The fixture's fault control, or `None` on the local leg (which arms its
+    /// own faults through the provider admission seam).
+    pub fn fixture_faults(&self) -> Option<FixtureFaults> {
+        match &self.provider {
+            Provider::Local(_) => None,
+            Provider::Fixture(provider) => Some(provider.faults().clone()),
+        }
+    }
+
     pub const fn kind(&self) -> Kind {
         self.kind
+    }
+
+    /// The fixture leg's durable database file, so a test can open a second
+    /// provider instance over the same workspace (the reopen-recovery rows).
+    pub fn fixture_db(&self) -> &std::path::Path {
+        match &self.home {
+            Home::Remote { db, .. } => db,
+            Home::Local { .. } => panic!("the local leg has no fixture database"),
+        }
     }
 
     pub fn space_id(&self) -> &str {
@@ -984,6 +1123,11 @@ impl Matrix {
     /// Restart the provider over the SAME file: close both responder sessions,
     /// close the owned pool, reopen the file as a fresh instance and serve two
     /// fresh sessions. The previous instance is never reused.
+    //
+    // clippy::too_many_lines: same settle-order dance as [`Self::assemble`],
+    // twice (admin then peer); splitting it would duplicate the ownership
+    // handoff the tests must observe exactly.
+    #[allow(clippy::too_many_lines)]
     pub async fn restart(self) -> Self {
         let Self {
             kind,
@@ -997,8 +1141,14 @@ impl Matrix {
             peer_principal,
             space_id,
             host_id,
+            advertises_reflection,
             ..
         } = self;
+        let negotiated: &'static [&'static str] = if kind == Kind::Remote && advertises_reflection {
+            &MEMORY_REFLECTION_CAPABILITIES
+        } else {
+            &MEMORY_CAPABILITIES
+        };
         admin.close().await;
         peer.close().await;
         drop(service);
@@ -1006,19 +1156,32 @@ impl Matrix {
             Provider::Local(provider) => drop(provider),
             Provider::Fixture(provider) => close_fixture(provider).await,
         }
-        let provider = open_provider(&home).await;
+        let provider =
+            open_provider_advertised(&home, kind == Kind::Remote && advertises_reflection).await;
         let service = build_service(&provider, &directory);
         // The reopened provider is settled if either fresh session fails to
         // set up; the admin endpoint is settled before the provider.
-        let admin = match std::panic::AssertUnwindSafe(open_endpoint(
+        let admin = match std::panic::AssertUnwindSafe(open_endpoint_with(
             Arc::clone(&service),
             &host_id,
             ADMIN_SEED,
+            negotiated,
         ))
         .catch_unwind()
         .await
         {
-            Ok(endpoint) => endpoint,
+            Ok(Ok(endpoint)) => endpoint,
+            Ok(Err(failure)) => {
+                // Release this path's local provider reference before the
+                // fixture's bounded close tries to take sole ownership.
+                drop(service);
+                match settle_provider_setup(provider).await {
+                    Ok(()) => panic!("the restarted admin endpoint setup failed: {failure:?}"),
+                    Err(problem) => panic!(
+                        "the restarted admin endpoint setup failed ({failure:?}) and the provider settlement also failed: {problem}"
+                    ),
+                }
+            }
             Err(payload) => {
                 // Release this path's local provider reference before the
                 // fixture's bounded close tries to take sole ownership.
@@ -1034,15 +1197,34 @@ impl Matrix {
                 }
             }
         };
-        let peer = match std::panic::AssertUnwindSafe(open_endpoint(
+        let peer = match std::panic::AssertUnwindSafe(open_endpoint_with(
             Arc::clone(&service),
             &host_id,
             PEER_SEED,
+            negotiated,
         ))
         .catch_unwind()
         .await
         {
-            Ok(endpoint) => endpoint,
+            Ok(Ok(endpoint)) => endpoint,
+            Ok(Err(failure)) => {
+                let mut problems: Vec<String> = Vec::new();
+                if let Err(error) = admin.settle().await {
+                    problems.push(format!("the admin session did not settle: {error}"));
+                }
+                drop(service);
+                if let Err(error) = settle_provider_setup(provider).await {
+                    problems.push(format!("the provider did not settle: {error}"));
+                }
+                assert!(
+                    !problems.is_empty(),
+                    "the restarted peer endpoint setup failed: {failure:?}"
+                );
+                panic!(
+                    "the restarted peer endpoint setup failed ({failure:?}) and cleanup also failed: {}",
+                    problems.join("; ")
+                );
+            }
             Err(payload) => {
                 let mut problems: Vec<String> = Vec::new();
                 if let Err(error) = admin.settle().await {
@@ -1074,6 +1256,7 @@ impl Matrix {
             peer_principal,
             space_id,
             host_id,
+            advertises_reflection,
             advanced: AtomicI64::new(0),
         }
     }
@@ -1816,6 +1999,7 @@ pub async fn prove_failed_endpoint_settles() {
         // A wrong host key: a deterministic genuine dial failure after the
         // real listener accepted and its responder started.
         pubkey(&PEER_SEED),
+        &MEMORY_CAPABILITIES,
     )
     .await
     else {
@@ -2462,6 +2646,39 @@ impl Actor<'_> {
                 .await,
         )
     }
+
+    pub async fn reflections_state(&self, request: Value) -> Value {
+        let mut request = request;
+        request["space_id"] = json!(self.space_id);
+        wire(
+            &self
+                .client
+                .get_reflection_state(self.principal, dto(request))
+                .await,
+        )
+    }
+
+    pub async fn reflections_list(&self, request: Value) -> Value {
+        let mut request = request;
+        request["space_id"] = json!(self.space_id);
+        wire(
+            &self
+                .client
+                .list_reflections(self.principal, dto(request))
+                .await,
+        )
+    }
+
+    pub async fn reflections_generate(&self, request: Value) -> Value {
+        let mut request = request;
+        request["space_id"] = json!(self.space_id);
+        wire(
+            &self
+                .client
+                .generate_reflection(self.principal, dto(request))
+                .await,
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2592,7 +2809,8 @@ impl RawSession {
         client_capabilities: &[&str],
         expected_host_pubkey: [u8; 32],
     ) -> Result<Self, RawSetupFailure> {
-        let (addr, host) = spawn_expected_endpoint_listener(service, host_id, seed).await;
+        let (addr, host) =
+            spawn_expected_endpoint_listener(service, host_id, seed, &MEMORY_CAPABILITIES).await;
         let port = addr.port();
         // The listener task is owned until the hello/session exchange succeeds;
         // a failure aborts and bounded-joins it before re-raising.

@@ -29,9 +29,20 @@ pub struct FixtureIdentity {
 /// The independent durable provider the conformance suite exercises.
 pub struct FixtureMemoryProvider {
     store: FixtureStore,
+    /// This instance's identity, stamped as a pending generate receipt's
+    /// generation-lease `owner_id` (§7.0.3, inspector round 2). Two instances
+    /// over one database never share it, so the reopen recovery can tell a
+    /// live generation from a crash orphan by the lease alone. In-memory:
+    /// identities need not outlive the process.
+    pub(crate) generation_owner: String,
     /// Crate-private: the operation slices pin every request to the durable
     /// space/authority pair this provider serves.
     pub(crate) identity: FixtureIdentity,
+    /// Whether `memory.describe` advertises `spoke-memory-reflection`. The
+    /// deliberately-unadvertised shape still serves all three operations; the
+    /// absent advertisement only makes Connect negotiation answer
+    /// `capability_missing` before dispatch (C-003/C-073 remote continuity).
+    advertises_reflection: bool,
     /// Operator/test-only control (C7 seam): bounded fault points only. It is
     /// in-memory state attached to this provider instance, never persisted and
     /// never consulted as provider authority.
@@ -53,11 +64,38 @@ impl FixtureMemoryProvider {
     pub async fn open(database_path: &Path) -> Result<Self, FixtureError> {
         let store = FixtureStore::open(database_path).await?;
         let identity = provision_space(&store).await?;
+        // Restart recovery (§8.5): a generate receipt left pending by a lost
+        // session can never complete, so reopen terminalizes it `failed`.
+        crate::reflections::terminalize_orphaned_generate_receipts(&store).await?;
         Ok(Self {
             store,
+            generation_owner: Uuid::new_v4().simple().to_string(),
             identity,
+            advertises_reflection: true,
             faults: FixtureFaults::new(),
         })
+    }
+
+    /// Open the same database as the deliberately-unadvertised shape: all
+    /// three reflection operations are served, but `memory.describe` omits
+    /// `spoke-memory-reflection`, so Connect negotiation keeps answering
+    /// `capability_missing` for the reflection family (C-003/C-073 remote).
+    ///
+    /// # Errors
+    ///
+    /// Same contract as [`FixtureMemoryProvider::open`].
+    pub async fn open_unadvertised(database_path: &Path) -> Result<Self, FixtureError> {
+        let provider = Self::open(database_path).await?;
+        Ok(Self {
+            advertises_reflection: false,
+            ..provider
+        })
+    }
+
+    /// Whether the describe body advertises `spoke-memory-reflection`.
+    #[must_use]
+    pub const fn advertises_reflection(&self) -> bool {
+        self.advertises_reflection
     }
 
     /// The durable space/authority identity provisioned for this database.

@@ -2,10 +2,11 @@
 //! peer→principal table admission is built from (§4.1, §4.2, §7.0.6, §7.1).
 //!
 //! Everything here is the fixture's own declaration: it serves `spoke-memory`
-//! only, so the optional reflection and transfer families are neither
-//! advertised nor implemented. The limits are the bounds the private operation
-//! slices actually enforce, and `engine_policy_version` is the fixture's own
-//! stamp rather than Nexus's, so a client can tell the two providers apart.
+//! and — depending on the construction flag — `spoke-memory-reflection`. The
+//! optional transfer family is neither advertised nor implemented. The limits
+//! are the bounds the private operation slices actually enforce, and
+//! `engine_policy_version` is the fixture's own stamp rather than Nexus's, so
+//! a client can tell the two providers apart.
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU64;
@@ -25,16 +26,28 @@ use crate::spaces::{ENGINE_POLICY_VERSION, MAX_PAGE_SIZE};
 /// §3: the memory protocol revision this provider speaks.
 pub const MEMORY_PROTOCOL_VERSION: u64 = 1;
 
-/// §4.1: the one family this fixture serves. `spoke-memory-reflection` and
-/// `spoke-memory-transfer` are never advertised because no reflection or
-/// transfer operation is served.
-pub const CAPABILITIES: [&str; 1] = ["spoke-memory"];
+/// §4.1: the families this fixture serves. All three reflection operations
+/// are genuinely served, so `spoke-memory-reflection` is advertised exactly
+/// when the provider is constructed advertised (C-003 honesty: no capability
+/// claim without serving, and no silent omission of a served family).
+pub const BASE_CAPABILITY: &str = "spoke-memory";
+pub const REFLECTION_CAPABILITY: &str = "spoke-memory-reflection";
+
+/// The capability list for one provider shape.
+#[must_use]
+pub fn capabilities(advertises_reflection: bool) -> Vec<&'static str> {
+    if advertises_reflection {
+        vec![BASE_CAPABILITY, REFLECTION_CAPABILITY]
+    } else {
+        vec![BASE_CAPABILITY]
+    }
+}
 
 /// §4.2: authored content kinds this provider requires before generation.
 ///
-/// It generates nothing (no `spoke-memory-reflection`), so it requires no
-/// authored kind; advertising a prerequisite for an unsupported operation would
-/// be a false claim.
+/// It generates reflections without an authored-kind prerequisite, so it
+/// requires no authored kind; the insufficient-data outcome is
+/// `INSUFFICIENT_DATA`-driven, not a profile-kind demand.
 const REQUIRED_PROFILE_KINDS: [&str; 0] = [];
 
 /// Largest candidate count one `memory.capture` can produce: the fixture's
@@ -67,11 +80,12 @@ fn limits() -> Value {
     })
 }
 
-/// §7.1 `memory.describe` success body.
-pub fn describe_body() -> Value {
+/// §7.1 `memory.describe` success body, for one provider shape.
+#[must_use]
+pub fn describe_body(advertises_reflection: bool) -> Value {
     json!({
         "memory_protocol_version": non_zero(MEMORY_PROTOCOL_VERSION),
-        "capabilities": CAPABILITIES,
+        "capabilities": capabilities(advertises_reflection),
         "limits": limits(),
         "required_profile_kinds": REQUIRED_PROFILE_KINDS,
         "engine_policy_version": ENGINE_POLICY_VERSION,

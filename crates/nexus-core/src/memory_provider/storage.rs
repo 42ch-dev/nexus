@@ -76,6 +76,7 @@
 //! placement, so [`Coverage`] resolves those requirements inside the effect
 //! transaction instead of trusting a value read before it.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "test-hooks")]
@@ -88,7 +89,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use spoke_operations::spoke_schemas::MemoryGrant;
 use spoke_operations::{
     grant_covers, is_freeze_allowlisted, validate_grant_issuance, GrantRequirement, IssuedGrant,
@@ -144,6 +145,33 @@ pub(super) enum StoreError {
     },
     RevisionConflict {
         current: i64,
+    },
+    /// §7.25 state CAS (reflection generate, N4-R): the recomputed basis
+    /// digest no longer matches the caller's `expected_state_digest`. Carries
+    /// the current digest so the refusal names the recovery path (re-read
+    /// `memory.reflections.state`, retry with the fresh token).
+    StateConflict {
+        current: String,
+    },
+    /// §7.0.3 (inspector round 2): this process's terminal commit (transaction
+    /// 2) matched zero pending rows because the receipt's generation lease was
+    /// lost — reopen recovery terminalized it after the lease expired, or
+    /// another owner settled it. Not corruption: the envelope insert rolls
+    /// back with this error and the receipt stays replayable, so a same-key
+    /// retry (or `memory.receipts.get`) resolves the recorded outcome. Never
+    /// recorded on the receipt itself.
+    GenerationLeaseLost {
+        receipt_id: String,
+    },
+    /// MEM-R005: a required authored profile kind is absent for the subject.
+    ProfileIncomplete {
+        subject_id: String,
+        missing: Vec<String>,
+    },
+    /// §7.27 provider data-sufficiency policy: the authorized basis is too
+    /// small to generate from.
+    InsufficientData {
+        subject_id: String,
     },
     IdempotencyConflict,
     /// The receipt body is past `receipt_retention_seconds`; the dedup tombstone
@@ -297,9 +325,28 @@ struct CaptureRendezvous {
     release: Arc<tokio::sync::Barrier>,
 }
 
+/// C-015/C-070 proof seam: the rendezvous a reflection generate waits at
+/// **between its pending commit (transaction 1) and its terminal commit
+/// (transaction 2)** — `entered` reports that the pending receipt is published,
+/// `release` frees the generation. Test only.
+#[cfg(feature = "test-hooks")]
+struct GenerationRendezvous {
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Barrier>,
+}
+
 /// §6.10 receipt status while its journaled file effect is not yet published
 /// (§5.2 step 2): durable, but not terminal.
 pub(super) const RECEIPT_PENDING: &str = "pending";
+
+/// How long a pending generate receipt's lease covers the generation running
+/// under it (§7.0.3, inspector round 2). The generation is in-process pure
+/// composition over a pinned snapshot, so the window is normally milliseconds;
+/// the lease only has to outlive pathological scheduling, while staying short
+/// enough that a crashed owner's receipt is recoverable at the next reopen
+/// without an operator. No renewals: transaction 2 either lands inside the
+/// lease or loses it to recovery.
+const GENERATION_LEASE_SECONDS: i64 = 30;
 
 /// §5.2 step 3: the receipt of an intent that could not be published. Terminal:
 /// `error_json` carries the failure envelope, and a later re-drive publishes the
@@ -554,6 +601,12 @@ impl PublicationGuard {
 }
 
 pub(super) struct MemoryStore {
+    /// This instance's identity, stamped as a pending generate receipt's
+    /// generation-lease `owner_id` (§7.0.3, inspector round 2). Two store
+    /// instances over one workspace — two processes, or two providers in one —
+    /// never share it, so reopen recovery can tell a live generation from a
+    /// crash orphan by the lease alone.
+    instance_id: String,
     pool: SqlitePool,
     /// Holds this provider's writer admission for the provider's lifetime.
     /// `None` on a read-only store, which holds no admission at all.
@@ -617,6 +670,15 @@ pub(super) struct MemoryStore {
     /// concurrent `remove_binding` cannot interleave (compass D15).
     #[cfg(feature = "test-hooks")]
     capture_barrier: std::sync::Mutex<Option<CaptureRendezvous>>,
+    /// Test-only rendezvous a reflection generate waits at between its pending
+    /// commit and its terminal commit — `entered` tells the test the pending
+    /// receipt is published, `release` frees the generation (C-015/C-070).
+    #[cfg(feature = "test-hooks")]
+    generation_barrier: std::sync::Mutex<Option<GenerationRendezvous>>,
+    /// Test-only one-shot fault failing the next reflection generation step so
+    /// transaction 2 commits an honest `failed` receipt (C-078).
+    #[cfg(feature = "test-hooks")]
+    generation_fault: AtomicBool,
     /// Test-only rendezvous a publication waits at **while it holds the
     /// workspace publication gate** — `entered` tells the test the gate is held,
     /// `release` frees it — so a second provider instance on the same workspace
@@ -846,6 +908,7 @@ impl MemoryStore {
         let provisioned = Self::provider_tables_present(&pool).await?;
         let publish_gate = workspace_publish_gate(&files_root);
         Ok(Self {
+            instance_id: Uuid::new_v4().simple().to_string(),
             pool,
             guarded,
             files_root,
@@ -869,6 +932,10 @@ impl MemoryStore {
             admission_token: AtomicU64::new(0),
             #[cfg(feature = "test-hooks")]
             capture_barrier: std::sync::Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            generation_barrier: std::sync::Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            generation_fault: AtomicBool::new(false),
             #[cfg(feature = "test-hooks")]
             publish_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
@@ -995,6 +1062,52 @@ impl MemoryStore {
     ) {
         *self.capture_barrier.lock().expect("capture gate") =
             Some(CaptureRendezvous { entered, release });
+    }
+
+    /// C-015/C-070 proof seam: park the next reflection generate after its
+    /// pending receipt committed and before its terminal commit — `entered`
+    /// signals the pending receipt is published, `release` frees the
+    /// generation — so a test can observe the published pending receipt
+    /// through `memory.receipts.get`. One-shot. Compiled out of a production
+    /// build.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn park_next_generation(
+        &self,
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Barrier>,
+    ) {
+        *self.generation_barrier.lock().expect("generation gate") =
+            Some(GenerationRendezvous { entered, release });
+    }
+
+    /// C-078 proof seam: fail the next reflection generation step so its
+    /// transaction 2 commits an honest `failed` receipt with no cost. One-shot:
+    /// a replay never runs a generation, so an armed fault stays armed across
+    /// one. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn inject_generation_fault(&self) {
+        self.generation_fault.store(true, Ordering::SeqCst);
+    }
+
+    /// The [`Self::park_next_generation`] wait, taken exactly once per fresh
+    /// generate, after transaction 1 committed the pending receipt and before
+    /// generation runs.
+    #[cfg(feature = "test-hooks")]
+    async fn generation_gate(&self) {
+        let parked = {
+            let mut gate = self.generation_barrier.lock().expect("generation gate");
+            gate.take()
+        };
+        if let Some(rendezvous) = parked {
+            rendezvous.entered.notify_one();
+            rendezvous.release.wait().await;
+        }
+    }
+
+    /// Consume the one-shot generation fault, if armed.
+    #[cfg(feature = "test-hooks")]
+    fn generation_fault(&self) -> bool {
+        self.generation_fault.swap(false, Ordering::SeqCst)
     }
 
     /// Park the next write once it has entered the write-admission machinery and
@@ -1197,6 +1310,14 @@ impl MemoryStore {
         // The pass is bounded and best-effort: an intent it cannot settle stays
         // quarantined and the subject's reads report that explicitly.
         self.recover_journal(space_id).await;
+        // N4-R: a reflection generate receipt a crash left `pending` between
+        // the two transactions terminalizes here — a pending receipt can never
+        // have a reflection row (its insert is transaction 2). Only leases
+        // that are absent or already expired settle: a live lease is a
+        // generation another process is executing right now, and terminalizing
+        // it would break that process's transaction 2 (§7.0.3, inspector
+        // round 2). Its own open terminalizes it once its lease has expired.
+        self.recover_reflections(space_id).await;
         // §6.10 retention is durable even for a deployment that only reads:
         // opening the provider reclaims what has aged out, and does so in its
         // own committed transaction so a provisioning failure cannot put an
@@ -2664,6 +2785,15 @@ async fn write_journal_entry(
     Ok(())
 }
 
+/// The one unsettled journal row fencing a subject: its receipt identity and
+/// its lifecycle state. Named fields, so a consumer cannot hand the receipt id
+/// where the state is expected (the reversed-tuple defect the reflection read
+/// wave introduced).
+struct UnsettledJournal {
+    receipt_id: String,
+    state: String,
+}
+
 /// The unsettled journal state that fences one subject (D-10 read isolation).
 ///
 /// The row's own `subject_id` fences its subject, and so does every subject its
@@ -2677,12 +2807,12 @@ async fn write_journal_entry(
 /// write can repair on its own, so a newer pending intent for the same subject
 /// must not mask it and turn the terminal diagnosis into silent absence.
 async fn unsettled_in(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
     space_id: &str,
     subject_id: &str,
-) -> StoreResult<Option<String>> {
-    let row: Option<(String,)> = sqlx::query_as(
-        "SELECT state FROM memory_journal \
+) -> StoreResult<Option<UnsettledJournal>> {
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT receipt_id, state FROM memory_journal \
          WHERE space_id = ? AND state <> 'applied' \
            AND (subject_id = ? OR EXISTS ( \
                SELECT 1 FROM json_each(json_extract(result_json, '$.fenced_subjects')) \
@@ -2696,15 +2826,15 @@ async fn unsettled_in(
     .bind(journal::STATE_DEFERRED)
     .fetch_optional(&mut **tx)
     .await?;
-    Ok(row.map(|(state,)| state))
+    Ok(row.map(|(receipt_id, state)| UnsettledJournal { receipt_id, state }))
 }
 
 /// §5.2 steps 4–5: only an intent that is still being recovered withholds the
 /// subject's objects silently. A quarantined one — and one a bounded pass left
 /// `deferred` — answers the terminal refusal instead of waiting forever.
-fn withheld(state: Option<&str>, subject_id: &str) -> StoreResult<bool> {
-    match state {
-        Some(journal::STATE_PENDING) => Ok(true),
+fn withheld(unsettled: Option<&UnsettledJournal>, subject_id: &str) -> StoreResult<bool> {
+    match unsettled {
+        Some(unsettled) if unsettled.state == journal::STATE_PENDING => Ok(true),
         Some(_) => Err(StoreError::Unreconciled {
             subject_id: subject_id.to_string(),
         }),
@@ -4548,6 +4678,992 @@ enum RecordMutation<'a> {
     },
 }
 
+// ── Reflections (§7.25–§7.27, N4-R) ─────────────────────────────────────
+//
+// One append-only envelope per generated reflection; the table is immutable by
+// design, so the family is an insert and an identity read and nothing else.
+// Pinned shapes travel as verbatim JSON text end to end: this mapping never
+// parses or re-serializes them, so published array shapes survive intact and an
+// absent optional filter stays SQL NULL — never a `null`-substituted array.
+// Staleness is recomputed at read time (§7.26); `stale_cache` is only the
+// write-time flag the insert recorded. The reflection ops (`mod.rs`) are the
+// consumers, landing with Tasks 2–4 of v230-n4r-local-reflection.
+
+/// Per distinct pinned selection/filter (its JSON columns), the recomputed
+/// `(live, tombstoned)` record sets.
+type ReflectionProbeMap = HashMap<(String, String), (Vec<(String, i64)>, Vec<(String, i64)>)>;
+
+const REFLECTION_COLUMNS: &str =
+    "seq, reflection_id, space_id, subject_id, requester_principal_id, \
+     selection_json, filter_json, cognition_filter_json, basis_json, engine_policy_version, \
+     model, schema_version, revision, extensions_json, created_at, body_text, body_format, \
+     cost_unit_kind, cost_units, stale_cache";
+
+/// One generated reflection envelope as stored (§7.27).
+#[derive(Clone, Debug, sqlx::FromRow)]
+pub(super) struct ReflectionRow {
+    // The store-assigned insertion order: the read path orders by it (whole-
+    // second `created_at` stamps cannot separate same-second envelopes); the
+    // wire projection never serves it.
+    #[allow(dead_code)]
+    pub seq: i64,
+    pub reflection_id: String,
+    pub space_id: String,
+    pub subject_id: String,
+    // The generate flow (Task 4) pins this at insert; the §7.26 projection
+    // never serves it, so it stays mapped for row fidelity only.
+    #[allow(dead_code)]
+    pub requester_principal_id: String,
+    pub selection_json: String,
+    pub filter_json: Option<String>,
+    pub cognition_filter_json: Option<String>,
+    pub basis_json: String,
+    pub engine_policy_version: String,
+    pub model: Option<String>,
+    pub schema_version: i64,
+    pub revision: i64,
+    pub extensions_json: String,
+    pub created_at: String,
+    pub body_text: String,
+    pub body_format: String,
+    pub cost_unit_kind: Option<String>,
+    pub cost_units: Option<f64>,
+    #[allow(dead_code)] // the write-time cache; §7.26 reads never serve it
+    pub stale_cache: bool,
+}
+
+/// One reflection envelope to insert — the generate flow's transaction-2 write.
+/// Pinned shapes arrive as verbatim JSON text (serialization is the caller's
+/// admission step); `cost` is the wire's one optional object, stored as its two
+/// columns or neither.
+struct NewReflection<'a> {
+    pub reflection_id: &'a str,
+    pub space_id: &'a str,
+    pub subject_id: &'a str,
+    pub requester_principal_id: &'a str,
+    pub selection_json: &'a str,
+    pub filter_json: Option<&'a str>,
+    pub cognition_filter_json: Option<&'a str>,
+    pub basis_json: &'a str,
+    pub engine_policy_version: &'a str,
+    pub model: Option<&'a str>,
+    pub schema_version: i64,
+    pub revision: i64,
+    pub extensions_json: &'a str,
+    pub created_at: &'a str,
+    pub body_text: &'a str,
+    pub body_format: &'a str,
+    pub stale_cache: bool,
+    pub cost: Option<(&'a str, f64)>,
+}
+
+/// Append one reflection envelope. There is no update or delete path: rows are
+/// immutable and never swept.
+async fn insert_reflection(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    reflection: &NewReflection<'_>,
+) -> StoreResult<()> {
+    let (cost_unit_kind, cost_units) = match reflection.cost {
+        Some((unit_kind, units)) => (Some(unit_kind), Some(units)),
+        None => (None, None),
+    };
+    sqlx::query(
+        "INSERT INTO memory_reflections \
+         (seq, reflection_id, space_id, subject_id, requester_principal_id, selection_json, \
+          filter_json, cognition_filter_json, basis_json, engine_policy_version, model, \
+          schema_version, revision, extensions_json, created_at, body_text, body_format, \
+          cost_unit_kind, cost_units, stale_cache) \
+         VALUES (\
+           (SELECT COALESCE(MAX(seq), 0) + 1 FROM memory_reflections), \
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(reflection.reflection_id)
+    .bind(reflection.space_id)
+    .bind(reflection.subject_id)
+    .bind(reflection.requester_principal_id)
+    .bind(reflection.selection_json)
+    .bind(reflection.filter_json)
+    .bind(reflection.cognition_filter_json)
+    .bind(reflection.basis_json)
+    .bind(reflection.engine_policy_version)
+    .bind(reflection.model)
+    .bind(reflection.schema_version)
+    .bind(reflection.revision)
+    .bind(reflection.extensions_json)
+    .bind(reflection.created_at)
+    .bind(reflection.body_text)
+    .bind(reflection.body_format)
+    .bind(cost_unit_kind)
+    .bind(cost_units)
+    .bind(reflection.stale_cache)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+// ── Reflection reads (§7.25–§7.26, N4-R Task 3) ─────────────────────────
+//
+// The read-time staleness mechanism (C-042): the provider recomposes its
+// canonical basis object over the *current* authorized set on every read and
+// compares digests — there are no eager invalidation writes and the stored
+// `stale_cache` is never consulted. The digest composition itself lives on the
+// provider side (`super::reflection_state_digest`/`reflection_source_set_digest`);
+// this layer owns the authorized sets, the pinned-basis comparisons and the
+// tombstone exclusion (C-077), all inside one read transaction.
+
+/// The §7.25 state snapshot: the authorized source-record identity set (live
+/// rows only — a tombstoned row leaves the authorized set at read time,
+/// C-077) and the subject's profile revisions. Pairs sorted by id, then
+/// revision.
+pub(super) struct ReflectionBasisSnapshot {
+    pub records: Vec<(String, i64)>,
+    pub profile_revisions: Vec<(String, i64)>,
+}
+
+/// One visible reflection envelope plus the staleness this read recomputed
+/// against its pinned basis (§7.26) — never the stored write-time cache.
+pub(super) struct VisibleReflection {
+    pub row: ReflectionRow,
+    pub stale: bool,
+}
+
+/// The authorized record identity set for one selection/filter, split into its
+/// live and tombstoned halves (C-077's two sides), each sorted. Tombstones
+/// keep their placement and provenance columns, so the predicate reaches them;
+/// counting them back in is how a pinned basis proves its only delta was
+/// tombstoning.
+async fn reflection_record_sets(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    selection: &Selection,
+    filter: Option<&[String]>,
+    space_id: &str,
+    subject_id: &str,
+) -> StoreResult<(Vec<(String, i64)>, Vec<(String, i64)>)> {
+    let (where_sql, binds) = record_predicate(selection, filter, &[], true, space_id, subject_id);
+    let sql = format!(
+        "SELECT record_id, revision, tombstone_json IS NOT NULL \
+         FROM memory_records{where_sql}"
+    );
+    let mut rows = sqlx::query_as::<_, (String, i64, bool)>(sqlx::AssertSqlSafe(sql));
+    for bind in &binds {
+        rows = rows.bind(bind);
+    }
+    let mut live = Vec::new();
+    let mut tombstones = Vec::new();
+    for (record_id, revision, tombstoned) in rows.fetch_all(&mut **tx).await? {
+        if tombstoned {
+            tombstones.push((record_id, revision));
+        } else {
+            live.push((record_id, revision));
+        }
+    }
+    live.sort();
+    tombstones.sort();
+    Ok((live, tombstones))
+}
+
+/// The subject's authored profile kinds with their revisions, sorted by kind.
+async fn profile_revisions_in_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    space_id: &str,
+    subject_id: &str,
+) -> StoreResult<Vec<(String, i64)>> {
+    let mut rows = sqlx::query_as::<_, (String, i64)>(
+        "SELECT profile_kind, revision FROM memory_profiles \
+         WHERE space_id = ? AND subject_id = ? ORDER BY profile_kind",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    rows.sort();
+    Ok(rows)
+}
+
+/// A reflection row's pinned filter column as the provenance id list the
+/// predicate and the digest composition read; an absent column is no filter.
+fn pinned_filter(raw: Option<&String>) -> StoreResult<Option<Vec<String>>> {
+    raw.map(|raw| {
+        let filter: Value = serde_json::from_str(raw)
+            .map_err(|error| StoreError::Corrupt(format!("reflection filter: {error}")))?;
+        filter
+            .get("source_context_ids")
+            .and_then(Value::as_array)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .ok_or_else(|| {
+                StoreError::Corrupt("reflection filter names no source_context_ids".to_string())
+            })
+    })
+    .transpose()
+}
+
+/// §7.26/§7.27 read-time staleness and the C-077 exclusion for one pinned
+/// basis. `stale` is true iff the current authorized basis — recomposed under
+/// the pinned selection/filter — differs from the pinned basis digest. The row
+/// is excluded iff recomposing the source set *with its tombstones counted
+/// back in* reproduces the pinned source-set digest while the live set does
+/// not: the basis's only delta is tombstoning, so the deleted content must not
+/// leak through the derived envelope. Counting a tombstone back in is
+/// identity-based: deletion is terminal (MEM-R014) and bumps the revision by
+/// exactly one, so a tombstoned row re-enters the pin's source set at
+/// `(record_id, revision - 1)` whatever revision the pin saw. Every other
+/// delta — edits, additions, profile or policy changes — keeps the exact
+/// pairs apart and stays listed with honest staleness.
+#[allow(clippy::type_complexity)]
+fn pinned_staleness(
+    live: &[(String, i64)],
+    tombstones: &[(String, i64)],
+    profile_revisions: &[(String, i64)],
+    selection: &Selection,
+    filter: Option<&[String]>,
+    basis_json: &str,
+) -> StoreResult<(bool, bool)> {
+    let basis: Value = serde_json::from_str(basis_json)
+        .map_err(|error| StoreError::Corrupt(format!("reflection basis: {error}")))?;
+    let pinned_member = |member: &str| {
+        basis
+            .get(member)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| StoreError::Corrupt(format!("reflection basis has no {member}")))
+    };
+    let pinned_source_set = pinned_member("source_set_digest")?;
+    let pinned_state = pinned_member("state_digest")?;
+    let state = super::reflection_state_digest(live, profile_revisions, selection, filter)
+        .map_err(StoreError::Corrupt)?;
+    let source_live = super::reflection_source_set_digest(live).map_err(StoreError::Corrupt)?;
+    let mut counting = live.to_vec();
+    // Undo the single delete-time revision bump; a tombstoned row has no
+    // other revision history after the pin.
+    counting.extend(
+        tombstones
+            .iter()
+            .map(|(id, revision)| (id.clone(), revision - 1)),
+    );
+    counting.sort();
+    let source_counting =
+        super::reflection_source_set_digest(&counting).map_err(StoreError::Corrupt)?;
+    Ok((
+        state != pinned_state,
+        source_counting == pinned_source_set && source_live != pinned_source_set,
+    ))
+}
+
+/// The MEM-R026 invalidation marker for a reflection page: a digest over the
+/// visible envelope set, *every* record identity of the subject (live and
+/// tombstoned — any basis-affecting change rebinds an outstanding cursor even
+/// when no reflection row moved), the subject's profile revisions (the same
+/// sorted pairs the state digest composes), the space's grant revisions and
+/// the subject status. A state or grant change therefore answers a stale
+/// cursor with `CURSOR_INVALID` (§7.0.7).
+fn reflection_marker(
+    reflections: &[(String, i64)],
+    records: &[(String, i64)],
+    profile_revisions: &[(String, i64)],
+    grants: &[GrantRow],
+    subject_status: Option<&str>,
+) -> StoreResult<String> {
+    let mut reflections = reflections.to_vec();
+    reflections.sort();
+    let mut grant_revisions: Vec<(String, i64)> = grants
+        .iter()
+        .map(|grant| (grant.grant_id.clone(), grant.revision))
+        .collect();
+    grant_revisions.sort();
+    match super::digest_value(&json!({
+        "records": records,
+        "profile_revisions": profile_revisions,
+        "reflections": reflections,
+        "grants": grant_revisions,
+        "subject": subject_status,
+    })) {
+        Ok(digest) => Ok(digest),
+        Err(error) => Err(StoreError::Corrupt(error)),
+    }
+}
+
+impl MemoryStore {
+    /// §7.26 list read path (and §7.25's `last_reflection_id` pick): every
+    /// reflection envelope of the subject this principal may see, newest
+    /// first, with staleness recomputed per row at read time and C-077 rows
+    /// excluded. Visible means all of: the caller's current `reflect`
+    /// coverage admits the reflection's pinned selection, the request's
+    /// selection scope covers the pin (an absent request selection narrows to
+    /// the caller's covered reflections only), the request's provenance
+    /// filter names the pin's own filter exactly (a present request filter
+    /// returns only envelopes pinned to it; an absent one narrows nothing),
+    /// and the pin's basis delta is not tombstoning. The marker binds the
+    /// page to the snapshot it was cut from, so any state or grant change
+    /// invalidates outstanding cursors.
+    pub(super) async fn reflections(
+        &self,
+        space_id: &str,
+        subject_id: &str,
+        request_selection: Option<&Selection>,
+        request_filter: Option<&[String]>,
+        principal_id: &str,
+    ) -> StoreResult<(Vec<VisibleReflection>, String, u64)> {
+        self.require_provisioned(space_id).await?;
+        let (mut tx, now) = self.begin_read().await?;
+        space_in_tx(&mut tx, space_id).await?;
+        let grant_rows = grants_in_tx(&mut tx, space_id).await?;
+        let grants = wire_grants(&grant_rows)?;
+        let subject_row = subject_in_tx(&mut tx, space_id, subject_id).await?;
+        let subject_status = subject_row.as_ref().map(|subject| subject.status.clone());
+        let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
+        if withheld(unsettled.as_ref(), subject_id)? {
+            tx.commit().await?;
+            let marker = reflection_marker(&[], &[], &[], &grant_rows, subject_status.as_deref())?;
+            return Ok((Vec::new(), marker, 0));
+        }
+        let profile_revisions = profile_revisions_in_tx(&mut tx, space_id, subject_id).await?;
+        // Every record identity of the subject, live and tombstoned: the
+        // cursor marker must move on any basis-affecting change (MEM-R026).
+        let (all_live, all_tombstones) =
+            reflection_record_sets(&mut tx, &Selection::SubjectAll, None, space_id, subject_id)
+                .await?;
+        let mut all_records = all_live;
+        all_records.extend(all_tombstones);
+        let visible = visible_reflections_in_tx(
+            &mut tx,
+            &grants,
+            principal_id,
+            space_id,
+            subject_id,
+            &profile_revisions,
+            request_selection,
+            request_filter,
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        let marker_set: Vec<(String, i64)> = visible
+            .iter()
+            .map(|visible| (visible.row.reflection_id.clone(), visible.row.revision))
+            .collect();
+        let marker = reflection_marker(
+            &marker_set,
+            &all_records,
+            &profile_revisions,
+            &grant_rows,
+            subject_status.as_deref(),
+        )?;
+        let total = u64::try_from(visible.len()).unwrap_or(u64::MAX);
+        Ok((visible, marker, total))
+    }
+
+    /// §7.25 state snapshot (inspector round 2): the authorized basis AND the
+    /// subject's visible reflections in **one** read transaction — one
+    /// snapshot — so the published state body can never mix an older
+    /// `state_digest` with a newer staleness verdict. The basis half is
+    /// [`Self::reflection_basis`]'s composition; the rows half is
+    /// [`Self::reflections`]' visibility narrowing for the same
+    /// selection/filter, without the cursor marker the state op never
+    /// publishes.
+    pub(super) async fn reflection_state_snapshot(
+        &self,
+        space_id: &str,
+        subject_id: &str,
+        selection: &Selection,
+        filter: Option<&[String]>,
+        principal_id: &str,
+    ) -> StoreResult<(ReflectionBasisSnapshot, Vec<VisibleReflection>)> {
+        self.require_provisioned(space_id).await?;
+        let (mut tx, now) = self.begin_read().await?;
+        space_in_tx(&mut tx, space_id).await?;
+        let grant_rows = grants_in_tx(&mut tx, space_id).await?;
+        let grants = wire_grants(&grant_rows)?;
+        // §7.25: the request's own selection must hold current `reflect`
+        // coverage before the basis publishes — the disclosure check
+        // `reflection_basis` performs, at the same point of the read.
+        if !covered(
+            &grants,
+            principal_id,
+            space_id,
+            now,
+            &selection.base_requirement("reflect", subject_id),
+        ) {
+            return Err(StoreError::NotAuthorized(format!(
+                "principal {principal_id} holds no reflect grant covering the selection"
+            )));
+        }
+        let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
+        // §5.2/D-10: an unsettled file intent withholds the subject from
+        // reads — both halves empty, exactly what the two separate reads
+        // produced before.
+        if withheld(unsettled.as_ref(), subject_id)? {
+            tx.commit().await?;
+            return Ok((
+                ReflectionBasisSnapshot {
+                    records: Vec::new(),
+                    profile_revisions: Vec::new(),
+                },
+                Vec::new(),
+            ));
+        }
+        let (records, _tombstones) =
+            reflection_record_sets(&mut tx, selection, filter, space_id, subject_id).await?;
+        let profile_revisions = profile_revisions_in_tx(&mut tx, space_id, subject_id).await?;
+        let visible = visible_reflections_in_tx(
+            &mut tx,
+            &grants,
+            principal_id,
+            space_id,
+            subject_id,
+            &profile_revisions,
+            Some(selection),
+            filter,
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok((
+            ReflectionBasisSnapshot {
+                records,
+                profile_revisions,
+            },
+            visible,
+        ))
+    }
+}
+
+/// The visible reflections one read transaction serves (§7.26): every
+/// reflection envelope of the subject this principal may see, newest first,
+/// with staleness recomputed per row at read time and C-077 rows excluded.
+/// Visible means all of: the caller's current `reflect` coverage admits the
+/// reflection's pinned selection, the request's selection scope covers the
+/// pin (an absent request selection narrows to the caller's covered
+/// reflections only), the request's provenance filter names the pin's own
+/// filter exactly (a present request filter returns only envelopes pinned to
+/// it; an absent one narrows nothing), and the pin's basis delta is not
+/// tombstoning. Caller-supplied rows come from the SAME transaction the
+/// caller opened, so every consumer of this helper serves one snapshot.
+#[allow(clippy::too_many_arguments)]
+async fn visible_reflections_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    grants: &[MemoryGrant],
+    principal_id: &str,
+    space_id: &str,
+    subject_id: &str,
+    profile_revisions: &[(String, i64)],
+    request_selection: Option<&Selection>,
+    request_filter: Option<&[String]>,
+    now: DateTime<Utc>,
+) -> StoreResult<Vec<VisibleReflection>> {
+    let sql = format!(
+        "SELECT {REFLECTION_COLUMNS} FROM memory_reflections \
+         WHERE space_id = ? AND subject_id = ? \
+         ORDER BY seq DESC"
+    );
+    let rows = sqlx::query_as::<_, ReflectionRow>(sqlx::AssertSqlSafe(sql))
+        .bind(space_id)
+        .bind(subject_id)
+        .fetch_all(&mut **tx)
+        .await?;
+    // Per distinct pinned selection/filter, one recomputation of the
+    // current record sets; each envelope's staleness/exclusion verdict is
+    // then computed against that row's own pinned basis — envelopes
+    // sharing a pin may pin different bases, so a verdict computed from a
+    // sibling row's basis is never shared.
+    let mut probes: ReflectionProbeMap = HashMap::new();
+    // The request filter matches a pinned filter as a set — the same
+    // canonicalization the digest key renders — never by raw array order.
+    let request_filter_set = request_filter.map(super::canonical_ids);
+    let mut visible = Vec::with_capacity(rows.len());
+    for row in rows {
+        let pinned = super::pinned_selection(&row.selection_json).map_err(StoreError::Corrupt)?;
+        let filter = pinned_filter(row.filter_json.as_ref())?;
+        let (live, tombstones) = {
+            let key = (
+                row.selection_json.clone(),
+                row.filter_json.clone().unwrap_or_default(),
+            );
+            match probes.entry(key) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => entry.insert(
+                    reflection_record_sets(tx, &pinned, filter.as_deref(), space_id, subject_id)
+                        .await?,
+                ),
+            }
+        };
+        let (stale, excluded) = pinned_staleness(
+            live,
+            tombstones,
+            profile_revisions,
+            &pinned,
+            filter.as_deref(),
+            &row.basis_json,
+        )?;
+        if excluded
+            || request_filter_set.as_ref().is_some_and(|requested| {
+                Some(requested) != filter.as_deref().map(super::canonical_ids).as_ref()
+            })
+            || !covered(
+                grants,
+                principal_id,
+                space_id,
+                now,
+                &pinned.base_requirement("reflect", subject_id),
+            )
+            || !super::selection_scope_covers(&pinned, request_selection)
+        {
+            continue;
+        }
+        visible.push(VisibleReflection { row, stale });
+    }
+    Ok(visible)
+}
+
+impl MemoryStore {
+    // ── Reflection generation (§7.27, N4-R Task 4) ──────────────────────
+
+    /// §7.27 generate: the §7.0.3 two-transaction flow.
+    ///
+    /// Transaction 1 is the point of no return. Every refusal — the current
+    /// coverage recheck, the §7.25 state CAS, the freeze/fence gates, the
+    /// required-profile and data-sufficiency policy verdicts — is raised
+    /// strictly before it, so a refused generate records no receipt and
+    /// charges nothing; a same-key replay resolves through the probe before
+    /// every gate and is exempt from them (C-036). Once the pending receipt
+    /// commits, exactly one terminal outcome commits in transaction 2 — a
+    /// `committed` receipt with its reflection row, or a `failed` receipt
+    /// naming an honest retryable cause — and the only cost recording rides
+    /// the `committed` outcome, so a failure never charges (C-078).
+    ///
+    /// The basis content is deterministic over the basis snapshot transaction 1
+    /// pinned — `basis_json`, `body_text` and the state/source digests are the
+    /// same pure function of the same authorized basis and policy version —
+    /// but the envelope identity is NOT: `reflection_id` is freshly minted, so
+    /// the same basis regenerated under a new idempotency key produces a new
+    /// envelope identity. A racing generation resolves through the dedup
+    /// namespace, never through the content.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn generate_reflection(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        subject_id: &str,
+        selection: &Selection,
+        filter: Option<&[String]>,
+        selection_json: &str,
+        filter_json: Option<&str>,
+        expected_state_digest: &str,
+    ) -> StoreResult<ReceiptRow> {
+        // ── Transaction 1: admission and the point of no return ──
+        let (mut tx, now) = self.begin_admission().await?;
+        // §7.0.5/MEM-R021: handing back a receipt is a disclosure, so the
+        // current-coverage recheck precedes the probe; the replay it returns
+        // is exempt from every gate below (the fence included, C-036).
+        let _grants = authorize(&mut tx, admission, now).await?;
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
+            return Ok(row);
+        }
+        gate(&mut tx, admission).await?;
+        // §5.2/D-10: a withheld subject's `state` digest is the empty-basis
+        // one, so refusing with the unsettled predecessor is the only honest
+        // outcome — a stale-CAS or insufficient-data diagnosis would send the
+        // caller re-reading a basis recovery still owes.
+        if let Some(unsettled) = unsettled_in(&mut tx, ctx.space_id, subject_id).await? {
+            return Err(StoreError::UnsettledPredecessor {
+                receipt_id: unsettled.receipt_id,
+                state: unsettled.state,
+            });
+        }
+        // §7.25 state CAS over the *current* authorized basis, recomputed
+        // inside this transaction — the same composition the `state` op
+        // publishes, so a matching token proves the caller read this basis.
+        let snapshot =
+            reflection_basis_in_tx(&mut tx, selection, filter, ctx.space_id, subject_id).await?;
+        let current_digest = super::reflection_state_digest(
+            &snapshot.records,
+            &snapshot.profile_revisions,
+            selection,
+            filter,
+        )
+        .map_err(StoreError::Corrupt)?;
+        if current_digest != expected_state_digest {
+            return Err(StoreError::StateConflict {
+                current: current_digest,
+            });
+        }
+        // MEM-R005 then §7.27 sufficiency, both the same provider policy the
+        // `state` op reports: the missing kinds are the ones
+        // `missing_required_profile_kinds` names, and the verdict is exactly
+        // `data_sufficiency`'s.
+        let missing: Vec<String> = super::profile_projection(&snapshot.profile_revisions).1;
+        if !missing.is_empty() {
+            return Err(StoreError::ProfileIncomplete {
+                subject_id: subject_id.to_string(),
+                missing,
+            });
+        }
+        if super::data_sufficiency(snapshot.records.len()) == "insufficient" {
+            return Err(StoreError::InsufficientData {
+                subject_id: subject_id.to_string(),
+            });
+        }
+        // The pending receipt is the point of no return: published before any
+        // generation (C-015/C-070), carrying no payload, no terminal stamp and
+        // no cost. The same transaction stamps this instance as the lease
+        // owner with the generation deadline, so a concurrent reopen's
+        // recovery passes over the live generation (§7.0.3, inspector round 2).
+        let receipt_id = mint_receipt_id();
+        let mut row = self
+            .write_receipt(&mut tx, ctx, &receipt_id, None, now)
+            .await?;
+        sqlx::query(
+            "UPDATE memory_receipts SET owner_id = ?, lease_expires_at = ? \
+             WHERE receipt_id = ?",
+        )
+        .bind(&self.instance_id)
+        .bind(timestamp(
+            now + chrono::Duration::seconds(GENERATION_LEASE_SECONDS),
+        ))
+        .bind(&receipt_id)
+        .execute(&mut *tx)
+        .await?;
+        self.commit_effect(tx).await?;
+
+        // ── The parked window: pending published, terminal not yet ──
+        #[cfg(feature = "test-hooks")]
+        self.generation_gate().await;
+
+        // ── Deterministic generation over the pinned basis ──
+        // The one-shot fault (C-078 seam) fails the generation step so
+        // transaction 2 commits the honest `failed` receipt; nothing else
+        // fails here — the composition is pure over the pinned snapshot.
+        #[cfg(feature = "test-hooks")]
+        let injected = self.generation_fault();
+        #[cfg(not(feature = "test-hooks"))]
+        let injected = false;
+        let settled_at = timestamp(self.now());
+        if injected {
+            let failure = interrupted_failure(&receipt_id);
+            self.record_generation_failure(&mut row, &receipt_id, &failure, &settled_at)
+                .await?;
+        } else {
+            let generation = compose_generation(&snapshot, selection, filter, subject_id)?;
+            // The pinned columns travel verbatim (the shapes Task 1 staged);
+            // absent optionals stay SQL NULL — never null-substituted.
+            let reflection = NewReflection {
+                reflection_id: &generation.reflection_id,
+                space_id: ctx.space_id,
+                subject_id,
+                requester_principal_id: ctx.requester_principal_id,
+                selection_json,
+                filter_json,
+                cognition_filter_json: None,
+                basis_json: &generation.basis_json,
+                engine_policy_version: super::policy::ENGINE_POLICY_VERSION,
+                model: None,
+                schema_version: 1,
+                revision: 1,
+                extensions_json: "{}",
+                created_at: &settled_at,
+                body_text: &generation.body_text,
+                body_format: "markdown",
+                stale_cache: false,
+                cost: Some(("reflection", 1.0)),
+            };
+            self.commit_generation(&mut row, &reflection, &generation.result_json, &settled_at)
+                .await?;
+        }
+        Ok(row)
+    }
+
+    /// Transaction 2, committed branch: the envelope row and the terminal
+    /// `committed` receipt join one transaction, so the pending receipt can
+    /// never resolve committed without its reflection row existing.
+    async fn commit_generation(
+        &self,
+        row: &mut ReceiptRow,
+        reflection: &NewReflection<'_>,
+        result_json: &str,
+        settled_at: &str,
+    ) -> StoreResult<()> {
+        let mut tx = begin_immediate(&self.pool).await?;
+        insert_reflection(&mut tx, reflection).await?;
+        let updated = sqlx::query(
+            "UPDATE memory_receipts SET status = 'committed', result_json = ?, \
+             error_json = NULL, completed_at = ? \
+             WHERE receipt_id = ? AND status = ? AND owner_id = ?",
+        )
+        .bind(result_json)
+        .bind(settled_at)
+        .bind(&row.receipt_id)
+        .bind(RECEIPT_PENDING)
+        .bind(&self.instance_id)
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() != 1 {
+            // The lease was lost, not the store: the envelope insert rolls back
+            // with this error and the receipt stays replayable (§7.0.3).
+            return Err(StoreError::GenerationLeaseLost {
+                receipt_id: row.receipt_id.clone(),
+            });
+        }
+        self.commit_effect(tx).await?;
+        row.status = "committed".to_string();
+        row.result_json = Some(result_json.to_string());
+        row.error_json = None;
+        row.completed_at = Some(settled_at.to_string());
+        Ok(())
+    }
+
+    /// Transaction 2, failed branch: the honest failure envelope is the
+    /// receipt's only new content. No cost exists to record — the envelope row
+    /// is never written on this path (C-078).
+    async fn record_generation_failure(
+        &self,
+        row: &mut ReceiptRow,
+        receipt_id: &str,
+        failure: &Value,
+        settled_at: &str,
+    ) -> StoreResult<()> {
+        let failure_json = serde_json::to_string(failure)
+            .map_err(|e| StoreError::Corrupt(format!("failure: {e}")))?;
+        let mut tx = begin_immediate(&self.pool).await?;
+        let updated = sqlx::query(
+            "UPDATE memory_receipts SET status = 'failed', error_json = ?, completed_at = ? \
+             WHERE receipt_id = ? AND status = ? AND owner_id = ?",
+        )
+        .bind(&failure_json)
+        .bind(settled_at)
+        .bind(receipt_id)
+        .bind(RECEIPT_PENDING)
+        .bind(&self.instance_id)
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() != 1 {
+            // Same lease-lost rule as the committed branch (§7.0.3).
+            return Err(StoreError::GenerationLeaseLost {
+                receipt_id: receipt_id.to_string(),
+            });
+        }
+        self.commit_effect(tx).await?;
+        row.status = RECEIPT_FAILED.to_string();
+        row.result_json = None;
+        row.error_json = Some(failure_json);
+        row.completed_at = Some(settled_at.to_string());
+        Ok(())
+    }
+
+    /// Reopen recovery (§5.2 step 3 family): terminalize the reflection
+    /// generate receipts a crash left `pending` between the two transactions —
+    /// and only those. A pending receipt carries its owner's lease
+    /// (§7.0.3, inspector round 2), so a receipt whose lease is still live is a
+    /// generation another process is executing right now and must be left
+    /// alone: terminalizing it would flip the live owner's transaction 2 into
+    /// a lease-lost conflict and record an "interrupted" failure nothing
+    /// interrupted. A lease that is absent (a writer older than the lease
+    /// columns) or expired marks the crash orphan this pass exists for. The
+    /// recorded failure is retryable `INTERNAL_ERROR` — generation was
+    /// interrupted before any effect, so nothing was charged — and a same-key
+    /// retry replays it while a new key runs a fresh generation (no double
+    /// charge, C-078). The pass holds the workspace publication section like
+    /// [`Self::recover_journal`], so recovery passes serialize, and stays
+    /// bounded and best-effort: a receipt this pass cannot terminalize stays
+    /// pending until the next open after its lease expires.
+    async fn recover_reflections(&self, space_id: &str) {
+        // Held for the whole pass so recovery passes serialize; the pass only
+        // touches the receipts table, but the section is the workspace-wide
+        // recovery serialization point.
+        let _publication = match self.begin_publication_section().await {
+            Ok(publication) => publication,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "reflection generate recovery skipped: no publication lock"
+                );
+                return;
+            }
+        };
+        let now = timestamp(self.now());
+        let Ok(mut tx) = begin_immediate(&self.pool).await else {
+            tracing::warn!(%space_id, "reflection generate recovery skipped: no writer connection");
+            return;
+        };
+        let orphans: Vec<(String,)> = match sqlx::query_as(
+            "SELECT receipt_id FROM memory_receipts \
+             WHERE space_id = ? AND op = ? AND status = ? \
+             AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
+        )
+        .bind(space_id)
+        .bind(super::OP_REFLECTIONS_GENERATE)
+        .bind(RECEIPT_PENDING)
+        .bind(&now)
+        .fetch_all(&mut *tx)
+        .await
+        {
+            Ok(orphans) => orphans,
+            Err(error) => {
+                tracing::warn!(%space_id, ?error, "reflection generate recovery scan skipped");
+                let _ = tx.rollback().await;
+                return;
+            }
+        };
+        if orphans.is_empty() {
+            let _ = tx.rollback().await;
+            return;
+        }
+        let settled_at = timestamp(self.now());
+        for (receipt_id,) in &orphans {
+            let failure = interrupted_failure(receipt_id);
+            let failure_json = serde_json::to_string(&failure)
+                .map_err(|e| StoreError::Corrupt(format!("recovery failure envelope: {e}")));
+            let Ok(failure_json) = failure_json else {
+                tracing::warn!(%space_id, "reflection generate recovery envelope skipped");
+                continue;
+            };
+            let updated = sqlx::query(
+                "UPDATE memory_receipts SET status = 'failed', error_json = ?, completed_at = ? \
+                 WHERE receipt_id = ? AND status = ?",
+            )
+            .bind(&failure_json)
+            .bind(&settled_at)
+            .bind(receipt_id)
+            .bind(RECEIPT_PENDING)
+            .execute(&mut *tx)
+            .await;
+            match updated {
+                Ok(updated) if updated.rows_affected() == 1 => {}
+                Ok(_) => {
+                    tracing::warn!(%receipt_id, "pending reflection receipt settled elsewhere");
+                }
+                Err(error) => tracing::warn!(%receipt_id, ?error, "reflection recovery skipped"),
+            }
+        }
+        if let Err(error) = tx.commit().await {
+            tracing::warn!(%space_id, ?error, "reflection generate recovery not committed");
+        }
+    }
+}
+
+/// One generated reflection, composed over the basis snapshot transaction 1
+/// pinned. The basis content is a pure function of the snapshot, the pinned
+/// request shapes and the policy version, but the envelope identity is NOT:
+/// `reflection_id` is freshly minted — racing generations of one key resolve
+/// through the dedup namespace, never through this content. All owned data:
+/// the caller ties the `NewReflection` borrows inside its own scope.
+struct ComposedGeneration {
+    reflection_id: String,
+    basis_json: String,
+    body_text: String,
+    /// The receipt's `result` object, serialized: `{reflection_id, cost}` —
+    /// no envelope body ever travels in the receipt (it is served by `list`).
+    result_json: String,
+}
+
+/// The generation step: deterministic basis content, a minted envelope
+/// identity. The cost is this provider's own unit
+/// accounting — one reflection per committed generation — and exists only on
+/// the committed path, which is the whole C-078 mechanism.
+fn compose_generation(
+    snapshot: &ReflectionBasisSnapshot,
+    selection: &Selection,
+    filter: Option<&[String]>,
+    subject_id: &str,
+) -> StoreResult<ComposedGeneration> {
+    let source_set_digest =
+        super::reflection_source_set_digest(&snapshot.records).map_err(StoreError::Corrupt)?;
+    let profile_revisions: Map<String, Value> = snapshot
+        .profile_revisions
+        .iter()
+        .map(|(kind, revision)| (kind.clone(), json!(revision)))
+        .collect();
+    let kinds: Vec<&str> = snapshot
+        .profile_revisions
+        .iter()
+        .map(|(kind, _)| kind.as_str())
+        .collect();
+    let state_digest = super::reflection_state_digest(
+        &snapshot.records,
+        &snapshot.profile_revisions,
+        selection,
+        filter,
+    )
+    .map_err(StoreError::Corrupt)?;
+    // The basis object is served verbatim by every envelope projection; the
+    // staleness probe reads exactly the two digest members below.
+    let basis_json = json!({
+        "profile_revisions": profile_revisions,
+        "record_count": snapshot.records.len(),
+        "source_set_digest": source_set_digest,
+        "state_digest": state_digest,
+    })
+    .to_string();
+    let body_text = format!(
+        "# Reflection — subject {subject_id}\n\n\
+         Deterministic local reflection over the authorized basis pinned at \
+         generation (§7.27).\n\n\
+         - source records: {}\n\
+         - profile kinds: {}\n\
+         - source_set_digest: `{source_set_digest}`\n\
+         - state_digest: `{state_digest}`\n\
+         - engine_policy_version: `{}`\n",
+        snapshot.records.len(),
+        kinds.join(", "),
+        super::policy::ENGINE_POLICY_VERSION,
+    );
+    let result = json!({
+        "reflection_id": format!("refl_{}", Uuid::new_v4().simple()),
+        "cost": { "unit_kind": "reflection", "units": 1.0 },
+    });
+    let reflection_id = result
+        .get("reflection_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| StoreError::Corrupt("composed reflection id".to_string()))?;
+    Ok(ComposedGeneration {
+        reflection_id,
+        basis_json,
+        body_text,
+        result_json: result.to_string(),
+    })
+}
+
+/// The basis snapshot inside an existing transaction: the generate flow's CAS
+/// reads the same authorized sets the `state` op publishes — live rows only
+/// (C-077), profiles with their revisions — one snapshot, no second read.
+async fn reflection_basis_in_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    selection: &Selection,
+    filter: Option<&[String]>,
+    space_id: &str,
+    subject_id: &str,
+) -> StoreResult<ReflectionBasisSnapshot> {
+    let (records, _tombstones) =
+        reflection_record_sets(tx, selection, filter, space_id, subject_id).await?;
+    let profile_revisions = profile_revisions_in_tx(tx, space_id, subject_id).await?;
+    Ok(ReflectionBasisSnapshot {
+        records,
+        profile_revisions,
+    })
+}
+
+/// The honest failure a generation fault records on the receipt (§5.2 step 3
+/// shape): retryable `INTERNAL_ERROR`, naming that no effect and no cost
+/// exist, so the caller's recovery is a fresh generation under a new key.
+fn interrupted_failure(receipt_id: &str) -> Value {
+    json!({
+        "code": "INTERNAL_ERROR",
+        "message": format!(
+            "receipt {receipt_id} is failed: reflection generation was interrupted before any \
+             effect; nothing was charged, and a new idempotency_key starts a fresh generation"
+        ),
+        "details": {
+            "retry_class": "retryable",
+            "receipt_id": receipt_id,
+        },
+        "extensions": {},
+    })
+}
+
 impl MemoryStore {
     /// The bearer subject that owns one provider-native candidate row, if this
     /// store holds it.
@@ -4824,7 +5940,7 @@ impl MemoryStore {
         // status-filtered listing is an explicit audit query and stays readable.
         // §5.2/D-10: an unsettled intent withholds the subject either way.
         let archived = status.is_none() && subject_status.as_deref() == Some("archived");
-        let hidden = withheld(unsettled.as_deref(), subject_id)?;
+        let hidden = withheld(unsettled.as_ref(), subject_id)?;
         if archived || hidden {
             tx.commit().await?;
             let marker = snapshot_marker(
@@ -5027,7 +6143,7 @@ impl MemoryStore {
         }) else {
             return Ok(None);
         };
-        if withheld(unsettled.as_deref(), row.subject_id.as_str())? {
+        if withheld(unsettled.as_ref(), row.subject_id.as_str())? {
             return Ok(None);
         }
         Ok(Some(row))
@@ -5341,7 +6457,7 @@ impl MemoryStore {
         // by-id audit routes still serve them.
         // §5.2/D-10: an unsettled file intent withholds the subject from both.
         let archived = read.excludes_archived() && subject_status.as_deref() == Some("archived");
-        let hidden = withheld(unsettled.as_deref(), subject_id)?;
+        let hidden = withheld(unsettled.as_ref(), subject_id)?;
         let subject_all = matches!(selection, Selection::SubjectAll);
         if archived || hidden {
             tx.commit().await?;
@@ -5549,7 +6665,7 @@ impl MemoryStore {
         }) else {
             return Ok(None);
         };
-        if withheld(unsettled.as_deref(), row.subject_id.as_str())? {
+        if withheld(unsettled.as_ref(), row.subject_id.as_str())? {
             return Ok(None);
         }
         Ok(Some(row))
@@ -6307,7 +7423,7 @@ impl MemoryStore {
         tx.commit().await?;
         // §5.2/D-10: a subject whose file intent is unsettled has no readable
         // profile surface yet.
-        if withheld(unsettled.as_deref(), subject_id)? {
+        if withheld(unsettled.as_ref(), subject_id)? {
             return Ok(None);
         }
         Ok(Some(rows))

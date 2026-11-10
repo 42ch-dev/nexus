@@ -10,9 +10,10 @@
 //! recall/reflection bases to, and the §8.2 freeze allowlist is the protocol's
 //! own predicate (re-used from `spoke_operations`, never re-implemented here).
 //!
-//! Staleness (MEM-R013) is defined only over a *pinned reflection basis*; N1
-//! serves no reflection op and stores no reflection, so there is nothing here
-//! to compute it over and no dead function stands in for it.
+//! Staleness (MEM-R013) is defined only over a *pinned reflection basis*; the
+//! reflection read paths recompute it at read time from the current authorized
+//! basis, so nothing here stores an invalidation flag or a dead function
+//! standing in for one.
 
 use std::num::NonZeroU64;
 
@@ -21,10 +22,17 @@ use serde_json::{json, Value};
 /// §3: the memory protocol revision this provider speaks.
 pub(super) const MEMORY_PROTOCOL_VERSION: u64 = 1;
 
-/// §4.1: the family flag served. The sub-capabilities
-/// (`spoke-memory-reflection`, `spoke-memory-transfer`) are not served, so they
-/// are never advertised and their ops refuse `op_unsupported`.
-pub(super) const CAPABILITIES: [&str; 1] = ["spoke-memory"];
+/// §4.1: the family flags served. `spoke-memory-reflection` is advertised only
+/// because the provider genuinely serves all three reflection ops (§7.25–§7.27).
+/// The `spoke-memory-transfer` family is not served, so it is never advertised
+/// and its ops refuse `op_unsupported`.
+pub(super) const CAPABILITIES: [&str; 2] = ["spoke-memory", "spoke-memory-reflection"];
+
+/// §4.1: the deliberately-unadvertised shape — the same provider with the
+/// reflection sub-capability withheld (staging spec §4 N4-R completion: C-003
+/// still passes where reflection is deliberately not advertised). Its
+/// `memory.reflections.*` ops refuse `op_unsupported`.
+pub(super) const CAPABILITIES_WITHOUT_REFLECTION: [&str; 1] = ["spoke-memory"];
 
 /// §4.2: the authored content kinds this provider requires before generation.
 pub(super) const REQUIRED_PROFILE_KINDS: [&str; 1] = ["personality"];

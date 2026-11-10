@@ -470,7 +470,7 @@ async fn unknown_op_and_missing_capability_are_distinct(
     );
     assert_eq!(
         described["payload"]["capabilities"],
-        json!(["spoke-memory"]),
+        json!(["spoke-memory", "spoke-memory-reflection"]),
         "{described}"
     );
 
@@ -989,7 +989,10 @@ async fn c_104_receipt_read_rechecks_revoked_authorization_remote() {
 
 #[tokio::test]
 async fn c_073_reflection_reads_refuse_without_capability_local() {
-    let matrix = Matrix::local().await;
+    // N4-R: on the served local provider the reflection family is negotiable,
+    // so the continuity row proves the refusal on the deliberately-unadvertised
+    // shape (staging spec §4 N4-R).
+    let matrix = Matrix::local_unadvertised().await;
     run_matrix_scenario(matrix, |m, r, t| {
         Box::pin(async move { reflection_reads_refuse_without_capability(m, r, t).await })
     })
@@ -998,7 +1001,10 @@ async fn c_073_reflection_reads_refuse_without_capability_local() {
 
 #[tokio::test]
 async fn c_073_reflection_reads_refuse_without_capability_remote() {
-    let matrix = Matrix::remote().await;
+    // The continuity shape: the deliberately-unadvertised fixture serves the
+    // same operations, so the reads' `capability_missing` is the real
+    // dispatch denial over Connect negotiation.
+    let matrix = Matrix::remote_unadvertised().await;
     run_matrix_scenario(matrix, |m, r, t| {
         Box::pin(async move { reflection_reads_refuse_without_capability(m, r, t).await })
     })

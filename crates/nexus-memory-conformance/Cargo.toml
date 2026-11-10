@@ -93,7 +93,15 @@ name = "c_local_legacy"
 required-features = ["dev-graph-memory-remote"]
 
 [[test]]
+name = "c_reflections_local"
+required-features = ["dev-graph-memory-remote"]
+
+[[test]]
 name = "c_records_recall_profiles"
+required-features = ["dev-graph-memory-remote"]
+
+[[test]]
+name = "c_reflections_remote"
 required-features = ["dev-graph-memory-remote"]
 
 [[test]]

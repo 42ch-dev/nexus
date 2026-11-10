@@ -23,9 +23,10 @@
 //!   `details.retry_class` at the service boundary without losing their code,
 //!   message or existing details.
 //!
-//! The optional reflection and transfer families are not served: their methods
-//! answer the SDK's terminal capability refusal and `memory.describe` never
-//! advertises them.
+//! The reflection family is served (advertised exactly when the provider is
+//! constructed advertised); the optional transfer family is not served: its
+//! methods answer the SDK's terminal capability refusal and `memory.describe`
+//! never advertises it.
 
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -573,7 +574,9 @@ impl FixtureMemoryProvider {
     }
 
     /// Open the one writer transaction a mutation owns.
-    async fn begin_write(&self) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, SpokeReject> {
+    pub(crate) async fn begin_write(
+        &self,
+    ) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, SpokeReject> {
         self.store()
             .pool()
             .begin_with("BEGIN IMMEDIATE")
@@ -628,8 +631,9 @@ impl MemoryPort for FixtureMemoryProvider {
         _request: MemoryDescribeRequest,
     ) -> SpokeResult<MemoryDescribeResponse> {
         // §7.1: no grant is required, only authenticated admission — which the
-        // service face already performed.
-        respond(describe_body())
+        // service face already performed. The capability list is honest for
+        // this provider's construction shape.
+        respond(describe_body(self.advertises_reflection()))
     }
 
     async fn list_spaces(
@@ -1774,26 +1778,62 @@ impl MemoryPort for FixtureMemoryProvider {
 
     async fn get_reflection_state(
         &self,
-        _principal: &Principal,
-        _request: MemoryReflectionsStateRequest,
+        principal: &Principal,
+        request: MemoryReflectionsStateRequest,
     ) -> SpokeResult<MemoryReflectionsStateResponse> {
-        unsupported("memory.reflections.state")
+        let view = match self
+            .reflection_state(principal_id(principal), &request, Utc::now())
+            .await
+        {
+            Ok(view) => view,
+            Err(reject) => return SpokeResult::Reject(reject),
+        };
+        let mut body = json!({
+            "basis": view.basis,
+            "data_sufficiency": if view.sufficient { "sufficient" } else { "insufficient" },
+            "missing_required_profile_kinds": view.missing_required_profile_kinds,
+            "stale": view.stale,
+            "state_digest": view.state_digest,
+        });
+        if let Some(last_reflection_id) = view.last_reflection_id {
+            body["last_reflection_id"] = json!(last_reflection_id);
+        }
+        respond(body)
     }
 
     async fn list_reflections(
         &self,
-        _principal: &Principal,
-        _request: MemoryReflectionsListRequest,
+        principal: &Principal,
+        request: MemoryReflectionsListRequest,
     ) -> SpokeResult<MemoryReflectionsListResponse> {
-        unsupported("memory.reflections.list")
+        match self
+            .reflection_list(principal_id(principal), &request, Utc::now())
+            .await
+        {
+            Ok(page) => respond(json!({
+                "reflections": page.reflections,
+                "next_cursor": page.next_cursor,
+            })),
+            Err(reject) => SpokeResult::Reject(reject),
+        }
     }
 
     async fn generate_reflection(
         &self,
-        _principal: &Principal,
-        _request: MemoryReflectionsGenerateRequest,
+        principal: &Principal,
+        request: MemoryReflectionsGenerateRequest,
     ) -> SpokeResult<MemoryReflectionsGenerateResponse> {
-        unsupported("memory.reflections.generate")
+        let admitted = match self.admitted("memory.reflections.generate", request) {
+            Ok(admitted) => admitted,
+            Err(reject) => return SpokeResult::Reject(reject),
+        };
+        match self
+            .reflection_generate(principal_id(principal), &admitted, Utc::now())
+            .await
+        {
+            Ok(receipt) => respond_receipt(&receipt),
+            Err(reject) => SpokeResult::Reject(reject),
+        }
     }
 
     async fn get_receipt(
