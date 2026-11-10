@@ -2,7 +2,7 @@
 
 ## Scope
 
-**Status:** Shipped. The Rust adapter uses official `agent-client-protocol = "=5.0.0"` (stable-v1 API via `v1::schema::*`; no unstable v2 features, no `agent-client-protocol-rmcp`) behind Nexus-owned DTOs. Current service composition uses the core-owned `HostManager` and `packages/nexus-provider-acp` callbacks, not a route-facing daemon manager plus per-creator `acp-worker` children. **Document class**: Master
+The shipped Rust ACP client adapter: the `agent-client-protocol` pin, the Nexus-owned DTO boundary, host/service composition, provider callbacks, and the retired daemon topology that no longer applies.
 
 ## Current state
 

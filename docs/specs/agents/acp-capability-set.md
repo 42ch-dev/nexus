@@ -11,8 +11,6 @@ This document defines the **minimal ACP-facing capability contract** between **N
 
 ### 0. Document position
 
-This document defines the **minimal ACP-facing capability contract** between **Nexus CLI runtime (ACP Client)** and **user-owned local agents (ACP Agent)**. It is a functional contract layer; it does not freeze ACP wire-level RPC method names or JSON shapes.
-
 The same logical `nexus.*` IDs may appear in **platform REST** contracts for **naming alignment** with CLI capability surfaces; **Nexus Platform does not expose the ACP wire protocol** — ACP is **CLI / local-runtime only** (Nexus as ACP Client ↔ user agents as ACP Agent).
 
 **Normative architecture baseline**:

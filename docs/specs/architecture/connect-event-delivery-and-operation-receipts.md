@@ -2,7 +2,7 @@
 
 ## Scope
 
-(`^op_[0-9a-f]{32}$`); 128 bits, SHA-256 truncated. One syntax on every surface; the wire field name is `operation_id` (snake_case, per `schemas/core/core-provider-operation.schema.json:17-20` and `provider-call.schema.json`). - **Derivation (default)**: `operationId = "op_" + hex128(SHA-256( canonical_json({actor, session, action, args}) ))` where: - `actor` = `creator_id` (the principal); - `session` = the consumer's session scope — Connect: the authenticated peer session id; compute Run: the run's session correlation when the carrying lane provides one (`ToolExecuteRequest.session_id`, `capabilities.rs:91`). The direct daemon lane's `RunRequest` carries no session field, so there the run's own id is the session component (`session = run_id`, `compute.rs:1287-1303`) — a run-scoped shadow
+This page states the shipped Connect event-delivery and durable operation-receipt surface: the replay/negotiation wire, gap and reconciliation behavior, and the receipt-first recover handshake. The `operation_id` derivation it consumes is defined here; neighbouring product surfaces are referenced, not restated.
 
 ## Current state
 

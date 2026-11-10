@@ -7,7 +7,7 @@ Source: migrated from the retired tracked specs corpus
 
 ## Problem
 
-The key words MUST, MUST NOT, SHOULD, and MAY are RFC 2119 terms for a conforming implementation of this proposal only (if adopted).
+UserScope/User KnowledgeStore, reference sources, and the `creator kb` work-scope file index are three parallel knowledge surfaces that duplicate World-KB ownership and keep user-tier tables, reference bodies, and a JSON file index alive after the ports/IR cut. Leaving them in place invites a fourth store and compatibility shims inside Knowledge IR; they must be retired before the IR assumes a World-KB-only family.
 
 ## Proposal
 

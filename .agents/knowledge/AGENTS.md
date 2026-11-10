@@ -25,7 +25,7 @@ End-user docs stay in repo-root `docs/`.
 
 ## Specs and ADRs
 
-Current-state specs live in **[`docs/specs/`](../../docs/specs)**, one page per subject at `<class>/<topic>.md`, latest-only. Rules and the navigation index: [`docs/specs/README.md`](../../docs/specs/README.md). The catalog in `.mstar/store.db` is the registry (`mstar catalog list`).
+Current-state specs live in **[`docs/specs/`](../../docs/specs)**, one page per subject at `<class>/<topic>.md`, latest-only. Rules and the navigation index: [`docs/specs/README.md`](../../docs/specs/README.md). The catalog (`mstar catalog list`) is the registry; it is process-local and not clone-shared.
 
 Decisions live in **[`../adr/`](../adr)**. Contract: [`../adr/README.md`](../adr/README.md).
 

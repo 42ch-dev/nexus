@@ -7,7 +7,7 @@ Source: migrated from the retired tracked specs corpus
 
 ## Problem
 
-Observed on `main` @ `3263aa71f` (local analysis, Asia/Shanghai 2026-11-10):
+Whole-workspace rebuild cost is high and packaging is coupled: `nexus-core` (~167k LOC), `nexus-contracts` (~156k, generated-heavy) and `nexus-orchestration` (~87k, fanning in path deps across the workspace) dominate builds, while most crates share one version and cannot ship stable feature packages incrementally. Scoped `cargo -p <crate>` runs are the daily workaround, and `modules/nexus-module-sdk` is the existing standalone-publish precedent. The user-facing layer must stay TypeScript while Rust keeps narrative/orchestration truth.
 
 ## Proposal
 

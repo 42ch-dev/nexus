@@ -8,7 +8,7 @@ Source: migrated from the retired tracked specs corpus
 
 ## Problem
 
-**Supersession (v1.193 P2)**: Current command authority is [cli-spec.md](../../../../docs/specs/cli/cli-spec.md) §6.0B plus its delivered v1.193 P2 overlay, checked against `apps/nexus42/src/cli.rs`. The daemon group (including lifecycle/schedule controls and hidden `daemon-run`), `web-embed`, DaemonClient leaves, `creator run` / `creator bootstrap` and the other incomplete runner entries, and the top-level `sync` alias were removed. `platform sync` is canonical; the direct-core `cli` cohort is the ordinary default (`apps/nexus42/Cargo.toml`). The V1.35 rationale and later pre-retirement amendments below are historical, not current command or onboarding rules. **Coordinates with**:
+V1.16's six-group CLI produced dual entry points (`daemon schedule` vs `creator run`), misplaced cloud sync as a peer of creator identity, and obscured the local-first path. V1.35 replaced that IA; the v1.193 P2 retirement then removed the daemon group, `web-embed`, DaemonClient leaves, and the incomplete runner entries. This record preserves the shipped V1.35 IA rationale; current command authority is [`cli-spec.md`](../../../../docs/specs/cli/cli-spec.md) §6.0B.
 
 ## Decision
 

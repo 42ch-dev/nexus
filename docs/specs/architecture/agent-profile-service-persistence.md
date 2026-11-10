@@ -2,7 +2,7 @@
 
 ## Scope
 
-The saved agent profile was reachable from only two places: the desktop `get_agent_profile` / `set_agent_profile` IPC (Electron `agent-host/config.toml`) and a browser-only `localStorage` snapshot keyed by creator id (`nexus-agent-profile:<creator_id>`). A browser build therefore could not persist the profile on the service, and the profile was not shared across browsers/devices pointing at the same daemon. The service-owned surface closes that gap additively: the desktop path keeps working unchanged, and the browser path gains service persistence.
+The service-owned agent-profile persistence surface: `GET/PUT /v1/daemon/agent-host/profile`, home `config.toml` storage, name-scoped merge, desktop IPC compatibility, and the one daemon-global profile contract.
 
 ## Current state
 

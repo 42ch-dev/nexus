@@ -3,7 +3,7 @@
 Status: implemented — the retirement/dehistoricization this record documents is complete
 Archived: 2026-10-10 — frozen retirement history; it no longer guides future work
 Date: 2026-10-10
-Scope: architecture
+Scope: feature
 Source: migrated from the retired tracked specs corpus
 
 ## Problem
