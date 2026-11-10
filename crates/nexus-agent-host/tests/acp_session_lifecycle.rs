@@ -850,7 +850,7 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
     );
     let (_manager, host) = build_host(&ws, provider_cfg).await;
 
-    let err = host
+    let result = host
         .create_session(CreateSessionRequest {
             provider_id: ProviderId::new("mock-acp"),
             cwd: ws.creator_ws_a.join("sub"),
@@ -860,8 +860,33 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
             metadata: serde_json::Value::Null,
             owner: owner("ctr_a", ws.creator_ws_a.clone()),
         })
-        .await
-        .expect_err("EOF launch must fail session creation");
+        .await;
+
+    // Fixture-owned cleanup BEFORE any assertion that can fail: the failed
+    // launch leaves the fixture's descendant alive (that is the state under
+    // test), so kill it and await bounded disappearance first.
+    let log = read_fixture_log(&ws.fixture_log);
+    let descendant_pid = u32::try_from(
+        log.iter()
+            .rev()
+            .find(|e| e["event"] == "descendant_spawned")
+            .expect("fixture recorded its descendant")["child_pid"]
+            .as_u64()
+            .expect("descendant pid"),
+    )
+    .expect("descendant pid fits u32");
+    let _ = std::process::Command::new("kill")
+        .arg("-9")
+        .arg(descendant_pid.to_string())
+        .status();
+    let cleanup_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while process_alive(descendant_pid) {
+        assert!(
+            tokio::time::Instant::now() < cleanup_deadline,
+            "fixture descendant {descendant_pid} must disappear after the cleanup SIGKILL"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 
     // The classification follows the teardown OUTCOME, not the leader exit
     // alone: where the platform can still prove the exited leader's identity
@@ -874,27 +899,12 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
     } else {
         "launch_failed"
     };
+    let err = result.expect_err("EOF launch must fail session creation");
     assert_eq!(
         err.category(),
         expected,
         "surviving-descendant teardown classification, got: {err}"
     );
-
-    // Fixture-owned cleanup: the failed launch leaves the fixture's
-    // descendant alive (that is the state under test); kill it explicitly so
-    // nothing outlives the test.
-    let log = read_fixture_log(&ws.fixture_log);
-    let descendant_pid = log
-        .iter()
-        .rev()
-        .find(|e| e["event"] == "descendant_spawned")
-        .expect("fixture recorded its descendant")["child_pid"]
-        .as_u64()
-        .expect("descendant pid");
-    let _ = std::process::Command::new("kill")
-        .arg("-9")
-        .arg(descendant_pid.to_string())
-        .status();
 }
 
 #[cfg(unix)]

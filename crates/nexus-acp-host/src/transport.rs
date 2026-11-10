@@ -1651,14 +1651,16 @@ mod tests {
             .expect("teardown of an already-exited leader must be confirmed cleanup");
     }
 
-    /// Fixture-owned cleanup for a spawned same-group descendant: fires on
-    /// every exit path (including panics) so no fixture process outlives the
-    /// test, independent of the production call under test.
-    struct KillDescendantOnDrop(nix::unistd::Pid);
+    /// Fixture-owned cleanup for a spawned owned group: `killpg(SIGKILL)`
+    /// reaches the leader and every same-group descendant, and fires on every
+    /// exit path (including panics during fixture setup) so no fixture
+    /// process outlives the test — independent of the production call under
+    /// test. A no-op once the group is gone.
+    struct KillGroupOnDrop(nix::unistd::Pid);
 
-    impl Drop for KillDescendantOnDrop {
+    impl Drop for KillGroupOnDrop {
         fn drop(&mut self) {
-            let _ = nix::sys::signal::kill(self.0, nix::sys::signal::Signal::SIGKILL);
+            let _ = nix::sys::signal::killpg(self.0, nix::sys::signal::Signal::SIGKILL);
         }
     }
 
@@ -1683,6 +1685,38 @@ mod tests {
         .expect("descendant pid line within bound")
     }
 
+    /// Reads the SIGTERM-ignoring fixture's `(pid, trap-ready)` pair. The
+    /// descendant publishes the `ready` line only AFTER `trap "" TERM` made
+    /// SIGTERM ignorable — the disposition is inherited by the exec'd
+    /// `sleep`, so seeing `ready` proves the signal was trap-ready before
+    /// any teardown signal.
+    #[cfg(target_os = "linux")]
+    async fn read_descendant_readiness(stdout: tokio::process::ChildStdout) -> u32 {
+        use tokio::io::AsyncBufReadExt;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let mut lines = tokio::io::BufReader::new(stdout).lines();
+            let mut pid = None;
+            let mut ready = false;
+            while !(pid.is_some() && ready) {
+                let line = lines
+                    .next_line()
+                    .await
+                    .expect("fixture line readable")
+                    .expect("fixture line present");
+                let trimmed = line.trim();
+                if let Ok(value) = trimmed.parse::<u32>() {
+                    pid = Some(value);
+                } else if trimmed == "ready" {
+                    ready = true;
+                }
+            }
+            pid.expect("descendant pid line")
+        })
+        .await
+        .expect("fixture readiness lines within bound")
+    }
+
     /// A leader that exits while a same-group descendant stays alive: while
     /// identity is provable (Linux reads a zombie's start time), the guarded
     /// SIGTERM must reach the survivor and the teardown must be confirmed
@@ -1698,9 +1732,11 @@ mod tests {
             .expect("spawn grouped fixture");
         let leader = child.id().expect("leader pid");
         let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
+        // Fixture-owned cleanup before any fallible step: the guard kills the
+        // whole owned group (leader + descendant) on every exit path.
+        let _guard = KillGroupOnDrop(leader_pid);
         let descendant = read_descendant_pid(stdout).await;
         let descendant_pid = nix::unistd::Pid::from_raw(descendant.cast_signed());
-        let _guard = KillDescendantOnDrop(descendant_pid);
         assert_ne!(descendant, leader, "the descendant is not the leader");
 
         let mut proc =
@@ -1729,8 +1765,10 @@ mod tests {
     /// escalation re-verifies the birth token, which only works when the
     /// leader's reap is deferred until after the group is proven gone
     /// (reap-before-escalation would invalidate the token and leak the
-    /// survivor). Linux-only: it needs a zombie leader whose start time the
-    /// identity check can still read.
+    /// survivor). The fixture publishes readiness only after `trap "" TERM`
+    /// took effect, so the test never signals a descendant whose default
+    /// TERM disposition could still win the race. Linux-only: it needs a
+    /// zombie leader whose start time the identity check can still read.
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn terminate_escalates_to_sigkill_when_descendant_ignores_sigterm() {
@@ -1738,14 +1776,18 @@ mod tests {
         let (child, _stdin, stdout) = spawner
             .spawn(
                 "/bin/sh",
-                &["-c", "(trap \"\" TERM; sleep 300) & echo $!; exit 0"],
+                &[
+                    "-c",
+                    "(trap \"\" TERM; echo ready; exec sleep 300) & echo $!; exit 0",
+                ],
             )
             .expect("spawn grouped fixture");
         let leader = child.id().expect("leader pid");
         let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
-        let descendant = read_descendant_pid(stdout).await;
+        // Fixture-owned cleanup before any fallible step.
+        let _guard = KillGroupOnDrop(leader_pid);
+        let descendant = read_descendant_readiness(stdout).await;
         let descendant_pid = nix::unistd::Pid::from_raw(descendant.cast_signed());
-        let _guard = KillDescendantOnDrop(descendant_pid);
 
         let mut proc =
             ManagedAcpProcess::new("group-fixture".to_string(), child, PathBuf::from("/bin/sh"));
@@ -1762,6 +1804,12 @@ mod tests {
             .await
             .expect("SIGKILL escalation must reap a SIGTERM-ignoring group");
 
+        // Bounded disappearance: the escalation must have reaped the leader
+        // AND SIGKILLed the trap-protected descendant.
+        assert!(
+            ManagedAcpProcess::wait_group_quiescent(leader_pid, Duration::from_secs(5)).await,
+            "the whole owned group must be gone after the SIGKILL escalation"
+        );
         assert!(
             nix::sys::signal::kill(leader_pid, None).is_err(),
             "the leader must be reaped"
@@ -1784,9 +1832,11 @@ mod tests {
             .spawn("/bin/sh", &["-c", "sleep 300 & echo $!; exit 0"])
             .expect("spawn grouped fixture");
         let leader = child.id().expect("leader pid");
+        let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
+        // Fixture-owned cleanup before any fallible step.
+        let _guard = KillGroupOnDrop(leader_pid);
         let descendant = read_descendant_pid(stdout).await;
         let descendant_pid = nix::unistd::Pid::from_raw(descendant.cast_signed());
-        let _guard = KillDescendantOnDrop(descendant_pid);
 
         let mut proc =
             ManagedAcpProcess::new("group-fixture".to_string(), child, PathBuf::from("/bin/sh"));
@@ -1817,9 +1867,19 @@ mod tests {
             "the survivor must be untouched by a refused signal"
         );
 
-        // Fixture-owned cleanup: the guard above covers panic paths; the
-        // explicit kill here is redundant with it and keeps intent visible.
+        // Normal-path cleanup: bounded disappearance instead of a
+        // fire-and-forget signal (the guard above covers failure paths).
         let _ = nix::sys::signal::kill(descendant_pid, nix::sys::signal::Signal::SIGKILL);
+        let gone = tokio::time::timeout(Duration::from_secs(5), async {
+            while nix::sys::signal::kill(descendant_pid, None).is_ok() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(
+            gone.is_ok(),
+            "fixture descendant {descendant} must disappear after the cleanup SIGKILL"
+        );
     }
 
     /// A live leader with an unprovable identity must not hang the cleanup
@@ -1841,6 +1901,10 @@ mod tests {
             child,
             PathBuf::from("/bin/sleep"),
         );
+        // Fixture-owned cleanup before any fallible step: the forgotten
+        // handle after the refusal cannot be dropped into an implicit kill,
+        // so this guard is what kills the leader on every failure path.
+        let _guard = KillGroupOnDrop(leader_pid);
         proc.birth = Some(ProcessBirthToken {
             pid: leader,
             start_tick: u64::MAX,
