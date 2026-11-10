@@ -1,16 +1,16 @@
 /**
  * Adapter boundary — the `NexusClient` interface.
  *
- * Spec: `docs/specs/surfaces/web-ui.md` §5. All daemon access from the UI
+ * Spec: `.agents/adr/archived/feature/2026-10-22-web-ui-retired-historical-notes.md` §5. All daemon access from the UI
  * goes through this interface; core screen logic never calls `fetch`/`invoke`
  * directly. This is what makes the desktop shell a one-impl swap
  * (`BrowserClient` → `DesktopClient`) instead of a rewrite.
  *
- * Method coverage reflects the MVP screen groups (web-ui.md §6) against the
+ * Method coverage reflects the MVP screen groups (retired web-ui record §6) against the
  * V1.64 hardened contract base (Track B / plan P0 merged): cursor pagination
  * (F-P1), the shared `ErrorResponse` (F-E1), and the findings list endpoint
  * (F-P2) are all available. Methods are typed against generated contracts so
- * no handwritten wire shapes are introduced (web-ui.md §12.6).
+ * no handwritten wire shapes are introduced (retired web-ui record §12.6).
  *
  * Still-pending daemon surface (not in this interface; tracked as residuals):
  *  - Capability admission gates → CapabilityInfo carries name + I/O schemas

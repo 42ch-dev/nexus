@@ -1,27 +1,34 @@
-# ADR: Redirect stub
+# ADR: Redirect stub — Local API surface conventions renamed to Daemon API
 
-Status: implemented — the retirement/dehistoricization this record documents is complete
-Archived: 2026-07-05 — frozen retirement history; it no longer guides future work
+Status: implemented — the rename shipped; this record is a migration archive stub
+Archived: 2026-07-05 — frozen redirect note; it carries no decision of its own
 Date: 2026-07-05
-Scope: architecture
+Scope: architecture — redirect stub
 Source: migrated from the retired tracked specs corpus
 
 ## Problem
 
-> **Renamed in V1.90.** This file has been renamed to **[daemon-api-surface-conventions.md](../../../../docs/specs/runtime/daemon-api-surface-conventions.md)**. > > The surface was renamed from "Local API" to "Daemon API" and the path prefix from `/v1/local/` to `/v1/daemon/`. All normative conventions continue to apply unchanged to the renamed surface.
+Historical iteration compasses and plan files still reference the retired
+`local-api-surface-conventions.md` filename. V1.90 renamed the surface from
+"Local API" to "Daemon API" and the path prefix from `/v1/local/` to
+`/v1/daemon/`; without a redirect those links break.
 
 ## Decision
 
-The live specification states current behavior only. The historical material removed from it by the retirement pass is preserved verbatim below and is frozen: it is not current authority and receives no further edits.
+This record is a **migration archive stub, not a decision record**: it records
+the rename and redirects readers, and deliberately carries no proposal,
+alternatives, or consequences of its own. The surviving normative contract is
+[`daemon-api-surface-conventions.md`](../../../../docs/specs/runtime/daemon-api-surface-conventions.md);
+all of its conventions continue to apply unchanged to the renamed surface.
 
 ## Alternatives considered
 
-Not recorded in the ledger; the retirement pass preserved removed text instead of weighing competing alternatives.
+None recorded — the stub does not encode a decision of its own, so no
+alternatives were weighed here. The decision to rename the surface is recorded
+in the live Daemon API conventions and its Git history.
 
 ## Consequences
 
-> **Renamed in V1.90.** This file has been renamed to **[daemon-api-surface-conventions.md](../../../../docs/specs/runtime/daemon-api-surface-conventions.md)**.
->
-> The surface was renamed from "Local API" to "Daemon API" and the path prefix from `/v1/local/` to `/v1/daemon/`. All normative conventions continue to apply unchanged to the renamed surface.
-
-This stub exists to avoid broken links from historical iteration compasses and plan files that reference the old filename. New content should link to `daemon-api-surface-conventions.md`.
+New content links to `daemon-api-surface-conventions.md`; this stub exists only
+to keep historical plan and iteration links resolving. It is frozen and is not
+current authority.

@@ -4,7 +4,7 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 
 | Subtree | Role |
 | --- | --- |
-| **[`../specs/`](../../docs/specs/README.md)** | Current-state specification corpus — `<class>/<topic>.md`, latest-only, indexed by `docs/specs/README.md` |
+| **[`docs/specs/`](../../docs/specs/README.md)** | Current-state specification corpus — `<class>/<topic>.md`, latest-only, indexed by `docs/specs/README.md` |
 | **[`architecture-patterns/`](architecture-patterns)** | Distilled reusable patterns (compound output) — [sub-index](architecture-patterns/README.md) |
 | **[`api-design/`](api-design)** | Distilled reusable API design patterns (compound output) |
 | **This directory (root files)** | Cross-cutting policy, boundaries |
