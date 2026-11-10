@@ -42,7 +42,7 @@ Observed on `main` @ `3263aa71f` (local analysis, Asia/Shanghai 2026-11-10):
 
 - Large crates (approx LOC): `nexus-core` ~167k, `nexus-contracts` ~156k (generated-heavy), `nexus-orchestration` ~87k, `nexus-local-db` ~62k; `nexus-narrative` ~4.2k is comparatively thin.
 - `nexus-orchestration` fans in path deps across contracts, preset, knowledge, spoke-adapter, local-db, narrative, creator-memory, wasm-host.
-- Root `AGENTS.md` forbids mirroring CI’s `cargo --all` during iteration; `pnpm run dev:backend:refresh` is the only routine DX path that runs Cargo/codegen — full rebuild cost is already treated as a constraint.
+- Root `AGENTS.md` Development Policy treats running CI-scope `cargo clippy --all` / `cargo test --all` on every small edit as an anti-pattern (scoped `-p <crate>` is the daily default); `pnpm run dev:backend:refresh` and the `build:cli` / `build:cli:release` scripts are the routine Cargo/codegen DX paths — full rebuild cost is already treated as a constraint.
 - `modules/nexus-module-sdk` is STANDALONE with `publish = true` — the right packaging precedent; most workspace crates still share `0.1.0`.
 
 ---
