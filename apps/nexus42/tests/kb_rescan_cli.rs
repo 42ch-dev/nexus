@@ -29,8 +29,8 @@
 mod direct;
 
 use direct::DirectFixture;
-use nexus42::commands::creator::world::kb::rescan::{kb_rescan_hermetic, WORLD_KB_FORBIDDEN_CODE};
 use nexus42::commands::creator::world::kb::kb_adopt;
+use nexus42::commands::creator::world::kb::rescan::{kb_rescan_hermetic, WORLD_KB_FORBIDDEN_CODE};
 use nexus42::errors::CliError;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody;
 use nexus_knowledge::world_kb::KbStore;
@@ -447,7 +447,10 @@ async fn rebound_rescan_requires_exactly_one_scope() {
         .args(["creator", "world", "kb", "rescan"])
         .output()
         .expect("spawn the real nexus42 binary");
-    assert!(!neither.status.success(), "rescan without a scope must fail");
+    assert!(
+        !neither.status.success(),
+        "rescan without a scope must fail"
+    );
     let stderr = String::from_utf8_lossy(&neither.stderr);
     assert!(
         stderr.contains("or --work <work_ref>"),

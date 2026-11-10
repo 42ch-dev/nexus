@@ -166,12 +166,10 @@ pub async fn run(
         (Some(t), None) => kb_rescan(config, t, dry_run, json).await,
         (None, Some(w)) => kb_rescan_work(config, w, dry_run, json).await,
         (Some(_), Some(_)) => Err(CliError::Other(
-            "Specify either <work_ref>/<chapter> positional or --work <work_ref>, not both."
-                .into(),
+            "Specify either <work_ref>/<chapter> positional or --work <work_ref>, not both.".into(),
         )),
         (None, None) => Err(CliError::Other(
-            "Specify either <work_ref>/<chapter> (e.g. my-novel/05) or --work <work_ref>."
-                .into(),
+            "Specify either <work_ref>/<chapter> (e.g. my-novel/05) or --work <work_ref>.".into(),
         )),
     }
 }

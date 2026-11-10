@@ -45,7 +45,7 @@ async fn migrations_are_idempotent() {
     nexus_local_db::run_migrations(&pool).await.unwrap(); // second call is a no-op
 }
 
-/// ADR K1 §3.1–§3.2: the User KnowledgeStore and reference registry are
+/// ADR K1 §3.1–§3.2: the User `KnowledgeStore` and reference registry are
 /// dropped, not sealed, once their data is archived.
 #[tokio::test]
 async fn retired_user_and_reference_tables_are_dropped() {
@@ -65,7 +65,10 @@ async fn retired_user_and_reference_tables_are_dropped() {
 
     // 32 was the schema line that still carried both tables.
     let versions = nexus_local_db::read_versions(&pool).await.unwrap();
-    assert_eq!(versions.db_schema_version, nexus_local_db::DB_SCHEMA_VERSION);
+    assert_eq!(
+        versions.db_schema_version,
+        nexus_local_db::DB_SCHEMA_VERSION
+    );
     assert!(
         versions.db_schema_version > 32,
         "the retirement drop must advance db_schema_version past 32"

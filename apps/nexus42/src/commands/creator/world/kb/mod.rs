@@ -472,16 +472,7 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
             work,
             dry_run,
             json,
-        } => {
-            rescan::run(
-                config,
-                target.as_deref(),
-                work.as_deref(),
-                dry_run,
-                json,
-            )
-            .await
-        }
+        } => rescan::run(config, target.as_deref(), work.as_deref(), dry_run, json).await,
         cmd => run_local(cmd, config).await,
     }
 }
