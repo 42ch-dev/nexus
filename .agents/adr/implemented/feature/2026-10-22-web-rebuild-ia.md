@@ -51,7 +51,7 @@ Design principles:
 | --- | --- | --- |
 | 1 | **Identity** | Value proposition + two cards: "我来写故事" (recommended) / "我来开发工具". Next disabled until picked. |
 | 2 | **AI partner** | Auto-scan results (`AgentScanEntry`): recommended agent pre-selected; install guide and manual launch command behind collapsed links. No ACP/protocol vocabulary on this surface. |
-| 3 | **First World** | Template cards (blank / fantasy / sci-fi; templates seed Brief + example timeline) + world name + default workspace note (`creative_root` derived; change-location behind "advanced"). **Create & enter** lands in the app shell. |
+| 3 | **First World** | Template cards (blank / fantasy / sci-fi; a template preselects the World name — Brief/timeline seeding is deferred) + world name + default workspace note (`creative_root` derived; change-location behind "advanced"). **Create & enter** lands in the app shell. |
 
 #### 2.2 Developer path — 2 steps
 
@@ -84,7 +84,7 @@ Three zones, one shared skeleton:
 - A floating, translucent **dock** (blur, rounded, elevation), top-aligned; no bottom-pinned settings item (settings lives in the topnav).
 - Each rail item is **one module = one app**: large icon + tiny label; active item highlighted.
 - **Module = lazy boundary**: an app's route chunk and UI assets load only when the module is active. The rail is driven by an app registry per entrance.
-- **Progressive activation (creator entrance)**: on first landing only 世界 (World) is active; 作品 / 会话 / 记忆 render locked (greyed, hover explains the unlock condition). Unlock events (e.g. first Brief saved → 作品 activates) fire a toast and light the item. Activation state is persisted per creator.
+- **Progressive activation (creator entrance)**: on first landing only 世界 (World) is active. 作品 unlocks when the first Brief is saved (toast + item lights); 会话 and 记忆 render locked with their copy and have no unlock path in this iteration. Activation state is persisted per creator.
 
 #### 3.3 Workspace switcher — on the content surface, not the chrome
 
@@ -139,3 +139,4 @@ The shipped rebuild stays within these boundaries:
 - No second SPA, no new build target, no native player app (PD-09 unchanged).
 - No new wire contracts for this IA — it consumes existing creators/workspaces/world/work surfaces. (If world/work list filtering needs a workspace query param, that is an additive daemon-api change owned by its own spec.)
 - No cloud/SaaS feature, no auth surface (§7 carry-over).
+- Deferred: World template seeding (Brief/example timeline) and session/memory unlock paths are not shipped; those rail items stay locked.
