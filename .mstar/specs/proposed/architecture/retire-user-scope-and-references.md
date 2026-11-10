@@ -44,6 +44,13 @@ After Workflow IR ([PR #483](https://github.com/42ch-dev/nexus/pull/483)), Work 
 
 **Owner ruling (2026-11-10):** the product has not formally launched and has no production consumers. Do not over-protect unused leftover faces. The latest IR design is the authority. Retaining the filesystem-core `creator kb` index only adds complexity: with no production producer, inventing a consumption or compatibility adapter is pointless. This is withdrawal of a placeholder / scatter surface, not a merge into memory or `KnowledgeEntry`. If workspace staging inputs are wanted later, that MUST be a new independent Exploration — the old index MUST NOT be kept as a compatibility layer inside Knowledge IR.
 
+**Owner rulings (2026-11-10, open questions settled — now normative for a later implementation PR):**
+
+1. **MCA User Knowledge slot: delete.** The slot MUST be deleted, not hard-disabled. Do not leave an empty heading. Golden fixtures and dogfood packets MUST be updated in the same implementation change.
+2. **Tables: DROP.** After archive (or an explicit waiver), the implementation PR MUST `DROP TABLE knowledge_entries` and `DROP TABLE reference_sources`. A sealed unused table is **not** an acceptable long-term or default path, and MUST NOT be left as a permanent ghost.
+3. **HTTP contract: simplify and modularize, then add later if needed.** User-level knowledge and the retiring file-kb / references surfaces are removed from the daemon-api contract in the implementation PR, as part of a pre-1.0 API simplification / modular refactor, with an explicit changelog. MUST NOT leave a 410/sunset compatibility layer. If demand returns later, add a **new** contract — do not revive the old routes. User knowledge has no HTTP surface today; the retiring HTTP faces this rule covers are `GET /v1/daemon/references` (and the by-id route) and `/v1/daemon/kb/entries`.
+4. **Non-Spoke, file-based `creator kb`: full retirement.** Already in this proposal's scope; this is now a settled ruling, not an open question.
+
 ### 0.2 What this retirement is and is not
 
 **This is:** a planned withdrawal of unfinished or leftover placeholders, plus an archive/disposal rule for any residual rows and files, so later Knowledge IR work is not built on a confused multi-store picture.
@@ -65,7 +72,7 @@ This section is **maintainer guidance**. It does not schedule work by itself.
 | --- | --- | --- |
 | **1** | **This PR** (retire + archive design) | Clears the leftover surfaces and records data/consumer rules before Knowledge IR assumes a World-KB-only family. |
 | **2** | Knowledge IR implementation Exploration (stacked PR; base = this branch) | Depends on (1)'s exclusions. Filling adapters and import seams *before* retirement is accepted risks dragging UserScope / references / the old `creator kb` index back into the IR. |
-| **3** | Resolve §7 open questions that this file and Knowledge IR share | Archive vs wipe defaults; Moment slot deletion vs hard-disable; whether `knowledge_entries` / `reference_sources` are dropped or left dormant; where extract/rescan operator entrances land after the `creator kb` group is retired. |
+| **3** | Remaining §7 questions (defaults already recorded) | Archive location and retention; `nexus-knowledge` crate shape after the User tier is gone; where extract/rescan operator entrances land after the `creator kb` group is retired (default: rebind onto `creator world kb`). MCA slot deletion, table DROP, HTTP contract retirement (no 410/sunset), and full `creator kb` retirement are already settled in the body. |
 | **4** | Implementation PR(s), then later Draft/Master promotion | Only a later, separately authorized PR deletes code. Promotion of any replacement Knowledge Master is also later. |
 
 **Anti-pattern:** deleting UserScope, reference, or `creator kb` code inside this Exploration, or landing Knowledge IR adapters that still read `knowledge_entries` / `reference_sources` / `kb/index.json` "just in case."
@@ -84,12 +91,16 @@ Implementation PR for this retirement (authorized separately)
       (knowledge_entries, reference bodies, kb/index.json + kb/entries)
   P1  stop writes (CLI, demo seed, register, refresh schedule,
       creator kb add/remove, POST /v1/daemon/kb/entries)
-  P2  remove or hard-disable MCA User Knowledge slot + Host/inspector wiring
-  P3  retire HTTP GET references + /v1/daemon/kb/entries and generated
-      clients; retire the creator kb command group after rebinding
-      extract/rescan operator entrances onto the World KB surface
-  P4  drop or seal tables; remove body trees and workspace kb/ indexes;
-      amend active Masters in the same change as any schema/API drop
+  P2  delete the MCA User Knowledge slot + Host/inspector wiring
+      (not hard-disable); update goldens and dogfood in the same change
+  P3  remove HTTP GET references + /v1/daemon/kb/entries and generated
+      clients from the contract as a pre-1.0 API simplification
+      (changelog; no 410/sunset layer); retire the creator kb command
+      group after rebinding extract/rescan operator entrances onto the
+      World KB surface
+  P4  DROP knowledge_entries and reference_sources; remove body trees
+      and workspace kb/ indexes; amend active Masters in the same
+      change as the schema/API drop
         │
         ▼
 Only then implement Knowledge IR adapters against the cleaned family
@@ -200,7 +211,7 @@ The implementation PR MUST, in one accountable change set (or a short sequenced 
 
 | Consumer | Target change |
 | --- | --- |
-| MCA `## User Knowledge` slot, `user_knowledge` field, `fetch_user_knowledge`, budget tail, golden fixtures | **Delete** the slot from the assembled Moment (preferred) or hard-disable it so the heading and field can never populate. Do not leave an empty heading. Update goldens and dogfood packets in the same change. |
+| MCA `## User Knowledge` slot, `user_knowledge` field, `fetch_user_knowledge`, budget tail, golden fixtures | **Delete** the slot from the assembled Moment. Do not hard-disable it as a substitute. Do not leave an empty heading. Update goldens and dogfood packets in the same implementation change. |
 | `MomentRequest::with_user` / `--user-id` / `--knowledge-limit` | Remove or make them rejected flags (no silent no-op). |
 | Production Host `with_user(creator_id)` + `SqliteKnowledgeStore` injection | Stop injecting a User knowledge store; assemble World / Actor / memory only. |
 | Inspector / `platform context assemble-moment` | Drop User-knowledge reads; command help and cli-spec "four-domain" language become three narrative domains + Stage-0 (memory remains a separate family). |
@@ -216,7 +227,7 @@ The implementation PR MUST, in one accountable change set (or a short sequenced 
 | --- | --- |
 | `nexus42 creator reference register\|list\|show` | Retire the command group. |
 | `CoreService::{register,list,get}_reference` | Remove from the core public surface. |
-| HTTP `GET /v1/daemon/references` and `GET /v1/daemon/references/{id}` | Retire routes, schemas, generated contracts, and the unused web client wrappers. Follow daemon-api / schema-drift rules so retirement is a deliberate contract break, not a silent 404. |
+| HTTP `GET /v1/daemon/references` and `GET /v1/daemon/references/{id}` | Remove the routes, schemas, generated contracts, and the unused web client wrappers from the daemon-api contract in the implementation PR, as part of a pre-1.0 API simplification / modular refactor, with an explicit changelog. MUST NOT leave a 410/sunset compatibility layer, and MUST NOT be a silent 404. If demand returns later, add a new contract — do not revive these routes. |
 | `nexus.reference.refresh` capability + execution refresh schedule | Unadmit / retire. In-flight refresh jobs MUST be cancelled or failed closed before the table or body tree is removed. |
 | DAO `reference_source.rs`, home-layout helpers *used only for this tree* | Remove once callers are gone. Shared `nexus-home-layout` helpers for other Creator paths stay. |
 | Active Masters: reference-store-layout, reference-knowledge, local-db-schema §4.1.1, capability IDs | Archive or amend in the implementation / promotion change. The current Masters remain authority until that change. |
@@ -228,7 +239,7 @@ The implementation PR MUST, in one accountable change set (or a short sequenced 
 | `nexus42 creator kb list\|search\|show\|add\|remove` | Retire with the command group. |
 | `nexus42 creator kb queue-extract\|extract-status` and `creator kb rescan` / `rescan --work` | Retire these **spellings** with the group. **Rebind** the operator entrances onto the remaining World KB surface (default: the `creator world kb` family, or a dedicated extract leaf in that family — see §7). Do not delete `kb_extract_jobs`, the `kb.extract_work` capability, or `creator world kb` adopt/reject. |
 | `CoreService::{list,add,get,delete}_kb_entry` and the `kb/index.json` read/write helpers | Remove from the core public surface once callers are gone. `queue_kb_extract` / list/get extract-job methods stay or move with the rebound operator entrance; they MUST NOT keep a hard dependency on the file index. |
-| HTTP `GET\|POST /v1/daemon/kb/entries` and `GET\|DELETE /v1/daemon/kb/entries/{id}` | Retire routes, the work-scope entry schemas, generated contracts, and the unused web / native client wrappers. Follow daemon-api / schema-drift rules so retirement is a deliberate contract break, not a silent 404. Do **not** retire World KB `/kb/` / `/kb/key-blocks/` or World pack `/v1/daemon/worlds/:world_id/kb/pack/*`. |
+| HTTP `GET\|POST /v1/daemon/kb/entries` and `GET\|DELETE /v1/daemon/kb/entries/{id}` | Remove the routes, the work-scope entry schemas, generated contracts, and the unused web / native client wrappers from the daemon-api contract in the implementation PR, as part of a pre-1.0 API simplification / modular refactor, with an explicit changelog. MUST NOT leave a 410/sunset compatibility layer, and MUST NOT be a silent 404. If demand returns later, add a new contract — do not revive these routes. Do **not** retire World KB `/kb/` / `/kb/key-blocks/` or World pack `/v1/daemon/worlds/:world_id/kb/pack/*`. |
 | Home-layout helpers `creator_kb_dir` / `creator_kb_entries_dir` | Remove once callers are gone. Shared workspace helpers stay. |
 | Workflow persist stage and novel-writing / work-experience wording that maps Work → World KB to `creator kb queue-extract` | Point at the rebound World KB extract entrance. |
 | Active Masters: entity-scope §5.3–§5.4 work-scope index, cli-spec `creator kb` rows, world-kb-runtime extract-status/rescan mentions, workflow-profile, work-experience-model, creator-workflow | Amend in the implementation / promotion change. Replace "live work-scope file index" claims with a short "retired; future staging would be a new Exploration" pointer, not with a silent import adapter inside Knowledge IR. |
@@ -252,14 +263,14 @@ Pre-1.0 local persistence already MAY be wiped rather than migrated ([reference-
 1. **Inventory.** Count rows by `user_id` (expect `user_default`; do not assume it is the only key — tests and manual DBs may have others).
 2. **Archive (default).** Export remaining rows to a one-shot, non-runtime archive (for example a dated JSON/NDJSON dump under a maintainer-chosen local archive directory, *not* under `Works/`, *not* under `kb/`, *not* re-imported into World KB or memory). Record the export path and row count in the implementation PR description.
 3. **Discard (explicit opt-in).** If the inventory is empty, or the maintainer records that the rows are disposable demo data, the export MAY be skipped. Demo-seed text is disposable by default; any non-demo content MUST be archived or explicitly waived.
-4. **Remove.** `DROP TABLE knowledge_entries` (or a migration that leaves a sealed, unused table — see §7). After drop, no runtime path may recreate the table except a future, separately accepted proposal.
+4. **Remove.** After archive or waiver, `DROP TABLE knowledge_entries`. After the drop, no runtime path may recreate the table except a future, separately accepted proposal. A sealed unused table is not an acceptable long-term or default path.
 
 ### 3.2 Reference registry and `body.md`
 
 1. **Inventory.** List `reference_sources` rows and resolve `content_path` / home-layout body paths. Note orphan files under `references/units/` with no row, and rows whose `body.md` is missing.
 2. **Archive (default).** Copy registry rows plus available `body.md` (and, if present, legacy inline `content`) into the same class of dated archive as §3.1. Do not copy them into World KB, the retiring `creator kb` tree, or `Works/`.
 3. **In-flight refresh.** Cancel or fail-closed any `nexus.reference.refresh` / scheduled job before deleting bodies.
-4. **Remove.** Delete archived unit directories; then drop or seal `reference_sources`. Shared Creator home directories that still have other purposes stay.
+4. **Remove.** Delete archived unit directories; then `DROP TABLE reference_sources`. Shared Creator home directories that still have other purposes stay. A sealed unused table is not an acceptable long-term or default path.
 
 ### 3.3 `creator kb` file index (`kb/index.json` + `kb/entries/<id>.md`)
 
@@ -298,7 +309,7 @@ Pre-1.0 local persistence already MAY be wiped rather than migrated ([reference-
 2. An implementation PR MUST be separately authorized, MUST land consumer rewires before or in the same change as store / file-tree deletion, and MUST include the archive/waiver record from §3.
 3. Moment assembly after retirement MUST still produce a valid context without a User Knowledge heading.
 4. World KB extract, adopt/reject, holder/governance, and memory ports MUST keep passing their existing tests. Extract/rescan operator entrances MUST be rebound before the `creator kb` group disappears, so the pipeline is not left without a caller.
-5. Schema/API retirement (HTTP references, HTTP `/v1/daemon/kb/entries`, generated contracts, CLI command-surface tests) MUST be explicit; no silent contract drift.
+5. Schema/API retirement (HTTP references, HTTP `/v1/daemon/kb/entries`, generated contracts, CLI command-surface tests) MUST be an explicit pre-1.0 contract simplification with a changelog; no silent contract drift, and no 410/sunset compatibility layer.
 6. Simulate / dry-run paths MUST NOT be "fixed" by pointing them at these stores or at `kb/index.json`.
 7. Knowledge IR MUST NOT keep the old file index as an import/staging compatibility adapter.
 
@@ -307,12 +318,12 @@ Pre-1.0 local persistence already MAY be wiped rather than migrated ([reference-
 ## 6. Acceptance (for a later implementation PR, not this file)
 
 - [ ] `creator knowledge`, `creator reference`, and `creator kb` are gone from the shipped CLI surface contract.
-- [ ] Assembled Moments have no `## User Knowledge` section; Host no longer injects `SqliteKnowledgeStore` / `with_user(creator_id)`.
+- [ ] Assembled Moments have no `## User Knowledge` section (slot deleted, not hard-disabled); goldens and dogfood are updated in the same change; Host no longer injects `SqliteKnowledgeStore` / `with_user(creator_id)`.
 - [ ] Demo seed no longer writes or deletes `knowledge_entries`.
-- [ ] `GET /v1/daemon/references` routes and `nexus.reference.refresh` are retired; no new `references/units/<id>/body.md` is created.
-- [ ] `/v1/daemon/kb/entries` routes are retired; no new `kb/index.json` or `kb/entries/<id>.md` is created.
+- [ ] `GET /v1/daemon/references` routes and `nexus.reference.refresh` are removed from the contract (changelog; no 410/sunset layer); no new `references/units/<id>/body.md` is created.
+- [ ] `/v1/daemon/kb/entries` routes are removed from the contract (changelog; no 410/sunset layer); no new `kb/index.json` or `kb/entries/<id>.md` is created.
 - [ ] World KB extract operator entrances formerly spelled `creator kb queue-extract` / `extract-status` / `rescan` are rebound; `kb_extract_jobs`, `kb.extract_work`, and `creator world kb` adopt/reject still behave.
-- [ ] Residual `user_default` / reference bodies / `creator kb` files are archived or explicitly waived; tables are dropped or sealed; workspace `kb/` index trees are removed.
+- [ ] Residual `user_default` / reference bodies / `creator kb` files are archived or explicitly waived; `knowledge_entries` and `reference_sources` are DROPped (not sealed); workspace `kb/` index trees are removed.
 - [ ] Active Masters listed in §2.2–§2.4 are amended with a link-migration sweep, or are scheduled in the immediate follow-up promotion PR — no dual-authority window that still describes a live User-knowledge fourth domain or a live `creator kb` file index.
 - [ ] World KB, memory, Work trees, and research-run artifact dirs still behave.
 
@@ -320,12 +331,13 @@ Pre-1.0 local persistence already MAY be wiped rather than migrated ([reference-
 
 ## 7. Open questions
 
-1. **Delete vs hard-disable the MCA slot.** Preferred: delete (cleaner Moment contract). Hard-disable is only a staging tactic if goldens must move in two PRs.
-2. **`DROP TABLE` vs sealed unused table.** Prefer drop for `knowledge_entries` and `reference_sources` once archives exist. A sealed table is acceptable only as a short compatibility bridge inside the implementation stack, not as a permanent ghost.
-3. **HTTP references and `/v1/daemon/kb/entries` contract break.** Retire in the same daemon-api version bump as other accepted breaks, or leave a documented 410/sunset for one release? Default: retire in the implementation PR with an explicit changelog (pre-1.0).
-4. **Archive location and retention.** Maintainer-local dated dump vs in-repo `archived/` fixtures. Default: local dump, not committed author content.
-5. **Shared `nexus-knowledge` crate shape.** After the User tier is removed, keep the crate World-KB-only (preferred) or split? Decide in the implementation PR; Knowledge IR assumes World-KB-only.
-6. **Where extract/rescan operator entrances land.** After `creator kb` is retired, default is to move `queue-extract` / `extract-status` / `rescan` onto the `creator world kb` family (or a dedicated extract leaf in that family). Do not leave the pipeline without a first-party operator entrance, and do not keep `creator kb` as a hidden alias.
+The following were open and are now **settled in the body** (not repeated as questions): MCA User Knowledge slot is deleted (§2.2); tables are DROPped after archive (§3); HTTP references and `/v1/daemon/kb/entries` are removed from the contract in the implementation PR as a pre-1.0 simplification, with a changelog and no 410/sunset layer (§2.3–§2.4); the non-Spoke file-based `creator kb` is fully retired (§2.4).
+
+Remaining questions:
+
+1. **Archive location and retention.** Maintainer-local dated dump vs in-repo `archived/` fixtures. Default: local dump, not committed author content.
+2. **Shared `nexus-knowledge` crate shape.** After the User tier is removed, keep the crate World-KB-only (preferred) or split? Decide in the implementation PR; Knowledge IR assumes World-KB-only.
+3. **Where extract/rescan operator entrances land.** After `creator kb` is retired, default is to move `queue-extract` / `extract-status` / `rescan` onto the `creator world kb` family (or a dedicated extract leaf in that family). Do not leave the pipeline without a first-party operator entrance, and do not keep `creator kb` as a hidden alias.
 
 ---
 
