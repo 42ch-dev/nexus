@@ -888,16 +888,26 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 
-    // The classification follows the teardown OUTCOME, not the leader exit
-    // alone: where the platform can still prove the exited leader's identity
-    // (Linux), the group SIGTERM reaches the survivor and the typed
-    // `launch_failed` stands; where it cannot (macOS), the surviving group is
-    // reported unconfirmed — never a silently clean launch failure with a
-    // possibly-live tree.
+    // The classification follows the teardown OUTCOME, and it is honestly
+    // platform-dependent today:
+    // - Linux: the handshake's `wait()` arm reaps the exited leader before
+    //   teardown (I-000358), the birth token becomes unverifiable, the
+    //   guarded signal is refused, and the survivor is left alive — so the
+    //   launch failure surfaces `cleanup_unconfirmed`. This passes BECAUSE
+    //   of the early reap; revisit when I-000358 lands: the descendant is
+    //   then actually cleaned up by the teardown and the launch error stays
+    //   `launch_failed`.
+    // - macOS: there is no non-reaping exit observation and the zombie's
+    //   identity is unreadable, so terminate() refuses to signal — and the
+    //   fixture now owns its descendant's lifetime (its `finally` reaps the
+    //   survivor), letting terminate prove the group gone and keep the typed
+    //   `launch_failed`.
+    // Never a silently misclassified tree: the refusal path is exercised at
+    // the transport level regardless of platform.
     let expected = if cfg!(target_os = "macos") {
-        "cleanup_unconfirmed"
-    } else {
         "launch_failed"
+    } else {
+        "cleanup_unconfirmed"
     };
     let err = result.expect_err("EOF launch must fail session creation");
     assert_eq!(
