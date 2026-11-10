@@ -1,8 +1,8 @@
 //! Local knowledge surfaces over the guarded core workspace: the
 //! creator-scoped work file index (`creator kb`, V1.20 Batch 5 T39 — scope
 //! clarified KCA-003 C2; V1.27 H3 scope honesty) and the work-entry extract
-//! queue (`creator kb queue-extract` / `extract-status`; core producer added
-//! by v1.207 P1 item 6).
+//! queue (`creator world kb queue-extract` / `extract-status`; core producer
+//! added by v1.207 P1 item 6, operator entrance rebound by v231).
 //! Extracted from the legacy daemon `kb.rs` handlers. This is NOT the World
 //! narrative KB graph (`nexus-kb` / P0 `world_kb`).
 //! The file-index surface is deliberately `async` despite syncing only against
@@ -103,7 +103,7 @@ fn validate_workspace_slug(slug: Option<&str>) -> Result<(), KnowledgeFault> {
     })
 }
 
-// ─── Work-entry extract queue (`creator kb queue-extract`) ────────────────
+// ─── Work-entry extract queue (`creator world kb queue-extract`) ──────────
 
 /// Input for [`CoreService::queue_kb_extract`].
 ///
@@ -112,7 +112,11 @@ fn validate_workspace_slug(slug: Option<&str>) -> Result<(), KnowledgeFault> {
 /// enqueue into a workspace it is not admitted to.
 #[derive(Debug, Clone)]
 pub struct QueueKbExtractParams {
-    /// Work-scope KB entry ID to extract from.
+    /// Idempotency label for the job.
+    ///
+    /// The extractor reads the Work artifact named by [`Self::work_id`] /
+    /// [`Self::chapter`]; this label only keys the job, so it never resolves
+    /// to a work-scope file-index entry.
     pub work_entry_id: String,
     /// Target world ID for the resulting `KnowledgeEntryRecord`.
     pub world_id: String,
@@ -850,7 +854,7 @@ impl CoreService {
         Err(KnowledgeFault::NotFound(format!("KB entry {entry_id} not found")).into())
     }
 
-    // ── Work-entry extract queue (`creator kb queue-extract` / `extract-status`) ──
+    // ── Work-entry extract queue (`creator world kb queue-extract` / `extract-status`) ──
 
     /// Enqueue a work-scope entry for extraction into a target world.
     ///

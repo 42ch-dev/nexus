@@ -1,11 +1,11 @@
-//! V1.51 T-A P1 — `creator kb rescan --work <work_ref>` cross-chapter
+//! V1.51 T-A P1 — `creator world kb rescan --work <work_ref>` cross-chapter
 //! reconciliation hermetic round-trip.
 //!
 //! Plan: `2026-06-18-v1.51-cross-chapter-rescan` (local plan record)
 //! Spec: `.agents/knowledge/world-kb-runtime-architecture.md` §5.5.1
 //! CLI:   `docs/specs/cli/cli-spec.md` §6.2G (`--work` amendment)
 //!
-//! Drives `nexus42::commands::creator::kb::rescan::kb_rescan_work_hermetic`
+//! Drives `nexus42::commands::creator::world::kb::rescan::kb_rescan_work_hermetic`
 //! against a fresh temp DB + temp workspace so the work-scoped rescan can be
 //! exercised without `$HOME` or a daemon.
 //!
@@ -21,7 +21,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use nexus42::commands::creator::kb::rescan::kb_rescan_work_hermetic;
+use nexus42::commands::creator::world::kb::rescan::kb_rescan_work_hermetic;
 use nexus42::errors::CliError;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::list_pending_for_world;

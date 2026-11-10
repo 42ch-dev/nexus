@@ -1,8 +1,12 @@
-//! `creator kb rescan` — refreshable KB scan (V1.50 T-B P2).
+//! `creator world kb rescan` — refreshable KB scan (V1.50 T-B P2).
 //!
 //! Re-syncs `kb_extract_jobs` candidates and confirmed `KnowledgeEntryRecord` rows from a
 //! chapter's current text. Plan: `2026-06-18-v1.50-kb-refreshable-scan`;
 //! spec: `entity-scope-model.md` §5.5; compass §0.1 decision 7.
+//!
+//! Rebound from the retired work-scope `kb` group (v231 retire-file-index
+//! Task 1): the inputs are the Work's chapter prose and the confirmed
+//! records, never the retired work-scope file index.
 //!
 //! # Flow
 //!
@@ -140,7 +144,39 @@ impl WorkRescanReport {
     }
 }
 
-/// `creator kb rescan <work_ref>/<chapter>` CLI entrypoint.
+/// Dispatch `creator world kb rescan` onto its chapter- or work-scoped mode.
+///
+/// Exactly one of the positional `<work_ref>/<chapter>` or `--work <work_ref>`
+/// names the scan scope; supplying both (or neither) fails closed.
+///
+/// # Errors
+///
+/// Returns [`CliError::Other`] when neither or both scopes are supplied, and
+/// the failures of the selected mode.
+// CLI entry-point runs on a single-threaded tokio runtime — Send not required.
+#[allow(clippy::future_not_send)]
+pub async fn run(
+    config: &CliConfig,
+    target: Option<&str>,
+    work: Option<&str>,
+    dry_run: bool,
+    json: bool,
+) -> Result<()> {
+    match (target, work) {
+        (Some(t), None) => kb_rescan(config, t, dry_run, json).await,
+        (None, Some(w)) => kb_rescan_work(config, w, dry_run, json).await,
+        (Some(_), Some(_)) => Err(CliError::Other(
+            "Specify either <work_ref>/<chapter> positional or --work <work_ref>, not both."
+                .into(),
+        )),
+        (None, None) => Err(CliError::Other(
+            "Specify either <work_ref>/<chapter> (e.g. my-novel/05) or --work <work_ref>."
+                .into(),
+        )),
+    }
+}
+
+/// `creator world kb rescan <work_ref>/<chapter>` CLI entrypoint.
 ///
 /// Resolves the active creator, workspace pool, and workspace dir from
 /// `CliConfig`, then delegates to [`kb_rescan_hermetic`]. The seam's admission
@@ -214,7 +250,7 @@ pub async fn kb_rescan_hermetic(
         .ok_or_else(|| {
             CliError::Other(format!(
                 "Work '{work_ref}' not found for creator '{creator_id}'. \
-                 Usage: creator kb rescan <work_ref>/<chapter>"
+                 Usage: creator world kb rescan <work_ref>/<chapter>"
             ))
         })?;
     let world_id = work.world_id.ok_or_else(|| {
@@ -287,7 +323,7 @@ pub async fn kb_rescan_hermetic(
 // (closes R-V150KBED-08; spec: world-kb-runtime-architecture.md §5.5.1)
 // ═══════════════════════════════════════════════════════════════════════
 
-/// `creator kb rescan --work <work_ref>` CLI entrypoint.
+/// `creator world kb rescan --work <work_ref>` CLI entrypoint.
 ///
 /// Resolves the active creator, workspace pool, and workspace dir from
 /// `CliConfig`, then delegates to [`kb_rescan_work_hermetic`]. The seam's
@@ -363,7 +399,7 @@ pub async fn kb_rescan_work_hermetic(
         .ok_or_else(|| {
             CliError::Other(format!(
                 "Work '{work_ref}' not found for creator '{creator_id}'. \
-                 Usage: creator kb rescan --work <work_ref>"
+                 Usage: creator world kb rescan --work <work_ref>"
             ))
         })?;
     let world_id = work.world_id.clone().ok_or_else(|| {

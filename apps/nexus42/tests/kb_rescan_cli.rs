@@ -1,9 +1,9 @@
-//! V1.50 T-B P2 — `creator kb rescan` hermetic round-trip.
+//! V1.50 T-B P2 — `creator world kb rescan` hermetic round-trip.
 //!
 //! Plan: `2026-06-18-v1.50-kb-refreshable-scan` (local plan record)
 //! Spec: `docs/specs/architecture/entity-scope-model.md` §5.5
 //!
-//! Drives `nexus42::commands::creator::kb::rescan::kb_rescan_hermetic` against
+//! Drives `nexus42::commands::creator::world::kb::rescan::kb_rescan_hermetic` against
 //! a fresh temp DB + temp workspace so the rescan can be exercised without
 //! `$HOME` or a daemon.
 //!
@@ -29,7 +29,7 @@
 mod direct;
 
 use direct::DirectFixture;
-use nexus42::commands::creator::kb::rescan::{kb_rescan_hermetic, WORLD_KB_FORBIDDEN_CODE};
+use nexus42::commands::creator::world::kb::rescan::{kb_rescan_hermetic, WORLD_KB_FORBIDDEN_CODE};
 use nexus42::commands::creator::world::kb::kb_adopt;
 use nexus42::errors::CliError;
 use nexus_home_layout::{creator_kb_dir, nexus_root_from_home};
@@ -659,5 +659,48 @@ async fn corrupt_work_index_is_reported_as_empty_not_an_error() {
             .contains("No local work entries in workspace default"),
         "a corrupt index must read as empty, got:\n{}",
         String::from_utf8_lossy(&list.stdout)
+    );
+}
+
+/// The rebound `creator world kb rescan` leaf fails closed unless exactly one
+/// scan scope is named, and the refusal names the supported spellings.
+///
+/// Reachable without a seeded Work: the scope check runs before the pool open,
+/// so this pins the rebound entrance's dispatch, not the rescan heuristic
+/// (`kb_rescan_hermetic` / `kb_rescan_work_hermetic` cover that).
+#[tokio::test]
+async fn rebound_rescan_requires_exactly_one_scope() {
+    let fixture = DirectFixture::new().await;
+
+    let neither = fixture
+        .command()
+        .args(["creator", "world", "kb", "rescan"])
+        .output()
+        .expect("spawn the real nexus42 binary");
+    assert!(!neither.status.success(), "rescan without a scope must fail");
+    let stderr = String::from_utf8_lossy(&neither.stderr);
+    assert!(
+        stderr.contains("or --work <work_ref>"),
+        "the refusal must name both supported scopes, got:\n{stderr}"
+    );
+
+    let both = fixture
+        .command()
+        .args([
+            "creator",
+            "world",
+            "kb",
+            "rescan",
+            "my-novel/05",
+            "--work",
+            "my-novel",
+        ])
+        .output()
+        .expect("spawn the real nexus42 binary");
+    assert!(!both.status.success(), "both scopes must be refused");
+    let stderr = String::from_utf8_lossy(&both.stderr);
+    assert!(
+        stderr.contains("not both"),
+        "the refusal must reject the double scope, got:\n{stderr}"
     );
 }
