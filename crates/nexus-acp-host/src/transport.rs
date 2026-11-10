@@ -824,20 +824,20 @@ impl ManagedAcpProcess {
         Ok(())
     }
 
-    /// Hand a still-unreaped child to a detached, non-signalling reaper
-    /// (I-000359).
+    /// Hand a still-unreaped child to a detached reaper (I-000359).
     ///
-    /// A cleanup-deadline refusal must not signal the child it refused to
-    /// signal, so ownership never lands on a drop: the task waits for the exit
-    /// whenever it happens and reaps it then, and a task cancelled by its
-    /// runtime leaves the handle to Tokio's orphan queue, which reaps without
-    /// signalling.
+    /// The task waits for the exit whenever it happens and reaps it then.
     ///
-    /// Without a current Tokio runtime there is no task to own it, and
-    /// dropping the handle is the one action that would deliver
-    /// `kill_on_drop`'s SIGKILL to the child this refusal declined to signal.
-    /// The handle is therefore retained by [`Self::retain_unreaped`], never
-    /// dropped.
+    /// This helper does NOT make that branch drop-free: a runtime that cancels
+    /// the task drops the captured handle, and dropping a `kill_on_drop` child
+    /// signals it. The no-signal guarantee there comes from the managed spawn
+    /// policy, `kill_on_drop(false)`
+    /// ([`AgentSpawner::spawn_with_env_policy`]), not from this helper; a
+    /// caller-built `kill_on_drop` child keeps its own policy on that branch.
+    ///
+    /// Without a current Tokio runtime there is no task and therefore no drop
+    /// path: the handle is retained by [`Self::retain_unreaped`], which never
+    /// signals it.
     fn hand_to_reaper(mut child: tokio::process::Child) {
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
@@ -851,7 +851,7 @@ impl ManagedAcpProcess {
 
     /// Retain a child that no reaper can own, without ever dropping it.
     ///
-    /// This is the only place an owned child outlives the teardown call: a
+    /// This is the only place an owned handle is kept outside any reaper: a
     /// non-Tokio executor cannot run the reaping task, and dropping the handle
     /// would signal a `kill_on_drop` child — exactly the kill a cleanup
     /// refusal must never perform. The handle stays owned for the life of the
