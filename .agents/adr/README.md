@@ -50,7 +50,7 @@ A superseded record stays in its live bucket with both-way `Supersedes:` / `Supe
 ## Deliberately absent
 
 - `INDEX.md` — the path already carries bucket, class and date.
-- Bilingual siblings — records are English-only, like every tracked page under `docs/` and `.agents/`.
+- Bilingual siblings — newly authored ADR prose is English-only, like every tracked page under `docs/` and `.agents/`. Frozen migration ledgers keep their original language verbatim, and quoted product labels stay as shipped.
 
 ## What the gate checks
 

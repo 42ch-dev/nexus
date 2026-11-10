@@ -41,7 +41,7 @@ Both tracked layers describe the latest state; neither keeps version history.
 
 **Specs:** update in place. When a page no longer describes the current state, delete it or merge it into its successor and record the supersession in that successor's provenance line. Git and ADRs carry history; there is no `archived/` directory in the tracked specs tree. Fix every inbound link and reconcile the catalog row in the same change.
 
-Do not retire while a crate `AGENTS.md` or a shipped spec still treats the path as normative authority.
+Do not retire while a crate `AGENTS.md` or a shipped spec still treats the path as normative authority. Published migration comments are the one exception: their bytes are checksum-frozen, so their references are redirected by the migration table in `crates/nexus-local-db/AGENTS.md` rather than edited in place.
 
 ---
 
