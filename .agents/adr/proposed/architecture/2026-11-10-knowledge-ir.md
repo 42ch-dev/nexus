@@ -161,7 +161,7 @@ Simulate / dry-run / extract-preview ──► KnowledgeEntryPort stub
 #### 2.1 Normative target rules
 
 1. **No parallel IR.** A conforming implementation MUST NOT introduce a second knowledge document type, JSON schema, or crate whose fields duplicate Spoke `KnowledgeEntry`. New local fields go through the existing `extensions.nexus` contract, or they do not exist.
-2. **One write-port stack.** Durable creates/updates/deletes of KnowledgeEntries (and their relationship rows when the same transaction applies) MUST go through the existing stack: Spoke `KnowledgeEntryPort` (integration, including the stub in non-apply paths) plus local `KbStore` / `SqliteKbStore` (persistence). A conforming implementation MUST NOT introduce a parallel `KnowledgePort` trait between those two layers. Callers MUST NOT open ad-hoc SQL against `kb_key_blocks` outside the adapter.
+2. **One write-port stack for entry rows; sibling ports for the rest.** Durable creates/updates/deletes of KnowledgeEntry rows MUST go through the existing stack: Spoke `KnowledgeEntryPort` (integration, including the stub in non-apply paths) plus local `KbStore` / `SqliteKbStore` (persistence). Relationship rows (`kb_relationships`) and extract-job apply are **sibling ports**, not members of that trait surface: they keep their own adapter layer (today `nexus-local-db` `kb_relationships` / `kb_extract_job`, called from `nexus-core`) and carry the **same stub rule** as §2.1 rule 4 — a non-apply path binds a stub for them too. Neither concern MUST be folded into `KnowledgeEntryPort` / `KbStore`. A conforming implementation MUST NOT introduce a parallel `KnowledgePort` trait between the entry layers. Callers MUST NOT open ad-hoc SQL against `kb_key_blocks` outside the adapter.
 3. **Projection, not authority.** If `KnowledgeEntryRecord` and a Spoke `KnowledgeEntry` disagree after a round-trip through the conversion seam, the seam is buggy; do not "fix" it by treating the SQLite row as authoritative *over* the protocol. SQLite is how the IR persists locally. Reconcile / OCC remain as today's Masters specify (`revision`, terminal-status guards).
 4. **Stub in non-apply paths.** Simulate, dry-run, extract *preview*, and any Workflow IR Simulate that would touch knowledge MUST bind a stub implementation of `KnowledgeEntryPort`. The stub MAY record intended mutations for inspection. It MUST NOT insert or update `kb_key_blocks` (or extract-job rows that auto-apply).
 5. **Do not absorb other families.** The port MUST NOT grow User-knowledge APIs, reference-registry APIs, memory APIs, Work-tree file APIs, or a `creator kb` / `kb/index.json` import API.
@@ -193,7 +193,7 @@ HTTP `/kb/` and `/kb/key-blocks/`, plus `nexus42 creator world kb` (list / show 
 
 #### 3.4 Extract-apply adapter
 
-LLM / heuristic extract produces *candidates* (`kb_extract_jobs`, relationship `needs_review` rows). Confirmed KnowledgeEntries appear only after the existing author gate (or the already-specified auto-adopt paths). The apply step MUST be a commit through this port stack. Preview / Simulate MUST use the `KnowledgeEntryPort` stub.
+LLM / heuristic extract produces *candidates* (`kb_extract_jobs`, relationship `needs_review` rows). Confirmed KnowledgeEntries appear only after the existing author gate (or the already-specified auto-adopt paths). The apply step MUST be a commit through this port stack; the job's own status transition stays on the sibling extract-job port (§2.1 rule 2). Preview / Simulate MUST use the `KnowledgeEntryPort` stub.
 
 #### 3.5 `creator kb` is not an adapter of this IR
 
@@ -340,10 +340,10 @@ The previous "P3: keep `creator kb` as an import adapter" default is withdrawn; 
 
 The following were open and are now **settled in the body** (not repeated as questions): the port stack is the existing Spoke `KnowledgeEntryPort` plus local `KbStore` / `SqliteKbStore` — do not invent a parallel `KnowledgePort` (§0.2, §2); the previous "keep `creator kb` as import/staging" default remains withdrawn (#486 retires that surface; this PR does not implement the deletion).
 
-Remaining questions:
+Remaining questions (each carries its recorded answer; 3 still needs the owner's decision):
 
 1. **When P0 may start.** After this spec merges, or only after #486's implementation PR removes UserScope / references / the `creator kb` file index? Default: P0 docs/tests MAY start after merge; P3 and any crate-graph cleanup wait for #486 implementation.
-2. **Relationships and extract jobs on the same port.** Should relationship writes and extract-job apply share the `KnowledgeEntryPort` / `KbStore` surface, or remain sibling ports with the same stub policy? Default: sibling ports, same stub rule (`KnowledgeEntryPort` stub strategy; no new `KnowledgePort`).
-3. **Promotion of this file.** Fold "writes go through the port stack" into world-kb-runtime / spoke-adapter Masters, or keep a short Feature/Master after Draft? Decide at promotion; do not fork state machines into this document.
+2. **Relationships and extract jobs — settled: sibling ports.** Relationship writes and extract-job apply stay on sibling ports with the same stub policy and are not folded into `KnowledgeEntryPort` / `KbStore` (§2.1 rule 2, §3.4). They borrow the `KnowledgeEntryPort` stub strategy for their own non-apply paths; this adds no `KnowledgePort` trait and no shared trait surface.
+3. **Promotion of this file — recommendation: fold, no third Master.** Proposed answer for the owner: fold "writes go through the port stack" into [world-kb-runtime-architecture.md](../../../../docs/specs/architecture/world-kb-runtime-architecture.md) and [spoke-adapter-architecture.md](../../../../docs/specs/architecture/spoke-adapter-architecture.md) at the promotion PR, because both already own the stack's layers and a short third Master would fork state-machine authority. Owner decision pending; do not fork state machines into this document either way.
 
 ---
