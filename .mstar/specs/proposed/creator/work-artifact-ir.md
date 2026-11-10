@@ -24,7 +24,7 @@ tags:
 | **Status** | **Proposed** — not implement authority. Nothing here schedules work or claims a shipped feature. |
 | **Document class** | Exploration |
 | **Scope** | Detailed design for a **Work Artifact IR** that is the SSOT for a Work's durable creative artifacts (chapter bodies, outlines, review/quality logs, derived narrative and rules files, scaffolded tree layout), plus **read/write ports** that production and dry-run share. Lifecycle is **Load → Validate → Dry-run → Commit** (a storage-and-commit pipeline, not a strategy Generate → Execute pipeline). |
-| **Coordinates with** | [chapter-content-local-api.md](../../active/runtime/chapter-content-local-api.md) (body is HTTP-read-only; structure/outline writable), [workflow-profile.md](../../active/novel-writing/workflow-profile.md), [quality-loop.md](../../active/novel-writing/quality-loop.md), [sync-contract.md](../../active/novel-writing/sync-contract.md), [creator-workflow.md](../../active/creator/creator-workflow.md), essay / script / game-bible profile specs under `active/creator/`, [orchestration-engine.md](../../active/orchestration/orchestration-engine.md) (`WorkspaceExecutor`, SessionStorage), Canvas + Workflow IR redesign ([PR #483](https://github.com/42ch-dev/nexus/pull/483); `.mstar/specs/proposed/orchestration/canvas-and-workflow-ir-redesign.md`) |
+| **Coordinates with** | [chapter-content-local-api.md](../../active/runtime/chapter-content-local-api.md) (body is HTTP-read-only; structure/outline writable), [workflow-profile.md](../../active/novel-writing/workflow-profile.md), [quality-loop.md](../../active/novel-writing/quality-loop.md), [sync-contract.md](../../active/novel-writing/sync-contract.md), [creator-workflow.md](../../active/creator/creator-workflow.md), essay / script / game-bible profile specs under `active/creator/`, [orchestration-engine.md](../../active/orchestration/orchestration-engine.md) (`WorkspaceExecutor`, SessionStorage), Canvas + Workflow IR redesign ([PR #483](https://github.com/42ch-dev/nexus/pull/483); `.mstar/specs/proposed/orchestration/canvas-and-workflow-ir-redesign.md`, landing with #483) |
 | **Relationship to #483** | #483 is the detailed redesign of **strategy orchestration**: Workflow IR is the SSOT for strategy graphs (Generate \| Compose → Validate → Simulate → Approve → Apply → Execute). **This document** is a sibling Exploration for **Work output**. The two MUST remain separate documents, separate types, and separately versioned landings. They MAY share the ports/adapters *practice*, and production writes SHOULD converge on the existing `WorkspaceExecutor` / `commit_fs` seam. They MUST NOT merge into one IR or one runtime type. |
 | **Path choice** | Lands under `proposed/creator/` because `.mstar/specs/AGENTS.md` has no `work/` class axis, and Work profiles plus `work-experience-model.md` already live under `creator/`. `novel-writing/` is too narrow (this IR spans novel, essay, script, and game-bible Works). |
 
@@ -85,7 +85,7 @@ Essay, script, and game-bible scaffolds write a different subtree (drafts, scrip
 | --- | --- | --- | --- |
 | **Chapter body (hot path)** | Agent tool `fs/write_text_file` → `execute_write_file` in `crates/nexus-core/src/execution/capabilities.rs` | After `resolve_guarded_path_async`, **bare** `std::fs::create_dir_all` + `std::fs::write` (no temp/rename, no fsync) | Markdown + YAML frontmatter |
 | **Prompt contract** | `crates/nexus-preset/embedded-presets/novel-writing/prompts/draft-chapter.md` | Instructs the agent to write `{{body_path}}` and create `Stories/` if missing | Same |
-| **Chapter HTTP/Core API** | `crates/nexus-core/src/content.rs` `chapter_body` / `patch_chapter` | Body is **read-only** (`read_only: true`, `read_guarded_file`). `patch_chapter` mutates SQLite metadata only (slug/status/volume) | Metadata in DB |
+| **Chapter HTTP/Core API** | `crates/nexus-core/src/content.rs` `chapter_body` / `patch_chapter` | Body is **read-only** (`read_only: true`, `read_guarded_file`). `patch_chapter` mutates SQLite metadata only (slug/status/volume/`planned_word_count`; `title` is rejected as display-only) | Metadata in DB |
 | **Web UI** | `apps/web` chapter page | Copies the path to the clipboard; does not persist body bytes | — |
 | **Outline** | `crates/nexus-core/src/outline.rs` via `content::fsync_write_atomic` / `atomic_write_text` | Temp + fsync + rename + final-file fsync + parent-dir fsync | Markdown + frontmatter |
 | **Scaffold** | `novel_scaffold.rs` `write_file_idem` / `create_dir_all_idem`; essay / script / game-bible scaffold `write_file` | Direct `std::fs` (novel uses a local `ScaffoldTransaction` rollback; others often temp+rename). Creates `Stories/` **empty**; does not draft chapter bodies | Templates, dirs |
@@ -159,7 +159,7 @@ Preset capabilities `workspace.open` / `workspace.commit` go through this port. 
 
 ### 2.2 What "replace direct writes" means
 
-After migration acceptance (§7.3), the product MUST be able to:
+After migration acceptance (§6.3), the product MUST be able to:
 
 - Draft a chapter (agent `fs/write_text_file` or a successor tool) without the tool handler calling `std::fs::write` itself.
 - Write outlines, scaffolds, review/quality logs, and derived rules/index files through the same port.
@@ -226,7 +226,7 @@ The kind set MAY grow with a profile, but a new kind MUST NOT be used to smuggle
 - The IR MUST keep them distinct. Updating `status` in the DB without rewriting bytes (today's `patch_chapter`) remains legal; the snapshot records a metadata revision even when `content_hash` is unchanged.
 - Reconcile compares disk frontmatter + path layout against DB pointers and emits a structured diff (`work_chapters` already computes one). The port SHOULD expose that diff rather than leaving callers to walk `Stories/` themselves.
 
-### 3.4 Encoding (open, see §9)
+### 3.4 Encoding (open, see §8)
 
 On-disk projection during transition MUST remain the current Markdown tree so sync and presets keep working. Whether a canonical IR snapshot is also persisted (JSON/CBOR beside the tree, or only in DB) is an open question. This Exploration does **not** require a second parallel tree of IR files in v1.
 
