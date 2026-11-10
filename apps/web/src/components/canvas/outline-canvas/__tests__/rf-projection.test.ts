@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import type { TFunction } from 'i18next';
 import type { ChapterSummary, WorkOutline } from '@42ch/nexus-contracts';
 
 import {
@@ -396,8 +397,8 @@ describe('outlineGraphSummary', () => {
       timeline_events: [{ event_id: 'e1', title: 'E1' }],
       foreshadows: [{ source_event_id: 'e1', target_event_id: 'e2' }],
     });
-    const t = (key: string, options?: Record<string, unknown>) =>
-      `${key} ${JSON.stringify(options ?? {})}`;
+    const t = ((key: string, options?: Record<string, unknown>) =>
+      `${key} ${JSON.stringify(options ?? {})}`) as unknown as TFunction<'canvas'>;
     expect(outlineGraphSummary(o, 1, t)).toMatch(/outlineCanvas.graphSummary.body/);
   });
 
@@ -413,13 +414,13 @@ describe('outlineGraphSummary', () => {
       ],
       foreshadows: [],
     });
-    const t = (key: string, options?: Record<string, unknown>) =>
-      `${key} ${JSON.stringify(options ?? {})}`;
+    const t = ((key: string, options?: Record<string, unknown>) =>
+      `${key} ${JSON.stringify(options ?? {})}`) as unknown as TFunction<'canvas'>;
     expect(outlineGraphSummary(o, 3, t)).toMatch(/outlineCanvas.graphSummary.body/);
   });
 
   it('reports not-loaded for undefined outline', () => {
-    const t = (key: string) => key;
+    const t = ((key: string) => key) as unknown as TFunction<'canvas'>;
     expect(outlineGraphSummary(undefined, 0, t)).toMatch(/outlineCanvas.graphSummary.notLoaded/);
   });
 });

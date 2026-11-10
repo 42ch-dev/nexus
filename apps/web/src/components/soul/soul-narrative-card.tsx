@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState, Spinner } from '@/components/ui/states';
 import { formatDate } from '@/lib/format';
 import type { SoulNarrativeResponse } from '@42ch/nexus-contracts';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 
 /**
@@ -101,7 +102,7 @@ function remainingToFragmentsThreshold(narrative: SoulNarrativeResponse): number
   return Math.max(0, narrative.min_fragment_count - narrative.current_fragment_count);
 }
 
-function GeneratingState({ t }: { t: TFunction }) {
+function GeneratingState({ t }: { t: TFunction<'memory'> }) {
   return (
     <div data-testid="soul-narrative-generating" className="flex flex-col gap-3">
       <div className="flex items-center gap-2 text-copy-14 text-gray-700">
@@ -124,7 +125,7 @@ function GeneratingState({ t }: { t: TFunction }) {
   );
 }
 
-function UngeneratedState({ onReflect, t }: { onReflect: () => void; t: TFunction }) {
+function UngeneratedState({ onReflect, t }: { onReflect: () => void; t: TFunction<'memory'> }) {
   return (
     <div data-testid="soul-narrative-ungenerated" className="flex flex-col items-start gap-3">
       <div>
@@ -145,7 +146,7 @@ function InsufficientDataState({
 }: {
   narrative: SoulNarrativeResponse;
   scope: 'creator' | 'world';
-  t: TFunction;
+  t: TFunction<'memory'>;
 }) {
   const remaining = remainingToFragmentsThreshold(narrative);
   const isWorld = scope === 'world';
@@ -172,7 +173,7 @@ function CachedNarrativeState({
   narrative: SoulNarrativeResponse;
   stale: boolean;
   onReflect: () => void;
-  t: TFunction;
+  t: TFunction<'memory'>;
 }) {
   return (
     <div
@@ -211,5 +212,3 @@ function CachedNarrativeState({
     </div>
   );
 }
-
-type TFunction = (key: string, options?: Record<string, unknown>) => string;

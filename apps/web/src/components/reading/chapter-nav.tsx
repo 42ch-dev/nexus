@@ -13,6 +13,7 @@
  */
 import { Link } from 'react-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
@@ -31,7 +32,7 @@ function chapterHref(workId: string, row: ChapterSummary): string {
   return `/works/${encodeURIComponent(workId)}/chapters/${row.chapter}?volume=${row.volume}`;
 }
 
-function chapterLabel(row: ChapterSummary, t: (key: string, options?: Record<string, unknown>) => string): string {
+function chapterLabel(row: ChapterSummary, t: TFunction<'reading'>): string {
   return row.title?.trim() ? row.title : t('chapter.title', { chapter: row.chapter });
 }
 
