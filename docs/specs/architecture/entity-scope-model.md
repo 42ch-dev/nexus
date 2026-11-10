@@ -918,8 +918,6 @@ The normative constraints for this surface are stated in §Current state; a chan
 - `apps/nexus42/src/bin/nexus-runtime.rs`
 - `crates/nexus-orchestration/src/tasks/mod.rs`
 - `crates/nexus-knowledge/src/world_kb/validation.rs`
-- `schemas/compute/compute-entity-attributes.schema.json`
-- `schemas/compute/compute-entity-state.schema.json`
 - `schemas/common/common.schema.json`
 - `crates/nexus-contracts/src/generated/daemon_api/canvas/world_kb/world_kb_entity_patch.rs`
 - `crates/nexus-narrative/src/world.rs`

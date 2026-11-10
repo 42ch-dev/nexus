@@ -2,7 +2,7 @@
 
 ## Scope
 
-**Status:** Accepted target — locked 2026-09-13. The boundary it locks is the shipped composition: the ordinary `nexus42` default is the direct-core + cloud + optional Connect `cli` cohort, the desktop is the Electron host, and the integrated daemon composition no longer exists. This document is normative for that boundary and is self-contained. **Document class:** Master **Pillar:** Cross-cutting — Harness, Canvas, and Computable consumption ends keep their product identities; this spec only locks the service-boundary target those pillars run on. **Coordinates with:** [local-runtime-boundary.md](local-runtime-boundary.md), [cli-spec.md](../cli/cli-spec.md), [desktop-shell.md](../surfaces/desktop-shell.md), [agent-host.md](../agents/agent-host.md), [concurrency.md](../runtime/concurrency.m
+This page locks the Rust core/service boundary: the transport-neutral Rust authority, the `nexus42` direct-core + cloud + optional Connect composition, `nexus-runtime`, the standalone TypeScript HTTP service, and the Electron desktop — including the retired integrated-daemon topology and the dependency direction these components obey. Wire DTOs remain owned by `schemas/`; per-route behavior is owned by the CLI and Daemon API specs.
 
 ## Current state
 

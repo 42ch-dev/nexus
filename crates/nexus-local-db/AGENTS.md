@@ -6,6 +6,21 @@ SQLite-backed persistence using sqlx. Used by the daemon runtime and `nexus-orch
 
 Migration files under `migrations/` are committed — the schema is fully reproducible. **sqlx orders migrations numerically** by the leading version prefix (the digits before the first `_` or non-digit separator).
 
+**Published migration files are checksum-frozen.** sqlx pins each file's checksum; editing a shipped migration — even a comment — changes the checksum and makes existing databases fail `VersionMismatch`. Never edit a published `.sql` file. Current documentation references for those headers are kept here instead of in the SQL:
+
+| Migration | Current reference |
+| --- | --- |
+| `20260418_orchestration_sessions.sql` | `docs/specs/orchestration/orchestration-engine.md` §4.3 |
+| `202606170001_extend_findings_status.sql` | `docs/specs/contracts/findings-lifecycle.md` §2 |
+| `202606180001_works_schedule_json.sql` | `docs/specs/novel-writing/workflow-profile.md` §11 (cron staggering) |
+| `202606180004_works_schedule_json_partial_idx.sql` | `docs/specs/novel-writing/workflow-profile.md` §11 |
+| `202606180005_works_auto_chronology.sql` | `docs/specs/novel-writing/workflow-profile.md` §11.5.3 |
+| `202606180006_kb_extract_jobs_llm_payload.sql` | `docs/specs/orchestration/llm-extract.md` §3.2; `docs/specs/architecture/entity-scope-model.md` §5.5.6 |
+| `202606190002_kb_extract_jobs_auto_promote.sql` | `docs/specs/novel-writing/quality-loop.md` §5.6; `docs/specs/architecture/entity-scope-model.md` §5.5 |
+| `20260812_drop_legacy_outbox.sql` | `docs/specs/runtime/outbox-consolidation.md` §6 |
+| `20260918000001_holder_registry.sql` | `docs/specs/architecture/holder-governance.md` §§2, 3, 5 |
+
+
 Common filename shapes in this crate:
 
 - `YYYYMMDD_<description>.sql` — e.g. `20260812_drop_legacy_outbox.sql`

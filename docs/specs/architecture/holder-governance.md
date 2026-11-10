@@ -2,7 +2,7 @@
 
 ## Scope
 
-> **Status:** Shipped — the registry (`crates/nexus-local-db/src/holders.rs`, `knowledge_holders`) is current state. Current SPOKE pins are the pinned upstream lockstep release recorded in the workspace manifests (D17). > **Document class:** Draft overlay, sole technical authority for Actor holders and their disclosure policy. > **Related:** [actor-product-model.md](actor-product-model.md), [spoke-adapter-architecture.md](spoke-adapter-architecture.md), [local-db-schema.md](../runtime/local-db-schema.md), [rust-core-service-boundary.md](rust-core-service-boundary.md).
+This page owns Actor holder identity and governance: the stored holder registry (`knowledge_holders`), the holder-to-`KnowledgeEntry` projection, native disclosure policy, reader visibility predicates, import quarantine, and the offline cutover and production-extraction contract. It does not restate the product Actor model (`actor-product-model.md`) or SPOKE wire types (`spoke-adapter-architecture.md`).
 
 ## Current state
 

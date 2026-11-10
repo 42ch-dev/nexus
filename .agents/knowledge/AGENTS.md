@@ -8,11 +8,12 @@ Behavioral rules for the harness **knowledge** tree. **Do not** duplicate file i
 
 ## What belongs where
 
-**Principle:** separate **durable normative truth** (tracked `specs/`) from **cross-cutting policy** (tracked `knowledge/`). Local delivery state is gitignored and is **not** clone SSOT.
+**Principle:** separate current-state truth (`docs/specs/`), decision history (`.agents/adr/`), and reusable experience (`knowledge/`). Local delivery state is gitignored and is **not** clone SSOT.
 
 | Kind of content | Where | Must not |
 | --- | --- | --- |
-| CLI / daemon / ACP / orchestration **behavior contracts** | [`../specs/`](../../docs/specs/) | Live in knowledge root long-term |
+| CLI / daemon / ACP / orchestration **behavior contracts** | [`docs/specs/`](../../docs/specs/) | Live in knowledge root long-term |
+| One decision among real alternatives, with its consequences | [`../adr/`](../adr/) | Restate current state or plan text |
 | Schema ↔ contracts boundary, crate policy | `knowledge/` root | Restate normative command/API detail |
 | Time-boxed delivery, plans, residuals, roadmaps | local process only | Be tracked here or treated as clone SSOT |
 
@@ -22,35 +23,31 @@ End-user docs stay in repo-root `docs/`.
 
 ---
 
-## Specs
+## Specs and ADRs
 
-Normative OSS specs live in **[`../specs/`](../../docs/specs/)**. Rules: [`../specs/AGENTS.md`](../../docs/specs/README.md).
+Current-state specs live in **[`docs/specs/`](../../docs/specs/)**, one page per subject at `<class>/<topic>.md`, latest-only. Rules and the navigation index: [`docs/specs/README.md`](../../docs/specs/README.md). The catalog in `.mstar/store.db` is the registry (`mstar catalog list`).
 
-When implementing runtime behavior, read the rules in [`../specs/AGENTS.md`](../../docs/specs/README.md) plus the lifecycle tree (`specs/active/<class>/`), then the cited spec bodies.
+Decisions live in **[`../adr/`](../adr/)**. Contract: [`../adr/README.md`](../adr/README.md).
 
-**Do not silently diverge** from a cited spec; record change via spec revision or ADR.
+When implementing runtime behavior, read the cited spec body, then the relevant knowledge pattern. **Do not silently diverge** from a cited spec; record the change via spec revision or ADR.
 
 ---
 
-## Archiving superseded knowledge
+## Retiring knowledge and specs
 
-The two tracked trees retire differently — the rules split by directory.
+Both tracked layers describe the latest state; neither keeps version history.
 
-**In `knowledge/`** (indexed tree):
+**Knowledge:** remove a stale or superseded document from tracked `knowledge/` outright — no archive-pointer stubs and no versioned siblings. Fix tracked inbound links, remove its `README.md` rows, and reconcile its catalog row (`superseded`/`archived`, or remove). A local, gitignored comparison copy may be kept outside the tracked tree; it is not clone SSOT.
 
-1. Remove the superseded document from tracked `knowledge/` **entirely** — no archive-pointer stubs. Record the supersession in [`README.md`](README.md): its index rows are validated, so a retired document's row is updated in the same change.
-2. Fix all **tracked** in-repo links in the same change.
-3. Update that README index only — not AGENTS files.
+**Specs:** update in place. When a page no longer describes the current state, delete it or merge it into its successor and record the supersession in that successor's provenance line. Git and ADRs carry history; there is no `archived/` directory in the tracked specs tree. Fix every inbound link and reconcile the catalog row in the same change.
 
-**In `specs/`** (no index — the path is the state): no README row is added or updated. A superseded spec records its supersession in the **merge-target / successor spec's `Supersedes:` provenance line**; a retired record is **frozen** at `archived/{class}/<date>-<topic>.md` and never edited afterwards; a rename or retirement is discovered from **git history**, not from a maintained list.
-
-Do not archive while a crate AGENTS or a shipped spec still treats the path as normative authority.
+Do not retire while a crate `AGENTS.md` or a shipped spec still treats the path as normative authority.
 
 ---
 
 ## OSS local normative SSOT
 
-Platform `v1-spec/local/` was retired in favor of **`specs/` in this repo** (see platform ADR-029). Specs here are authoritative for OSS implementation; platform `v1-spec/` remains authoritative for cloud product and shared ADRs.
+Platform `v1-spec/local/` was retired in favor of **`docs/specs/` in this repo** (see platform ADR-029). Specs here are authoritative for OSS implementation; platform `v1-spec/` remains authoritative for cloud product and shared ADRs.
 
 ---
 

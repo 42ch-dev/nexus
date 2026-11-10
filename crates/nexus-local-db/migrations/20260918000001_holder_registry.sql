@@ -2,7 +2,7 @@
 -- v1.191 P1 Task 3: Actor holder registry and the offline governance cutover.
 -- (14-digit version: sqlx orders numerically and the September rebuilds use
 -- 14-digit versions up to 20260914000001.)
--- Spec: docs/specs/holder-governance.md §§2, 3, 5.
+-- Spec: .mstar/specs/holder-governance.md §§2, 3, 5.
 --
 -- One offline cutover, not dual-write compatibility:
 --   * `knowledge_holders` — one row per stored Creator/Character identity,
