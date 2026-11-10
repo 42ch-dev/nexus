@@ -29,6 +29,7 @@ tags:
 | **Coordinates with** | [orchestration-engine.md](../../active/orchestration/orchestration-engine.md) (current Master: graph-flow + preset SSOT), [canvas-strategy-surface.md](../../active/surfaces/canvas-strategy-surface.md) (Strategy Canvas β), [docs/strategy-authoring.md](../../../../docs/strategy-authoring.md), [STRATEGY.md](../../../../STRATEGY.md) (Harness / Canvas pillars), `dynamic-workflow-and-simulation.md` ([PR #482](https://github.com/42ch-dev/nexus/pull/482) direction brief; path `.mstar/specs/proposed/orchestration/` once merged — **this file is the detailed redesign**) |
 | **Relationship to #482** | `dynamic-workflow-and-simulation.md` ([PR #482](https://github.com/42ch-dev/nexus/pull/482)) states product direction (universal IR, nest/compose, patterns, lifecycle, safety fences). **This document** answers *how* to redesign Canvas + IR so the **current strategy orchestration implementation can be fully retired** after a staged migration — schema, UX, APIs, loader replacement, acceptance criteria. |
 | **Recommended merge / land order** | See §0.1 — merge **#482 before #483**; start implementation only after both are accepted as direction + detailed design (still not implement authority until Draft/Master promotion). |
+| **Boundary vs Work artifacts** | Workflow IR is the SSOT for **strategy orchestration only**. Durable Work-tree output under `Works/<work_ref>/Stories`, `Outlines`, and `Logs` belongs to the sibling **Work Artifact IR** and its read/write ports ([PR #485](https://github.com/42ch-dev/nexus/pull/485); `.mstar/specs/proposed/creator/work-artifact-ir.md`). Those artifacts MUST NOT be folded into this IR. If Simulate would touch a Work artifact port, it MUST stub that port (no real `Works/` writes). |
 
 The key words MUST, MUST NOT, SHOULD, and MAY are RFC 2119 terms for a conforming implementation of this proposal only (if adopted).
 
@@ -184,6 +185,7 @@ Evidence: [canvas-strategy-surface.md](../../active/surfaces/canvas-strategy-sur
 3. **Execution semantics MUST remain single-backend:** the retained graph-flow adapter (`OrchestrationEngine` / `GraphFlowEngine`). This redesign MUST NOT introduce a second orchestration runtime. Simulator MUST reuse the same graph construction rules with dry-run task adapters.
 4. **TypeScript owns Canvas UX only.** Rust owns IR types, validation, simulation, expansion, Apply identity freeze, and execution truth ([STRATEGY.md](../../../../STRATEGY.md) / #482 posture).
 5. **Patterns are first-class packages.** Developers primarily publish patterns; end users nest/compose patterns and drafts on Canvas (and equivalent APIs).
+6. **Work artifacts are out of this IR.** Chapter bodies, outlines, review/quality logs, and other files under `Works/<work_ref>/` are owned by the Work Artifact IR ([PR #485](https://github.com/42ch-dev/nexus/pull/485)). This document MUST NOT absorb that SSOT. Simulator dry-run MUST stub any Work artifact port it would otherwise call.
 
 ### 2.2 What "completely replace" means
 
@@ -479,7 +481,7 @@ All MUST hold on a reference workspace:
 ## 8. Safety invariants
 
 1. **No silent Apply.** Candidate → Approved → Applied transitions MUST be explicit. Auto-apply on generate/compose/validate/simulate MUST NOT exist.
-2. **Simulation stubs.** During Simulate, `write_candidate` and `external` capabilities MUST be stubbed or recorded only — never World-settling commits, never cloud sync.
+2. **Simulation stubs.** During Simulate, `write_candidate` and `external` capabilities MUST be stubbed or recorded only — never World-settling commits, never cloud sync, and never a live write through a Work Artifact port (`Works/` tree; [PR #485](https://github.com/42ch-dev/nexus/pull/485)).
 3. **Nested effect rollup.** Child effect classes MUST bubble to parent `effect_summary` (lattice join). Approve UI MUST show the rolled-up fence.
 4. **Source freeze.** After Apply, recovery MUST refuse missing/changed IR bytes or pattern pin hashes (same spirit as orchestration-engine §15.6).
 5. **Complementary human gates.** Approve gates *graph adoption*; `WaitingForInput` gates *run continuation*. Neither replaces the other.
@@ -505,6 +507,7 @@ All MUST hold on a reference workspace:
 - Guaranteeing LLM generation quality parity across providers.
 - Exactly-once external side effects in simulation or historical repair beyond engine §15 non-goals.
 - Replacing Outline / Timeline / World KB canvas surfaces (Strategy surface only).
+- Owning Work-tree artifacts (`Works/<work_ref>/Stories`, `Outlines`, `Logs`, and sibling profiles). That SSOT is the Work Artifact IR ([PR #485](https://github.com/42ch-dev/nexus/pull/485)), not this Workflow IR.
 - Actor/Viewpoint preset IR (explicitly out of scope in engine §15.7).
 - Implementing this Exploration without a later Draft/Master promotion.
 
@@ -518,6 +521,7 @@ All MUST hold on a reference workspace:
 - [docs/strategy-authoring.md](../../../../docs/strategy-authoring.md) — bundle layout, validator, patch CAS
 - [STRATEGY.md](../../../../STRATEGY.md) — Harness / Canvas pillars
 - `dynamic-workflow-and-simulation.md` ([PR #482](https://github.com/42ch-dev/nexus/pull/482)) — direction brief; this doc is the detailed redesign companion
+- Work Artifact IR ([PR #485](https://github.com/42ch-dev/nexus/pull/485); `.mstar/specs/proposed/creator/work-artifact-ir.md`) — sibling Exploration for Work output SSOT and read/write ports; not part of this IR
 - `crates/nexus-contracts/src/local/orchestration/preset.rs` — `PresetManifest` SSOT types today
 - `crates/nexus-preset/src/{loader,source_identity,validation}.rs` — load + content hash
 - `apps/web/src/lib/canvas/{strategy-graph.ts,use-strategy-data.ts}` + `components/canvas/strategy-canvas/*` — YAML projection + patches
