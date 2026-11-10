@@ -253,9 +253,10 @@ impl AcpProvider {
         // sequence (A5): dropping a plain Child is not an awaited process-tree
         // reap. `child` stays borrowed during the handshake for EOF watch and
         // is consumed into `ManagedAcpProcess` only on success or teardown.
-        // I-000320: set by this function's own `wait()` arms — a leader exit
-        // OBSERVED here makes the typed `launch_failed` classification
-        // authoritative for the teardown that follows.
+        // I-000320: set by this function's own `wait()` arms or discovered at
+        // teardown entry (`poll_exit`) — a leader exit OBSERVED by either
+        // makes the typed `launch_failed` classification authoritative for
+        // the teardown that follows.
         let mut exit_observed = false;
         let session_result: HostResult<NexusSessionCreated> = async {
             // The SDK connection is established asynchronously by
@@ -378,13 +379,13 @@ impl AcpProvider {
                 {
                     Ok(()) => return Err(error),
                     // I-000320: the leader's exit was already observed by a
-                    // `wait()` arm above, so the typed launch classification
-                    // is authoritative. A reap failure on the already-dead
-                    // process must not upgrade `launch_failed` into
-                    // `cleanup_unconfirmed` (a confirmed-exit launch failure
-                    // is not an unconfirmed-cleanup state); the cleanup
-                    // uncertainty is still reported here, without replacing
-                    // the category.
+                    // `wait()` arm above or discovered at teardown entry, so
+                    // the typed launch classification is authoritative. A
+                    // reap failure on the already-dead process must not
+                    // upgrade `launch_failed` into `cleanup_unconfirmed` (a
+                    // confirmed-exit launch failure is not an
+                    // unconfirmed-cleanup state); the cleanup uncertainty is
+                    // still reported here, without replacing the category.
                     Err(reap_err) if exit_observed => {
                         tracing::warn!(
                             provider_id = %self.provider_id,

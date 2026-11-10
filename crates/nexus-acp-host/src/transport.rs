@@ -1490,17 +1490,24 @@ mod tests {
     /// confirmed cleanup, never "signal refused" — the CI-observed macOS
     /// launch-failure misclassification route: `id()` is still `Some` (tokio
     /// reports `None` only after reaping) and the birth-token check cannot
-    /// read a zombie's start time. The zombie state is reached
-    /// deterministically: SIGKILL, then stdout EOF (only the child holds the
-    /// pipe write end) proves exit while tokio still owns the unreaped
-    /// zombie.
+    /// prove the leader's identity. The exit-state barrier polls the kernel's
+    /// zombie state (`ps -o state=` leading `Z` — exactly when the exit
+    /// status is waitable for the parent) with `yield_now` between checks;
+    /// the timeout turns a wrong assumption into a failed test instead of a
+    /// hang. sysinfo cannot be used for this on macOS: its backend drops
+    /// zombies entirely (`get_bsd_info` fails, so the process is removed
+    /// from the map), which is the same platform quirk the birth-token
+    /// check trips over.
+    ///
+    /// The token is then overwritten with an impossible start tick so the
+    /// identity check fails on every platform (Linux can still read a
+    /// zombie's start time, macOS cannot): the pre-fix signalling path must
+    /// refuse — and the fixed reap-on-sight path must confirm — on both.
     #[cfg(unix)]
     #[tokio::test]
     async fn terminate_confirms_leader_already_exited_at_teardown() {
-        use tokio::io::AsyncReadExt;
-
         let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
-        let (child, _stdin, mut stdout) = spawner
+        let (child, _stdin, _stdout) = spawner
             .spawn("/bin/sleep", &["300"])
             .expect("spawn grouped sleep fixture");
         let leader = child.id().expect("owned child pid");
@@ -1515,16 +1522,53 @@ mod tests {
 
         nix::sys::signal::kill(leader_pid, nix::sys::signal::Signal::SIGKILL)
             .expect("SIGKILL the owned child");
-        let mut buf = [0u8; 1];
-        let read = stdout.read(&mut buf).await.expect("read stdout to EOF");
-        assert_eq!(read, 0, "EOF proves the leader exited without a reap");
+
+        // Exact exit-state barrier: leading `Z` in `ps -o state=` means the
+        // kernel has made the exit status waitable (zombie) while nobody has
+        // reaped it, so tokio still owns the zombie below.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !leader_state_is_zombie(leader) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("leader must reach the unreaped zombie state");
         assert!(
             proc.pid().is_some(),
             "the leader is dead but tokio has not reaped it yet"
+        );
+        assert!(
+            proc.birth().is_some(),
+            "the spawn-time birth token must have been captured"
+        );
+        // Deliberate: identity can no longer be proven, on every platform, so
+        // the pre-fix signalling path must refuse regardless of whether the
+        // OS still reports a zombie's start time (Linux can, macOS cannot).
+        proc.birth = Some(ProcessBirthToken {
+            pid: leader,
+            start_tick: u64::MAX,
+        });
+        assert!(
+            !proc.birth.as_ref().expect("token").verify(),
+            "precondition: the birth token must be unverifiable"
         );
 
         proc.terminate(Duration::from_secs(5))
             .await
             .expect("teardown of an already-exited leader must be confirmed cleanup");
+    }
+
+    /// `true` while `pid` exists in the kernel's zombie state (exit status
+    /// waitable, not yet reaped); `false` while still alive/dying or gone.
+    fn leader_state_is_zombie(pid: u32) -> bool {
+        std::process::Command::new("ps")
+            .args(["-o", "state=", "-p", &pid.to_string()])
+            .output()
+            .is_ok_and(|output| {
+                output.status.success()
+                    && String::from_utf8_lossy(&output.stdout)
+                        .trim()
+                        .starts_with('Z')
+            })
     }
 }
