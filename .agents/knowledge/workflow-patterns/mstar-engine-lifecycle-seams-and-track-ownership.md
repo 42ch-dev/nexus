@@ -131,3 +131,16 @@ violation at a time, so the full shape is worth having in one place:
   SHAs, an absolute outfile, and an existing `context.json` (`mstar sdd workspace` creates
   the dir but not the file — write the five-field context.json by hand when a hand-built
   SDD root lacks it).
+
+## Main-worktree residency is the recorded `branch.base`
+
+`mstar worktree check --workflow <id> --entry` compares the primary checkout's attached
+branch with the workflow's recorded `branch.base`. There is no separate residency field,
+and an explicit `--main-branch` does not override the recorded expectation. When another
+RUNNING workflow occupies the primary checkout on its own branch, a new iteration must
+record that branch as `branch.base` (its integration branch is then cut from it) or wait
+for the other workflow to close; the engine never switches the primary checkout. Restore
+the intended base through `mstar workflow delivery-anchors --branch-base <branch>` once
+the primary checkout moves back, and reset/rebuild the integration branch to match. A
+mismatch surfaces as `worktree.main.residency-switched` and blocks Phase 2 entry even
+when every other anchor is correct.
