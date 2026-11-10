@@ -2,7 +2,7 @@
 //! freshly-extracted candidate set.
 //!
 //! V1.50 T-B P2 (plan `2026-06-18-v1.50-kb-refreshable-scan` §5 T3; compass
-//! §0.1 decision 7). The `creator kb rescan` CLI re-runs the review-time
+//! §0.1 decision 7). The `creator world kb rescan` CLI re-runs the review-time
 //! heuristic over the current chapter text and calls into this module to keep
 //! confirmed `KnowledgeEntryRecord` rows in sync with their source chapter.
 //!

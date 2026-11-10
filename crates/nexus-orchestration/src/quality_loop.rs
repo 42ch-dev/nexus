@@ -351,7 +351,7 @@ pub struct AggregatedCandidate {
 /// candidate's payload is the merge base.
 ///
 /// No I/O — unit-testable hermetically. Used by the work-scoped
-/// `creator kb rescan --work <ref>` CLI path (V1.51 T-A P1).
+/// `creator world kb rescan --work <ref>` CLI path (V1.51 T-A P1).
 #[must_use]
 pub fn aggregate_candidates_by_canonical_name(
     per_chapter: &[(i32, Vec<KbCandidate>)],
