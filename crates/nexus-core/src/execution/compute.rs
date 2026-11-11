@@ -683,6 +683,7 @@ pub async fn accept_compute_run(
     let mut tx = pool.begin().await.map_err(|e| CoreError::Internal {
         category: format!("begin transaction: {e}"),
     })?;
+    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
 
     let accepted_at = chrono::Utc::now().to_rfc3339();
 
@@ -697,7 +698,7 @@ pub async fn accept_compute_run(
     .map_err(map_delta_error)?;
 
     let new_entries_created =
-        create_key_blocks_in_tx(&mut tx, &run.world_id, &output.new_key_blocks).await?;
+        create_key_blocks_in_tx(&kb_store, &mut tx, &run.world_id, &output.new_key_blocks).await?;
 
     let provenance = serde_json::to_string(&json!({
         "compute": {
@@ -1602,6 +1603,7 @@ fn map_delta_error(e: nexus_orchestration::capability::CapabilityError) -> CoreE
 /// The lane is World-owned only: a block naming another world (or carrying a
 /// non-World owner) refuses the whole accept.
 async fn create_key_blocks_in_tx(
+    kb_store: &nexus_local_db::kb_store::SqliteKbStore,
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     world_id: &str,
     blocks: &[serde_json::Map<String, Value>],
@@ -1632,45 +1634,16 @@ async fn create_key_blocks_in_tx(
             ));
         }
 
-        let block_type_str = serde_json::to_string(&kb.block_type).unwrap_or_default();
-        let block_type_str = block_type_str.trim_matches('"');
-        let body_json = kb
-            .body
-            .as_ref()
-            .map(|b| serde_json::to_string(b).unwrap_or_default());
-        let source_anchor_json = kb
-            .source_anchor
-            .as_ref()
-            .map(|a| serde_json::to_string(a).unwrap_or_default());
-        let now = chrono::Utc::now().to_rfc3339();
-
-        // The lane is World-owned only (world_id param), so owner_kind='world'
-        // and the non-World owner columns are NULL. The native governance
-        // columns are left at their shared defaults (NULL/NULL): v1.191 P1 T3
-        // removed the legacy `creator_only` column from `kb_key_blocks`, and
-        // compute output never assigns a holder or disclosure (authoring
-        // admission owns that).
-        sqlx::query(
-            "INSERT INTO kb_key_blocks \
-             (key_block_id, owner_kind, world_id, character_id, \
-              actor_world_binding_id, block_type, canonical_name, status, \
-              body_json, source_anchor_json, created_at, updated_at) \
-             VALUES (?, 'world', ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&kb.entry_id)
-        .bind(world_id)
-        .bind(block_type_str)
-        .bind(&kb.canonical_name)
-        .bind(&kb.status)
-        .bind(&body_json)
-        .bind(&source_anchor_json)
-        .bind(&now)
-        .bind(&now)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| CoreError::Internal {
-            category: format!("insert new_key_block '{}': {e}", kb.entry_id),
-        })?;
+        // The store primitive keeps the insert inside the caller's accept
+        // transaction and populates `extensions_nexus_json` with the World
+        // owner carrier; governance columns stay at shared defaults since
+        // compute output never assigns a holder or disclosure.
+        kb_store
+            .insert_key_block_in_tx(&mut *tx, kb)
+            .await
+            .map_err(|e| CoreError::Internal {
+                category: format!("insert new_key_block: {e}"),
+            })?;
 
         created += 1;
     }
