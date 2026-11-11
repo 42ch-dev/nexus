@@ -8,18 +8,25 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use nexus_home_layout::active_context::{read_active_creator_id, try_active_workspace_slug};
+use nexus_home_layout::active_context::{
+    read_active_creator_id, workspace_slug_selection, WorkspaceSlugSelection,
+};
 use nexus_local_db::works;
 use sqlx::SqlitePool;
 
 use crate::content::{create_parent_dirs, fsync_write_atomic, WorkLock};
 use crate::error::CoreError as NexusApiError;
+use crate::slug::validate_slug_name;
 
 /// A raw tool path classified against the `Works/<work_ref>/` shape.
 #[derive(Debug)]
 pub(crate) enum WorkPath<'a> {
     /// Not under `Works/` — the caller keeps its existing guarded write.
     NonWork,
+    /// A case variant of `Works` (`works/…`, `WORKS/…`): the port writes the
+    /// literal `Works` tree and the read path never classifies, so a different
+    /// spelling is refused instead of routed.
+    CaseVariantWorks,
     /// `Works/<work_ref>/<child…>`: a writable Work artifact.
     Artifact {
         /// The Work directory name (or Work id) the path names.
@@ -42,18 +49,26 @@ pub(crate) enum WorkPath<'a> {
 /// Classify a raw tool path against the `Works/<work_ref>/` shape.
 ///
 /// Decided on the raw string, before any I/O: the first component must be
-/// `Works`, and the artifact remainder must be non-empty and `..`-free. A
-/// lexical prefix check alone would accept `Works/<ref>/../x.md`, so
-/// classification itself rejects `..`.
+/// `Works` byte-exactly, and the artifact remainder must be non-empty and
+/// `..`-free. A lexical prefix check alone would accept `Works/<ref>/../x.md`,
+/// so classification itself rejects `..`.
 ///
-/// The first component matches case-insensitively on purpose: on a
-/// case-insensitive filesystem `works/…` names the same tree, so it is routed
-/// through this port (and its boundary check) instead of a caller's raw write.
+/// A case-variant first component is refused rather than routed: this port's
+/// target is built with the literal `Works`, and the read path does not
+/// classify at all. Routing `works/…` would write a *different* tree on a
+/// case-sensitive filesystem while reaching the same tree — bypassing this
+/// port's lock and durability path — on a case-insensitive one.
 #[must_use]
 pub(crate) fn classify_work_path(path: &str) -> WorkPath<'_> {
     let mut components = Path::new(path).components();
-    match components.next() {
-        Some(Component::Normal(first)) if first.eq_ignore_ascii_case("Works") => {}
+    let Some(Component::Normal(first)) = components.next() else {
+        return WorkPath::NonWork;
+    };
+    match first.to_str() {
+        Some("Works") => {}
+        Some(other) if other.eq_ignore_ascii_case("Works") => {
+            return WorkPath::CaseVariantWorks;
+        }
         _ => return WorkPath::NonWork,
     }
     let Some(second) = components.next() else {
@@ -235,12 +250,25 @@ impl WorkArtifactPort for FsWorkArtifactPort {
                         .to_string(),
             });
         };
-        let Some(workspace_slug) = try_active_workspace_slug(&self.nexus_home, &creator_id) else {
-            return Err(NexusApiError::Forbidden {
-                resource:
-                    "tool_execution: active workspace required to write Works/<work_ref>/ artifacts"
-                        .to_string(),
-            });
+        // A creator registered without `workspace use` records no slug; the
+        // rest of the process resolves that same config to the default
+        // partition (`workspace_slug_for_creator`), so the port must agree
+        // instead of refusing the creator's own Work. A recorded value that
+        // names no partition is an explicit (broken) selection: refuse rather
+        // than silently act on the default one the user never chose.
+        let workspace_slug = match workspace_slug_selection(&self.nexus_home, &creator_id) {
+            WorkspaceSlugSelection::Unselected(default_slug) => default_slug,
+            WorkspaceSlugSelection::Recorded(slug) => {
+                if let Err(reason) = validate_slug_name(&slug) {
+                    return Err(NexusApiError::Forbidden {
+                        resource: format!(
+                            "tool_execution: active workspace required to write \
+                             Works/<work_ref>/ artifacts: recorded workspace '{slug}' {reason}"
+                        ),
+                    });
+                }
+                slug
+            }
         };
         let work_id = works::resolve_work_id_by_ref_or_id(
             &self.pool,
@@ -419,17 +447,16 @@ mod tests {
             classify_work_path("/Works/demo/x.md"),
             WorkPath::NonWork
         ));
-        // Case-variant `Works` is routed through the port, never a raw write.
-        match classify_work_path("works/demo/x.md") {
-            WorkPath::Artifact {
-                work_ref,
-                rel_child,
-            } => {
-                assert_eq!(work_ref, "demo");
-                assert_eq!(rel_child, Path::new("x.md"));
-            }
-            other => panic!("expected an artifact for a case-variant Works, got {other:?}"),
-        }
+        // A case-variant `Works` is refused, never routed: the port writes the
+        // literal `Works` tree and the read path does not classify.
+        assert!(matches!(
+            classify_work_path("works/demo/x.md"),
+            WorkPath::CaseVariantWorks
+        ));
+        assert!(matches!(
+            classify_work_path("WORKS/demo/x.md"),
+            WorkPath::CaseVariantWorks
+        ));
         assert!(matches!(
             classify_work_path("Works/demo"),
             WorkPath::WorkRoot { work_ref: "demo" }
@@ -501,23 +528,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn commit_refuses_without_an_active_workspace() {
-        // The seeded Work lives in the `default` partition: a silent fallback
-        // would accept this write even though the user selected no workspace.
-        for active_slug in [None, Some("")] {
-            let fixture = fixture_selecting_workspace(true, active_slug).await;
+    async fn commit_refuses_an_unusable_recorded_workspace_selection() {
+        // A recorded value that names no partition is the user's explicit
+        // (broken) selection: the port refuses rather than acting on the
+        // default partition they never chose.
+        for active_slug in ["", ".."] {
+            let fixture = fixture_selecting_workspace(true, Some(active_slug)).await;
 
             let error = fixture
                 .port
                 .commit(write(&fixture, Path::new("Stories/ch1.md"), "body"))
                 .await
-                .expect_err("no active workspace refuses");
+                .expect_err("an unusable recorded selection refuses");
 
             match error {
                 NexusApiError::Forbidden { resource } => {
                     assert!(resource.contains("active workspace required"), "{resource}");
                 }
-                other => panic!("expected Forbidden, got {other:?}"),
+                other => panic!("expected Forbidden for {active_slug:?}, got {other:?}"),
             }
             assert!(
                 !fixture.workspace.path().join("Works").exists(),
@@ -529,6 +557,32 @@ mod tests {
                 "no lock was taken for the refused Work"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn commit_writes_without_a_recorded_workspace_selection() {
+        // A creator registered without `workspace use` records no slug. The
+        // rest of the process resolves that same config to the default
+        // partition (`workspace_slug_for_creator`), so the port must agree
+        // instead of refusing the creator's own Work.
+        let fixture = fixture_selecting_workspace(true, None).await;
+
+        fixture
+            .port
+            .commit(write(
+                &fixture,
+                Path::new("Stories/ch1.md"),
+                "# Chapter 1\n",
+            ))
+            .await
+            .expect("no recorded selection falls back to the default partition");
+
+        assert_eq!(
+            std::fs::read_to_string(fixture.workspace.path().join("Works/demo/Stories/ch1.md"))
+                .expect("read"),
+            "# Chapter 1\n"
+        );
+        assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
     }
 
     #[tokio::test]

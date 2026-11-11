@@ -934,6 +934,13 @@ async fn execute_write_file(
                 resource: format!("file: path '{path_str}' escapes the Works/{work_ref}/ boundary"),
             });
         }
+        WorkPath::CaseVariantWorks => {
+            return Err(NexusApiError::Forbidden {
+                resource: format!(
+                    "file: path '{path_str}' must spell the Work root 'Works' byte-exactly; the read path does not classify, so a case variant cannot be written consistently"
+                ),
+            });
+        }
         WorkPath::NonWork => {
             let write_result = tokio::task::spawn_blocking(move || {
                 if let Some(parent) = resolved.parent() {
@@ -4208,7 +4215,8 @@ mod tests {
         let workspace = tempfile::tempdir().expect("temp workspace");
         std::fs::write(
             home.path().join("config.toml"),
-            // The Work artifact port requires an explicit workspace selection.
+            // The Work artifact port resolves the workspace partition through
+            // this selection (or the process default when none is recorded).
             format!(
                 "active_creator_id = \"{CREATOR}\"\n\
                  active_workspace_slug_by_creator = {{ {CREATOR} = \"default\" }}\n"
@@ -4386,6 +4394,12 @@ mod tests {
             (
                 format!("Works/{WORK_REF}/../plain.md"),
                 "escapes the Works/demo/ boundary",
+            ),
+            // A case variant is not the `Works` tree this port writes, and the
+            // read path does not classify: refuse so write and read agree.
+            (
+                format!("works/{WORK_REF}/Stories/ch1.md"),
+                "must spell the Work root 'Works' byte-exactly",
             ),
         ] {
             let error = execute_write_file(&write_request(&path, "body"), &fixture.context)
