@@ -83,6 +83,9 @@ pub mod state_provider;
 // with the `test-hooks` feature, exactly as in the daemon before the move.
 #[cfg(any(test, feature = "test-hooks"))]
 pub mod test_hooks;
+// v1.234 P0+P1 (ADR #485 §4.4): the single byte-write port for Work artifacts;
+// `fs/write_text_file` commits every `Works/<work_ref>/…` path through it.
+pub mod work_artifact;
 pub mod workflow;
 pub mod workspace;
 

@@ -24,10 +24,28 @@ pub fn cli_holder(caller_info: &str) -> String {
     format!("cli:{caller_info}:{}", uuid::Uuid::new_v4())
 }
 
+/// Holder prefix of a daemon auto-chain schedule: `daemon:schedule:`.
+pub const SCHEDULE_HOLDER_PREFIX: &str = "daemon:schedule:";
+
 /// Build a daemon-format holder string: `daemon:schedule:<schedule_id>`.
 #[must_use]
 pub fn schedule_holder(schedule_id: &str) -> String {
-    format!("daemon:schedule:{schedule_id}")
+    format!("{SCHEDULE_HOLDER_PREFIX}{schedule_id}")
+}
+
+/// Read the Work's current runtime-lock holder, if any.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn current_holder(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+) -> Result<Option<String>, LocalDbError> {
+    Ok(get_work(pool, creator_id, work_id)
+        .await?
+        .and_then(|work| work.runtime_lock_holder))
 }
 
 /// Result of a lock acquisition attempt.
@@ -50,8 +68,12 @@ pub enum AcquireResult {
 /// Attempt to acquire the runtime lock for a Work.
 ///
 /// If the Work is already locked, returns `AcquireResult::Locked`.
-/// If `force_stale` is true and the lock is older than `ttl_secs`,
-/// the stale lock is cleared first and re-acquired.
+/// Acquisition is one conditional `UPDATE` predicated on the holder *and*
+/// acquisition timestamp this attempt observed, so its affected-row count elects
+/// exactly one winner among concurrent callers — including contenders that share
+/// one holder string, whose takeover still refreshes the timestamp.
+/// If `force_stale` is true and the lock is older than `ttl_secs`, the stale
+/// holder is taken over by that same election.
 ///
 /// # Errors
 ///
@@ -64,49 +86,88 @@ pub async fn acquire_runtime_lock(
     ttl_secs: i64,
     force_stale: bool,
 ) -> Result<AcquireResult, LocalDbError> {
-    let work = get_work(pool, creator_id, work_id).await?.ok_or_else(|| {
-        LocalDbError::MissingVersionKey {
-            key: format!("works/{work_id}"),
-        }
-    })?;
+    // Each iteration either wins the election, or observes a holder that a
+    // rival wrote and reports it as `Locked`.
+    loop {
+        let work = get_work(pool, creator_id, work_id).await?.ok_or_else(|| {
+            LocalDbError::MissingVersionKey {
+                key: format!("works/{work_id}"),
+            }
+        })?;
 
-    if let Some(ref existing) = work.runtime_lock_holder {
-        // Lock is present. Check if we should force-clear a stale one.
-        if force_stale && is_lock_stale(&work, ttl_secs) {
-            tracing::info!(
-                work_id = %work_id,
-                old_holder = %existing,
-                new_holder = %holder,
-                ttl_secs = ttl_secs,
-                "runtime_lock: clearing stale holder"
-            );
-        } else {
-            return Ok(AcquireResult::Locked {
-                holder: existing.clone(),
-                acquired_at: work.runtime_lock_acquired_at.clone(),
+        if let Some(existing) = &work.runtime_lock_holder {
+            // Lock is present. Check if we should force-clear a stale one.
+            if force_stale && is_lock_stale(&work, ttl_secs) {
+                tracing::info!(
+                    work_id = %work_id,
+                    old_holder = %existing,
+                    new_holder = %holder,
+                    ttl_secs = ttl_secs,
+                    "runtime_lock: clearing stale holder"
+                );
+            } else {
+                return Ok(AcquireResult::Locked {
+                    holder: existing.clone(),
+                    acquired_at: work.runtime_lock_acquired_at.clone(),
+                });
+            }
+        }
+
+        let elected = elect_runtime_lock(
+            pool,
+            creator_id,
+            work_id,
+            holder,
+            work.runtime_lock_holder.as_deref(),
+            work.runtime_lock_acquired_at.as_deref(),
+        )
+        .await?;
+        if elected {
+            return Ok(AcquireResult::Acquired {
+                holder: holder.to_string(),
             });
         }
+        // Lost the election: loop to report the winner (or re-elect if the
+        // holder changed again).
     }
+}
 
+/// One compare-and-swap election against the lock state this attempt observed.
+///
+/// Returns `true` when this attempt owns the row it updated.
+async fn elect_runtime_lock(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    holder: &str,
+    observed_holder: Option<&str>,
+    observed_acquired_at: Option<&str>,
+) -> Result<bool, LocalDbError> {
     let now = chrono::Utc::now().to_rfc3339();
     // SAFETY: Dynamic SQL required for conditional lock acquire.
-    // All values are bound parameters.
+    // All values are bound parameters. `IS` matches NULL like `=`, so the
+    // observed pair turns the update into a compare-and-swap: a rival that
+    // wrote between our read and update leaves zero affected rows. `acquired_at`
+    // is part of the predicate because the daemon reuses one schedule holder
+    // string, so a takeover that refreshed only the timestamp would otherwise
+    // leave a rival's stale observation matching.
     let sql =
         "UPDATE works SET runtime_lock_holder = ?, runtime_lock_acquired_at = ?, updated_at = ? \
-               WHERE work_id = ? AND creator_id = ?";
-    sqlx::query(sql)
+               WHERE work_id = ? AND creator_id = ? \
+                 AND ((runtime_lock_holder IS NULL AND runtime_lock_acquired_at IS NULL) \
+                   OR (runtime_lock_holder IS ? AND runtime_lock_acquired_at IS ?))";
+    let result = sqlx::query(sql)
         .bind(holder)
         .bind(&now)
         .bind(&now)
         .bind(work_id)
         .bind(creator_id)
+        .bind(observed_holder)
+        .bind(observed_acquired_at)
         .execute(pool)
         .await
         .map_err(LocalDbError::from)?;
-
-    Ok(AcquireResult::Acquired {
-        holder: holder.to_string(),
-    })
+    Ok(result.rows_affected() == 1)
 }
 
 /// Release the runtime lock for a Work.
@@ -445,6 +506,185 @@ mod tests {
     fn test_schedule_holder_format() {
         let holder = schedule_holder("ACH20260611120000123");
         assert_eq!(holder, "daemon:schedule:ACH20260611120000123");
+    }
+
+    /// Two contenders start their acquire together on one barrier.
+    async fn race(
+        pool: &SqlitePool,
+        work_id: &str,
+        force_stale: bool,
+    ) -> Vec<(String, AcquireResult)> {
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+        let mut tasks = Vec::new();
+        for slot in 0..2 {
+            let pool = pool.clone();
+            let barrier = barrier.clone();
+            let work_id = work_id.to_string();
+            let holder = cli_holder(&format!("racer_{slot}"));
+            tasks.push(tokio::spawn(async move {
+                barrier.wait().await;
+                let result =
+                    acquire_runtime_lock(&pool, "ctr_test", &work_id, &holder, 7200, force_stale)
+                        .await
+                        .unwrap();
+                (holder, result)
+            }));
+        }
+        let mut results = Vec::new();
+        for task in tasks {
+            results.push(task.await.unwrap());
+        }
+        results
+    }
+
+    /// Exactly one contender acquired, every loser names that holder, and only
+    /// the winner's holder is persisted.
+    async fn assert_one_winner(
+        pool: &SqlitePool,
+        work_id: &str,
+        results: &[(String, AcquireResult)],
+    ) {
+        let winners: Vec<&String> = results
+            .iter()
+            .filter_map(|(holder, result)| match result {
+                AcquireResult::Acquired { .. } => Some(holder),
+                AcquireResult::Locked { .. } => None,
+            })
+            .collect();
+        assert_eq!(winners.len(), 1, "exactly one winner: {results:?}");
+        let winner = winners[0];
+        for (_, result) in results {
+            if let AcquireResult::Locked { holder, .. } = result {
+                assert_eq!(holder, winner, "the loser reports the winner");
+            }
+        }
+        let work = works::get_work(pool, "ctr_test", work_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            work.runtime_lock_holder.as_ref(),
+            Some(winner),
+            "only the winner's holder is persisted"
+        );
+    }
+
+    /// A read-then-unconditional-update acquire lets both contenders win; the
+    /// conditional election must leave exactly one `Acquired` and one `Locked`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_simultaneous_acquire_elects_exactly_one_winner() {
+        let (pool, _dir) = fresh_pool().await;
+
+        for round in 0..8 {
+            let work_id = format!("wrk_race_{round}");
+            works::create_work(&pool, &sample_work(&work_id))
+                .await
+                .unwrap();
+            let results = race(&pool, &work_id, false).await;
+            assert_one_winner(&pool, &work_id, &results).await;
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_simultaneous_stale_takeover_elects_exactly_one_winner() {
+        let (pool, _dir) = fresh_pool().await;
+
+        for round in 0..4 {
+            let work_id = format!("wrk_race_stale_{round}");
+            works::create_work(&pool, &sample_work(&work_id))
+                .await
+                .unwrap();
+            let stale = cli_holder("stale_owner");
+            acquire_runtime_lock(&pool, "ctr_test", &work_id, &stale, 7200, false)
+                .await
+                .unwrap();
+            let three_hours_ago = (chrono::Utc::now() - chrono::Duration::hours(3)).to_rfc3339();
+            works::patch_work(
+                &pool,
+                "ctr_test",
+                &work_id,
+                &works::WorkPatch {
+                    runtime_lock_acquired_at: Some(Some(three_hours_ago)),
+                    ..Default::default()
+                },
+                &chrono::Utc::now().to_rfc3339(),
+            )
+            .await
+            .unwrap();
+
+            let results = race(&pool, &work_id, true).await;
+            assert_one_winner(&pool, &work_id, &results).await;
+        }
+    }
+
+    /// The daemon schedule caller reuses one deterministic holder string, so a
+    /// stale takeover must also pin the observed acquisition timestamp: after the
+    /// first contender refreshes it, the second contender's stale snapshot is no
+    /// longer current even though the holder text is unchanged.
+    #[tokio::test]
+    async fn test_same_holder_stale_takeover_elects_exactly_one_winner() {
+        let (pool, _dir) = fresh_pool().await;
+        let work_id = "wrk_race_stale_same_holder";
+        works::create_work(&pool, &sample_work(work_id))
+            .await
+            .unwrap();
+
+        let holder = schedule_holder("SCH20260611120000");
+        acquire_runtime_lock(&pool, "ctr_test", work_id, &holder, 7200, false)
+            .await
+            .unwrap();
+        let three_hours_ago = (chrono::Utc::now() - chrono::Duration::hours(3)).to_rfc3339();
+        works::patch_work(
+            &pool,
+            "ctr_test",
+            work_id,
+            &works::WorkPatch {
+                runtime_lock_acquired_at: Some(Some(three_hours_ago)),
+                ..Default::default()
+            },
+            &chrono::Utc::now().to_rfc3339(),
+        )
+        .await
+        .unwrap();
+
+        // Both contenders observe the same stale epoch before either updates.
+        let observed = works::get_work(&pool, "ctr_test", work_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(is_lock_stale(&observed, 7200), "seed row must be stale");
+        let stale_holder = observed.runtime_lock_holder.as_deref();
+        let stale_at = observed.runtime_lock_acquired_at.as_deref();
+
+        let first = elect_runtime_lock(&pool, "ctr_test", work_id, &holder, stale_holder, stale_at)
+            .await
+            .unwrap();
+        let second =
+            elect_runtime_lock(&pool, "ctr_test", work_id, &holder, stale_holder, stale_at)
+                .await
+                .unwrap();
+        assert_eq!(
+            usize::from(first) + usize::from(second),
+            1,
+            "same-holder stale takeover elects exactly one winner"
+        );
+
+        let after = works::get_work(&pool, "ctr_test", work_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.runtime_lock_holder.as_deref(), Some(holder.as_str()));
+        assert_ne!(
+            after.runtime_lock_acquired_at.as_deref(),
+            stale_at,
+            "the takeover refreshed the ownership epoch"
+        );
+
+        // A late same-holder contender that re-reads now sees a fresh lock.
+        let late = acquire_runtime_lock(&pool, "ctr_test", work_id, &holder, 7200, true)
+            .await
+            .unwrap();
+        assert!(matches!(late, AcquireResult::Locked { .. }));
     }
 
     #[tokio::test]

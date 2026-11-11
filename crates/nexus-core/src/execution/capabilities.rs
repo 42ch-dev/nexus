@@ -46,6 +46,9 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::too_many_lines)]
 
+use super::work_artifact::{
+    classify_work_path, FsWorkArtifactPort, WorkArtifactPort, WorkArtifactWrite, WorkPath,
+};
 use crate::content::resolve_guarded_path_async;
 use crate::error::{CoreError, CoreResult};
 // The handlers below were extracted from the daemon, where the refusal type is
@@ -799,6 +802,47 @@ async fn execute_context_assemble(
 
 // ─── fs/* Baseline handlers (V1.33, unchanged behavior) ───────────────────
 
+// Refusals shared by the read and write halves of `fs/*`: both halves judge the
+// same classification and answer from these, so the two cannot disagree.
+
+/// A case-variant `Works` spelling: neither half routes it.
+fn case_variant_works_refusal(path_str: &str) -> NexusApiError {
+    NexusApiError::Forbidden {
+        resource: format!("file: path '{path_str}' must spell the Work root 'Works' byte-exactly"),
+    }
+}
+
+/// `Works/<work_ref>` itself: a directory, never a readable or writable file.
+fn work_root_refusal(path_str: &str, work_ref: &str) -> NexusApiError {
+    NexusApiError::Forbidden {
+        resource: format!(
+            "file: path '{path_str}' is the Work root directory 'Works/{work_ref}', not an artifact file"
+        ),
+    }
+}
+
+/// A `..` inside the Work subtree: lexically inside, physically not.
+fn escaped_work_refusal(path_str: &str, work_ref: &str) -> NexusApiError {
+    NexusApiError::Forbidden {
+        resource: format!("file: path '{path_str}' escapes the Works/{work_ref}/ boundary"),
+    }
+}
+
+/// Classify the raw path and refuse the three never-routed Work spellings.
+///
+/// Both halves call this before the path guard, so a spelling is judged the
+/// same way whether the target exists, is missing, or resolves through a
+/// symlink: the guard's canonicalization never gets to answer first.
+fn classify_and_refuse_work_path(path_str: &str) -> Result<WorkPath<'_>, NexusApiError> {
+    let work_path = classify_work_path(path_str);
+    match &work_path {
+        WorkPath::WorkRoot { work_ref } => Err(work_root_refusal(path_str, work_ref)),
+        WorkPath::EscapedWork { work_ref } => Err(escaped_work_refusal(path_str, work_ref)),
+        WorkPath::CaseVariantWorks => Err(case_variant_works_refusal(path_str)),
+        WorkPath::Artifact { .. } | WorkPath::NonWork => Ok(work_path),
+    }
+}
+
 /// Execute `fs/read_text_file` tool.
 ///
 /// V1.86 T5 (R-V156P0-M004): all blocking `std::fs` operations run on the
@@ -825,10 +869,25 @@ async fn execute_read_file(
             ),
         })?;
 
+    // ADR #485 §4.4: the read half refuses every classification the write half
+    // refuses, and judges the raw spelling before the guard — the same order the
+    // write half uses — so the same path gets the same answer whether or not it
+    // exists and wherever a symlink sends it.
+    classify_and_refuse_work_path(&path_str)?;
+
     let workspace_path = Path::new(&workspace_path_str).to_path_buf();
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), true)
         .await
         .map_err(|e| match e {
+            // `must_exist = true` cannot canonicalize an absent target: that is
+            // not an escape, so it keeps a not-found answer.
+            NexusApiError::InvalidInput { ref field, .. }
+                if field == "chapter_path_unresolvable" =>
+            {
+                NexusApiError::NotFound {
+                    resource: format!("file: path '{path_str}' does not exist"),
+                }
+            }
             NexusApiError::InvalidInput { .. } => NexusApiError::Forbidden {
                 resource: format!("file: path '{path_str}' is outside the workspace root"),
             },
@@ -892,6 +951,10 @@ async fn execute_write_file(
             ),
         })?;
 
+    // ADR #485 §4.4: judge the raw spelling before the guard, exactly as the
+    // read half does, so the same path gets the same refusal on both sides.
+    let work_path = classify_and_refuse_work_path(&path_str)?;
+
     let workspace_path = Path::new(&workspace_path_str).to_path_buf();
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), false)
         .await
@@ -902,30 +965,48 @@ async fn execute_write_file(
             other => other,
         })?;
 
-    let write_result = tokio::task::spawn_blocking(move || {
-        if let Some(parent) = resolved.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
+    // ADR #485 §4.4: `Works/<work_ref>/…` is a Work artifact byte write — one
+    // port, one lock, one durability path. Every other workspace path keeps
+    // the guarded write below.
+    if let WorkPath::Artifact {
+        work_ref,
+        rel_child,
+    } = work_path
+    {
+        FsWorkArtifactPort::new(context.pool.clone(), context.nexus_home.clone())
+            .commit(WorkArtifactWrite {
+                workspace_root: Path::new(&workspace_path_str),
+                work_ref,
+                rel_child,
+                content: &content,
+            })
+            .await?;
+    } else {
+        let write_result = tokio::task::spawn_blocking(move || {
+            if let Some(parent) = resolved.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
+                    category: format!(
+                        "DIR_CREATE_FAILED: {}",
+                        format_args!("failed to create directory {}: {}", parent.display(), e)
+                    ),
+                })?;
+            }
+            std::fs::write(&resolved, content).map_err(|e| NexusApiError::Internal {
                 category: format!(
-                    "DIR_CREATE_FAILED: {}",
-                    format_args!("failed to create directory {}: {}", parent.display(), e)
+                    "FILE_WRITE_FAILED: {}",
+                    format_args!("failed to write file {}: {e}", resolved.display())
                 ),
-            })?;
-        }
-        std::fs::write(&resolved, content).map_err(|e| NexusApiError::Internal {
-            category: format!(
-                "FILE_WRITE_FAILED: {}",
-                format_args!("failed to write file {}: {e}", resolved.display())
-            ),
+            })
         })
-    })
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        category: format!(
-            "FILE_WRITE_PANIC: {}",
-            format_args!("file write task panicked: {e}")
-        ),
-    })?;
-    write_result?;
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            category: format!(
+                "FILE_WRITE_PANIC: {}",
+                format_args!("file write task panicked: {e}")
+            ),
+        })?;
+        write_result?;
+    }
 
     Ok(serde_json::json!({
         "written": true
@@ -4113,3 +4194,568 @@ pub fn build_registry() -> CapabilityRegistry {
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use nexus_local_db::works::WorkRecord;
+    use sqlx::SqlitePool;
+    use tempfile::TempDir;
+
+    const CREATOR: &str = "ctr_test";
+    const WORK_ID: &str = "wrk_demo";
+    const WORK_REF: &str = "demo";
+
+    struct Fixture {
+        _home: TempDir,
+        workspace: TempDir,
+        pool: SqlitePool,
+        context: ToolContext,
+    }
+
+    fn work_record() -> WorkRecord {
+        WorkRecord {
+            work_id: WORK_ID.to_string(),
+            creator_id: CREATOR.to_string(),
+            workspace_slug: "default".to_string(),
+            status: "draft".to_string(),
+            title: "My Novel".to_string(),
+            long_term_goal: "Write a great novel".to_string(),
+            initial_idea: "A sci-fi thriller".to_string(),
+            creative_brief: None,
+            intake_status: "pending".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: "2026-06-04T10:00:00Z".to_string(),
+            updated_at: "2026-06-04T10:00:00Z".to_string(),
+            current_stage: "intake".to_string(),
+            stage_status: "pending".to_string(),
+            work_profile: None,
+            work_ref: Some(WORK_REF.to_string()),
+            total_planned_chapters: None,
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        }
+    }
+
+    async fn fixture(seed_work: bool) -> Fixture {
+        let home = tempfile::tempdir().expect("temp home");
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        std::fs::write(
+            home.path().join("config.toml"),
+            // The Work artifact port resolves the workspace partition through
+            // this selection (or the process default when none is recorded).
+            format!(
+                "active_creator_id = \"{CREATOR}\"\n\
+                 active_workspace_slug_by_creator = {{ {CREATOR} = \"default\" }}\n"
+            ),
+        )
+        .expect("cli config");
+        let pool = nexus_local_db::init_engine_pool(&home.path().join("state.db"))
+            .await
+            .expect("engine pool")
+            .clone_pool();
+        if seed_work {
+            works::create_work(&pool, &work_record())
+                .await
+                .expect("works row");
+        }
+        let context = ToolContext::new(
+            pool.clone(),
+            home.path().to_path_buf(),
+            Some(workspace.path().display().to_string()),
+            ToolRuntimeFacts::default(),
+            None,
+            None,
+        );
+        Fixture {
+            _home: home,
+            workspace,
+            pool,
+            context,
+        }
+    }
+
+    fn write_request(path: &str, content: &str) -> ToolsApi {
+        ToolsApi {
+            caller_kind: None,
+            parameters: serde_json::json!({ "path": path, "content": content }),
+            request_id: None,
+            session_id: None,
+            tool_name: "fs/write_text_file".to_string(),
+        }
+    }
+
+    fn read_request(path: &str) -> ToolsApi {
+        ToolsApi {
+            caller_kind: None,
+            parameters: serde_json::json!({ "path": path }),
+            request_id: None,
+            session_id: None,
+            tool_name: "fs/read_text_file".to_string(),
+        }
+    }
+
+    fn assert_case_variant_works_refusal(error: NexusApiError, path: &str) {
+        match error {
+            NexusApiError::Forbidden { resource } => assert!(
+                resource.contains("must spell the Work root 'Works' byte-exactly"),
+                "{path}: {resource}"
+            ),
+            other => panic!("expected Forbidden for {path}, got {other:?}"),
+        }
+    }
+
+    async fn holder(pool: &SqlitePool) -> Option<String> {
+        sqlx::query_scalar("SELECT runtime_lock_holder FROM works WHERE work_id = ?")
+            .bind(WORK_ID)
+            .fetch_one(pool)
+            .await
+            .expect("holder read")
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_writes_work_artifacts_through_the_port() {
+        let fixture = fixture(true).await;
+
+        let result = execute_write_file(
+            &write_request(&format!("Works/{WORK_REF}/Stories/ch1.md"), "chapter body"),
+            &fixture.context,
+        )
+        .await
+        .expect("the Work artifact write succeeds");
+
+        assert_eq!(result, serde_json::json!({ "written": true }));
+        let target = fixture
+            .workspace
+            .path()
+            .join(format!("Works/{WORK_REF}/Stories/ch1.md"));
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read"),
+            "chapter body"
+        );
+        assert_eq!(
+            std::fs::read_dir(target.parent().expect("parent"))
+                .expect("read_dir")
+                .count(),
+            1,
+            "the atomic temp file is cleaned up"
+        );
+        assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_refuses_work_paths_without_a_works_row() {
+        let fixture = fixture(false).await;
+
+        let error = execute_write_file(
+            &write_request(&format!("Works/{WORK_REF}/Stories/ch1.md"), "body"),
+            &fixture.context,
+        )
+        .await
+        .expect_err("a missing works row refuses");
+
+        match error {
+            NexusApiError::Forbidden { resource } => {
+                assert!(resource.contains("has no works row"), "{resource}");
+            }
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+        assert!(!fixture
+            .workspace
+            .path()
+            .join(format!("Works/{WORK_REF}"))
+            .exists());
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_refuses_a_lock_held_elsewhere() {
+        let fixture = fixture(true).await;
+        nexus_local_db::acquire_runtime_lock(
+            &fixture.pool,
+            CREATOR,
+            WORK_ID,
+            "cli:http:foreign",
+            nexus_local_db::DEFAULT_RUNTIME_LOCK_TTL_SECS,
+            false,
+        )
+        .await
+        .expect("foreign lock");
+
+        let error = execute_write_file(
+            &write_request(&format!("Works/{WORK_REF}/Stories/ch1.md"), "body"),
+            &fixture.context,
+        )
+        .await
+        .expect_err("a held lock refuses");
+
+        match error {
+            NexusApiError::Forbidden { resource } => {
+                assert!(resource.contains("work_locked"), "{resource}");
+            }
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+        assert_eq!(
+            holder(&fixture.pool).await.as_deref(),
+            Some("cli:http:foreign"),
+            "the foreign holder is untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_treats_a_leading_curdir_work_path_as_the_artifact() {
+        let fixture = fixture(true).await;
+
+        execute_write_file(
+            &write_request(
+                &format!("./Works/{WORK_REF}/Stories/ch1.md"),
+                "chapter body",
+            ),
+            &fixture.context,
+        )
+        .await
+        .expect("a `.`-prefixed Work artifact write succeeds");
+
+        let target = fixture
+            .workspace
+            .path()
+            .join(format!("Works/{WORK_REF}/Stories/ch1.md"));
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read"),
+            "chapter body"
+        );
+        assert_eq!(
+            std::fs::read_dir(target.parent().expect("parent"))
+                .expect("read_dir")
+                .count(),
+            1,
+            "the atomic temp file is cleaned up"
+        );
+        assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
+
+        // Same classification means the same lock: a held Work lock refuses
+        // this spelling instead of writing around it on the guarded path.
+        nexus_local_db::acquire_runtime_lock(
+            &fixture.pool,
+            CREATOR,
+            WORK_ID,
+            "cli:http:foreign",
+            nexus_local_db::DEFAULT_RUNTIME_LOCK_TTL_SECS,
+            false,
+        )
+        .await
+        .expect("foreign lock");
+
+        let error = execute_write_file(
+            &write_request(&format!("./Works/{WORK_REF}/Stories/ch2.md"), "body"),
+            &fixture.context,
+        )
+        .await
+        .expect_err("a held lock refuses the `.`-prefixed write");
+
+        match error {
+            NexusApiError::Forbidden { resource } => {
+                assert!(resource.contains("work_locked"), "{resource}");
+            }
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+        assert!(!fixture
+            .workspace
+            .path()
+            .join(format!("Works/{WORK_REF}/Stories/ch2.md"))
+            .exists());
+    }
+
+    #[tokio::test]
+    async fn fs_leading_curdir_case_variant_spelling_is_refused_on_write_and_read() {
+        let fixture = fixture(true).await;
+        // Seed both spellings so the answer is decided by the spelling, never
+        // by the target being absent — on a case-sensitive volume or not.
+        for tree in ["works", "Works"] {
+            let dir = fixture
+                .workspace
+                .path()
+                .join(format!("{tree}/{WORK_REF}/Stories"));
+            std::fs::create_dir_all(&dir).expect("work dir");
+            std::fs::write(dir.join("ch1.md"), "chapter body").expect("seed artifact");
+        }
+        let case_variant = format!("./works/{WORK_REF}/Stories/ch1.md");
+
+        let write_error =
+            execute_write_file(&write_request(&case_variant, "rewritten"), &fixture.context)
+                .await
+                .expect_err("a `.`-prefixed case-variant write refuses");
+        let read_error = execute_read_file(&read_request(&case_variant), &fixture.context)
+            .await
+            .expect_err("a `.`-prefixed case-variant read refuses");
+
+        assert_case_variant_works_refusal(write_error, &case_variant);
+        assert_case_variant_works_refusal(read_error, &case_variant);
+        assert_eq!(holder(&fixture.pool).await, None, "no lock was taken");
+        assert_eq!(
+            std::fs::read_to_string(
+                fixture
+                    .workspace
+                    .path()
+                    .join(format!("works/{WORK_REF}/Stories/ch1.md"))
+            )
+            .expect("read"),
+            "chapter body",
+            "the refused write left the case-variant artifact untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_is_not_reentrant_for_tool_fs_write() {
+        let fixture = fixture(true).await;
+        // The same process's in-flight `tool:fs_write` holder mints a fresh
+        // uuid per acquire, so a second write refuses instead of re-entering.
+        nexus_local_db::acquire_runtime_lock(
+            &fixture.pool,
+            CREATOR,
+            WORK_ID,
+            &nexus_local_db::cli_holder("tool:fs_write"),
+            nexus_local_db::DEFAULT_RUNTIME_LOCK_TTL_SECS,
+            false,
+        )
+        .await
+        .expect("in-flight tool lock");
+
+        let error = execute_write_file(
+            &write_request(&format!("Works/{WORK_REF}/Stories/ch1.md"), "body"),
+            &fixture.context,
+        )
+        .await
+        .expect_err("a concurrent tool write refuses");
+
+        match error {
+            NexusApiError::Forbidden { resource } => {
+                assert!(resource.contains("work_locked"), "{resource}");
+            }
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_refuses_the_work_root_and_lexical_escapes() {
+        let fixture = fixture(true).await;
+
+        for (path, expected) in [
+            (format!("Works/{WORK_REF}"), "is the Work root directory"),
+            (
+                format!("Works/{WORK_REF}/../plain.md"),
+                "escapes the Works/demo/ boundary",
+            ),
+        ] {
+            let error = execute_write_file(&write_request(&path, "body"), &fixture.context)
+                .await
+                .expect_err("the classification refuses");
+
+            match error {
+                NexusApiError::Forbidden { resource } => {
+                    assert!(resource.contains(expected), "{path}: {resource}");
+                }
+                other => panic!("expected Forbidden for {path}, got {other:?}"),
+            }
+            assert_eq!(holder(&fixture.pool).await, None, "no lock was taken");
+        }
+        assert!(!fixture.workspace.path().join("plain.md").exists());
+    }
+
+    #[tokio::test]
+    async fn fs_case_variant_works_spelling_is_refused_on_write_and_read() {
+        let fixture = fixture(true).await;
+        let case_variant = format!("works/{WORK_REF}/Stories/ch1.md");
+        let exact = format!("Works/{WORK_REF}/Stories/ch1.md");
+        // Seed both spellings so the read refusal is decided by the spelling,
+        // never by the target being absent — the answer stays the same on a
+        // case-sensitive and a case-insensitive volume.
+        std::fs::create_dir_all(
+            fixture
+                .workspace
+                .path()
+                .join(format!("works/{WORK_REF}/Stories")),
+        )
+        .expect("case-variant work dir");
+        std::fs::create_dir_all(
+            fixture
+                .workspace
+                .path()
+                .join(format!("Works/{WORK_REF}/Stories")),
+        )
+        .expect("exact work dir");
+        std::fs::write(fixture.workspace.path().join(&case_variant), "chapter body")
+            .expect("seed case variant");
+        std::fs::write(fixture.workspace.path().join(&exact), "chapter body")
+            .expect("seed exact spelling");
+
+        let write_error =
+            execute_write_file(&write_request(&case_variant, "rewritten"), &fixture.context)
+                .await
+                .expect_err("a case-variant write refuses");
+        assert_case_variant_works_refusal(write_error, &case_variant);
+        assert_eq!(holder(&fixture.pool).await, None, "no lock was taken");
+        assert_eq!(
+            std::fs::read_to_string(fixture.workspace.path().join(&case_variant)).expect("read"),
+            "chapter body",
+            "the refused write left the existing artifact untouched"
+        );
+
+        let read_error = execute_read_file(&read_request(&case_variant), &fixture.context)
+            .await
+            .expect_err("a case-variant read refuses");
+        assert_case_variant_works_refusal(read_error, &case_variant);
+
+        // The spelling is judged before any lookup, exactly as on write, so a
+        // missing target is the same spelling refusal rather than a not-found.
+        let missing = format!("works/{WORK_REF}/Stories/missing.md");
+        let missing_error = execute_read_file(&read_request(&missing), &fixture.context)
+            .await
+            .expect_err("a missing case-variant read is still refused");
+        assert_case_variant_works_refusal(missing_error, &missing);
+
+        // The exact spelling stays readable.
+        let read = execute_read_file(&read_request(&exact), &fixture.context)
+            .await
+            .expect("the exact spelling reads");
+        assert_eq!(read, serde_json::json!({ "content": "chapter body" }));
+
+        // A valid exact spelling that is merely absent is still not-found: only
+        // the invalid spelling is refused before the lookup.
+        let exact_missing = format!("Works/{WORK_REF}/Stories/absent.md");
+        let exact_missing_error =
+            execute_read_file(&read_request(&exact_missing), &fixture.context)
+                .await
+                .expect_err("a missing exact-spelling artifact is not found");
+        assert!(
+            matches!(exact_missing_error, NexusApiError::NotFound { .. }),
+            "{exact_missing}: {exact_missing_error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fs_work_escape_is_refused_identically_on_write_and_read() {
+        let fixture = fixture(true).await;
+        // Lexically under `Works/<ref>` but physically the case-variant tree.
+        let escaped = format!("Works/{WORK_REF}/../works/{WORK_REF}/x.md");
+        let expected = format!("escapes the Works/{WORK_REF}/ boundary");
+
+        let write_error = execute_write_file(&write_request(&escaped, "body"), &fixture.context)
+            .await
+            .expect_err("the escaped write refuses");
+        let read_error = execute_read_file(&read_request(&escaped), &fixture.context)
+            .await
+            .expect_err("the escaped read refuses");
+
+        for error in [write_error, read_error] {
+            match error {
+                NexusApiError::Forbidden { resource } => {
+                    assert!(resource.contains(&expected), "{escaped}: {resource}");
+                }
+                other => panic!("expected Forbidden for {escaped}, got {other:?}"),
+            }
+        }
+        assert_eq!(holder(&fixture.pool).await, None, "no lock was taken");
+        assert!(!fixture
+            .workspace
+            .path()
+            .join(format!("works/{WORK_REF}/x.md"))
+            .exists());
+    }
+
+    #[tokio::test]
+    async fn fs_case_variant_spelling_refusal_outranks_a_symlinked_target() {
+        let fixture = fixture(true).await;
+        // `works` symlinked to an existing directory outside the workspace: the
+        // guard would call this an escape, so this pins the spelling-first order
+        // and the identical answer on both halves.
+        let outside = tempfile::tempdir().expect("outside root");
+        std::fs::create_dir_all(outside.path().join(WORK_REF)).expect("outside work dir");
+        std::fs::write(
+            outside.path().join(format!("{WORK_REF}/x.md")),
+            "outside body",
+        )
+        .expect("outside artifact");
+        std::os::unix::fs::symlink(outside.path(), fixture.workspace.path().join("works"))
+            .expect("case-variant symlink");
+
+        let case_variant = format!("works/{WORK_REF}/x.md");
+        let write_error =
+            execute_write_file(&write_request(&case_variant, "rewritten"), &fixture.context)
+                .await
+                .expect_err("a case-variant write refuses before the guard");
+        let read_error = execute_read_file(&read_request(&case_variant), &fixture.context)
+            .await
+            .expect_err("a case-variant read refuses before the guard");
+
+        assert_case_variant_works_refusal(write_error, &case_variant);
+        assert_case_variant_works_refusal(read_error, &case_variant);
+        assert_eq!(holder(&fixture.pool).await, None, "no lock was taken");
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join(format!("{WORK_REF}/x.md")))
+                .expect("outside artifact read"),
+            "outside body",
+            "the refused write stayed inside the refusal"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_keeps_the_outside_workspace_refusal() {
+        let fixture = fixture(true).await;
+        let absolute_outside = fixture
+            .workspace
+            .path()
+            .parent()
+            .expect("parent")
+            .join("outside.md");
+
+        for path in [
+            "../outside.md".to_string(),
+            absolute_outside.display().to_string(),
+        ] {
+            let error = execute_write_file(&write_request(&path, "body"), &fixture.context)
+                .await
+                .expect_err("a path outside the workspace refuses");
+
+            match error {
+                NexusApiError::Forbidden { resource } => {
+                    assert!(
+                        resource.contains("is outside the workspace root"),
+                        "{path}: {resource}"
+                    );
+                }
+                other => panic!("expected Forbidden for {path}, got {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_keeps_the_guarded_write_for_non_work_paths() {
+        let fixture = fixture(true).await;
+
+        let result = execute_write_file(
+            &write_request("notes/plain.md", "plain body"),
+            &fixture.context,
+        )
+        .await
+        .expect("a non-Work path writes");
+
+        assert_eq!(result, serde_json::json!({ "written": true }));
+        let target = fixture.workspace.path().join("notes/plain.md");
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read"),
+            "plain body"
+        );
+    }
+}

@@ -44,7 +44,7 @@ Placement rule: runnable product surfaces → `apps/`; reusable Rust libraries �
 
 | Line | Purpose | Surface |
 |------|---------|---------|
-| **Local** | Rust core authority, orchestration, agent host, Creator / memory, narrative, World KB, User knowledge, moment assembly, web/desktop UI | `nexus42` CLI direct calls + `nexus-runtime` Connect; the Electron/TS service serves `/v1/daemon/*` for browser/desktop |
+| **Local** | Rust core authority, orchestration, agent host, Creator / memory, narrative, World KB, moment assembly, web/desktop UI | `nexus42` CLI direct calls + `nexus-runtime` Connect; the Electron/TS service serves `/v1/daemon/*` for browser/desktop |
 | **Cloud enhancement** | Platform HTTP, sync, registration, optional cloud context stage | CLI / `nexus-cloud-sync` — **never** through the local service HTTP |
 
 **Hard isolation:** the local service host must not depend on cloud sync or cloud-domain crates, and must not expose cloud HTTP or sync proxies. Local UI is part of the local line: it talks only to the local API and must not assume cloud-only product surfaces.
@@ -72,18 +72,19 @@ Canonical hierarchy (normative detail in the entity-scope model):
 ```text
 Global
 └── User
-    ├── Creator
-    │   └── World
-    │       ├── Timeline → Event → Moment
-    │       └── KB graph / narrative knowledge assets
-    └── User knowledge index
+    └── Creator
+        └── World
+            ├── Timeline → Event → Moment
+            └── KB graph / narrative knowledge assets
 ```
+
+The former `User knowledge index` child of `User` is retired (V1.231, [ADR K1](../../../.agents/adr/implemented/architecture/2026-11-10-retire-user-scope-and-references.md)) together with the User KnowledgeStore and the reference registry; World KB is the only knowledge family ([Knowledge IR](../../../.agents/adr/implemented/architecture/2026-11-10-knowledge-ir.md)).
 
 Guiding rules:
 
 1. Every scoped entity has **exactly one** owning scope and primary owner crate.
 2. **World history is immutable** — change via Fork, not in-place rewrite.
-3. **`nexus-knowledge`** owns World-scoped KnowledgeEntries / SourceAnchors and User-scoped knowledge. Do not conflate either with the CLI **work file index** under work-scope `kb` routes.
+3. **`nexus-knowledge`** owns World-scoped KnowledgeEntries / SourceAnchors — the only knowledge family since V1.231 ([ADR K1](../../../.agents/adr/implemented/architecture/2026-11-10-retire-user-scope-and-references.md)) retired the User knowledge store, the reference registry and the `creator kb` work file index.
 4. **`nexus-narrative`** coordinates World / Timeline / Event state; forks are platform-oriented where the entity model says so.
 5. **`nexus-moment-context-assembly`** owns session-start context assembly (`assemble_moment` is the assembly SSOT).
 6. A local `workspace_slug` is a **storage partition** under Creator, not a new entity scope.

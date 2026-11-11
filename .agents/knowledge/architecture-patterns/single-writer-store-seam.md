@@ -55,3 +55,29 @@ A table had four writers across three crates — a compute settlement insert in 
 - `crates/nexus-local-db/tests/kb_key_blocks_writer_guard.rs` — the source guard.
 - `crates/nexus-local-db/tests/actor_knowledge_maintenance.rs` — the `t4_primitive_*` cases cover the caller-transaction patch/delete primitives.
 - `crates/nexus-core/tests/capability_compute.rs::aborted_accept_rolls_back_key_block_inserts` — the deterministic post-insert failure proving the settlement insert stays in the accept transaction.
+
+## Byte-write port (files, not rows)
+
+The same seam argument applies when the durable artifact is a file tree instead of a table row. Route the byte write through one named port, not through a helper call at the call site:
+
+1. **Classify once at the boundary.** `Works/<work_ref>/<child>` is an artifact; `Works`, `Works/<ref>` without a child, and any `..` in the suffix are not writable; everything else keeps the old writer. Classification runs on the raw path after the workspace guard, so the seam does not silently widen to the whole workspace.
+2. **Own `mkdir` + temp-write + fsync + rename inside the adapter.** Callers pass a relative child; the adapter constructs the absolute target, so classification and construction cannot disagree.
+3. **Take the per-object lock the domain already uses.** `WorkLock` with a distinct holder label (`tool:fs_write`) is the concurrency authority; the tool hot path was previously outside it.
+4. **Release on every path.** With no `Drop` guard, the shape is `let result = { .. }.await; lock.release().await; result` — a skipped release pins the object until the TTL.
+
+### Verification
+
+- **A canonical-path comparison is not containment.** Comparing a canonicalized destination against the allowed prefix accepts a lower symlink that resolves to the prefix's ancestor. Require the probed path to be lexically under the allowed subtree, and allow the workspace root / `Works` ancestor only when the probe itself is that real, non-symlink ancestor (the not-yet-created first-write case). Regress both alias destinations, not just an unrelated external directory.
+- **Read-then-update lock acquisition is not exclusive.** `SELECT holder; if NULL then UPDATE` admits two winners. Bind one conditional `UPDATE` to the observed `(holder, acquired_at)` pair with NULL-safe `IS`, and elect on affected rows; keep stale eligibility as a separate pre-check. Test free-lock, distinct-holder and same-holder stale takeover — the same-holder case is the one a holder-only predicate still loses.
+
+### Pitfalls
+
+- **A holder-only CAS leaves the same-holder takeover open.** Stable holders (`daemon:schedule:<id>`) keep the predicate true after the first winner refreshes the timestamp.
+- **A gated module can hide an unrun test.** When the crate declares an empty default feature set, the recorded selector must carry `--features <module>`; otherwise the evidence command compiles a different crate than the one claimed.
+- **A grouped inventory is not a per-hit inventory.** When a gate requires every site classified, emit one row per `file:line` from the recorded scan output; crate totals and "…" shorthand are not auditable.
+
+### Evidence
+
+- `crates/nexus-core/src/execution/work_artifact.rs` — classification, port, adapter, boundary re-check.
+- `crates/nexus-local-db/src/runtime_lock.rs` — conditional acquisition bound to `(holder, acquired_at)`.
+- `crates/nexus-core/src/execution/capabilities.rs` — the `fs/write_text_file` branch; the `NonWork` branch is unchanged.

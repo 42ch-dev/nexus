@@ -210,6 +210,40 @@ pub fn read_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option
     )
 }
 
+/// How `config.toml` records the workspace slug for one creator.
+///
+/// [`Self::Unselected`] is the "never chose" state: the rest of the process
+/// resolves that same config to the default partition through
+/// [`CliConfigSnapshot::workspace_slug_for_creator`], so a caller that must not
+/// act on a partition the user never chose can tell the two apart instead of
+/// treating both as an explicit selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceSlugSelection {
+    /// No slug recorded for the creator (an absent or empty entry, or no
+    /// loadable `config.toml`), with the default partition that resolution
+    /// yields.
+    Unselected(String),
+    /// The non-empty value recorded for the creator, verbatim: never
+    /// defaulted, so the caller can judge an unusable selection itself. An
+    /// empty recorded value is [`Self::Unselected`], matching
+    /// [`CliConfigSnapshot::workspace_slug_for_creator`].
+    Recorded(String),
+}
+
+/// Read the workspace slug recorded for `creator_id`, distinguishing "never
+/// selected" from "recorded".
+#[must_use]
+pub fn workspace_slug_selection(nexus_home: &Path, creator_id: &str) -> WorkspaceSlugSelection {
+    let cfg = CliConfigSnapshot::load(nexus_home).unwrap_or_default();
+    cfg.active_workspace_slug_by_creator
+        .get(creator_id)
+        .filter(|slug| !slug.is_empty())
+        .map_or_else(
+            || WorkspaceSlugSelection::Unselected(cfg.workspace_slug_for_creator(creator_id)),
+            |slug| WorkspaceSlugSelection::Recorded(slug.clone()),
+        )
+}
+
 /// Read the optional `[memory_provider]` table.
 ///
 /// Independent of [`CliConfigSnapshot`] so a malformed provider table fails
