@@ -1779,11 +1779,7 @@ async fn write_missing_kb_log(
     let executor = crate::capability::builtins::work_commit::require_executor(executor)
         .map_err(|e| format!("work artifact commit unavailable: {e}"))?;
     crate::capability::builtins::work_commit::commit_work_bytes(
-        executor,
-        ws_dir,
-        work_ref,
-        &rel_child,
-        &body,
+        executor, ws_dir, work_ref, &rel_child, &body,
     )
     .await
     .map_err(|e| format!("commit {}: {e}", rel_child.display()))?;

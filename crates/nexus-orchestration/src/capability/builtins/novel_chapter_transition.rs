@@ -179,14 +179,8 @@ impl Capability for NovelChapterTransition {
                 })?;
                 let updated = Self::replace_frontmatter_field(&content, "status", &inp.to_status);
                 let executor = require_executor(self.executor.as_ref())?;
-                commit_work_bytes(
-                    executor,
-                    Path::new(ws_root),
-                    work_ref,
-                    rel_child,
-                    &updated,
-                )
-                .await?;
+                commit_work_bytes(executor, Path::new(ws_root), work_ref, rel_child, &updated)
+                    .await?;
                 info!(
                     path = %full_path.display(),
                     status = %inp.to_status,

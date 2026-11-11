@@ -4388,10 +4388,13 @@ mod tests {
         .expect("seed chapters");
 
         let content = "The locket opened on the tide.\n\nAria stepped through.";
-        let result =
-            execute_manuscript_write(&manuscript_write_request(content, 1), &fixture.context, CREATOR)
-                .await
-                .expect("manuscript write");
+        let result = execute_manuscript_write(
+            &manuscript_write_request(content, 1),
+            &fixture.context,
+            CREATOR,
+        )
+        .await
+        .expect("manuscript write");
 
         let expected_words = content.split_whitespace().count();
         assert_eq!(result["word_count"], expected_words);
@@ -4454,7 +4457,10 @@ mod tests {
         let body_path = chapter.body_path.expect("body_path recorded");
         let written = std::fs::read_to_string(fixture.workspace.path().join(&body_path))
             .expect("the recorded pointer names an existing file");
-        assert_eq!(written, content, "the recorded pointer names the written bytes");
+        assert_eq!(
+            written, content,
+            "the recorded pointer names the written bytes"
+        );
         assert_eq!(
             chapter.actual_word_count,
             Some(i32::try_from(content.split_whitespace().count()).expect("fits i32"))

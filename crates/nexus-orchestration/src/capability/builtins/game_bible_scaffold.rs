@@ -196,10 +196,7 @@ impl ScaffoldTransaction {
         rel_child: &Path,
         content: &str,
     ) -> Result<(), CapabilityError> {
-        let path = workspace_root
-            .join("Works")
-            .join(work_ref)
-            .join(rel_child);
+        let path = workspace_root.join("Works").join(work_ref).join(rel_child);
 
         let original = if path.exists() {
             let data = std::fs::read(&path).map_err(|e| {
@@ -685,7 +682,8 @@ mod tests {
         assert_eq!(commits[0].rel_child, "README.md");
         assert!(commits
             .iter()
-            .any(|c| c.rel_child == "Design/overview.md" && c.content.contains("section_status: draft")));
+            .any(|c| c.rel_child == "Design/overview.md"
+                && c.content.contains("section_status: draft")));
         assert_eq!(out["files_created"].as_array().unwrap().len(), 13);
     }
 
@@ -714,7 +712,10 @@ mod tests {
             matches!(err, CapabilityError::WorkerUnavailable),
             "expected WorkerUnavailable, got: {err}"
         );
-        assert!(!root.join("gb-nowire").exists(), "no directory may be created");
+        assert!(
+            !root.join("gb-nowire").exists(),
+            "no directory may be created"
+        );
     }
 
     #[tokio::test]

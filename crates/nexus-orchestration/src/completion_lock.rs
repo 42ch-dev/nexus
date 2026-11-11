@@ -77,8 +77,7 @@ pub async fn write_completion_lock(
     executor: Option<&Arc<dyn WorkspaceExecutor>>,
 ) -> Result<(), std::io::Error> {
     let json = serde_json::to_string_pretty(lock)?;
-    let executor =
-        require_executor(executor).map_err(|e| std::io::Error::other(e.to_string()))?;
+    let executor = require_executor(executor).map_err(|e| std::io::Error::other(e.to_string()))?;
     commit_work_bytes(
         executor,
         workspace_dir,

@@ -709,9 +709,13 @@ impl ScheduleSupervisor {
         // `Works/<work_ref>/Outlines/foreshadowing.md` after a
         // `novel-writing` produce run completes.
         if preset_id == nexus_preset::preset_ids::NOVEL_WRITING_PRESET_ID {
-            if let Err(e) =
-                auto_chain::promote_foreshadowing_for_schedule(&self.pool, schedule_id, ws_path, executor)
-                    .await
+            if let Err(e) = auto_chain::promote_foreshadowing_for_schedule(
+                &self.pool,
+                schedule_id,
+                ws_path,
+                executor,
+            )
+            .await
             {
                 tracing::warn!(
                     schedule_id,

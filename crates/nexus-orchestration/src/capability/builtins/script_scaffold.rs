@@ -154,10 +154,7 @@ impl ScaffoldTransaction {
         rel_child: &Path,
         content: &str,
     ) -> Result<(), CapabilityError> {
-        let path = workspace_root
-            .join("Works")
-            .join(work_ref)
-            .join(rel_child);
+        let path = workspace_root.join("Works").join(work_ref).join(rel_child);
 
         // Snapshot original if exists
         let original = if path.exists() {

@@ -195,9 +195,9 @@ impl Capability for ScriptSectionStatusUpdate {
             replace_frontmatter_field(&content, "section_status", &inp.new_status)?;
 
         // Commit through the Work artifact port (canonical path → Work-relative child)
-        let work_dir_canonical = scripts_dir_canonical.parent().ok_or_else(|| {
-            CapabilityError::Internal(format!("missing work dir for {work_ref}"))
-        })?;
+        let work_dir_canonical = scripts_dir_canonical
+            .parent()
+            .ok_or_else(|| CapabilityError::Internal(format!("missing work dir for {work_ref}")))?;
         let rel_child = section_canonical
             .strip_prefix(work_dir_canonical)
             .map_err(|_| {

@@ -1012,10 +1012,9 @@ mod tests {
         let (tmp, work) = work_dir();
         let exec = executor();
         let section = "- F001: the locket\n- F002: the prophecy\n";
-        let allocated =
-            promote_outline_to_index(tmp.path(), TEST_WORK_REF, section, Some(&exec))
-                .await
-                .unwrap();
+        let allocated = promote_outline_to_index(tmp.path(), TEST_WORK_REF, section, Some(&exec))
+            .await
+            .unwrap();
         assert_eq!(allocated, vec!["F001".to_string(), "F002".to_string()]);
 
         let written = fs::read_to_string(work.join("Outlines/foreshadowing.md")).unwrap();
@@ -1029,9 +1028,10 @@ mod tests {
     async fn promote_outline_to_index_creates_file_when_absent() {
         let (tmp, work) = work_dir();
         let exec = executor();
-        let allocated = promote_outline_to_index(tmp.path(), TEST_WORK_REF, "F001: the locket", Some(&exec))
-            .await
-            .unwrap();
+        let allocated =
+            promote_outline_to_index(tmp.path(), TEST_WORK_REF, "F001: the locket", Some(&exec))
+                .await
+                .unwrap();
         assert_eq!(allocated, vec!["F001".to_string()]);
         assert!(work.join("Outlines/foreshadowing.md").is_file());
     }

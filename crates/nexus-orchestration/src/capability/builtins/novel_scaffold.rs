@@ -807,10 +807,7 @@ async fn write_file_idem(
     content: &str,
     files_created: &mut Vec<PathBuf>,
 ) -> Result<bool, CapabilityError> {
-    let path = workspace_root
-        .join("Works")
-        .join(work_ref)
-        .join(rel_child);
+    let path = workspace_root.join("Works").join(work_ref).join(rel_child);
     if path.exists() {
         info!(path = %path.display(), "write_file_idem: skip (exists)");
         return Ok(false);

@@ -1249,14 +1249,7 @@ pub async fn promote_foreshadowing_for_schedule(
         return Ok(0);
     }
 
-    promote_outlines_in(
-        ws_dir,
-        &outlines_chapters,
-        schedule_id,
-        work_ref,
-        executor,
-    )
-    .await
+    promote_outlines_in(ws_dir, &outlines_chapters, schedule_id, work_ref, executor).await
 }
 
 /// Scan every `*-outline.md` in `outlines_dir`, extract its foreshadowing

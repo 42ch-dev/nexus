@@ -56,11 +56,7 @@ impl WorkspaceExecutor for DirectWriteExecutor {
         }
         std::fs::write(&target, &input.content)
             .map_err(|e| CapabilityError::Internal(format!("write: {e}")))?;
-        Ok(
-            nexus_contracts::local::orchestration::WorkArtifactCommitOutput {
-                committed: true,
-            },
-        )
+        Ok(nexus_contracts::local::orchestration::WorkArtifactCommitOutput { committed: true })
     }
 }
 
@@ -133,8 +129,7 @@ async fn bootstrap_game_bible_creates_design_tree() {
     let work_ref = "e2e-game-bible-scaffold";
     insert_test_work(&pool, work_id, work_ref).await;
 
-    let cap =
-        scaffold_at(&pool, works_root.path());
+    let cap = scaffold_at(&pool, works_root.path());
 
     let input = scaffold_input("ctr_test", work_id, work_ref, "Test Game Bible");
     let output = cap.run(input).await.expect("scaffold should succeed");
@@ -258,8 +253,7 @@ async fn bootstrap_game_bible_idempotent() {
     let work_ref = "e2e-idempotent";
     insert_test_work(&pool, work_id, work_ref).await;
 
-    let cap =
-        scaffold_at(&pool, works_root.path());
+    let cap = scaffold_at(&pool, works_root.path());
 
     let input = scaffold_input("ctr_test", work_id, work_ref, "Idempotent Test");
 
@@ -322,8 +316,7 @@ async fn game_bible_work_status_json() {
     let work_ref = "e2e-status";
     insert_test_work(&pool, work_id, work_ref).await;
 
-    let cap =
-        scaffold_at(&pool, works_root.path());
+    let cap = scaffold_at(&pool, works_root.path());
 
     let input = scaffold_input("ctr_test", work_id, work_ref, "Status Test");
     let output = cap.run(input).await.expect("scaffold should succeed");
@@ -383,8 +376,7 @@ async fn game_bible_scaffold_with_world_id() {
     let work_ref = "e2e-world";
     insert_test_work(&pool, work_id, work_ref).await;
 
-    let cap =
-        scaffold_at(&pool, works_root.path());
+    let cap = scaffold_at(&pool, works_root.path());
 
     let input = serde_json::json!({
         "creator_id": "ctr_test",

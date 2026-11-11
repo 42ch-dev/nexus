@@ -58,11 +58,7 @@ impl WorkspaceExecutor for DirectWriteExecutor {
         }
         std::fs::write(&target, &input.content)
             .map_err(|e| CapabilityError::Internal(format!("write: {e}")))?;
-        Ok(
-            nexus_contracts::local::orchestration::WorkArtifactCommitOutput {
-                committed: true,
-            },
-        )
+        Ok(nexus_contracts::local::orchestration::WorkArtifactCommitOutput { committed: true })
     }
 }
 
