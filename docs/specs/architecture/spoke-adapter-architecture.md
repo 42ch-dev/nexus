@@ -1081,7 +1081,6 @@ All standard lifecycle invariants (promote gate, status transitions, AssemblePac
 - `tooling/check-wire-drift.sh::SPOKE_PIN`
 - `schemas/domain/key-block.schema.json`
 - `crates/nexus-spoke-adapter/`
-- `crates/nexus-kb/`
 - `crates/nexus-knowledge/`
 - `tooling/codegen/src/schema-prep.ts`
 - `schemas/common/common.schema.json`
