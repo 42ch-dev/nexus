@@ -27,7 +27,9 @@
 //! path joining, mirroring the game-bible/script scaffold pattern.
 
 use super::novel_scaffold_sanitize::validate_work_ref;
-use super::work_commit::{commit_work_bytes, require_executor, workspace_root_of};
+use super::work_commit::{
+    claim_work_ref, commit_work_bytes, publish_work_identity, require_executor, resolve_works_dirs,
+};
 use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -40,8 +42,6 @@ use tracing::info;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct ScaffoldInput {
-    #[allow(dead_code)]
-    // required by the capability input schema; handler patches the works row by work_id
     creator_id: String,
     work_id: String,
     work_ref: String,
@@ -271,6 +271,9 @@ impl Capability for EssayProjectScaffold {
         r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","files_created","dirs_created"],"additionalProperties":false}"#
     }
 
+    // SAFETY: The run method handles 6 directory/file operations through the
+    // Work artifact port; the length is inherent to the scaffold batch.
+    #[allow(clippy::too_many_lines)]
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
         let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
             CapabilityError::InputInvalid(format!("essay.project_scaffold input: {e}"))
@@ -286,103 +289,125 @@ impl Capability for EssayProjectScaffold {
             "essay.project_scaffold: start"
         );
 
-        let work_dir = self.works_root.join(&work_ref);
-        let workspace_root = workspace_root_of(&self.works_root);
         let title = inp.title.clone();
         let work_id_for_fs = inp.work_id.clone();
         let executor = require_executor(self.executor.as_ref())?;
+        let (workspace_root, resolved_works) = resolve_works_dirs(executor, &self.works_root)?;
+        let work_dir = resolved_works.join(&work_ref);
 
         // The Work artifact port resolves `Works/<work_ref>` through the works
         // row, so the ref must already be there when the first byte lands — a
-        // first scaffold still has it NULL.
-        if let Some(pool) = &self.pool {
-            sqlx::query("UPDATE works SET work_profile = 'essay', work_ref = ? WHERE work_id = ?")
-                .bind(&work_ref)
-                .bind(&inp.work_id)
-                .execute(pool)
-                .await
-                .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
+        // first scaffold still has it NULL. Only the ref is claimed here; the
+        // profile lands with the finished scaffold, and a failure restores it.
+        let claim =
+            claim_work_ref(self.pool.as_ref(), &inp.creator_id, &inp.work_id, &work_ref).await?;
+
+        let result: Result<(Vec<String>, Vec<String>), CapabilityError> = async {
+            // `ScaffoldTransaction` is inherently synchronous (Drop-based
+            // rollback cannot be async); the file bytes go through the injected
+            // executor, so only rollback bookkeeping stays local. Every path it
+            // records is already absolute, so the guard compensates the same
+            // tree the port wrote.
+            let mut tx = ScaffoldTransaction::new();
+
+            let outlines_dir = work_dir.join("Outlines");
+            let drafts_dir = work_dir.join("Drafts");
+            let logs_dir = work_dir.join("Logs");
+            let logs_write_dir = logs_dir.join("write");
+            let logs_review_dir = logs_dir.join("review");
+
+            // Create directory structure (idempotent — only tracks newly created dirs)
+            for dir in [
+                &work_dir,
+                &outlines_dir,
+                &drafts_dir,
+                &logs_dir,
+                &logs_write_dir,
+                &logs_review_dir,
+            ] {
+                tx.create_dir(dir)?;
+            }
+
+            // Write README.md (through the Work artifact port; tracks create vs overwrite)
+            let readme_content = format!(
+                "# {title}\n\nEssay project.\n\n- **Work ID**: {work_id_for_fs}\n- **Profile**: essay\n",
+            );
+            tx.write_file(
+                executor,
+                &workspace_root,
+                &work_ref,
+                Path::new("README.md"),
+                &readme_content,
+            )
+            .await?;
+
+            // Write Outlines/outline.md
+            let outline_content = format!(
+                "---\ntitle: {title}\nstatus: outline\n---\n\n# Thesis\n\n# Audience\n\n# Structure\n\n1. Opening hook\n2. Core argument\n3. Supporting evidence\n4. Counterpoint / nuance\n5. Ending takeaway\n",
+            );
+            tx.write_file(
+                executor,
+                &workspace_root,
+                &work_ref,
+                Path::new("Outlines/outline.md"),
+                &outline_content,
+            )
+            .await?;
+
+            // Write Drafts/draft.md
+            let draft_content = format!(
+                "---\ntitle: {title}\nstatus: draft\nword_count: 0\n---\n\n# {title}\n\nWrite your essay here.\n",
+            );
+            tx.write_file(
+                executor,
+                &workspace_root,
+                &work_ref,
+                Path::new("Drafts/draft.md"),
+                &draft_content,
+            )
+            .await?;
+
+            // Files landed — publish the profile identity, then commit the guard.
+            publish_work_identity(
+                self.pool.as_ref(),
+                &inp.creator_id,
+                &inp.work_id,
+                "essay",
+                &work_ref,
+            )
+            .await?;
+
+            // Output diagnostics use new file lists
+            let files_created: Vec<String> = tx
+                .created_files
+                .iter()
+                .chain(tx.overwritten_files.iter().map(|(p, _)| p))
+                .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
+                .collect();
+            let dirs_created: Vec<String> = tx
+                .created_dirs
+                .iter()
+                .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
+                .collect();
+
+            tx.commit();
+            Ok((files_created, dirs_created))
         }
+        .await;
 
-        // `ScaffoldTransaction` is inherently synchronous (Drop-based
-        // rollback cannot be async); the file bytes go through the injected
-        // executor, so only rollback bookkeeping stays local. If the
-        // subsequent DB PATCH fails, the guard's Drop rolls back all FS
-        // writes — atomicity is preserved.
-        let mut tx = ScaffoldTransaction::new();
-
-        let outlines_dir = work_dir.join("Outlines");
-        let drafts_dir = work_dir.join("Drafts");
-        let logs_dir = work_dir.join("Logs");
-        let logs_write_dir = logs_dir.join("write");
-        let logs_review_dir = logs_dir.join("review");
-
-        // Create directory structure (idempotent — only tracks newly created dirs)
-        for dir in [
-            &work_dir,
-            &outlines_dir,
-            &drafts_dir,
-            &logs_dir,
-            &logs_write_dir,
-            &logs_review_dir,
-        ] {
-            tx.create_dir(dir)?;
-        }
-
-        // Write README.md (through the Work artifact port; tracks create vs overwrite)
-        let readme_content = format!(
-            "# {title}\n\nEssay project.\n\n- **Work ID**: {work_id_for_fs}\n- **Profile**: essay\n",
-        );
-        tx.write_file(
-            executor,
-            workspace_root,
-            &work_ref,
-            Path::new("README.md"),
-            &readme_content,
-        )
-        .await?;
-
-        // Write Outlines/outline.md
-        let outline_content = format!(
-            "---\ntitle: {title}\nstatus: outline\n---\n\n# Thesis\n\n# Audience\n\n# Structure\n\n1. Opening hook\n2. Core argument\n3. Supporting evidence\n4. Counterpoint / nuance\n5. Ending takeaway\n",
-        );
-        tx.write_file(
-            executor,
-            workspace_root,
-            &work_ref,
-            Path::new("Outlines/outline.md"),
-            &outline_content,
-        )
-        .await?;
-
-        // Write Drafts/draft.md
-        let draft_content = format!(
-            "---\ntitle: {title}\nstatus: draft\nword_count: 0\n---\n\n# {title}\n\nWrite your essay here.\n",
-        );
-        tx.write_file(
-            executor,
-            workspace_root,
-            &work_ref,
-            Path::new("Drafts/draft.md"),
-            &draft_content,
-        )
-        .await?;
-
-        // All FS + DB writes succeeded — commit the transaction guard
-        tx.commit();
-
-        // Output diagnostics use new file lists
-        let files_created: Vec<String> = tx
-            .created_files
-            .iter()
-            .chain(tx.overwritten_files.iter().map(|(p, _)| p))
-            .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
-            .collect();
-        let dirs_created: Vec<String> = tx
-            .created_dirs
-            .iter()
-            .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
-            .collect();
+        let (files_created, dirs_created) = match result {
+            Ok(created) => created,
+            Err(err) => {
+                if let Err(restore_err) = claim.restore(self.pool.as_ref()).await {
+                    tracing::warn!(
+                        work_id = %inp.work_id,
+                        error = %restore_err,
+                        "essay.project_scaffold: restore prior work_ref failed"
+                    );
+                }
+                return Err(err);
+            }
+        };
 
         let output = ScaffoldOutput {
             scaffold_root: work_dir.display().to_string(),
@@ -408,7 +433,8 @@ mod tests {
 
     /// Capability over a temp `Works/` root with a recording executor.
     fn cap_with_root(works_root: PathBuf) -> EssayProjectScaffold {
-        let executor: Arc<dyn WorkspaceExecutor> = RecordingExecutor::new();
+        let executor: Arc<dyn WorkspaceExecutor> =
+            RecordingExecutor::at(works_root.parent().expect("works root has a parent"));
         EssayProjectScaffold {
             pool: None,
             works_root,
@@ -580,7 +606,7 @@ mod tests {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
-        let executor = RecordingExecutor::new();
+        let executor = RecordingExecutor::at(tmp.path());
         let cap = EssayProjectScaffold {
             pool: None,
             works_root: root.clone(),
@@ -674,7 +700,7 @@ mod tests {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
-        let executor = RecordingExecutor::refusing("Drafts/draft.md");
+        let executor = RecordingExecutor::refusing_at(tmp.path(), "Drafts/draft.md");
         let cap = EssayProjectScaffold {
             pool: None,
             works_root: root.clone(),

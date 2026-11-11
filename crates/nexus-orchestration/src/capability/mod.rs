@@ -253,6 +253,21 @@ pub trait WorkspaceExecutor: Send + Sync {
         input: nexus_contracts::local::orchestration::WorkspaceCommitInput,
     ) -> Result<nexus_contracts::local::orchestration::WorkspaceCommitOutput, CapabilityError>;
 
+    /// The absolute workspace root whose `Works/` tree this executor commits.
+    ///
+    /// A builtin resolves its `Works/<work_ref>/` bookkeeping against this
+    /// root, so existence checks, directory creation, the port commit and
+    /// rollback all address one tree instead of the process cwd.
+    ///
+    /// Default refuses: an executor with no bound workspace cannot resolve a
+    /// target, so no caller falls back to a relative path.
+    ///
+    /// # Errors
+    /// [`CapabilityError::WorkerUnavailable`] when no workspace is bound.
+    fn workspace_root(&self) -> Result<std::path::PathBuf, CapabilityError> {
+        Err(CapabilityError::WorkerUnavailable)
+    }
+
     /// Commit one Work artifact byte write (`Works/<work_ref>/<rel_child>`).
     ///
     /// The single production implementation delegates to the core byte-write
@@ -432,8 +447,11 @@ impl CapabilityRegistry {
             // V1.52 T-A P2: register essay.project_scaffold for
             // embedded preset validation.
             Box::new(builtins::EssayProjectScaffold::new()),
-            // V1.63 P2: register essay.draft_status.finalize for
-            // essay-writing preset finalize_commit state.
+            // V1.63 P2: register essay.draft_status.finalize for the
+            // essay-writing preset's finalize_commit state. This registry
+            // carries no workspace executor, so the instance is
+            // validation-only — `with_runtime_deps` registers the executable
+            // one.
             Box::new(builtins::EssayDraftStatusFinalize::new()),
             // V1.54 P1: register game_bible.project_scaffold for
             // embedded preset validation.
@@ -501,7 +519,9 @@ impl CapabilityRegistry {
             Box::new(builtins::NovelChapterTransition::with_pool(pool.clone())),
             // V1.52 T-A P2: essay.project_scaffold with pool.
             Box::new(builtins::EssayProjectScaffold::with_pool(pool.clone())),
-            // V1.63 P2: essay.draft_status.finalize (pool-less; FS-only).
+            // V1.63 P2: essay.draft_status.finalize (pool only, no workspace
+            // executor — validation-only here; `with_runtime_deps` registers
+            // the executable instance).
             Box::new(builtins::EssayDraftStatusFinalize::new()),
             // V1.54 P1: game_bible.project_scaffold with pool.
             Box::new(builtins::GameBibleProjectScaffold::with_pool(pool.clone())),
@@ -823,6 +843,14 @@ impl CapabilityRegistry {
                     })
                     .with_workspace_executor(deps.workspace_executor.clone()),
             ),
+            // V1.63 P2: essay.draft_status.finalize — the essay preset's
+            // finalize_commit writer. It writes Work bytes, so it needs the
+            // runtime executor; `with_builtins` registers it without one and
+            // therefore stays validation-only.
+            Box::new(
+                builtins::EssayDraftStatusFinalize::new()
+                    .with_workspace_executor(deps.workspace_executor.clone()),
+            ),
             // V1.54 P1: game_bible.project_scaffold with runtime deps.
             Box::new(
                 deps.pool
@@ -1132,6 +1160,48 @@ mod tests {
         assert!(names.contains(&"script.section_status.update"));
     }
 
+    /// The runtime-deps registry is the supported executable path for the
+    /// essay finalizer: an invocation resolved from it must reach the injected
+    /// Work executor instead of refusing with `WorkerUnavailable`.
+    #[tokio::test]
+    async fn runtime_deps_registry_runs_the_essay_finalizer_through_its_executor() {
+        use crate::capability::builtins::work_commit::test_support::RecordingExecutor;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace_root = tmp.path().to_path_buf();
+        let drafts = workspace_root
+            .join("Works")
+            .join("registry-essay")
+            .join("Drafts");
+        std::fs::create_dir_all(&drafts).unwrap();
+        std::fs::write(drafts.join("draft.md"), "---\nstatus: draft\n---\nbody").unwrap();
+
+        let executor = RecordingExecutor::at(workspace_root);
+        let deps = CapabilityRuntimeDeps {
+            pool: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+            daemon_tool_dispatch: None,
+            cdn_config: None,
+            workspace_executor: Some(executor.clone()),
+        };
+        let registry = CapabilityRegistry::with_runtime_deps(&deps);
+        let cap = registry
+            .get("essay.draft_status.finalize")
+            .expect("the executable registry exposes the essay finalizer");
+
+        cap.run(serde_json::json!({ "work_ref": "registry-essay" }))
+            .await
+            .expect("finalize runs through the registry-wired executor");
+        assert_eq!(
+            executor.commits().len(),
+            1,
+            "the registry's executor received the draft commit"
+        );
+    }
+
     // ── User capability constructors (T2 / AR-36) ───────────────────────
     // The trio fixture is the shared `test_support::write_capability_dir`
     // (qc1 S-1): one writer for the in-crate test modules.
@@ -1150,9 +1220,8 @@ mod tests {
             cdn_config: None,
             workspace_executor: None,
         };
-        // Base builtin count of the runtime-deps constructor (33 — the shared
-        // `build_with_narrative_compute` vec; `essay.draft_status.finalize`
-        // is only in with_builtins/with_builtins_and_pool).
+        // Base builtin count of the runtime-deps constructor (34 — the shared
+        // `build_with_narrative_compute` vec).
         let base = CapabilityRegistry::with_runtime_deps(&deps);
         let base_len = base.len();
         let (reg, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, tmp.path());

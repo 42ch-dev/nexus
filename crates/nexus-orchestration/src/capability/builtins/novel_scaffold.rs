@@ -5,7 +5,9 @@
 //! and updates the `works` table — all atomically per V1.36 §5.4.
 
 use super::novel_scaffold_sanitize::{validate_total_chapters, validate_work_ref};
-use super::work_commit::{commit_work_bytes, require_executor, workspace_root_of};
+use super::work_commit::{
+    claim_work_ref, commit_work_bytes, require_executor, resolve_works_dirs, WorkRefClaim,
+};
 use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use nexus_local_db::{work_chapters, works};
@@ -393,22 +395,32 @@ impl Capability for NovelProjectScaffold {
             }
         }
 
-        let root = self.works_root.join(&inp.work_ref);
-        let workspace_root = workspace_root_of(&self.works_root);
         let executor = require_executor(self.executor.as_ref())?;
+        let (workspace_root, works_dir) = resolve_works_dirs(executor, &self.works_root)?;
+        let root = works_dir.join(&inp.work_ref);
 
         // The Work artifact port resolves `Works/<work_ref>` through the works
         // row, so the ref must already be there when the first byte lands — a
-        // first scaffold still has it NULL. The T4 patch below stays inside the
-        // chapters/world transaction and re-states the same value.
-        if let Some(pool) = &self.pool {
-            sqlx::query("UPDATE works SET work_ref = ? WHERE work_id = ?")
-                .bind(&inp.work_ref)
-                .bind(&inp.work_id)
-                .execute(pool)
-                .await
-                .map_err(|e| CapabilityError::Internal(format!("claim work_ref: {e}")))?;
-        }
+        // first scaffold still has it NULL. A partial re-init that does not
+        // select `work_ref` keeps the stored value instead of overwriting it;
+        // the prior value is restored if the scaffold fails.
+        let claim = if inp
+            .fields_changed
+            .as_ref()
+            .is_none_or(|fields| fields.iter().any(|field| field == "work_ref"))
+        {
+            claim_work_ref(
+                self.pool.as_ref(),
+                &inp.creator_id,
+                &inp.work_id,
+                &inp.work_ref,
+            )
+            .await?
+        } else {
+            WorkRefClaim::none()
+        };
+
+        let result = async {
 
         // ── T2a: root directory ────────────────────────────────────────
         // F2 (C-002, C-2, W-3): all subsequent FS writes register with
@@ -448,7 +460,7 @@ impl Capability for NovelProjectScaffold {
             )?;
             write_file_idem(
                 executor,
-                workspace_root,
+                &workspace_root,
                 &inp.work_ref,
                 Path::new("README.md"),
                 &rendered,
@@ -493,7 +505,7 @@ impl Capability for NovelProjectScaffold {
             );
             write_file_idem(
                 executor,
-                workspace_root,
+                &workspace_root,
                 &inp.work_ref,
                 Path::new("Outlines/volume-outline.md"),
                 &content,
@@ -512,7 +524,7 @@ impl Capability for NovelProjectScaffold {
             )?;
             write_file_idem(
                 executor,
-                workspace_root,
+                &workspace_root,
                 &inp.work_ref,
                 Path::new("Outlines/volume-outline.md"),
                 &rendered,
@@ -526,7 +538,7 @@ impl Capability for NovelProjectScaffold {
             let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
             write_file_idem(
                 executor,
-                workspace_root,
+                &workspace_root,
                 &inp.work_ref,
                 Path::new("Outlines/foreshadowing.md"),
                 &rendered,
@@ -540,7 +552,7 @@ impl Capability for NovelProjectScaffold {
             let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
             write_file_idem(
                 executor,
-                workspace_root,
+                &workspace_root,
                 &inp.work_ref,
                 Path::new("Outlines/event-index.md"),
                 &rendered,
@@ -583,7 +595,7 @@ impl Capability for NovelProjectScaffold {
         let agents_md_rendered = crate::rules_layers::render_default_agents_md(&inp.work_ref);
         write_file_idem(
             executor,
-            workspace_root,
+            &workspace_root,
             &inp.work_ref,
             Path::new("AGENTS.md"),
             &agents_md_rendered,
@@ -775,6 +787,19 @@ impl Capability for NovelProjectScaffold {
         };
         serde_json::to_value(output)
             .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+        }
+        .await;
+
+        if result.is_err() {
+            if let Err(restore_err) = claim.restore(self.pool.as_ref()).await {
+                tracing::warn!(
+                    work_id = %inp.work_id,
+                    error = %restore_err,
+                    "novel.project_scaffold: restore prior work_ref failed"
+                );
+            }
+        }
+        result
     }
 }
 
@@ -901,7 +926,8 @@ mod tests {
 
     /// Capability over a temp `Works/` root with a recording executor.
     fn cap_with_root(works_root: PathBuf) -> NovelProjectScaffold {
-        let executor: Arc<dyn WorkspaceExecutor> = RecordingExecutor::new();
+        let executor: Arc<dyn WorkspaceExecutor> =
+            RecordingExecutor::at(works_root.parent().expect("works root has a parent"));
         NovelProjectScaffold {
             pool: None,
             works_root,
@@ -1142,7 +1168,7 @@ mod tests {
     async fn scaffold_rolls_back_when_port_refuses_a_later_file() {
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
-        let executor = RecordingExecutor::refusing("AGENTS.md");
+        let executor = RecordingExecutor::refusing_at(tmp.path(), "AGENTS.md");
         let cap = NovelProjectScaffold {
             pool: None,
             works_root: root.clone(),

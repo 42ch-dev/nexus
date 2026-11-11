@@ -143,6 +143,12 @@ fn map_port_error(err: NexusApiError) -> CapabilityError {
 
 #[async_trait]
 impl WorkspaceExecutor for WorkspaceCommitExecutor {
+    fn workspace_root(&self) -> Result<PathBuf, CapabilityError> {
+        Ok(Path::new(&self.canonical_workspace_root)
+            .canonicalize()
+            .unwrap_or_else(|_| PathBuf::from(&self.canonical_workspace_root)))
+    }
+
     async fn open(
         &self,
         input: WorkspaceOpenInput,
@@ -210,21 +216,40 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
         };
         // A builtin's default `works_root` is the workspace-relative `Works`,
         // so its owning root arrives empty. Resolve any relative/empty input
-        // against the ONE canonical root this executor was built for, instead
-        // of handing a relative path to the boundary check (which compares a
-        // canonical absolute probe against it and refuses every write).
-        let input_root = Path::new(&input.workspace_root);
-        let workspace_root = if input_root.is_absolute() {
-            std::borrow::Cow::Borrowed(input_root)
-        } else {
-            std::borrow::Cow::Owned(Path::new(&self.canonical_workspace_root).join(input_root))
+        // against the ONE canonical root this executor was built for, then
+        // require the result to BE that root: a caller-supplied directory
+        // (or a `..` out of the workspace) must be refused before any
+        // directory or byte mutation, or it becomes the authority the port
+        // approves writes under.
+        let Ok(canonical_root) = Path::new(&self.canonical_workspace_root).canonicalize() else {
+            return Err(CapabilityError::Internal(
+                "workspace root does not resolve".into(),
+            ));
         };
+        let input_root = Path::new(&input.workspace_root);
+        let requested_root = if input_root.is_absolute() {
+            input_root.to_path_buf()
+        } else {
+            canonical_root.join(input_root)
+        };
+        let Ok(requested_root) = requested_root.canonicalize() else {
+            return Err(CapabilityError::Forbidden(format!(
+                "workspace root '{}' is not this executor's workspace root",
+                input.workspace_root
+            )));
+        };
+        if requested_root != canonical_root {
+            return Err(CapabilityError::Forbidden(format!(
+                "workspace root '{}' is not this executor's workspace root",
+                input.workspace_root
+            )));
+        }
         // Same per-dispatch construction the hot path performs: one port over
         // the shared pool, no second writer and no new public surface.
         let pool = self.session_manager.pool();
         FsWorkArtifactPort::new((*pool).clone(), nexus_home.clone())
             .commit(WorkArtifactWrite {
-                workspace_root: workspace_root.as_ref(),
+                workspace_root: &requested_root,
                 work_ref: &input.work_ref,
                 rel_child: Path::new(&input.rel_child),
                 content: &input.content,
@@ -313,26 +338,7 @@ mod tests {
     async fn a_builtin_receives_the_executor_and_commits_work_bytes() {
         let home = tempfile::tempdir().expect("temp home");
         let workspace = tempfile::tempdir().expect("temp workspace");
-        let config = format!(
-            "active_creator_id = \"{CREATOR}\"\n\
-             active_workspace_slug_by_creator = {{ {CREATOR} = \"default\" }}\n"
-        );
-        std::fs::write(home.path().join("config.toml"), config).expect("cli config");
-        let pool = nexus_local_db::init_engine_pool(&home.path().join("state.db"))
-            .await
-            .expect("engine pool")
-            .clone_pool();
-        works::create_work(&pool, &work_record())
-            .await
-            .expect("works row");
-
-        let executor: Arc<dyn WorkspaceExecutor> = Arc::new(
-            WorkspaceCommitExecutor::new(
-                Arc::new(WorkspaceSessionManager::new(Arc::new(pool))),
-                workspace.path().to_string_lossy().into_owned(),
-            )
-            .with_work_artifact_home(home.path().to_path_buf()),
-        );
+        let (_pool, executor) = seam(home.path(), workspace.path()).await;
 
         BuiltinLikeCaller { executor }
             .write_chapter(
@@ -352,5 +358,93 @@ mod tests {
         )
         .expect("artifact bytes");
         assert_eq!(written, "# Chapter 1\n");
+    }
+
+    #[tokio::test]
+    async fn commit_work_artifact_refuses_an_unrelated_workspace_root() {
+        let home = tempfile::tempdir().expect("temp home");
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let unrelated = tempfile::tempdir().expect("unrelated directory");
+        let (_pool, executor) = seam(home.path(), workspace.path()).await;
+
+        let err = executor
+            .commit_work_artifact(WorkArtifactCommitInput {
+                workspace_root: unrelated.path().to_string_lossy().into_owned(),
+                work_ref: WORK_REF.to_string(),
+                rel_child: "Body/chapter-01.md".to_string(),
+                content: "# Leak\n".to_string(),
+            })
+            .await
+            .expect_err("a foreign workspace root must be refused");
+        assert!(
+            matches!(err, CapabilityError::Forbidden(_)),
+            "expected the confinement refusal, got: {err}"
+        );
+        assert!(
+            !unrelated.path().join("Works").exists(),
+            "no directory may be created in the foreign root"
+        );
+        assert!(
+            !workspace.path().join("Works").exists(),
+            "and nothing may be written inside the workspace either"
+        );
+    }
+
+    #[tokio::test]
+    async fn commit_work_artifact_refuses_a_parent_relative_workspace_root() {
+        let parent = tempfile::tempdir().expect("parent");
+        let workspace = parent.path().join("ws");
+        let sibling = parent.path().join("other");
+        std::fs::create_dir_all(&workspace).expect("workspace dir");
+        std::fs::create_dir_all(&sibling).expect("sibling dir");
+        let home = tempfile::tempdir().expect("temp home");
+        let (_pool, executor) = seam(home.path(), &workspace).await;
+
+        let err = executor
+            .commit_work_artifact(WorkArtifactCommitInput {
+                workspace_root: format!("{}/../other", workspace.display()),
+                work_ref: WORK_REF.to_string(),
+                rel_child: "Body/chapter-01.md".to_string(),
+                content: "# Leak\n".to_string(),
+            })
+            .await
+            .expect_err("a root outside the workspace must be refused");
+        assert!(
+            matches!(err, CapabilityError::Forbidden(_)),
+            "expected the confinement refusal, got: {err}"
+        );
+        assert!(
+            !sibling.join("Works").exists(),
+            "`..` may not walk the target out of the workspace"
+        );
+    }
+
+    /// The production shape: a home carrying the CLI selection, an engine pool
+    /// with one works row, and a real executor bound to `workspace`.
+    async fn seam(
+        home: &std::path::Path,
+        workspace: &std::path::Path,
+    ) -> (sqlx::SqlitePool, Arc<dyn WorkspaceExecutor>) {
+        let config = format!(
+            "active_creator_id = \"{CREATOR}\"\n\
+             active_workspace_slug_by_creator = {{ {CREATOR} = \"default\" }}\n"
+        );
+        std::fs::write(home.join("config.toml"), config).expect("cli config");
+        let pool = nexus_local_db::init_engine_pool(&home.join("state.db"))
+            .await
+            .expect("engine pool")
+            .clone_pool();
+        works::create_work(&pool, &work_record())
+            .await
+            .expect("works row");
+
+        let executor: Arc<dyn WorkspaceExecutor> = Arc::new(
+            WorkspaceCommitExecutor::new(
+                Arc::new(WorkspaceSessionManager::new(Arc::new(pool.clone()))),
+                workspace.to_string_lossy().into_owned(),
+            )
+            .with_work_artifact_home(home.to_path_buf()),
+        );
+        (pool, executor)
     }
 }

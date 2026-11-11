@@ -21,10 +21,16 @@ use nexus_orchestration::capability::{Capability, CapabilityError, WorkspaceExec
 /// Test executor: commits Work bytes at the target the production port builds
 /// (`<workspace_root>/Works/<work_ref>/<rel_child>`), without the DB lock/row
 /// checks the core port performs.
-struct DirectWriteExecutor;
+struct DirectWriteExecutor {
+    workspace_root: std::path::PathBuf,
+}
 
 #[async_trait::async_trait]
 impl WorkspaceExecutor for DirectWriteExecutor {
+    fn workspace_root(&self) -> Result<std::path::PathBuf, CapabilityError> {
+        Ok(self.workspace_root.clone())
+    }
+
     async fn open(
         &self,
         _input: nexus_contracts::local::orchestration::WorkspaceOpenInput,
@@ -98,7 +104,11 @@ fn make_cap(
         pool,
         works_root.to_path_buf(),
     )
-    .with_workspace_executor(Some(std::sync::Arc::new(DirectWriteExecutor)))
+    .with_workspace_executor(Some(std::sync::Arc::new(DirectWriteExecutor {
+        workspace_root: works_root
+            .parent()
+            .map_or_else(std::path::PathBuf::new, std::path::Path::to_path_buf),
+    })))
 }
 
 /// Build scaffold input JSON.

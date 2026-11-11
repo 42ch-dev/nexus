@@ -26,7 +26,9 @@
 //! path joining, mirroring the novel scaffold pattern.
 
 use super::novel_scaffold_sanitize::validate_work_ref;
-use super::work_commit::{commit_work_bytes, require_executor, workspace_root_of};
+use super::work_commit::{
+    claim_work_ref, commit_work_bytes, publish_work_identity, require_executor, resolve_works_dirs,
+};
 use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -39,8 +41,6 @@ use tracing::info;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct ScaffoldInput {
-    #[allow(dead_code)]
-    // required by the capability input schema; handler patches the works row by work_id
     creator_id: String,
     work_id: String,
     work_ref: String,
@@ -351,78 +351,98 @@ impl Capability for GameBibleProjectScaffold {
             "game_bible.project_scaffold: start"
         );
 
-        let work_dir = self.works_root.join(&work_ref);
-        let workspace_root = workspace_root_of(&self.works_root);
+        let executor = require_executor(self.executor.as_ref())?;
+        let (workspace_root, resolved_works) = resolve_works_dirs(executor, &self.works_root)?;
+        let work_dir = resolved_works.join(&work_ref);
         let design_dir = work_dir.join("Design");
         let logs_dir = work_dir.join("Logs");
         let logs_design_dir = logs_dir.join("design");
         let logs_review_dir = logs_dir.join("review");
 
-        let executor = require_executor(self.executor.as_ref())?;
-
         // The Work artifact port resolves `Works/<work_ref>` through the works
         // row, so the ref must already be there when the first byte lands — a
-        // first scaffold still has it NULL.
-        if let Some(pool) = &self.pool {
-            sqlx::query(
-                "UPDATE works SET work_profile = 'game_bible', work_ref = ? WHERE work_id = ?",
-            )
-            .bind(&work_ref)
-            .bind(&inp.work_id)
-            .execute(pool)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
-        }
+        // first scaffold still has it NULL. Only the ref is claimed here; the
+        // profile lands with the finished scaffold, and a failure restores it.
+        let claim =
+            claim_work_ref(self.pool.as_ref(), &inp.creator_id, &inp.work_id, &work_ref).await?;
 
-        let mut tx = ScaffoldTransaction::new();
+        let result: Result<(Vec<String>, Vec<String>), CapabilityError> = async {
+            let mut tx = ScaffoldTransaction::new();
 
-        // Create directory structure (idempotent)
-        for dir in [
-            &work_dir,
-            &design_dir,
-            &logs_dir,
-            &logs_design_dir,
-            &logs_review_dir,
-        ] {
-            tx.create_dir(dir)?;
-        }
+            // Create directory structure (idempotent)
+            for dir in [
+                &work_dir,
+                &design_dir,
+                &logs_dir,
+                &logs_design_dir,
+                &logs_review_dir,
+            ] {
+                tx.create_dir(dir)?;
+            }
 
-        // Write README.md (through the Work artifact port; tracks create vs overwrite)
-        let readme_content = format!(
+            // Write README.md (through the Work artifact port; tracks create vs overwrite)
+            let readme_content = format!(
         "# {title}\n\nGame design bible.\n\n- **Work ID**: {work_id}\n- **Profile**: game_bible\n\n## Core Pillars\n\n<!-- Genre, tone, target audience, and key design constraints -->\n",
         title = inp.title,
         work_id = inp.work_id,
     );
-        tx.write_file(
-            executor,
-            workspace_root,
-            &work_ref,
-            Path::new("README.md"),
-            &readme_content,
-        )
-        .await?;
+            tx.write_file(
+                executor,
+                &workspace_root,
+                &work_ref,
+                Path::new("README.md"),
+                &readme_content,
+            )
+            .await?;
 
-        // Write 12 Design/*.md template files
-        for tmpl in DESIGN_TEMPLATES {
-            let content = render_template(tmpl);
-            let rel_child = Path::new("Design").join(tmpl.filename);
-            tx.write_file(executor, workspace_root, &work_ref, &rel_child, &content)
-                .await?;
+            // Write 12 Design/*.md template files
+            for tmpl in DESIGN_TEMPLATES {
+                let content = render_template(tmpl);
+                let rel_child = Path::new("Design").join(tmpl.filename);
+                tx.write_file(executor, &workspace_root, &work_ref, &rel_child, &content)
+                    .await?;
+            }
+
+            // Files landed — publish the profile identity, then commit the guard.
+            publish_work_identity(
+                self.pool.as_ref(),
+                &inp.creator_id,
+                &inp.work_id,
+                "game_bible",
+                &work_ref,
+            )
+            .await?;
+
+            let files_created: Vec<String> = tx
+                .created_files
+                .iter()
+                .chain(tx.overwritten_files.iter().map(|(p, _)| p))
+                .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
+                .collect();
+            let dirs_created: Vec<String> = tx
+                .created_dirs
+                .iter()
+                .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
+                .collect();
+
+            tx.commit();
+            Ok((files_created, dirs_created))
         }
+        .await;
 
-        tx.commit();
-
-        let files_created: Vec<String> = tx
-            .created_files
-            .iter()
-            .chain(tx.overwritten_files.iter().map(|(p, _)| p))
-            .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
-            .collect();
-        let dirs_created: Vec<String> = tx
-            .created_dirs
-            .iter()
-            .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
-            .collect();
+        let (files_created, dirs_created) = match result {
+            Ok(created) => created,
+            Err(err) => {
+                if let Err(restore_err) = claim.restore(self.pool.as_ref()).await {
+                    tracing::warn!(
+                        work_id = %inp.work_id,
+                        error = %restore_err,
+                        "game_bible.project_scaffold: restore prior work_ref failed"
+                    );
+                }
+                return Err(err);
+            }
+        };
 
         let output = ScaffoldOutput {
             scaffold_root: work_dir.display().to_string(),
@@ -449,7 +469,8 @@ mod tests {
 
     /// Capability over a temp `Works/` root with a recording executor.
     fn cap_with_root(works_root: PathBuf) -> GameBibleProjectScaffold {
-        let executor: Arc<dyn WorkspaceExecutor> = RecordingExecutor::new();
+        let executor: Arc<dyn WorkspaceExecutor> =
+            RecordingExecutor::at(works_root.parent().expect("works root has a parent"));
         GameBibleProjectScaffold {
             pool: None,
             works_root,
@@ -656,7 +677,7 @@ mod tests {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
-        let executor = RecordingExecutor::new();
+        let executor = RecordingExecutor::at(tmp.path());
         let cap = GameBibleProjectScaffold {
             pool: None,
             works_root: root.clone(),
@@ -723,7 +744,7 @@ mod tests {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
-        let executor = RecordingExecutor::refusing("Design/lore.md");
+        let executor = RecordingExecutor::refusing_at(tmp.path(), "Design/lore.md");
         let cap = GameBibleProjectScaffold {
             pool: None,
             works_root: root.clone(),

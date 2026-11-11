@@ -27,7 +27,9 @@
 //! path joining, mirroring the novel scaffold pattern.
 
 use super::novel_scaffold_sanitize::validate_work_ref;
-use super::work_commit::{commit_work_bytes, require_executor, workspace_root_of};
+use super::work_commit::{
+    claim_work_ref, commit_work_bytes, publish_work_identity, require_executor, resolve_works_dirs,
+};
 use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -40,8 +42,6 @@ use tracing::info;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct ScaffoldInput {
-    #[allow(dead_code)]
-    // required by the capability input schema; handler patches the works row by work_id
     creator_id: String,
     work_id: String,
     work_ref: String,
@@ -303,6 +303,9 @@ impl Capability for ScriptProjectScaffold {
         r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","files_created","dirs_created"],"additionalProperties":false}"#
     }
 
+    // SAFETY: The run method handles 7 directory/file operations through the
+    // Work artifact port; the length is inherent to the scaffold batch.
+    #[allow(clippy::too_many_lines)]
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
         let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
             CapabilityError::InputInvalid(format!("script.project_scaffold input: {e}"))
@@ -318,8 +321,9 @@ impl Capability for ScriptProjectScaffold {
             "script.project_scaffold: start"
         );
 
-        let work_dir = self.works_root.join(&work_ref);
-        let workspace_root = workspace_root_of(&self.works_root);
+        let executor = require_executor(self.executor.as_ref())?;
+        let (workspace_root, resolved_works) = resolve_works_dirs(executor, &self.works_root)?;
+        let work_dir = resolved_works.join(&work_ref);
         let scripts_dir = work_dir.join("Scripts");
         let beats_dir = work_dir.join("Beats");
         let characters_dir = work_dir.join("Characters");
@@ -327,98 +331,118 @@ impl Capability for ScriptProjectScaffold {
         let logs_write_dir = logs_dir.join("write");
         let logs_review_dir = logs_dir.join("review");
 
-        let executor = require_executor(self.executor.as_ref())?;
-
         // The Work artifact port resolves `Works/<work_ref>` through the works
         // row, so the ref must already be there when the first byte lands — a
-        // first scaffold still has it NULL.
-        if let Some(pool) = &self.pool {
-            sqlx::query("UPDATE works SET work_profile = 'script', work_ref = ? WHERE work_id = ?")
-                .bind(&work_ref)
-                .bind(&inp.work_id)
-                .execute(pool)
-                .await
-                .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
+        // first scaffold still has it NULL. Only the ref is claimed here; the
+        // profile lands with the finished scaffold, and a failure restores it.
+        let claim =
+            claim_work_ref(self.pool.as_ref(), &inp.creator_id, &inp.work_id, &work_ref).await?;
+
+        let result: Result<(Vec<String>, Vec<String>), CapabilityError> = async {
+            let mut tx = ScaffoldTransaction::new();
+
+            // Create directory structure (idempotent — only tracks newly created dirs)
+            for dir in [
+                &work_dir,
+                &scripts_dir,
+                &beats_dir,
+                &characters_dir,
+                &logs_dir,
+                &logs_write_dir,
+                &logs_review_dir,
+            ] {
+                tx.create_dir(dir)?;
+            }
+
+            // Write README.md (through the Work artifact port; tracks create vs overwrite)
+            let readme_content = format!(
+                "# {title}\n\nScript project.\n\n- **Work ID**: {work_id}\n- **Profile**: script\n",
+                title = inp.title,
+                work_id = inp.work_id,
+            );
+            tx.write_file(
+                executor,
+                &workspace_root,
+                &work_ref,
+                Path::new("README.md"),
+                &readme_content,
+            )
+            .await?;
+
+            // Write Scripts/script.md
+            let script_content = render_template(&SCRIPT_TEMPLATES[0]);
+            tx.write_file(
+                executor,
+                &workspace_root,
+                &work_ref,
+                Path::new("Scripts/script.md"),
+                &script_content,
+            )
+            .await?;
+
+            // Write Beats/beat-sheet.md
+            let beat_content = render_template(&SCRIPT_TEMPLATES[1]);
+            tx.write_file(
+                executor,
+                &workspace_root,
+                &work_ref,
+                Path::new("Beats/beat-sheet.md"),
+                &beat_content,
+            )
+            .await?;
+
+            // Write Characters/characters.md
+            let characters_content = render_template(&SCRIPT_TEMPLATES[2]);
+            tx.write_file(
+                executor,
+                &workspace_root,
+                &work_ref,
+                Path::new("Characters/characters.md"),
+                &characters_content,
+            )
+            .await?;
+
+            // Files landed — publish the profile identity, then commit the guard.
+            publish_work_identity(
+                self.pool.as_ref(),
+                &inp.creator_id,
+                &inp.work_id,
+                "script",
+                &work_ref,
+            )
+            .await?;
+
+            // Output diagnostics use new file lists
+            let files_created: Vec<String> = tx
+                .created_files
+                .iter()
+                .chain(tx.overwritten_files.iter().map(|(p, _)| p))
+                .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
+                .collect();
+            let dirs_created: Vec<String> = tx
+                .created_dirs
+                .iter()
+                .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
+                .collect();
+
+            tx.commit();
+            Ok((files_created, dirs_created))
         }
+        .await;
 
-        let mut tx = ScaffoldTransaction::new();
-
-        // Create directory structure (idempotent — only tracks newly created dirs)
-        for dir in [
-            &work_dir,
-            &scripts_dir,
-            &beats_dir,
-            &characters_dir,
-            &logs_dir,
-            &logs_write_dir,
-            &logs_review_dir,
-        ] {
-            tx.create_dir(dir)?;
-        }
-
-        // Write README.md (through the Work artifact port; tracks create vs overwrite)
-        let readme_content = format!(
-            "# {title}\n\nScript project.\n\n- **Work ID**: {work_id}\n- **Profile**: script\n",
-            title = inp.title,
-            work_id = inp.work_id,
-        );
-        tx.write_file(
-            executor,
-            workspace_root,
-            &work_ref,
-            Path::new("README.md"),
-            &readme_content,
-        )
-        .await?;
-
-        // Write Scripts/script.md
-        let script_content = render_template(&SCRIPT_TEMPLATES[0]);
-        tx.write_file(
-            executor,
-            workspace_root,
-            &work_ref,
-            Path::new("Scripts/script.md"),
-            &script_content,
-        )
-        .await?;
-
-        // Write Beats/beat-sheet.md
-        let beat_content = render_template(&SCRIPT_TEMPLATES[1]);
-        tx.write_file(
-            executor,
-            workspace_root,
-            &work_ref,
-            Path::new("Beats/beat-sheet.md"),
-            &beat_content,
-        )
-        .await?;
-
-        // Write Characters/characters.md
-        let characters_content = render_template(&SCRIPT_TEMPLATES[2]);
-        tx.write_file(
-            executor,
-            workspace_root,
-            &work_ref,
-            Path::new("Characters/characters.md"),
-            &characters_content,
-        )
-        .await?;
-
-        // All FS + DB writes succeeded — commit the transaction guard
-        tx.commit();
-
-        // Output diagnostics use new file lists
-        let files_created: Vec<String> = tx
-            .created_files
-            .iter()
-            .chain(tx.overwritten_files.iter().map(|(p, _)| p))
-            .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
-            .collect();
-        let dirs_created: Vec<String> = tx
-            .created_dirs
-            .iter()
-            .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
-            .collect();
+        let (files_created, dirs_created) = match result {
+            Ok(created) => created,
+            Err(err) => {
+                if let Err(restore_err) = claim.restore(self.pool.as_ref()).await {
+                    tracing::warn!(
+                        work_id = %inp.work_id,
+                        error = %restore_err,
+                        "script.project_scaffold: restore prior work_ref failed"
+                    );
+                }
+                return Err(err);
+            }
+        };
 
         let output = ScaffoldOutput {
             scaffold_root: work_dir.display().to_string(),
@@ -444,7 +468,8 @@ mod tests {
 
     /// Capability over a temp `Works/` root with a recording executor.
     fn cap_with_root(works_root: PathBuf) -> ScriptProjectScaffold {
-        let executor: Arc<dyn WorkspaceExecutor> = RecordingExecutor::new();
+        let executor: Arc<dyn WorkspaceExecutor> =
+            RecordingExecutor::at(works_root.parent().expect("works root has a parent"));
         ScriptProjectScaffold {
             pool: None,
             works_root,
@@ -671,7 +696,7 @@ mod tests {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
-        let executor = RecordingExecutor::new();
+        let executor = RecordingExecutor::at(tmp.path());
         let cap = ScriptProjectScaffold {
             pool: None,
             works_root: root.clone(),
@@ -801,7 +826,7 @@ mod tests {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
-        let executor = RecordingExecutor::refusing("Characters/characters.md");
+        let executor = RecordingExecutor::refusing_at(tmp.path(), "Characters/characters.md");
         let cap = ScriptProjectScaffold {
             pool: None,
             works_root: root.clone(),

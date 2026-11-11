@@ -21,7 +21,7 @@
 //! durable atomic write).
 
 use super::novel_scaffold_sanitize::validate_work_ref;
-use super::work_commit::{commit_work_bytes, require_executor, workspace_root_of};
+use super::work_commit::{commit_work_bytes, require_executor, resolve_works_dirs};
 use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -116,7 +116,9 @@ impl Capability for EssayDraftStatusFinalize {
         let works_root = inp
             .works_root
             .map_or_else(|| self.works_root.clone(), PathBuf::from);
-        let draft_path = works_root.join(&work_ref).join("Drafts").join("draft.md");
+        let executor = require_executor(self.executor.as_ref())?;
+        let (workspace_root, works_dir) = resolve_works_dirs(executor, &works_root)?;
+        let draft_path = works_dir.join(&work_ref).join("Drafts").join("draft.md");
 
         // Read current draft
         let content = tokio::fs::read_to_string(&draft_path)
@@ -130,10 +132,9 @@ impl Capability for EssayDraftStatusFinalize {
         let word_count = count_body_words(&updated_content);
 
         // Commit through the Work artifact port
-        let executor = require_executor(self.executor.as_ref())?;
         commit_work_bytes(
             executor,
-            workspace_root_of(&works_root),
+            &workspace_root,
             &work_ref,
             Path::new("Drafts").join("draft.md").as_path(),
             &updated_content,
@@ -304,7 +305,7 @@ mod tests {
         )
         .unwrap();
 
-        let executor = RecordingExecutor::new();
+        let executor = RecordingExecutor::at(tmp.path());
         let cap = EssayDraftStatusFinalize::new().with_workspace_executor(Some(executor.clone()));
         let out = cap
             .run(serde_json::json!({

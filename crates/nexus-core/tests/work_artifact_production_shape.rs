@@ -8,27 +8,97 @@
 //! the bytes must land under the executor's canonical workspace root while the
 //! scaffold itself only knows `Works`.
 //!
-//! The process cwd is moved into a separate temp directory: the scaffolds'
-//! directory bookkeeping is cwd-relative, so any byte that landed without going
-//! through the port would land there instead of in the canonical root.
+//! The process cwd is moved into a separate temp directory and never restored
+//! until the guard drops: the scaffolds must resolve their `Works/` tree from
+//! the executor, so a cwd-relative read, write or rollback shows up as a
+//! leaked tree without the expected canonical bytes.
 
 #![cfg(feature = "execution")]
 #![allow(clippy::unwrap_used)]
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use nexus_contracts::local::orchestration::{
+    WorkArtifactCommitInput, WorkArtifactCommitOutput, WorkspaceCommitInput, WorkspaceCommitOutput,
+    WorkspaceOpenInput, WorkspaceOpenOutput,
+};
 use nexus_core::execution::executor::WorkspaceCommitExecutor;
 use nexus_core::execution::session::WorkspaceSessionManager;
 use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::capability::builtins::{
     EssayProjectScaffold, GameBibleProjectScaffold, NovelProjectScaffold, ScriptProjectScaffold,
 };
-use nexus_orchestration::capability::{Capability, WorkspaceExecutor};
+use nexus_orchestration::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use serde_json::json;
 use sqlx::SqlitePool;
 
 const CREATOR: &str = "ctr_prod_shape";
 const WORKSPACE: &str = "default";
+
+/// Restores the process cwd on drop, so a panicking assertion cannot leak the
+/// temp directory (deleted on drop) into the other tests.
+struct CwdGuard {
+    previous: PathBuf,
+}
+
+impl CwdGuard {
+    fn enter(dir: &Path) -> Self {
+        let previous = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir).expect("chdir");
+        Self { previous }
+    }
+}
+
+impl Drop for CwdGuard {
+    fn drop(&mut self) {
+        if let Err(err) = std::env::set_current_dir(&self.previous) {
+            eprintln!("cwd restore failed: {err}");
+        }
+    }
+}
+
+/// The real executor, refusing one named artifact after the earlier ones
+/// landed — the failure a later port commit produces.
+struct FailOnChild {
+    inner: Arc<dyn WorkspaceExecutor>,
+    fail_on: &'static str,
+}
+
+#[async_trait]
+impl WorkspaceExecutor for FailOnChild {
+    fn workspace_root(&self) -> Result<PathBuf, CapabilityError> {
+        self.inner.workspace_root()
+    }
+
+    async fn open(
+        &self,
+        input: WorkspaceOpenInput,
+    ) -> Result<WorkspaceOpenOutput, CapabilityError> {
+        self.inner.open(input).await
+    }
+
+    async fn commit(
+        &self,
+        input: WorkspaceCommitInput,
+    ) -> Result<WorkspaceCommitOutput, CapabilityError> {
+        self.inner.commit(input).await
+    }
+
+    async fn commit_work_artifact(
+        &self,
+        input: WorkArtifactCommitInput,
+    ) -> Result<WorkArtifactCommitOutput, CapabilityError> {
+        if input.rel_child == self.fail_on {
+            return Err(CapabilityError::Forbidden(format!(
+                "injected refusal for {}",
+                input.rel_child
+            )));
+        }
+        self.inner.commit_work_artifact(input).await
+    }
+}
 
 /// The pieces one production-shaped run needs: the CLI home the port resolves
 /// the active creator/workspace from, the canonical workspace root the executor
@@ -174,10 +244,9 @@ async fn assert_first_scaffold_lands(
 #[tokio::test(flavor = "multi_thread")]
 async fn first_scaffolds_land_bytes_through_the_real_port() {
     let fx = fixture().await;
-    // The scaffolds derive their `Works` tree from the cwd; keep that tree out
-    // of the canonical root so a non-port write cannot masquerade as a hit.
-    let previous_cwd = std::env::current_dir().expect("cwd");
-    std::env::set_current_dir(fx.cwd.path()).expect("chdir");
+    // The scaffolds resolve their `Works` tree from the executor; keep the
+    // cwd elsewhere so a non-port write cannot masquerade as a hit.
+    let _cwd = CwdGuard::enter(fx.cwd.path());
 
     let essay_id = "wrk_prod_essay";
     let script_id = "wrk_prod_script";
@@ -261,5 +330,107 @@ async fn first_scaffolds_land_bytes_through_the_real_port() {
         "README.md",
     )
     .await;
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reinit_preserves_an_existing_canonical_novel_file() {
+    let fx = fixture().await;
+    let _cwd = CwdGuard::enter(fx.cwd.path());
+
+    let work_id = "wrk_prod_novel_keep";
+    works::create_work(&fx.pool, &work_record(work_id))
+        .await
+        .expect("works row");
+
+    // A user-authored file already sits at the port's target. The scaffold's
+    // idempotency check must see THIS tree, not a cwd-relative one.
+    let work_dir = fx.root.path().join("Works").join("prod-novel-keep");
+    std::fs::create_dir_all(&work_dir).expect("work dir");
+    std::fs::write(work_dir.join("README.md"), "# user edits\n").expect("user readme");
+
+    let novel = NovelProjectScaffold::with_pool((*fx.pool).clone())
+        .with_workspace_executor(Some(Arc::clone(&fx.executor)));
+    novel
+        .run(json!({
+            "creator_id": CREATOR,
+            "work_id": work_id,
+            "work_ref": "prod-novel-keep",
+            "title": "Production Novel",
+            "create_world": true,
+            "world_title": "Production World",
+            "total_planned_chapters": 2,
+        }))
+        .await
+        .expect("re-init over an existing canonical Work");
+
+    assert_eq!(
+        std::fs::read_to_string(work_dir.join("README.md")).expect("canonical readme"),
+        "# user edits\n",
+        "the idempotency check must protect the canonical file"
+    );
+    assert!(
+        !fx.cwd.path().join("Works").join("prod-novel-keep").exists(),
+        "no cwd-relative tree may appear"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_later_port_refusal_restores_the_canonical_tree() {
+    let fx = fixture().await;
+    let _cwd = CwdGuard::enter(fx.cwd.path());
+
+    let work_id = "wrk_prod_essay_rollback";
+    works::create_work(&fx.pool, &work_record(work_id))
+        .await
+        .expect("works row");
+
+    // The README lands first (overwriting this original), then the outline
+    // commit refuses: rollback must restore/remove the same canonical tree.
+    let work_dir = fx.root.path().join("Works").join("prod-essay-rollback");
+    std::fs::create_dir_all(&work_dir).expect("work dir");
+    std::fs::write(work_dir.join("README.md"), "ORIGINAL\n").expect("original readme");
+
+    let executor: Arc<dyn WorkspaceExecutor> = Arc::new(FailOnChild {
+        inner: Arc::clone(&fx.executor),
+        fail_on: "Outlines/outline.md",
+    });
+    let essay =
+        EssayProjectScaffold::with_pool((*fx.pool).clone()).with_workspace_executor(Some(executor));
+
+    let err = essay
+        .run(json!({
+            "creator_id": CREATOR,
+            "work_id": work_id,
+            "work_ref": "prod-essay-rollback",
+            "title": "Production Essay",
+        }))
+        .await
+        .expect_err("the later commit refuses");
+    assert!(
+        matches!(err, CapabilityError::Forbidden(_)),
+        "expected the port refusal to propagate, got: {err}"
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(work_dir.join("README.md")).expect("restored readme"),
+        "ORIGINAL\n",
+        "rollback must restore the overwritten canonical file"
+    );
+    assert!(
+        !work_dir.join("Outlines").exists() && !work_dir.join("Drafts").exists(),
+        "rollback must remove the canonical directories this run created"
+    );
+    assert!(
+        !fx.cwd
+            .path()
+            .join("Works")
+            .join("prod-essay-rollback")
+            .exists(),
+        "nothing may land in the cwd tree"
+    );
+    assert_eq!(
+        stored_work_ref(&fx.pool, work_id).await,
+        None,
+        "the failed scaffold restores the claimed work_ref"
+    );
 }
