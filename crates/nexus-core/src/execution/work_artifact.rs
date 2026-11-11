@@ -12,8 +12,8 @@ use nexus_home_layout::active_context::{
     read_active_creator_id, workspace_slug_selection, WorkspaceSlugSelection,
 };
 use nexus_local_db::works;
-use sqlx::SqlitePool;
 use sha2::{Digest, Sha256};
+use sqlx::SqlitePool;
 
 use crate::content::{create_parent_dirs, fsync_write_atomic, WorkLock};
 use crate::error::CoreError as NexusApiError;
@@ -326,7 +326,8 @@ impl WorkArtifactPort for FsWorkArtifactPort {
 }
 
 /// One recorded intended write in a [`RecordingWorkArtifactPort`] log.
-#[allow(dead_code)] // unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
+#[cfg_attr(not(test), allow(dead_code))]
+// unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
 #[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct RecordedMutation {
     /// The Work directory name the write addressed.
@@ -345,12 +346,12 @@ pub(crate) struct RecordedMutation {
 /// Never constructed on a production path; a future Simulate execution plane
 /// selects it at the per-dispatch construction point (`capabilities.rs`,
 /// `FsWorkArtifactPort::new`) so one selection covers every Work write.
-#[allow(dead_code)] // unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
+#[cfg_attr(not(test), allow(dead_code))] // unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
 pub(crate) struct RecordingWorkArtifactPort {
     mutations: std::sync::Mutex<Vec<RecordedMutation>>,
 }
 
-#[allow(dead_code)] // unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
+#[cfg_attr(not(test), allow(dead_code))] // unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
 impl RecordingWorkArtifactPort {
     #[must_use]
     pub(crate) const fn new() -> Self {
@@ -362,11 +363,14 @@ impl RecordingWorkArtifactPort {
     /// Snapshot of the log in commit order.
     #[must_use]
     pub(crate) fn mutations(&self) -> Vec<RecordedMutation> {
-        self.mutations.lock().expect("mutation log").clone()
+        self.mutations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 }
 
-#[allow(dead_code)] // unused until the first Simulate execution plane selects the stub (plan v235-work-ir-p3 reopen condition)
+#[cfg_attr(not(test), allow(dead_code))] // unused until the first Simulate execution plane selects the stub (plan v235-work-ir-p3 reopen condition)
 impl WorkArtifactPort for RecordingWorkArtifactPort {
     // The trait signature is async; the stub records synchronously.
     #[allow(clippy::unused_async_trait_impl)]
@@ -381,7 +385,7 @@ impl WorkArtifactPort for RecordingWorkArtifactPort {
         };
         self.mutations
             .lock()
-            .expect("mutation log")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(record);
         Ok(())
     }
@@ -895,20 +899,11 @@ mod tests {
             content,
         };
 
-        fixture
-            .port
-            .commit(write)
-            .await
-            .expect("production commit");
+        fixture.port.commit(write).await.expect("production commit");
 
         let target = fixture.workspace.path().join("Works/demo/drafts/ch1.md");
         let on_disk = std::fs::read(&target).expect("read bytes");
         assert_eq!(on_disk, content.as_bytes());
-        // The bytes are the exact content, digest-verified against the same
-        // sha256 convention the stub records.
-        let mut sha = Sha256::new();
-        sha.update(&on_disk);
-        assert_eq!(hex::encode(sha.finalize()), hex::encode(Sha256::digest(content.as_bytes())));
         assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
     }
 
@@ -937,7 +932,18 @@ mod tests {
         }
 
         let workspace = tempfile::tempdir().expect("temp workspace");
+        // A populated tree proves `tree_digest` actually hashes the listing:
+        // one non-Work file makes the digest the sha256 of "notes/a.md"
+        // instead of the empty input, so a degenerate (always-empty) digest
+        // cannot pass vacuously.
+        std::fs::create_dir_all(workspace.path().join("notes")).expect("notes dir");
+        std::fs::write(workspace.path().join("notes/a.md"), b"kept").expect("seed file");
         let before = tree_digest(workspace.path());
+        assert_eq!(
+            before, "b33a8099b01219568f1660eb604d897c0ac5db4fdd84c142337f129d5a0fca4d",
+            // sha256("notes/a.md")
+            "digest reflects the populated listing"
+        );
         assert!(
             !workspace.path().join("Works").exists(),
             "absent before the stub runs"
@@ -958,17 +964,9 @@ mod tests {
             !workspace.path().join("Works").exists(),
             "absent after the stub runs"
         );
-        // sha256("") — the sorted rel-path list stayed empty.
-        assert_eq!(
-            before,
-            tree_digest(workspace.path()),
-            "digest unchanged"
-        );
-        assert_eq!(
-            tree_digest(workspace.path()),
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-            "an empty workspace digests the empty input"
-        );
+        // Same digest before and after: the stub wrote nothing, so the sorted
+        // rel-path list is still exactly ["notes/a.md"].
+        assert_eq!(before, tree_digest(workspace.path()), "digest unchanged");
     }
 
     #[tokio::test]
