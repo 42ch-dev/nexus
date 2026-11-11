@@ -54,32 +54,38 @@ fn is_live_kb_status(status: &str) -> bool {
     !matches!(status, "deleted" | "merged" | "deprecated")
 }
 
-fn map_kb_actor_constraint<T>(result: Result<T, sqlx::Error>) -> Result<T, LocalDbError> {
-    match result {
-        Ok(v) => Ok(v),
-        Err(err) => {
-            if let sqlx::Error::Database(db) = &err {
-                if db.is_unique_violation() {
-                    let constraint = db.constraint().unwrap_or_default();
-                    let message = db.message();
-                    if constraint.contains("idx_kb_key_blocks_character_active_unique")
-                        || constraint.contains("idx_kb_key_blocks_binding_active_unique")
-                        || message.contains("idx_kb_key_blocks_character_active_unique")
-                        || message.contains("idx_kb_key_blocks_binding_active_unique")
-                        || message.contains(
-                            "kb_key_blocks.character_id, kb_key_blocks.block_type, kb_key_blocks.canonical_name",
-                        )
-                        || message.contains(
-                            "kb_key_blocks.actor_world_binding_id, kb_key_blocks.block_type, kb_key_blocks.canonical_name",
-                        )
-                    {
-                        return Err(duplicate_actor_knowledge());
-                    }
-                }
+/// Translate the owner-scoped unique-index violation a Character knowledge
+/// write can raise into its domain refusal.
+///
+/// The storage primitives report [`LocalDbError`]; the sqlx error they wrap is
+/// what carries the violated constraint, so the mapping inspects that and
+/// leaves every other error untouched.
+fn map_kb_actor_constraint<T>(result: Result<T, LocalDbError>) -> Result<T, LocalDbError> {
+    let err = match result {
+        Ok(v) => return Ok(v),
+        Err(LocalDbError::Sqlx(err)) => err,
+        Err(err) => return Err(err),
+    };
+    if let sqlx::Error::Database(db) = &err {
+        if db.is_unique_violation() {
+            let constraint = db.constraint().unwrap_or_default();
+            let message = db.message();
+            if constraint.contains("idx_kb_key_blocks_character_active_unique")
+                || constraint.contains("idx_kb_key_blocks_binding_active_unique")
+                || message.contains("idx_kb_key_blocks_character_active_unique")
+                || message.contains("idx_kb_key_blocks_binding_active_unique")
+                || message.contains(
+                    "kb_key_blocks.character_id, kb_key_blocks.block_type, kb_key_blocks.canonical_name",
+                )
+                || message.contains(
+                    "kb_key_blocks.actor_world_binding_id, kb_key_blocks.block_type, kb_key_blocks.canonical_name",
+                )
+            {
+                return Err(duplicate_actor_knowledge());
             }
-            Err(LocalDbError::from(err))
         }
     }
+    Err(LocalDbError::from(err))
 }
 
 fn validate_summary_utf8_bytes(summary: &str) -> Result<(), LocalDbError> {
@@ -790,11 +796,9 @@ async fn apply_actor_knowledge_patch(
 
 /// CAS-write the patched row inside the caller's transaction (durable §3).
 ///
-/// The `WHERE` clause re-asserts the Character/binding ownership the read
-/// preimage was prepared under, so a row that changed container between the read
-/// and this write is a revision conflict rather than a silent cross-owner write.
-/// The governance pair is written only when the resolved audience carries one:
-/// a patch never moves governance (§3), so a shared row keeps its NULL pair.
+/// The ownership/CAS/liveness policy that makes a zero row-count a conflict,
+/// and the duplicate-name translation, stay here; the statement itself is
+/// [`crate::kb_store::cas_patch_actor_knowledge_in_tx`].
 async fn cas_actor_knowledge_patch_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     entry_id: &str,
@@ -804,52 +808,18 @@ async fn cas_actor_knowledge_patch_tx(
     body_json: Option<&str>,
     governance: Option<&KnowledgeGovernance>,
 ) -> Result<(), LocalDbError> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let new_revision = expected_revision + 1;
-    // SAFETY: the governance columns are unknown to the committed `.sqlx`
-    // offline cache, so the statement is runtime-checked with a fixed
-    // column list (never interpolated input) — the same convention
-    // `kb_store.rs` uses for `kb_key_blocks` column changes.
-    let mut sets = "canonical_name = ?, body_json = ?, revision = ?, updated_at = ?".to_string();
-    if governance.is_some() {
-        sets.push_str(", holder_entry_id = ?, disclosure = ?");
-    }
-    let sql = format!(
-        "UPDATE kb_key_blocks SET {sets}
-           WHERE key_block_id = ?
-             AND COALESCE(revision, 0) = ?
-             AND status NOT IN ('deleted', 'merged', 'deprecated')
-             AND (
-               (owner_kind = 'character' AND character_id = ?)
-               OR (
-                 owner_kind = 'actor_world_binding'
-                 AND actor_world_binding_id IN (
-                   SELECT binding_id FROM actor_world_bindings
-                   WHERE character_id = ? AND status = 'active'
-                 )
-               )
-             )"
-    );
-    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
-        .bind(canonical_name)
-        .bind(body_json)
-        .bind(new_revision)
-        .bind(&now);
-    if let Some(governance) = governance {
-        query = query
-            .bind(governance.holder_entry_id.as_deref())
-            .bind(governance.disclosure.as_deref());
-    }
     let updated = map_kb_actor_constraint(
-        query
-            .bind(entry_id)
-            .bind(expected_revision)
-            .bind(character_id)
-            .bind(character_id)
-            .execute(&mut **tx)
-            .await,
-    )?
-    .rows_affected();
+        crate::kb_store::cas_patch_actor_knowledge_in_tx(
+            tx,
+            entry_id,
+            character_id,
+            expected_revision,
+            canonical_name,
+            body_json,
+            governance,
+        )
+        .await,
+    )?;
     if updated == 0 {
         return Err(knowledge_revision_conflict());
     }
@@ -878,30 +848,14 @@ pub async fn delete_actor_knowledge_entry(
         .await?;
         assert_no_protected_referents_tx(&mut tx, entry_id, &row).await?;
         let deleted = map_kb_actor_constraint(
-            sqlx::query!(
-                r#"DELETE FROM kb_key_blocks
-                   WHERE key_block_id = ?
-                     AND COALESCE(revision, 0) = ?
-                     AND status NOT IN ('deleted', 'merged', 'deprecated')
-                     AND (
-                       (owner_kind = 'character' AND character_id = ?)
-                       OR (
-                         owner_kind = 'actor_world_binding'
-                         AND actor_world_binding_id IN (
-                           SELECT binding_id FROM actor_world_bindings
-                           WHERE character_id = ? AND status = 'active'
-                         )
-                       )
-                     )"#,
+            crate::kb_store::delete_actor_knowledge_in_tx(
+                &mut tx,
                 entry_id,
-                expected_revision,
                 character_id,
-                character_id
+                expected_revision,
             )
-            .execute(&mut *tx)
             .await,
-        )?
-        .rows_affected();
+        )?;
         if deleted == 0 {
             return Err(knowledge_revision_conflict());
         }
