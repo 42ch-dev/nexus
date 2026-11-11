@@ -8,7 +8,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use nexus_home_layout::active_context::{read_active_creator_id, read_active_workspace_slug};
+use nexus_home_layout::active_context::{read_active_creator_id, try_active_workspace_slug};
 use nexus_local_db::works;
 use sqlx::SqlitePool;
 
@@ -235,7 +235,7 @@ impl WorkArtifactPort for FsWorkArtifactPort {
                         .to_string(),
             });
         };
-        let Some(workspace_slug) = read_active_workspace_slug(&self.nexus_home, &creator_id) else {
+        let Some(workspace_slug) = try_active_workspace_slug(&self.nexus_home, &creator_id) else {
             return Err(NexusApiError::Forbidden {
                 resource:
                     "tool_execution: active workspace required to write Works/<work_ref>/ artifacts"
@@ -269,6 +269,8 @@ impl WorkArtifactPort for FsWorkArtifactPort {
                 .map_err(|e| NexusApiError::Internal {
                     category: format!("DATABASE_ERROR: runtime_lock holder read failed: {e}"),
                 })?;
+        // F-002 residual: this exemption trusts the stored holder prefix, not
+        // the calling run's identity, so it covers every tool writer.
         if current_holder.as_deref().is_some_and(|holder| {
             holder.starts_with(nexus_local_db::runtime_lock::SCHEDULE_HOLDER_PREFIX)
         }) {
@@ -341,13 +343,18 @@ mod tests {
     }
 
     async fn fixture(seed_work: bool) -> Fixture {
+        fixture_selecting_workspace(seed_work, Some("default")).await
+    }
+
+    /// `active_slug: None` writes a config that records no workspace selection.
+    async fn fixture_selecting_workspace(seed_work: bool, active_slug: Option<&str>) -> Fixture {
         let home = tempfile::tempdir().expect("temp home");
         let workspace = tempfile::tempdir().expect("temp workspace");
-        std::fs::write(
-            home.path().join("config.toml"),
-            format!("active_creator_id = \"{CREATOR}\"\n"),
-        )
-        .expect("cli config");
+        let selection = active_slug.map_or_else(String::new, |slug| {
+            format!("active_workspace_slug_by_creator = {{ {CREATOR} = \"{slug}\" }}\n")
+        });
+        let config = format!("active_creator_id = \"{CREATOR}\"\n{selection}");
+        std::fs::write(home.path().join("config.toml"), config).expect("cli config");
         let pool = nexus_local_db::init_engine_pool(&home.path().join("state.db"))
             .await
             .expect("engine pool")
@@ -491,6 +498,37 @@ mod tests {
             other => panic!("expected Forbidden, got {other:?}"),
         }
         assert!(!fixture.workspace.path().join("Works/demo").exists());
+    }
+
+    #[tokio::test]
+    async fn commit_refuses_without_an_active_workspace() {
+        // The seeded Work lives in the `default` partition: a silent fallback
+        // would accept this write even though the user selected no workspace.
+        for active_slug in [None, Some("")] {
+            let fixture = fixture_selecting_workspace(true, active_slug).await;
+
+            let error = fixture
+                .port
+                .commit(write(&fixture, Path::new("Stories/ch1.md"), "body"))
+                .await
+                .expect_err("no active workspace refuses");
+
+            match error {
+                NexusApiError::Forbidden { resource } => {
+                    assert!(resource.contains("active workspace required"), "{resource}");
+                }
+                other => panic!("expected Forbidden, got {other:?}"),
+            }
+            assert!(
+                !fixture.workspace.path().join("Works").exists(),
+                "no byte or directory was created"
+            );
+            assert_eq!(
+                holder(&fixture.pool).await,
+                None,
+                "no lock was taken for the refused Work"
+            );
+        }
     }
 
     #[tokio::test]

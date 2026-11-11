@@ -4208,7 +4208,11 @@ mod tests {
         let workspace = tempfile::tempdir().expect("temp workspace");
         std::fs::write(
             home.path().join("config.toml"),
-            format!("active_creator_id = \"{CREATOR}\"\n"),
+            // The Work artifact port requires an explicit workspace selection.
+            format!(
+                "active_creator_id = \"{CREATOR}\"\n\
+                 active_workspace_slug_by_creator = {{ {CREATOR} = \"default\" }}\n"
+            ),
         )
         .expect("cli config");
         let pool = nexus_local_db::init_engine_pool(&home.path().join("state.db"))

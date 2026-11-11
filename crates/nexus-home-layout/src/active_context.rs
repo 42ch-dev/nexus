@@ -210,6 +210,22 @@ pub fn read_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option
     )
 }
 
+/// Read the workspace slug explicitly selected for `creator_id`, if any.
+///
+/// Unlike [`read_active_workspace_slug`], nothing is assumed: `None` means no
+/// slug is recorded for the creator (or `config.toml` cannot be loaded), so a
+/// caller that requires an explicit selection refuses instead of acting on a
+/// partition the user never chose.
+#[must_use]
+pub fn try_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option<String> {
+    CliConfigSnapshot::load(nexus_home)
+        .ok()?
+        .active_workspace_slug_by_creator
+        .get(creator_id)
+        .filter(|slug| !slug.is_empty())
+        .cloned()
+}
+
 /// Read the optional `[memory_provider]` table.
 ///
 /// Independent of [`CliConfigSnapshot`] so a malformed provider table fails
