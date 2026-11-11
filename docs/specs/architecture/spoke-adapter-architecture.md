@@ -47,12 +47,7 @@ Where spoke already provides a type, field, op, or lifecycle invariant, nexus us
 #### 1.4 Crate topology
 
 - **New:** `crates/nexus-spoke-adapter/` — the only boundary that constructs spoke objects with a **lean** `extensions.nexus` populated and delegates lifecycle ops to `spoke-operations`. Capability aggregation (Q13).
-- **Merge:** `crates/nexus-kb/` is merged INTO the **existing** `crates/nexus-knowledge/` (which today owns User-scoped global knowledge + reference sources). After merger, `nexus-knowledge` consolidates three knowledge tiers in one crate:
-  1. **World KnowledgeEntry** (narrative KB entries tied to a World)
-  2. **User knowledge** (existing — tag-driven global knowledge entries indexed per `user_id`)
-  3. **reference sources** (existing — local-only research/reference registration)
-  
-  `crates/nexus-kb/` is deleted after merger. spoke-provided standard lifecycle invariants live in `nexus-spoke-adapter`, **not** in the merged `nexus-knowledge`. The merged crate's AGENTS.md is rewritten to reflect the expanded scope (the current AGENTS.md line "does not own World/narrative KeyBlocks" is inverted).
+- **Merge (landed):** `crates/nexus-kb/` was merged INTO the existing `crates/nexus-knowledge/`, which now carries the World narrative `KnowledgeEntry` domain (`KnowledgeEntryRecord`, `SourceAnchor`, taxonomy/body validation, `KbStore` traits and query types); `crates/nexus-kb/` no longer exists. The merge also absorbed the crate's then-existing User-scoped knowledge tier (`knowledge_entries`) and reference-sources registry (`reference_sources`); V1.231 retired both ([ADR K1](../../../.agents/adr/implemented/architecture/2026-11-10-retire-user-scope-and-references.md)), leaving World KB as the only knowledge family — the shape [Knowledge IR](../../../.agents/adr/implemented/architecture/2026-11-10-knowledge-ir.md) is written against. spoke-provided standard lifecycle invariants live in `nexus-spoke-adapter`, **not** in `nexus-knowledge`; the crate's AGENTS.md records the scope inversion the merge brought and the World-KB-only scope that followed.
 
 #### 1.5 Full operations delegation
 
@@ -1065,12 +1060,7 @@ Where spoke already provides a type, field, op, or lifecycle invariant, nexus us
 #### 1.4 Crate topology
 
 - **New:** `crates/nexus-spoke-adapter/` — the only boundary that constructs spoke objects with a **lean** `extensions.nexus` populated and delegates lifecycle ops to `spoke-operations`. Capability aggregation (Q13).
-- **Merge:** `crates/nexus-kb/` is merged INTO the **existing** `crates/nexus-knowledge/` (which today owns User-scoped global knowledge + reference sources). After merger, `nexus-knowledge` consolidates three knowledge tiers in one crate:
-  1. **World KnowledgeEntry** (narrative KB entries tied to a World)
-  2. **User knowledge** (existing — tag-driven global knowledge entries indexed per `user_id`)
-  3. **reference sources** (existing — local-only research/reference registration)
-  
-  `crates/nexus-kb/` is deleted after merger. spoke-provided standard lifecycle invariants live in `nexus-spoke-adapter`, **not** in the merged `nexus-knowledge`. The merged crate's AGENTS.md is rewritten to reflect the expanded scope (the current AGENTS.md line "does not own World/narrative KeyBlocks" is inverted).
+- **Merge (landed):** `crates/nexus-kb/` was merged INTO the existing `crates/nexus-knowledge/`, which now carries the World narrative `KnowledgeEntry` domain (`KnowledgeEntryRecord`, `SourceAnchor`, taxonomy/body validation, `KbStore` traits and query types); `crates/nexus-kb/` no longer exists. The merge also absorbed the crate's then-existing User-scoped knowledge tier (`knowledge_entries`) and reference-sources registry (`reference_sources`); V1.231 retired both ([ADR K1](../../../.agents/adr/implemented/architecture/2026-11-10-retire-user-scope-and-references.md)), leaving World KB as the only knowledge family — the shape [Knowledge IR](../../../.agents/adr/implemented/architecture/2026-11-10-knowledge-ir.md) is written against. spoke-provided standard lifecycle invariants live in `nexus-spoke-adapter`, **not** in `nexus-knowledge`; the crate's AGENTS.md records the scope inversion the merge brought and the World-KB-only scope that followed.
 
 #### 1.5 Full operations delegation
 

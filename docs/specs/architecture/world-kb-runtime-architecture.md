@@ -27,9 +27,10 @@ World KB concerns span `nexus-knowledge`, `nexus-moment-context-assembly`, `nexu
 | **World KB domain** | `nexus-knowledge` | `crates/nexus-knowledge/src/world_kb/` owns `KnowledgeEntryRecord`, `SourceAnchor`, taxonomy/body validation, `KbStore` traits and query types, and extraction preparation/persistence coordination. |
 | **Narrative domain** | `nexus-narrative` | World, fork, timeline/event, and manuscript domain models; local branch persistence remains separate from the world-copy fork model (§6.6 of entity-scope-model) |
 | **Read SSOT** | `nexus-moment-context-assembly` | `WorldKbQueryBuilder` — shared filter/taxonomy logic; `assemble_moment` (wide session snapshot) and `build_chapter_kb_block` (narrow prompt slice) |
-| **User knowledge** | `nexus-knowledge` | User-scoped global knowledge — same crate as the World KB domain row above |
 | **Execution** | `nexus-orchestration` | Presets + capabilities; LLM inner graphs; schedule/job lifecycle — **no** KB domain rules |
 | **SQLite persistence** | `nexus-local-db` | `crates/nexus-local-db/src/kb_store.rs` implements `SqliteKbStore`; `crates/nexus-local-db/src/kb_relationships.rs` owns relationship CRUD/OCC. This crate owns SQLite migrations and persistence for `kb_key_blocks`, `kb_relationships`, and `kb_extract_jobs`, not the domain aggregate definitions. |
+
+`nexus-knowledge` is World-KB-only: the User-scoped knowledge tier (`knowledge_entries`) and the reference-sources registry (`reference_sources`) that once shared the crate were retired in V1.231 ([ADR K1](../../../.agents/adr/implemented/architecture/2026-11-10-retire-user-scope-and-references.md)), so World KB is the only knowledge family.
 
 Platform integration reads World KB through `assemble_moment` / moment-context-assembly contracts, not through orchestration presets.
 
