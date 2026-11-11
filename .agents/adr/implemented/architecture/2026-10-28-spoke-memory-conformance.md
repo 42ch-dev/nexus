@@ -1,13 +1,13 @@
 # ADR: Cross-Provider Conformance and Acceptance Matrix
 
-Status: implemented — the scenario matrix is the standing acceptance contract; the per-capability named selectors pass in CI (`cargo test -p nexus-memory-conformance --features dev-graph-memory-remote`); the full historical matrix is not claimed run; N4-T transfer rows remain open
+Status: implemented — the scenario matrix is the standing acceptance contract; the per-capability named selectors are observed green in CI (GitHub Actions run 42990561936, head 28221c2f3, job "Rust memory-remote cohort" SUCCESS); the full historical matrix is not claimed run; N4-T transfer rows remain open
 Date: 2026-10-28
 Scope: The `C-*` scenario ID space for the `spoke-memory` family: two conformance classes (single-provider semantics, cross-provider transfer), fixture semantics, the scenario matrix, nexus acceptance traceability to the `NXM-*` stages, and the execution/evidence policy.
 Source: migrated from the retired tracked specs corpus
 
 ## Problem
 
-**Landing reconciliation (2026-11-01).** Written against SPOKE 0.14.1, where the family was proposed; upstream 0.15.0 (2026-10-30) landed it and 0.15.1 (2026-10-31) is docs/CI only, published on crates.io and npm. That makes the matrix executable against real upstream participants rather than a proposed shape, with one caveat: the reference policy engine (`spoke-fixture-memory-engine`) ships only as an unpublished path-dependency fixture, so it can serve as the algorithm-variable reference but never as a shipped conformance participant. Nexus moved its lockstep pins first to 0.15.1 and then to the 0.16.0 lockstep (workspace pins in `Cargo.toml`); the per-capability named selectors now pass in CI (`cargo test -p nexus-memory-conformance --features dev-graph-memory-remote`), the full historical matrix is not claimed run, and the N4-T transfer rows remain open.
+**Landing reconciliation (2026-11-01).** Written against SPOKE 0.14.1, where the family was proposed; upstream 0.15.0 (2026-10-30) landed it and 0.15.1 (2026-10-31) is docs/CI only, published on crates.io and npm. That makes the matrix executable against real upstream participants rather than a proposed shape, with one caveat: the reference policy engine (`spoke-fixture-memory-engine`) ships only as an unpublished path-dependency fixture, so it can serve as the algorithm-variable reference but never as a shipped conformance participant. Nexus moved its lockstep pins first to 0.15.1 and then to the 0.16.0 lockstep (workspace pins in `Cargo.toml`); the per-capability named selectors are observed green in CI — GitHub Actions run 42990561936 on head 28221c2f3 completed `success`, its job "Rust memory-remote cohort" (conclusion `SUCCESS`) ran `cargo test -p nexus-memory-conformance --features dev-graph-memory-remote` (`.github/workflows/ci.yml:852`); the 2026-11-11 promotion diff is Markdown-only, so that observed result applies to the reviewed code. The full historical matrix is not claimed run, and the N4-T transfer rows remain open.
 
 ## Decision
 
@@ -15,12 +15,12 @@ Source: migrated from the retired tracked specs corpus
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | **Implemented** — the scenario matrix is the standing acceptance contract; CI covers the per-capability named selectors (not the full historical matrix); N4-T transfer rows open. |
+| **Status** | **Implemented** — the scenario matrix is the standing acceptance contract; the per-capability named selectors are observed green in CI (run 42990561936, head 28221c2f3, job "Rust memory-remote cohort" SUCCESS); the full historical matrix is not claimed run; N4-T transfer rows open. |
 | **Document class** | Exploration |
 | **Scope** | The `C-*` scenario ID space for the `spoke-memory` family: two conformance classes (single-provider semantics, cross-provider transfer), fixture semantics, the scenario matrix, nexus acceptance traceability to the `NXM-*` stages, and the execution/evidence policy. |
 | **Coordinates with** | [spoke-memory-protocol.md](2026-10-28-spoke-memory-protocol.md) (`MEM-R001`–`MEM-R027` are owned by the published upstream protocol at the 0.16.0 lockstep — referenced, never redefined here), [spoke-memory-adoption-plan.md](2026-10-28-spoke-memory-adoption-plan.md) §7 (rollout stages `NXM-*` named in the Stage column) |
 
-**Landing reconciliation (2026-11-01).** Written against SPOKE 0.14.1, where the family was proposed; upstream 0.15.0 (2026-10-30) landed it and 0.15.1 (2026-10-31) is docs/CI only, published on crates.io and npm. That makes the matrix executable against real upstream participants rather than a proposed shape, with one caveat: the reference policy engine (`spoke-fixture-memory-engine`) ships only as an unpublished path-dependency fixture, so it can serve as the algorithm-variable reference but never as a shipped conformance participant. Nexus moved its lockstep pins first to 0.15.1 and then to the 0.16.0 lockstep (workspace pins in `Cargo.toml`); the per-capability named selectors now pass in CI (`cargo test -p nexus-memory-conformance --features dev-graph-memory-remote`), the full historical matrix is not claimed run, and the N4-T transfer rows remain open.
+**Landing reconciliation (2026-11-01).** Written against SPOKE 0.14.1, where the family was proposed; upstream 0.15.0 (2026-10-30) landed it and 0.15.1 (2026-10-31) is docs/CI only, published on crates.io and npm. That makes the matrix executable against real upstream participants rather than a proposed shape, with one caveat: the reference policy engine (`spoke-fixture-memory-engine`) ships only as an unpublished path-dependency fixture, so it can serve as the algorithm-variable reference but never as a shipped conformance participant. Nexus moved its lockstep pins first to 0.15.1 and then to the 0.16.0 lockstep (workspace pins in `Cargo.toml`); the per-capability named selectors are observed green in CI — GitHub Actions run 42990561936 on head 28221c2f3 completed `success`, its job "Rust memory-remote cohort" (conclusion `SUCCESS`) ran `cargo test -p nexus-memory-conformance --features dev-graph-memory-remote` (`.github/workflows/ci.yml:852`); the 2026-11-11 promotion diff is Markdown-only, so that observed result applies to the reviewed code. The full historical matrix is not claimed run, and the N4-T transfer rows remain open.
 
 #### Original framing (research provenance)
 
@@ -105,7 +105,7 @@ exclusively via `memory.receipts.get`; no webhooks or streams.
   outcomes (exceptions: the explicitly local-physical family L rows).
 - **Runner invocation**: scenarios are standard libtest named tests in the
  landed `nexus-memory-conformance` crate (03 NXM-11), filtered by name,
- e.g. `cargo test -p nexus-memory-conformance c_020`. No custom
+ e.g. `cargo test -p nexus-memory-conformance --features dev-graph-memory-remote c_020`. No custom
   `-- --scenario` harness (libtest does not support it); a custom
   `harness = false` runner is allowed only if explicitly costed in NXM-11.
   No scenario requires running the whole suite locally (`--all`-style full
@@ -278,7 +278,7 @@ Applies | Owner | Stage.
 
 - Runner: crate `nexus-memory-conformance` (03 NXM-11, landed) with
   scenarios as standard named tests, filtered by name:
-  `cargo test -p nexus-memory-conformance c_020` (single scenario) or a
+  `cargo test -p nexus-memory-conformance --features dev-graph-memory-remote c_020` (single scenario) or a
   family prefix (`c_08`). No custom `-- --scenario` flag (libtest does not
   support it); a `harness = false` runner only if explicitly costed in
   NXM-11. Full-matrix runs belong to CI, not local gates. Precedent: the
@@ -305,11 +305,15 @@ Every "Expected result" above is a **contract** traced to 01's
 invariants (MEM-R001–R027), not a status report about the code. Evidence
 status at the 0.16.0 lockstep (2026-11-11): the crate's 12 named selectors —
 all carrying `required-features = ["dev-graph-memory-remote"]`
-(`crates/nexus-memory-conformance/Cargo.toml:75–121`) — pass in CI
-(`cargo test -p nexus-memory-conformance --features dev-graph-memory-remote`,
-the memory-remote cohort in `.github/workflows/ci.yml`); the core-group step
-runs only the crate's auto-discovered `provider_bootstrap`/`server_loopback`
-targets. That is per-capability evidence, not a full-matrix run. The staged
+(`crates/nexus-memory-conformance/Cargo.toml:75–121`) — are observed green:
+GitHub Actions run 42990561936 on head 28221c2f3 completed `success`, and its
+job "Rust memory-remote cohort" (conclusion `SUCCESS`) ran
+`cargo test -p nexus-memory-conformance --features dev-graph-memory-remote`
+(`.github/workflows/ci.yml:852`); the 2026-11-11 promotion diff is
+Markdown-only, so the observed result applies to the reviewed code. The
+core-group step is configured to run only the crate's auto-discovered
+`provider_bootstrap`/`server_loopback` targets. That is per-capability
+evidence, not a full-matrix run. The staged
 95-scenario disposition and the open N4-T transfer remainders are the standing
 contract in `docs/specs/architecture/spoke-memory-conformance-staging.md`;
 transfer stays explicitly unsupported.

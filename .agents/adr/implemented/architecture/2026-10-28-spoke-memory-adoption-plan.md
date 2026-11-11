@@ -666,37 +666,43 @@ with quoted command evidence live in that audit guide (control-tree
    dual-meaning `MemoryPipelineCtx.scope_id` in-memory field (audit item R6).
 2. Default local provider passes the full 04 conformance matrix; the loopback
    independent remote provider passes the same matrix — **not claimed**:
-   staged conformance only; the per-capability named selectors pass in CI
-   (`cargo test -p nexus-memory-conformance --features dev-graph-memory-remote`),
+   staged conformance only; the per-capability named selectors are observed
+   green in CI — GitHub Actions run 42990561936 on head 28221c2f3 (the base of
+   this Markdown-only promotion diff, so the observed result applies to the
+   reviewed code), job "Rust memory-remote cohort" (conclusion `SUCCESS`) ran
+   `cargo test -p nexus-memory-conformance --features dev-graph-memory-remote`
+   (`.github/workflows/ci.yml:852`);
    and the staged 95-scenario disposition
    (`docs/specs/architecture/spoke-memory-conformance-staging.md`) is the
    standing contract.
 3. Writer-guard triggers, revision CAS, and bearer path validation behave
-   byte-identically for local operation — CI-covered (`c_local_legacy`,
-   `-p nexus-creator-memory`, `--test legacy_content_migration`).
+   byte-identically for local operation — `c_local_legacy` is observed green
+   in run 42990561936; `-p nexus-creator-memory` and
+   `--test legacy_content_migration` are configured to run in CI.
 4. Receipts/idempotency for memory ops verified incl. `OUTCOME_UNCERTAIN`
    replay; no peer-session-derived identity anywhere in the memory domain —
-   CI-covered (`c_capture_candidates`, `c_grants_errors`;
-   `crates/nexus-core/src/operation_id.rs:39–55`).
+   selectors `c_capture_candidates` and `c_grants_errors` are observed green
+   in run 42990561936; identity anchor
+   `crates/nexus-core/src/operation_id.rs:39–55`.
 5. Transfer runbook (NXM-12) demonstrated local→remote and back with explicit
    rollback points; no dual-write or silent fallback exists — **unsupported:
    N4-T remains open**; no transfer, drain or cutover is implemented or claimed.
 6. D-4 boundary intact: `remember:true` refusal unchanged and covered by a
    regression test; Creator **explicit** capture parity (NXM-16) passes its
-   typed contract scenarios — CI-covered
+   typed contract scenarios — configured to run in CI
    (`host_actor_lifecycle.rs:1517–1580`; `--test memory_services`;
    `--test creator_memory_remote`).
 7. Control-metadata migration is registered/idempotent; binary/schema rollback
-   compatibility verified or backup-restore path documented — CI-covered
-   (`--test legacy_content_migration`; C-117).
+   compatibility verified or backup-restore path documented — configured to
+   run in CI (`--test legacy_content_migration`; C-117).
 8. Removal list (NXM-14) executed; docs updated — executed with the item-1
    residual above; docs landed as the `docs/specs/architecture/spoke-memory-*`
    masters and this record (no `ARCHITECTURE.md` exists in this repository).
 
-Items 2 and 5 are honest limits, not omissions: CI evidence covers
-per-capability selectors only, and transfer stays explicitly unsupported,
-matching the implemented protocol record's Status line
-(`2026-10-28-spoke-memory-protocol.md:3`, same directory).
+Items 2 and 5 are honest limits, not omissions: the observed CI result
+(run 42990561936) covers per-capability selectors only, and transfer stays
+explicitly unsupported, matching the implemented protocol record's Status
+line (`2026-10-28-spoke-memory-protocol.md:3`, same directory).
 
 | Risk | Mitigation |
 |---|---|
