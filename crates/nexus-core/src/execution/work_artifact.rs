@@ -324,6 +324,64 @@ impl WorkArtifactPort for FsWorkArtifactPort {
     }
 }
 
+use sha2::{Digest, Sha256};
+
+/// One recorded intended write in a [`RecordingWorkArtifactPort`] log.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct RecordedMutation {
+    /// The Work directory name the write addressed.
+    pub(crate) work_ref: String,
+    /// The artifact path below the Work root.
+    pub(crate) rel_child: String,
+    /// Byte length of the content that *would* have been written.
+    pub(crate) bytes: usize,
+    /// sha256 hex digest of the content (same convention as the tree digest).
+    pub(crate) sha256: String,
+}
+
+/// Simulate/dry-run [`WorkArtifactPort`]: records intended mutations in
+/// commit order and performs no filesystem, SQLite or lock operation.
+///
+/// Never constructed on a production path; a future Simulate execution plane
+/// selects it at the per-dispatch construction point (`capabilities.rs`,
+/// `FsWorkArtifactPort::new`) so one selection covers every Work write.
+pub(crate) struct RecordingWorkArtifactPort {
+    mutations: std::sync::Mutex<Vec<RecordedMutation>>,
+}
+
+impl RecordingWorkArtifactPort {
+    #[must_use]
+    pub(crate) const fn new() -> Self {
+        Self {
+            mutations: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Snapshot of the log in commit order.
+    #[must_use]
+    pub(crate) fn mutations(&self) -> Vec<RecordedMutation> {
+        self.mutations.lock().expect("mutation log").clone()
+    }
+}
+
+impl WorkArtifactPort for RecordingWorkArtifactPort {
+    async fn commit(&self, write: WorkArtifactWrite<'_>) -> Result<(), NexusApiError> {
+        let mut sha = Sha256::new();
+        sha.update(write.content.as_bytes());
+        let record = RecordedMutation {
+            work_ref: write.work_ref.to_string(),
+            rel_child: write.rel_child.display().to_string(),
+            bytes: write.content.len(),
+            sha256: hex::encode(sha.finalize()),
+        };
+        self.mutations
+            .lock()
+            .expect("mutation log")
+            .push(record);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -809,5 +867,33 @@ mod tests {
             None,
             "the lock is released on the refusal path"
         );
+    }
+
+    #[tokio::test]
+    async fn recording_port_logs_one_mutation_and_touches_nothing() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let port = RecordingWorkArtifactPort::new();
+        let content = "# chapter one\n";
+        port.commit(WorkArtifactWrite {
+            workspace_root: workspace.path(),
+            work_ref: WORK_REF,
+            rel_child: Path::new("drafts/ch1.md"),
+            content,
+        })
+        .await
+        .expect("recorded commit");
+
+        let mutations = port.mutations();
+        assert_eq!(mutations.len(), 1);
+        let record = &mutations[0];
+        assert_eq!(record.work_ref, WORK_REF);
+        assert_eq!(record.rel_child, "drafts/ch1.md");
+        assert_eq!(record.bytes, content.len());
+        let mut sha = Sha256::new();
+        sha.update(content.as_bytes());
+        assert_eq!(record.sha256, hex::encode(sha.finalize()));
+
+        // Zero filesystem change: not even the `Works/` directory exists.
+        assert!(!workspace.path().join("Works").exists());
     }
 }
