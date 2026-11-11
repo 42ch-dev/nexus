@@ -459,12 +459,14 @@ async fn handle_findings_set_status(
 /// [`CoreService::work_artifact_executor`] answers `Uninitialized` when the
 /// selected workspace registers no usable root; the CLI maps that class to
 /// `Creator not selected`, whose suggestion (`creator use`) only switches the
-/// active slug and cannot repair `meta.json.local_root`. Naming the root, and
-/// the command that writes it, is the only actionable answer.
+/// active slug and cannot repair `meta.json.local_root`. Naming the root — the
+/// `local_root` repair first, the registration command only for a workspace with
+/// no `meta.json` yet — is the only actionable answer.
 const MISSING_CREATIVE_ROOT_HINT: &str =
-    "The selected workspace registers no usable creative root. \
-     Register one with `nexus42 creator workspace create <slug> --creative-root <path>`, or update \
-     the `local_root` in that workspace's `meta.json` to an existing directory.";
+    "The selected workspace registers no usable creative root. When the workspace is already \
+     registered but its `meta.json` has a blank or dangling `local_root`, point `local_root` at an \
+     existing directory — that is the usual repair. A workspace without `meta.json` yet must be \
+     registered with `nexus42 creator workspace create <slug> --creative-root <path>`.";
 
 /// Acquire the Work artifact executor, keeping the two core refusals apart.
 ///
