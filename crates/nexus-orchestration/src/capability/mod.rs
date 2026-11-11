@@ -252,6 +252,30 @@ pub trait WorkspaceExecutor: Send + Sync {
         &self,
         input: nexus_contracts::local::orchestration::WorkspaceCommitInput,
     ) -> Result<nexus_contracts::local::orchestration::WorkspaceCommitOutput, CapabilityError>;
+
+    /// Commit one Work artifact byte write (`Works/<work_ref>/<rel_child>`).
+    ///
+    /// The single production implementation delegates to the core byte-write
+    /// port, so an orchestration caller writes Work bytes under the port's
+    /// Work lock and durability path instead of opening its own writer.
+    ///
+    /// Default refuses: every impl that does not write Work bytes stays
+    /// untouched and cannot silently acquire a second writer.
+    ///
+    /// # Errors
+    /// [`CapabilityError::InputInvalid`] when the executor carries no Work
+    /// artifact port (default), [`CapabilityError::Forbidden`] when the Work
+    /// row, creator, workspace or path boundary refuses the write, and
+    /// [`CapabilityError::Internal`] on a lookup or write failure.
+    async fn commit_work_artifact(
+        &self,
+        _input: nexus_contracts::local::orchestration::WorkArtifactCommitInput,
+    ) -> Result<nexus_contracts::local::orchestration::WorkArtifactCommitOutput, CapabilityError>
+    {
+        Err(CapabilityError::InputInvalid(
+            "work artifact commit not wired".into(),
+        ))
+    }
 }
 
 /// Provider for live workspace session state (v1.188 P3).

@@ -138,6 +138,15 @@ pub struct ScheduleSupervisor {
     /// (tests, no Host config) means internal insertion refuses to publish
     /// a drive-enabled row for a preset with prompt roles.
     binding_provider: Arc<Option<String>>,
+    /// Injected workspace executor (P2 seam): the supervisor's terminal chains
+    /// commit Work bytes through the same `commit_work_artifact` handle the
+    /// capability registry receives, never through a second writer.
+    ///
+    /// `None` (tests, standalone supervisor) keeps every chain on its own
+    /// pre-seam behavior. Read by the Work-artifact chains landing in the
+    /// sibling task of this plan.
+    #[allow(dead_code)]
+    workspace_executor: Arc<Option<Arc<dyn crate::capability::WorkspaceExecutor>>>,
 }
 
 struct Inner {
@@ -174,6 +183,7 @@ impl ScheduleSupervisor {
             registry: Arc::new(None),
             schedule_starter: Arc::new(None),
             binding_provider: Arc::new(None),
+            workspace_executor: Arc::new(None),
         }
     }
 
@@ -199,6 +209,20 @@ impl ScheduleSupervisor {
     #[must_use]
     pub fn with_schedule_starter(mut self, starter: Arc<dyn ScheduleRunStarter>) -> Self {
         self.schedule_starter = Arc::new(Some(starter));
+        self
+    }
+
+    /// Inject the workspace executor whose `commit_work_artifact` handle the
+    /// supervisor's Work artifact chains write through (P2 seam).
+    ///
+    /// `nexus-core` builds the supervisor with its own production executor, so
+    /// the chains never open a writer of their own.
+    #[must_use]
+    pub fn with_workspace_executor(
+        mut self,
+        executor: Arc<dyn crate::capability::WorkspaceExecutor>,
+    ) -> Self {
+        self.workspace_executor = Arc::new(Some(executor));
         self
     }
 
