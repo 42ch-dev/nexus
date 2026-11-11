@@ -1,30 +1,30 @@
 # ADR: Nexus Adoption Plan for the SPOKE Memory Protocol
 
-Status: proposed — not authorization to execute. Nothing here is registered as a workflow, no stage is scheduled, and no feature is claimed shipped. Every "Current" statement is a snapshot of the repository as read on 2026-10-28.
+Status: implemented — adoption stages N0–N3, N4-R (reflection) and NXM-16 delivered (v1.227–v1.230, at the 0.16.0 lockstep); N4-T transfer remains explicitly unsupported; the N5 audit closed this record on 2026-11-11
 Date: 2026-10-28
-Scope: How nexus would adopt the `spoke-memory` family: the two-layer landing model (protocol adoption ≠ data merge), the target architecture (`MemoryPort` in-process provider + application authorization adapter), the caller-migration inventory, the staged roadmap `NXM-*` with its gates, the deferred triggers, and the adoption-program definition of done.
+Scope: How nexus adopted the `spoke-memory` family: the two-layer landing model (protocol adoption ≠ data merge), the target architecture (`MemoryPort` in-process provider + application authorization adapter), the caller-migration inventory, the staged roadmap `NXM-*` with its gates, the deferred triggers, and the adoption-program definition of done.
 Source: migrated from the retired tracked specs corpus
 
 ## Problem
 
-**Landing reconciliation (2026-11-01).** This plan was written against SPOKE 0.14.1, where the family was still proposed. Upstream 0.15.0 (2026-10-30) landed it additively and 0.15.1 (2026-10-31) is docs/CI only; crates.io and npm publish 0.15.1, so the protocol side of the two-layer model is now available to consume. The reference policy engine stays `fixtures/memory-engine/rust` (`spoke-fixture-memory-engine`, path-dependency-only, unpublished) — provider-private implementation, not a published protocol participant, so plans that treat it as an upstream dependency must vendor or reimplement rather than depend on it. This nexus repository has since moved its five lockstep pins to 0.15.1 (the re-pin also carries the upstream generated-type rename sweep in its consumers), but the adoption s
+**Landing reconciliation (2026-11-01).** This plan was written against SPOKE 0.14.1, where the family was still proposed. Upstream 0.15.0 (2026-10-30) landed it additively and 0.15.1 (2026-10-31) is docs/CI only; crates.io and npm publish 0.15.1, so the protocol side of the two-layer model is now available to consume. The reference policy engine stays `fixtures/memory-engine/rust` (`spoke-fixture-memory-engine`, path-dependency-only, unpublished) — provider-private implementation, not a published protocol participant, so plans that treat it as an upstream dependency must vendor or reimplement rather than depend on it. This nexus repository moved its five lockstep pins first to 0.15.1 and then to the 0.16.0 lockstep (workspace pins in `Cargo.toml`); the staged adoption N0–N3, N4-R and NXM-16 has since been delivered (v1.227–v1.230), while N4-T transfer remains explicitly unsupported.
 
-## Proposal
+## Decision
 
 ### 0. Document position
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | **Proposed** — not authorization to execute. Nothing here is registered as a workflow, no stage is scheduled, and no feature is claimed shipped. Every "Current" statement is a snapshot of the repository as read on 2026-10-28. |
+| **Status** | **Implemented** — adoption stages N0–N3, N4-R (reflection) and NXM-16 delivered (v1.227–v1.230, at the 0.16.0 lockstep); N4-T transfer explicitly unsupported. "Current" statements in §3 are the 2026-10-28 baseline snapshot kept as provenance. |
 | **Document class** | Exploration |
-| **Scope** | How nexus would adopt the `spoke-memory` family: the two-layer landing model (protocol adoption ≠ data merge), the target architecture (`MemoryPort` in-process provider + application authorization adapter), the caller-migration inventory, the staged roadmap `NXM-*` with its gates, the deferred triggers, and the adoption-program definition of done. |
-| **Coordinates with** | [spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md) (wire symbols and `MEM-R###` invariants — referenced, never redefined here), [spoke-memory-conformance.md](2026-10-28-spoke-memory-conformance.md) (`C-*` scenarios and the acceptance matrix this plan's stages trace to), [spoke-adapter-architecture.md](../../../../docs/specs/architecture/spoke-adapter-architecture.md) (the consumption boundary and port-delegation rules the provider must fit) |
+| **Scope** | How nexus adopted the `spoke-memory` family: the two-layer landing model (protocol adoption ≠ data merge), the target architecture (`MemoryPort` in-process provider + application authorization adapter), the caller-migration inventory, the staged roadmap `NXM-*` with its gates, the deferred triggers, and the adoption-program definition of done. |
+| **Coordinates with** | [spoke-memory-protocol.md](2026-10-28-spoke-memory-protocol.md) (wire symbols and `MEM-R###` invariants — referenced, never redefined here), [spoke-memory-conformance.md](2026-10-28-spoke-memory-conformance.md) (`C-*` scenarios and the acceptance matrix this plan's stages trace to), [spoke-adapter-architecture.md](../../../../docs/specs/architecture/spoke-adapter-architecture.md) (the consumption boundary and port-delegation rules the provider must fit) |
 
-**Landing reconciliation (2026-11-01).** This plan was written against SPOKE 0.14.1, where the family was still proposed. Upstream 0.15.0 (2026-10-30) landed it additively and 0.15.1 (2026-10-31) is docs/CI only; crates.io and npm publish 0.15.1, so the protocol side of the two-layer model is now available to consume. The reference policy engine stays `fixtures/memory-engine/rust` (`spoke-fixture-memory-engine`, path-dependency-only, unpublished) — provider-private implementation, not a published protocol participant, so plans that treat it as an upstream dependency must vendor or reimplement rather than depend on it. This nexus repository has since moved its five lockstep pins to 0.15.1 (the re-pin also carries the upstream generated-type rename sweep in its consumers), but the adoption stages below remain unscheduled and unconsumed; upstream task IDs from the discarded implementation plan are replaced by "already landed upstream".
+**Landing reconciliation (2026-11-01).** This plan was written against SPOKE 0.14.1, where the family was still proposed. Upstream 0.15.0 (2026-10-30) landed it additively and 0.15.1 (2026-10-31) is docs/CI only; crates.io and npm publish 0.15.1, so the protocol side of the two-layer model is now available to consume. The reference policy engine stays `fixtures/memory-engine/rust` (`spoke-fixture-memory-engine`, path-dependency-only, unpublished) — provider-private implementation, not a published protocol participant, so plans that treat it as an upstream dependency must vendor or reimplement rather than depend on it. This nexus repository moved its five lockstep pins first to 0.15.1 and then to the 0.16.0 lockstep (workspace pins in `Cargo.toml`); the staged adoption N0–N3, N4-R and NXM-16 has since been delivered (v1.227–v1.230), while N4-T transfer remains unscheduled and explicitly unsupported; upstream task IDs from the discarded implementation plan are replaced by "already landed upstream".
 
 #### Original framing (research provenance)
 
-> This plan was **not** authorization to execute, does not register any workflow, and did not claim any feature shipped. Wire-level symbols are owned by [spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md) (naming contract v2.0, 2026-10-28) and are **referenced, never redefined** here. Upstream implementation task IDs cited as dependencies were owned by the upstream implementation plan, which is superseded by the landed 0.15.0 shape and is deliberately not promoted: the family now exists, so a staging plan for building it is dead weight.
+> This plan was **not** authorization to execute, does not register any workflow, and did not claim any feature shipped. Wire-level symbols are owned by [spoke-memory-protocol.md](2026-10-28-spoke-memory-protocol.md) (naming contract v2.0, 2026-10-28) and are **referenced, never redefined** here. Upstream implementation task IDs cited as dependencies were owned by the upstream implementation plan, which is superseded by the landed 0.15.0 shape and is deliberately not promoted: the family now exists, so a staging plan for building it is dead weight.
 
 ### 1. Purpose and scope
 
@@ -37,14 +37,14 @@ them through one provider boundary. Remote (cloud or third-party) providers
 implement the same service semantics over SPOKE Connect.
 
 Non-goals for this document: defining wire fields (owned by
-[spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md)), changing SPOKE source
+[spoke-memory-protocol.md](2026-10-28-spoke-memory-protocol.md)), changing SPOKE source
 (upstream owns its own releases), executing any task below, and re-enabling the
 currently refused automatic run-capture path (§6.4, Decision D-4).
 
 ### 2. Protocol symbol reference (frozen names, cited from the protocol spec)
 
 > Shorthand used by the `Owner` column and body prose: `01` =
-> [spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md); `04` =
+> [spoke-memory-protocol.md](2026-10-28-spoke-memory-protocol.md); `04` =
 > [spoke-memory-conformance.md](2026-10-28-spoke-memory-conformance.md); `02` = the
 > upstream implementation plan, **not tracked here** — it is superseded by the
 > landed 0.15.0 shape, so its task series (A1–A3, B1–B4, C1–C3, D1–D5, E1–E4,
@@ -74,7 +74,9 @@ currently refused automatic run-capture path (§6.4, Decision D-4).
 All paths are repo-root-relative. At this snapshot both this repository and
 SPOKE consumed upstream package version `0.14.1`; SPOKE has since published
 `0.15.1` carrying the memory family; this repository then moved its five
-lockstep pins to `0.15.1` without consuming the family.
+lockstep pins to `0.15.1` without yet consuming the family. (Consumption of
+the base family, reflection and fencing later landed at the 0.16.0 lockstep,
+v1.227–v1.230; transfer (N4-T) remains unconsumed.)
 
 #### 3.1 Memory entry points (as-is)
 
@@ -647,29 +649,54 @@ are frozen (received 2026-10-28).
 
 ## Alternatives considered
 
-Not stated as a separate comparison in the migrated proposal; where the body names a rejected direction, that record stays in the proposal.
+Not stated as a separate comparison in the migrated proposal; where the body names a rejected direction, that record stays in the body.
 
-## Acceptance criteria
+## Consequences
+
+The program-level definition of done — the eight items below — was closed by
+the N5 audit of iteration `v1.235-adr-landing` (2026-11-11); per-item verdicts
+with quoted command evidence live in that audit guide (control-tree
+`.mstar/iterations/v1.235-adr-landing/guides/n5-audit.md`). Summary verdicts:
 
 1. Every entry point in §6 routes through the CoreService memory family →
-   `MemoryPort`; zero direct memory table/file bypass remains (grep-audited).
+   `MemoryPort`; zero direct memory table/file bypass remains (grep-audited) —
+   **delivered for the audited surfaces**: zero production
+   `nexus_creator_memory::memory_io`/`soul_io` caller outside the adapter seam
+   (`crates/nexus-core/src/memory_provider/legacy.rs`); one open residual, the
+   dual-meaning `MemoryPipelineCtx.scope_id` in-memory field (audit item R6).
 2. Default local provider passes the full 04 conformance matrix; the loopback
-   independent remote provider passes the same matrix.
+   independent remote provider passes the same matrix — **not claimed**:
+   staged conformance only; the per-capability named selectors pass in CI
+   (`cargo test -p nexus-memory-conformance --features dev-graph-memory-remote`),
+   and the staged 95-scenario disposition
+   (`docs/specs/architecture/spoke-memory-conformance-staging.md`) is the
+   standing contract.
 3. Writer-guard triggers, revision CAS, and bearer path validation behave
-   byte-identically for local operation.
+   byte-identically for local operation — CI-covered (`c_local_legacy`,
+   `-p nexus-creator-memory`, `--test legacy_content_migration`).
 4. Receipts/idempotency for memory ops verified incl. `OUTCOME_UNCERTAIN`
-   replay; no peer-session-derived identity anywhere in the memory domain.
-5. Transfer runbook (NXM-12) demonstrated local→remote and back with
-   explicit rollback points; no dual-write or silent fallback exists.
+   replay; no peer-session-derived identity anywhere in the memory domain —
+   CI-covered (`c_capture_candidates`, `c_grants_errors`;
+   `crates/nexus-core/src/operation_id.rs:39–55`).
+5. Transfer runbook (NXM-12) demonstrated local→remote and back with explicit
+   rollback points; no dual-write or silent fallback exists — **unsupported:
+   N4-T remains open**; no transfer, drain or cutover is implemented or claimed.
 6. D-4 boundary intact: `remember:true` refusal unchanged and covered by a
    regression test; Creator **explicit** capture parity (NXM-16) passes its
-   typed contract scenarios.
-7. Control-metadata migration is registered/idempotent; binary/schema
-   rollback compatibility verified or backup-restore path documented.
-8. Removal list (NXM-14) executed; docs updated (ARCHITECTURE.md memory
-   section, CLI help).
+   typed contract scenarios — CI-covered
+   (`host_actor_lifecycle.rs:1517–1580`; `--test memory_services`;
+   `--test creator_memory_remote`).
+7. Control-metadata migration is registered/idempotent; binary/schema rollback
+   compatibility verified or backup-restore path documented — CI-covered
+   (`--test legacy_content_migration`; C-117).
+8. Removal list (NXM-14) executed; docs updated — executed with the item-1
+   residual above; docs landed as the `docs/specs/architecture/spoke-memory-*`
+   masters and this record (no `ARCHITECTURE.md` exists in this repository).
 
-## Risks
+Items 2 and 5 are honest limits, not omissions: CI evidence covers
+per-capability selectors only, and transfer stays explicitly unsupported,
+matching the implemented protocol record's Status line
+(`2026-10-28-spoke-memory-protocol.md:3`, same directory).
 
 | Risk | Mitigation |
 |---|---|

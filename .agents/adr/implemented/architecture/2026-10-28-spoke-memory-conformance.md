@@ -1,26 +1,26 @@
 # ADR: Cross-Provider Conformance and Acceptance Matrix
 
-Status: proposed — nothing here authorizes execution, and no scenario has been run in this repository.
+Status: implemented — the scenario matrix is the standing acceptance contract; the per-capability named selectors pass in CI (`cargo test -p nexus-memory-conformance --features dev-graph-memory-remote`); the full historical matrix is not claimed run; N4-T transfer rows remain open
 Date: 2026-10-28
 Scope: The `C-*` scenario ID space for the `spoke-memory` family: two conformance classes (single-provider semantics, cross-provider transfer), fixture semantics, the scenario matrix, nexus acceptance traceability to the `NXM-*` stages, and the execution/evidence policy.
 Source: migrated from the retired tracked specs corpus
 
 ## Problem
 
-**Landing reconciliation (2026-11-01).** Written against SPOKE 0.14.1, where the family was proposed; upstream 0.15.0 (2026-10-30) landed it and 0.15.1 (2026-10-31) is docs/CI only, published on crates.io and npm. That makes the matrix executable against real upstream participants rather than a proposed shape, with one caveat: the reference policy engine (`spoke-fixture-memory-engine`) ships only as an unpublished path-dependency fixture, so it can serve as the algorithm-variable reference but never as a shipped conformance participant. Nexus has since moved its lockstep pins to 0.15.1 but has run none of these scenarios.
+**Landing reconciliation (2026-11-01).** Written against SPOKE 0.14.1, where the family was proposed; upstream 0.15.0 (2026-10-30) landed it and 0.15.1 (2026-10-31) is docs/CI only, published on crates.io and npm. That makes the matrix executable against real upstream participants rather than a proposed shape, with one caveat: the reference policy engine (`spoke-fixture-memory-engine`) ships only as an unpublished path-dependency fixture, so it can serve as the algorithm-variable reference but never as a shipped conformance participant. Nexus moved its lockstep pins first to 0.15.1 and then to the 0.16.0 lockstep (workspace pins in `Cargo.toml`); the per-capability named selectors now pass in CI (`cargo test -p nexus-memory-conformance --features dev-graph-memory-remote`), the full historical matrix is not claimed run, and the N4-T transfer rows remain open.
 
-## Proposal
+## Decision
 
 ### 0. Document position
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | **Proposed** — nothing here authorizes execution, and no scenario has been run in this repository. |
+| **Status** | **Implemented** — the scenario matrix is the standing acceptance contract; CI covers the per-capability named selectors (not the full historical matrix); N4-T transfer rows open. |
 | **Document class** | Exploration |
 | **Scope** | The `C-*` scenario ID space for the `spoke-memory` family: two conformance classes (single-provider semantics, cross-provider transfer), fixture semantics, the scenario matrix, nexus acceptance traceability to the `NXM-*` stages, and the execution/evidence policy. |
-| **Coordinates with** | [spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md) (`MEM-R001`–`MEM-R027` are owned by the published upstream protocol at the 0.16.0 lockstep — referenced, never redefined here), [spoke-memory-adoption-plan.md](2026-10-28-spoke-memory-adoption-plan.md) §7 (rollout stages `NXM-*` named in the Stage column) |
+| **Coordinates with** | [spoke-memory-protocol.md](2026-10-28-spoke-memory-protocol.md) (`MEM-R001`–`MEM-R027` are owned by the published upstream protocol at the 0.16.0 lockstep — referenced, never redefined here), [spoke-memory-adoption-plan.md](2026-10-28-spoke-memory-adoption-plan.md) §7 (rollout stages `NXM-*` named in the Stage column) |
 
-**Landing reconciliation (2026-11-01).** Written against SPOKE 0.14.1, where the family was proposed; upstream 0.15.0 (2026-10-30) landed it and 0.15.1 (2026-10-31) is docs/CI only, published on crates.io and npm. That makes the matrix executable against real upstream participants rather than a proposed shape, with one caveat: the reference policy engine (`spoke-fixture-memory-engine`) ships only as an unpublished path-dependency fixture, so it can serve as the algorithm-variable reference but never as a shipped conformance participant. Nexus has since moved its lockstep pins to 0.15.1 but has run none of these scenarios.
+**Landing reconciliation (2026-11-01).** Written against SPOKE 0.14.1, where the family was proposed; upstream 0.15.0 (2026-10-30) landed it and 0.15.1 (2026-10-31) is docs/CI only, published on crates.io and npm. That makes the matrix executable against real upstream participants rather than a proposed shape, with one caveat: the reference policy engine (`spoke-fixture-memory-engine`) ships only as an unpublished path-dependency fixture, so it can serve as the algorithm-variable reference but never as a shipped conformance participant. Nexus moved its lockstep pins first to 0.15.1 and then to the 0.16.0 lockstep (workspace pins in `Cargo.toml`); the per-capability named selectors now pass in CI (`cargo test -p nexus-memory-conformance --features dev-graph-memory-remote`), the full historical matrix is not claimed run, and the N4-T transfer rows remain open.
 
 #### Original framing (research provenance)
 
@@ -28,14 +28,14 @@ Source: migrated from the retired tracked specs corpus
 > naming contract v1, extended through contract v2.0, 2026-10-28). Protocol
 > symbols, operation semantics, and the normative invariants
 > (`MEM-R001`–`MEM-R027`) are owned by
-> [spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md) and the upstream 0.16.0 publication, and are referenced,
+> [spoke-memory-protocol.md](2026-10-28-spoke-memory-protocol.md) and the upstream 0.16.0 publication, and are referenced,
 > never redefined. Nexus rollout stages (`NXM-*`) referenced in the Stage
 > column are defined in [spoke-memory-adoption-plan.md](2026-10-28-spoke-memory-adoption-plan.md) §7.
 
 ### 1. Purpose and scope
 
 > Shorthand used by the tables below: `01` =
-> [spoke-memory-protocol.md](../../implemented/architecture/2026-10-28-spoke-memory-protocol.md); `03` =
+> [spoke-memory-protocol.md](2026-10-28-spoke-memory-protocol.md); `03` =
 > [spoke-memory-adoption-plan.md](2026-10-28-spoke-memory-adoption-plan.md).
 
 One unified acceptance matrix for the Memory capability family
@@ -104,8 +104,8 @@ exclusively via `memory.receipts.get`; no webhooks or streams.
   never inspect provider-private tables to assert protocol-visible
   outcomes (exceptions: the explicitly local-physical family L rows).
 - **Runner invocation**: scenarios are standard libtest named tests in the
-  proposed `nexus-memory-conformance` crate (03 NXM-11), filtered by name,
-  e.g. `PROPOSED: cargo test -p nexus-memory-conformance c_020`. No custom
+ landed `nexus-memory-conformance` crate (03 NXM-11), filtered by name,
+ e.g. `cargo test -p nexus-memory-conformance c_020`. No custom
   `-- --scenario` harness (libtest does not support it); a custom
   `harness = false` runner is allowed only if explicitly costed in NXM-11.
   No scenario requires running the whole suite locally (`--all`-style full
@@ -276,7 +276,7 @@ Applies | Owner | Stage.
 
 ### 6. Execution and evidence policy
 
-- Runner: `PROPOSED` crate `nexus-memory-conformance` (03 NXM-11) with
+- Runner: crate `nexus-memory-conformance` (03 NXM-11, landed) with
   scenarios as standard named tests, filtered by name:
   `cargo test -p nexus-memory-conformance c_020` (single scenario) or a
   family prefix (`c_08`). No custom `-- --scenario` flag (libtest does not
@@ -299,19 +299,33 @@ Applies | Owner | Stage.
   provider-private storage inspection, except family L rows which are
   explicitly local-physical.
 
-### 7. Current-vs-proposed statement
+### 7. Contract-vs-evidence statement
 
-Every "Expected result" above is a **proposed contract** traced to 01's
-invariants (MEM-R001–R027); current Nexus behavior differs where 03 §3.4
-records gaps (unwired Creator production capture, refused run capture, CLI
-bypass, ambiguous scope). Nothing in this matrix asserts that current code
-already passes.
+Every "Expected result" above is a **contract** traced to 01's
+invariants (MEM-R001–R027), not a status report about the code. Evidence
+status at the 0.16.0 lockstep (2026-11-11): the crate's 12 named selectors —
+all carrying `required-features = ["dev-graph-memory-remote"]`
+(`crates/nexus-memory-conformance/Cargo.toml:75–121`) — pass in CI
+(`cargo test -p nexus-memory-conformance --features dev-graph-memory-remote`,
+the memory-remote cohort in `.github/workflows/ci.yml`); the core-group step
+runs only the crate's auto-discovered `provider_bootstrap`/`server_loopback`
+targets. That is per-capability evidence, not a full-matrix run. The staged
+95-scenario disposition and the open N4-T transfer remainders are the standing
+contract in `docs/specs/architecture/spoke-memory-conformance-staging.md`;
+transfer stays explicitly unsupported.
 
 ## Alternatives considered
 
-Not stated as a separate comparison in the migrated proposal; where the body names a rejected direction, that record stays in the proposal.
+Not stated as a separate comparison in the migrated proposal; where the body names a rejected direction, that record stays in the body.
 
-## Acceptance criteria
+## Consequences
+
+The acceptance traceability below maps program goals to task stages and
+scenario IDs; it is the standing checklist shape, not a claim that every row
+has run. Evidence status is per-capability CI selectors (§7); the N4-T
+transfer rows are open and transfer remains explicitly unsupported per the
+implemented protocol record (`2026-10-28-spoke-memory-protocol.md:3`, same
+directory). The body's non-goals stand unchanged.
 
 | User/program goal | 03 task(s) | Scenario IDs |
 |---|---|---|
@@ -323,14 +337,10 @@ Not stated as a separate comparison in the migrated proposal; where the body nam
 | Remote provider via Connect, no cloud-sync proxy | NXM-10 | all `both` rows against the durable loopback provider; C-029 |
 | Receipts/idempotency incl. uncertain replay, retention, content-free summaries | NXM-2 | C-021..C-024, C-027, C-028, C-036, C-100, C-103, C-104 |
 | Lifecycle fencing (subject + context) across clients; reversible archive | NXM-13 | C-011..C-017, C-026, C-044, C-091, C-093 |
-| Transfer completeness + rollback without data loss or split authority | NXM-12 | C-080..C-089, C-094, C-119 |
+| Transfer completeness + rollback without data loss or split authority | NXM-12 | C-080..C-089, C-094, C-119 — **open (N4-T)** |
 | Profile trust, content kinds, and admission triage | NXM-4 | C-060..C-064 |
 | Reflections: scoped, pinned, invalidated, failure-honest | NXM-11 | C-042, C-070..C-079 |
 | Grant model self-contained, non-amplifying, operator-bootstrapped | NXM-9, NXM-11 | C-057A, C-075, C-090, C-095, C-096 |
 | Honest capability surface | NXM-8 | C-002..C-005, C-035, C-101 |
 | Bounded reads, hard budgets, cursor integrity | NXM-11 | C-030, C-043, C-045, C-055, C-056 |
 | Auto run capture stays refused (separate product decision) | D-4 boundary | C-115 |
-
-## Risks
-
-Not stated separately; the proposal body carries its non-goals and open questions where present.
