@@ -624,9 +624,7 @@ impl Capability for WorldDeltaApply {
                                 )
                             })?;
                             nexus_local_db::kb_store::update_key_block_status_in_tx(
-                                &mut tx,
-                                kid,
-                                new_status,
+                                &mut tx, kid, new_status,
                             )
                             .await
                             .map_err(|e| CapabilityError::Internal(format!("kb status: {e}")))?;
@@ -860,13 +858,15 @@ mod tests {
         body_json: &str,
     ) -> String {
         let kid = seed_kb_row(pool, world_id, name, None, None).await;
-        sqlx::query("UPDATE kb_key_blocks SET body_json = ?, updated_at = ? WHERE key_block_id = ?")
-            .bind(body_json)
-            .bind("2020-01-01T00:00:00Z")
-            .bind(&kid)
-            .execute(pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE kb_key_blocks SET body_json = ?, updated_at = ? WHERE key_block_id = ?",
+        )
+        .bind(body_json)
+        .bind("2020-01-01T00:00:00Z")
+        .bind(&kid)
+        .execute(pool)
+        .await
+        .unwrap();
         kid
     }
 
@@ -1590,7 +1590,10 @@ mod tests {
 
         let after = kb_snapshot(&pool, &kid).await;
         assert_eq!(after.0, before.0, "the earlier body write is rolled back");
-        assert_eq!(after.2, before.2, "the earlier write did not stamp updated_at");
+        assert_eq!(
+            after.2, before.2,
+            "the earlier write did not stamp updated_at"
+        );
     }
 
     /// Create branch: the provisional insert lands inside the handler's
@@ -1629,6 +1632,9 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(ghosts, 0, "the provisional insert must not survive rollback");
+        assert_eq!(
+            ghosts, 0,
+            "the provisional insert must not survive rollback"
+        );
     }
 }

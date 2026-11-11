@@ -28,7 +28,7 @@ tags:
 
 ## Problem
 
-A table had writers in four crates: a compute settlement insert, two orchestration capability updates, and a dynamic actor patch/delete. They worked, but every new caller had to rediscover the predicates (revision CAS, terminal-status exclusion, ownership conjunct). The existing `KbStore` trait could not host all of them: its methods open their own transaction, so a handler that already holds one would lose atomicity.
+A table had four writers across three crates — a compute settlement insert in `nexus-core`, two orchestration capability updates in `nexus-orchestration`, and a dynamic actor patch/delete in `nexus-local-db`. They worked, but every new caller had to rediscover the predicates (revision CAS, terminal-status exclusion, ownership conjunct). The existing `KbStore` trait could not host all of them: its methods open their own transaction, so a handler that already holds one would lose atomicity.
 
 ## Pattern
 
@@ -45,10 +45,13 @@ A table had writers in four crates: a compute settlement insert, two orchestrati
 ## Pitfalls
 
 - **Column drift.** Replacing raw SQL with a store helper silently changes defaults: `updated_at` became `NULL`, and the helper populated `extensions_nexus_json` where the raw insert wrote `NULL`. Either pin the old value or assert the delta explicitly in the recorded-delta test.
+- **Governance drift.** A store primitive that binds a record also binds its `holder_entry_id` / `disclosure` / `revision`, so a lane that must stay World-shared has to normalise those to `NULL` explicitly — the wire proposal it decoded may carry an owner the lane never accepted. Assert the stored `NULL/NULL`, not the schema default.
 - **Error taxonomy drift.** Raw-SQL call sites often surfaced coded input errors; the converged path may collapse them into an internal error. Name the mapping explicitly or capture the delta as a residual.
 - **`.sqlx` hashes the SQL text.** Re-indenting a moved compile-checked statement forces `cargo sqlx prepare`; keep the literal as-is or regenerate in the same change.
 - **A per-line source scan shares its blind spot with the grep it replaces.** Line-wrapped or lowercased SQL escapes both; document the limit at the guard.
 
 ## Evidence
 
-`.mstar/sdd/v233-knowledge-ir-p1/inventory.md`, `review/qc1.md`, `review/qc2.md`, `crates/nexus-local-db/tests/kb_key_blocks_writer_guard.rs`.
+- `crates/nexus-local-db/tests/kb_key_blocks_writer_guard.rs` — the source guard.
+- `crates/nexus-local-db/tests/actor_knowledge_maintenance.rs` — the `t4_primitive_*` cases cover the caller-transaction patch/delete primitives.
+- `crates/nexus-core/tests/capability_compute.rs::aborted_accept_rolls_back_key_block_inserts` — the deterministic post-insert failure proving the settlement insert stays in the accept transaction.

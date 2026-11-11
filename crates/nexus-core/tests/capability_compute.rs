@@ -417,9 +417,7 @@ async fn kb_block_rows(pool: &sqlx::SqlitePool) -> Vec<String> {
 /// record → spoke conversion seam the production proposals ride.
 fn world_block_proposal(entry_id: &str, world_id: &str) -> serde_json::Value {
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::knowledge_entry::{
-        KnowledgeEntryBody, KnowledgeEntryRecord,
-    };
+    use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
     use nexus_spoke_adapter::conversion::knowledge_record_to_spoke;
 
     let kb = KnowledgeEntryRecord {
@@ -467,16 +465,23 @@ async fn accept_writes_new_key_blocks_through_the_store_seam() {
     .expect("settlement row exists");
     // The recorded delta: the store seam populates the World owner carrier.
     assert_eq!(
-        row.get::<Option<String>, _>("extensions_nexus_json").as_deref(),
+        row.get::<Option<String>, _>("extensions_nexus_json")
+            .as_deref(),
         Some(r#"{"world_id":"wld_combat"}"#),
     );
     assert_eq!(row.get::<Option<i64>, _>("revision"), None);
     // The pre-convergence shape: every other column unchanged.
     assert_eq!(row.get::<String, _>("owner_kind"), "world");
-    assert_eq!(row.get::<Option<String>, _>("world_id").as_deref(), Some(WORLD));
+    assert_eq!(
+        row.get::<Option<String>, _>("world_id").as_deref(),
+        Some(WORLD)
+    );
     assert_eq!(row.get::<Option<String>, _>("character_id"), None);
     assert_eq!(row.get::<Option<String>, _>("actor_world_binding_id"), None);
-    assert_eq!(row.get::<Option<String>, _>("block_type").as_deref(), Some("event"));
+    assert_eq!(
+        row.get::<Option<String>, _>("block_type").as_deref(),
+        Some("event")
+    );
     assert_eq!(
         row.get::<Option<String>, _>("canonical_name").as_deref(),
         Some("Forged Sigil"),
@@ -496,6 +501,76 @@ async fn accept_writes_new_key_blocks_through_the_store_seam() {
     let updated_at = row.get::<Option<String>, _>("updated_at");
     assert!(created_at.is_some());
     assert_eq!(updated_at, created_at);
+}
+
+/// The settlement lane carries no governance: a wire proposal naming an
+/// `owner` + `disclosure` (and a `revision`) still lands as a World-shared
+/// row — `holder_entry_id`/`disclosure`/`revision` normalised to `NULL`.
+#[tokio::test]
+#[serial_test::serial]
+async fn accept_settles_a_governance_carrying_block_as_shared() {
+    use sqlx::Row;
+
+    let f = fixture().await;
+    let mut proposals = crafted_proposals(&[], &[], None);
+    let mut proposal = world_block_proposal("kb_governed", WORLD);
+    proposal["owner"] = json!("kb_holder");
+    proposal["disclosure"] = json!("owner-private");
+    proposal["revision"] = json!(7);
+    proposals["new_key_blocks"] = json!([proposal]);
+    let run_id = craft_succeeded_run(f.core.pool(), proposals).await;
+    let principal = f.core.active_principal().await.unwrap();
+
+    let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
+    let response =
+        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+            .await
+            .expect("accept succeeds");
+    assert_eq!(response.applied.new_entries_created, 1);
+
+    let row = sqlx::query(
+        "SELECT holder_entry_id, disclosure, revision \
+         FROM kb_key_blocks WHERE key_block_id = 'kb_governed'",
+    )
+    .fetch_one(f.core.pool())
+    .await
+    .expect("settlement row exists");
+    assert_eq!(
+        row.get::<Option<String>, _>("holder_entry_id"),
+        None,
+        "a settlement row is World-shared, never a holder's",
+    );
+    assert_eq!(row.get::<Option<String>, _>("disclosure"), None);
+    assert_eq!(row.get::<Option<i64>, _>("revision"), None);
+}
+
+/// A block the store refuses to validate is the caller's input fault: the
+/// accept refuses with the coded `invalid_input` taxonomy, not an internal
+/// error, and writes nothing.
+#[tokio::test]
+#[serial_test::serial]
+async fn accept_refuses_a_store_invalid_block_as_invalid_input() {
+    let f = fixture().await;
+    let mut proposals = crafted_proposals(&[], &[], None);
+    // The wire canonical-name newtype only enforces a non-empty string; the
+    // store's own 256-byte limit is what refuses this one.
+    let mut proposal = world_block_proposal("kb_overlong", WORLD);
+    proposal["canonical_name"] = json!("x".repeat(300));
+    proposals["new_key_blocks"] = json!([proposal]);
+    let run_id = craft_succeeded_run(f.core.pool(), proposals).await;
+    let principal = f.core.active_principal().await.unwrap();
+
+    let rows_before = kb_block_rows(f.core.pool()).await;
+    let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
+    let err =
+        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+            .await
+            .expect_err("a store-refused block must refuse the accept");
+    assert!(
+        matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "invalid_input"),
+        "a store validation refusal must be coded invalid_input, got {err:?}"
+    );
+    assert_eq!(kb_block_rows(f.core.pool()).await, rows_before);
 }
 
 /// A `new_key_blocks` entry owned by another World refuses the whole accept
