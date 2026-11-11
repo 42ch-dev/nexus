@@ -456,19 +456,22 @@ async fn handle_findings_set_status(
 
 /// The refusal a selection WITHOUT a usable creative root must carry.
 ///
-/// [`CoreService::work_artifact_executor`] answers `Uninitialized` both for "no
-/// creator/workspace is selected" and for "the selected workspace registers no
-/// usable root", and the CLI maps that class to `Creator not selected` — whose
-/// suggestion (`creator use`) cannot fix a workspace whose `meta.json` names a
-/// missing directory. Naming the root is the only actionable answer.
+/// [`CoreService::work_artifact_executor`] answers `Uninitialized` when the
+/// selected workspace registers no usable root; the CLI maps that class to
+/// `Creator not selected`, whose suggestion (`creator use`) only switches the
+/// active slug and cannot repair `meta.json.local_root`. Naming the root, and
+/// the command that writes it, is the only actionable answer.
 const MISSING_CREATIVE_ROOT_HINT: &str = "The selected workspace registers no usable creative root. \
-     Run `nexus42 creator workspace init` (or `nexus42 creator workspace use <path>`) and make sure \
-     the workspace's `meta.json` names an existing directory.";
+     Register one with `nexus42 creator workspace create <slug> --creative-root <path>`, or update \
+     the `local_root` in that workspace's `meta.json` to an existing directory.";
 
 /// Acquire the Work artifact executor, keeping the two core refusals apart.
 ///
-/// `Uninitialized` is the missing/unresolvable creative root; every other
-/// failure (a stale or absent creator selection) keeps its own mapped error.
+/// `Uninitialized` is the selected workspace's missing/unresolvable creative
+/// root, and is the only class rewritten here. A missing or stale creator /
+/// workspace selection arrives as `AuthRequired`, which `map_core_error`
+/// renders as `CreatorNotSelected`; every other failure keeps its own mapped
+/// error.
 async fn work_artifact_executor_or_error(
     core: &CoreService,
 ) -> Result<std::sync::Arc<dyn WorkspaceExecutor>> {
