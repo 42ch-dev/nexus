@@ -184,10 +184,7 @@ async fn handle_findings_accept(
     //    read path, the reported path and the port input must all name it —
     //    the operational workspace dir (`~/.nexus42/.../workspaces/<slug>`)
     //    is a different tree and would be refused on every write.
-    let executor = core
-        .work_artifact_executor()
-        .await
-        .map_err(map_core_error)?;
+    let executor = work_artifact_executor_or_error(core).await?;
     let ws_dir = workspace_root_or_error(executor.as_ref())?;
     let agents_md_path = nexus_home_layout::work_agents_md_path(&ws_dir, work_ref);
 
@@ -457,6 +454,34 @@ async fn handle_findings_set_status(
     }))
 }
 
+/// The refusal a selection WITHOUT a usable creative root must carry.
+///
+/// [`CoreService::work_artifact_executor`] answers `Uninitialized` both for "no
+/// creator/workspace is selected" and for "the selected workspace registers no
+/// usable root", and the CLI maps that class to `Creator not selected` — whose
+/// suggestion (`creator use`) cannot fix a workspace whose `meta.json` names a
+/// missing directory. Naming the root is the only actionable answer.
+const MISSING_CREATIVE_ROOT_HINT: &str = "The selected workspace registers no usable creative root. \
+     Run `nexus42 creator workspace init` (or `nexus42 creator workspace use <path>`) and make sure \
+     the workspace's `meta.json` names an existing directory.";
+
+/// Acquire the Work artifact executor, keeping the two core refusals apart.
+///
+/// `Uninitialized` is the missing/unresolvable creative root; every other
+/// failure (a stale or absent creator selection) keeps its own mapped error.
+async fn work_artifact_executor_or_error(
+    core: &CoreService,
+) -> Result<std::sync::Arc<dyn WorkspaceExecutor>> {
+    core.work_artifact_executor()
+        .await
+        .map_err(|err| match err {
+            nexus_core::CoreError::Uninitialized => {
+                CliError::Config(MISSING_CREATIVE_ROOT_HINT.to_string())
+            }
+            other => map_core_error(other),
+        })
+}
+
 /// Resolve the workspace root the Work artifact executor commits under, or
 /// return a helpful error.
 ///
@@ -466,8 +491,7 @@ fn workspace_root_or_error(executor: &dyn WorkspaceExecutor) -> Result<std::path
     executor.workspace_root().map_err(|e| {
         CliError::Config(format!(
             "Could not resolve the workspace root this executor commits under: {e}. \
-             Run `nexus42 creator workspace init` and ensure an active \
-             creator/workspace is set."
+             {MISSING_CREATIVE_ROOT_HINT}"
         ))
     })
 }
@@ -529,10 +553,7 @@ async fn handle_rules_reset(
 
     // The Work artifact executor pins the registered creative root; the read,
     // the diff, the dry-run report and the port write must all name that tree.
-    let executor = core
-        .work_artifact_executor()
-        .await
-        .map_err(map_core_error)?;
+    let executor = work_artifact_executor_or_error(core).await?;
     let ws_dir = workspace_root_or_error(executor.as_ref())?;
     let agents_md_path = nexus_home_layout::work_agents_md_path(&ws_dir, work_ref);
     let agents_md_rel = std::path::Path::new("Works")

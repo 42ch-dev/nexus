@@ -68,6 +68,7 @@ fn describe(out: &Output) -> String {
 /// `rule_suggestion` is [`RULE`].
 struct RulesEnv {
     fixture: DirectFixture,
+    creator_id: String,
     op_dir: PathBuf,
     creative_root: PathBuf,
     work_id: String,
@@ -174,7 +175,7 @@ async fn fresh_env() -> RulesEnv {
             title: "Past-tense tags".to_string(),
             description: "A test finding".to_string(),
             target_executor: "write".to_string(),
-            creator_id,
+            creator_id: creator_id.clone(),
             kind: "craft".to_string(),
             rule_suggestion: Some(RULE.to_string()),
             created_at: now,
@@ -189,6 +190,7 @@ async fn fresh_env() -> RulesEnv {
 
     RulesEnv {
         fixture,
+        creator_id,
         op_dir,
         creative_root,
         work_id,
@@ -275,4 +277,56 @@ async fn rules_writes_land_under_the_registered_creative_root() {
         !env.op_dir.join("Works").exists(),
         "the reset must not create a tree beside the operational workspace dir"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_missing_creative_root_names_the_root_not_the_creator() {
+    let env = fresh_env().await;
+    // Re-register the workspace on a directory that no longer exists: the
+    // creator/workspace selection is intact, only the creative root is
+    // unresolvable.
+    register_creative_root(
+        &env.op_dir,
+        &env.creator_id,
+        &env.fixture.home.path().join("gone"),
+    );
+
+    let cases: [&[&str]; 2] = [
+        &[
+            "creator",
+            "works",
+            "findings",
+            "accept",
+            env.finding_id.as_str(),
+        ],
+        &[
+            "creator",
+            "works",
+            "rules",
+            "reset",
+            env.work_id.as_str(),
+            "--yes",
+        ],
+    ];
+    for args in cases {
+        let out = cli(&env.fixture, args);
+        assert!(
+            !out.status.success(),
+            "an unusable creative root must fail: {}",
+            describe(&out)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(
+            stderr.contains("creative root"),
+            "the refusal must name the creative root: {stderr}"
+        );
+        assert!(
+            !stderr.contains("Creator not selected"),
+            "an intact selection must not be reported as a missing creator: {stderr}"
+        );
+        assert!(
+            !stderr.contains("creator use"),
+            "the selection hint cannot fix a missing root: {stderr}"
+        );
+    }
 }
