@@ -874,6 +874,103 @@ mod tests {
         );
     }
 
+    /// The `fs/write_text_file` production route: the tool surface classifies
+    /// a raw `Works/<ref>/…` path and hands the artifact shape to the
+    /// production adapter, which lands the real bytes on disk.
+    #[tokio::test]
+    async fn production_adapter_lands_real_bytes_for_a_work_tool_path() {
+        let fixture = fixture(true).await;
+        let work_path = match classify_work_path("Works/demo/drafts/ch1.md") {
+            WorkPath::Artifact {
+                work_ref,
+                rel_child,
+            } => (work_ref, rel_child),
+            other => panic!("expected an artifact, got {other:?}"),
+        };
+        let content = "# Chapter 1\n";
+        let write = WorkArtifactWrite {
+            workspace_root: fixture.workspace.path(),
+            work_ref: work_path.0,
+            rel_child: work_path.1,
+            content,
+        };
+
+        fixture
+            .port
+            .commit(write)
+            .await
+            .expect("production commit");
+
+        let target = fixture.workspace.path().join("Works/demo/drafts/ch1.md");
+        let on_disk = std::fs::read(&target).expect("read bytes");
+        assert_eq!(on_disk, content.as_bytes());
+        // The bytes are the exact content, digest-verified against the same
+        // sha256 convention the stub records.
+        let mut sha = Sha256::new();
+        sha.update(&on_disk);
+        assert_eq!(hex::encode(sha.finalize()), hex::encode(Sha256::digest(content.as_bytes())));
+        assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
+    }
+
+    #[tokio::test]
+    async fn recording_port_leaves_the_workspace_digest_unchanged() {
+        // Digest convention: sha256 over the sorted relative file paths of the
+        // workspace, joined by '\n'. An empty workspace hashes the empty input.
+        fn tree_digest(root: &Path) -> String {
+            fn walk(root: &Path, prefix: &str, paths: &mut Vec<String>) {
+                for entry in std::fs::read_dir(root).expect("read_dir") {
+                    let entry = entry.expect("entry");
+                    let rel = format!("{prefix}{}", entry.file_name().to_string_lossy());
+                    if entry.file_type().expect("file_type").is_dir() {
+                        walk(&entry.path(), &format!("{rel}/"), paths);
+                    } else {
+                        paths.push(rel);
+                    }
+                }
+            }
+            let mut paths = Vec::new();
+            walk(root, "", &mut paths);
+            paths.sort();
+            let mut sha = Sha256::new();
+            sha.update(paths.join("\n"));
+            hex::encode(sha.finalize())
+        }
+
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let before = tree_digest(workspace.path());
+        assert!(
+            !workspace.path().join("Works").exists(),
+            "absent before the stub runs"
+        );
+
+        let port = RecordingWorkArtifactPort::new();
+        port.commit(WorkArtifactWrite {
+            workspace_root: workspace.path(),
+            work_ref: WORK_REF,
+            rel_child: Path::new("drafts/ch1.md"),
+            content: "# Chapter 1\n",
+        })
+        .await
+        .expect("recorded commit");
+        assert_eq!(port.mutations().len(), 1);
+
+        assert!(
+            !workspace.path().join("Works").exists(),
+            "absent after the stub runs"
+        );
+        // sha256("") — the sorted rel-path list stayed empty.
+        assert_eq!(
+            before,
+            tree_digest(workspace.path()),
+            "digest unchanged"
+        );
+        assert_eq!(
+            tree_digest(workspace.path()),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "an empty workspace digests the empty input"
+        );
+    }
+
     #[tokio::test]
     async fn recording_port_logs_one_mutation_and_touches_nothing() {
         let workspace = tempfile::tempdir().expect("temp workspace");
