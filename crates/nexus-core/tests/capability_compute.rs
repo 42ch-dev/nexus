@@ -490,7 +490,12 @@ async fn accept_writes_new_key_blocks_through_the_store_seam() {
         Some(r#"{"summary":"Forged by compute","attributes":{"sigil":"ember"}}"#),
     );
     assert_eq!(row.get::<Option<String>, _>("source_anchor_json"), None);
-    assert!(row.get::<Option<String>, _>("created_at").is_some());
+    // Pre-convergence shape: the old raw INSERT bound created_at and
+    // updated_at to the same `now`; the store seam stamps both on the record.
+    let created_at = row.get::<Option<String>, _>("created_at");
+    let updated_at = row.get::<Option<String>, _>("updated_at");
+    assert!(created_at.is_some());
+    assert_eq!(updated_at, created_at);
 }
 
 /// A `new_key_blocks` entry owned by another World refuses the whole accept
@@ -517,47 +522,53 @@ async fn accept_refuses_a_foreign_world_block_before_any_write() {
     assert_eq!(kb_block_rows(f.core.pool()).await, rows_before);
 }
 
-/// The run-row CAS still decides the commit: when the `WHERE status =
-/// 'succeeded'` flip updates zero rows, the whole accept — key-block inserts
-/// included — rolls back and leaves the pre-existing rows untouched.
+/// The run-row CAS still decides the commit. Deterministic fixture: a
+/// test-only `AFTER INSERT` trigger on `kb_key_blocks` flips the run row away
+/// from 'succeeded' the moment the accept writes its block, so the later CAS
+/// (`WHERE status = 'succeeded'`) updates zero rows AFTER the insert — and
+/// the whole accept, insert included, must roll back.
 #[tokio::test]
 #[serial_test::serial]
 async fn aborted_accept_rolls_back_key_block_inserts() {
     let f = fixture().await;
-    // Race two accepts of the same run: both pre-checks pass on 'succeeded',
-    // but only one CAS (`WHERE status = 'succeeded'`) can update a row — the
-    // loser aborts and its key-block insert must leave zero rows.
     let mut proposals = crafted_proposals(&[], &["late arrival"], None);
     proposals["new_key_blocks"] = json!([world_block_proposal("kb_sigil_race", WORLD)]);
     let run_id = craft_succeeded_run(f.core.pool(), proposals).await;
     let principal = f.core.active_principal().await.unwrap();
 
+    // The block insert itself moves the run row: the CAS is guaranteed to
+    // lose strictly after the insert ran inside the accept transaction.
+    let mut builder = sqlx::QueryBuilder::new(
+        "CREATE TRIGGER test_qc_flip_run_after_kb_insert \
+         AFTER INSERT ON kb_key_blocks FOR EACH ROW \
+         BEGIN UPDATE compute_sessions SET status = 'applied' WHERE run_id = ",
+    );
+    builder.push(format!("'{run_id}'; END"));
+    builder
+        .build()
+        .execute(f.core.pool())
+        .await
+        .expect("install the CAS-loss trigger");
+
     let rows_before = kb_block_rows(f.core.pool()).await;
     let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
-    let (first, second) = tokio::join!(
-        nexus_core::execution::compute::accept_compute_run(
-            &f.core,
-            &principal,
-            &run_id,
-            request.clone(),
-        ),
-        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request),
-    );
-    assert!(
-        usize::from(first.is_ok()) + usize::from(second.is_ok()) == 1,
-        "exactly one concurrent accept may win the CAS, got {first:?} / {second:?}",
-    );
+    let err =
+        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+            .await
+            .expect_err("the zero-row CAS must abort the accept");
 
-    // The aborted accept left zero rows: the insert stayed inside the
-    // rolled-back transaction, and the winner wrote the block exactly once.
+    // The inserted block is gone and the pre-existing id set is unchanged:
+    // the insert (and the trigger's update) stayed inside the rolled-back
+    // transaction. These assertions are what a self-committing insert fails.
     let rows_after = kb_block_rows(f.core.pool()).await;
-    assert_eq!(
-        rows_after.iter().filter(|id| **id == "kb_sigil_race").count(),
-        1,
-        "the settlement row must exist exactly once, got {rows_after:?}",
+    assert_eq!(rows_after, rows_before, "the aborted accept left zero rows");
+    assert!(!rows_after.iter().any(|id| id == "kb_sigil_race"));
+
+    // The refusal is the CAS conflict, not the ownership or status gate.
+    assert!(
+        matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "conflict"),
+        "the aborted accept must be a coded conflict, got {err:?}"
     );
-    let expected = rows_before.len() + 1;
-    assert_eq!(rows_after.len(), expected);
 }
 
 /// An unknown tool is refused with the retained code and ZERO domain effect.

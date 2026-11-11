@@ -1637,7 +1637,13 @@ async fn create_key_blocks_in_tx(
         // The store primitive keeps the insert inside the caller's accept
         // transaction and populates `extensions_nexus_json` with the World
         // owner carrier; governance columns stay at shared defaults since
-        // compute output never assigns a holder or disclosure.
+        // compute output never assigns a holder or disclosure. The raw INSERT
+        // this lane replaced bound created_at and updated_at to the same
+        // `now`; stamp both here so the store seam matches that shape.
+        let mut kb = kb;
+        let now = chrono::Utc::now().to_rfc3339();
+        kb.created_at = now.clone();
+        kb.updated_at = Some(now);
         kb_store
             .insert_key_block_in_tx(&mut *tx, kb)
             .await
