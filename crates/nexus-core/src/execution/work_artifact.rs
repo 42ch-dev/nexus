@@ -13,6 +13,7 @@ use nexus_home_layout::active_context::{
 };
 use nexus_local_db::works;
 use sqlx::SqlitePool;
+use sha2::{Digest, Sha256};
 
 use crate::content::{create_parent_dirs, fsync_write_atomic, WorkLock};
 use crate::error::CoreError as NexusApiError;
@@ -324,9 +325,8 @@ impl WorkArtifactPort for FsWorkArtifactPort {
     }
 }
 
-use sha2::{Digest, Sha256};
-
 /// One recorded intended write in a [`RecordingWorkArtifactPort`] log.
+#[allow(dead_code)] // unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
 #[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct RecordedMutation {
     /// The Work directory name the write addressed.
@@ -345,10 +345,12 @@ pub(crate) struct RecordedMutation {
 /// Never constructed on a production path; a future Simulate execution plane
 /// selects it at the per-dispatch construction point (`capabilities.rs`,
 /// `FsWorkArtifactPort::new`) so one selection covers every Work write.
+#[allow(dead_code)] // unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
 pub(crate) struct RecordingWorkArtifactPort {
     mutations: std::sync::Mutex<Vec<RecordedMutation>>,
 }
 
+#[allow(dead_code)] // unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
 impl RecordingWorkArtifactPort {
     #[must_use]
     pub(crate) const fn new() -> Self {
@@ -364,7 +366,10 @@ impl RecordingWorkArtifactPort {
     }
 }
 
+#[allow(dead_code)] // unused until the first Simulate execution plane selects the stub (plan v235-work-ir-p3 reopen condition)
 impl WorkArtifactPort for RecordingWorkArtifactPort {
+    // The trait signature is async; the stub records synchronously.
+    #[allow(clippy::unused_async_trait_impl)]
     async fn commit(&self, write: WorkArtifactWrite<'_>) -> Result<(), NexusApiError> {
         let mut sha = Sha256::new();
         sha.update(write.content.as_bytes());
@@ -889,9 +894,11 @@ mod tests {
         assert_eq!(record.work_ref, WORK_REF);
         assert_eq!(record.rel_child, "drafts/ch1.md");
         assert_eq!(record.bytes, content.len());
-        let mut sha = Sha256::new();
-        sha.update(content.as_bytes());
-        assert_eq!(record.sha256, hex::encode(sha.finalize()));
+        // sha256("# chapter one\n") — precomputed, not re-mirrored from the stub.
+        assert_eq!(
+            record.sha256,
+            "9ae3ccb02e53b1e85a04d509e94a0658cdb813d2136b91fea0a4b906ad1ca6f2"
+        );
 
         // Zero filesystem change: not even the `Works/` directory exists.
         assert!(!workspace.path().join("Works").exists());
