@@ -198,7 +198,7 @@ Four directions were genuinely weighed. Each was available at the point of decis
 - [reference-store-layout.md](../../../../docs/specs/runtime/reference-store-layout.md), [reference-knowledge.md](../../../../docs/specs/runtime/reference-knowledge.md)
 - [cli-spec.md](../../../../docs/specs/cli/cli-spec.md) (`creator knowledge`, `creator reference`, `creator kb`, assemble-moment)
 - [world-kb-runtime-architecture.md](../../../../docs/specs/architecture/world-kb-runtime-architecture.md), [spoke-adapter-architecture.md](../../../../docs/specs/architecture/spoke-adapter-architecture.md) (§6.1 route stability), [creator-workflow.md](../../../../docs/specs/creator/creator-workflow.md)
-- Spoke memory records: `implemented/architecture/2026-10-28-spoke-memory-protocol.md`, `proposed/architecture/2026-10-28-spoke-memory-adoption-plan.md` (N4-T / N5 still open; no KnowledgeEntry-in-memory)
+- Spoke memory records: `implemented/architecture/2026-10-28-spoke-memory-protocol.md`, `implemented/architecture/2026-10-28-spoke-memory-adoption-plan.md` (N4-T open; N5 closed 2026-11-11; no KnowledgeEntry-in-memory)
 - Sibling strategy / work IRs: [PR #483](https://github.com/42ch-dev/nexus/pull/483), [PR #485](https://github.com/42ch-dev/nexus/pull/485)
 - Companion record: `2026-11-10-knowledge-ir.md` — the Knowledge IR design built on this retirement
 - Implementation evidence: `crates/nexus-local-db/migrations/20261111000001_retire_user_and_reference_stores.sql` (the drop), `crates/nexus-local-db/src/version.rs` (V1.231 schema bump)
