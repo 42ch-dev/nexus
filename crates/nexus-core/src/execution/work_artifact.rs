@@ -130,10 +130,13 @@ pub(crate) trait WorkArtifactPort {
     ///
     /// # Errors
     ///
-    /// Returns [`NexusApiError::Forbidden`] for a missing active creator, an
-    /// unknown `work_ref`, any other held lock (`work_locked:…`, propagated
-    /// unmapped) or a resolved path escaping the `Works/<work_ref>/` boundary,
-    /// and [`NexusApiError::Internal`] for a lookup, directory or write failure.
+    /// Returns [`NexusApiError::InvalidInput`] (`field: "rel_child"`) when the
+    /// child is absolute or contains a `..` component — refused before any
+    /// read, lock or directory creation; [`NexusApiError::Forbidden`] for a
+    /// missing active creator, an unknown `work_ref`, any other held lock
+    /// (`work_locked:…`, propagated unmapped) or a resolved path escaping the
+    /// `Works/<work_ref>/` boundary, and [`NexusApiError::Internal`] for a
+    /// lookup, directory or write failure.
     async fn commit(&self, write: WorkArtifactWrite<'_>) -> Result<(), NexusApiError>;
 }
 
