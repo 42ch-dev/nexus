@@ -2489,10 +2489,13 @@ async fn execute_manuscript_write(
         })?;
 
     // ADR #485 §6.1 P2 row 2: the final body bytes commit through the Work
-    // artifact port (Work lock + durable atomic write). The port resolves the
-    // work row on its own connection, so this call stays OUTSIDE the word-count
-    // transaction below; a later DB failure rolls back the row while the bytes
-    // stay landed, as before.
+    // artifact port (Work lock + durable atomic write) BEFORE the word-count
+    // row update below. The port resolves the Work row on its own connection,
+    // so it cannot join that transaction: if the update fails, the bytes stay
+    // landed and only the metadata rolls back. That window is accepted — a
+    // retried write re-commits the same bytes and the next successful update
+    // restores the count — and it is why the byte commit comes first: the
+    // reverse order would leave a row describing bytes that never landed.
     let (body_work_ref, body_rel_child) = work_artifact_parts(&body_path)?;
     FsWorkArtifactPort::new(context.pool.clone(), context.nexus_home.clone())
         .commit(WorkArtifactWrite {

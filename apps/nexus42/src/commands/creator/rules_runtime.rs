@@ -28,6 +28,7 @@ use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
 use nexus_contracts::FindingsApi;
 use nexus_core::{CoreService, ListFindingsQuery, Principal};
+use nexus_orchestration::capability::WorkspaceExecutor;
 
 /// Handle `creator works findings …` (V1.48 P2).
 ///
@@ -129,7 +130,8 @@ pub async fn handle_rules(config: &CliConfig, command: RulesCommand) -> Result<(
 /// 1. Read the finding (creator-scoped) → must have non-empty `rule_suggestion`.
 /// 2. Read the Work → resolve `work_ref` (the read also verifies Work
 ///    ownership before the status write).
-/// 3. Resolve the operational workspace dir from CLI config.
+/// 3. Resolve the workspace root the Work artifact executor commits under —
+///    the registered creative root, which is the ONE tree the port accepts.
 /// 4. Append the rule suggestion to `Works/<work_ref>/AGENTS.md`
 ///    (idempotent on `finding_id`).
 /// 5. Mark the finding `resolved` (skipped when it already is).
@@ -177,17 +179,21 @@ async fn handle_findings_accept(
         ))
     })?;
 
-    // 4. Resolve the operational workspace dir.
-    let ws_dir = operational_workspace_dir_or_error()?;
+    // 4. Resolve the ONE root this executor commits under. The Work artifact
+    //    port pins the registered creative root and refuses any other, so the
+    //    read path, the reported path and the port input must all name it —
+    //    the operational workspace dir (`~/.nexus42/.../workspaces/<slug>`)
+    //    is a different tree and would be refused on every write.
+    let executor = core
+        .work_artifact_executor()
+        .await
+        .map_err(map_core_error)?;
+    let ws_dir = workspace_root_or_error(executor.as_ref())?;
     let agents_md_path = nexus_home_layout::work_agents_md_path(&ws_dir, work_ref);
 
     // 5. Append (idempotent on finding_id) through the Work artifact port, so
     //    the bytes land under the Work lock and the shared durability path.
     let timestamp = chrono::Utc::now().to_rfc3339();
-    let executor = core
-        .work_artifact_executor()
-        .await
-        .map_err(map_core_error)?;
     let outcome = nexus_orchestration::rules_layers::append_rule_suggestion(
         executor.as_ref(),
         &ws_dir,
@@ -238,30 +244,48 @@ async fn handle_findings_accept(
         });
         serde_json::to_string_pretty(&body).unwrap_or_default()
     } else {
-        let agents_md_rel = std::path::Path::new("Works")
-            .join(work_ref)
-            .join("AGENTS.md");
-        let mut lines = vec![match outcome {
-            nexus_orchestration::rules_layers::AppendOutcome::Appended => {
-                format!(
-                    "✓ Appended rule suggestion from finding {finding_id} to {rel}",
-                    rel = agents_md_rel.display()
-                )
-            }
-            nexus_orchestration::rules_layers::AppendOutcome::AlreadyPresent => {
-                format!(
-                    "• Finding {finding_id} already recorded in {rel} (idempotent — no change)",
-                    rel = agents_md_rel.display()
-                )
-            }
-        }];
-        if resolved_now {
-            lines.push(format!("✓ Marked finding {finding_id} as resolved"));
-        } else if already_resolved {
-            lines.push(format!("• Finding {finding_id} was already resolved"));
-        }
-        lines.join("\n")
+        render_accept_report(
+            finding_id,
+            work_ref,
+            outcome,
+            resolved_now,
+            already_resolved,
+        )
     }))
+}
+
+/// Human report for a completed accept: the append outcome plus the two
+/// idempotency notes for the finding's status.
+fn render_accept_report(
+    finding_id: &str,
+    work_ref: &str,
+    outcome: nexus_orchestration::rules_layers::AppendOutcome,
+    resolved_now: bool,
+    already_resolved: bool,
+) -> String {
+    let agents_md_rel = std::path::Path::new("Works")
+        .join(work_ref)
+        .join("AGENTS.md");
+    let mut lines = vec![match outcome {
+        nexus_orchestration::rules_layers::AppendOutcome::Appended => {
+            format!(
+                "✓ Appended rule suggestion from finding {finding_id} to {rel}",
+                rel = agents_md_rel.display()
+            )
+        }
+        nexus_orchestration::rules_layers::AppendOutcome::AlreadyPresent => {
+            format!(
+                "• Finding {finding_id} already recorded in {rel} (idempotent — no change)",
+                rel = agents_md_rel.display()
+            )
+        }
+    }];
+    if resolved_now {
+        lines.push(format!("✓ Marked finding {finding_id} as resolved"));
+    } else if already_resolved {
+        lines.push(format!("• Finding {finding_id} was already resolved"));
+    }
+    lines.join("\n")
 }
 
 /// `creator works findings prune [--older-than <days>] [--dry-run]`
@@ -433,15 +457,18 @@ async fn handle_findings_set_status(
     }))
 }
 
-/// Resolve the operational workspace dir or return a helpful error.
-fn operational_workspace_dir_or_error() -> Result<std::path::PathBuf> {
-    super::works::operational_workspace_dir_from_config_public().ok_or_else(|| {
-        CliError::Config(
-            "Could not resolve the operational workspace directory from CLI config. \
-             Run `nexus42 creator workspace init` and ensure an active creator/workspace \
-             is set."
-                .to_string(),
-        )
+/// Resolve the workspace root the Work artifact executor commits under, or
+/// return a helpful error.
+///
+/// The port pins the registered creative root and refuses any other root, so
+/// this is the only directory the `Works/` read, write and report may name.
+fn workspace_root_or_error(executor: &dyn WorkspaceExecutor) -> Result<std::path::PathBuf> {
+    executor.workspace_root().map_err(|e| {
+        CliError::Config(format!(
+            "Could not resolve the workspace root this executor commits under: {e}. \
+             Run `nexus42 creator workspace init` and ensure an active \
+             creator/workspace is set."
+        ))
     })
 }
 
@@ -500,7 +527,13 @@ async fn handle_rules_reset(
         ))
     })?;
 
-    let ws_dir = operational_workspace_dir_or_error()?;
+    // The Work artifact executor pins the registered creative root; the read,
+    // the diff, the dry-run report and the port write must all name that tree.
+    let executor = core
+        .work_artifact_executor()
+        .await
+        .map_err(map_core_error)?;
+    let ws_dir = workspace_root_or_error(executor.as_ref())?;
     let agents_md_path = nexus_home_layout::work_agents_md_path(&ws_dir, work_ref);
     let agents_md_rel = std::path::Path::new("Works")
         .join(work_ref)
@@ -607,10 +640,6 @@ async fn handle_rules_reset(
     }
 
     // ── Perform the reset through the Work artifact port. ──────────────
-    let executor = core
-        .work_artifact_executor()
-        .await
-        .map_err(map_core_error)?;
     nexus_orchestration::rules_layers::reset_agents_md(executor.as_ref(), &ws_dir, work_ref)
         .await
         .map_err(|e| {

@@ -2193,13 +2193,6 @@ fn operational_workspace_dir_from_config() -> Option<std::path::PathBuf> {
     ))
 }
 
-/// V1.48 P2: crate-public re-export so `rules_runtime` can resolve the
-/// operational workspace dir for `AGENTS.md` file operations. Same
-/// semantics as [`operational_workspace_dir_from_config`] (best-effort).
-pub(crate) fn operational_workspace_dir_from_config_public() -> Option<std::path::PathBuf> {
-    operational_workspace_dir_from_config()
-}
-
 /// V1.51 T-B P0: read the lock holder info from the filesystem and return
 /// it as a JSON value for `creator works status --json`. Returns `None` if
 /// the `work_ref` is missing, the workspace directory cannot be resolved, or

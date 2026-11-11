@@ -249,6 +249,7 @@ async fn assert_first_scaffold_lands(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn first_scaffolds_land_bytes_through_the_real_port() {
     let fx = fixture().await;
     // The scaffolds resolve their `Works` tree from the executor; keep the
@@ -340,6 +341,7 @@ async fn first_scaffolds_land_bytes_through_the_real_port() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn a_reinit_preserves_an_existing_canonical_novel_file() {
     let fx = fixture().await;
     let _cwd = CwdGuard::enter(fx.cwd.path());
@@ -382,6 +384,7 @@ async fn a_reinit_preserves_an_existing_canonical_novel_file() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn a_later_port_refusal_restores_the_canonical_tree() {
     let fx = fixture().await;
     let _cwd = CwdGuard::enter(fx.cwd.path());
@@ -443,6 +446,7 @@ async fn a_later_port_refusal_restores_the_canonical_tree() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn a_partial_reinit_uses_the_stored_ref_through_the_real_port() {
     let fx = fixture().await;
     let _cwd = CwdGuard::enter(fx.cwd.path());
