@@ -61,6 +61,14 @@ pub(crate) enum WorkPath<'a> {
 #[must_use]
 pub(crate) fn classify_work_path(path: &str) -> WorkPath<'_> {
     let mut components = Path::new(path).components();
+    // Rust keeps a leading `./` as a `CurDir` component (interior `.` is
+    // normalized away), so without dropping it `./Works/<ref>/x.md` would fall
+    // through as `NonWork` — the generic guarded write with no port, lock or
+    // boundary re-check — and `./works/<ref>/x.md` would skip the case-variant
+    // refusal.
+    while components.clone().next() == Some(Component::CurDir) {
+        components.next();
+    }
     let Some(Component::Normal(first)) = components.next() else {
         return WorkPath::NonWork;
     };
@@ -470,6 +478,32 @@ mod tests {
             WorkPath::EscapedWork { work_ref: "demo" }
         ));
         match classify_work_path("Works/demo/Stories/ch1.md") {
+            WorkPath::Artifact {
+                work_ref,
+                rel_child,
+            } => {
+                assert_eq!(work_ref, "demo");
+                assert_eq!(rel_child, Path::new("Stories/ch1.md"));
+            }
+            other => panic!("expected an artifact, got {other:?}"),
+        }
+        // A leading `./` is not part of the path's identity: Rust keeps it as a
+        // component, so classifying it away is what stops `./Works/…` from
+        // falling through as `NonWork` and skipping the port.
+        assert!(matches!(
+            classify_work_path("./notes/plain.md"),
+            WorkPath::NonWork
+        ));
+        assert!(matches!(classify_work_path("./Works"), WorkPath::NonWork));
+        assert!(matches!(
+            classify_work_path("./works/demo/x.md"),
+            WorkPath::CaseVariantWorks
+        ));
+        assert!(matches!(
+            classify_work_path("./Works/demo"),
+            WorkPath::WorkRoot { work_ref: "demo" }
+        ));
+        match classify_work_path("./Works/demo/Stories/ch1.md") {
             WorkPath::Artifact {
                 work_ref,
                 rel_child,

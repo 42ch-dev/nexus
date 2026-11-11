@@ -4414,6 +4414,109 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execute_write_file_treats_a_leading_curdir_work_path_as_the_artifact() {
+        let fixture = fixture(true).await;
+
+        execute_write_file(
+            &write_request(
+                &format!("./Works/{WORK_REF}/Stories/ch1.md"),
+                "chapter body",
+            ),
+            &fixture.context,
+        )
+        .await
+        .expect("a `.`-prefixed Work artifact write succeeds");
+
+        let target = fixture
+            .workspace
+            .path()
+            .join(format!("Works/{WORK_REF}/Stories/ch1.md"));
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read"),
+            "chapter body"
+        );
+        assert_eq!(
+            std::fs::read_dir(target.parent().expect("parent"))
+                .expect("read_dir")
+                .count(),
+            1,
+            "the atomic temp file is cleaned up"
+        );
+        assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
+
+        // Same classification means the same lock: a held Work lock refuses
+        // this spelling instead of writing around it on the guarded path.
+        nexus_local_db::acquire_runtime_lock(
+            &fixture.pool,
+            CREATOR,
+            WORK_ID,
+            "cli:http:foreign",
+            nexus_local_db::DEFAULT_RUNTIME_LOCK_TTL_SECS,
+            false,
+        )
+        .await
+        .expect("foreign lock");
+
+        let error = execute_write_file(
+            &write_request(&format!("./Works/{WORK_REF}/Stories/ch2.md"), "body"),
+            &fixture.context,
+        )
+        .await
+        .expect_err("a held lock refuses the `.`-prefixed write");
+
+        match error {
+            NexusApiError::Forbidden { resource } => {
+                assert!(resource.contains("work_locked"), "{resource}");
+            }
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+        assert!(!fixture
+            .workspace
+            .path()
+            .join(format!("Works/{WORK_REF}/Stories/ch2.md"))
+            .exists());
+    }
+
+    #[tokio::test]
+    async fn fs_leading_curdir_case_variant_spelling_is_refused_on_write_and_read() {
+        let fixture = fixture(true).await;
+        // Seed both spellings so the answer is decided by the spelling, never
+        // by the target being absent — on a case-sensitive volume or not.
+        for tree in ["works", "Works"] {
+            let dir = fixture
+                .workspace
+                .path()
+                .join(format!("{tree}/{WORK_REF}/Stories"));
+            std::fs::create_dir_all(&dir).expect("work dir");
+            std::fs::write(dir.join("ch1.md"), "chapter body").expect("seed artifact");
+        }
+        let case_variant = format!("./works/{WORK_REF}/Stories/ch1.md");
+
+        let write_error =
+            execute_write_file(&write_request(&case_variant, "rewritten"), &fixture.context)
+                .await
+                .expect_err("a `.`-prefixed case-variant write refuses");
+        let read_error = execute_read_file(&read_request(&case_variant), &fixture.context)
+            .await
+            .expect_err("a `.`-prefixed case-variant read refuses");
+
+        assert_case_variant_works_refusal(write_error, &case_variant);
+        assert_case_variant_works_refusal(read_error, &case_variant);
+        assert_eq!(holder(&fixture.pool).await, None, "no lock was taken");
+        assert_eq!(
+            std::fs::read_to_string(
+                fixture
+                    .workspace
+                    .path()
+                    .join(format!("works/{WORK_REF}/Stories/ch1.md"))
+            )
+            .expect("read"),
+            "chapter body",
+            "the refused write left the case-variant artifact untouched"
+        );
+    }
+
+    #[tokio::test]
     async fn execute_write_file_is_not_reentrant_for_tool_fs_write() {
         let fixture = fixture(true).await;
         // The same process's in-flight `tool:fs_write` holder mints a fresh
