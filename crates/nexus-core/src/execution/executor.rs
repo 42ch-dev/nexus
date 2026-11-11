@@ -6,7 +6,7 @@
 //! writes through, so a preset's `workspace.commit` observes real durable
 //! workspace state.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -244,6 +244,23 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
                 input.workspace_root
             )));
         }
+        // `rel_child` addresses a path BELOW `Works/<work_ref>/`. An absolute
+        // path replaces the base entirely, and a `..` walks out of the Work
+        // subtree — while the port's boundary probe stops at the first
+        // existing ancestor, so a first write with `Works/<work_ref>` absent
+        // would approve a target inside a SIBLING Work's tree. Refuse both
+        // before the port resolves anything.
+        let rel_child = Path::new(&input.rel_child);
+        if rel_child.is_absolute()
+            || rel_child
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+        {
+            return Err(CapabilityError::InputInvalid(format!(
+                "rel_child '{}' must be a relative path below Works/<work_ref>/",
+                input.rel_child
+            )));
+        }
         // Same per-dispatch construction the hot path performs: one port over
         // the shared pool, no second writer and no new public surface.
         let pool = self.session_manager.pool();
@@ -251,7 +268,7 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
             .commit(WorkArtifactWrite {
                 workspace_root: &requested_root,
                 work_ref: &input.work_ref,
-                rel_child: Path::new(&input.rel_child),
+                rel_child,
                 content: &input.content,
             })
             .await
@@ -416,6 +433,58 @@ mod tests {
         assert!(
             !sibling.join("Works").exists(),
             "`..` may not walk the target out of the workspace"
+        );
+    }
+
+    #[tokio::test]
+    async fn commit_work_artifact_refuses_a_child_that_leaves_the_work_tree() {
+        let home = tempfile::tempdir().expect("temp home");
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let unrelated = tempfile::tempdir().expect("unrelated directory");
+        let (_pool, executor) = seam(home.path(), workspace.path()).await;
+
+        // A sibling Work's tree: with `Works/<work_ref>` absent the port's
+        // boundary probe would otherwise stop at the `Works` first-write
+        // ancestor and approve this target.
+        let err = executor
+            .commit_work_artifact(WorkArtifactCommitInput {
+                workspace_root: workspace.path().to_string_lossy().into_owned(),
+                work_ref: WORK_REF.to_string(),
+                rel_child: "../sibling/Body/chapter-01.md".to_string(),
+                content: "# Leak\n".to_string(),
+            })
+            .await
+            .expect_err("a parent-relative child must be refused");
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected the shape refusal, got: {err}"
+        );
+        assert!(
+            !workspace.path().join("Works").exists(),
+            "no directory may be created for a refused child"
+        );
+
+        // An absolute child replaces the base path entirely.
+        let err = executor
+            .commit_work_artifact(WorkArtifactCommitInput {
+                workspace_root: workspace.path().to_string_lossy().into_owned(),
+                work_ref: WORK_REF.to_string(),
+                rel_child: unrelated
+                    .path()
+                    .join("leak.md")
+                    .to_string_lossy()
+                    .into_owned(),
+                content: "# Leak\n".to_string(),
+            })
+            .await
+            .expect_err("an absolute child must be refused");
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected the shape refusal, got: {err}"
+        );
+        assert!(
+            !unrelated.path().join("leak.md").exists(),
+            "nothing may be written outside the Work tree"
         );
     }
 
