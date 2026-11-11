@@ -27,7 +27,7 @@ World KB is the only knowledge family left. Its store (`KnowledgeEntryRecord` �
 
 #### UserScope / User KnowledgeStore
 
-The Masters at the time placed a **User knowledge index** beside Creator under `User` ([entity-scope-model.md](../../../../docs/specs/architecture/entity-scope-model.md) §1.1–§1.2, §5.2, §5.4, §6.2–§6.3), named `nexus42 creator knowledge ...` as its CLI entrance and described `platform context assemble-moment` as a **four-domain** Moment ([cli-spec.md](../../../../docs/specs/cli/cli-spec.md)), and owned `knowledge_entries` as the User-scoped table ([local-db-schema.md](../../../../docs/specs/runtime/local-db-schema.md) §4.1.1). What actually shipped:
+The Masters at the time placed a **User knowledge index** beside Creator under `User` ([entity-scope-model.md](../../../../docs/specs/architecture/entity-scope-model.md) §1.1–§1.2, §5.2, §5.4, §6.2–§6.3), named `nexus42 creator knowledge ...` as its CLI entrance and described `platform context assemble-moment` as a **four-domain** Moment ([cli-spec.md](../../../../docs/specs/cli/cli-spec.md)), and owned `knowledge_entries` as the User-scoped table ([local-db-schema.md](../../../../docs/specs/runtime/local-db-schema.md) §4.1.3). What actually shipped:
 
 | Surface | Location | What it did |
 | --- | --- | --- |
