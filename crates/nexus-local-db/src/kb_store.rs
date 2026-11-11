@@ -3061,6 +3061,69 @@ pub async fn update_key_block_auxiliary_fields_in_tx(
     .map(|_| ())
 }
 
+/// Overwrite a `kb_key_blocks` body inside a caller-owned transaction.
+///
+/// Storage primitive behind the `nexus.world.delta.apply` capability, whose
+/// lost-update model is the pre-fetched live-body comparison the caller
+/// performs before calling this: the predicate is therefore id-only and the
+/// `revision` column is deliberately left untouched. Callers that need OCC
+/// use [`cas_update_key_block_fields`].
+///
+/// Returns the number of affected rows (0 when no such `key_block_id`).
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] on database failure.
+pub async fn update_key_block_body_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key_block_id: &str,
+    body_json: &str,
+) -> Result<u64, LocalDbError> {
+    let updated_at = chrono::Utc::now().to_rfc3339();
+    // SAFETY: static UPDATE against known kb_key_blocks columns; values bound.
+    let result = sqlx::query(
+        "UPDATE kb_key_blocks SET body_json = ?, updated_at = ? \
+         WHERE key_block_id = ?",
+    )
+    .bind(body_json)
+    .bind(updated_at)
+    .bind(key_block_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Overwrite a `kb_key_blocks` status inside a caller-owned transaction.
+///
+/// Same seam and contract as [`update_key_block_body_in_tx`]: id-only
+/// predicate, `updated_at` stamped, `revision` untouched, and the table's
+/// `status` CHECK is the only validation applied here.
+///
+/// Returns the number of affected rows (0 when no such `key_block_id`).
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] on database failure (including a `status` value
+/// the column CHECK rejects).
+pub async fn update_key_block_status_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key_block_id: &str,
+    status: &str,
+) -> Result<u64, LocalDbError> {
+    let updated_at = chrono::Utc::now().to_rfc3339();
+    // SAFETY: static UPDATE against known kb_key_blocks columns; values bound.
+    let result = sqlx::query(
+        "UPDATE kb_key_blocks SET status = ?, updated_at = ? \
+         WHERE key_block_id = ?",
+    )
+    .bind(status)
+    .bind(updated_at)
+    .bind(key_block_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 // ── V1.147 W3: TX-aware state read/write primitives (state-delta lane) ─────
 // The Accept lane's state-delta path reads/writes `kb_key_blocks` through
 // these primitives so ALL SQL against the table lives in `nexus-local-db`
