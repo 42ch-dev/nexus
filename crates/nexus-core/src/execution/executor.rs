@@ -244,12 +244,12 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
                 input.workspace_root
             )));
         }
-        // `rel_child` addresses a path BELOW `Works/<work_ref>/`. An absolute
+        // `rel_child` addresses a path BELOW `Works/<work_ref>/`: an absolute
         // path replaces the base entirely, and a `..` walks out of the Work
-        // subtree — while the port's boundary probe stops at the first
-        // existing ancestor, so a first write with `Works/<work_ref>` absent
-        // would approve a target inside a SIBLING Work's tree. Refuse both
-        // before the port resolves anything.
+        // subtree. The port re-checks the same shape for every caller; this
+        // copy refuses on the capability surface before the root canonicalize
+        // and the pool work, so a builtin gets an `InputInvalid` naming its own
+        // input field.
         let rel_child = Path::new(&input.rel_child);
         if rel_child.is_absolute()
             || rel_child

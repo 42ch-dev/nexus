@@ -252,6 +252,27 @@ impl FsWorkArtifactPort {
 
 impl WorkArtifactPort for FsWorkArtifactPort {
     async fn commit(&self, write: WorkArtifactWrite<'_>) -> Result<(), NexusApiError> {
+        // ONE gate for every caller (tool surface, scaffolds, manuscript.write,
+        // the executor adapter): `rel_child` must name a path BELOW
+        // `Works/<work_ref>/`. An absolute path replaces that base, and a `..`
+        // walks out of the Work subtree — and the boundary probe below stops at
+        // the first EXISTING ancestor, so with `Works/<work_ref>` absent it
+        // would approve a target inside a sibling Work's tree.
+        if write.rel_child.is_absolute()
+            || write
+                .rel_child
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+        {
+            return Err(NexusApiError::InvalidInput {
+                field: "rel_child".to_string(),
+                reason: format!(
+                    "'{}' must be a relative path below Works/{}/",
+                    write.rel_child.display(),
+                    write.work_ref
+                ),
+            });
+        }
         let Some(creator_id) = read_active_creator_id(&self.nexus_home) else {
             return Err(NexusApiError::Forbidden {
                 resource:
@@ -686,6 +707,46 @@ mod tests {
             );
             assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
         }
+    }
+
+    #[tokio::test]
+    async fn commit_refuses_a_child_that_leaves_the_work_tree() {
+        let fixture = fixture(true).await;
+        let absolute_child = fixture.workspace.path().join("outside.md");
+
+        // The port is the single gate every caller shares, so both shapes are
+        // refused here — before any Work lookup, lock or directory creation.
+        for rel_child in [
+            PathBuf::from("../sibling/Stories/ch1.md"),
+            absolute_child.clone(),
+        ] {
+            let error = fixture
+                .port
+                .commit(write(&fixture, rel_child.as_path(), "body"))
+                .await
+                .expect_err("a child outside Works/<work_ref>/ refuses");
+            match error {
+                NexusApiError::InvalidInput { field, reason } => {
+                    assert_eq!(field, "rel_child");
+                    assert!(reason.contains("Works/demo/"), "{reason}");
+                }
+                other => panic!("expected InvalidInput, got {other:?}"),
+            }
+        }
+
+        assert!(
+            !fixture.workspace.path().join("Works").exists(),
+            "no directory may be created for a refused child"
+        );
+        assert!(
+            !absolute_child.exists(),
+            "an absolute child may not be written"
+        );
+        assert_eq!(
+            holder(&fixture.pool).await,
+            None,
+            "the refusal precedes the lock"
+        );
     }
 
     #[tokio::test]
