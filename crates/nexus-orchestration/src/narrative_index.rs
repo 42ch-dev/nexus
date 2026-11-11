@@ -31,18 +31,19 @@
 //!
 //! ## Concurrency
 //!
-//! Promotion performs an atomic temp-file + rename write so a crash never
-//! leaves a torn `foreshadowing.md`. Concurrent promotion safety relies on the
-//! same single-writer daemon assumption documented on
-//! [`crate::capability::builtins::NovelProjectScaffold`] (pre-1.0 single-user):
-//! only one `novel-writing` schedule terminates at a time per Work. A hard
-//! advisory lock is intentionally not added in this slice to avoid lock-file
-//! leak hazards on panic (see completion report follow-ups).
+//! Promotion commits through the Work artifact port, which takes the per-Work
+//! `WorkLock` and applies the file durably (ADR #485 §6.1 P2 row 5), so a crash
+//! never leaves a torn `foreshadowing.md` and a concurrent writer is refused
+//! rather than interleaved.
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
+
+use crate::capability::builtins::work_commit::{commit_work_bytes, require_executor};
+use crate::capability::WorkspaceExecutor;
 
 // ---------------------------------------------------------------------------
 // Canonical table geometry
@@ -630,21 +631,27 @@ fn foreshadowing_index_path(work_dir: &Path) -> PathBuf {
 /// allocated a new id. This keeps the index free of spurious ids from
 /// non-declaration bullets.
 ///
-/// The file is rewritten atomically (temp file + rename) so a crash never
+/// The file is rewritten atomically through the injected Work artifact port
+/// (Work lock + durable atomic write, ADR #485 §6.1 P2 row 5) so a crash never
 /// leaves a torn index. Returns the list of **newly appended** `F###` ids
 /// (explicit ids that were not previously indexed).
 ///
-/// `work_dir` is the Work directory `Works/<work_ref>/` (the parent of
-/// `Outlines/`).
+/// `workspace_dir` is the workspace root owning `Works/`; `work_ref` names the
+/// Work whose `Outlines/foreshadowing.md` receives the rows.
 ///
 /// # Errors
 ///
-/// Returns an error if the index file exists but cannot be read, the temp file
-/// cannot be written, the atomic rename fails, a data row has an invalid
+/// Returns an error if the index file exists but cannot be read, the executor
+/// is not wired, the port refuses the commit, a data row has an invalid
 /// status cell (see [`IndexParseError`]), or a conflicting-description
 /// duplicate is detected.
-pub fn promote_outline_to_index(work_dir: &Path, outline_section: &str) -> Result<Vec<String>> {
-    let index_path = foreshadowing_index_path(work_dir);
+pub async fn promote_outline_to_index(
+    workspace_dir: &Path,
+    work_ref: &str,
+    outline_section: &str,
+    executor: Option<&Arc<dyn WorkspaceExecutor>>,
+) -> Result<Vec<String>> {
+    let index_path = foreshadowing_index_path(&workspace_dir.join("Works").join(work_ref));
     let existing_content = match std::fs::read_to_string(&index_path) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -688,18 +695,16 @@ pub fn promote_outline_to_index(work_dir: &Path, outline_section: &str) -> Resul
     }
 
     let serialized = serialize_foreshadowing_index(&rows);
-    atomic_write(&index_path, &serialized)?;
+    let executor = require_executor(executor)?;
+    commit_work_bytes(
+        executor,
+        workspace_dir,
+        work_ref,
+        Path::new("Outlines").join("foreshadowing.md").as_path(),
+        &serialized,
+    )
+    .await?;
     Ok(allocated)
-}
-
-/// Write `contents` to `path` atomically: write to `<path>.tmp` then rename.
-fn atomic_write(path: &Path, contents: &str) -> Result<()> {
-    let mut tmp = path.to_path_buf();
-    tmp.set_extension("md.tmp");
-    std::fs::write(&tmp, contents).with_context(|| format!("write temp {}", tmp.display()))?;
-    std::fs::rename(&tmp, path)
-        .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()))?;
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -988,18 +993,29 @@ mod tests {
 
     // ── promote_outline_to_index ───────────────────────────────────────────
 
+    const TEST_WORK_REF: &str = "test-novel";
+
+    /// A temp workspace root plus the Work directory the port writes into.
     fn work_dir() -> (TempDir, PathBuf) {
         let tmp = TempDir::new().unwrap();
-        let work = tmp.path().to_path_buf();
+        let work = tmp.path().join("Works").join(TEST_WORK_REF);
         std::fs::create_dir_all(work.join("Outlines")).unwrap();
         (tmp, work)
     }
 
-    #[test]
-    fn promote_outline_to_index_appends_new_f_ids() {
-        let (_tmp, work) = work_dir();
+    fn executor() -> Arc<dyn WorkspaceExecutor> {
+        crate::capability::builtins::work_commit::test_support::RecordingExecutor::new()
+    }
+
+    #[tokio::test]
+    async fn promote_outline_to_index_appends_new_f_ids() {
+        let (tmp, work) = work_dir();
+        let exec = executor();
         let section = "- F001: the locket\n- F002: the prophecy\n";
-        let allocated = promote_outline_to_index(&work, section).unwrap();
+        let allocated =
+            promote_outline_to_index(tmp.path(), TEST_WORK_REF, section, Some(&exec))
+                .await
+                .unwrap();
         assert_eq!(allocated, vec!["F001".to_string(), "F002".to_string()]);
 
         let written = fs::read_to_string(work.join("Outlines/foreshadowing.md")).unwrap();
@@ -1009,21 +1025,30 @@ mod tests {
         assert_eq!(rows[0].status, ForeshadowingStatus::Planned);
     }
 
-    #[test]
-    fn promote_outline_to_index_creates_file_when_absent() {
-        let (_tmp, work) = work_dir();
-        let allocated = promote_outline_to_index(&work, "F001: the locket").unwrap();
+    #[tokio::test]
+    async fn promote_outline_to_index_creates_file_when_absent() {
+        let (tmp, work) = work_dir();
+        let exec = executor();
+        let allocated = promote_outline_to_index(tmp.path(), TEST_WORK_REF, "F001: the locket", Some(&exec))
+            .await
+            .unwrap();
         assert_eq!(allocated, vec!["F001".to_string()]);
         assert!(work.join("Outlines/foreshadowing.md").is_file());
     }
 
-    #[test]
-    fn promote_outline_to_index_does_not_duplicate_existing_f_id() {
-        let (_tmp, work) = work_dir();
+    #[tokio::test]
+    async fn promote_outline_to_index_does_not_duplicate_existing_f_id() {
+        let (tmp, work) = work_dir();
+        let exec = executor();
         // First promotion.
-        promote_outline_to_index(&work, "- F001: the locket").unwrap();
+        promote_outline_to_index(tmp.path(), TEST_WORK_REF, "- F001: the locket", Some(&exec))
+            .await
+            .unwrap();
         // Re-promote the SAME id + description → no-op, no duplicate.
-        let allocated = promote_outline_to_index(&work, "- F001: the locket").unwrap();
+        let allocated =
+            promote_outline_to_index(tmp.path(), TEST_WORK_REF, "- F001: the locket", Some(&exec))
+                .await
+                .unwrap();
         assert_eq!(allocated, [] as [std::string::String; 0]);
 
         let rows = parse_foreshadowing_index(
@@ -1033,29 +1058,45 @@ mod tests {
         assert_eq!(rows.len(), 1);
     }
 
-    #[test]
-    fn promote_outline_to_index_errors_on_conflicting_description() {
-        let (_tmp, work) = work_dir();
-        promote_outline_to_index(&work, "- F001: the locket").unwrap();
-        let err = promote_outline_to_index(&work, "- F001: a different thing").unwrap_err();
+    #[tokio::test]
+    async fn promote_outline_to_index_errors_on_conflicting_description() {
+        let (tmp, _work) = work_dir();
+        let exec = executor();
+        promote_outline_to_index(tmp.path(), TEST_WORK_REF, "- F001: the locket", Some(&exec))
+            .await
+            .unwrap();
+        let err = promote_outline_to_index(
+            tmp.path(),
+            TEST_WORK_REF,
+            "- F001: a different thing",
+            Some(&exec),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.to_string().contains("different description"),
             "expected conflict error, got: {err}"
         );
     }
 
-    #[test]
-    fn promote_outline_to_index_does_not_allocate_for_prose_bullets() {
+    #[tokio::test]
+    async fn promote_outline_to_index_does_not_allocate_for_prose_bullets() {
         // W-2: prose bullets without an explicit `F###` token must not allocate
         // new ids. Only the F###-tokened bullet is promoted.
-        let (_tmp, work) = work_dir();
-        promote_outline_to_index(&work, "F001: the locket").unwrap();
+        let (tmp, work) = work_dir();
+        let exec = executor();
+        promote_outline_to_index(tmp.path(), TEST_WORK_REF, "F001: the locket", Some(&exec))
+            .await
+            .unwrap();
         let allocated = promote_outline_to_index(
-            &work,
+            tmp.path(),
+            TEST_WORK_REF,
             "- F002: the dagger\n\
              - Note: chapter is darker than planned\n\
              - TODO: resolve the locket payoff next chapter\n",
+            Some(&exec),
         )
+        .await
         .unwrap();
         assert_eq!(allocated, vec!["F002".to_string()]);
 
@@ -1070,23 +1111,47 @@ mod tests {
         assert!(!rows.iter().any(|r| r.id == "F003"));
     }
 
-    #[test]
-    fn promote_outline_to_index_is_atomic_no_tmp_left_behind() {
-        let (_tmp, work) = work_dir();
-        promote_outline_to_index(&work, "F001: the locket").unwrap();
-        // The temp file must have been renamed away.
-        assert!(!work.join("Outlines/foreshadowing.md.tmp").exists());
+    #[tokio::test]
+    async fn promote_outline_to_index_commits_the_index_through_the_port() {
+        let (tmp, _work) = work_dir();
+        let recording =
+            crate::capability::builtins::work_commit::test_support::RecordingExecutor::new();
+        let exec: Arc<dyn WorkspaceExecutor> = recording.clone();
+        promote_outline_to_index(tmp.path(), TEST_WORK_REF, "F001: the locket", Some(&exec))
+            .await
+            .unwrap();
+
+        let commits = recording.commits();
+        assert_eq!(commits.len(), 1, "one artifact commit per promotion");
+        let commit = &commits[0];
+        assert_eq!(commit.work_ref, TEST_WORK_REF);
+        assert_eq!(commit.rel_child, "Outlines/foreshadowing.md");
+        assert_eq!(
+            commit.workspace_root,
+            tmp.path().to_str().unwrap(),
+            "the workspace root owning Works/"
+        );
+        assert!(
+            commit.content.contains("| F001 | the locket |"),
+            "the full index bytes commit: {}",
+            commit.content
+        );
     }
 
-    #[test]
-    fn promote_outline_to_index_noop_section_does_not_touch_mtime() {
-        let (_tmp, work) = work_dir();
-        promote_outline_to_index(&work, "F001: the locket").unwrap();
+    #[tokio::test]
+    async fn promote_outline_to_index_noop_section_does_not_touch_mtime() {
+        let (tmp, work) = work_dir();
+        let exec = executor();
+        promote_outline_to_index(tmp.path(), TEST_WORK_REF, "F001: the locket", Some(&exec))
+            .await
+            .unwrap();
         let path = work.join("Outlines/foreshadowing.md");
         let mtime_before = fs::metadata(&path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
         // Empty section → nothing to promote → no write.
-        let allocated = promote_outline_to_index(&work, "").unwrap();
+        let allocated = promote_outline_to_index(tmp.path(), TEST_WORK_REF, "", Some(&exec))
+            .await
+            .unwrap();
         assert_eq!(allocated, [] as [std::string::String; 0]);
         let mtime_after = fs::metadata(&path).unwrap().modified().unwrap();
         assert_eq!(mtime_before, mtime_after, "no-op must not rewrite the file");
@@ -1108,10 +1173,18 @@ mod tests {
         assert!(read_foreshadowing_summary(&work).is_none());
     }
 
-    #[test]
-    fn read_foreshadowing_summary_returns_compact_markdown_for_populated() {
-        let (_tmp, work) = work_dir();
-        promote_outline_to_index(&work, "- F001: the locket\n- F002: the prophecy").unwrap();
+    #[tokio::test]
+    async fn read_foreshadowing_summary_returns_compact_markdown_for_populated() {
+        let (tmp, work) = work_dir();
+        let exec = executor();
+        promote_outline_to_index(
+            tmp.path(),
+            TEST_WORK_REF,
+            "- F001: the locket\n- F002: the prophecy",
+            Some(&exec),
+        )
+        .await
+        .unwrap();
         let summary = read_foreshadowing_summary(&work).expect("non-empty");
         assert!(summary.contains("- F001 | the locket | planned"));
         assert!(summary.contains("- F002 | the prophecy | planned"));

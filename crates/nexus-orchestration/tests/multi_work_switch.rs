@@ -9,9 +9,54 @@
 
 use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::auto_chain::{mark_work_completed, ChainAction};
+use nexus_orchestration::capability::{CapabilityError, WorkspaceExecutor};
 use nexus_orchestration::completion_lock;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
+
+/// Test executor: commits Work bytes at the target the production port builds
+/// (`<workspace_root>/Works/<work_ref>/<rel_child>`), without the DB lock/row
+/// checks the core port performs.
+struct DirectWriteExecutor;
+
+#[async_trait::async_trait]
+impl WorkspaceExecutor for DirectWriteExecutor {
+    async fn open(
+        &self,
+        _input: nexus_contracts::local::orchestration::WorkspaceOpenInput,
+    ) -> Result<nexus_contracts::local::orchestration::WorkspaceOpenOutput, CapabilityError> {
+        Err(CapabilityError::WorkerUnavailable)
+    }
+
+    async fn commit(
+        &self,
+        _input: nexus_contracts::local::orchestration::WorkspaceCommitInput,
+    ) -> Result<nexus_contracts::local::orchestration::WorkspaceCommitOutput, CapabilityError> {
+        Err(CapabilityError::WorkerUnavailable)
+    }
+
+    async fn commit_work_artifact(
+        &self,
+        input: nexus_contracts::local::orchestration::WorkArtifactCommitInput,
+    ) -> Result<nexus_contracts::local::orchestration::WorkArtifactCommitOutput, CapabilityError>
+    {
+        let target = std::path::Path::new(&input.workspace_root)
+            .join("Works")
+            .join(&input.work_ref)
+            .join(&input.rel_child);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| CapabilityError::Internal(format!("mkdir: {e}")))?;
+        }
+        std::fs::write(&target, &input.content)
+            .map_err(|e| CapabilityError::Internal(format!("write: {e}")))?;
+        Ok(
+            nexus_contracts::local::orchestration::WorkArtifactCommitOutput {
+                committed: true,
+            },
+        )
+    }
+}
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -102,11 +147,14 @@ async fn test_completion_two_step_ceremony_writes_lock_and_updates_pool() {
     std::fs::create_dir_all(&work_dir).unwrap();
 
     let locked_at = updated.completion_locked_at.as_deref().unwrap();
+    let executor: std::sync::Arc<dyn WorkspaceExecutor> = std::sync::Arc::new(DirectWriteExecutor);
     nexus_orchestration::auto_chain::write_completion_lock_for_work(
         workspace_dir,
         &updated,
         locked_at,
+        Some(&executor),
     )
+    .await
     .unwrap();
 
     let lock = completion_lock::read_completion_lock(workspace_dir, "test-wrk_novel_a")

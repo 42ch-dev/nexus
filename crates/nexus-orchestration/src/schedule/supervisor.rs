@@ -142,10 +142,8 @@ pub struct ScheduleSupervisor {
     /// commit Work bytes through the same `commit_work_artifact` handle the
     /// capability registry receives, never through a second writer.
     ///
-    /// `None` (tests, standalone supervisor) keeps every chain on its own
-    /// pre-seam behavior. Read by the Work-artifact chains landing in the
-    /// sibling task of this plan.
-    #[allow(dead_code)]
+    /// `None` (tests, standalone supervisor) leaves those chains unable to
+    /// write, which they log and skip — never a local fallback writer.
     workspace_executor: Arc<Option<Arc<dyn crate::capability::WorkspaceExecutor>>>,
 }
 
@@ -683,6 +681,10 @@ impl ScheduleSupervisor {
         let ws_path = ws_ref.as_deref();
         let reg: Option<&crate::capability::CapabilityRegistry> =
             self.registry.as_ref().as_ref().map(|r| &**r);
+        // The Work artifact chains below commit through the SAME executor the
+        // capability registry received (ADR #485 §6.1 P2 rows 5–6).
+        let executor: Option<&Arc<dyn crate::capability::WorkspaceExecutor>> =
+            (*self.workspace_executor).as_ref();
 
         // V1.47 P0 (novel-quality-loop §5.5.6 / §8): persist ≥1 finding
         // when a `novel-chapter-review` schedule completes. This is the
@@ -708,7 +710,7 @@ impl ScheduleSupervisor {
         // `novel-writing` produce run completes.
         if preset_id == nexus_preset::preset_ids::NOVEL_WRITING_PRESET_ID {
             if let Err(e) =
-                auto_chain::promote_foreshadowing_for_schedule(&self.pool, schedule_id, ws_path)
+                auto_chain::promote_foreshadowing_for_schedule(&self.pool, schedule_id, ws_path, executor)
                     .await
             {
                 tracing::warn!(
@@ -724,9 +726,14 @@ impl ScheduleSupervisor {
             // Works/<work_ref>/Logs/kb/missing/. Missing candidates are NOT
             // inserted into kb_extract_jobs. Best-effort: errors are logged
             // and do NOT fail the terminal transition.
-            if let Err(e) =
-                quality_loop::detect_missing_kb_on_finalize(&self.pool, schedule_id, ws_path, reg)
-                    .await
+            if let Err(e) = quality_loop::detect_missing_kb_on_finalize(
+                &self.pool,
+                schedule_id,
+                ws_path,
+                reg,
+                executor,
+            )
+            .await
             {
                 tracing::warn!(
                     schedule_id,
@@ -1267,20 +1274,26 @@ impl ScheduleSupervisor {
 
     /// Write completion-lock file for a completed Work (DF-60 §3, best-effort).
     ///
-    /// DB is SSOT; the file is a derived on-disk artifact for cross-tool observation.
-    /// Failures are logged as warnings but do not propagate.
+    /// DB is SSOT; the file is a derived on-disk artifact for cross-tool
+    /// observation, committed through the injected Work artifact port
+    /// (ADR #485 §6.1 P2 row 4). Failures are logged as warnings but do not
+    /// propagate.
     async fn write_completion_lock_if_available(&self, creator_id: &str, work_id: &str) {
         use crate::auto_chain;
 
         let Some(ref ws_dir) = *self.workspace_dir else {
             return;
         };
+        let executor: Option<&Arc<dyn crate::capability::WorkspaceExecutor>> =
+            (*self.workspace_executor).as_ref();
 
         if let Ok(Some(work)) =
             nexus_local_db::works::get_work(&self.pool, creator_id, work_id).await
         {
             if let Some(ref locked_at) = work.completion_locked_at {
-                if let Err(e) = auto_chain::write_completion_lock_for_work(ws_dir, &work, locked_at)
+                if let Err(e) =
+                    auto_chain::write_completion_lock_for_work(ws_dir, &work, locked_at, executor)
+                        .await
                 {
                     tracing::warn!(
                         work_id = %work_id,

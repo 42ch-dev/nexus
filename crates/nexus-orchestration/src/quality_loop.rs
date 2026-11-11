@@ -727,6 +727,7 @@ pub async fn detect_missing_kb_on_finalize(
     schedule_id: &str,
     workspace_dir: Option<&std::path::Path>,
     registry: Option<&CapabilityRegistry>,
+    executor: Option<&std::sync::Arc<dyn crate::capability::WorkspaceExecutor>>,
 ) -> Result<usize, AutoChainError> {
     let Some(ctx) = load_finalize_context(pool, schedule_id, workspace_dir).await? else {
         return Ok(0);
@@ -785,11 +786,13 @@ pub async fn detect_missing_kb_on_finalize(
         return Ok(0);
     }
 
-    let written = write_missing_kb_log(workspace_dir, &ctx, &missing).map_err(|e| {
-        AutoChainError::InvalidState(format!(
-            "failed to write missing-KB log for {schedule_id}: {e}"
-        ))
-    })?;
+    let written = write_missing_kb_log(workspace_dir, &ctx, &missing, executor)
+        .await
+        .map_err(|e| {
+            AutoChainError::InvalidState(format!(
+                "failed to write missing-KB log for {schedule_id}: {e}"
+            ))
+        })?;
 
     tracing::info!(
         schedule_id,
@@ -1694,13 +1697,18 @@ async fn existing_canonical_names(
 /// Markdown body. It overwrites any existing file for the same day/chapter so
 /// repeated finalize transitions remain idempotent.
 ///
+/// The bytes commit through the injected workspace executor's Work artifact
+/// handle (ADR #485 §6.1 P2 row 6); the full-file replace keeps the YAML
+/// frontmatter at the head of the file.
+///
 /// Returns the number of candidates written. Returns `Ok(0)` when there is no
 /// `workspace_dir` or no resolvable `work_ref` (hermetic test path), and no log
 /// is written.
-fn write_missing_kb_log(
+async fn write_missing_kb_log(
     workspace_dir: Option<&std::path::Path>,
     ctx: &ChapterContext,
     missing: &[KbCandidate],
+    executor: Option<&std::sync::Arc<dyn crate::capability::WorkspaceExecutor>>,
 ) -> Result<usize, String> {
     if missing.is_empty() {
         return Ok(0);
@@ -1714,15 +1722,12 @@ fn write_missing_kb_log(
     };
 
     let date = chrono::Utc::now().format("%Y-%m-%d");
-    let log_dir = ws_dir
-        .join("Works")
-        .join(work_ref)
-        .join("Logs")
+    // The port creates the parent directories; the log name is date+chapter
+    // unique, so a repeat finalize replaces the same file.
+    let rel_child = std::path::Path::new("Logs")
         .join("kb")
-        .join("missing");
-    std::fs::create_dir_all(&log_dir).map_err(|e| format!("create_dir_all: {e}"))?;
-
-    let log_path = log_dir.join(format!("{date}-ch{}.md", ctx.chapter));
+        .join("missing")
+        .join(format!("{date}-ch{}.md", ctx.chapter));
 
     let candidates: Vec<MissingLogCandidate> = missing
         .iter()
@@ -1771,7 +1776,17 @@ fn write_missing_kb_log(
         }
     }
 
-    std::fs::write(&log_path, body).map_err(|e| format!("write {}: {e}", log_path.display()))?;
+    let executor = crate::capability::builtins::work_commit::require_executor(executor)
+        .map_err(|e| format!("work artifact commit unavailable: {e}"))?;
+    crate::capability::builtins::work_commit::commit_work_bytes(
+        executor,
+        ws_dir,
+        work_ref,
+        &rel_child,
+        &body,
+    )
+    .await
+    .map_err(|e| format!("commit {}: {e}", rel_child.display()))?;
     Ok(missing.len())
 }
 
