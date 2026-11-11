@@ -828,6 +828,21 @@ fn escaped_work_refusal(path_str: &str, work_ref: &str) -> NexusApiError {
     }
 }
 
+/// Classify the raw path and refuse the three never-routed Work spellings.
+///
+/// Both halves call this before the path guard, so a spelling is judged the
+/// same way whether the target exists, is missing, or resolves through a
+/// symlink: the guard's canonicalization never gets to answer first.
+fn classify_and_refuse_work_path(path_str: &str) -> Result<WorkPath<'_>, NexusApiError> {
+    let work_path = classify_work_path(path_str);
+    match &work_path {
+        WorkPath::WorkRoot { work_ref } => Err(work_root_refusal(path_str, work_ref)),
+        WorkPath::EscapedWork { work_ref } => Err(escaped_work_refusal(path_str, work_ref)),
+        WorkPath::CaseVariantWorks => Err(case_variant_works_refusal(path_str)),
+        WorkPath::Artifact { .. } | WorkPath::NonWork => Ok(work_path),
+    }
+}
+
 /// Execute `fs/read_text_file` tool.
 ///
 /// V1.86 T5 (R-V156P0-M004): all blocking `std::fs` operations run on the
@@ -855,16 +870,10 @@ async fn execute_read_file(
         })?;
 
     // ADR #485 §4.4: the read half refuses every classification the write half
-    // refuses, and judges the raw spelling first — the same order the write half
-    // uses — so the same path gets the same answer whether or not it exists.
-    match classify_work_path(&path_str) {
-        WorkPath::WorkRoot { work_ref } => return Err(work_root_refusal(&path_str, work_ref)),
-        WorkPath::EscapedWork { work_ref } => {
-            return Err(escaped_work_refusal(&path_str, work_ref));
-        }
-        WorkPath::CaseVariantWorks => return Err(case_variant_works_refusal(&path_str)),
-        WorkPath::Artifact { .. } | WorkPath::NonWork => {}
-    }
+    // refuses, and judges the raw spelling before the guard — the same order the
+    // write half uses — so the same path gets the same answer whether or not it
+    // exists and wherever a symlink sends it.
+    classify_and_refuse_work_path(&path_str)?;
 
     let workspace_path = Path::new(&workspace_path_str).to_path_buf();
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), true)
@@ -942,6 +951,10 @@ async fn execute_write_file(
             ),
         })?;
 
+    // ADR #485 §4.4: judge the raw spelling before the guard, exactly as the
+    // read half does, so the same path gets the same refusal on both sides.
+    let work_path = classify_and_refuse_work_path(&path_str)?;
+
     let workspace_path = Path::new(&workspace_path_str).to_path_buf();
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), false)
         .await
@@ -955,55 +968,44 @@ async fn execute_write_file(
     // ADR #485 §4.4: `Works/<work_ref>/…` is a Work artifact byte write — one
     // port, one lock, one durability path. Every other workspace path keeps
     // the guarded write below.
-    match classify_work_path(&path_str) {
-        WorkPath::Artifact {
-            work_ref,
-            rel_child,
-        } => {
-            FsWorkArtifactPort::new(context.pool.clone(), context.nexus_home.clone())
-                .commit(WorkArtifactWrite {
-                    workspace_root: Path::new(&workspace_path_str),
-                    work_ref,
-                    rel_child,
-                    content: &content,
-                })
-                .await?;
-        }
-        WorkPath::WorkRoot { work_ref } => {
-            return Err(work_root_refusal(&path_str, work_ref));
-        }
-        WorkPath::EscapedWork { work_ref } => {
-            return Err(escaped_work_refusal(&path_str, work_ref));
-        }
-        WorkPath::CaseVariantWorks => {
-            return Err(case_variant_works_refusal(&path_str));
-        }
-        WorkPath::NonWork => {
-            let write_result = tokio::task::spawn_blocking(move || {
-                if let Some(parent) = resolved.parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
-                        category: format!(
-                            "DIR_CREATE_FAILED: {}",
-                            format_args!("failed to create directory {}: {}", parent.display(), e)
-                        ),
-                    })?;
-                }
-                std::fs::write(&resolved, content).map_err(|e| NexusApiError::Internal {
-                    category: format!(
-                        "FILE_WRITE_FAILED: {}",
-                        format_args!("failed to write file {}: {e}", resolved.display())
-                    ),
-                })
+    if let WorkPath::Artifact {
+        work_ref,
+        rel_child,
+    } = work_path
+    {
+        FsWorkArtifactPort::new(context.pool.clone(), context.nexus_home.clone())
+            .commit(WorkArtifactWrite {
+                workspace_root: Path::new(&workspace_path_str),
+                work_ref,
+                rel_child,
+                content: &content,
             })
-            .await
-            .map_err(|e| NexusApiError::Internal {
+            .await?;
+    } else {
+        let write_result = tokio::task::spawn_blocking(move || {
+            if let Some(parent) = resolved.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
+                    category: format!(
+                        "DIR_CREATE_FAILED: {}",
+                        format_args!("failed to create directory {}: {}", parent.display(), e)
+                    ),
+                })?;
+            }
+            std::fs::write(&resolved, content).map_err(|e| NexusApiError::Internal {
                 category: format!(
-                    "FILE_WRITE_PANIC: {}",
-                    format_args!("file write task panicked: {e}")
+                    "FILE_WRITE_FAILED: {}",
+                    format_args!("failed to write file {}: {e}", resolved.display())
                 ),
-            })?;
-            write_result?;
-        }
+            })
+        })
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            category: format!(
+                "FILE_WRITE_PANIC: {}",
+                format_args!("file write task panicked: {e}")
+            ),
+        })?;
+        write_result?;
     }
 
     Ok(serde_json::json!({
@@ -4525,6 +4527,18 @@ mod tests {
             .await
             .expect("the exact spelling reads");
         assert_eq!(read, serde_json::json!({ "content": "chapter body" }));
+
+        // A valid exact spelling that is merely absent is still not-found: only
+        // the invalid spelling is refused before the lookup.
+        let exact_missing = format!("Works/{WORK_REF}/Stories/absent.md");
+        let exact_missing_error =
+            execute_read_file(&read_request(&exact_missing), &fixture.context)
+                .await
+                .expect_err("a missing exact-spelling artifact is not found");
+        assert!(
+            matches!(exact_missing_error, NexusApiError::NotFound { .. }),
+            "{exact_missing}: {exact_missing_error:?}"
+        );
     }
 
     #[tokio::test]
@@ -4555,6 +4569,42 @@ mod tests {
             .path()
             .join(format!("works/{WORK_REF}/x.md"))
             .exists());
+    }
+
+    #[tokio::test]
+    async fn fs_case_variant_spelling_refusal_outranks_a_symlinked_target() {
+        let fixture = fixture(true).await;
+        // `works` symlinked to an existing directory outside the workspace: the
+        // guard would call this an escape, so this pins the spelling-first order
+        // and the identical answer on both halves.
+        let outside = tempfile::tempdir().expect("outside root");
+        std::fs::create_dir_all(outside.path().join(WORK_REF)).expect("outside work dir");
+        std::fs::write(
+            outside.path().join(format!("{WORK_REF}/x.md")),
+            "outside body",
+        )
+        .expect("outside artifact");
+        std::os::unix::fs::symlink(outside.path(), fixture.workspace.path().join("works"))
+            .expect("case-variant symlink");
+
+        let case_variant = format!("works/{WORK_REF}/x.md");
+        let write_error =
+            execute_write_file(&write_request(&case_variant, "rewritten"), &fixture.context)
+                .await
+                .expect_err("a case-variant write refuses before the guard");
+        let read_error = execute_read_file(&read_request(&case_variant), &fixture.context)
+            .await
+            .expect_err("a case-variant read refuses before the guard");
+
+        assert_case_variant_works_refusal(write_error, &case_variant);
+        assert_case_variant_works_refusal(read_error, &case_variant);
+        assert_eq!(holder(&fixture.pool).await, None, "no lock was taken");
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join(format!("{WORK_REF}/x.md")))
+                .expect("outside artifact read"),
+            "outside body",
+            "the refused write stayed inside the refusal"
+        );
     }
 
     #[tokio::test]
