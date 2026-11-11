@@ -6,11 +6,13 @@
 //!
 //! Design: novel-writing/workflow-profile.md §4.1.2 (truth model), §5.1 (finalize gate).
 
-use crate::capability::{Capability, CapabilityError};
+use super::work_commit::{commit_work_bytes, require_executor};
+use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::Path;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 // ---------------------------------------------------------------------------
@@ -82,19 +84,33 @@ struct TransitionOutput {
 /// (testing / preview). With a pool, also updates the `work_chapters` DB row.
 pub struct NovelChapterTransition {
     pool: Option<sqlx::SqlitePool>,
+    executor: Option<Arc<dyn WorkspaceExecutor>>,
 }
 
 impl NovelChapterTransition {
     /// Create a standalone (pool-less) instance.
     #[must_use]
     pub const fn new() -> Self {
-        Self { pool: None }
+        Self {
+            pool: None,
+            executor: None,
+        }
     }
 
     /// Create a pool-backed instance.
     #[must_use]
     pub const fn with_pool(pool: sqlx::SqlitePool) -> Self {
-        Self { pool: Some(pool) }
+        Self {
+            pool: Some(pool),
+            executor: None,
+        }
+    }
+
+    /// Attach the workspace executor that carries the Work artifact port.
+    #[must_use]
+    pub fn with_workspace_executor(mut self, executor: Option<Arc<dyn WorkspaceExecutor>>) -> Self {
+        self.executor = executor;
+        self
     }
 }
 
@@ -142,12 +158,34 @@ impl Capability for NovelChapterTransition {
         }
 
         // If workspace_root + work_ref + body_path available, update frontmatter
-        if let (Some(ws_root), Some(_work_ref), Some(body_path)) =
+        if let (Some(ws_root), Some(work_ref), Some(body_path)) =
             (&inp.workspace_root, &inp.work_ref, &inp.body_path)
         {
-            let full_path = PathBuf::from(ws_root).join(body_path);
+            // The chapter body is a Work artifact: its bytes commit through the
+            // injected port, addressed relative to `Works/<work_ref>/`.
+            let work_root = Path::new("Works").join(work_ref);
+            let rel_child = Path::new(body_path).strip_prefix(&work_root).map_err(|_| {
+                CapabilityError::InputInvalid(format!(
+                    "body_path '{body_path}' must address a file under Works/{work_ref}/"
+                ))
+            })?;
+            let full_path = Path::new(ws_root).join(body_path);
             if full_path.exists() {
-                Self::update_frontmatter_status(&full_path, &inp.to_status)?;
+                let content = std::fs::read_to_string(&full_path).map_err(|e| {
+                    CapabilityError::Internal(format!(
+                        "read chapter file {}: {e}",
+                        full_path.display()
+                    ))
+                })?;
+                let updated = Self::replace_frontmatter_field(&content, "status", &inp.to_status);
+                let executor = require_executor(self.executor.as_ref())?;
+                commit_work_bytes(executor, Path::new(ws_root), work_ref, rel_child, &updated)
+                    .await?;
+                info!(
+                    path = %full_path.display(),
+                    status = %inp.to_status,
+                    "frontmatter_status_updated"
+                );
             } else {
                 info!(
                     path = %full_path.display(),
@@ -256,29 +294,6 @@ impl NovelChapterTransition {
             work_id = %work_id,
             current_chapter = chapter,
             "current_chapter_advanced"
-        );
-        Ok(())
-    }
-
-    /// Update the `status` field in a chapter `.md` file's YAML frontmatter.
-    fn update_frontmatter_status(
-        path: &std::path::Path,
-        new_status: &str,
-    ) -> Result<(), CapabilityError> {
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            CapabilityError::Internal(format!("read chapter file {}: {e}", path.display()))
-        })?;
-
-        let updated = Self::replace_frontmatter_field(&content, "status", new_status);
-
-        std::fs::write(path, updated).map_err(|e| {
-            CapabilityError::Internal(format!("write chapter file {}: {e}", path.display()))
-        })?;
-
-        info!(
-            path = %path.display(),
-            status = new_status,
-            "frontmatter_status_updated"
         );
         Ok(())
     }
@@ -404,15 +419,18 @@ Body text here.";
 
     #[tokio::test]
     async fn test_chapter_transition_with_frontmatter_file() {
+        use super::super::work_commit::test_support::RecordingExecutor;
         let dir = tempfile::tempdir().unwrap();
-        let chapter_path = dir.path().join("ch01-intro.md");
+        let chapter_path = dir.path().join("Works/my-novel/ch01-intro.md");
+        std::fs::create_dir_all(chapter_path.parent().unwrap()).unwrap();
         std::fs::write(
             &chapter_path,
             "---\ntitle: Intro\nchapter: 1\nstatus: draft\nword_count: 2500\n---\nBody text.",
         )
         .unwrap();
 
-        let cap = NovelChapterTransition::new();
+        let executor = RecordingExecutor::new();
+        let cap = NovelChapterTransition::new().with_workspace_executor(Some(executor.clone()));
         let out = cap
             .run(serde_json::json!({
                 "work_id": "wrk_test",
@@ -421,7 +439,7 @@ Body text here.";
                 "to_status": "finalized",
                 "workspace_root": dir.path().to_str().unwrap(),
                 "work_ref": "my-novel",
-                "body_path": "ch01-intro.md",
+                "body_path": "Works/my-novel/ch01-intro.md",
                 "actual_word_count": 2500
             }))
             .await
@@ -429,10 +447,46 @@ Body text here.";
 
         assert_eq!(out["to_status"], "finalized");
 
+        // The bytes went through the Work artifact port.
+        let commits = executor.commits();
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].rel_child, "ch01-intro.md");
+        assert!(commits[0].content.contains("status: finalized"));
+
         // Verify frontmatter was updated
         let updated = std::fs::read_to_string(&chapter_path).unwrap();
         assert!(updated.contains("status: finalized"));
         assert!(!updated.contains("status: draft"));
+    }
+
+    #[tokio::test]
+    async fn test_chapter_transition_refuses_non_work_body_path() {
+        use super::super::work_commit::test_support::RecordingExecutor;
+        let dir = tempfile::tempdir().unwrap();
+        let chapter_path = dir.path().join("ch01-intro.md");
+        std::fs::write(&chapter_path, "---\nstatus: draft\n---\nBody.").unwrap();
+
+        let executor = RecordingExecutor::new();
+        let cap = NovelChapterTransition::new().with_workspace_executor(Some(executor.clone()));
+        let err = cap
+            .run(serde_json::json!({
+                "work_id": "wrk_test",
+                "chapter": 1,
+                "from_status": "draft",
+                "to_status": "finalized",
+                "workspace_root": dir.path().to_str().unwrap(),
+                "work_ref": "my-novel",
+                "body_path": "ch01-intro.md",
+            }))
+            .await
+            .expect_err("a body outside Works/<work_ref>/ must not be written");
+
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("must address a file under Works/my-novel/"),
+            "unexpected refusal: {msg}"
+        );
+        assert!(executor.commits().is_empty(), "no byte may be committed");
     }
 
     // =======================================================================

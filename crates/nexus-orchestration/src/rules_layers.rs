@@ -16,8 +16,11 @@
 //! Spec: [novel-writing/quality-loop.md §9.3](../../../docs/specs/novel-writing/quality-loop.md) (rules runtime),
 //! [novel-writing/workflow-profile.md §5.5.4](../../../docs/specs/novel-writing/workflow-profile.md).
 
-use std::io::Write;
 use std::path::Path;
+
+use nexus_contracts::local::orchestration::WorkArtifactCommitInput;
+
+use crate::capability::{CapabilityError, WorkspaceExecutor};
 
 /// Embedded default scaffold for `Works/<work_ref>/AGENTS.md`.
 ///
@@ -221,16 +224,19 @@ fn hunk_range(start: usize, count: usize) -> String {
 /// the file is left unchanged and [`AppendOutcome::AlreadyPresent`] is
 /// returned.
 ///
-/// If the file does not exist, it is created from
+/// If the file does not exist, it is seeded from
 /// [`render_default_agents_md`] with `work_ref` before appending.
+///
+/// The read, marker and section logic stay here; the byte write is one
+/// [`WorkspaceExecutor::commit_work_artifact`] commit, so it lands under the
+/// Work lock and the shared durability path instead of a local temp+rename.
 ///
 /// # Arguments
 ///
-/// * `agents_md_path` — absolute path to `Works/<work_ref>/AGENTS.md`.
-/// * `work_ref` — Work ref used to seed the scaffold when the file is
-///   missing. May be empty when the file is known to exist; passing the
-///   correct value is strongly recommended so a missing file is seeded
-///   with the right header.
+/// * `executor` — the workspace executor carrying the Work artifact port.
+/// * `workspace_root` — the workspace owning the `Works/` tree (absolute, or
+///   resolved by the executor against its own canonical root when relative).
+/// * `work_ref` — the Work directory name; also seeds a missing file.
 /// * `finding_id` — stable finding identifier (ULID). Used as the
 ///   idempotency key.
 /// * `rule_text` — the accepted `rule_suggestion` body. Must be non-empty
@@ -239,29 +245,36 @@ fn hunk_range(start: usize, count: usize) -> String {
 ///
 /// # Errors
 ///
-/// Returns `std::io::Error` on filesystem read/write failure.
+/// Returns [`CapabilityError::Internal`] when the current file cannot be read
+/// and the executor's refusal (e.g. [`CapabilityError::Forbidden`] for a Work
+/// with no `works` row) when the commit is refused.
 ///
 /// # Idempotency
 ///
 /// Repeated calls with the same `finding_id` do not duplicate the entry.
 /// The marker comment `<!-- finding_id: <id> -->` is the dedup key.
-pub fn append_rule_suggestion(
-    agents_md_path: &Path,
+pub async fn append_rule_suggestion(
+    executor: &dyn WorkspaceExecutor,
+    workspace_root: &Path,
     work_ref: &str,
     finding_id: &str,
     rule_text: &str,
     timestamp_rfc3339: &str,
-) -> std::io::Result<AppendOutcome> {
-    // Ensure the file exists; seed from scaffold if missing.
-    if !agents_md_path.exists() {
-        if let Some(parent) = agents_md_path.parent() {
-            std::fs::create_dir_all(parent)?;
+) -> Result<AppendOutcome, CapabilityError> {
+    let agents_md_path = agents_md_path(workspace_root, work_ref);
+    // A missing file is seeded from the scaffold; any other read fault is a
+    // real error, not an absent file.
+    let existing = match std::fs::read_to_string(&agents_md_path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => render_default_agents_md(work_ref),
+        Err(e) => {
+            return Err(CapabilityError::Internal(format!(
+                "read {}: {e}",
+                agents_md_path.display()
+            )))
         }
-        let seeded = render_default_agents_md(work_ref);
-        std::fs::write(agents_md_path, seeded)?;
-    }
+    };
 
-    let existing = std::fs::read_to_string(agents_md_path)?;
     let marker = format!("<!-- finding_id: {finding_id} -->");
     if existing.contains(&marker) {
         return Ok(AppendOutcome::AlreadyPresent);
@@ -270,41 +283,53 @@ pub fn append_rule_suggestion(
     let entry = format_accepted_entry(finding_id, rule_text, timestamp_rfc3339);
     let updated = ensure_accepted_section(&existing);
     let updated = format!("{updated}\n{entry}\n");
-
-    // Atomic write via temp + rename (mirrors rules_history.rs pattern).
-    let tmp_path = agents_md_path.with_extension("md.tmp");
-    {
-        let mut f = std::fs::File::create(&tmp_path)?;
-        f.write_all(updated.as_bytes())?;
-        f.sync_all()?;
-    }
-    std::fs::rename(&tmp_path, agents_md_path)?;
+    commit_agents_md(executor, workspace_root, work_ref, &updated).await?;
     Ok(AppendOutcome::Appended)
 }
 
 /// Reset `Works/<work_ref>/AGENTS.md` to the default scaffold.
 ///
-/// Overwrites the file with [`render_default_agents_md`]. The Work's
-/// chapter artifacts and other files are NOT touched (spec §4). If the
-/// file is missing, it is created.
+/// Overwrites the file with [`render_default_agents_md`] through the Work
+/// artifact port. The Work's chapter artifacts and other files are NOT
+/// touched (spec §4). If the file is missing, the port creates it.
 ///
 /// # Errors
 ///
-/// Returns `std::io::Error` on filesystem write failure.
-pub fn reset_agents_md(agents_md_path: &Path, work_ref: &str) -> std::io::Result<()> {
-    if let Some(parent) = agents_md_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+/// Returns the executor's refusal (e.g. [`CapabilityError::Forbidden`] for a
+/// Work with no `works` row) when the commit is refused.
+pub async fn reset_agents_md(
+    executor: &dyn WorkspaceExecutor,
+    workspace_root: &Path,
+    work_ref: &str,
+) -> Result<(), CapabilityError> {
     let scaffold = render_default_agents_md(work_ref);
-    // Atomic write via temp + rename.
-    let tmp_path = agents_md_path.with_extension("md.tmp");
-    {
-        let mut f = std::fs::File::create(&tmp_path)?;
-        f.write_all(scaffold.as_bytes())?;
-        f.sync_all()?;
-    }
-    std::fs::rename(&tmp_path, agents_md_path)?;
-    Ok(())
+    commit_agents_md(executor, workspace_root, work_ref, &scaffold).await
+}
+
+/// The Work-relative artifact name this module owns.
+const AGENTS_MD: &str = "AGENTS.md";
+
+/// The absolute `Works/<work_ref>/AGENTS.md` the read half addresses.
+fn agents_md_path(workspace_root: &Path, work_ref: &str) -> std::path::PathBuf {
+    workspace_root.join("Works").join(work_ref).join(AGENTS_MD)
+}
+
+/// The write half: one Work artifact commit under the Work lock.
+async fn commit_agents_md(
+    executor: &dyn WorkspaceExecutor,
+    workspace_root: &Path,
+    work_ref: &str,
+    content: &str,
+) -> Result<(), CapabilityError> {
+    executor
+        .commit_work_artifact(WorkArtifactCommitInput {
+            workspace_root: workspace_root.to_string_lossy().into_owned(),
+            work_ref: work_ref.to_string(),
+            rel_child: AGENTS_MD.to_string(),
+            content: content.to_string(),
+        })
+        .await
+        .map(|_| ())
 }
 
 /// Build the markdown entry for one accepted rule suggestion.
@@ -336,13 +361,19 @@ fn ensure_accepted_section(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability::builtins::work_commit::test_support::RecordingExecutor;
 
-    fn tmp_agents_md(work_ref: &str) -> (tempfile::TempDir, std::path::PathBuf) {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let path = tmp.path().join("AGENTS.md");
-        // Seed with default scaffold so the section exists.
-        std::fs::write(&path, render_default_agents_md(work_ref)).expect("seed");
-        (tmp, path)
+    /// A temp workspace root plus the recording executor that commits where the
+    /// real port would: `<root>/Works/<work_ref>/AGENTS.md`.
+    fn workspace() -> (tempfile::TempDir, std::sync::Arc<RecordingExecutor>) {
+        (
+            tempfile::tempdir().expect("tmpdir"),
+            RecordingExecutor::new(),
+        )
+    }
+
+    fn agents_md(root: &Path, work_ref: &str) -> std::path::PathBuf {
+        root.join("Works").join(work_ref).join("AGENTS.md")
     }
 
     #[test]
@@ -354,49 +385,55 @@ mod tests {
         assert!(!rendered.contains("{{work_ref}}"));
     }
 
-    #[test]
-    fn rules_layers_append_creates_entry_under_section() {
-        let (_tmp, path) = tmp_agents_md("neon-river");
+    #[tokio::test]
+    async fn rules_layers_append_creates_entry_under_section() {
+        let (root, exec) = workspace();
         let out = append_rule_suggestion(
-            &path,
+            exec.as_ref(),
+            root.path(),
             "neon-river",
             "fnd_01HMV",
             "Prefer first-person POV in dialogue scenes.",
             "2026-06-16T12:00:00Z",
         )
+        .await
         .expect("append");
 
         assert_eq!(out, AppendOutcome::Appended);
-        let content = std::fs::read_to_string(&path).expect("read");
+        let content = std::fs::read_to_string(agents_md(root.path(), "neon-river")).expect("read");
         assert!(content.contains("<!-- finding_id: fnd_01HMV -->"));
         assert!(content.contains("**Accepted 2026-06-16T12:00:00Z**"));
         assert!(content.contains("Prefer first-person POV in dialogue scenes."));
     }
 
-    #[test]
-    fn rules_layers_append_is_idempotent_on_finding_id() {
-        let (_tmp, path) = tmp_agents_md("neon-river");
+    #[tokio::test]
+    async fn rules_layers_append_is_idempotent_on_finding_id() {
+        let (root, exec) = workspace();
         let fid = "fnd_dup";
         append_rule_suggestion(
-            &path,
+            exec.as_ref(),
+            root.path(),
             "neon-river",
             fid,
             "Avoid passive voice.",
             "2026-06-16T12:00:00Z",
         )
+        .await
         .expect("first append");
 
         let out2 = append_rule_suggestion(
-            &path,
+            exec.as_ref(),
+            root.path(),
             "neon-river",
             fid,
             "Avoid passive voice.",
             "2026-06-16T12:00:01Z",
         )
+        .await
         .expect("second append");
 
         assert_eq!(out2, AppendOutcome::AlreadyPresent);
-        let content = std::fs::read_to_string(&path).expect("read");
+        let content = std::fs::read_to_string(agents_md(root.path(), "neon-river")).expect("read");
         // The marker appears exactly once.
         assert_eq!(
             content
@@ -407,41 +444,46 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rules_layers_append_seeds_missing_file_from_scaffold() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let path = tmp.path().join("nested").join("AGENTS.md");
+    #[tokio::test]
+    async fn rules_layers_append_seeds_missing_file_from_scaffold() {
+        let (root, exec) = workspace();
         let out = append_rule_suggestion(
-            &path,
+            exec.as_ref(),
+            root.path(),
             "ghost-novel",
             "fnd_seed",
             "Keep chapters under 4000 words.",
             "2026-06-16T12:00:00Z",
         )
+        .await
         .expect("append");
 
         assert_eq!(out, AppendOutcome::Appended);
-        let content = std::fs::read_to_string(&path).expect("read");
+        let content =
+            std::fs::read_to_string(agents_md(root.path(), "ghost-novel")).expect("seeded file");
         // Seeded header carries the work_ref.
         assert!(content.contains("# AGENTS.md — ghost-novel"));
         assert!(content.contains("## Accepted rule suggestions"));
         assert!(content.contains("<!-- finding_id: fnd_seed -->"));
     }
 
-    #[test]
-    fn rules_layers_append_adds_section_when_missing() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let path = tmp.path().join("AGENTS.md");
+    #[tokio::test]
+    async fn rules_layers_append_adds_section_when_missing() {
+        let (root, exec) = workspace();
+        let path = agents_md(root.path(), "legacy");
         // Pre-existing file without the accepted section (e.g. legacy file).
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
         std::fs::write(&path, "# AGENTS.md — legacy\n\n- POV: first\n").expect("write");
 
         let out = append_rule_suggestion(
-            &path,
+            exec.as_ref(),
+            root.path(),
             "legacy",
             "fnd_legacy",
             "Ban adverbs.",
             "2026-06-16T12:00:00Z",
         )
+        .await
         .expect("append");
 
         assert_eq!(out, AppendOutcome::Appended);
@@ -452,18 +494,21 @@ mod tests {
         assert!(content.contains("POV: first"));
     }
 
-    #[test]
-    fn rules_layers_reset_restores_default_scaffold() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let path = tmp.path().join("AGENTS.md");
+    #[tokio::test]
+    async fn rules_layers_reset_restores_default_scaffold() {
+        let (root, exec) = workspace();
+        let path = agents_md(root.path(), "neon-river");
         // File with user edits + accepted entries.
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
         std::fs::write(
             &path,
             "# AGENTS.md — neon-river\n\n- POV: first\n\n## Accepted rule suggestions\n\n<!-- finding_id: fnd_old -->\nold\n",
         )
         .expect("write");
 
-        reset_agents_md(&path, "neon-river").expect("reset");
+        reset_agents_md(exec.as_ref(), root.path(), "neon-river")
+            .await
+            .expect("reset");
 
         let content = std::fs::read_to_string(&path).expect("read");
         assert!(content.contains("# AGENTS.md — neon-river"));
@@ -479,14 +524,34 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rules_layers_reset_creates_missing_file() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let path = tmp.path().join("Works").join("neon").join("AGENTS.md");
-        reset_agents_md(&path, "neon").expect("reset");
+    #[tokio::test]
+    async fn rules_layers_reset_creates_missing_file() {
+        let (root, exec) = workspace();
+        reset_agents_md(exec.as_ref(), root.path(), "neon")
+            .await
+            .expect("reset");
+        let path = agents_md(root.path(), "neon");
         assert!(path.is_file());
         let content = std::fs::read_to_string(&path).expect("read");
         assert!(content.contains("# AGENTS.md — neon"));
+    }
+
+    #[tokio::test]
+    async fn rules_layers_write_is_refused_when_the_port_refuses() {
+        // A Work with no `works` row is refused by the port; nothing lands.
+        let (root, _) = workspace();
+        let err = append_rule_suggestion(
+            RecordingExecutor::refusing("AGENTS.md").as_ref(),
+            root.path(),
+            "orphan",
+            "fnd_orphan",
+            "Never write an unresolvable Work.",
+            "2026-06-16T12:00:00Z",
+        )
+        .await
+        .expect_err("refused");
+        assert!(matches!(err, CapabilityError::Forbidden(_)), "{err:?}");
+        assert!(!agents_md(root.path(), "orphan").exists());
     }
 
     // ── V1.48 P2-fix1: diff_agents_md_vs_scaffold ──────────────────────

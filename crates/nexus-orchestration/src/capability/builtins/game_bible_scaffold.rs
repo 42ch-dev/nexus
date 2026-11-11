@@ -17,7 +17,8 @@
 //! Wraps FS writes + DB PATCH in a `ScaffoldTransaction` with Drop-based FS
 //! rollback. Tracks create vs overwrite separately: on rollback, created
 //! files are deleted and overwritten files are restored from snapshot.
-//! Writes use temp+rename for atomicity.
+//! Writes commit through the injected Work artifact port (Work lock +
+//! durable atomic write); the rollback guard still restores via Drop.
 //!
 //! # Path safety (P3 fix-wave)
 //!
@@ -25,19 +26,21 @@
 //! path joining, mirroring the novel scaffold pattern.
 
 use super::novel_scaffold_sanitize::validate_work_ref;
-use crate::capability::{Capability, CapabilityError};
+use super::work_commit::{
+    claim_work_ref, commit_work_bytes, publish_work_identity, require_executor, resolve_works_dirs,
+};
+use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tracing::info;
 
 /// Input for the game-bible scaffold capability.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct ScaffoldInput {
-    #[allow(dead_code)]
-    // required by the capability input schema; handler patches the works row by work_id
     creator_id: String,
     work_id: String,
     work_ref: String,
@@ -180,9 +183,23 @@ impl ScaffoldTransaction {
         Ok(true)
     }
 
-    fn write_file(&mut self, path: &Path, content: &str) -> Result<(), CapabilityError> {
+    /// Commit a file through the Work artifact port.
+    ///
+    /// If the file already exists, its original content is saved so rollback
+    /// can restore it. The bytes land through the injected executor (Work
+    /// lock + durable atomic write); rollback bookkeeping stays here.
+    async fn write_file(
+        &mut self,
+        executor: &dyn WorkspaceExecutor,
+        workspace_root: &Path,
+        work_ref: &str,
+        rel_child: &Path,
+        content: &str,
+    ) -> Result<(), CapabilityError> {
+        let path = workspace_root.join("Works").join(work_ref).join(rel_child);
+
         let original = if path.exists() {
-            let data = std::fs::read(path).map_err(|e| {
+            let data = std::fs::read(&path).map_err(|e| {
                 CapabilityError::Internal(format!("read original {}: {e}", path.display()))
             })?;
             Some(data)
@@ -190,24 +207,12 @@ impl ScaffoldTransaction {
             None
         };
 
-        let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, content)
-            .map_err(|e| CapabilityError::Internal(format!("write tmp {}: {e}", tmp.display())))?;
-        self.temp_files.push(tmp.clone());
-
-        std::fs::rename(&tmp, path).map_err(|e| {
-            CapabilityError::Internal(format!(
-                "rename {} -> {}: {e}",
-                tmp.display(),
-                path.display()
-            ))
-        })?;
-        self.temp_files.retain(|t| t != &tmp);
+        commit_work_bytes(executor, workspace_root, work_ref, rel_child, content).await?;
 
         let is_create = original.is_none();
         match original {
-            Some(data) => self.overwritten_files.push((path.to_path_buf(), data)),
-            None => self.created_files.push(path.to_path_buf()),
+            Some(data) => self.overwritten_files.push((path.clone(), data)),
+            None => self.created_files.push(path.clone()),
         }
 
         info!(
@@ -274,6 +279,7 @@ impl Drop for ScaffoldTransaction {
 pub struct GameBibleProjectScaffold {
     pool: Option<sqlx::SqlitePool>,
     works_root: PathBuf,
+    executor: Option<Arc<dyn WorkspaceExecutor>>,
 }
 
 impl GameBibleProjectScaffold {
@@ -282,6 +288,7 @@ impl GameBibleProjectScaffold {
         Self {
             pool: None,
             works_root: PathBuf::from("Works"),
+            executor: None,
         }
     }
 
@@ -290,6 +297,7 @@ impl GameBibleProjectScaffold {
         Self {
             pool: Some(pool),
             works_root: PathBuf::from("Works"),
+            executor: None,
         }
     }
 
@@ -298,7 +306,15 @@ impl GameBibleProjectScaffold {
         Self {
             pool: Some(pool),
             works_root,
+            executor: None,
         }
+    }
+
+    /// Attach the workspace executor that carries the Work artifact port.
+    #[must_use]
+    pub fn with_workspace_executor(mut self, executor: Option<Arc<dyn WorkspaceExecutor>>) -> Self {
+        self.executor = executor;
+        self
     }
 }
 
@@ -320,6 +336,9 @@ impl Capability for GameBibleProjectScaffold {
         r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","files_created","dirs_created"],"additionalProperties":false}"#
     }
 
+    // SAFETY: The run method handles 5 directory/file operations through the
+    // Work artifact port; the length is inherent to the scaffold batch.
+    #[allow(clippy::too_many_lines)]
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
         let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
             CapabilityError::InputInvalid(format!("game_bible.project_scaffold input: {e}"))
@@ -335,64 +354,104 @@ impl Capability for GameBibleProjectScaffold {
             "game_bible.project_scaffold: start"
         );
 
-        let work_dir = self.works_root.join(&work_ref);
+        let executor = require_executor(self.executor.as_ref())?;
+        let (workspace_root, resolved_works) = resolve_works_dirs(executor, &self.works_root)?;
+        let work_dir = resolved_works.join(&work_ref);
         let design_dir = work_dir.join("Design");
         let logs_dir = work_dir.join("Logs");
         let logs_design_dir = logs_dir.join("design");
         let logs_review_dir = logs_dir.join("review");
 
-        let mut tx = ScaffoldTransaction::new();
+        // The Work artifact port resolves `Works/<work_ref>` through the works
+        // row, so the ref must already be there when the first byte lands — a
+        // first scaffold still has it NULL. Only the ref is claimed here; the
+        // profile lands with the finished scaffold, and a failure restores it.
+        let mut claim = claim_work_ref(
+            self.pool.as_ref(),
+            &inp.creator_id,
+            &inp.work_id,
+            Some(&work_ref),
+        )
+        .await?;
 
-        // Create directory structure (idempotent)
-        for dir in [
-            &work_dir,
-            &design_dir,
-            &logs_dir,
-            &logs_design_dir,
-            &logs_review_dir,
-        ] {
-            tx.create_dir(dir)?;
-        }
+        let result: Result<(Vec<String>, Vec<String>), CapabilityError> = async {
+            let mut tx = ScaffoldTransaction::new();
 
-        // Write README.md (atomic: temp+rename; tracks create vs overwrite)
-        let readme_content = format!(
+            // Create directory structure (idempotent)
+            for dir in [
+                &work_dir,
+                &design_dir,
+                &logs_dir,
+                &logs_design_dir,
+                &logs_review_dir,
+            ] {
+                tx.create_dir(dir)?;
+            }
+
+            // Write README.md (through the Work artifact port; tracks create vs overwrite)
+            let readme_content = format!(
         "# {title}\n\nGame design bible.\n\n- **Work ID**: {work_id}\n- **Profile**: game_bible\n\n## Core Pillars\n\n<!-- Genre, tone, target audience, and key design constraints -->\n",
         title = inp.title,
         work_id = inp.work_id,
     );
-        tx.write_file(&work_dir.join("README.md"), &readme_content)?;
-
-        // Write 12 Design/*.md template files
-        for tmpl in DESIGN_TEMPLATES {
-            let content = render_template(tmpl);
-            tx.write_file(&design_dir.join(tmpl.filename), &content)?;
-        }
-
-        // PATCH works row: set work_profile and work_ref
-        if let Some(ref pool) = self.pool {
-            sqlx::query(
-                "UPDATE works SET work_profile = 'game_bible', work_ref = ? WHERE work_id = ?",
+            tx.write_file(
+                executor,
+                &workspace_root,
+                &work_ref,
+                Path::new("README.md"),
+                &readme_content,
             )
-            .bind(&work_ref)
-            .bind(&inp.work_id)
-            .execute(pool)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
+            .await?;
+
+            // Write 12 Design/*.md template files
+            for tmpl in DESIGN_TEMPLATES {
+                let content = render_template(tmpl);
+                let rel_child = Path::new("Design").join(tmpl.filename);
+                tx.write_file(executor, &workspace_root, &work_ref, &rel_child, &content)
+                    .await?;
+            }
+
+            // Files landed — publish the profile identity, then commit the guard.
+            publish_work_identity(
+                self.pool.as_ref(),
+                &inp.creator_id,
+                &inp.work_id,
+                "game_bible",
+                &work_ref,
+            )
+            .await?;
+
+            let files_created: Vec<String> = tx
+                .created_files
+                .iter()
+                .chain(tx.overwritten_files.iter().map(|(p, _)| p))
+                .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
+                .collect();
+            let dirs_created: Vec<String> = tx
+                .created_dirs
+                .iter()
+                .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
+                .collect();
+
+            tx.commit();
+            Ok((files_created, dirs_created))
         }
+        .await;
 
-        tx.commit();
-
-        let files_created: Vec<String> = tx
-            .created_files
-            .iter()
-            .chain(tx.overwritten_files.iter().map(|(p, _)| p))
-            .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
-            .collect();
-        let dirs_created: Vec<String> = tx
-            .created_dirs
-            .iter()
-            .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
-            .collect();
+        let (files_created, dirs_created) = match result {
+            Ok(created) => created,
+            Err(err) => {
+                if let Err(restore_err) = claim.restore().await {
+                    tracing::warn!(
+                        work_id = %inp.work_id,
+                        error = %restore_err,
+                        "game_bible.project_scaffold: restore prior work_ref failed"
+                    );
+                }
+                return Err(err);
+            }
+        };
+        claim.disarm();
 
         let output = ScaffoldOutput {
             scaffold_root: work_dir.display().to_string(),
@@ -414,7 +473,19 @@ impl Capability for GameBibleProjectScaffold {
 
 #[cfg(test)]
 mod tests {
+    use super::super::work_commit::test_support::RecordingExecutor;
     use super::*;
+
+    /// Capability over a temp `Works/` root with a recording executor.
+    fn cap_with_root(works_root: PathBuf) -> GameBibleProjectScaffold {
+        let executor: Arc<dyn WorkspaceExecutor> =
+            RecordingExecutor::at(works_root.parent().expect("works root has a parent"));
+        GameBibleProjectScaffold {
+            pool: None,
+            works_root,
+            executor: Some(executor),
+        }
+    }
 
     #[test]
     fn all_design_templates_render_non_empty() {
@@ -515,8 +586,8 @@ mod tests {
 
     // ── Fix 1 regression: pre-existing user content survives rollback ──
 
-    #[test]
-    fn rollback_preserves_pre_existing_user_content() {
+    #[tokio::test]
+    async fn rollback_preserves_pre_existing_user_content() {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
@@ -527,11 +598,19 @@ mod tests {
         let user_content = "# My Game Bible\n\nPersonal design notes.\n";
         std::fs::write(&readme_path, user_content).expect("write user README");
 
+        let executor = RecordingExecutor::new();
         let mut tx = ScaffoldTransaction::new();
         tx.create_dir(&work_dir).unwrap();
         let scaffold_content = "# Overwritten\n\nScaffold template.\n";
-        tx.write_file(&readme_path, scaffold_content)
-            .expect("write scaffold README");
+        tx.write_file(
+            executor.as_ref(),
+            tmp.path(),
+            "gb-user-data-survival",
+            Path::new("README.md"),
+            scaffold_content,
+        )
+        .await
+        .expect("write scaffold README");
 
         // Rollback without commit
         drop(tx);
@@ -551,10 +630,7 @@ mod tests {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
-        let cap = GameBibleProjectScaffold {
-            pool: None,
-            works_root: root.clone(),
-        };
+        let cap = cap_with_root(root.clone());
 
         let input = serde_json::json!({
             "creator_id": "attacker",
@@ -601,5 +677,108 @@ mod tests {
             "temp file must be cleaned up on rollback"
         );
         assert!(!final_path.exists(), "final path must not exist");
+    }
+
+    // ── Work artifact port seam ──
+
+    #[tokio::test]
+    async fn scaffold_writes_every_file_through_the_port() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let executor = RecordingExecutor::at(tmp.path());
+        let cap = GameBibleProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: Some(executor.clone()),
+        };
+
+        let out = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_gb_port",
+                "work_ref": "gb-port",
+                "title": "GB Port",
+            }))
+            .await
+            .expect("scaffold should succeed");
+
+        let commits = executor.commits();
+        assert_eq!(
+            commits.len(),
+            13,
+            "README + 12 Design templates must all go through the executor"
+        );
+        assert_eq!(commits[0].rel_child, "README.md");
+        assert!(commits
+            .iter()
+            .any(|c| c.rel_child == "Design/overview.md"
+                && c.content.contains("section_status: draft")));
+        assert_eq!(out["files_created"].as_array().unwrap().len(), 13);
+    }
+
+    #[tokio::test]
+    async fn scaffold_refuses_without_workspace_executor() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let cap = GameBibleProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: None,
+        };
+
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_gb_nowire",
+                "work_ref": "gb-nowire",
+                "title": "GB No Wire",
+            }))
+            .await
+            .expect_err("a Work byte write without the port must refuse");
+
+        assert!(
+            matches!(err, CapabilityError::WorkerUnavailable),
+            "expected WorkerUnavailable, got: {err}"
+        );
+        assert!(
+            !root.join("gb-nowire").exists(),
+            "no directory may be created"
+        );
+    }
+
+    #[tokio::test]
+    async fn scaffold_rolls_back_when_port_refuses_a_later_file() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let executor = RecordingExecutor::refusing_at(tmp.path(), "Design/lore.md");
+        let cap = GameBibleProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: Some(executor.clone()),
+        };
+
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_gb_rollback",
+                "work_ref": "gb-rollback",
+                "title": "GB Rollback",
+            }))
+            .await
+            .expect_err("missing work row must refuse the write");
+        assert!(
+            matches!(err, CapabilityError::Forbidden(_)),
+            "expected the port refusal to propagate, got: {err}"
+        );
+
+        let work_dir = root.join("gb-rollback");
+        assert!(!work_dir.join("README.md").exists(), "README rolled back");
+        assert!(
+            !work_dir.join("Design/overview.md").exists(),
+            "committed templates rolled back"
+        );
     }
 }

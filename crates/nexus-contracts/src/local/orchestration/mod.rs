@@ -188,6 +188,32 @@ pub struct WorkspaceCommitOutput {
     pub committed: bool,
 }
 
+/// Input for one Work artifact byte commit (`Works/<work_ref>/<rel_child>`).
+///
+/// Carries the classified shape the caller already holds: the port builds the
+/// absolute target itself from `workspace_root` + `work_ref` + `rel_child`, so
+/// classification and target construction cannot disagree.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkArtifactCommitInput {
+    /// Workspace whose `Works/` tree owns the artifact (absolute).
+    pub workspace_root: String,
+    /// The Work directory name (or Work id) the caller addressed.
+    pub work_ref: String,
+    /// The artifact path below the Work root; non-empty, `..`-free.
+    pub rel_child: String,
+    /// The bytes to commit.
+    pub content: String,
+}
+
+/// Output for [`WorkArtifactCommitInput`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkArtifactCommitOutput {
+    /// True only after the bytes landed durably under the Work lock.
+    pub committed: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Registry capability
 // ---------------------------------------------------------------------------

@@ -12,11 +12,57 @@
 
 use std::path::Path;
 
-use nexus_orchestration::capability::Capability;
+use nexus_orchestration::capability::{Capability, CapabilityError, WorkspaceExecutor};
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Test executor: commits Work bytes at the target the production port builds
+/// (`<workspace_root>/Works/<work_ref>/<rel_child>`), without the DB lock/row
+/// checks the core port performs.
+struct DirectWriteExecutor {
+    workspace_root: std::path::PathBuf,
+}
+
+#[async_trait::async_trait]
+impl WorkspaceExecutor for DirectWriteExecutor {
+    fn workspace_root(&self) -> Result<std::path::PathBuf, CapabilityError> {
+        Ok(self.workspace_root.clone())
+    }
+
+    async fn open(
+        &self,
+        _input: nexus_contracts::local::orchestration::WorkspaceOpenInput,
+    ) -> Result<nexus_contracts::local::orchestration::WorkspaceOpenOutput, CapabilityError> {
+        Err(CapabilityError::WorkerUnavailable)
+    }
+
+    async fn commit(
+        &self,
+        _input: nexus_contracts::local::orchestration::WorkspaceCommitInput,
+    ) -> Result<nexus_contracts::local::orchestration::WorkspaceCommitOutput, CapabilityError> {
+        Err(CapabilityError::WorkerUnavailable)
+    }
+
+    async fn commit_work_artifact(
+        &self,
+        input: nexus_contracts::local::orchestration::WorkArtifactCommitInput,
+    ) -> Result<nexus_contracts::local::orchestration::WorkArtifactCommitOutput, CapabilityError>
+    {
+        let target = std::path::Path::new(&input.workspace_root)
+            .join("Works")
+            .join(&input.work_ref)
+            .join(&input.rel_child);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| CapabilityError::Internal(format!("mkdir: {e}")))?;
+        }
+        std::fs::write(&target, &input.content)
+            .map_err(|e| CapabilityError::Internal(format!("write: {e}")))?;
+        Ok(nexus_contracts::local::orchestration::WorkArtifactCommitOutput { committed: true })
+    }
+}
 
 /// Create a fresh `SQLite` pool with all migrations applied.
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
@@ -58,6 +104,11 @@ fn make_cap(
         pool,
         works_root.to_path_buf(),
     )
+    .with_workspace_executor(Some(std::sync::Arc::new(DirectWriteExecutor {
+        workspace_root: works_root
+            .parent()
+            .map_or_else(std::path::PathBuf::new, std::path::Path::to_path_buf),
+    })))
 }
 
 /// Build scaffold input JSON.

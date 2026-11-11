@@ -14,11 +14,68 @@
 use sqlx::Row;
 
 use nexus_orchestration::capability::builtins::GameBibleProjectScaffold;
-use nexus_orchestration::capability::Capability;
+use nexus_orchestration::capability::{Capability, CapabilityError, WorkspaceExecutor};
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Test executor: commits Work bytes at the target the production port builds
+/// (`<workspace_root>/Works/<work_ref>/<rel_child>`), without the DB lock/row
+/// checks the core port performs.
+struct DirectWriteExecutor {
+    workspace_root: std::path::PathBuf,
+}
+
+#[async_trait::async_trait]
+impl WorkspaceExecutor for DirectWriteExecutor {
+    fn workspace_root(&self) -> Result<std::path::PathBuf, CapabilityError> {
+        Ok(self.workspace_root.clone())
+    }
+
+    async fn open(
+        &self,
+        _input: nexus_contracts::local::orchestration::WorkspaceOpenInput,
+    ) -> Result<nexus_contracts::local::orchestration::WorkspaceOpenOutput, CapabilityError> {
+        Err(CapabilityError::WorkerUnavailable)
+    }
+
+    async fn commit(
+        &self,
+        _input: nexus_contracts::local::orchestration::WorkspaceCommitInput,
+    ) -> Result<nexus_contracts::local::orchestration::WorkspaceCommitOutput, CapabilityError> {
+        Err(CapabilityError::WorkerUnavailable)
+    }
+
+    async fn commit_work_artifact(
+        &self,
+        input: nexus_contracts::local::orchestration::WorkArtifactCommitInput,
+    ) -> Result<nexus_contracts::local::orchestration::WorkArtifactCommitOutput, CapabilityError>
+    {
+        let target = std::path::Path::new(&input.workspace_root)
+            .join("Works")
+            .join(&input.work_ref)
+            .join(&input.rel_child);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| CapabilityError::Internal(format!("mkdir: {e}")))?;
+        }
+        std::fs::write(&target, &input.content)
+            .map_err(|e| CapabilityError::Internal(format!("write: {e}")))?;
+        Ok(nexus_contracts::local::orchestration::WorkArtifactCommitOutput { committed: true })
+    }
+}
+
+/// Scaffold over `<workspace_root>/Works` with the test executor attached.
+fn scaffold_at(
+    pool: &sqlx::SqlitePool,
+    workspace_root: &std::path::Path,
+) -> GameBibleProjectScaffold {
+    GameBibleProjectScaffold::new_with_root(pool.clone(), workspace_root.join("Works"))
+        .with_workspace_executor(Some(std::sync::Arc::new(DirectWriteExecutor {
+            workspace_root: workspace_root.to_path_buf(),
+        })))
+}
 
 /// Create a fresh `SQLite` pool with all migrations applied.
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
@@ -80,8 +137,7 @@ async fn bootstrap_game_bible_creates_design_tree() {
     let work_ref = "e2e-game-bible-scaffold";
     insert_test_work(&pool, work_id, work_ref).await;
 
-    let cap =
-        GameBibleProjectScaffold::new_with_root(pool.clone(), works_root.path().to_path_buf());
+    let cap = scaffold_at(&pool, works_root.path());
 
     let input = scaffold_input("ctr_test", work_id, work_ref, "Test Game Bible");
     let output = cap.run(input).await.expect("scaffold should succeed");
@@ -157,7 +213,7 @@ async fn bootstrap_game_bible_creates_design_tree() {
     assert!(logs_review_found, "Logs/review not found in dirs_created");
 
     // Verify files exist on disk
-    let work_dir = works_root.path().join(work_ref);
+    let work_dir = works_root.path().join("Works").join(work_ref);
     let readme_path = work_dir.join("README.md");
     assert!(readme_path.exists(), "README.md should exist on disk");
     assert!(
@@ -205,8 +261,7 @@ async fn bootstrap_game_bible_idempotent() {
     let work_ref = "e2e-idempotent";
     insert_test_work(&pool, work_id, work_ref).await;
 
-    let cap =
-        GameBibleProjectScaffold::new_with_root(pool.clone(), works_root.path().to_path_buf());
+    let cap = scaffold_at(&pool, works_root.path());
 
     let input = scaffold_input("ctr_test", work_id, work_ref, "Idempotent Test");
 
@@ -246,7 +301,7 @@ async fn bootstrap_game_bible_idempotent() {
     );
 
     // Verify files still exist on disk after second run
-    let work_dir = works_root.path().join(work_ref);
+    let work_dir = works_root.path().join("Works").join(work_ref);
     assert!(work_dir.join("README.md").exists());
     assert!(work_dir.join("Design").join("overview.md").exists());
 
@@ -269,8 +324,7 @@ async fn game_bible_work_status_json() {
     let work_ref = "e2e-status";
     insert_test_work(&pool, work_id, work_ref).await;
 
-    let cap =
-        GameBibleProjectScaffold::new_with_root(pool.clone(), works_root.path().to_path_buf());
+    let cap = scaffold_at(&pool, works_root.path());
 
     let input = scaffold_input("ctr_test", work_id, work_ref, "Status Test");
     let output = cap.run(input).await.expect("scaffold should succeed");
@@ -330,8 +384,7 @@ async fn game_bible_scaffold_with_world_id() {
     let work_ref = "e2e-world";
     insert_test_work(&pool, work_id, work_ref).await;
 
-    let cap =
-        GameBibleProjectScaffold::new_with_root(pool.clone(), works_root.path().to_path_buf());
+    let cap = scaffold_at(&pool, works_root.path());
 
     let input = serde_json::json!({
         "creator_id": "ctr_test",
