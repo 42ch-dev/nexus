@@ -1618,7 +1618,7 @@ async fn create_key_blocks_in_tx(
                     category: format!("decode new_key_block: {e}"),
                 }
             })?;
-        let kb = spoke_to_knowledge_record(spoke).map_err(|e| CoreError::Internal {
+        let mut kb = spoke_to_knowledge_record(spoke).map_err(|e| CoreError::Internal {
             category: format!("decode new_key_block owner: {e}"),
         })?;
 
@@ -1636,19 +1636,31 @@ async fn create_key_blocks_in_tx(
 
         // The store primitive keeps the insert inside the caller's accept
         // transaction and populates `extensions_nexus_json` with the World
-        // owner carrier; governance columns stay at shared defaults since
-        // compute output never assigns a holder or disclosure. The raw INSERT
-        // this lane replaced bound created_at and updated_at to the same
-        // `now`; stamp both here so the store seam matches that shape.
-        let mut kb = kb;
+        // owner carrier. The settlement lane carries no governance: a proposal
+        // may name a wire `owner`/`disclosure`, but the record is normalised
+        // to `NULL/NULL` here so the row is World-shared. The raw INSERT this
+        // lane replaced bound created_at and updated_at to the same `now`;
+        // stamp both here so the store seam matches that shape.
+        kb.holder_entry_id = None;
+        kb.disclosure = None;
+        kb.revision = None;
         let now = chrono::Utc::now().to_rfc3339();
         kb.created_at = now.clone();
         kb.updated_at = Some(now);
         kb_store
             .insert_key_block_in_tx(&mut *tx, kb)
             .await
-            .map_err(|e| CoreError::Internal {
-                category: format!("insert new_key_block: {e}"),
+            .map_err(|e| match e {
+                // A refused record is a caller-input fault, not a storage
+                // fault: keep the coded `invalid_input` taxonomy the raw lane
+                // surfaced.
+                nexus_knowledge::world_kb::KbStoreError::Validation(_)
+                | nexus_knowledge::world_kb::KbStoreError::ValidationLegacy(_) => {
+                    coded_refusal("invalid_input", format!("insert new_key_block: {e}"))
+                }
+                other => CoreError::Internal {
+                    category: format!("insert new_key_block: {other}"),
+                },
             })?;
 
         created += 1;
