@@ -46,6 +46,9 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::too_many_lines)]
 
+use super::work_artifact::{
+    classify_work_path, FsWorkArtifactPort, WorkArtifactPort, WorkArtifactWrite, WorkPath,
+};
 use crate::content::resolve_guarded_path_async;
 use crate::error::{CoreError, CoreResult};
 // The handlers below were extracted from the daemon, where the refusal type is
@@ -902,30 +905,62 @@ async fn execute_write_file(
             other => other,
         })?;
 
-    let write_result = tokio::task::spawn_blocking(move || {
-        if let Some(parent) = resolved.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
+    // ADR #485 §4.4: `Works/<work_ref>/…` is a Work artifact byte write — one
+    // port, one lock, one durability path. Every other workspace path keeps
+    // the guarded write below.
+    match classify_work_path(&path_str) {
+        WorkPath::Artifact {
+            work_ref,
+            rel_child,
+        } => {
+            FsWorkArtifactPort::new(context.pool.clone(), context.nexus_home.clone())
+                .commit(WorkArtifactWrite {
+                    workspace_root: Path::new(&workspace_path_str),
+                    work_ref,
+                    rel_child,
+                    content: &content,
+                })
+                .await?;
+        }
+        WorkPath::WorkRoot { work_ref } => {
+            return Err(NexusApiError::Forbidden {
+                resource: format!(
+                    "file: path '{path_str}' is the Work root directory 'Works/{work_ref}', not an artifact file"
+                ),
+            });
+        }
+        WorkPath::EscapedWork { work_ref } => {
+            return Err(NexusApiError::Forbidden {
+                resource: format!("file: path '{path_str}' escapes the Works/{work_ref}/ boundary"),
+            });
+        }
+        WorkPath::NonWork => {
+            let write_result = tokio::task::spawn_blocking(move || {
+                if let Some(parent) = resolved.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
+                        category: format!(
+                            "DIR_CREATE_FAILED: {}",
+                            format_args!("failed to create directory {}: {}", parent.display(), e)
+                        ),
+                    })?;
+                }
+                std::fs::write(&resolved, content).map_err(|e| NexusApiError::Internal {
+                    category: format!(
+                        "FILE_WRITE_FAILED: {}",
+                        format_args!("failed to write file {}: {e}", resolved.display())
+                    ),
+                })
+            })
+            .await
+            .map_err(|e| NexusApiError::Internal {
                 category: format!(
-                    "DIR_CREATE_FAILED: {}",
-                    format_args!("failed to create directory {}: {}", parent.display(), e)
+                    "FILE_WRITE_PANIC: {}",
+                    format_args!("file write task panicked: {e}")
                 ),
             })?;
+            write_result?;
         }
-        std::fs::write(&resolved, content).map_err(|e| NexusApiError::Internal {
-            category: format!(
-                "FILE_WRITE_FAILED: {}",
-                format_args!("failed to write file {}: {e}", resolved.display())
-            ),
-        })
-    })
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        category: format!(
-            "FILE_WRITE_PANIC: {}",
-            format_args!("file write task panicked: {e}")
-        ),
-    })?;
-    write_result?;
+    }
 
     Ok(serde_json::json!({
         "written": true
@@ -4113,3 +4148,303 @@ pub fn build_registry() -> CapabilityRegistry {
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use nexus_local_db::works::WorkRecord;
+    use sqlx::SqlitePool;
+    use tempfile::TempDir;
+
+    const CREATOR: &str = "ctr_test";
+    const WORK_ID: &str = "wrk_demo";
+    const WORK_REF: &str = "demo";
+
+    struct Fixture {
+        _home: TempDir,
+        workspace: TempDir,
+        pool: SqlitePool,
+        context: ToolContext,
+    }
+
+    fn work_record() -> WorkRecord {
+        WorkRecord {
+            work_id: WORK_ID.to_string(),
+            creator_id: CREATOR.to_string(),
+            workspace_slug: "default".to_string(),
+            status: "draft".to_string(),
+            title: "My Novel".to_string(),
+            long_term_goal: "Write a great novel".to_string(),
+            initial_idea: "A sci-fi thriller".to_string(),
+            creative_brief: None,
+            intake_status: "pending".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: "2026-06-04T10:00:00Z".to_string(),
+            updated_at: "2026-06-04T10:00:00Z".to_string(),
+            current_stage: "intake".to_string(),
+            stage_status: "pending".to_string(),
+            work_profile: None,
+            work_ref: Some(WORK_REF.to_string()),
+            total_planned_chapters: None,
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        }
+    }
+
+    async fn fixture(seed_work: bool) -> Fixture {
+        let home = tempfile::tempdir().expect("temp home");
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        std::fs::write(
+            home.path().join("config.toml"),
+            format!("active_creator_id = \"{CREATOR}\"\n"),
+        )
+        .expect("cli config");
+        let pool = nexus_local_db::init_engine_pool(&home.path().join("state.db"))
+            .await
+            .expect("engine pool")
+            .clone_pool();
+        if seed_work {
+            works::create_work(&pool, &work_record())
+                .await
+                .expect("works row");
+        }
+        let context = ToolContext::new(
+            pool.clone(),
+            home.path().to_path_buf(),
+            Some(workspace.path().display().to_string()),
+            ToolRuntimeFacts::default(),
+            None,
+            None,
+        );
+        Fixture {
+            _home: home,
+            workspace,
+            pool,
+            context,
+        }
+    }
+
+    fn write_request(path: &str, content: &str) -> ToolsApi {
+        ToolsApi {
+            caller_kind: None,
+            parameters: serde_json::json!({ "path": path, "content": content }),
+            request_id: None,
+            session_id: None,
+            tool_name: "fs/write_text_file".to_string(),
+        }
+    }
+
+    async fn holder(pool: &SqlitePool) -> Option<String> {
+        sqlx::query_scalar("SELECT runtime_lock_holder FROM works WHERE work_id = ?")
+            .bind(WORK_ID)
+            .fetch_one(pool)
+            .await
+            .expect("holder read")
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_writes_work_artifacts_through_the_port() {
+        let fixture = fixture(true).await;
+
+        let result = execute_write_file(
+            &write_request(&format!("Works/{WORK_REF}/Stories/ch1.md"), "chapter body"),
+            &fixture.context,
+        )
+        .await
+        .expect("the Work artifact write succeeds");
+
+        assert_eq!(result, serde_json::json!({ "written": true }));
+        let target = fixture
+            .workspace
+            .path()
+            .join(format!("Works/{WORK_REF}/Stories/ch1.md"));
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read"),
+            "chapter body"
+        );
+        assert_eq!(
+            std::fs::read_dir(target.parent().expect("parent"))
+                .expect("read_dir")
+                .count(),
+            1,
+            "the atomic temp file is cleaned up"
+        );
+        assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_refuses_work_paths_without_a_works_row() {
+        let fixture = fixture(false).await;
+
+        let error = execute_write_file(
+            &write_request(&format!("Works/{WORK_REF}/Stories/ch1.md"), "body"),
+            &fixture.context,
+        )
+        .await
+        .expect_err("a missing works row refuses");
+
+        match error {
+            NexusApiError::Forbidden { resource } => {
+                assert!(resource.contains("has no works row"), "{resource}");
+            }
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+        assert!(!fixture
+            .workspace
+            .path()
+            .join(format!("Works/{WORK_REF}"))
+            .exists());
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_refuses_a_lock_held_elsewhere() {
+        let fixture = fixture(true).await;
+        nexus_local_db::acquire_runtime_lock(
+            &fixture.pool,
+            CREATOR,
+            WORK_ID,
+            "cli:http:foreign",
+            nexus_local_db::DEFAULT_RUNTIME_LOCK_TTL_SECS,
+            false,
+        )
+        .await
+        .expect("foreign lock");
+
+        let error = execute_write_file(
+            &write_request(&format!("Works/{WORK_REF}/Stories/ch1.md"), "body"),
+            &fixture.context,
+        )
+        .await
+        .expect_err("a held lock refuses");
+
+        match error {
+            NexusApiError::Forbidden { resource } => {
+                assert!(resource.contains("work_locked"), "{resource}");
+            }
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+        assert_eq!(
+            holder(&fixture.pool).await.as_deref(),
+            Some("cli:http:foreign"),
+            "the foreign holder is untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_is_not_reentrant_for_tool_fs_write() {
+        let fixture = fixture(true).await;
+        // The same process's in-flight `tool:fs_write` holder mints a fresh
+        // uuid per acquire, so a second write refuses instead of re-entering.
+        nexus_local_db::acquire_runtime_lock(
+            &fixture.pool,
+            CREATOR,
+            WORK_ID,
+            &nexus_local_db::cli_holder("tool:fs_write"),
+            nexus_local_db::DEFAULT_RUNTIME_LOCK_TTL_SECS,
+            false,
+        )
+        .await
+        .expect("in-flight tool lock");
+
+        let error = execute_write_file(
+            &write_request(&format!("Works/{WORK_REF}/Stories/ch1.md"), "body"),
+            &fixture.context,
+        )
+        .await
+        .expect_err("a concurrent tool write refuses");
+
+        match error {
+            NexusApiError::Forbidden { resource } => {
+                assert!(resource.contains("work_locked"), "{resource}");
+            }
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_refuses_the_work_root_and_lexical_escapes() {
+        let fixture = fixture(true).await;
+
+        for (path, expected) in [
+            (format!("Works/{WORK_REF}"), "is the Work root directory"),
+            (
+                format!("Works/{WORK_REF}/../plain.md"),
+                "escapes the Works/demo/ boundary",
+            ),
+        ] {
+            let error = execute_write_file(&write_request(&path, "body"), &fixture.context)
+                .await
+                .expect_err("the classification refuses");
+
+            match error {
+                NexusApiError::Forbidden { resource } => {
+                    assert!(resource.contains(expected), "{path}: {resource}");
+                }
+                other => panic!("expected Forbidden for {path}, got {other:?}"),
+            }
+            assert_eq!(holder(&fixture.pool).await, None, "no lock was taken");
+        }
+        assert!(!fixture.workspace.path().join("plain.md").exists());
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_keeps_the_outside_workspace_refusal() {
+        let fixture = fixture(true).await;
+        let absolute_outside = fixture
+            .workspace
+            .path()
+            .parent()
+            .expect("parent")
+            .join("outside.md");
+
+        for path in [
+            "../outside.md".to_string(),
+            absolute_outside.display().to_string(),
+        ] {
+            let error = execute_write_file(&write_request(&path, "body"), &fixture.context)
+                .await
+                .expect_err("a path outside the workspace refuses");
+
+            match error {
+                NexusApiError::Forbidden { resource } => {
+                    assert!(
+                        resource.contains("is outside the workspace root"),
+                        "{path}: {resource}"
+                    );
+                }
+                other => panic!("expected Forbidden for {path}, got {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_write_file_keeps_the_guarded_write_for_non_work_paths() {
+        let fixture = fixture(true).await;
+
+        let result = execute_write_file(
+            &write_request("notes/plain.md", "plain body"),
+            &fixture.context,
+        )
+        .await
+        .expect("a non-Work path writes");
+
+        assert_eq!(result, serde_json::json!({ "written": true }));
+        let target = fixture.workspace.path().join("notes/plain.md");
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read"),
+            "plain body"
+        );
+    }
+}
