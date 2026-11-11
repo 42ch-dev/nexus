@@ -3124,6 +3124,136 @@ pub async fn update_key_block_status_in_tx(
     Ok(result.rows_affected())
 }
 
+// ── v1.233 P1 T4: Character-owned knowledge CAS patch / delete ─────────────
+// The Character-scoped knowledge maintenance surface keeps its policy
+// (read preimage, referent guard, conflict mapping) in
+// `actor_knowledge_store.rs`; the two statements live here so every
+// `kb_key_blocks` write in the workspace is a storage primitive.
+
+/// CAS-patch a Character- or binding-owned `kb_key_blocks` row inside the
+/// caller's transaction.
+///
+/// The `WHERE` clause re-asserts the Character/binding ownership the caller's
+/// read preimage was prepared under, so a row that changed container between
+/// the read and this write misses the CAS instead of being rewritten
+/// cross-owner. A terminal-status row (`deleted` / `merged` / `deprecated`) is
+/// equally unmatchable. The governance pair is written only when `governance`
+/// carries one — a patch never moves governance, so a shared row keeps its
+/// absent pair.
+///
+/// Returns the number of affected rows: `1` on success, `0` on a stale
+/// revision, a lost terminal-status exclusion, or ownership drift.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] on database failure, including a `canonical_name`
+/// colliding with the same owner's live row (the caller's constraint mapping
+/// turns that unique-index violation into its own refusal).
+pub async fn cas_patch_actor_knowledge_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key_block_id: &str,
+    character_id: &str,
+    expected_revision: i64,
+    canonical_name: &str,
+    body_json: Option<&str>,
+    governance: Option<&KnowledgeGovernance>,
+) -> Result<u64, LocalDbError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let new_revision = expected_revision + 1;
+    // SAFETY: the governance columns are unknown to the committed `.sqlx`
+    // offline cache, so the statement is runtime-checked with a fixed column
+    // list (never interpolated input) — the same convention this module uses
+    // for `kb_key_blocks` column changes.
+    let mut sets = "canonical_name = ?, body_json = ?, revision = ?, updated_at = ?".to_string();
+    if governance.is_some() {
+        sets.push_str(", holder_entry_id = ?, disclosure = ?");
+    }
+    let sql = format!(
+        "UPDATE kb_key_blocks SET {sets}
+           WHERE key_block_id = ?
+             AND COALESCE(revision, 0) = ?
+             AND status NOT IN ('deleted', 'merged', 'deprecated')
+             AND (
+               (owner_kind = 'character' AND character_id = ?)
+               OR (
+                 owner_kind = 'actor_world_binding'
+                 AND actor_world_binding_id IN (
+                   SELECT binding_id FROM actor_world_bindings
+                   WHERE character_id = ? AND status = 'active'
+                 )
+               )
+             )"
+    );
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(canonical_name)
+        .bind(body_json)
+        .bind(new_revision)
+        .bind(&now);
+    if let Some(governance) = governance {
+        query = query
+            .bind(governance.holder_entry_id.as_deref())
+            .bind(governance.disclosure.as_deref());
+    }
+    let updated = query
+        .bind(key_block_id)
+        .bind(expected_revision)
+        .bind(character_id)
+        .bind(character_id)
+        .execute(&mut **tx)
+        .await?
+        .rows_affected();
+    Ok(updated)
+}
+
+/// CAS-delete a Character- or binding-owned `kb_key_blocks` row inside the
+/// caller's transaction.
+///
+/// Same predicate as [`cas_patch_actor_knowledge_in_tx`]: the revision, the
+/// terminal-status exclusion and the ownership conjunct are re-asserted inside
+/// the write transaction, so a concurrent soft-delete, revision bump or
+/// ownership drift deletes nothing.
+///
+/// Returns the number of affected rows: `1` on success, `0` on every predicate
+/// miss.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] on database failure.
+pub async fn delete_actor_knowledge_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key_block_id: &str,
+    character_id: &str,
+    expected_revision: i64,
+) -> Result<u64, LocalDbError> {
+    // Statement text kept byte-identical to its previous home so the committed
+    // `.sqlx` offline cache entry still resolves (whitespace is part of the
+    // query hash).
+    let deleted = sqlx::query!(
+        r#"DELETE FROM kb_key_blocks
+                   WHERE key_block_id = ?
+                     AND COALESCE(revision, 0) = ?
+                     AND status NOT IN ('deleted', 'merged', 'deprecated')
+                     AND (
+                       (owner_kind = 'character' AND character_id = ?)
+                       OR (
+                         owner_kind = 'actor_world_binding'
+                         AND actor_world_binding_id IN (
+                           SELECT binding_id FROM actor_world_bindings
+                           WHERE character_id = ? AND status = 'active'
+                         )
+                       )
+                     )"#,
+        key_block_id,
+        expected_revision,
+        character_id,
+        character_id
+    )
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    Ok(deleted)
+}
+
 // ── V1.147 W3: TX-aware state read/write primitives (state-delta lane) ─────
 // The Accept lane's state-delta path reads/writes `kb_key_blocks` through
 // these primitives so ALL SQL against the table lives in `nexus-local-db`

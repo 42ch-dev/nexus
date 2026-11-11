@@ -7,7 +7,8 @@ use nexus_knowledge::world_kb::knowledge_entry::{
     KnowledgeEntryBody, KnowledgeEntryRecord, DISCLOSURE_OWNER_PRIVATE,
 };
 use nexus_local_db::kb_store::{
-    cas_update_key_block_modules_in_tx, AuthoredAudience, SqliteKbStore,
+    cas_patch_actor_knowledge_in_tx, cas_update_key_block_modules_in_tx,
+    delete_actor_knowledge_in_tx, AuthoredAudience, SqliteKbStore,
 };
 use nexus_local_db::{
     author_actor_knowledge_entry, character_holder_entry_id, create_character_with_initial_binding,
@@ -1460,4 +1461,270 @@ async fn v1191_audience_cas_binding_owned_governance_bumps_the_owning_character(
         0,
         "a binding has no revision of its own and never moves a World revision"
     );
+}
+
+// ── v1.233 P1 T4: the two kb_store primitives own the statements ──────────
+// The assertions below call the primitives directly so a loosened predicate
+// (revision CAS, terminal-status exclusion, ownership conjunct, governance
+// guard) or a statement that escaped the caller's transaction fails here
+// instead of only at a public-API level.
+
+async fn kb_row_count(pool: &SqlitePool, entry_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
+        .bind(entry_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn t4_primitive_stale_revision_misses_with_zero_rows() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "fact", Some(r#"{"summary":"hi"}"#)).await;
+    let before = row_snapshot(&pool, &entry).await;
+
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let updated = cas_patch_actor_knowledge_in_tx(
+        &mut tx,
+        &entry,
+        &chr,
+        9,
+        "renamed",
+        Some(r#"{"summary":"stale"}"#),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated, 0, "a stale revision must match no row");
+    tx.commit().await.unwrap();
+
+    assert_eq!(
+        row_snapshot(&pool, &entry).await,
+        before,
+        "byte-identical row"
+    );
+}
+
+#[tokio::test]
+async fn t4_primitive_ownership_drift_misses() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, binding) = seed_character(&pool).await;
+    let other_chr = seed_character_in(&pool, WORLD, "Rival").await;
+
+    // A Character-owned row written under another Character's id.
+    let owned = insert_character_ke(&pool, &chr, "mine", None).await;
+    let before = row_snapshot(&pool, &owned).await;
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let cross = cas_patch_actor_knowledge_in_tx(
+        &mut tx,
+        &owned,
+        &other_chr,
+        0,
+        "stolen",
+        Some(r#"{"summary":"stolen"}"#),
+        None,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(cross, 0, "a cross-owner patch matches no row");
+    assert_eq!(row_snapshot(&pool, &owned).await, before);
+
+    // A binding-owned row whose binding is no longer active.
+    let bound = create_binding_owned_ke(&pool, &chr, &binding, "bound-fact").await;
+    sqlx::query("UPDATE actor_world_bindings SET status = 'inactive' WHERE binding_id = ?")
+        .bind(&binding)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let before = row_snapshot(&pool, &bound).await;
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let inactive = cas_patch_actor_knowledge_in_tx(
+        &mut tx,
+        &bound,
+        &chr,
+        0,
+        "renamed",
+        Some(r#"{"summary":"nope"}"#),
+        None,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(inactive, 0, "an inactive binding owns nothing");
+    assert_eq!(row_snapshot(&pool, &bound).await, before);
+}
+
+#[tokio::test]
+async fn t4_primitive_terminal_status_misses() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "fact", None).await;
+    sqlx::query("UPDATE kb_key_blocks SET status = 'merged' WHERE key_block_id = ?")
+        .bind(&entry)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let before = row_snapshot(&pool, &entry).await;
+
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let updated = cas_patch_actor_knowledge_in_tx(
+        &mut tx,
+        &entry,
+        &chr,
+        0,
+        "renamed",
+        Some(r#"{"summary":"zombie"}"#),
+        None,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    assert_eq!(updated, 0, "a terminal row must not be patched");
+    assert_eq!(row_snapshot(&pool, &entry).await, before);
+}
+
+#[tokio::test]
+async fn t4_primitive_patch_without_governance_keeps_existing_pair() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "fact", Some(r#"{"summary":"hi"}"#)).await;
+    author_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        KEEP_CONTENT,
+        AuthoredAudience::Character { character_id: &chr },
+    )
+    .await
+    .unwrap();
+    let pair = stored_pair(&pool, &entry).await;
+    assert_eq!(pair.1.as_deref(), Some(DISCLOSURE_OWNER_PRIVATE));
+
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let updated = cas_patch_actor_knowledge_in_tx(
+        &mut tx,
+        &entry,
+        &chr,
+        pair.2,
+        "fact",
+        Some(r#"{"summary":"patched"}"#),
+        None,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    assert_eq!(updated, 1);
+    assert_eq!(
+        stored_pair(&pool, &entry).await,
+        (pair.0, pair.1, pair.2 + 1),
+        "a governance-free patch keeps the stored pair and bumps the revision"
+    );
+}
+
+#[tokio::test]
+async fn t4_primitive_delete_honours_caller_transaction() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+
+    // A protected referent refuses through the guard and leaves the row.
+    let guarded = insert_character_ke(&pool, &chr, "guarded", None).await;
+    sqlx::query(
+        "INSERT INTO kb_source_anchors (key_block_id, anchor_ordinal, source_anchor_json) VALUES (?, 0, '{}')",
+    )
+    .bind(&guarded)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let err = delete_actor_knowledge_entry(&pool, OWNER, &chr, &guarded, 0)
+        .await
+        .unwrap_err();
+    assert_conflict(err, ActorContractConflict::KnowledgeEntryInUse);
+    assert_eq!(
+        kb_row_count(&pool, &guarded).await,
+        1,
+        "refusal removed nothing"
+    );
+
+    // An unguarded row is deleted inside the caller's transaction: the caller
+    // rolls it back and the row survives.
+    let entry = insert_character_ke(&pool, &chr, "doomed", None).await;
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let deleted = delete_actor_knowledge_in_tx(&mut tx, &entry, &chr, 0)
+        .await
+        .unwrap();
+    assert_eq!(deleted, 1);
+    tx.rollback().await.unwrap();
+    assert_eq!(
+        kb_row_count(&pool, &entry).await,
+        1,
+        "the DELETE never commits outside the caller's transaction"
+    );
+}
+
+#[tokio::test]
+async fn t4_primitive_patch_row_count_is_one_or_zero() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "fact", None).await;
+
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let first = cas_patch_actor_knowledge_in_tx(
+        &mut tx,
+        &entry,
+        &chr,
+        0,
+        "fact",
+        Some(r#"{"summary":"one"}"#),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(first, 1);
+    tx.commit().await.unwrap();
+    let applied = row_snapshot(&pool, &entry).await;
+
+    // Replaying the applied revision is a miss, never a second silent write.
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let replay = cas_patch_actor_knowledge_in_tx(
+        &mut tx,
+        &entry,
+        &chr,
+        0,
+        "fact",
+        Some(r#"{"summary":"two"}"#),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(replay, 0, "0 rows is the only non-applied outcome");
+    tx.commit().await.unwrap();
+    assert_eq!(row_snapshot(&pool, &entry).await, applied);
+
+    // The public surface turns that zero into the revision conflict.
+    let err = update_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        ActorKnowledgePatch {
+            canonical_name: None,
+            summary: FieldPatch::Set("three"),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_conflict(err, ActorContractConflict::KnowledgeRevisionConflict);
 }
