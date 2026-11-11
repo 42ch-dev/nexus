@@ -461,7 +461,8 @@ async fn handle_findings_set_status(
 /// `Creator not selected`, whose suggestion (`creator use`) only switches the
 /// active slug and cannot repair `meta.json.local_root`. Naming the root, and
 /// the command that writes it, is the only actionable answer.
-const MISSING_CREATIVE_ROOT_HINT: &str = "The selected workspace registers no usable creative root. \
+const MISSING_CREATIVE_ROOT_HINT: &str =
+    "The selected workspace registers no usable creative root. \
      Register one with `nexus42 creator workspace create <slug> --creative-root <path>`, or update \
      the `local_root` in that workspace's `meta.json` to an existing directory.";
 
