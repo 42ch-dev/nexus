@@ -143,21 +143,23 @@ impl FsWorkArtifactPort {
             .workspace_root
             .canonicalize()
             .unwrap_or_else(|_| write.workspace_root.to_path_buf());
-        let allowed = canonical_root.join("Works").join(write.work_ref);
         let works_dir = canonical_root.join("Works");
+        let allowed = works_dir.join(write.work_ref);
+        // The lexical ancestors a first write may legitimately stop at: with
+        // no `Works/<work_ref>` yet, the nearest existing ancestor is the
+        // workspace root or its `Works` directory itself.
+        let works_path = write.workspace_root.join("Works");
         let mut probe = target.as_path();
         loop {
             match probe.canonicalize() {
                 Ok(canonical) => {
-                    // Inside the Work subtree, or the still-missing subtree's
-                    // existing ancestors (the workspace root / its `Works`),
-                    // whose canonical form is exactly those paths — so a
-                    // symlink anywhere below them would have been the first
-                    // existing ancestor instead.
-                    let contained = canonical.starts_with(&allowed)
-                        || canonical == canonical_root
-                        || canonical == works_dir;
-                    if !contained {
+                    // Inside the Work subtree; or the probe *is* one of those
+                    // two ancestors, not merely a lower symlink that resolves
+                    // to one of them (e.g. `Works/demo/Leak -> …/Works`).
+                    let first_write_ancestor = (probe == write.workspace_root
+                        && canonical == canonical_root)
+                        || (probe == works_path && canonical == works_dir);
+                    if !canonical.starts_with(&allowed) && !first_write_ancestor {
                         return Err(escape(&target));
                     }
                     break;
@@ -491,6 +493,62 @@ mod tests {
             None,
             "the lock is released on the error path"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn commit_refuses_symlinks_aliasing_the_first_write_ancestors() {
+        // A lower symlink resolving to the workspace root or its `Works`
+        // directory must not borrow the first-write ancestor exception and
+        // create bytes outside the addressed Work.
+        for link_to_works_dir in [false, true] {
+            let fixture = fixture(true).await;
+            std::fs::create_dir_all(fixture.workspace.path().join("Works/demo")).expect("work dir");
+            let link_target = if link_to_works_dir {
+                fixture.workspace.path().join("Works")
+            } else {
+                fixture.workspace.path().to_path_buf()
+            };
+            std::os::unix::fs::symlink(
+                &link_target,
+                fixture.workspace.path().join("Works/demo/Leak"),
+            )
+            .expect("symlink");
+
+            let error = fixture
+                .port
+                .commit(write(&fixture, Path::new("Leak/notes/x.md"), "body"))
+                .await
+                .expect_err("an ancestor alias refuses");
+
+            match error {
+                NexusApiError::Forbidden { resource } => {
+                    assert!(
+                        resource.contains("escapes the Works/demo/ boundary"),
+                        "{resource}"
+                    );
+                }
+                other => panic!("expected Forbidden, got {other:?}"),
+            }
+            assert_eq!(
+                entry_names(&fixture.workspace.path().join("Works")),
+                vec!["demo".to_string()],
+                "no sibling Work entry was created through the alias"
+            );
+            assert!(
+                !fixture.workspace.path().join("notes").exists(),
+                "no workspace-root byte was created through the alias"
+            );
+            assert!(
+                !fixture.workspace.path().join("Works/demo/notes").exists(),
+                "no Work byte was created below the refused alias"
+            );
+            assert_eq!(
+                holder(&fixture.pool).await,
+                None,
+                "the lock is released on the refusal path"
+            );
+        }
     }
 
     #[cfg(unix)]
