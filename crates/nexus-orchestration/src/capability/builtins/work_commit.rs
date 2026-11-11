@@ -26,14 +26,6 @@ pub fn require_executor(
         .ok_or(CapabilityError::WorkerUnavailable)
 }
 
-/// The workspace root owning a builtin's `Works/` directory.
-///
-/// A builtin's `works_root` (default `"Works"`) is the `Works/` directory
-/// itself, so its owning workspace root is the parent path.
-pub fn workspace_root_of(works_root: &Path) -> &Path {
-    works_root.parent().unwrap_or_else(|| Path::new(""))
-}
-
 /// The absolute `Works/` directory a scaffold run writes into, plus the
 /// workspace root the port rebuilds it under.
 ///

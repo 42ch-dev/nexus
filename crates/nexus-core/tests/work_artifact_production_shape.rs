@@ -1,9 +1,9 @@
 //! Production-shape proof for the Work artifact seam (v235 P2 fix round).
 //!
 //! The production registry arms build every scaffold with the DEFAULT `Works`
-//! root — a *relative* path — so `workspace_root_of` hands the executor an
-//! empty workspace root, and a first scaffold starts with `works.work_ref`
-//! NULL. Both facts are exercised here against the REAL port
+//! root — a *relative* path — so the scaffold resolves it against the
+//! executor's own workspace root, and a first scaffold starts with
+//! `works.work_ref` NULL. Both facts are exercised here against the REAL port
 //! (`WorkspaceCommitExecutor` → `FsWorkArtifactPort`), not a recording double:
 //! the bytes must land under the executor's canonical workspace root while the
 //! scaffold itself only knows `Works`.

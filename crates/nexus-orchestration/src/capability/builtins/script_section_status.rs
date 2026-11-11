@@ -34,7 +34,7 @@ use super::game_bible_section_status::{
     extract_frontmatter_field, replace_frontmatter_field, validate_transition,
 };
 use super::novel_scaffold_sanitize::validate_work_ref;
-use super::work_commit::{commit_work_bytes, require_executor, workspace_root_of};
+use super::work_commit::{commit_work_bytes, require_executor, resolve_works_dirs};
 use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -122,13 +122,15 @@ impl Capability for ScriptSectionStatusUpdate {
         // Validate work_ref against path traversal
         let work_ref = validate_work_ref(&inp.work_ref)?;
 
-        // Resolve works_root
-        let root = inp
+        // Resolve the one absolute `Works/` tree this run reads and writes.
+        let works_root = inp
             .works_root
             .as_deref()
             .map_or_else(|| self.works_root.clone(), PathBuf::from);
+        let executor = require_executor(self.executor.as_ref())?;
+        let (workspace_root, resolved_works) = resolve_works_dirs(executor, &works_root)?;
 
-        let work_dir = root.join(&work_ref);
+        let work_dir = resolved_works.join(&work_ref);
         let scripts_dir = work_dir.join("Scripts");
         let section_full_path = scripts_dir.join(&inp.section_path);
 
@@ -206,10 +208,9 @@ impl Capability for ScriptSectionStatusUpdate {
                     inp.section_path
                 ))
             })?;
-        let executor = require_executor(self.executor.as_ref())?;
         commit_work_bytes(
             executor,
-            workspace_root_of(&root),
+            &workspace_root,
             &work_ref,
             rel_child,
             &updated_content,
@@ -248,8 +249,8 @@ mod tests {
     use serde_json::json;
     use tempfile::TempDir;
 
-    fn test_executor() -> Arc<dyn WorkspaceExecutor> {
-        RecordingExecutor::new()
+    fn test_executor(works_root: &std::path::Path) -> Arc<dyn WorkspaceExecutor> {
+        RecordingExecutor::at(works_root.parent().expect("works root has a parent"))
     }
 
     #[test]
@@ -272,7 +273,7 @@ mod tests {
         .expect("write");
 
         let cap = ScriptSectionStatusUpdate::with_works_root(works_root.clone())
-            .with_workspace_executor(Some(test_executor()));
+            .with_workspace_executor(Some(test_executor(&works_root)));
         let output = cap
             .run(json!({
                 "work_ref": "my-screenplay",
@@ -312,7 +313,7 @@ mod tests {
         .expect("write");
 
         let cap = ScriptSectionStatusUpdate::with_works_root(works_root.clone())
-            .with_workspace_executor(Some(test_executor()));
+            .with_workspace_executor(Some(test_executor(&works_root)));
         let err = cap
             .run(json!({
                 "work_ref": "my-screenplay",
@@ -333,7 +334,7 @@ mod tests {
         std::fs::create_dir_all(&scripts_dir).expect("mkdir");
 
         let cap = ScriptSectionStatusUpdate::with_works_root(works_root.clone())
-            .with_workspace_executor(Some(test_executor()));
+            .with_workspace_executor(Some(test_executor(&works_root)));
         let err = cap
             .run(json!({
                 "work_ref": "my-screenplay",

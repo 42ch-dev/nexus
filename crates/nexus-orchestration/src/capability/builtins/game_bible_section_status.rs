@@ -30,7 +30,7 @@
 //! - `section_path`: the full path to the updated file
 
 use super::novel_scaffold_sanitize::validate_work_ref;
-use super::work_commit::{commit_work_bytes, require_executor, workspace_root_of};
+use super::work_commit::{commit_work_bytes, require_executor, resolve_works_dirs};
 use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -288,13 +288,15 @@ impl Capability for GameBibleSectionStatusUpdate {
         // Validate work_ref against path traversal
         let work_ref = validate_work_ref(&inp.work_ref)?;
 
-        // Resolve works_root
-        let root = inp
+        // Resolve the one absolute `Works/` tree this run reads and writes.
+        let works_root = inp
             .works_root
             .as_deref()
             .map_or_else(|| self.works_root.clone(), PathBuf::from);
+        let executor = require_executor(self.executor.as_ref())?;
+        let (workspace_root, resolved_works) = resolve_works_dirs(executor, &works_root)?;
 
-        let work_dir = root.join(&work_ref);
+        let work_dir = resolved_works.join(&work_ref);
         let design_dir = work_dir.join("Design");
         let section_full_path = design_dir.join(&inp.section_path);
 
@@ -356,7 +358,7 @@ impl Capability for GameBibleSectionStatusUpdate {
         let executor = require_executor(self.executor.as_ref())?;
         commit_work_bytes(
             executor,
-            workspace_root_of(&root),
+            &workspace_root,
             &work_ref,
             rel_child,
             &updated_content,
@@ -422,8 +424,8 @@ mod tests {
     use super::super::work_commit::test_support::RecordingExecutor;
     use super::*;
 
-    fn test_executor() -> Arc<dyn WorkspaceExecutor> {
-        RecordingExecutor::new()
+    fn test_executor(works_root: &std::path::Path) -> Arc<dyn WorkspaceExecutor> {
+        RecordingExecutor::at(works_root.parent().expect("works root has a parent"))
     }
 
     // ── Transition validation ──
@@ -574,7 +576,7 @@ mod tests {
         .expect("write");
 
         let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
-            .with_workspace_executor(Some(test_executor()));
+            .with_workspace_executor(Some(test_executor(&works_root)));
 
         let input = serde_json::json!({
             "work_ref": "my-design",
@@ -608,7 +610,7 @@ mod tests {
         .expect("write");
 
         let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
-            .with_workspace_executor(Some(test_executor()));
+            .with_workspace_executor(Some(test_executor(&works_root)));
 
         let input = serde_json::json!({
             "work_ref": "my-design",
@@ -640,7 +642,7 @@ mod tests {
         .expect("write");
 
         let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
-            .with_workspace_executor(Some(test_executor()));
+            .with_workspace_executor(Some(test_executor(&works_root)));
 
         let input = serde_json::json!({
             "work_ref": "my-design",
@@ -666,7 +668,7 @@ mod tests {
         std::fs::create_dir_all(work_dir.join("Design")).expect("mkdir");
 
         let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
-            .with_workspace_executor(Some(test_executor()));
+            .with_workspace_executor(Some(test_executor(&works_root)));
 
         let input = serde_json::json!({
             "work_ref": "my-design",
@@ -696,7 +698,7 @@ mod tests {
         .expect("write");
 
         let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
-            .with_workspace_executor(Some(test_executor()));
+            .with_workspace_executor(Some(test_executor(&works_root)));
 
         let input = serde_json::json!({
             "work_ref": "my-design",
@@ -731,7 +733,7 @@ mod tests {
         .expect("write");
 
         let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
-            .with_workspace_executor(Some(test_executor()));
+            .with_workspace_executor(Some(test_executor(&works_root)));
 
         let input = serde_json::json!({
             "work_ref": "my-design",
@@ -760,7 +762,10 @@ mod tests {
 
         // The port refuses the write (missing works row).
         let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
-            .with_workspace_executor(Some(RecordingExecutor::refusing("Design/overview.md")));
+            .with_workspace_executor(Some(RecordingExecutor::refusing_at(
+                tmp.path(),
+                "Design/overview.md",
+            )));
 
         let err = cap
             .run(serde_json::json!({
@@ -807,5 +812,54 @@ mod tests {
             matches!(err, CapabilityError::WorkerUnavailable),
             "expected WorkerUnavailable, got: {err}"
         );
+    }
+
+    /// QC1-001 / QC2-F001 for this writer: with the DEFAULT relative `Works`
+    /// root the read, the canonical guard and the port commit must all address
+    /// the executor's workspace. The process cwd (the crate checkout) is not
+    /// that workspace, so a cwd-relative resolution fails to find the section.
+    #[tokio::test]
+    async fn run_resolves_the_section_through_the_executor_root_not_the_cwd() {
+        use tempfile::TempDir;
+
+        let workspace = TempDir::new().expect("workspace");
+        let design_dir = workspace
+            .path()
+            .join("Works")
+            .join("cwd-design")
+            .join("Design");
+        std::fs::create_dir_all(&design_dir).expect("mkdir");
+        let section_path = design_dir.join("overview.md");
+        std::fs::write(
+            &section_path,
+            "---\nsection_status: draft\n---\n# Overview\n",
+        )
+        .expect("write");
+
+        let executor = RecordingExecutor::at(workspace.path());
+        let cap =
+            GameBibleSectionStatusUpdate::new().with_workspace_executor(Some(executor.clone()));
+
+        cap.run(serde_json::json!({
+            "work_ref": "cwd-design",
+            "section_path": "overview.md",
+            "new_status": "reviewed",
+        }))
+        .await
+        .expect("the writer must resolve `Works` from the executor");
+
+        assert!(
+            std::fs::read_to_string(&section_path)
+                .expect("section read back")
+                .contains("section_status: reviewed"),
+            "the canonical section file carries the update"
+        );
+        let commits = executor.commits();
+        assert_eq!(
+            commits[0].workspace_root,
+            workspace.path().to_string_lossy(),
+            "the port input must name the executor's workspace root"
+        );
+        assert_eq!(commits[0].rel_child, "Design/overview.md");
     }
 }
