@@ -299,7 +299,7 @@ impl Capability for EssayProjectScaffold {
         // row, so the ref must already be there when the first byte lands — a
         // first scaffold still has it NULL. Only the ref is claimed here; the
         // profile lands with the finished scaffold, and a failure restores it.
-        let claim = claim_work_ref(
+        let mut claim = claim_work_ref(
             self.pool.as_ref(),
             &inp.creator_id,
             &inp.work_id,

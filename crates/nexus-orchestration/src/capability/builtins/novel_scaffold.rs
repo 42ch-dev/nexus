@@ -406,7 +406,7 @@ impl Capability for NovelProjectScaffold {
             .as_ref()
             .is_none_or(|fields| fields.iter().any(|field| field == "work_ref"))
             .then_some(inp.work_ref.as_str());
-        let claim = claim_work_ref(
+        let mut claim = claim_work_ref(
             self.pool.as_ref(),
             &inp.creator_id,
             &inp.work_id,

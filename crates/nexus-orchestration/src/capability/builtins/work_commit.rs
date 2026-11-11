@@ -36,25 +36,26 @@ pub fn require_executor(
 /// # Errors
 /// [`CapabilityError::WorkerUnavailable`] when the executor carries no
 /// workspace root, so no caller falls back to a relative path.
+/// [`CapabilityError::InputInvalid`] when `works_root` resolves anywhere but
+/// this executor's own `Works/` tree (external or nested), refused here before
+/// the claim or any directory/byte mutation.
 pub fn resolve_works_dirs(
     executor: &dyn WorkspaceExecutor,
     works_root: &Path,
 ) -> Result<(PathBuf, PathBuf), CapabilityError> {
-    let works_dir = executor.workspace_root()?.join(works_root);
-    // The port rebuilds its target as `<workspace_root>/Works/<ref>/<child>`,
-    // so a root with any other last component would make the reads and the
-    // commits address two different trees. Alternatives that ARE a `Works`
-    // directory (any absolute tree) stay valid; anything else is refused here,
-    // before the claim or any directory/byte mutation.
-    if works_dir.file_name() != Some(std::ffi::OsStr::new("Works")) {
+    let workspace_root = executor.workspace_root()?;
+    let works_dir = workspace_root.join("Works");
+    // The port always rebuilds `<workspace_root>/Works/<ref>/<child>` and the
+    // real executor refuses any other parent only at commit — after the claim
+    // and the mkdir. Confining the root here keeps a foreign or nested tree
+    // from being mutated at all.
+    if workspace_root.join(works_root) != works_dir {
         return Err(CapabilityError::InputInvalid(format!(
-            "works_root must name a Works directory: {}",
-            works_dir.display()
+            "works_root must resolve to {}: {}",
+            works_dir.display(),
+            works_root.display()
         )));
     }
-    let Some(workspace_root) = works_dir.parent().map(Path::to_path_buf) else {
-        return Err(CapabilityError::WorkerUnavailable);
-    };
     Ok((workspace_root, works_dir))
 }
 
@@ -91,16 +92,21 @@ impl WorkRefClaim {
     /// Put the prior `work_ref` back after an unsuccessful scaffold.
     ///
     /// The update matches only while the row still holds the ref this run
-    /// claimed, so a concurrent writer's ref is never clobbered.
+    /// claimed, so a concurrent writer's ref is never clobbered. The guard
+    /// keeps its recovery state until the update has landed, so a caller
+    /// cancelled while this is pending still reverts through [`Drop`].
     ///
     /// # Errors
     /// [`CapabilityError::Internal`] when the compensating update fails; the
-    /// caller reports the original scaffold error and logs this one.
-    pub async fn restore(mut self) -> Result<(), CapabilityError> {
-        let (Some(pool), Some(prior)) = (self.pool.take(), self.prior.take()) else {
+    /// caller reports the original scaffold error and logs this one, and the
+    /// still-armed guard retries the revert on drop.
+    pub async fn restore(&mut self) -> Result<(), CapabilityError> {
+        let (Some(pool), Some(prior)) = (self.pool.as_ref(), self.prior.as_ref()) else {
             return Ok(());
         };
-        restore_prior(&pool, &prior).await
+        restore_prior(pool, prior).await?;
+        self.prior = None;
+        Ok(())
     }
 }
 
@@ -512,6 +518,26 @@ mod tests {
         .expect("read works row")
     }
 
+    /// One pooled connection, no acquire timeout: holding it keeps any
+    /// competing statement pending until the test releases it.
+    async fn single_connection_pool(dir: &Path, work_ref: Option<&str>) -> SqlitePool {
+        let guarded = nexus_local_db::writer_protocol::init_engine_pool(
+            &dir.join("state.db"),
+            nexus_local_db::BOOTSTRAP_CREATOR_ID,
+            nexus_local_db::GuardedPoolOptions {
+                max_connections: 1,
+                acquire_timeout: None,
+            },
+        )
+        .await
+        .expect("engine pool");
+        let pool = guarded.clone_pool();
+        works::create_work(&pool, &work_record(work_ref, None))
+            .await
+            .expect("works row");
+        pool
+    }
+
     #[tokio::test]
     async fn a_refused_first_commit_restores_the_prior_ref_and_profile() {
         let tmp = tempfile::tempdir().expect("tmpdir");
@@ -672,9 +698,9 @@ mod tests {
         assert!(!works_root.exists(), "no directory may be created");
         assert!(probe.commits().is_empty(), "no byte may be committed");
         assert_eq!(
-            stored_identity(&pool).await.0,
-            Some("keep-ref".to_string()),
-            "the refusal lands before the claim"
+            stored_identity(&pool).await,
+            (Some("keep-ref".to_string()), Some("essay".to_string())),
+            "the refusal lands before the claim, so metadata is untouched"
         );
     }
 
@@ -726,10 +752,98 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_cancelled_restore_still_restores_the_prior_ref() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let pool = single_connection_pool(tmp.path(), Some("prior-ref")).await;
+        let mut claim = claim_work_ref(Some(&pool), CREATOR, WORK_ID, Some("claimed-ref"))
+            .await
+            .expect("claim the ref");
+        assert_eq!(
+            stored_identity(&pool).await.0.as_deref(),
+            Some("claimed-ref")
+        );
+
+        // Holding the only pooled connection keeps the compensating UPDATE
+        // pending, so the restore below is cancelled mid-await.
+        let held = pool.acquire().await.expect("occupy the only connection");
+        let started = std::sync::Arc::new(tokio::sync::Notify::new());
+        let signal = std::sync::Arc::clone(&started);
+        let restore = tokio::spawn(async move {
+            signal.notify_one();
+            claim.restore().await
+        });
+        started.notified().await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        restore.abort();
+        assert!(restore.await.is_err(), "the restore was cancelled");
+        drop(held);
+
+        // The guard restores on its own task; give it turns to land.
+        let mut restored = false;
+        for _ in 0..200 {
+            if stored_identity(&pool).await.0.as_deref() == Some("prior-ref") {
+                restored = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(
+            restored,
+            "cancelling a pending restore must still revert through the guard"
+        );
+    }
+
+    /// An alternate `Works` tree is refused by the resolver, before the claim
+    /// or any directory/byte mutation.
+    async fn refuses_works_root(workspace: &Path, works_root: PathBuf) {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let pool = pool_with_work(dir.path(), Some("keep-ref"), Some("essay")).await;
+        let executor = RecordingExecutor::at(workspace.to_path_buf());
+        let probe = std::sync::Arc::clone(&executor);
+        let cap = EssayProjectScaffold::new_with_root(pool.clone(), works_root.clone())
+            .with_workspace_executor(Some(executor));
+
+        let err = cap
+            .run(json!({
+                "creator_id": CREATOR,
+                "work_id": WORK_ID,
+                "work_ref": "other-ref",
+                "title": "Foreign Root Essay",
+            }))
+            .await
+            .expect_err("an unconfined works_root must be refused");
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected the works_root refusal, got: {err}"
+        );
+        assert!(!works_root.exists(), "no directory may be created");
+        assert!(
+            !workspace.join("Works").exists(),
+            "the executor's own tree must stay untouched"
+        );
+        assert!(probe.commits().is_empty(), "no byte may be committed");
+        assert_eq!(
+            stored_identity(&pool).await,
+            (Some("keep-ref".to_string()), Some("essay".to_string())),
+            "the refusal lands before the claim, so metadata is untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn external_and_nested_works_roots_are_refused_before_mutation() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let workspace = tmp.path().join("ws");
+        std::fs::create_dir_all(&workspace).expect("workspace dir");
+
+        refuses_works_root(&workspace, tmp.path().join("other").join("Works")).await;
+        refuses_works_root(&workspace, workspace.join("nested").join("Works")).await;
+    }
+
+    #[tokio::test]
     async fn restore_does_not_clobber_a_concurrent_writers_ref() {
         let tmp = tempfile::tempdir().expect("tmpdir");
         let pool = pool_with_work(tmp.path(), Some("prior-ref"), None).await;
-        let claim = claim_work_ref(Some(&pool), CREATOR, WORK_ID, Some("claimed-ref"))
+        let mut claim = claim_work_ref(Some(&pool), CREATOR, WORK_ID, Some("claimed-ref"))
             .await
             .expect("claim the ref");
         assert_eq!(
