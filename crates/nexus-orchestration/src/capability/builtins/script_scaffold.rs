@@ -331,6 +331,19 @@ impl Capability for ScriptProjectScaffold {
         let logs_review_dir = logs_dir.join("review");
 
         let executor = require_executor(self.executor.as_ref())?;
+
+        // The Work artifact port resolves `Works/<work_ref>` through the works
+        // row, so the ref must already be there when the first byte lands — a
+        // first scaffold still has it NULL.
+        if let Some(pool) = &self.pool {
+            sqlx::query("UPDATE works SET work_profile = 'script', work_ref = ? WHERE work_id = ?")
+                .bind(&work_ref)
+                .bind(&inp.work_id)
+                .execute(pool)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
+        }
+
         let mut tx = ScaffoldTransaction::new();
 
         // Create directory structure (idempotent — only tracks newly created dirs)
@@ -393,16 +406,6 @@ impl Capability for ScriptProjectScaffold {
             &characters_content,
         )
         .await?;
-
-        // PATCH works row: set work_profile and work_ref
-        if let Some(ref pool) = self.pool {
-            sqlx::query("UPDATE works SET work_profile = 'script', work_ref = ? WHERE work_id = ?")
-                .bind(&work_ref)
-                .bind(&inp.work_id)
-                .execute(pool)
-                .await
-                .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
-        }
 
         // All FS + DB writes succeeded — commit the transaction guard
         tx.commit();

@@ -228,6 +228,11 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 [features]
 default = ["cli"]
 cli = [
+  # v235 P2 row 8: the Work artifact port (`Works/<ref>/AGENTS.md`) is
+  # core-execution owned, so the CLI links that library edge. It grants no
+  # engine owner, Host, scheduler or WASM; the direct-writer open still starts
+  # nothing (v1.235 work-artifact IR, ADR #485 §7.8).
+  "nexus-core/execution",
   "dep:nexus-orchestration",
   "dep:nexus-moment-context-assembly",
   "dep:nexus-creator-memory",

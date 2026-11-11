@@ -295,6 +295,18 @@ impl Capability for EssayProjectScaffold {
         let work_id_for_fs = inp.work_id.clone();
         let executor = require_executor(self.executor.as_ref())?;
 
+        // The Work artifact port resolves `Works/<work_ref>` through the works
+        // row, so the ref must already be there when the first byte lands — a
+        // first scaffold still has it NULL.
+        if let Some(pool) = &self.pool {
+            sqlx::query("UPDATE works SET work_profile = 'essay', work_ref = ? WHERE work_id = ?")
+                .bind(&work_ref)
+                .bind(&inp.work_id)
+                .execute(pool)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
+        }
+
         // `ScaffoldTransaction` is inherently synchronous (Drop-based
         // rollback cannot be async); the file bytes go through the injected
         // executor, so only rollback bookkeeping stays local. If the
@@ -358,16 +370,6 @@ impl Capability for EssayProjectScaffold {
             &draft_content,
         )
         .await?;
-
-        // PATCH works row: set work_profile and work_ref
-        if let Some(ref pool) = self.pool {
-            sqlx::query("UPDATE works SET work_profile = 'essay', work_ref = ? WHERE work_id = ?")
-                .bind(&work_ref)
-                .bind(&inp.work_id)
-                .execute(pool)
-                .await
-                .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
-        }
 
         // All FS + DB writes succeeded — commit the transaction guard
         tx.commit();

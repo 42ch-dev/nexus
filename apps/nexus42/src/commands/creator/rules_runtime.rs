@@ -9,12 +9,12 @@
 //! - `rules reset [<work_id>]` — restore the default `AGENTS.md` scaffold
 //!   (overlay §4).
 //!
-//! The file-mutation logic lives in
+//! The read/modify logic lives in
 //! [`nexus_orchestration::rules_layers`](../../../../../nexus_orchestration/rules_layers/index.html)
-//! so it is hermetically testable without a daemon. This module is the
-//! thin CLI orchestration layer that resolves IDs and workspace paths,
-//! reads finding/Work data from the typed core, and invokes the pure
-//! helpers.
+//! so it is hermetically testable without a daemon; its write half commits
+//! through the Work artifact port. This module is the thin CLI orchestration
+//! layer that resolves IDs and workspace paths, reads finding/Work data from
+//! the typed core, and hands the helpers that port.
 //!
 //! Spec refs:
 //! - [novel-writing/quality-loop.md §9.3](../../../../../docs/specs/novel-writing/quality-loop.md) (rules runtime)
@@ -33,8 +33,9 @@ use nexus_core::{CoreService, ListFindingsQuery, Principal};
 ///
 /// Every arm runs on the typed core seam: the finding family
 /// ([`CoreService::get_finding`], `list_findings`, `update_finding`,
-/// `prune_findings`) for the data, and the existing guarded local library
-/// ([`nexus_orchestration::rules_layers`]) for the `AGENTS.md` write.
+/// `prune_findings`) for the data, and the `AGENTS.md` logic in
+/// [`nexus_orchestration::rules_layers`] whose write half commits through the
+/// Work artifact port ([`CoreService::work_artifact_executor`]).
 ///
 /// # Errors
 ///
@@ -92,9 +93,10 @@ pub async fn handle_findings(config: &CliConfig, command: FindingsCommand) -> Re
 
 /// Handle `creator works rules …` (V1.48 P2).
 ///
-/// The Work read comes from the typed core; the `AGENTS.md` reset itself stays
-/// the guarded local library call it always was. The outcome returns the report
-/// and the writer is released by [`finish_direct`] before any line is printed.
+/// The Work read comes from the typed core; the `AGENTS.md` reset itself
+/// commits through the Work artifact port ([`CoreService::work_artifact_executor`]).
+/// The outcome returns the report and the writer is released by
+/// [`finish_direct`] before any line is printed.
 ///
 /// # Errors
 ///
@@ -179,15 +181,22 @@ async fn handle_findings_accept(
     let ws_dir = operational_workspace_dir_or_error()?;
     let agents_md_path = nexus_home_layout::work_agents_md_path(&ws_dir, work_ref);
 
-    // 5. Append (idempotent on finding_id).
+    // 5. Append (idempotent on finding_id) through the Work artifact port, so
+    //    the bytes land under the Work lock and the shared durability path.
     let timestamp = chrono::Utc::now().to_rfc3339();
+    let executor = core
+        .work_artifact_executor()
+        .await
+        .map_err(map_core_error)?;
     let outcome = nexus_orchestration::rules_layers::append_rule_suggestion(
-        &agents_md_path,
+        executor.as_ref(),
+        &ws_dir,
         work_ref,
         finding_id,
         rule_text,
         &timestamp,
     )
+    .await
     .map_err(|e| {
         CliError::Other(format!(
             "Failed to append to {}: {e}",
@@ -597,10 +606,16 @@ async fn handle_rules_reset(
         }
     }
 
-    // ── Perform the reset. ─────────────────────────────────────────────
-    nexus_orchestration::rules_layers::reset_agents_md(&agents_md_path, work_ref).map_err(|e| {
-        CliError::Other(format!("Failed to reset {}: {e}", agents_md_path.display()))
-    })?;
+    // ── Perform the reset through the Work artifact port. ──────────────
+    let executor = core
+        .work_artifact_executor()
+        .await
+        .map_err(map_core_error)?;
+    nexus_orchestration::rules_layers::reset_agents_md(executor.as_ref(), &ws_dir, work_ref)
+        .await
+        .map_err(|e| {
+            CliError::Other(format!("Failed to reset {}: {e}", agents_md_path.display()))
+        })?;
 
     Ok(Some(if json {
         serde_json::to_string_pretty(&serde_json::json!({

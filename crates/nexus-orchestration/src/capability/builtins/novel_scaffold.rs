@@ -397,6 +397,19 @@ impl Capability for NovelProjectScaffold {
         let workspace_root = workspace_root_of(&self.works_root);
         let executor = require_executor(self.executor.as_ref())?;
 
+        // The Work artifact port resolves `Works/<work_ref>` through the works
+        // row, so the ref must already be there when the first byte lands — a
+        // first scaffold still has it NULL. The T4 patch below stays inside the
+        // chapters/world transaction and re-states the same value.
+        if let Some(pool) = &self.pool {
+            sqlx::query("UPDATE works SET work_ref = ? WHERE work_id = ?")
+                .bind(&inp.work_ref)
+                .bind(&inp.work_id)
+                .execute(pool)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("claim work_ref: {e}")))?;
+        }
+
         // ── T2a: root directory ────────────────────────────────────────
         // F2 (C-002, C-2, W-3): all subsequent FS writes register with
         // `txn`. On any `?` propagation before `txn.commit()`, the Drop

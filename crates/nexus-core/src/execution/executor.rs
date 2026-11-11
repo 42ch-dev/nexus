@@ -20,6 +20,8 @@ use nexus_orchestration::capability::{CapabilityError, WorkspaceExecutor};
 use super::session::{SessionError, SessionId, WorkspaceSessionManager};
 use super::work_artifact::{FsWorkArtifactPort, WorkArtifactPort, WorkArtifactWrite};
 use crate::error::CoreError as NexusApiError;
+use crate::error::CoreResult;
+use crate::service::CoreService;
 
 /// Production workspace executor bound to one canonical workspace root.
 pub struct WorkspaceCommitExecutor {
@@ -51,6 +53,47 @@ impl WorkspaceCommitExecutor {
     pub fn with_work_artifact_home(mut self, nexus_home: PathBuf) -> Self {
         self.work_artifact_home = Some(nexus_home);
         self
+    }
+}
+
+impl CoreService {
+    /// The Work artifact executor for THIS core's own workspace.
+    ///
+    /// A direct-writer open (the CLI) has no execution owner, so the hosted
+    /// bundle's executor is not reachable from it. This accessor returns the
+    /// ONE handle such a caller needs, built from the same pool and the same
+    /// canonical selection the hosted bundle resolves, so a CLI `Works/<ref>/`
+    /// write commits through the port instead of a local writer.
+    ///
+    /// `WorkspaceSessionManager::new` — not `new_recoverable`: the artifact
+    /// commit only reads the shared pool, and the recoverable manager would
+    /// take the exclusive workspace-authority lease (a rival authority).
+    ///
+    /// # Errors
+    ///
+    /// [`NexusApiError::AuthRequired`] when the on-disk selection no longer
+    /// matches this open, [`NexusApiError::Uninitialized`] when the selected
+    /// workspace registered no creative root, plus the read and representability
+    /// refusals of [`crate::works::canonical_selected_workspace_root`] /
+    /// [`crate::works::lossless_root_str`].
+    pub async fn work_artifact_executor(&self) -> CoreResult<Arc<dyn WorkspaceExecutor>> {
+        let principal = self.active_principal().await?;
+        let canonical_root = crate::works::canonical_selected_workspace_root(
+            &self.inner.nexus_home,
+            principal.creator_id(),
+            principal.workspace_slug(),
+        )?
+        .ok_or(NexusApiError::Uninitialized)?;
+        let canonical_root_str = crate::works::lossless_root_str(&canonical_root)?.to_owned();
+        Ok(Arc::new(
+            WorkspaceCommitExecutor::new(
+                Arc::new(WorkspaceSessionManager::new(Arc::new(
+                    self.inner.pool.clone(),
+                ))),
+                canonical_root_str,
+            )
+            .with_work_artifact_home(self.inner.nexus_home.clone()),
+        ))
     }
 }
 
@@ -165,12 +208,23 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
                 "work artifact commit not wired".into(),
             ));
         };
+        // A builtin's default `works_root` is the workspace-relative `Works`,
+        // so its owning root arrives empty. Resolve any relative/empty input
+        // against the ONE canonical root this executor was built for, instead
+        // of handing a relative path to the boundary check (which compares a
+        // canonical absolute probe against it and refuses every write).
+        let input_root = Path::new(&input.workspace_root);
+        let workspace_root = if input_root.is_absolute() {
+            std::borrow::Cow::Borrowed(input_root)
+        } else {
+            std::borrow::Cow::Owned(Path::new(&self.canonical_workspace_root).join(input_root))
+        };
         // Same per-dispatch construction the hot path performs: one port over
         // the shared pool, no second writer and no new public surface.
         let pool = self.session_manager.pool();
         FsWorkArtifactPort::new((*pool).clone(), nexus_home.clone())
             .commit(WorkArtifactWrite {
-                workspace_root: Path::new(&input.workspace_root),
+                workspace_root: workspace_root.as_ref(),
                 work_ref: &input.work_ref,
                 rel_child: Path::new(&input.rel_child),
                 content: &input.content,
