@@ -24,10 +24,28 @@ pub fn cli_holder(caller_info: &str) -> String {
     format!("cli:{caller_info}:{}", uuid::Uuid::new_v4())
 }
 
+/// Holder prefix of a daemon auto-chain schedule: `daemon:schedule:`.
+pub const SCHEDULE_HOLDER_PREFIX: &str = "daemon:schedule:";
+
 /// Build a daemon-format holder string: `daemon:schedule:<schedule_id>`.
 #[must_use]
 pub fn schedule_holder(schedule_id: &str) -> String {
-    format!("daemon:schedule:{schedule_id}")
+    format!("{SCHEDULE_HOLDER_PREFIX}{schedule_id}")
+}
+
+/// Read the Work's current runtime-lock holder, if any.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn current_holder(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+) -> Result<Option<String>, LocalDbError> {
+    Ok(get_work(pool, creator_id, work_id)
+        .await?
+        .and_then(|work| work.runtime_lock_holder))
 }
 
 /// Result of a lock acquisition attempt.
@@ -133,7 +151,8 @@ async fn elect_runtime_lock(
     // is part of the predicate because the daemon reuses one schedule holder
     // string, so a takeover that refreshed only the timestamp would otherwise
     // leave a rival's stale observation matching.
-    let sql = "UPDATE works SET runtime_lock_holder = ?, runtime_lock_acquired_at = ?, updated_at = ? \
+    let sql =
+        "UPDATE works SET runtime_lock_holder = ?, runtime_lock_acquired_at = ?, updated_at = ? \
                WHERE work_id = ? AND creator_id = ? \
                  AND ((runtime_lock_holder IS NULL AND runtime_lock_acquired_at IS NULL) \
                    OR (runtime_lock_holder IS ? AND runtime_lock_acquired_at IS ?))";
@@ -640,9 +659,10 @@ mod tests {
         let first = elect_runtime_lock(&pool, "ctr_test", work_id, &holder, stale_holder, stale_at)
             .await
             .unwrap();
-        let second = elect_runtime_lock(&pool, "ctr_test", work_id, &holder, stale_holder, stale_at)
-            .await
-            .unwrap();
+        let second =
+            elect_runtime_lock(&pool, "ctr_test", work_id, &holder, stale_holder, stale_at)
+                .await
+                .unwrap();
         assert_eq!(
             usize::from(first) + usize::from(second),
             1,

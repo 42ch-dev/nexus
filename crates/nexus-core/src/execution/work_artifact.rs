@@ -42,14 +42,18 @@ pub(crate) enum WorkPath<'a> {
 /// Classify a raw tool path against the `Works/<work_ref>/` shape.
 ///
 /// Decided on the raw string, before any I/O: the first component must be
-/// exactly `Works` (case-sensitive), and the artifact remainder must be
-/// non-empty and `..`-free. A lexical prefix check alone would accept
-/// `Works/<ref>/../x.md`, so classification itself rejects `..`.
+/// `Works`, and the artifact remainder must be non-empty and `..`-free. A
+/// lexical prefix check alone would accept `Works/<ref>/../x.md`, so
+/// classification itself rejects `..`.
+///
+/// The first component matches case-insensitively on purpose: on a
+/// case-insensitive filesystem `works/…` names the same tree, so it is routed
+/// through this port (and its boundary check) instead of a caller's raw write.
 #[must_use]
 pub(crate) fn classify_work_path(path: &str) -> WorkPath<'_> {
     let mut components = Path::new(path).components();
     match components.next() {
-        Some(Component::Normal(first)) if first == "Works" => {}
+        Some(Component::Normal(first)) if first.eq_ignore_ascii_case("Works") => {}
         _ => return WorkPath::NonWork,
     }
     let Some(second) = components.next() else {
@@ -97,12 +101,15 @@ pub(crate) struct WorkArtifactWrite<'a> {
 pub(crate) trait WorkArtifactPort {
     /// Commit one artifact write under the per-Work runtime lock.
     ///
+    /// An existing `daemon:schedule:<id>` holder (a schedule-driven run owns
+    /// the Work from enqueue to terminal) is written under, not re-acquired.
+    ///
     /// # Errors
     ///
     /// Returns [`NexusApiError::Forbidden`] for a missing active creator, an
-    /// unknown `work_ref`, a held lock (`work_locked:…`, propagated unmapped)
-    /// or a resolved path escaping the `Works/<work_ref>/` boundary, and
-    /// [`NexusApiError::Internal`] for a lookup, directory or write failure.
+    /// unknown `work_ref`, any other held lock (`work_locked:…`, propagated
+    /// unmapped) or a resolved path escaping the `Works/<work_ref>/` boundary,
+    /// and [`NexusApiError::Internal`] for a lookup, directory or write failure.
     async fn commit(&self, write: WorkArtifactWrite<'_>) -> Result<(), NexusApiError>;
 }
 
@@ -113,9 +120,57 @@ pub(crate) struct FsWorkArtifactPort {
     nexus_home: PathBuf,
 }
 
+/// Boundary re-check for one artifact target; runs on the blocking pool.
+///
+/// Mirrors the guard's canonical walk-up: the nearest existing ancestor must
+/// resolve inside `Works/<work_ref>/`, so a symlink anywhere on the way out is
+/// refused before any byte lands. Same racy-correct TOCTOU model as
+/// `resolve_guarded_path`.
+fn check_works_boundary(
+    workspace_root: &Path,
+    work_ref: &str,
+    target: &Path,
+) -> Result<(), NexusApiError> {
+    let escape = || NexusApiError::Forbidden {
+        resource: format!(
+            "file: path '{}' escapes the Works/{work_ref}/ boundary",
+            target.display()
+        ),
+    };
+    let canonical_root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let works_dir = canonical_root.join("Works");
+    let allowed = works_dir.join(work_ref);
+    // The lexical ancestors a first write may legitimately stop at: with no
+    // `Works/<work_ref>` yet, the nearest existing ancestor is the workspace
+    // root or its `Works` directory itself.
+    let works_path = workspace_root.join("Works");
+    let mut probe = target;
+    loop {
+        match probe.canonicalize() {
+            Ok(canonical) => {
+                // Inside the Work subtree; or the probe *is* one of those two
+                // ancestors, not merely a lower symlink that resolves to one of
+                // them (e.g. `Works/demo/Leak -> …/Works`).
+                let first_write_ancestor = (probe == workspace_root && canonical == canonical_root)
+                    || (probe == works_path && canonical == works_dir);
+                if !canonical.starts_with(&allowed) && !first_write_ancestor {
+                    return Err(escape());
+                }
+                return Ok(());
+            }
+            Err(_) => match probe.parent() {
+                Some(parent) => probe = parent,
+                None => return Err(escape()),
+            },
+        }
+    }
+}
+
 impl FsWorkArtifactPort {
     /// Build the adapter for one dispatch.
-    pub(crate) fn new(pool: SqlitePool, nexus_home: PathBuf) -> Self {
+    pub(crate) const fn new(pool: SqlitePool, nexus_home: PathBuf) -> Self {
         Self { pool, nexus_home }
     }
 
@@ -135,41 +190,18 @@ impl FsWorkArtifactPort {
             ),
         };
 
-        // D8 boundary re-check, mirroring the guard's canonical walk-up: the
-        // nearest existing ancestor must resolve inside `Works/<work_ref>/`, so
-        // a symlink anywhere on the way out is refused before any byte lands.
-        // Same racy-correct TOCTOU model as `resolve_guarded_path`.
-        let canonical_root = write
-            .workspace_root
-            .canonicalize()
-            .unwrap_or_else(|_| write.workspace_root.to_path_buf());
-        let works_dir = canonical_root.join("Works");
-        let allowed = works_dir.join(write.work_ref);
-        // The lexical ancestors a first write may legitimately stop at: with
-        // no `Works/<work_ref>` yet, the nearest existing ancestor is the
-        // workspace root or its `Works` directory itself.
-        let works_path = write.workspace_root.join("Works");
-        let mut probe = target.as_path();
-        loop {
-            match probe.canonicalize() {
-                Ok(canonical) => {
-                    // Inside the Work subtree; or the probe *is* one of those
-                    // two ancestors, not merely a lower symlink that resolves
-                    // to one of them (e.g. `Works/demo/Leak -> …/Works`).
-                    let first_write_ancestor = (probe == write.workspace_root
-                        && canonical == canonical_root)
-                        || (probe == works_path && canonical == works_dir);
-                    if !canonical.starts_with(&allowed) && !first_write_ancestor {
-                        return Err(escape(&target));
-                    }
-                    break;
-                }
-                Err(_) => match probe.parent() {
-                    Some(parent) => probe = parent,
-                    None => return Err(escape(&target)),
-                },
-            }
-        }
+        // D8 boundary re-check: the walk is blocking `stat`/`canonicalize` I/O,
+        // so it runs on the blocking pool, never on an async worker thread.
+        let workspace_root = write.workspace_root.to_path_buf();
+        let work_ref = write.work_ref.to_string();
+        let probe_target = target.clone();
+        tokio::task::spawn_blocking(move || {
+            check_works_boundary(&workspace_root, &work_ref, &probe_target)
+        })
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("PATH_GUARD_PANIC: path guard task panicked: {e}"),
+        })??;
 
         let Some(parent) = target.parent() else {
             return Err(escape(&target));
@@ -203,8 +235,13 @@ impl WorkArtifactPort for FsWorkArtifactPort {
                         .to_string(),
             });
         };
-        let workspace_slug = read_active_workspace_slug(&self.nexus_home, &creator_id)
-            .unwrap_or_else(|| "default".to_string());
+        let Some(workspace_slug) = read_active_workspace_slug(&self.nexus_home, &creator_id) else {
+            return Err(NexusApiError::Forbidden {
+                resource:
+                    "tool_execution: active workspace required to write Works/<work_ref>/ artifacts"
+                        .to_string(),
+            });
+        };
         let work_id = works::resolve_work_id_by_ref_or_id(
             &self.pool,
             &creator_id,
@@ -221,6 +258,22 @@ impl WorkArtifactPort for FsWorkArtifactPort {
                 write.work_ref
             ),
         })?;
+
+        // Inspector BUG-01: a schedule-driven run holds `daemon:schedule:<id>`
+        // from enqueue until the schedule is terminal, so acquiring here would
+        // always refuse the Work's own writes. That holder is the Work's single
+        // writer for its lifetime: write under it and leave it untouched.
+        let current_holder =
+            nexus_local_db::runtime_lock::current_holder(&self.pool, &creator_id, &work_id)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    category: format!("DATABASE_ERROR: runtime_lock holder read failed: {e}"),
+                })?;
+        if current_holder.as_deref().is_some_and(|holder| {
+            holder.starts_with(nexus_local_db::runtime_lock::SCHEDULE_HOLDER_PREFIX)
+        }) {
+            return self.write_locked(&write).await;
+        }
 
         // Not reentrant: every acquire mints a fresh holder uuid, so any
         // existing fresh holder — including this process's own in-flight
@@ -356,13 +409,20 @@ mod tests {
         assert!(matches!(classify_work_path("Works"), WorkPath::NonWork));
         assert!(matches!(classify_work_path("Works/"), WorkPath::NonWork));
         assert!(matches!(
-            classify_work_path("works/demo/x.md"),
-            WorkPath::NonWork
-        ));
-        assert!(matches!(
             classify_work_path("/Works/demo/x.md"),
             WorkPath::NonWork
         ));
+        // Case-variant `Works` is routed through the port, never a raw write.
+        match classify_work_path("works/demo/x.md") {
+            WorkPath::Artifact {
+                work_ref,
+                rel_child,
+            } => {
+                assert_eq!(work_ref, "demo");
+                assert_eq!(rel_child, Path::new("x.md"));
+            }
+            other => panic!("expected an artifact for a case-variant Works, got {other:?}"),
+        }
         assert!(matches!(
             classify_work_path("Works/demo"),
             WorkPath::WorkRoot { work_ref: "demo" }
@@ -464,6 +524,43 @@ mod tests {
             holder(&fixture.pool).await.as_deref(),
             Some("cli:http:foreign"),
             "the foreign holder is untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn commit_writes_under_a_schedule_holder_and_preserves_it() {
+        let fixture = fixture(true).await;
+        let schedule_holder = nexus_local_db::runtime_lock::schedule_holder("SCH20260611120000");
+        nexus_local_db::acquire_runtime_lock(
+            &fixture.pool,
+            CREATOR,
+            WORK_ID,
+            &schedule_holder,
+            nexus_local_db::DEFAULT_RUNTIME_LOCK_TTL_SECS,
+            true,
+        )
+        .await
+        .expect("schedule lock");
+
+        fixture
+            .port
+            .commit(write(
+                &fixture,
+                Path::new("Stories/ch1.md"),
+                "# Chapter 1\n",
+            ))
+            .await
+            .expect("a schedule-driven run writes under its own holder");
+
+        assert_eq!(
+            std::fs::read_to_string(fixture.workspace.path().join("Works/demo/Stories/ch1.md"))
+                .expect("read"),
+            "# Chapter 1\n"
+        );
+        assert_eq!(
+            holder(&fixture.pool).await.as_deref(),
+            Some(schedule_holder.as_str()),
+            "the schedule holder is neither re-acquired nor released"
         );
     }
 
