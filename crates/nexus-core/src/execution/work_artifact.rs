@@ -54,10 +54,10 @@ pub(crate) enum WorkPath<'a> {
 /// so classification itself rejects `..`.
 ///
 /// A case-variant first component is refused rather than routed: this port's
-/// target is built with the literal `Works`, and the read path does not
-/// classify at all. Routing `works/…` would write a *different* tree on a
-/// case-sensitive filesystem while reaching the same tree — bypassing this
-/// port's lock and durability path — on a case-insensitive one.
+/// target is built with the literal `Works`, and the read path refuses the
+/// same spelling, so routing `works/…` would write a *different* tree on a
+/// case-sensitive filesystem — bypassing this port's lock and durability path
+/// — while the same path stayed unreadable.
 #[must_use]
 pub(crate) fn classify_work_path(path: &str) -> WorkPath<'_> {
     let mut components = Path::new(path).components();
@@ -448,7 +448,7 @@ mod tests {
             WorkPath::NonWork
         ));
         // A case-variant `Works` is refused, never routed: the port writes the
-        // literal `Works` tree and the read path does not classify.
+        // literal `Works` tree and the read path refuses the same spelling.
         assert!(matches!(
             classify_work_path("works/demo/x.md"),
             WorkPath::CaseVariantWorks
@@ -531,58 +531,60 @@ mod tests {
     async fn commit_refuses_an_unusable_recorded_workspace_selection() {
         // A recorded value that names no partition is the user's explicit
         // (broken) selection: the port refuses rather than acting on the
-        // default partition they never chose.
-        for active_slug in ["", ".."] {
-            let fixture = fixture_selecting_workspace(true, Some(active_slug)).await;
+        // default partition they never chose. An empty record is *not* this
+        // case — it is the "never chose" state (`Unselected`).
+        let fixture = fixture_selecting_workspace(true, Some("..")).await;
 
-            let error = fixture
-                .port
-                .commit(write(&fixture, Path::new("Stories/ch1.md"), "body"))
-                .await
-                .expect_err("an unusable recorded selection refuses");
+        let error = fixture
+            .port
+            .commit(write(&fixture, Path::new("Stories/ch1.md"), "body"))
+            .await
+            .expect_err("an unusable recorded selection refuses");
 
-            match error {
-                NexusApiError::Forbidden { resource } => {
-                    assert!(resource.contains("active workspace required"), "{resource}");
-                }
-                other => panic!("expected Forbidden for {active_slug:?}, got {other:?}"),
+        match error {
+            NexusApiError::Forbidden { resource } => {
+                assert!(resource.contains("active workspace required"), "{resource}");
             }
-            assert!(
-                !fixture.workspace.path().join("Works").exists(),
-                "no byte or directory was created"
-            );
-            assert_eq!(
-                holder(&fixture.pool).await,
-                None,
-                "no lock was taken for the refused Work"
-            );
+            other => panic!("expected Forbidden, got {other:?}"),
         }
+        assert!(
+            !fixture.workspace.path().join("Works").exists(),
+            "no byte or directory was created"
+        );
+        assert_eq!(
+            holder(&fixture.pool).await,
+            None,
+            "no lock was taken for the refused Work"
+        );
     }
 
     #[tokio::test]
     async fn commit_writes_without_a_recorded_workspace_selection() {
-        // A creator registered without `workspace use` records no slug. The
-        // rest of the process resolves that same config to the default
-        // partition (`workspace_slug_for_creator`), so the port must agree
-        // instead of refusing the creator's own Work.
-        let fixture = fixture_selecting_workspace(true, None).await;
+        // A creator registered without `workspace use` records no slug, and a
+        // blank recorded value is the same "never chose" state. The rest of
+        // the process resolves both to the default partition
+        // (`workspace_slug_for_creator`), so the port must agree instead of
+        // refusing the creator's own Work.
+        for active_slug in [None, Some("")] {
+            let fixture = fixture_selecting_workspace(true, active_slug).await;
 
-        fixture
-            .port
-            .commit(write(
-                &fixture,
-                Path::new("Stories/ch1.md"),
-                "# Chapter 1\n",
-            ))
-            .await
-            .expect("no recorded selection falls back to the default partition");
+            fixture
+                .port
+                .commit(write(
+                    &fixture,
+                    Path::new("Stories/ch1.md"),
+                    "# Chapter 1\n",
+                ))
+                .await
+                .expect("no recorded selection falls back to the default partition");
 
-        assert_eq!(
-            std::fs::read_to_string(fixture.workspace.path().join("Works/demo/Stories/ch1.md"))
-                .expect("read"),
-            "# Chapter 1\n"
-        );
-        assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
+            assert_eq!(
+                std::fs::read_to_string(fixture.workspace.path().join("Works/demo/Stories/ch1.md"))
+                    .expect("read"),
+                "# Chapter 1\n"
+            );
+            assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
+        }
     }
 
     #[tokio::test]

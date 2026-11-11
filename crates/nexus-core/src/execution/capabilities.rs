@@ -802,6 +802,14 @@ async fn execute_context_assemble(
 
 // ─── fs/* Baseline handlers (V1.33, unchanged behavior) ───────────────────
 
+/// Refusal shared by the read and write halves of `fs/*` for a case-variant
+/// `Works` spelling: neither routes it, so the two cannot disagree.
+fn case_variant_works_refusal(path_str: &str) -> NexusApiError {
+    NexusApiError::Forbidden {
+        resource: format!("file: path '{path_str}' must spell the Work root 'Works' byte-exactly"),
+    }
+}
+
 /// Execute `fs/read_text_file` tool.
 ///
 /// V1.86 T5 (R-V156P0-M004): all blocking `std::fs` operations run on the
@@ -832,11 +840,27 @@ async fn execute_read_file(
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), true)
         .await
         .map_err(|e| match e {
+            // `must_exist = true` cannot canonicalize an absent target: that is
+            // not an escape, so it keeps a not-found answer.
+            NexusApiError::InvalidInput { ref field, .. }
+                if field == "chapter_path_unresolvable" =>
+            {
+                NexusApiError::NotFound {
+                    resource: format!("file: path '{path_str}' does not exist"),
+                }
+            }
             NexusApiError::InvalidInput { .. } => NexusApiError::Forbidden {
                 resource: format!("file: path '{path_str}' is outside the workspace root"),
             },
             other => other,
         })?;
+
+    // ADR #485 §4.4: the Work artifact port refuses a case-variant `Works`
+    // spelling, so the read half refuses it too. Classified only after the
+    // guard succeeds, so a missing file never becomes a spelling refusal.
+    if matches!(classify_work_path(&path_str), WorkPath::CaseVariantWorks) {
+        return Err(case_variant_works_refusal(&path_str));
+    }
 
     let content = tokio::task::spawn_blocking({
         let resolved = resolved.clone();
@@ -935,11 +959,7 @@ async fn execute_write_file(
             });
         }
         WorkPath::CaseVariantWorks => {
-            return Err(NexusApiError::Forbidden {
-                resource: format!(
-                    "file: path '{path_str}' must spell the Work root 'Works' byte-exactly; the read path does not classify, so a case variant cannot be written consistently"
-                ),
-            });
+            return Err(case_variant_works_refusal(&path_str));
         }
         WorkPath::NonWork => {
             let write_result = tokio::task::spawn_blocking(move || {
@@ -4258,6 +4278,26 @@ mod tests {
         }
     }
 
+    fn read_request(path: &str) -> ToolsApi {
+        ToolsApi {
+            caller_kind: None,
+            parameters: serde_json::json!({ "path": path }),
+            request_id: None,
+            session_id: None,
+            tool_name: "fs/read_text_file".to_string(),
+        }
+    }
+
+    fn assert_case_variant_works_refusal(error: NexusApiError, path: &str) {
+        match error {
+            NexusApiError::Forbidden { resource } => assert!(
+                resource.contains("must spell the Work root 'Works' byte-exactly"),
+                "{path}: {resource}"
+            ),
+            other => panic!("expected Forbidden for {path}, got {other:?}"),
+        }
+    }
+
     async fn holder(pool: &SqlitePool) -> Option<String> {
         sqlx::query_scalar("SELECT runtime_lock_holder FROM works WHERE work_id = ?")
             .bind(WORK_ID)
@@ -4395,12 +4435,6 @@ mod tests {
                 format!("Works/{WORK_REF}/../plain.md"),
                 "escapes the Works/demo/ boundary",
             ),
-            // A case variant is not the `Works` tree this port writes, and the
-            // read path does not classify: refuse so write and read agree.
-            (
-                format!("works/{WORK_REF}/Stories/ch1.md"),
-                "must spell the Work root 'Works' byte-exactly",
-            ),
         ] {
             let error = execute_write_file(&write_request(&path, "body"), &fixture.context)
                 .await
@@ -4415,6 +4449,70 @@ mod tests {
             assert_eq!(holder(&fixture.pool).await, None, "no lock was taken");
         }
         assert!(!fixture.workspace.path().join("plain.md").exists());
+    }
+
+    #[tokio::test]
+    async fn fs_case_variant_works_spelling_is_refused_on_write_and_read() {
+        let fixture = fixture(true).await;
+        let case_variant = format!("works/{WORK_REF}/Stories/ch1.md");
+        let exact = format!("Works/{WORK_REF}/Stories/ch1.md");
+        // Seed both spellings so the read refusal is decided by the spelling,
+        // never by the target being absent — the answer stays the same on a
+        // case-sensitive and a case-insensitive volume.
+        std::fs::create_dir_all(
+            fixture
+                .workspace
+                .path()
+                .join(format!("works/{WORK_REF}/Stories")),
+        )
+        .expect("case-variant work dir");
+        std::fs::create_dir_all(
+            fixture
+                .workspace
+                .path()
+                .join(format!("Works/{WORK_REF}/Stories")),
+        )
+        .expect("exact work dir");
+        std::fs::write(fixture.workspace.path().join(&case_variant), "chapter body")
+            .expect("seed case variant");
+        std::fs::write(fixture.workspace.path().join(&exact), "chapter body")
+            .expect("seed exact spelling");
+
+        let write_error =
+            execute_write_file(&write_request(&case_variant, "rewritten"), &fixture.context)
+                .await
+                .expect_err("a case-variant write refuses");
+        assert_case_variant_works_refusal(write_error, &case_variant);
+        assert_eq!(holder(&fixture.pool).await, None, "no lock was taken");
+        assert_eq!(
+            std::fs::read_to_string(fixture.workspace.path().join(&case_variant)).expect("read"),
+            "chapter body",
+            "the refused write left the existing artifact untouched"
+        );
+
+        let read_error = execute_read_file(&read_request(&case_variant), &fixture.context)
+            .await
+            .expect_err("a case-variant read refuses");
+        assert_case_variant_works_refusal(read_error, &case_variant);
+
+        // A genuinely missing target keeps the guard's not-found answer: the
+        // spelling is only judged once the path resolves.
+        let missing = format!("works/{WORK_REF}/Stories/missing.md");
+        let missing_error = execute_read_file(&read_request(&missing), &fixture.context)
+            .await
+            .expect_err("a missing read is not found");
+        match missing_error {
+            NexusApiError::NotFound { resource } => {
+                assert!(resource.contains("does not exist"), "{missing}: {resource}");
+            }
+            other => panic!("expected NotFound for {missing}, got {other:?}"),
+        }
+
+        // The exact spelling stays readable.
+        let read = execute_read_file(&read_request(&exact), &fixture.context)
+            .await
+            .expect("the exact spelling reads");
+        assert_eq!(read, serde_json::json!({ "content": "chapter body" }));
     }
 
     #[tokio::test]

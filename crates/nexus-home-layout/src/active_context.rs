@@ -210,22 +210,6 @@ pub fn read_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option
     )
 }
 
-/// Read the workspace slug explicitly selected for `creator_id`, if any.
-///
-/// Unlike [`read_active_workspace_slug`], nothing is assumed: `None` means no
-/// slug is recorded for the creator (or `config.toml` cannot be loaded), so a
-/// caller that requires an explicit selection refuses instead of acting on a
-/// partition the user never chose.
-#[must_use]
-pub fn try_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option<String> {
-    CliConfigSnapshot::load(nexus_home)
-        .ok()?
-        .active_workspace_slug_by_creator
-        .get(creator_id)
-        .filter(|slug| !slug.is_empty())
-        .cloned()
-}
-
 /// How `config.toml` records the workspace slug for one creator.
 ///
 /// [`Self::Unselected`] is the "never chose" state: the rest of the process
@@ -235,11 +219,14 @@ pub fn try_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option<
 /// treating both as an explicit selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceSlugSelection {
-    /// No slug recorded for the creator (or no loadable `config.toml`), with
-    /// the default partition that resolution yields.
+    /// No slug recorded for the creator (an absent or empty entry, or no
+    /// loadable `config.toml`), with the default partition that resolution
+    /// yields.
     Unselected(String),
-    /// The value recorded for the creator, verbatim: never defaulted, so the
-    /// caller can judge an empty or unusable selection itself.
+    /// The non-empty value recorded for the creator, verbatim: never
+    /// defaulted, so the caller can judge an unusable selection itself. An
+    /// empty recorded value is [`Self::Unselected`], matching
+    /// [`CliConfigSnapshot::workspace_slug_for_creator`].
     Recorded(String),
 }
 
@@ -250,6 +237,7 @@ pub fn workspace_slug_selection(nexus_home: &Path, creator_id: &str) -> Workspac
     let cfg = CliConfigSnapshot::load(nexus_home).unwrap_or_default();
     cfg.active_workspace_slug_by_creator
         .get(creator_id)
+        .filter(|slug| !slug.is_empty())
         .map_or_else(
             || WorkspaceSlugSelection::Unselected(cfg.workspace_slug_for_creator(creator_id)),
             |slug| WorkspaceSlugSelection::Recorded(slug.clone()),
