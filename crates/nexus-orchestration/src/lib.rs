@@ -16,7 +16,6 @@ pub mod preset_runtime;
 pub mod quality_loop;
 pub mod resume_rules;
 pub mod review_report;
-pub mod rules_history;
 pub mod rules_layers;
 pub mod run_state;
 pub mod schedule;

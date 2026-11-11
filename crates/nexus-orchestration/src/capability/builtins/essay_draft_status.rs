@@ -17,14 +17,17 @@
 //!
 //! # Atomicity
 //!
-//! Writes via temp+rename for atomicity.
+//! Writes commit through the injected Work artifact port (Work lock +
+//! durable atomic write).
 
 use super::novel_scaffold_sanitize::validate_work_ref;
-use crate::capability::{Capability, CapabilityError};
+use super::work_commit::{commit_work_bytes, require_executor, resolve_works_dirs};
+use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tracing::info;
 
 /// Input for `essay.draft_status.finalize`.
@@ -59,6 +62,7 @@ struct FinalizeDraftOutput {
 /// `essay.draft_status.finalize` capability.
 pub struct EssayDraftStatusFinalize {
     works_root: PathBuf,
+    executor: Option<Arc<dyn WorkspaceExecutor>>,
 }
 
 impl EssayDraftStatusFinalize {
@@ -67,7 +71,15 @@ impl EssayDraftStatusFinalize {
     pub fn new() -> Self {
         Self {
             works_root: PathBuf::from("Works"),
+            executor: None,
         }
+    }
+
+    /// Attach the workspace executor that carries the Work artifact port.
+    #[must_use]
+    pub fn with_workspace_executor(mut self, executor: Option<Arc<dyn WorkspaceExecutor>>) -> Self {
+        self.executor = executor;
+        self
     }
 }
 
@@ -104,7 +116,9 @@ impl Capability for EssayDraftStatusFinalize {
         let works_root = inp
             .works_root
             .map_or_else(|| self.works_root.clone(), PathBuf::from);
-        let draft_path = works_root.join(&work_ref).join("Drafts").join("draft.md");
+        let executor = require_executor(self.executor.as_ref())?;
+        let (workspace_root, works_dir) = resolve_works_dirs(executor, &works_root)?;
+        let draft_path = works_dir.join(&work_ref).join("Drafts").join("draft.md");
 
         // Read current draft
         let content = tokio::fs::read_to_string(&draft_path)
@@ -117,18 +131,15 @@ impl Capability for EssayDraftStatusFinalize {
         // Count words in body (excluding frontmatter)
         let word_count = count_body_words(&updated_content);
 
-        // Write atomically via temp+rename
-        let tmp_path = draft_path.with_extension("md.tmp");
-        tokio::fs::write(&tmp_path, &updated_content)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("write tmp draft.md: {e}")))?;
-        tokio::fs::rename(&tmp_path, &draft_path)
-            .await
-            .map_err(|e| {
-                // Clean up temp on rename failure
-                let _ = std::fs::remove_file(&tmp_path);
-                CapabilityError::Internal(format!("rename tmp to draft.md: {e}"))
-            })?;
+        // Commit through the Work artifact port
+        commit_work_bytes(
+            executor,
+            &workspace_root,
+            &work_ref,
+            Path::new("Drafts").join("draft.md").as_path(),
+            &updated_content,
+        )
+        .await?;
 
         info!(
             work_ref = %work_ref,
@@ -273,12 +284,67 @@ fn count_body_words(text: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use super::super::work_commit::test_support::RecordingExecutor;
     use super::*;
 
     #[test]
     fn capability_name() {
         let cap = EssayDraftStatusFinalize::new();
         assert_eq!(cap.name(), "essay.draft_status.finalize");
+    }
+
+    #[tokio::test]
+    async fn run_commits_finalized_draft_through_the_port() {
+        let tmp = tempfile::tempdir().unwrap();
+        let works_root = tmp.path().join("Works");
+        let drafts = works_root.join("my-essay").join("Drafts");
+        std::fs::create_dir_all(&drafts).unwrap();
+        std::fs::write(
+            drafts.join("draft.md"),
+            "---\ntitle: T\nstatus: draft\nword_count: 0\n---\n\none two three",
+        )
+        .unwrap();
+
+        let executor = RecordingExecutor::at(tmp.path());
+        let cap = EssayDraftStatusFinalize::new().with_workspace_executor(Some(executor.clone()));
+        let out = cap
+            .run(serde_json::json!({
+                "work_ref": "my-essay",
+                "works_root": works_root.to_str().unwrap(),
+            }))
+            .await
+            .expect("finalize should succeed");
+
+        assert_eq!(out["word_count"], 3);
+        let commits = executor.commits();
+        assert_eq!(commits.len(), 1, "one commit for Drafts/draft.md");
+        assert_eq!(commits[0].rel_child, "Drafts/draft.md");
+
+        let updated = std::fs::read_to_string(drafts.join("draft.md")).unwrap();
+        assert!(updated.contains("status: finalized"));
+    }
+
+    #[tokio::test]
+    async fn run_refuses_without_workspace_executor() {
+        let tmp = tempfile::tempdir().unwrap();
+        let works_root = tmp.path().join("Works");
+        let drafts = works_root.join("my-essay").join("Drafts");
+        std::fs::create_dir_all(&drafts).unwrap();
+        std::fs::write(drafts.join("draft.md"), "---\nstatus: draft\n---\nbody").unwrap();
+
+        let cap = EssayDraftStatusFinalize::new();
+        let err = cap
+            .run(serde_json::json!({
+                "work_ref": "my-essay",
+                "works_root": works_root.to_str().unwrap(),
+            }))
+            .await
+            .expect_err("a Work byte write without the port must refuse");
+
+        assert!(
+            matches!(err, CapabilityError::WorkerUnavailable),
+            "expected WorkerUnavailable, got: {err}"
+        );
     }
 
     #[test]

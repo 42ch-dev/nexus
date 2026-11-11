@@ -843,6 +843,28 @@ fn classify_and_refuse_work_path(path_str: &str) -> Result<WorkPath<'_>, NexusAp
     }
 }
 
+/// Split a workspace-relative Work artifact path into the port's
+/// `(work_ref, rel_child)` pair.
+///
+/// The three never-routed Work spellings keep their shared refusals, and a
+/// non-Work path is refused here: a manuscript body is a Work artifact by
+/// contract, so it may not fall back to an unguarded write.
+fn work_artifact_parts(path_str: &str) -> Result<(&str, &Path), NexusApiError> {
+    match classify_work_path(path_str) {
+        WorkPath::Artifact {
+            work_ref,
+            rel_child,
+        } => Ok((work_ref, rel_child)),
+        WorkPath::WorkRoot { work_ref } => Err(work_root_refusal(path_str, work_ref)),
+        WorkPath::EscapedWork { work_ref } => Err(escaped_work_refusal(path_str, work_ref)),
+        WorkPath::CaseVariantWorks => Err(case_variant_works_refusal(path_str)),
+        WorkPath::NonWork => Err(NexusApiError::InvalidInput {
+            field: "body_path".into(),
+            reason: "must name a Work artifact below Works/<work_ref>/".into(),
+        }),
+    }
+}
+
 /// Execute `fs/read_text_file` tool.
 ///
 /// V1.86 T5 (R-V156P0-M004): all blocking `std::fs` operations run on the
@@ -1722,10 +1744,10 @@ async fn execute_manuscript_chapter_update(
                 format!("Works/{wr}/Stories/{ch_nn}-{ch_nn}.md")
             });
 
-        // W-002: defense-in-depth path guard — ensure the resolved body path
-        // stays inside the workspace root before any FS op. Mirrors the chapter
-        // PUT handler's resolve_guarded_path behavior.
-        let body_file = resolve_guarded_path_async(
+        // W-002: defense-in-depth path guard — a DB-sourced path still has to
+        // resolve inside the workspace root. The port below re-checks the
+        // narrower `Works/<work_ref>/` boundary itself.
+        resolve_guarded_path_async(
             Path::new(&workspace_root).to_path_buf(),
             canonical_path.clone(),
             false,
@@ -1741,48 +1763,20 @@ async fn execute_manuscript_chapter_update(
             other => other,
         })?;
 
-        if let Some(parent) = body_file.parent() {
-            // C-002: use tokio::fs to avoid blocking the async runtime.
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| NexusApiError::Internal {
-                    category: format!(
-                        "DIR_CREATE_FAILED: {}",
-                        format_args!("failed to create chapter dir: {e}")
-                    ),
-                })?;
-        }
-        // C-002: write to a temp file first, then atomically rename within a
-        // DB transaction to prevent orphaned files on crash between write and
-        // DB commit.
-        let tmp_file = body_file.with_extension("md.tmp");
-        tokio::fs::write(&tmp_file, content)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                category: format!(
-                    "FILE_WRITE_FAILED: {}",
-                    format_args!("failed to write chapter body: {e}")
-                ),
-            })?;
-        // Durability: fsync temp file before the atomic rename.
-        let tmp_handle =
-            tokio::fs::File::open(&tmp_file)
-                .await
-                .map_err(|e| NexusApiError::Internal {
-                    category: format!(
-                        "FILE_SYNC_FAILED: {}",
-                        format_args!("failed to open temp file for fsync: {e}")
-                    ),
-                })?;
-        tmp_handle
-            .sync_all()
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                category: format!(
-                    "FILE_SYNC_FAILED: {}",
-                    format_args!("failed to fsync temp file: {e}")
-                ),
-            })?;
+        // ADR #485 §6.1 P2 row 1: the final body bytes commit through the Work
+        // artifact port (Work lock + durable atomic write). The port resolves
+        // the work row on its own connection, so this call stays OUTSIDE the
+        // update transaction below; a later DB failure rolls back the row
+        // while the bytes stay landed, as before.
+        let (body_work_ref, body_rel_child) = work_artifact_parts(&canonical_path)?;
+        FsWorkArtifactPort::new(context.pool.clone(), context.nexus_home.clone())
+            .commit(WorkArtifactWrite {
+                workspace_root: Path::new(&workspace_root),
+                work_ref: body_work_ref,
+                rel_child: body_rel_child,
+                content,
+            })
+            .await?;
         // W-003: store the relative canonical path in the DB, matching
         // the seed_chapters convention (Works/{work_ref}/Stories/{slug}.md).
         Some(canonical_path)
@@ -1791,33 +1785,9 @@ async fn execute_manuscript_chapter_update(
     };
 
     // Update chapter DB row if body_path or word count changed.
-    // C-002: wrap DB update + file rename in a single transaction so the
-    // DB row is only updated when the final file is in place.
-    if let Some(ref bp) = body_path {
-        // W-003: bp is a relative canonical path; resolve to absolute for FS ops.
-        // W-002: re-apply the path guard before the FS rename so the tx block
-        // cannot be reached with an escaped path even if the earlier guard were
-        // bypassed.
-        let workspace_root = context
-            .workspace_path()
-            .ok_or_else(|| NexusApiError::Internal {
-                category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available"),
-            })?;
-        let abs_body =
-            resolve_guarded_path_async(Path::new(&workspace_root).to_path_buf(), bp.clone(), false)
-                .await
-                .map_err(|e| match e {
-                    NexusApiError::InvalidInput { field, .. }
-                        if field == "chapter_path_forbidden" =>
-                    {
-                        NexusApiError::InvalidInput {
-                            field: "body_path".into(),
-                            reason: "body path outside workspace root".into(),
-                        }
-                    }
-                    other => other,
-                })?;
-        let abs_tmp = abs_body.with_extension("md.tmp");
+    // C-002: the bytes already committed through the port above; the DB update
+    // still runs in its own transaction so a failure rolls the row back.
+    if let Some(bp) = &body_path {
         let word_count = req.parameters["content"]
             .as_str()
             .map_or(0, |c| c.split_whitespace().count());
@@ -1850,55 +1820,6 @@ async fn execute_manuscript_chapter_update(
         .map_err(|e| NexusApiError::Internal {
             category: format!("DATABASE_ERROR: {}", format_args!("chapter update: {e}")),
         })?;
-        // Atomically rename temp → final (after DB update succeeds inside tx).
-        tokio::fs::rename(&abs_tmp, &abs_body).await.map_err(|e| {
-            // Best-effort cleanup: remove temp file on rename failure.
-            let _ = std::fs::remove_file(&abs_tmp);
-            NexusApiError::Internal {
-                category: format!(
-                    "FILE_RENAME_FAILED: {}",
-                    format_args!("failed to finalize chapter file: {e}")
-                ),
-            }
-        })?;
-        // Durability: fsync the final file after the atomic rename so a crash
-        // after rename() returns does not leave the rename unflushed.
-        let final_handle =
-            tokio::fs::File::open(&abs_body)
-                .await
-                .map_err(|e| NexusApiError::Internal {
-                    category: format!(
-                        "FILE_SYNC_FAILED: {}",
-                        format_args!("failed to open final file for fsync: {e}")
-                    ),
-                })?;
-        final_handle
-            .sync_all()
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                category: format!(
-                    "FILE_SYNC_FAILED: {}",
-                    format_args!("failed to fsync final file: {e}")
-                ),
-            })?;
-        // Durability: fsync the parent directory so the renamed entry is
-        // committed to disk (QC3-S3).
-        if let Some(parent) = abs_body.parent() {
-            let dir = tokio::fs::File::open(parent)
-                .await
-                .map_err(|e| NexusApiError::Internal {
-                    category: format!(
-                        "DIR_SYNC_FAILED: {}",
-                        format_args!("failed to open parent dir for fsync: {e}")
-                    ),
-                })?;
-            dir.sync_all().await.map_err(|e| NexusApiError::Internal {
-                category: format!(
-                    "DIR_SYNC_FAILED: {}",
-                    format_args!("failed to fsync parent dir: {e}")
-                ),
-            })?;
-        }
         tx.commit().await.map_err(|e| NexusApiError::Internal {
             category: format!(
                 "DATABASE_ERROR: {}",
@@ -2553,68 +2474,40 @@ async fn execute_manuscript_write(
     let workspace_root_path = Path::new(&workspace_root);
 
     // W-002: defense-in-depth path guard — ensure body_path (DB-sourced) resolves
-    // within the workspace root before any FS op. Uses the same canonicalize +
-    // component-wise prefix-check helper as the chapter PUT handler.
-    let abs_body =
-        resolve_guarded_path_async(workspace_root_path.to_path_buf(), body_path.clone(), false)
-            .await
-            .map_err(|e| match e {
-                NexusApiError::InvalidInput { field, .. } if field == "chapter_path_forbidden" => {
-                    NexusApiError::InvalidInput {
-                        field: "body_path".into(),
-                        reason: "body path outside workspace root".into(),
-                    }
+    // within the workspace root before any FS op. The port below re-checks the
+    // narrower `Works/<work_ref>/` boundary itself.
+    resolve_guarded_path_async(workspace_root_path.to_path_buf(), body_path.clone(), false)
+        .await
+        .map_err(|e| match e {
+            NexusApiError::InvalidInput { field, .. } if field == "chapter_path_forbidden" => {
+                NexusApiError::InvalidInput {
+                    field: "body_path".into(),
+                    reason: "body path outside workspace root".into(),
                 }
-                other => other,
-            })?;
-
-    // Ensure parent directory exists.
-    if let Some(parent) = abs_body.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                category: format!(
-                    "DIR_CREATE_FAILED: {}",
-                    format_args!("failed to create manuscript dir: {e}")
-                ),
-            })?;
-    }
-
-    // Stage content in a temp file (not durable until rename succeeds).
-    let tmp_file = abs_body.with_extension("md.tmp");
-    tokio::fs::write(&tmp_file, content)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            category: format!(
-                "FILE_WRITE_FAILED: {}",
-                format_args!("failed to write manuscript body: {e}")
-            ),
-        })?;
-    // Durability: fsync temp file before the atomic rename.
-    let tmp_handle =
-        tokio::fs::File::open(&tmp_file)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                category: format!(
-                    "FILE_SYNC_FAILED: {}",
-                    format_args!("failed to open temp file for fsync: {e}")
-                ),
-            })?;
-    tmp_handle
-        .sync_all()
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            category: format!(
-                "FILE_SYNC_FAILED: {}",
-                format_args!("failed to fsync temp file: {e}")
-            ),
+            }
+            other => other,
         })?;
 
-    // W-001: wrap the DB word-count update + atomic rename in a single
-    // transaction so the metadata update only commits when the final file is in
-    // place. Mirrors the execute_manuscript_chapter_update C-002 pattern
-    // (UPDATE → rename → commit); a failed rename returns early and the
-    // dropped transaction rolls back the word-count UPDATE.
+    // ADR #485 §6.1 P2 row 2: the final body bytes commit through the Work
+    // artifact port (Work lock + durable atomic write) BEFORE the word-count
+    // row update below. The port resolves the Work row on its own connection,
+    // so it cannot join that transaction: if the update fails, the bytes stay
+    // landed and only the metadata rolls back. That window is accepted — a
+    // retried write re-commits the same bytes and the next successful update
+    // restores the count — and it is why the byte commit comes first: the
+    // reverse order would leave a row describing bytes that never landed.
+    let (body_work_ref, body_rel_child) = work_artifact_parts(&body_path)?;
+    FsWorkArtifactPort::new(context.pool.clone(), context.nexus_home.clone())
+        .commit(WorkArtifactWrite {
+            workspace_root: workspace_root_path,
+            work_ref: body_work_ref,
+            rel_child: body_rel_child,
+            content,
+        })
+        .await?;
+
+    // W-001: the DB word-count update still runs in its own transaction so a
+    // failure rolls the metadata back (the bytes already committed above).
     let word_count = content.split_whitespace().count();
     let now = chrono::Utc::now().to_rfc3339();
     let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
@@ -2648,56 +2541,6 @@ async fn execute_manuscript_write(
             format_args!("manuscript.write word-count update: {e}")
         ),
     })?;
-    // Atomically rename temp → final inside the tx (after the UPDATE succeeds).
-    tokio::fs::rename(&tmp_file, &abs_body).await.map_err(|e| {
-        // Best-effort cleanup: remove temp file on rename failure; the dropped
-        // tx rolls back the word-count UPDATE above.
-        let _ = std::fs::remove_file(&tmp_file);
-        NexusApiError::Internal {
-            category: format!(
-                "FILE_RENAME_FAILED: {}",
-                format_args!("failed to finalize manuscript file: {e}")
-            ),
-        }
-    })?;
-    // Durability: fsync the final file after the atomic rename so a crash
-    // after rename() returns does not leave the rename unflushed.
-    let final_handle =
-        tokio::fs::File::open(&abs_body)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                category: format!(
-                    "FILE_SYNC_FAILED: {}",
-                    format_args!("failed to open final file for fsync: {e}")
-                ),
-            })?;
-    final_handle
-        .sync_all()
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            category: format!(
-                "FILE_SYNC_FAILED: {}",
-                format_args!("failed to fsync final file: {e}")
-            ),
-        })?;
-    // Durability: fsync the parent directory so the renamed entry is committed
-    // to disk (QC3-S3).
-    if let Some(parent) = abs_body.parent() {
-        let dir = tokio::fs::File::open(parent)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                category: format!(
-                    "DIR_SYNC_FAILED: {}",
-                    format_args!("failed to open parent dir for fsync: {e}")
-                ),
-            })?;
-        dir.sync_all().await.map_err(|e| NexusApiError::Internal {
-            category: format!(
-                "DIR_SYNC_FAILED: {}",
-                format_args!("failed to fsync parent dir: {e}")
-            ),
-        })?;
-    }
     tx.commit().await.map_err(|e| NexusApiError::Internal {
         category: format!(
             "DATABASE_ERROR: {}",
@@ -4514,6 +4357,118 @@ mod tests {
             "chapter body",
             "the refused write left the case-variant artifact untouched"
         );
+    }
+
+    fn manuscript_write_request(content: &str, chapter: i32) -> ToolsApi {
+        ToolsApi {
+            caller_kind: None,
+            parameters: serde_json::json!({
+                "work_id": WORK_ID,
+                "chapter": chapter,
+                "content": content,
+            }),
+            request_id: None,
+            session_id: None,
+            tool_name: "nexus.manuscript.write".to_string(),
+        }
+    }
+
+    /// ADR #485 §6.1 P2 row 2: the DB pointer and the file bytes agree.
+    ///
+    /// The word count the row records describes exactly the bytes that landed
+    /// at the `body_path` the same row names.
+    #[tokio::test]
+    async fn manuscript_write_keeps_the_db_pointer_and_the_file_bytes_consistent() {
+        let fixture = fixture(true).await;
+        nexus_local_db::work_chapters::seed_chapters(
+            &fixture.pool,
+            WORK_ID,
+            WORK_REF,
+            1,
+            "2026-06-04T10:00:00Z",
+        )
+        .await
+        .expect("seed chapters");
+
+        let content = "The locket opened on the tide.\n\nAria stepped through.";
+        let result = execute_manuscript_write(
+            &manuscript_write_request(content, 1),
+            &fixture.context,
+            CREATOR,
+        )
+        .await
+        .expect("manuscript write");
+
+        let expected_words = content.split_whitespace().count();
+        assert_eq!(result["word_count"], expected_words);
+
+        let chapter = nexus_local_db::work_chapters::get_chapter(&fixture.pool, WORK_ID, 1, 1)
+            .await
+            .expect("read chapter")
+            .expect("chapter row");
+        let body_path = chapter.body_path.expect("body_path recorded");
+        assert_eq!(
+            body_path,
+            format!("Works/{WORK_REF}/Stories/ch01-ch01.md"),
+            "the recorded pointer is the seeded canonical path"
+        );
+        assert_eq!(
+            chapter.actual_word_count,
+            Some(i32::try_from(expected_words).expect("word count fits i32")),
+            "the word count describes the committed bytes"
+        );
+
+        let written =
+            std::fs::read_to_string(fixture.workspace.path().join(&body_path)).expect("body file");
+        assert_eq!(written, content, "the pointers' file holds the body");
+        assert!(fixture
+            .workspace
+            .path()
+            .join(format!("{body_path}.tmp"))
+            .metadata()
+            .is_err());
+        assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
+    }
+
+    /// ADR #485 §6.1 P2 row 1: the chapter update writes the bytes the row
+    /// then points at, and the update transaction leaves no lock behind.
+    #[tokio::test]
+    async fn chapter_update_records_the_body_path_its_bytes_landed_in() {
+        let fixture = fixture(true).await;
+        nexus_local_db::work_chapters::seed_chapters(
+            &fixture.pool,
+            WORK_ID,
+            WORK_REF,
+            1,
+            "2026-06-04T10:00:00Z",
+        )
+        .await
+        .expect("seed chapters");
+
+        let content = "Rewritten chapter body.";
+        let mut request = manuscript_write_request(content, 1);
+        request.tool_name = "nexus.manuscript.chapter.update".to_string();
+
+        execute_manuscript_chapter_update(&request, &fixture.context, CREATOR)
+            .await
+            .expect("chapter update");
+
+        let chapter = nexus_local_db::work_chapters::get_chapter(&fixture.pool, WORK_ID, 1, 1)
+            .await
+            .expect("read chapter")
+            .expect("chapter row");
+        let body_path = chapter.body_path.expect("body_path recorded");
+        let written = std::fs::read_to_string(fixture.workspace.path().join(&body_path))
+            .expect("the recorded pointer names an existing file");
+        assert_eq!(
+            written, content,
+            "the recorded pointer names the written bytes"
+        );
+        assert_eq!(
+            chapter.actual_word_count,
+            Some(i32::try_from(content.split_whitespace().count()).expect("fits i32"))
+        );
+        assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
     }
 
     #[tokio::test]

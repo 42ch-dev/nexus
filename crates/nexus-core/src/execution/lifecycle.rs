@@ -1168,6 +1168,11 @@ impl CoreService {
                 if let Some(registry) = capability_holder.get() {
                     supervisor = supervisor.with_capability_registry(registry);
                 }
+                // The supervisor's Work artifact chains write through the SAME
+                // executor the registry receives, never a second writer.
+                if let Some(executor) = &deps.workspace_executor {
+                    supervisor = supervisor.with_workspace_executor(Arc::clone(executor));
+                }
                 let supervisor = Arc::new(supervisor);
                 // The coordinator settles terminal runs through the SAME
                 // supervisor the clock drives.

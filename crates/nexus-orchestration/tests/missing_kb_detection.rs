@@ -18,8 +18,53 @@ use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::list_pending_for_world;
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::works::{self, WorkRecord};
+use nexus_orchestration::capability::{CapabilityError, WorkspaceExecutor};
 use nexus_orchestration::quality_loop;
 use sqlx::SqlitePool;
+
+/// Test executor: commits Work bytes at the target the production port builds
+/// (`<workspace_root>/Works/<work_ref>/<rel_child>`), without the DB lock/row
+/// checks the core port performs.
+struct DirectWriteExecutor;
+
+#[async_trait::async_trait]
+impl WorkspaceExecutor for DirectWriteExecutor {
+    async fn open(
+        &self,
+        _input: nexus_contracts::local::orchestration::WorkspaceOpenInput,
+    ) -> Result<nexus_contracts::local::orchestration::WorkspaceOpenOutput, CapabilityError> {
+        Err(CapabilityError::WorkerUnavailable)
+    }
+
+    async fn commit(
+        &self,
+        _input: nexus_contracts::local::orchestration::WorkspaceCommitInput,
+    ) -> Result<nexus_contracts::local::orchestration::WorkspaceCommitOutput, CapabilityError> {
+        Err(CapabilityError::WorkerUnavailable)
+    }
+
+    async fn commit_work_artifact(
+        &self,
+        input: nexus_contracts::local::orchestration::WorkArtifactCommitInput,
+    ) -> Result<nexus_contracts::local::orchestration::WorkArtifactCommitOutput, CapabilityError>
+    {
+        let target = std::path::Path::new(&input.workspace_root)
+            .join("Works")
+            .join(&input.work_ref)
+            .join(&input.rel_child);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| CapabilityError::Internal(format!("mkdir: {e}")))?;
+        }
+        std::fs::write(&target, &input.content)
+            .map_err(|e| CapabilityError::Internal(format!("write: {e}")))?;
+        Ok(nexus_contracts::local::orchestration::WorkArtifactCommitOutput { committed: true })
+    }
+}
+
+fn executor() -> std::sync::Arc<dyn WorkspaceExecutor> {
+    std::sync::Arc::new(DirectWriteExecutor)
+}
 
 const CREATOR: &str = "ctr_missing_test";
 const WORLD: &str = "wld_missing_test";
@@ -181,10 +226,16 @@ async fn ac1_finalize_detection_writes_missing_log() {
     seed_chapter_with_body(&pool, "wrk_ac1", 2, &body_rel).await;
     insert_novel_writing_schedule(&pool, "sch_ac1", "wrk_ac1").await;
 
-    let count =
-        quality_loop::detect_missing_kb_on_finalize(&pool, "sch_ac1", Some(ws_dir.path()), None)
-            .await
-            .unwrap();
+    let exec = executor();
+    let count = quality_loop::detect_missing_kb_on_finalize(
+        &pool,
+        "sch_ac1",
+        Some(ws_dir.path()),
+        None,
+        Some(&exec),
+    )
+    .await
+    .unwrap();
 
     assert!(count >= 2, "expected ≥2 missing candidates, got {count}");
 
@@ -237,9 +288,16 @@ async fn ac4_missing_candidates_not_written_to_extract_jobs() {
     seed_chapter_with_body(&pool, "wrk_ac4", 2, &body_rel).await;
     insert_novel_writing_schedule(&pool, "sch_ac4", "wrk_ac4").await;
 
-    quality_loop::detect_missing_kb_on_finalize(&pool, "sch_ac4", Some(ws_dir.path()), None)
-        .await
-        .unwrap();
+    let exec = executor();
+    quality_loop::detect_missing_kb_on_finalize(
+        &pool,
+        "sch_ac4",
+        Some(ws_dir.path()),
+        None,
+        Some(&exec),
+    )
+    .await
+    .unwrap();
 
     let pending = list_pending_for_world(&pool, WORLD, None).await.unwrap();
     assert!(
@@ -274,10 +332,16 @@ async fn ac6_existing_key_block_filters_known_entity() {
     seed_chapter_with_body(&pool, "wrk_ac6", 2, &body_rel).await;
     insert_novel_writing_schedule(&pool, "sch_ac6", "wrk_ac6").await;
 
-    let count =
-        quality_loop::detect_missing_kb_on_finalize(&pool, "sch_ac6", Some(ws_dir.path()), None)
-            .await
-            .unwrap();
+    let exec = executor();
+    let count = quality_loop::detect_missing_kb_on_finalize(
+        &pool,
+        "sch_ac6",
+        Some(ws_dir.path()),
+        None,
+        Some(&exec),
+    )
+    .await
+    .unwrap();
 
     // "Bran Vale" should be missing; "Aria Stormblade" should be filtered.
     assert!(count >= 1, "expected ≥1 missing candidate, got {count}");
@@ -336,10 +400,16 @@ async fn non_novel_writing_schedule_is_noop() {
     let (ws_dir, body_rel) = write_workspace_with_chapter("Lin Xia was here.");
     seed_chapter_with_body(&pool, "wrk_noop", 1, &body_rel).await;
 
-    let count =
-        quality_loop::detect_missing_kb_on_finalize(&pool, "sch_noop", Some(ws_dir.path()), None)
-            .await
-            .unwrap();
+    let exec = executor();
+    let count = quality_loop::detect_missing_kb_on_finalize(
+        &pool,
+        "sch_noop",
+        Some(ws_dir.path()),
+        None,
+        Some(&exec),
+    )
+    .await
+    .unwrap();
     assert_eq!(count, 0, "non-novel-writing schedule must be a no-op");
 }
 
@@ -353,8 +423,10 @@ async fn missing_workspace_dir_is_noop() {
     works::create_work(&pool, &work).await.unwrap();
     insert_novel_writing_schedule(&pool, "sch_nows", "wrk_nows").await;
 
-    let count = quality_loop::detect_missing_kb_on_finalize(&pool, "sch_nows", None, None)
-        .await
-        .unwrap();
+    let exec = executor();
+    let count =
+        quality_loop::detect_missing_kb_on_finalize(&pool, "sch_nows", None, None, Some(&exec))
+            .await
+            .unwrap();
     assert_eq!(count, 0, "missing workspace_dir must be a safe no-op");
 }

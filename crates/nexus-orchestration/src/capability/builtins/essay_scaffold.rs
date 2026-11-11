@@ -18,7 +18,8 @@
 //! Wraps FS writes + DB PATCH in a `ScaffoldTransaction` with Drop-based FS
 //! rollback. Tracks create vs overwrite separately: on rollback, created
 //! files are deleted and overwritten files are restored from snapshot.
-//! Writes use temp+rename for atomicity.
+//! Writes commit through the injected Work artifact port (Work lock +
+//! durable atomic write); the rollback guard still restores via Drop.
 //!
 //! # Path safety (V1.63 P0)
 //!
@@ -26,19 +27,21 @@
 //! path joining, mirroring the game-bible/script scaffold pattern.
 
 use super::novel_scaffold_sanitize::validate_work_ref;
-use crate::capability::{Capability, CapabilityError};
+use super::work_commit::{
+    claim_work_ref, commit_work_bytes, publish_work_identity, require_executor, resolve_works_dirs,
+};
+use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tracing::info;
 
 /// Input for the essay scaffold capability.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct ScaffoldInput {
-    #[allow(dead_code)]
-    // required by the capability input schema; handler patches the works row by work_id
     creator_id: String,
     work_id: String,
     work_ref: String,
@@ -65,8 +68,8 @@ struct ScaffoldOutput {
 //   - Created files are deleted
 //   - Created directories are removed (reverse order)
 //
-// Writes use temp-file + rename for atomicity (no half-written file at
-// final path after crash).
+// Writes commit through the Work artifact port; rollback (Drop) restores or
+// removes what this run wrote.
 
 struct ScaffoldTransaction {
     /// Files that did NOT exist before — deleted on rollback.
@@ -106,15 +109,24 @@ impl ScaffoldTransaction {
         Ok(true)
     }
 
-    /// Write a file atomically (temp+rename).
+    /// Commit a file through the Work artifact port.
     ///
     /// If the file already exists, its original content is saved so rollback
-    /// can restore it. Uses a temp file (`<path>.tmp`) written first, then
-    /// atomically renamed to the final path.
-    fn write_file(&mut self, path: &Path, content: &str) -> Result<(), CapabilityError> {
+    /// can restore it. The bytes land through the injected executor (Work
+    /// lock + durable atomic write); rollback bookkeeping stays here.
+    async fn write_file(
+        &mut self,
+        executor: &dyn WorkspaceExecutor,
+        workspace_root: &Path,
+        work_ref: &str,
+        rel_child: &Path,
+        content: &str,
+    ) -> Result<(), CapabilityError> {
+        let path = workspace_root.join("Works").join(work_ref).join(rel_child);
+
         // Snapshot original if exists
         let original = if path.exists() {
-            let data = std::fs::read(path).map_err(|e| {
+            let data = std::fs::read(&path).map_err(|e| {
                 CapabilityError::Internal(format!("read original {}: {e}", path.display()))
             })?;
             Some(data)
@@ -122,28 +134,13 @@ impl ScaffoldTransaction {
             None
         };
 
-        // Write to temp file
-        let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, content)
-            .map_err(|e| CapabilityError::Internal(format!("write tmp {}: {e}", tmp.display())))?;
-        self.temp_files.push(tmp.clone());
-
-        // Atomic rename
-        std::fs::rename(&tmp, path).map_err(|e| {
-            CapabilityError::Internal(format!(
-                "rename {} -> {}: {e}",
-                tmp.display(),
-                path.display()
-            ))
-        })?;
-        // Remove from temp_files — rename succeeded
-        self.temp_files.retain(|t| t != &tmp);
+        commit_work_bytes(executor, workspace_root, work_ref, rel_child, content).await?;
 
         // Track
         let is_create = original.is_none();
         match original {
-            Some(data) => self.overwritten_files.push((path.to_path_buf(), data)),
-            None => self.created_files.push(path.to_path_buf()),
+            Some(data) => self.overwritten_files.push((path.clone(), data)),
+            None => self.created_files.push(path.clone()),
         }
 
         info!(
@@ -214,6 +211,7 @@ impl Drop for ScaffoldTransaction {
 pub struct EssayProjectScaffold {
     pool: Option<sqlx::SqlitePool>,
     works_root: PathBuf,
+    executor: Option<Arc<dyn WorkspaceExecutor>>,
 }
 
 impl EssayProjectScaffold {
@@ -223,6 +221,7 @@ impl EssayProjectScaffold {
         Self {
             pool: None,
             works_root: PathBuf::from("Works"),
+            executor: None,
         }
     }
 
@@ -232,6 +231,7 @@ impl EssayProjectScaffold {
         Self {
             pool: Some(pool),
             works_root: PathBuf::from("Works"),
+            executor: None,
         }
     }
 
@@ -241,7 +241,15 @@ impl EssayProjectScaffold {
         Self {
             pool: Some(pool),
             works_root,
+            executor: None,
         }
+    }
+
+    /// Attach the workspace executor that carries the Work artifact port.
+    #[must_use]
+    pub fn with_workspace_executor(mut self, executor: Option<Arc<dyn WorkspaceExecutor>>) -> Self {
+        self.executor = executor;
+        self
     }
 }
 
@@ -263,6 +271,9 @@ impl Capability for EssayProjectScaffold {
         r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","files_created","dirs_created"],"additionalProperties":false}"#
     }
 
+    // SAFETY: The run method handles 6 directory/file operations through the
+    // Work artifact port; the length is inherent to the scaffold batch.
+    #[allow(clippy::too_many_lines)]
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
         let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
             CapabilityError::InputInvalid(format!("essay.project_scaffold input: {e}"))
@@ -278,92 +289,131 @@ impl Capability for EssayProjectScaffold {
             "essay.project_scaffold: start"
         );
 
-        let work_dir = self.works_root.join(&work_ref);
         let title = inp.title.clone();
         let work_id_for_fs = inp.work_id.clone();
+        let executor = require_executor(self.executor.as_ref())?;
+        let (workspace_root, resolved_works) = resolve_works_dirs(executor, &self.works_root)?;
+        let work_dir = resolved_works.join(&work_ref);
 
-        // FS operations are wrapped in `spawn_blocking` to avoid blocking
-        // the tokio worker thread pool. `ScaffoldTransaction` is inherently
-        // synchronous (Drop-based rollback cannot be async), so the entire
-        // FS batch runs on a blocking thread and returns the guard.
-        // If the subsequent DB PATCH fails, the guard's Drop rolls back all
-        // FS writes — atomicity is preserved.
-        let mut tx = {
-            let work_dir = work_dir.clone();
-            tokio::task::spawn_blocking(
-            move || -> Result<ScaffoldTransaction, CapabilityError> {
-                let outlines_dir = work_dir.join("Outlines");
-                let drafts_dir = work_dir.join("Drafts");
-                let logs_dir = work_dir.join("Logs");
-                let logs_write_dir = logs_dir.join("write");
-                let logs_review_dir = logs_dir.join("review");
-
-                let mut tx = ScaffoldTransaction::new();
-
-                // Create directory structure (idempotent — only tracks newly created dirs)
-                for dir in [
-                    &work_dir,
-                    &outlines_dir,
-                    &drafts_dir,
-                    &logs_dir,
-                    &logs_write_dir,
-                    &logs_review_dir,
-                ] {
-                    tx.create_dir(dir)?;
-                }
-
-                // Write README.md (atomic: temp+rename; tracks create vs overwrite)
-                let readme_content = format!(
-                    "# {title}\n\nEssay project.\n\n- **Work ID**: {work_id_for_fs}\n- **Profile**: essay\n",
-                );
-                tx.write_file(&work_dir.join("README.md"), &readme_content)?;
-
-                // Write Outlines/outline.md
-                let outline_content = format!(
-                    "---\ntitle: {title}\nstatus: outline\n---\n\n# Thesis\n\n# Audience\n\n# Structure\n\n1. Opening hook\n2. Core argument\n3. Supporting evidence\n4. Counterpoint / nuance\n5. Ending takeaway\n",
-                );
-                tx.write_file(&outlines_dir.join("outline.md"), &outline_content)?;
-
-                // Write Drafts/draft.md
-                let draft_content = format!(
-                    "---\ntitle: {title}\nstatus: draft\nword_count: 0\n---\n\n# {title}\n\nWrite your essay here.\n",
-                );
-                tx.write_file(&drafts_dir.join("draft.md"), &draft_content)?;
-
-                Ok(tx)
-            },
+        // The Work artifact port resolves `Works/<work_ref>` through the works
+        // row, so the ref must already be there when the first byte lands — a
+        // first scaffold still has it NULL. Only the ref is claimed here; the
+        // profile lands with the finished scaffold, and a failure restores it.
+        let mut claim = claim_work_ref(
+            self.pool.as_ref(),
+            &inp.creator_id,
+            &inp.work_id,
+            Some(&work_ref),
         )
-        .await
-        .map_err(|e| {
-            CapabilityError::Internal(format!("scaffold blocking task panicked: {e}"))
-        })??
-        };
+        .await?;
 
-        // PATCH works row: set work_profile and work_ref
-        if let Some(ref pool) = self.pool {
-            sqlx::query("UPDATE works SET work_profile = 'essay', work_ref = ? WHERE work_id = ?")
-                .bind(&work_ref)
-                .bind(&inp.work_id)
-                .execute(pool)
-                .await
-                .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
+        let result: Result<(Vec<String>, Vec<String>), CapabilityError> = async {
+            // `ScaffoldTransaction` is inherently synchronous (Drop-based
+            // rollback cannot be async); the file bytes go through the injected
+            // executor, so only rollback bookkeeping stays local. Every path it
+            // records is already absolute, so the guard compensates the same
+            // tree the port wrote.
+            let mut tx = ScaffoldTransaction::new();
+
+            let outlines_dir = work_dir.join("Outlines");
+            let drafts_dir = work_dir.join("Drafts");
+            let logs_dir = work_dir.join("Logs");
+            let logs_write_dir = logs_dir.join("write");
+            let logs_review_dir = logs_dir.join("review");
+
+            // Create directory structure (idempotent — only tracks newly created dirs)
+            for dir in [
+                &work_dir,
+                &outlines_dir,
+                &drafts_dir,
+                &logs_dir,
+                &logs_write_dir,
+                &logs_review_dir,
+            ] {
+                tx.create_dir(dir)?;
+            }
+
+            // Write README.md (through the Work artifact port; tracks create vs overwrite)
+            let readme_content = format!(
+                "# {title}\n\nEssay project.\n\n- **Work ID**: {work_id_for_fs}\n- **Profile**: essay\n",
+            );
+            tx.write_file(
+                executor,
+                &workspace_root,
+                &work_ref,
+                Path::new("README.md"),
+                &readme_content,
+            )
+            .await?;
+
+            // Write Outlines/outline.md
+            let outline_content = format!(
+                "---\ntitle: {title}\nstatus: outline\n---\n\n# Thesis\n\n# Audience\n\n# Structure\n\n1. Opening hook\n2. Core argument\n3. Supporting evidence\n4. Counterpoint / nuance\n5. Ending takeaway\n",
+            );
+            tx.write_file(
+                executor,
+                &workspace_root,
+                &work_ref,
+                Path::new("Outlines/outline.md"),
+                &outline_content,
+            )
+            .await?;
+
+            // Write Drafts/draft.md
+            let draft_content = format!(
+                "---\ntitle: {title}\nstatus: draft\nword_count: 0\n---\n\n# {title}\n\nWrite your essay here.\n",
+            );
+            tx.write_file(
+                executor,
+                &workspace_root,
+                &work_ref,
+                Path::new("Drafts/draft.md"),
+                &draft_content,
+            )
+            .await?;
+
+            // Files landed — publish the profile identity, then commit the guard.
+            publish_work_identity(
+                self.pool.as_ref(),
+                &inp.creator_id,
+                &inp.work_id,
+                "essay",
+                &work_ref,
+            )
+            .await?;
+
+            // Output diagnostics use new file lists
+            let files_created: Vec<String> = tx
+                .created_files
+                .iter()
+                .chain(tx.overwritten_files.iter().map(|(p, _)| p))
+                .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
+                .collect();
+            let dirs_created: Vec<String> = tx
+                .created_dirs
+                .iter()
+                .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
+                .collect();
+
+            tx.commit();
+            Ok((files_created, dirs_created))
         }
+        .await;
 
-        // All FS + DB writes succeeded — commit the transaction guard
-        tx.commit();
-
-        // Output diagnostics use new file lists
-        let files_created: Vec<String> = tx
-            .created_files
-            .iter()
-            .chain(tx.overwritten_files.iter().map(|(p, _)| p))
-            .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
-            .collect();
-        let dirs_created: Vec<String> = tx
-            .created_dirs
-            .iter()
-            .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
-            .collect();
+        let (files_created, dirs_created) = match result {
+            Ok(created) => created,
+            Err(err) => {
+                if let Err(restore_err) = claim.restore().await {
+                    tracing::warn!(
+                        work_id = %inp.work_id,
+                        error = %restore_err,
+                        "essay.project_scaffold: restore prior work_ref failed"
+                    );
+                }
+                return Err(err);
+            }
+        };
+        claim.disarm();
 
         let output = ScaffoldOutput {
             scaffold_root: work_dir.display().to_string(),
@@ -384,7 +434,19 @@ impl Capability for EssayProjectScaffold {
 
 #[cfg(test)]
 mod tests {
+    use super::super::work_commit::test_support::RecordingExecutor;
     use super::*;
+
+    /// Capability over a temp `Works/` root with a recording executor.
+    fn cap_with_root(works_root: PathBuf) -> EssayProjectScaffold {
+        let executor: Arc<dyn WorkspaceExecutor> =
+            RecordingExecutor::at(works_root.parent().expect("works root has a parent"));
+        EssayProjectScaffold {
+            pool: None,
+            works_root,
+            executor: Some(executor),
+        }
+    }
 
     #[test]
     fn essay_capability_name() {
@@ -450,8 +512,8 @@ mod tests {
 
     // ── Fix 1 regression: pre-existing user content survives rollback ──
 
-    #[test]
-    fn rollback_preserves_pre_existing_user_content() {
+    #[tokio::test]
+    async fn rollback_preserves_pre_existing_user_content() {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
@@ -462,11 +524,19 @@ mod tests {
         let user_content = "# My Essay\n\nPersonal notes.\n";
         std::fs::write(&readme_path, user_content).expect("write user README");
 
+        let executor = RecordingExecutor::new();
         let mut tx = ScaffoldTransaction::new();
         tx.create_dir(&work_dir).unwrap();
         let scaffold_content = "# Overwritten\n\nScaffold template.\n";
-        tx.write_file(&readme_path, scaffold_content)
-            .expect("write scaffold README");
+        tx.write_file(
+            executor.as_ref(),
+            tmp.path(),
+            "essay-user-data-survival",
+            Path::new("README.md"),
+            scaffold_content,
+        )
+        .await
+        .expect("write scaffold README");
 
         // Rollback without commit
         drop(tx);
@@ -486,10 +556,7 @@ mod tests {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
-        let cap = EssayProjectScaffold {
-            pool: None,
-            works_root: root.clone(),
-        };
+        let cap = cap_with_root(root.clone());
 
         let input = serde_json::json!({
             "creator_id": "attacker",
@@ -545,9 +612,11 @@ mod tests {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
+        let executor = RecordingExecutor::at(tmp.path());
         let cap = EssayProjectScaffold {
             pool: None,
             works_root: root.clone(),
+            executor: Some(executor.clone()),
         };
 
         let input = serde_json::json!({
@@ -560,6 +629,18 @@ mod tests {
         let out = cap.run(input).await.expect("scaffold should succeed");
         let scaffold = out["scaffold_root"].as_str().expect("scaffold_root");
         let scaffold_path = std::path::Path::new(scaffold);
+
+        // Every template landed through the Work artifact port.
+        let committed: Vec<String> = executor
+            .commits()
+            .into_iter()
+            .map(|c| c.rel_child)
+            .collect();
+        assert_eq!(
+            committed,
+            vec!["README.md", "Outlines/outline.md", "Drafts/draft.md"],
+            "each forward write must go through the executor"
+        );
 
         assert!(scaffold_path.join("Outlines").is_dir());
         assert!(scaffold_path.join("Drafts").is_dir());
@@ -587,5 +668,73 @@ mod tests {
         let cap = EssayProjectScaffold::new();
         let result = cap.run(serde_json::json!({})).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn scaffold_refuses_without_workspace_executor() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let cap = EssayProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: None,
+        };
+
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_nowire",
+                "work_ref": "no-executor-essay",
+                "title": "No Executor",
+            }))
+            .await
+            .expect_err("a Work byte write without the port must refuse");
+
+        assert!(
+            matches!(err, CapabilityError::WorkerUnavailable),
+            "expected WorkerUnavailable, got: {err}"
+        );
+        assert!(
+            !root.join("no-executor-essay").exists(),
+            "no directory may be created before the port is available"
+        );
+    }
+
+    #[tokio::test]
+    async fn scaffold_rolls_back_when_port_refuses_a_later_file() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let executor = RecordingExecutor::refusing_at(tmp.path(), "Drafts/draft.md");
+        let cap = EssayProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: Some(executor.clone()),
+        };
+
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_rollback",
+                "work_ref": "rollback-essay",
+                "title": "Rollback Essay",
+            }))
+            .await
+            .expect_err("missing work row must refuse the write");
+        assert!(
+            matches!(err, CapabilityError::Forbidden(_)),
+            "expected the port refusal to propagate, got: {err}"
+        );
+
+        let work_dir = root.join("rollback-essay");
+        assert!(
+            !work_dir.join("README.md").exists(),
+            "rollback must remove the file committed before the refusal"
+        );
+        assert!(
+            !work_dir.join("Outlines/outline.md").exists(),
+            "rollback must remove every file this run created"
+        );
     }
 }

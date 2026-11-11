@@ -313,10 +313,12 @@ impl CoreService {
             .await
             .map_err(map_recovery_error)?;
 
-        let executor: Arc<dyn WorkspaceExecutor> = Arc::new(WorkspaceCommitExecutor::new(
-            Arc::clone(&manager),
-            canonical_root_str.clone(),
-        ));
+        // The same `~/.nexus42` the tool context hands the hot path's port, so
+        // `commit_work_artifact` resolves the identical creator/workspace.
+        let executor: Arc<dyn WorkspaceExecutor> = Arc::new(
+            WorkspaceCommitExecutor::new(Arc::clone(&manager), canonical_root_str.clone())
+                .with_work_artifact_home(self.inner.nexus_home.clone()),
+        );
         let state_provider: Arc<dyn WorkspaceStateProvider> = Arc::new(
             CoreWorkspaceStateProvider::new(Arc::clone(&manager), canonical_root_str.clone()),
         );

@@ -1,7 +1,7 @@
 ---
 module: nexus-local-db / nexus-core / nexus-orchestration (World KB persistence)
 date: 2026-11-11
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 problem_type: architecture
 category: architecture-patterns
 severity: medium
@@ -11,10 +11,15 @@ applies_when:
   - a handler already owns a transaction but the store trait method opens its own
   - proving that an insert stays inside a caller's transaction when a later step refuses
   - adding a source guard that keeps ad-hoc SQL out of other crates
+  - reaching a crate-private write port from a crate that must not depend on its owner
+  - a write path resolves its root from cwd while the port resolves it from the workspace
 related_components:
   - crates/nexus-local-db/src/kb_store.rs
   - crates/nexus-local-db/src/actor_knowledge_store.rs
   - crates/nexus-core/src/execution/compute.rs
+  - crates/nexus-core/src/execution/work_artifact.rs
+  - crates/nexus-core/src/execution/executor.rs
+  - crates/nexus-orchestration/src/capability/builtins/work_commit.rs
   - crates/nexus-orchestration/src/capability/builtins/world.rs
 tags:
   - single-writer
@@ -81,3 +86,60 @@ The same seam argument applies when the durable artifact is a file tree instead 
 - `crates/nexus-core/src/execution/work_artifact.rs` — classification, port, adapter, boundary re-check.
 - `crates/nexus-local-db/src/runtime_lock.rs` — conditional acquisition bound to `(holder, acquired_at)`.
 - `crates/nexus-core/src/execution/capabilities.rs` — the `fs/write_text_file` branch; the `NonWork` branch is unchanged.
+
+## Reaching a core-private port from another crate
+
+When the port lives in a crate the writers cannot depend on (`nexus-orchestration` must not link
+`nexus-core`), do not widen the port into a public API. Extend the trait both sides already share
+(`WorkspaceExecutor`) with one method whose input/output structs live in `nexus-contracts`, give it
+a default body that refuses, and implement it in core beside the production adapter. Builtins
+receive the executor through the existing runtime-deps injection; a CLI caller gets one narrow
+public accessor built from the same internal deps, never the whole deps struct.
+
+- **A default-refusing trait method keeps every other impl untouched** — no 34-item churn, and an
+  unwired capability fails closed instead of silently falling back to a local writer.
+- **One construction site** (per dispatch, from the tool context) means the hot path and the
+  builtin path cannot disagree about the adapter.
+- **The registry arm is part of the seam.** A migrated builtin registered without the executor is
+  an always-refusing capability; add a registry-level invocation test, not only a manual-injection
+  test. A validation-only registry must be documented as such.
+
+### One resolved root, or the seam is split
+
+A port that reconstructs `Works/<ref>/` from a caller-supplied root, while the caller derives its
+existence checks, `mkdir`, idempotency snapshot and rollback paths from the process cwd, addresses
+two trees whenever those differ. The result is silent: re-init overwrites user content, and a
+failed write cannot roll back the bytes that landed.
+
+- Resolve the effective absolute root **once** at the start of the operation (from the executor's
+  own workspace root, not cwd) and use that same value for reads, directories, returned paths,
+  commit input and compensation.
+- Validate a caller-supplied root against the executor's canonical root **before** any claim,
+  `mkdir` or metadata write; refuse an external or nested root with zero mutation.
+- If the port reconstructs a literal child (`Works/`), either carry the resolved works directory
+  through the input or refuse roots whose last component is not that child, so a custom override
+  cannot reintroduce the split.
+
+### Recoverable ordering claims
+
+When a write needs a pre-existing row identity (a `works.work_ref` normally patched after the
+files), claiming it before the first byte is a real ordering change:
+
+- publish only the identity the port needs, keep final profile/metadata at successful completion,
+  and restore the prior value on every failed path;
+- make the restore cancellation-safe — a guard that keeps its recovery state through the restore
+  await (and retries from `Drop`) closes the window where an aborted future leaves the claim;
+- predicate the restore on the claimed value so a concurrent writer's newer value is not clobbered;
+- a partial re-init must use the **stored** effective ref for the port input, not the requested one,
+  and the test must run against the real port, not a double that skips the lookup.
+
+### Verification (cross-crate port)
+
+- Production-shape test: default relative `works_root`, process cwd ≠ canonical root, first
+  scaffold with `work_ref = NULL`; assert bytes land only in the canonical tree, a later refusal
+  restores the canonical tree, and re-init preserves an existing user file.
+- Refusal tests: unrelated absolute root, nested `Works`, and `..`-relative root are rejected with
+  no directory, no commit and an unchanged row.
+- Cancellation test: hold the port's DB connection so the restore cannot run, abort the future
+  mid-await, then assert the prior ref returns from the guard's own task.
+

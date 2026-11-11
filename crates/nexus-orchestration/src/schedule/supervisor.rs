@@ -138,6 +138,13 @@ pub struct ScheduleSupervisor {
     /// (tests, no Host config) means internal insertion refuses to publish
     /// a drive-enabled row for a preset with prompt roles.
     binding_provider: Arc<Option<String>>,
+    /// Injected workspace executor (P2 seam): the supervisor's terminal chains
+    /// commit Work bytes through the same `commit_work_artifact` handle the
+    /// capability registry receives, never through a second writer.
+    ///
+    /// `None` (tests, standalone supervisor) leaves those chains unable to
+    /// write, which they log and skip — never a local fallback writer.
+    workspace_executor: Arc<Option<Arc<dyn crate::capability::WorkspaceExecutor>>>,
 }
 
 struct Inner {
@@ -174,6 +181,7 @@ impl ScheduleSupervisor {
             registry: Arc::new(None),
             schedule_starter: Arc::new(None),
             binding_provider: Arc::new(None),
+            workspace_executor: Arc::new(None),
         }
     }
 
@@ -199,6 +207,20 @@ impl ScheduleSupervisor {
     #[must_use]
     pub fn with_schedule_starter(mut self, starter: Arc<dyn ScheduleRunStarter>) -> Self {
         self.schedule_starter = Arc::new(Some(starter));
+        self
+    }
+
+    /// Inject the workspace executor whose `commit_work_artifact` handle the
+    /// supervisor's Work artifact chains write through (P2 seam).
+    ///
+    /// `nexus-core` builds the supervisor with its own production executor, so
+    /// the chains never open a writer of their own.
+    #[must_use]
+    pub fn with_workspace_executor(
+        mut self,
+        executor: Arc<dyn crate::capability::WorkspaceExecutor>,
+    ) -> Self {
+        self.workspace_executor = Arc::new(Some(executor));
         self
     }
 
@@ -659,6 +681,10 @@ impl ScheduleSupervisor {
         let ws_path = ws_ref.as_deref();
         let reg: Option<&crate::capability::CapabilityRegistry> =
             self.registry.as_ref().as_ref().map(|r| &**r);
+        // The Work artifact chains below commit through the SAME executor the
+        // capability registry received (ADR #485 §6.1 P2 rows 5–6).
+        let executor: Option<&Arc<dyn crate::capability::WorkspaceExecutor>> =
+            (*self.workspace_executor).as_ref();
 
         // V1.47 P0 (novel-quality-loop §5.5.6 / §8): persist ≥1 finding
         // when a `novel-chapter-review` schedule completes. This is the
@@ -683,9 +709,13 @@ impl ScheduleSupervisor {
         // `Works/<work_ref>/Outlines/foreshadowing.md` after a
         // `novel-writing` produce run completes.
         if preset_id == nexus_preset::preset_ids::NOVEL_WRITING_PRESET_ID {
-            if let Err(e) =
-                auto_chain::promote_foreshadowing_for_schedule(&self.pool, schedule_id, ws_path)
-                    .await
+            if let Err(e) = auto_chain::promote_foreshadowing_for_schedule(
+                &self.pool,
+                schedule_id,
+                ws_path,
+                executor,
+            )
+            .await
             {
                 tracing::warn!(
                     schedule_id,
@@ -700,9 +730,14 @@ impl ScheduleSupervisor {
             // Works/<work_ref>/Logs/kb/missing/. Missing candidates are NOT
             // inserted into kb_extract_jobs. Best-effort: errors are logged
             // and do NOT fail the terminal transition.
-            if let Err(e) =
-                quality_loop::detect_missing_kb_on_finalize(&self.pool, schedule_id, ws_path, reg)
-                    .await
+            if let Err(e) = quality_loop::detect_missing_kb_on_finalize(
+                &self.pool,
+                schedule_id,
+                ws_path,
+                reg,
+                executor,
+            )
+            .await
             {
                 tracing::warn!(
                     schedule_id,
@@ -1243,20 +1278,26 @@ impl ScheduleSupervisor {
 
     /// Write completion-lock file for a completed Work (DF-60 §3, best-effort).
     ///
-    /// DB is SSOT; the file is a derived on-disk artifact for cross-tool observation.
-    /// Failures are logged as warnings but do not propagate.
+    /// DB is SSOT; the file is a derived on-disk artifact for cross-tool
+    /// observation, committed through the injected Work artifact port
+    /// (ADR #485 §6.1 P2 row 4). Failures are logged as warnings but do not
+    /// propagate.
     async fn write_completion_lock_if_available(&self, creator_id: &str, work_id: &str) {
         use crate::auto_chain;
 
         let Some(ref ws_dir) = *self.workspace_dir else {
             return;
         };
+        let executor: Option<&Arc<dyn crate::capability::WorkspaceExecutor>> =
+            (*self.workspace_executor).as_ref();
 
         if let Ok(Some(work)) =
             nexus_local_db::works::get_work(&self.pool, creator_id, work_id).await
         {
             if let Some(ref locked_at) = work.completion_locked_at {
-                if let Err(e) = auto_chain::write_completion_lock_for_work(ws_dir, &work, locked_at)
+                if let Err(e) =
+                    auto_chain::write_completion_lock_for_work(ws_dir, &work, locked_at, executor)
+                        .await
                 {
                     tracing::warn!(
                         work_id = %work_id,

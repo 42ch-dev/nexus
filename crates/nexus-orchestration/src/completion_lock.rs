@@ -1,7 +1,8 @@
 //! Completion-lock file I/O for multi-Work lifecycle (DF-60 §3).
 //!
 //! The lock file lives at `Works/<work_ref>/.completion-lock.json`.
-//! Operations use atomic tmp+rename to avoid partial writes.
+//! Writes commit through the injected Work artifact port (Work lock + durable
+//! atomic write, ADR #485 §6.1 P2 row 4).
 //!
 //! # Source-of-truth (SSOT) declaration
 //!
@@ -12,8 +13,12 @@
 //! set, the supervisor treats the work as locked.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+
+use crate::capability::builtins::work_commit::{commit_work_bytes, require_executor};
+use crate::capability::WorkspaceExecutor;
 
 /// Current schema version for the completion-lock file.
 const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -56,26 +61,32 @@ pub fn completion_lock_path(workspace_dir: &Path, work_ref: &str) -> std::path::
         .join(LOCK_FILE_NAME)
 }
 
-/// Write a completion-lock file atomically (tmp + rename).
+/// Write a completion-lock file through the Work artifact port.
+///
+/// The derived artifact commits under the Work lock with the shared durable
+/// atomic write (ADR #485 §6.1 P2 row 4); the DB column stays the SSOT.
 ///
 /// # Errors
 ///
-/// Returns `std::io::Error` if the parent directory doesn't exist,
-/// the tmp write fails, or the rename fails.
-pub fn write_completion_lock(
+/// Returns `std::io::Error` when the lock JSON cannot be serialized, the
+/// injected executor is missing, or the port refuses the commit.
+pub async fn write_completion_lock(
     workspace_dir: &Path,
     work_ref: &str,
     lock: &CompletionLock,
+    executor: Option<&Arc<dyn WorkspaceExecutor>>,
 ) -> Result<(), std::io::Error> {
-    let path = completion_lock_path(workspace_dir, work_ref);
     let json = serde_json::to_string_pretty(lock)?;
-
-    // Write to temp file first, then atomic rename.
-    let tmp_path = path.with_extension("json.tmp");
-    std::fs::write(&tmp_path, &json)?;
-    std::fs::rename(&tmp_path, &path)?;
-
-    Ok(())
+    let executor = require_executor(executor).map_err(|e| std::io::Error::other(e.to_string()))?;
+    commit_work_bytes(
+        executor,
+        workspace_dir,
+        work_ref,
+        Path::new(LOCK_FILE_NAME),
+        &json,
+    )
+    .await
+    .map_err(std::io::Error::other)
 }
 
 /// Read the completion-lock file if present.
@@ -132,18 +143,20 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::TempDir;
 
+    fn recording_executor() -> Arc<dyn WorkspaceExecutor> {
+        crate::capability::builtins::work_commit::test_support::RecordingExecutor::new()
+    }
+
     #[test]
     fn completion_lock_path_format() {
         let p = completion_lock_path(Path::new("/ws"), "my-novel");
         assert_eq!(p, PathBuf::from("/ws/Works/my-novel/.completion-lock.json"));
     }
 
-    #[test]
-    fn write_then_read_roundtrip() {
+    #[tokio::test]
+    async fn write_then_read_roundtrip() {
         let dir = TempDir::new().unwrap();
         let ws = dir.path();
-        let work_dir = ws.join("Works").join("test-novel");
-        std::fs::create_dir_all(&work_dir).unwrap();
 
         let lock = CompletionLock {
             schema_version: 1,
@@ -152,11 +165,31 @@ mod tests {
             reason: "completion".to_string(),
         };
 
-        write_completion_lock(ws, "test-novel", &lock).unwrap();
+        let executor = recording_executor();
+        write_completion_lock(ws, "test-novel", &lock, Some(&executor))
+            .await
+            .unwrap();
         let read = read_completion_lock(ws, "test-novel")
             .unwrap()
             .expect("lock should exist");
         assert_eq!(read, lock);
+    }
+
+    #[tokio::test]
+    async fn write_refuses_without_a_wired_executor() {
+        let dir = TempDir::new().unwrap();
+        let lock = CompletionLock {
+            schema_version: 1,
+            work_id: "wrk_001".to_string(),
+            locked_at: "2026-06-10T12:00:00Z".to_string(),
+            reason: "completion".to_string(),
+        };
+
+        let err = write_completion_lock(dir.path(), "test-novel", &lock, None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::Other);
+        assert!(!completion_lock_path(dir.path(), "test-novel").exists());
     }
 
     #[test]
@@ -206,12 +239,10 @@ mod tests {
         assert!(result.is_none());
     }
 
-    #[test]
-    fn release_removes_file() {
+    #[tokio::test]
+    async fn release_removes_file() {
         let dir = TempDir::new().unwrap();
         let ws = dir.path();
-        let work_dir = ws.join("Works").join("test-novel");
-        std::fs::create_dir_all(&work_dir).unwrap();
 
         let lock = CompletionLock {
             schema_version: 1,
@@ -220,7 +251,10 @@ mod tests {
             reason: "completion".to_string(),
         };
 
-        write_completion_lock(ws, "test-novel", &lock).unwrap();
+        let executor = recording_executor();
+        write_completion_lock(ws, "test-novel", &lock, Some(&executor))
+            .await
+            .unwrap();
         assert!(completion_lock_path(ws, "test-novel").exists());
 
         release_completion_lock(ws, "test-novel").unwrap();

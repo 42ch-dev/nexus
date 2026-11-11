@@ -25,6 +25,7 @@ mod script_section_status;
 mod soul_experience_aggregate;
 mod sync;
 mod timeline;
+pub(crate) mod work_commit;
 mod workspace;
 mod world;
 mod world_refs_validate;

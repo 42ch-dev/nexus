@@ -12,6 +12,7 @@ use nexus_home_layout::active_context::{
     read_active_creator_id, workspace_slug_selection, WorkspaceSlugSelection,
 };
 use nexus_local_db::works;
+use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 
 use crate::content::{create_parent_dirs, fsync_write_atomic, WorkLock};
@@ -251,6 +252,27 @@ impl FsWorkArtifactPort {
 
 impl WorkArtifactPort for FsWorkArtifactPort {
     async fn commit(&self, write: WorkArtifactWrite<'_>) -> Result<(), NexusApiError> {
+        // ONE gate for every caller (tool surface, scaffolds, manuscript.write,
+        // the executor adapter): `rel_child` must name a path BELOW
+        // `Works/<work_ref>/`. An absolute path replaces that base, and a `..`
+        // walks out of the Work subtree — and the boundary probe below stops at
+        // the first EXISTING ancestor, so with `Works/<work_ref>` absent it
+        // would approve a target inside a sibling Work's tree.
+        if write.rel_child.is_absolute()
+            || write
+                .rel_child
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+        {
+            return Err(NexusApiError::InvalidInput {
+                field: "rel_child".to_string(),
+                reason: format!(
+                    "'{}' must be a relative path below Works/{}/",
+                    write.rel_child.display(),
+                    write.work_ref
+                ),
+            });
+        }
         let Some(creator_id) = read_active_creator_id(&self.nexus_home) else {
             return Err(NexusApiError::Forbidden {
                 resource:
@@ -321,6 +343,72 @@ impl WorkArtifactPort for FsWorkArtifactPort {
         // No `Drop` guard: a skipped release pins the Work until the TTL.
         lock.release().await;
         result
+    }
+}
+
+/// One recorded intended write in a [`RecordingWorkArtifactPort`] log.
+#[cfg_attr(not(test), allow(dead_code))]
+// unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct RecordedMutation {
+    /// The Work directory name the write addressed.
+    pub(crate) work_ref: String,
+    /// The artifact path below the Work root.
+    pub(crate) rel_child: String,
+    /// Byte length of the content that *would* have been written.
+    pub(crate) bytes: usize,
+    /// sha256 hex digest of the content (same convention as the tree digest).
+    pub(crate) sha256: String,
+}
+
+/// Simulate/dry-run [`WorkArtifactPort`]: records intended mutations in
+/// commit order and performs no filesystem, SQLite or lock operation.
+///
+/// Never constructed on a production path; a future Simulate execution plane
+/// selects it at the per-dispatch construction point (`capabilities.rs`,
+/// `FsWorkArtifactPort::new`) so one selection covers every Work write.
+#[cfg_attr(not(test), allow(dead_code))] // unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
+pub(crate) struct RecordingWorkArtifactPort {
+    mutations: std::sync::Mutex<Vec<RecordedMutation>>,
+}
+
+#[cfg_attr(not(test), allow(dead_code))] // unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
+impl RecordingWorkArtifactPort {
+    #[must_use]
+    pub(crate) const fn new() -> Self {
+        Self {
+            mutations: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Snapshot of the log in commit order.
+    #[must_use]
+    pub(crate) fn mutations(&self) -> Vec<RecordedMutation> {
+        self.mutations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))] // unused until the first Simulate execution plane selects the stub (plan v235-work-ir-p3 reopen condition)
+impl WorkArtifactPort for RecordingWorkArtifactPort {
+    // The trait signature is async; the stub records synchronously.
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn commit(&self, write: WorkArtifactWrite<'_>) -> Result<(), NexusApiError> {
+        let mut sha = Sha256::new();
+        sha.update(write.content.as_bytes());
+        let record = RecordedMutation {
+            work_ref: write.work_ref.to_string(),
+            rel_child: write.rel_child.display().to_string(),
+            bytes: write.content.len(),
+            sha256: hex::encode(sha.finalize()),
+        };
+        self.mutations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(record);
+        Ok(())
     }
 }
 
@@ -622,6 +710,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn commit_refuses_a_child_that_leaves_the_work_tree() {
+        let fixture = fixture(true).await;
+        let absolute_child = fixture.workspace.path().join("outside.md");
+
+        // The port is the single gate every caller shares, so both shapes are
+        // refused here — before any Work lookup, lock or directory creation.
+        for rel_child in [
+            PathBuf::from("../sibling/Stories/ch1.md"),
+            absolute_child.clone(),
+        ] {
+            let error = fixture
+                .port
+                .commit(write(&fixture, rel_child.as_path(), "body"))
+                .await
+                .expect_err("a child outside Works/<work_ref>/ refuses");
+            match error {
+                NexusApiError::InvalidInput { field, reason } => {
+                    assert_eq!(field, "rel_child");
+                    assert!(reason.contains("Works/demo/"), "{reason}");
+                }
+                other => panic!("expected InvalidInput, got {other:?}"),
+            }
+        }
+
+        assert!(
+            !fixture.workspace.path().join("Works").exists(),
+            "no directory may be created for a refused child"
+        );
+        assert!(
+            !absolute_child.exists(),
+            "an absolute child may not be written"
+        );
+        assert_eq!(
+            holder(&fixture.pool).await,
+            None,
+            "the refusal precedes the lock"
+        );
+    }
+
+    #[tokio::test]
     async fn commit_refuses_a_foreign_lock_and_keeps_its_holder() {
         let fixture = fixture(true).await;
         nexus_local_db::acquire_runtime_lock(
@@ -809,5 +937,126 @@ mod tests {
             None,
             "the lock is released on the refusal path"
         );
+    }
+
+    /// The `fs/write_text_file` production route: the tool surface classifies
+    /// a raw `Works/<ref>/…` path and hands the artifact shape to the
+    /// production adapter, which lands the real bytes on disk.
+    #[tokio::test]
+    async fn production_adapter_lands_real_bytes_for_a_work_tool_path() {
+        let fixture = fixture(true).await;
+        let work_path = match classify_work_path("Works/demo/drafts/ch1.md") {
+            WorkPath::Artifact {
+                work_ref,
+                rel_child,
+            } => (work_ref, rel_child),
+            other => panic!("expected an artifact, got {other:?}"),
+        };
+        let content = "# Chapter 1\n";
+        let write = WorkArtifactWrite {
+            workspace_root: fixture.workspace.path(),
+            work_ref: work_path.0,
+            rel_child: work_path.1,
+            content,
+        };
+
+        fixture.port.commit(write).await.expect("production commit");
+
+        let target = fixture.workspace.path().join("Works/demo/drafts/ch1.md");
+        let on_disk = std::fs::read(&target).expect("read bytes");
+        assert_eq!(on_disk, content.as_bytes());
+        assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
+    }
+
+    #[tokio::test]
+    async fn recording_port_leaves_the_workspace_digest_unchanged() {
+        // Digest convention: sha256 over the sorted relative file paths of the
+        // workspace, joined by '\n'. An empty workspace hashes the empty input.
+        fn tree_digest(root: &Path) -> String {
+            fn walk(root: &Path, prefix: &str, paths: &mut Vec<String>) {
+                for entry in std::fs::read_dir(root).expect("read_dir") {
+                    let entry = entry.expect("entry");
+                    let rel = format!("{prefix}{}", entry.file_name().to_string_lossy());
+                    if entry.file_type().expect("file_type").is_dir() {
+                        walk(&entry.path(), &format!("{rel}/"), paths);
+                    } else {
+                        paths.push(rel);
+                    }
+                }
+            }
+            let mut paths = Vec::new();
+            walk(root, "", &mut paths);
+            paths.sort();
+            let mut sha = Sha256::new();
+            sha.update(paths.join("\n"));
+            hex::encode(sha.finalize())
+        }
+
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        // A populated tree proves `tree_digest` actually hashes the listing:
+        // one non-Work file makes the digest the sha256 of "notes/a.md"
+        // instead of the empty input, so a degenerate (always-empty) digest
+        // cannot pass vacuously.
+        std::fs::create_dir_all(workspace.path().join("notes")).expect("notes dir");
+        std::fs::write(workspace.path().join("notes/a.md"), b"kept").expect("seed file");
+        let before = tree_digest(workspace.path());
+        assert_eq!(
+            before, "b33a8099b01219568f1660eb604d897c0ac5db4fdd84c142337f129d5a0fca4d",
+            // sha256("notes/a.md")
+            "digest reflects the populated listing"
+        );
+        assert!(
+            !workspace.path().join("Works").exists(),
+            "absent before the stub runs"
+        );
+
+        let port = RecordingWorkArtifactPort::new();
+        port.commit(WorkArtifactWrite {
+            workspace_root: workspace.path(),
+            work_ref: WORK_REF,
+            rel_child: Path::new("drafts/ch1.md"),
+            content: "# Chapter 1\n",
+        })
+        .await
+        .expect("recorded commit");
+        assert_eq!(port.mutations().len(), 1);
+
+        assert!(
+            !workspace.path().join("Works").exists(),
+            "absent after the stub runs"
+        );
+        // Same digest before and after: the stub wrote nothing, so the sorted
+        // rel-path list is still exactly ["notes/a.md"].
+        assert_eq!(before, tree_digest(workspace.path()), "digest unchanged");
+    }
+
+    #[tokio::test]
+    async fn recording_port_logs_one_mutation_and_touches_nothing() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let port = RecordingWorkArtifactPort::new();
+        let content = "# chapter one\n";
+        port.commit(WorkArtifactWrite {
+            workspace_root: workspace.path(),
+            work_ref: WORK_REF,
+            rel_child: Path::new("drafts/ch1.md"),
+            content,
+        })
+        .await
+        .expect("recorded commit");
+
+        let mutations = port.mutations();
+        assert_eq!(mutations.len(), 1);
+        let record = &mutations[0];
+        assert_eq!(record.work_ref, WORK_REF);
+        assert_eq!(record.rel_child, "drafts/ch1.md");
+        assert_eq!(record.bytes, content.len());
+        // sha256("# chapter one\n") — precomputed, not re-mirrored from the stub.
+        assert_eq!(
+            record.sha256,
+            "9ae3ccb02e53b1e85a04d509e94a0658cdb813d2136b91fea0a4b906ad1ca6f2"
+        );
+
+        // Zero filesystem change: not even the `Works/` directory exists.
+        assert!(!workspace.path().join("Works").exists());
     }
 }

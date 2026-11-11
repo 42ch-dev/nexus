@@ -988,17 +988,21 @@ pub async fn mark_work_completed(
 /// Write the completion-lock file for a completed Work (DF-60 §3).
 ///
 /// Call this after `mark_work_completed` succeeds, providing the workspace
-/// directory and the Work record (for `work_ref`). This is separated from
-/// `mark_work_completed` because the supervisor does not have access to the
-/// workspace directory — the daemon layer calls this function.
+/// directory, the injected workspace executor (whose `commit_work_artifact`
+/// handle owns the Work lock and durability) and the Work record (for
+/// `work_ref`). This is separated from `mark_work_completed` because the
+/// supervisor does not have access to the workspace directory — the daemon
+/// layer calls this function.
 ///
 /// # Errors
 ///
-/// Returns `std::io::Error` if the file cannot be written.
-pub fn write_completion_lock_for_work(
+/// Returns `std::io::Error` if the executor is not wired, the Work has no
+/// `work_ref`, or the port refuses the commit.
+pub async fn write_completion_lock_for_work(
     workspace_dir: &std::path::Path,
     work: &WorkRecord,
     locked_at: &str,
+    executor: Option<&std::sync::Arc<dyn crate::capability::WorkspaceExecutor>>,
 ) -> Result<(), std::io::Error> {
     let work_ref = work.work_ref.as_deref().ok_or_else(|| {
         std::io::Error::new(
@@ -1017,7 +1021,7 @@ pub fn write_completion_lock_for_work(
         reason: "completion".to_string(),
     };
 
-    completion_lock::write_completion_lock(workspace_dir, work_ref, &lock)
+    completion_lock::write_completion_lock(workspace_dir, work_ref, &lock, executor).await
 }
 
 /// Clear the `driver_schedule_id` on a Work (e.g., when schedule completes or is cancelled).
@@ -1158,10 +1162,14 @@ async fn compute_open_findings_block_for_produce(
 /// Promotion-internal errors (e.g. conflicting-description duplicate) are
 /// logged at `warn!` and counted as zero for that outline so one bad outline
 /// does not abort the rest.
+///
+/// The index bytes commit through the injected workspace executor's Work
+/// artifact handle (ADR #485 §6.1 P2 row 5), never a local writer.
 pub async fn promote_foreshadowing_for_schedule(
     pool: &SqlitePool,
     schedule_id: &str,
     workspace_dir: Option<&std::path::Path>,
+    executor: Option<&std::sync::Arc<dyn crate::capability::WorkspaceExecutor>>,
 ) -> Result<usize, AutoChainError> {
     use nexus_preset::preset_ids::NOVEL_WRITING_PRESET_ID;
 
@@ -1241,21 +1249,22 @@ pub async fn promote_foreshadowing_for_schedule(
         return Ok(0);
     }
 
-    promote_outlines_in(&work_dir, &outlines_chapters, schedule_id, work_ref)
+    promote_outlines_in(ws_dir, &outlines_chapters, schedule_id, work_ref, executor).await
 }
 
 /// Scan every `*-outline.md` in `outlines_dir`, extract its foreshadowing
-/// section, and promote it into `work_dir/Outlines/foreshadowing.md`.
+/// section, and promote it into `Works/<work_ref>/Outlines/foreshadowing.md`.
 ///
 /// Returns the total count of newly-allocated `F###` ids across all outlines.
 /// Per-outline promotion errors (e.g. conflicting-description duplicate) are
 /// logged at `warn!` and counted as zero so one bad outline does not abort the
 /// rest. Outline filenames are sorted for reproducible promotion order.
-fn promote_outlines_in(
-    work_dir: &std::path::Path,
+async fn promote_outlines_in(
+    workspace_dir: &std::path::Path,
     outlines_dir: &std::path::Path,
     schedule_id: &str,
     work_ref: &str,
+    executor: Option<&std::sync::Arc<dyn crate::capability::WorkspaceExecutor>>,
 ) -> Result<usize, AutoChainError> {
     let mut entries: Vec<String> = std::fs::read_dir(outlines_dir)
         .map_err(|e| AutoChainError::InvalidState(format!("read {}: {e}", outlines_dir.display())))?
@@ -1277,7 +1286,14 @@ fn promote_outlines_in(
         let Some(section) = crate::narrative_index::extract_foreshadowing_section(&content) else {
             continue;
         };
-        match crate::narrative_index::promote_outline_to_index(work_dir, &section) {
+        match crate::narrative_index::promote_outline_to_index(
+            workspace_dir,
+            work_ref,
+            &section,
+            executor,
+        )
+        .await
+        {
             Ok(allocated) => {
                 total += allocated.len();
                 if !allocated.is_empty() {

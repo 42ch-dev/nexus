@@ -31,14 +31,16 @@
 //! - `section_path`: the full path to the updated file
 
 use super::game_bible_section_status::{
-    atomic_write, extract_frontmatter_field, replace_frontmatter_field, validate_transition,
+    extract_frontmatter_field, replace_frontmatter_field, validate_transition,
 };
 use super::novel_scaffold_sanitize::validate_work_ref;
-use crate::capability::{Capability, CapabilityError};
+use super::work_commit::{commit_work_bytes, require_executor, resolve_works_dirs};
+use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::info;
 
 /// Input for `script.section_status.update`.
@@ -66,6 +68,7 @@ struct SectionStatusOutput {
 /// `script.section_status.update` capability.
 pub struct ScriptSectionStatusUpdate {
     works_root: PathBuf,
+    executor: Option<Arc<dyn WorkspaceExecutor>>,
 }
 
 impl ScriptSectionStatusUpdate {
@@ -73,12 +76,23 @@ impl ScriptSectionStatusUpdate {
     pub fn new() -> Self {
         Self {
             works_root: PathBuf::from("Works"),
+            executor: None,
         }
     }
 
     #[must_use]
     pub const fn with_works_root(works_root: PathBuf) -> Self {
-        Self { works_root }
+        Self {
+            works_root,
+            executor: None,
+        }
+    }
+
+    /// Attach the workspace executor that carries the Work artifact port.
+    #[must_use]
+    pub fn with_workspace_executor(mut self, executor: Option<Arc<dyn WorkspaceExecutor>>) -> Self {
+        self.executor = executor;
+        self
     }
 }
 
@@ -108,13 +122,15 @@ impl Capability for ScriptSectionStatusUpdate {
         // Validate work_ref against path traversal
         let work_ref = validate_work_ref(&inp.work_ref)?;
 
-        // Resolve works_root
-        let root = inp
+        // Resolve the one absolute `Works/` tree this run reads and writes.
+        let works_root = inp
             .works_root
             .as_deref()
             .map_or_else(|| self.works_root.clone(), PathBuf::from);
+        let executor = require_executor(self.executor.as_ref())?;
+        let (workspace_root, resolved_works) = resolve_works_dirs(executor, &works_root)?;
 
-        let work_dir = root.join(&work_ref);
+        let work_dir = resolved_works.join(&work_ref);
         let scripts_dir = work_dir.join("Scripts");
         let section_full_path = scripts_dir.join(&inp.section_path);
 
@@ -180,8 +196,26 @@ impl Capability for ScriptSectionStatusUpdate {
         let updated_content =
             replace_frontmatter_field(&content, "section_status", &inp.new_status)?;
 
-        // Atomic write via temp+rename (use canonical path)
-        atomic_write(&section_canonical, &updated_content)?;
+        // Commit through the Work artifact port (canonical path → Work-relative child)
+        let work_dir_canonical = scripts_dir_canonical
+            .parent()
+            .ok_or_else(|| CapabilityError::Internal(format!("missing work dir for {work_ref}")))?;
+        let rel_child = section_canonical
+            .strip_prefix(work_dir_canonical)
+            .map_err(|_| {
+                CapabilityError::InputInvalid(format!(
+                    "section_path '{}' must be within the Scripts directory",
+                    inp.section_path
+                ))
+            })?;
+        commit_work_bytes(
+            executor,
+            &workspace_root,
+            &work_ref,
+            rel_child,
+            &updated_content,
+        )
+        .await?;
 
         info!(
             work_ref = %work_ref,
@@ -210,9 +244,14 @@ impl Capability for ScriptSectionStatusUpdate {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use super::super::work_commit::test_support::RecordingExecutor;
     use super::*;
     use serde_json::json;
     use tempfile::TempDir;
+
+    fn test_executor(works_root: &std::path::Path) -> Arc<dyn WorkspaceExecutor> {
+        RecordingExecutor::at(works_root.parent().expect("works root has a parent"))
+    }
 
     #[test]
     fn capability_name_matches() {
@@ -223,7 +262,7 @@ mod tests {
     #[tokio::test]
     async fn run_updates_script_section_status_draft_to_reviewed() {
         let tmp = TempDir::new().expect("tmpdir");
-        let works_root = tmp.path().to_path_buf();
+        let works_root = tmp.path().join("Works");
         let scripts_dir = works_root.join("my-screenplay").join("Scripts");
         std::fs::create_dir_all(&scripts_dir).expect("mkdir");
         let section_path = scripts_dir.join("script.md");
@@ -233,7 +272,8 @@ mod tests {
         )
         .expect("write");
 
-        let cap = ScriptSectionStatusUpdate::with_works_root(works_root.clone());
+        let cap = ScriptSectionStatusUpdate::with_works_root(works_root.clone())
+            .with_workspace_executor(Some(test_executor(&works_root)));
         let output = cap
             .run(json!({
                 "work_ref": "my-screenplay",
@@ -263,7 +303,7 @@ mod tests {
     #[tokio::test]
     async fn run_rejects_draft_to_accepted_skip() {
         let tmp = TempDir::new().expect("tmpdir");
-        let works_root = tmp.path().to_path_buf();
+        let works_root = tmp.path().join("Works");
         let scripts_dir = works_root.join("my-screenplay").join("Scripts");
         std::fs::create_dir_all(&scripts_dir).expect("mkdir");
         std::fs::write(
@@ -272,7 +312,8 @@ mod tests {
         )
         .expect("write");
 
-        let cap = ScriptSectionStatusUpdate::with_works_root(works_root.clone());
+        let cap = ScriptSectionStatusUpdate::with_works_root(works_root.clone())
+            .with_workspace_executor(Some(test_executor(&works_root)));
         let err = cap
             .run(json!({
                 "work_ref": "my-screenplay",
@@ -288,11 +329,12 @@ mod tests {
     #[tokio::test]
     async fn run_rejects_section_not_found() {
         let tmp = TempDir::new().expect("tmpdir");
-        let works_root = tmp.path().to_path_buf();
+        let works_root = tmp.path().join("Works");
         let scripts_dir = works_root.join("my-screenplay").join("Scripts");
         std::fs::create_dir_all(&scripts_dir).expect("mkdir");
 
-        let cap = ScriptSectionStatusUpdate::with_works_root(works_root.clone());
+        let cap = ScriptSectionStatusUpdate::with_works_root(works_root.clone())
+            .with_workspace_executor(Some(test_executor(&works_root)));
         let err = cap
             .run(json!({
                 "work_ref": "my-screenplay",

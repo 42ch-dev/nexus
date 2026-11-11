@@ -18,7 +18,7 @@ applies_when:
 
 # Cross-store journal protocol for provider-owned SQL+file effects
 
-Landed in `crates/nexus-core/src/memory_provider/{journal.rs,storage.rs}` over seven review-fix rounds (v1.227). This is the implementation-level pattern; the protocol-level contract lives in `.agents/adr/proposed/architecture/2026-10-28-spoke-memory-adoption-plan.md` §5.2 (D-10).
+Landed in `crates/nexus-core/src/memory_provider/{journal.rs,storage.rs}` over seven review-fix rounds (v1.227). This is the implementation-level pattern; the protocol-level contract lives in `.agents/adr/implemented/architecture/2026-10-28-spoke-memory-adoption-plan.md` §5.2 (D-10).
 
 ## Invariants (the ones every fix round was fighting for)
 
