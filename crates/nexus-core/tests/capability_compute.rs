@@ -400,6 +400,252 @@ async fn accept_is_refused_twice_and_double_apply_is_impossible() {
     );
 }
 
+/// Every `key_block_id` currently in `kb_key_blocks`, sorted — the count +
+/// id set snapshot the rollback assertions compare.
+async fn kb_block_rows(pool: &sqlx::SqlitePool) -> Vec<String> {
+    use sqlx::Row;
+    let rows = sqlx::query("SELECT key_block_id FROM kb_key_blocks ORDER BY key_block_id")
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    rows.into_iter()
+        .map(|row| row.get::<String, _>(0))
+        .collect()
+}
+
+/// A World-owned `new_key_blocks` proposal entry, built through the same
+/// record → spoke conversion seam the production proposals ride.
+fn world_block_proposal(entry_id: &str, world_id: &str) -> serde_json::Value {
+    use nexus_contracts::BlockType;
+    use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
+    use nexus_spoke_adapter::conversion::knowledge_record_to_spoke;
+
+    let kb = KnowledgeEntryRecord {
+        entry_id: entry_id.to_string(),
+        body: Some(KnowledgeEntryBody {
+            summary: Some("Forged by compute".to_string()),
+            attributes: Some(json!({ "sigil": "ember" })),
+            ..Default::default()
+        }),
+        ..KnowledgeEntryRecord::new(world_id, BlockType::Event, "Forged Sigil")
+    };
+    serde_json::to_value(knowledge_record_to_spoke(&kb)).expect("spoke conversion")
+}
+
+/// An accept with `new_key_blocks` writes the settlement rows through the
+/// store seam inside the accept transaction: the owner carrier
+/// (`extensions.nexus`) is populated, `revision` stays NULL, and every other
+/// column keeps the pre-convergence shape.
+#[tokio::test]
+#[serial_test::serial]
+async fn accept_writes_new_key_blocks_through_the_store_seam() {
+    use sqlx::Row;
+
+    let f = fixture().await;
+    let mut proposals = crafted_proposals(&[], &["sigil forged"], None);
+    proposals["new_key_blocks"] = json!([world_block_proposal("kb_sigil", WORLD)]);
+    let run_id = craft_succeeded_run(f.core.pool(), proposals).await;
+    let principal = f.core.active_principal().await.unwrap();
+
+    let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
+    let response =
+        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+            .await
+            .expect("accept succeeds");
+    assert_eq!(response.applied.new_entries_created, 1);
+
+    let row = sqlx::query(
+        "SELECT owner_kind, world_id, character_id, actor_world_binding_id, \
+         block_type, canonical_name, status, body_json, source_anchor_json, \
+         extensions_nexus_json, revision, created_at, updated_at \
+         FROM kb_key_blocks WHERE key_block_id = 'kb_sigil'",
+    )
+    .fetch_one(f.core.pool())
+    .await
+    .expect("settlement row exists");
+    // The recorded delta: the store seam populates the World owner carrier.
+    assert_eq!(
+        row.get::<Option<String>, _>("extensions_nexus_json")
+            .as_deref(),
+        Some(r#"{"world_id":"wld_combat"}"#),
+    );
+    assert_eq!(row.get::<Option<i64>, _>("revision"), None);
+    // The pre-convergence shape: every other column unchanged.
+    assert_eq!(row.get::<String, _>("owner_kind"), "world");
+    assert_eq!(
+        row.get::<Option<String>, _>("world_id").as_deref(),
+        Some(WORLD)
+    );
+    assert_eq!(row.get::<Option<String>, _>("character_id"), None);
+    assert_eq!(row.get::<Option<String>, _>("actor_world_binding_id"), None);
+    assert_eq!(
+        row.get::<Option<String>, _>("block_type").as_deref(),
+        Some("event")
+    );
+    assert_eq!(
+        row.get::<Option<String>, _>("canonical_name").as_deref(),
+        Some("Forged Sigil"),
+    );
+    assert_eq!(
+        row.get::<Option<String>, _>("status").as_deref(),
+        Some("provisional"),
+    );
+    assert_eq!(
+        row.get::<Option<String>, _>("body_json").as_deref(),
+        Some(r#"{"summary":"Forged by compute","attributes":{"sigil":"ember"}}"#),
+    );
+    assert_eq!(row.get::<Option<String>, _>("source_anchor_json"), None);
+    // Pre-convergence shape: the old raw INSERT bound created_at and
+    // updated_at to the same `now`; the store seam stamps both on the record.
+    let created_at = row.get::<Option<String>, _>("created_at");
+    let updated_at = row.get::<Option<String>, _>("updated_at");
+    assert!(created_at.is_some());
+    assert_eq!(updated_at, created_at);
+}
+
+/// The settlement lane carries no governance: a wire proposal naming an
+/// `owner` + `disclosure` (and a `revision`) still lands as a World-shared
+/// row — `holder_entry_id`/`disclosure`/`revision` normalised to `NULL`.
+#[tokio::test]
+#[serial_test::serial]
+async fn accept_settles_a_governance_carrying_block_as_shared() {
+    use sqlx::Row;
+
+    let f = fixture().await;
+    let mut proposals = crafted_proposals(&[], &[], None);
+    let mut proposal = world_block_proposal("kb_governed", WORLD);
+    proposal["owner"] = json!("kb_holder");
+    proposal["disclosure"] = json!("owner-private");
+    proposal["revision"] = json!(7);
+    proposals["new_key_blocks"] = json!([proposal]);
+    let run_id = craft_succeeded_run(f.core.pool(), proposals).await;
+    let principal = f.core.active_principal().await.unwrap();
+
+    let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
+    let response =
+        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+            .await
+            .expect("accept succeeds");
+    assert_eq!(response.applied.new_entries_created, 1);
+
+    let row = sqlx::query(
+        "SELECT holder_entry_id, disclosure, revision \
+         FROM kb_key_blocks WHERE key_block_id = 'kb_governed'",
+    )
+    .fetch_one(f.core.pool())
+    .await
+    .expect("settlement row exists");
+    assert_eq!(
+        row.get::<Option<String>, _>("holder_entry_id"),
+        None,
+        "a settlement row is World-shared, never a holder's",
+    );
+    assert_eq!(row.get::<Option<String>, _>("disclosure"), None);
+    assert_eq!(row.get::<Option<i64>, _>("revision"), None);
+}
+
+/// A block the store refuses to validate is the caller's input fault: the
+/// accept refuses with the coded `invalid_input` taxonomy, not an internal
+/// error, and writes nothing.
+#[tokio::test]
+#[serial_test::serial]
+async fn accept_refuses_a_store_invalid_block_as_invalid_input() {
+    let f = fixture().await;
+    let mut proposals = crafted_proposals(&[], &[], None);
+    // The wire canonical-name newtype only enforces a non-empty string; the
+    // store's own 256-byte limit is what refuses this one.
+    let mut proposal = world_block_proposal("kb_overlong", WORLD);
+    proposal["canonical_name"] = json!("x".repeat(300));
+    proposals["new_key_blocks"] = json!([proposal]);
+    let run_id = craft_succeeded_run(f.core.pool(), proposals).await;
+    let principal = f.core.active_principal().await.unwrap();
+
+    let rows_before = kb_block_rows(f.core.pool()).await;
+    let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
+    let err =
+        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+            .await
+            .expect_err("a store-refused block must refuse the accept");
+    assert!(
+        matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "invalid_input"),
+        "a store validation refusal must be coded invalid_input, got {err:?}"
+    );
+    assert_eq!(kb_block_rows(f.core.pool()).await, rows_before);
+}
+
+/// A `new_key_blocks` entry owned by another World refuses the whole accept
+/// before any row is written.
+#[tokio::test]
+#[serial_test::serial]
+async fn accept_refuses_a_foreign_world_block_before_any_write() {
+    let f = fixture().await;
+    let mut proposals = crafted_proposals(&[], &[], None);
+    proposals["new_key_blocks"] = json!([world_block_proposal("kb_intruder", FOREIGN_WORLD)]);
+    let run_id = craft_succeeded_run(f.core.pool(), proposals).await;
+    let principal = f.core.active_principal().await.unwrap();
+
+    let rows_before = kb_block_rows(f.core.pool()).await;
+    let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
+    let err =
+        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+            .await
+            .expect_err("foreign-World block must refuse");
+    assert!(
+        matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "invalid_input"),
+        "a foreign-World block must be an invalid_input refusal, got {err:?}"
+    );
+    assert_eq!(kb_block_rows(f.core.pool()).await, rows_before);
+}
+
+/// The run-row CAS still decides the commit. Deterministic fixture: a
+/// test-only `AFTER INSERT` trigger on `kb_key_blocks` flips the run row away
+/// from 'succeeded' the moment the accept writes its block, so the later CAS
+/// (`WHERE status = 'succeeded'`) updates zero rows AFTER the insert — and
+/// the whole accept, insert included, must roll back.
+#[tokio::test]
+#[serial_test::serial]
+async fn aborted_accept_rolls_back_key_block_inserts() {
+    let f = fixture().await;
+    let mut proposals = crafted_proposals(&[], &["late arrival"], None);
+    proposals["new_key_blocks"] = json!([world_block_proposal("kb_sigil_race", WORLD)]);
+    let run_id = craft_succeeded_run(f.core.pool(), proposals).await;
+    let principal = f.core.active_principal().await.unwrap();
+
+    // The block insert itself moves the run row: the CAS is guaranteed to
+    // lose strictly after the insert ran inside the accept transaction.
+    let mut builder = sqlx::QueryBuilder::new(
+        "CREATE TRIGGER test_qc_flip_run_after_kb_insert \
+         AFTER INSERT ON kb_key_blocks FOR EACH ROW \
+         BEGIN UPDATE compute_sessions SET status = 'applied' WHERE run_id = ",
+    );
+    builder.push(format!("'{run_id}'; END"));
+    builder
+        .build()
+        .execute(f.core.pool())
+        .await
+        .expect("install the CAS-loss trigger");
+
+    let rows_before = kb_block_rows(f.core.pool()).await;
+    let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
+    let err =
+        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+            .await
+            .expect_err("the zero-row CAS must abort the accept");
+
+    // The inserted block is gone and the pre-existing id set is unchanged:
+    // the insert (and the trigger's update) stayed inside the rolled-back
+    // transaction. These assertions are what a self-committing insert fails.
+    let rows_after = kb_block_rows(f.core.pool()).await;
+    assert_eq!(rows_after, rows_before, "the aborted accept left zero rows");
+    assert!(!rows_after.iter().any(|id| id == "kb_sigil_race"));
+
+    // The refusal is the CAS conflict, not the ownership or status gate.
+    assert!(
+        matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "conflict"),
+        "the aborted accept must be a coded conflict, got {err:?}"
+    );
+}
+
 /// An unknown tool is refused with the retained code and ZERO domain effect.
 #[tokio::test]
 #[serial_test::serial]

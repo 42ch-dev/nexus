@@ -607,19 +607,13 @@ impl Capability for WorldDeltaApply {
                     }
 
                     // Apply the field update. V1.60 supports body_json + status.
-                    // SAFETY: UPDATE against known kb_key_blocks schema.
                     match ch.field.as_str() {
                         "body_json" => {
                             let body_str = serde_json::to_string(&ch.new_value)
                                 .map_err(|e| CapabilityError::Internal(e.to_string()))?;
-                            sqlx::query(
-                                "UPDATE kb_key_blocks SET body_json = ?, updated_at = ? \
-                             WHERE key_block_id = ?",
+                            nexus_local_db::kb_store::update_key_block_body_in_tx(
+                                &mut tx, kid, &body_str,
                             )
-                            .bind(&body_str)
-                            .bind(chrono::Utc::now().to_rfc3339())
-                            .bind(kid)
-                            .execute(&mut *tx)
                             .await
                             .map_err(|e| CapabilityError::Internal(format!("kb update: {e}")))?;
                         }
@@ -629,14 +623,9 @@ impl Capability for WorldDeltaApply {
                                     "status new_value must be a string".into(),
                                 )
                             })?;
-                            sqlx::query(
-                                "UPDATE kb_key_blocks SET status = ?, updated_at = ? \
-                             WHERE key_block_id = ?",
+                            nexus_local_db::kb_store::update_key_block_status_in_tx(
+                                &mut tx, kid, new_status,
                             )
-                            .bind(new_status)
-                            .bind(chrono::Utc::now().to_rfc3339())
-                            .bind(kid)
-                            .execute(&mut *tx)
                             .await
                             .map_err(|e| CapabilityError::Internal(format!("kb status: {e}")))?;
                         }
@@ -858,6 +847,43 @@ mod tests {
             .await
             .unwrap()
             .entry_id
+    }
+
+    /// Seed one World key block with a known body and a fixed `updated_at`, so
+    /// an apply's timestamp advance is observable rather than racing the seed.
+    async fn seed_kb_block_with_body(
+        pool: &sqlx::SqlitePool,
+        world_id: &str,
+        name: &str,
+        body_json: &str,
+    ) -> String {
+        let kid = seed_kb_row(pool, world_id, name, None, None).await;
+        sqlx::query(
+            "UPDATE kb_key_blocks SET body_json = ?, updated_at = ? WHERE key_block_id = ?",
+        )
+        .bind(body_json)
+        .bind("2020-01-01T00:00:00Z")
+        .bind(&kid)
+        .execute(pool)
+        .await
+        .unwrap();
+        kid
+    }
+
+    /// The columns the delta-apply writers may touch, read back as stored so a
+    /// non-write or rollback is compared byte-for-byte.
+    async fn kb_snapshot(
+        pool: &sqlx::SqlitePool,
+        kid: &str,
+    ) -> (Option<String>, String, Option<String>, Option<i64>) {
+        sqlx::query_as(
+            "SELECT body_json, status, updated_at, revision \
+             FROM kb_key_blocks WHERE key_block_id = ?",
+        )
+        .bind(kid)
+        .fetch_one(pool)
+        .await
+        .unwrap()
     }
 
     /// The `entry_id`s of the returned `kb_blocks` slice.
@@ -1438,5 +1464,177 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(usize::try_from(applied_count).unwrap_or(usize::MAX), total);
+    }
+
+    /// Stale preimage: a body update whose `old_value` no longer matches the
+    /// live body reports `conflict` and writes nothing — the stored body and
+    /// the row's `revision` stay exactly as they were.
+    #[tokio::test]
+    async fn world_delta_apply_kb_body_stale_preimage_writes_nothing() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_a").await;
+        seed_world(&pool, "ctr_a", "wld_a").await;
+        let kid = seed_kb_block_with_body(&pool, "wld_a", "Hero", r#"{"hp":10}"#).await;
+
+        let before = kb_snapshot(&pool, &kid).await;
+
+        let cap = WorldDeltaApply::with_pool(pool.clone());
+        let out = cap
+            .run(json!({
+                "policy_context": {"world_id": "wld_a", "creator_id": "ctr_a"},
+                "proposed_changes": [{
+                    "entity": "kb_key_block",
+                    "entity_id": kid,
+                    "field": "body_json",
+                    "old_value": {"hp": 5},
+                    "new_value": {"hp": 20},
+                    "rationale": "stale read"
+                }]
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(out["applied"][0]["status"], "conflict");
+        assert_eq!(out["atomic_applied"], false);
+        let after = kb_snapshot(&pool, &kid).await;
+        assert_eq!(after.0, before.0, "body_json must be byte-identical");
+        assert_eq!(after.3, before.3, "revision must be untouched");
+        assert_eq!(before.3, None, "the seeded row carries no revision");
+    }
+
+    /// Applied patch: body and status both take the new value and `updated_at`
+    /// advances, while `revision` stays untouched — the no-OCC contract of this
+    /// capability is asserted, not assumed.
+    #[tokio::test]
+    async fn world_delta_apply_kb_body_and_status_apply_without_bumping_revision() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_a").await;
+        seed_world(&pool, "ctr_a", "wld_a").await;
+        let kid = seed_kb_block_with_body(&pool, "wld_a", "Hero", r#"{"hp":10}"#).await;
+
+        let before = kb_snapshot(&pool, &kid).await;
+
+        let cap = WorldDeltaApply::with_pool(pool.clone());
+        let out = cap
+            .run(json!({
+                "policy_context": {"world_id": "wld_a", "creator_id": "ctr_a"},
+                "proposed_changes": [
+                    {
+                        "entity": "kb_key_block",
+                        "entity_id": kid,
+                        "field": "body_json",
+                        "old_value": {"hp": 10},
+                        "new_value": {"hp": 12},
+                        "rationale": "level up"
+                    },
+                    {
+                        "entity": "kb_key_block",
+                        "entity_id": kid,
+                        "field": "status",
+                        "new_value": "confirmed",
+                        "rationale": "creator confirms"
+                    }
+                ]
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(out["applied"][0]["status"], "applied");
+        assert_eq!(out["applied"][1]["status"], "applied");
+        assert_eq!(out["atomic_applied"], true);
+
+        let (body, status, updated_at, revision) = kb_snapshot(&pool, &kid).await;
+        assert_eq!(body.as_deref(), Some(r#"{"hp":12}"#));
+        assert_eq!(status, "confirmed");
+        assert_ne!(updated_at, before.2, "updated_at must advance");
+        assert_eq!(revision, before.3, "revision must stay untouched");
+        assert_eq!(revision, None);
+    }
+
+    /// Batch atomicity: a later change refusing in the same package rolls back
+    /// the earlier "applied" write of that transaction.
+    #[tokio::test]
+    async fn world_delta_apply_kb_batch_rolls_back_applied_writes_on_refusal() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_a").await;
+        seed_world(&pool, "ctr_a", "wld_a").await;
+        let kid = seed_kb_block_with_body(&pool, "wld_a", "Hero", r#"{"hp":10}"#).await;
+
+        let before = kb_snapshot(&pool, &kid).await;
+
+        let cap = WorldDeltaApply::with_pool(pool.clone());
+        let err = cap
+            .run(json!({
+                "policy_context": {"world_id": "wld_a", "creator_id": "ctr_a"},
+                "proposed_changes": [
+                    {
+                        "entity": "kb_key_block",
+                        "entity_id": kid,
+                        "field": "body_json",
+                        "old_value": {"hp": 10},
+                        "new_value": {"hp": 99},
+                        "rationale": "applies first"
+                    },
+                    {
+                        "entity": "kb_key_block",
+                        "entity_id": kid,
+                        "field": "modules_json",
+                        "new_value": {},
+                        "rationale": "unsupported field refuses the batch"
+                    }
+                ]
+            }))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CapabilityError::InputInvalid(_)));
+
+        let after = kb_snapshot(&pool, &kid).await;
+        assert_eq!(after.0, before.0, "the earlier body write is rolled back");
+        assert_eq!(
+            after.2, before.2,
+            "the earlier write did not stamp updated_at"
+        );
+    }
+
+    /// Create branch: the provisional insert lands inside the handler's
+    /// transaction, so a later refusal in the same package removes it again.
+    #[tokio::test]
+    async fn world_delta_apply_kb_create_rolls_back_on_later_refusal() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_a").await;
+        seed_world(&pool, "ctr_a", "wld_a").await;
+
+        let cap = WorldDeltaApply::with_pool(pool.clone());
+        let err = cap
+            .run(json!({
+                "policy_context": {"world_id": "wld_a", "creator_id": "ctr_a"},
+                "proposed_changes": [
+                    {
+                        "entity": "kb_key_block",
+                        "field": "canonical_name",
+                        "new_value": {"canonical_name": "Ghost", "block_type": "character"},
+                        "rationale": "provisional insert"
+                    },
+                    {
+                        "entity": "world_metadata",
+                        "field": "summary",
+                        "new_value": "unsupported field refuses the batch",
+                        "rationale": "later refusal"
+                    }
+                ]
+            }))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CapabilityError::InputInvalid(_)));
+
+        let ghosts: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE canonical_name = 'Ghost'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            ghosts, 0,
+            "the provisional insert must not survive rollback"
+        );
     }
 }
