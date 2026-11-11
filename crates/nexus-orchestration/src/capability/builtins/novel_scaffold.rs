@@ -5,13 +5,15 @@
 //! and updates the `works` table — all atomically per V1.36 §5.4.
 
 use super::novel_scaffold_sanitize::{validate_total_chapters, validate_work_ref};
-use crate::capability::{Capability, CapabilityError};
+use super::work_commit::{commit_work_bytes, require_executor, workspace_root_of};
+use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use nexus_local_db::{work_chapters, works};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tracing::info;
 
 // ---------------------------------------------------------------------------
@@ -188,6 +190,7 @@ fn load_template(name: &str) -> Option<String> {
 pub struct NovelProjectScaffold {
     pool: Option<sqlx::SqlitePool>,
     works_root: PathBuf,
+    executor: Option<Arc<dyn WorkspaceExecutor>>,
 }
 
 impl NovelProjectScaffold {
@@ -197,6 +200,7 @@ impl NovelProjectScaffold {
         Self {
             pool: None,
             works_root: PathBuf::from("Works"),
+            executor: None,
         }
     }
 
@@ -206,6 +210,7 @@ impl NovelProjectScaffold {
         Self {
             pool: Some(pool),
             works_root: PathBuf::from("Works"),
+            executor: None,
         }
     }
 
@@ -218,7 +223,15 @@ impl NovelProjectScaffold {
         Self {
             pool: Some(pool),
             works_root,
+            executor: None,
         }
+    }
+
+    /// Attach the workspace executor that carries the Work artifact port.
+    #[must_use]
+    pub fn with_workspace_executor(mut self, executor: Option<Arc<dyn WorkspaceExecutor>>) -> Self {
+        self.executor = executor;
+        self
     }
 }
 
@@ -381,6 +394,8 @@ impl Capability for NovelProjectScaffold {
         }
 
         let root = self.works_root.join(&inp.work_ref);
+        let workspace_root = workspace_root_of(&self.works_root);
+        let executor = require_executor(self.executor.as_ref())?;
 
         // ── T2a: root directory ────────────────────────────────────────
         // F2 (C-002, C-2, W-3): all subsequent FS writes register with
@@ -418,7 +433,15 @@ impl Capability for NovelProjectScaffold {
                     ("total_planned_chapters", &total),
                 ],
             )?;
-            write_file_idem(&root.join("README.md"), &rendered, &mut txn.files_created)?;
+            write_file_idem(
+                executor,
+                workspace_root,
+                &inp.work_ref,
+                Path::new("README.md"),
+                &rendered,
+                &mut txn.files_created,
+            )
+            .await?;
         }
 
         // ── T2c–T2g: Outlines/ subtree ────────────────────────────────
@@ -456,10 +479,14 @@ impl Capability for NovelProjectScaffold {
                 work_id = inp.work_id,
             );
             write_file_idem(
-                &outlines.join("volume-outline.md"),
+                executor,
+                workspace_root,
+                &inp.work_ref,
+                Path::new("Outlines/volume-outline.md"),
                 &content,
                 &mut txn.files_created,
-            )?;
+            )
+            .await?;
         } else if let Some(tmpl) = load_template("volume-outline.md") {
             let total = inp.total_planned_chapters.to_string();
             let rendered = render_template(
@@ -471,30 +498,42 @@ impl Capability for NovelProjectScaffold {
                 ],
             )?;
             write_file_idem(
-                &outlines.join("volume-outline.md"),
+                executor,
+                workspace_root,
+                &inp.work_ref,
+                Path::new("Outlines/volume-outline.md"),
                 &rendered,
                 &mut txn.files_created,
-            )?;
+            )
+            .await?;
         }
 
         // T2f: foreshadowing.md
         if let Some(tmpl) = load_template("foreshadowing.md") {
             let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
             write_file_idem(
-                &outlines.join("foreshadowing.md"),
+                executor,
+                workspace_root,
+                &inp.work_ref,
+                Path::new("Outlines/foreshadowing.md"),
                 &rendered,
                 &mut txn.files_created,
-            )?;
+            )
+            .await?;
         }
 
         // T2g: event-index.md
         if let Some(tmpl) = load_template("event-index.md") {
             let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
             write_file_idem(
-                &outlines.join("event-index.md"),
+                executor,
+                workspace_root,
+                &inp.work_ref,
+                Path::new("Outlines/event-index.md"),
                 &rendered,
                 &mut txn.files_created,
-            )?;
+            )
+            .await?;
         }
 
         // ── T2h: Stories/ ──────────────────────────────────────────────
@@ -530,10 +569,14 @@ impl Capability for NovelProjectScaffold {
         // and the `rules reset` CLI (T4) stay in sync.
         let agents_md_rendered = crate::rules_layers::render_default_agents_md(&inp.work_ref);
         write_file_idem(
-            &root.join("AGENTS.md"),
+            executor,
+            workspace_root,
+            &inp.work_ref,
+            Path::new("AGENTS.md"),
             &agents_md_rendered,
             &mut txn.files_created,
-        )?;
+        )
+        .await?;
 
         // ── T3: seed work_chapters rows + T4: PATCH works ─────────────
         // V1.37 (R-V136P1-02): T3 + T4 now run inside a single DB
@@ -738,22 +781,29 @@ fn create_dir_all_idem(path: &Path) -> Result<bool, CapabilityError> {
     Ok(!pre_existed)
 }
 
-/// Write file only if it doesn't exist (idempotent per T6).
+/// Commit a file through the Work artifact port, only if it doesn't exist
+/// (idempotent per T6).
 ///
 /// On rollback, only files this call actually wrote (return value `true`)
 /// will be removed; pre-existing files are preserved.
-fn write_file_idem(
-    path: &Path,
+async fn write_file_idem(
+    executor: &dyn WorkspaceExecutor,
+    workspace_root: &Path,
+    work_ref: &str,
+    rel_child: &Path,
     content: &str,
     files_created: &mut Vec<PathBuf>,
 ) -> Result<bool, CapabilityError> {
+    let path = workspace_root
+        .join("Works")
+        .join(work_ref)
+        .join(rel_child);
     if path.exists() {
         info!(path = %path.display(), "write_file_idem: skip (exists)");
         return Ok(false);
     }
-    std::fs::write(path, content)
-        .map_err(|e| CapabilityError::Internal(format!("write {}: {e}", path.display())))?;
-    files_created.push(path.to_path_buf());
+    commit_work_bytes(executor, workspace_root, work_ref, rel_child, content).await?;
+    files_created.push(path);
     Ok(true)
 }
 
@@ -835,8 +885,19 @@ impl Drop for ScaffoldTransaction {
 
 #[cfg(test)]
 mod tests {
+    use super::super::work_commit::test_support::RecordingExecutor;
     use super::*;
     use tempfile::TempDir;
+
+    /// Capability over a temp `Works/` root with a recording executor.
+    fn cap_with_root(works_root: PathBuf) -> NovelProjectScaffold {
+        let executor: Arc<dyn WorkspaceExecutor> = RecordingExecutor::new();
+        NovelProjectScaffold {
+            pool: None,
+            works_root,
+            executor: Some(executor),
+        }
+    }
 
     #[test]
     fn render_template_replaces_placeholders() {
@@ -879,10 +940,7 @@ mod tests {
     async fn scaffold_creates_directory_tree() {
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
-        let cap = NovelProjectScaffold {
-            pool: None,
-            works_root: root.clone(),
-        };
+        let cap = cap_with_root(root.clone());
 
         let input = serde_json::json!({
             "creator_id": "creator_test",
@@ -932,10 +990,7 @@ mod tests {
     async fn scaffold_idempotent_no_overwrite() {
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
-        let cap = NovelProjectScaffold {
-            pool: None,
-            works_root: root.clone(),
-        };
+        let cap = cap_with_root(root.clone());
 
         let input = serde_json::json!({
             "creator_id": "creator_test",
@@ -978,10 +1033,7 @@ mod tests {
     async fn scaffold_rejects_worldless_creation_missing_world_id_and_create_world() {
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
-        let cap = NovelProjectScaffold {
-            pool: None,
-            works_root: root,
-        };
+        let cap = cap_with_root(root);
 
         // No world_id, no create_world → fail-closed
         let input = serde_json::json!({
@@ -1012,10 +1064,7 @@ mod tests {
     async fn scaffold_succeeds_with_valid_world_id() {
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
-        let cap = NovelProjectScaffold {
-            pool: None,
-            works_root: root.clone(),
-        };
+        let cap = cap_with_root(root.clone());
 
         let input = serde_json::json!({
             "creator_id": "creator_test",
@@ -1042,6 +1091,75 @@ mod tests {
         assert!(
             !readme.contains("worldless"),
             "README should NOT contain worldless text for V1.40 bound Work"
+        );
+    }
+
+    // ── Work artifact port seam ──
+
+    #[tokio::test]
+    async fn scaffold_refuses_without_workspace_executor() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let cap = NovelProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: None,
+        };
+
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_novel_nowire",
+                "work_ref": "novel-nowire",
+                "title": "Novel No Wire",
+                "world_id": "wld_nowire",
+                "total_planned_chapters": 1,
+            }))
+            .await
+            .expect_err("a Work byte write without the port must refuse");
+
+        assert!(
+            matches!(err, CapabilityError::WorkerUnavailable),
+            "expected WorkerUnavailable, got: {err}"
+        );
+        assert!(
+            !root.join("novel-nowire").exists(),
+            "no directory may be created before the port is available"
+        );
+    }
+
+    #[tokio::test]
+    async fn scaffold_rolls_back_when_port_refuses_a_later_file() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let executor = RecordingExecutor::refusing("AGENTS.md");
+        let cap = NovelProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: Some(executor.clone()),
+        };
+
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_novel_rollback",
+                "work_ref": "novel-rollback",
+                "title": "Novel Rollback",
+                "world_id": "wld_rollback",
+                "total_planned_chapters": 1,
+            }))
+            .await
+            .expect_err("missing work row must refuse the write");
+        assert!(
+            matches!(err, CapabilityError::Forbidden(_)),
+            "expected the port refusal to propagate, got: {err}"
+        );
+
+        let work_dir = root.join("novel-rollback");
+        assert!(!work_dir.join("README.md").exists(), "README rolled back");
+        assert!(
+            !work_dir.join("Outlines/volume-outline.md").exists(),
+            "committed outlines rolled back"
         );
     }
 }

@@ -5,7 +5,7 @@
 //!
 //! Updates the `section_status` field in a game-bible `Design/*.md` file's
 //! YAML frontmatter. Validates the transition (draft → reviewed → accepted)
-//! and writes atomically via temp+rename.
+//! and writes through the injected Work artifact port.
 //!
 //! # Input
 //!
@@ -30,11 +30,13 @@
 //! - `section_path`: the full path to the updated file
 
 use super::novel_scaffold_sanitize::validate_work_ref;
-use crate::capability::{Capability, CapabilityError};
+use super::work_commit::{commit_work_bytes, require_executor, workspace_root_of};
+use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::info;
 
 /// Input for `game_bible.section_status.update`.
@@ -229,30 +231,10 @@ pub fn replace_frontmatter_field(
     Ok(final_result)
 }
 
-/// Write a file atomically using temp+rename.
-///
-/// V1.67 P2 (R-V160P1-QC1-W001): shared with `script.section_status.update`.
-pub fn atomic_write(path: &Path, content: &str) -> Result<(), CapabilityError> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, content)
-        .map_err(|e| CapabilityError::Internal(format!("write tmp {}: {e}", tmp.display())))?;
-
-    std::fs::rename(&tmp, path).map_err(|e| {
-        // Try to clean up the temp file on rename failure
-        let _ = std::fs::remove_file(&tmp);
-        CapabilityError::Internal(format!(
-            "rename {} -> {}: {e}",
-            tmp.display(),
-            path.display()
-        ))
-    })?;
-
-    Ok(())
-}
-
 /// `game_bible.section_status.update` capability.
 pub struct GameBibleSectionStatusUpdate {
     works_root: PathBuf,
+    executor: Option<Arc<dyn WorkspaceExecutor>>,
 }
 
 impl GameBibleSectionStatusUpdate {
@@ -260,12 +242,23 @@ impl GameBibleSectionStatusUpdate {
     pub fn new() -> Self {
         Self {
             works_root: PathBuf::from("Works"),
+            executor: None,
         }
     }
 
     #[must_use]
     pub const fn with_works_root(works_root: PathBuf) -> Self {
-        Self { works_root }
+        Self {
+            works_root,
+            executor: None,
+        }
+    }
+
+    /// Attach the workspace executor that carries the Work artifact port.
+    #[must_use]
+    pub fn with_workspace_executor(mut self, executor: Option<Arc<dyn WorkspaceExecutor>>) -> Self {
+        self.executor = executor;
+        self
     }
 }
 
@@ -348,8 +341,27 @@ impl Capability for GameBibleSectionStatusUpdate {
         let updated_content =
             replace_frontmatter_field(&content, "section_status", &inp.new_status)?;
 
-        // Atomic write via temp+rename (use canonical path)
-        atomic_write(&section_canonical, &updated_content)?;
+        // Commit through the Work artifact port (canonical path → Work-relative child)
+        let work_dir_canonical = design_dir_canonical.parent().ok_or_else(|| {
+            CapabilityError::Internal(format!("missing work dir for {work_ref}"))
+        })?;
+        let rel_child = section_canonical
+            .strip_prefix(work_dir_canonical)
+            .map_err(|_| {
+                CapabilityError::InputInvalid(format!(
+                    "section_path '{}' must be within the Design directory",
+                    inp.section_path
+                ))
+            })?;
+        let executor = require_executor(self.executor.as_ref())?;
+        commit_work_bytes(
+            executor,
+            workspace_root_of(&root),
+            &work_ref,
+            rel_child,
+            &updated_content,
+        )
+        .await?;
 
         info!(
             work_ref = %work_ref,
@@ -407,7 +419,12 @@ pub fn extract_frontmatter_field(content: &str, key: &str) -> Result<String, Cap
 
 #[cfg(test)]
 mod tests {
+    use super::super::work_commit::test_support::RecordingExecutor;
     use super::*;
+
+    fn test_executor() -> Arc<dyn WorkspaceExecutor> {
+        RecordingExecutor::new()
+    }
 
     // ── Transition validation ──
 
@@ -531,22 +548,6 @@ mod tests {
         assert!(replace_frontmatter_field(content, "section_status", "reviewed").is_err());
     }
 
-    // ── Atomic write ──
-
-    #[test]
-    fn atomic_write_creates_file() {
-        use tempfile::TempDir;
-        let tmp = TempDir::new().expect("tmpdir");
-        let path = tmp.path().join("test.md");
-        let content = "# Test\n";
-        atomic_write(&path, content).expect("write");
-        assert!(path.exists());
-        let read = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(read, content);
-        // Temp file should be cleaned up
-        assert!(!path.with_extension("tmp").exists());
-    }
-
     // ── Capability name ──
 
     #[test]
@@ -561,7 +562,7 @@ mod tests {
     async fn run_updates_section_status_draft_to_reviewed() {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
-        let works_root = tmp.path().to_path_buf();
+        let works_root = tmp.path().join("Works");
         let work_dir = works_root.join("my-design");
         let design_dir = work_dir.join("Design");
         std::fs::create_dir_all(&design_dir).expect("mkdir");
@@ -572,7 +573,8 @@ mod tests {
         )
         .expect("write");
 
-        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone());
+        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
+            .with_workspace_executor(Some(test_executor()));
 
         let input = serde_json::json!({
             "work_ref": "my-design",
@@ -595,7 +597,7 @@ mod tests {
     async fn run_rejects_draft_to_accepted() {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
-        let works_root = tmp.path().to_path_buf();
+        let works_root = tmp.path().join("Works");
         let work_dir = works_root.join("my-design");
         let design_dir = work_dir.join("Design");
         std::fs::create_dir_all(&design_dir).expect("mkdir");
@@ -605,7 +607,8 @@ mod tests {
         )
         .expect("write");
 
-        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone());
+        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
+            .with_workspace_executor(Some(test_executor()));
 
         let input = serde_json::json!({
             "work_ref": "my-design",
@@ -626,7 +629,7 @@ mod tests {
     async fn run_rejects_accepted_to_draft() {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
-        let works_root = tmp.path().to_path_buf();
+        let works_root = tmp.path().join("Works");
         let work_dir = works_root.join("my-design");
         let design_dir = work_dir.join("Design");
         std::fs::create_dir_all(&design_dir).expect("mkdir");
@@ -636,7 +639,8 @@ mod tests {
         )
         .expect("write");
 
-        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone());
+        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
+            .with_workspace_executor(Some(test_executor()));
 
         let input = serde_json::json!({
             "work_ref": "my-design",
@@ -657,11 +661,12 @@ mod tests {
     async fn run_rejects_section_not_found() {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
-        let works_root = tmp.path().to_path_buf();
+        let works_root = tmp.path().join("Works");
         let work_dir = works_root.join("my-design");
         std::fs::create_dir_all(work_dir.join("Design")).expect("mkdir");
 
-        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone());
+        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
+            .with_workspace_executor(Some(test_executor()));
 
         let input = serde_json::json!({
             "work_ref": "my-design",
@@ -679,7 +684,7 @@ mod tests {
     async fn run_preserves_other_frontmatter_fields() {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
-        let works_root = tmp.path().to_path_buf();
+        let works_root = tmp.path().join("Works");
         let work_dir = works_root.join("my-design");
         let design_dir = work_dir.join("Design");
         std::fs::create_dir_all(&design_dir).expect("mkdir");
@@ -690,7 +695,8 @@ mod tests {
         )
         .expect("write");
 
-        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone());
+        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
+            .with_workspace_executor(Some(test_executor()));
 
         let input = serde_json::json!({
             "work_ref": "my-design",
@@ -713,7 +719,7 @@ mod tests {
     async fn run_atomic_write_no_temp_file_left() {
         use tempfile::TempDir;
         let tmp = TempDir::new().expect("tmpdir");
-        let works_root = tmp.path().to_path_buf();
+        let works_root = tmp.path().join("Works");
         let work_dir = works_root.join("my-design");
         let design_dir = work_dir.join("Design");
         std::fs::create_dir_all(&design_dir).expect("mkdir");
@@ -724,7 +730,8 @@ mod tests {
         )
         .expect("write");
 
-        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone());
+        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
+            .with_workspace_executor(Some(test_executor()));
 
         let input = serde_json::json!({
             "work_ref": "my-design",
@@ -738,5 +745,67 @@ mod tests {
         // No temp file left behind
         assert!(!section_path.with_extension("tmp").exists());
         assert!(section_path.exists());
+    }
+
+    #[tokio::test]
+    async fn run_leaves_section_untouched_when_port_refuses() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let works_root = tmp.path().join("Works");
+        let design_dir = works_root.join("my-design").join("Design");
+        std::fs::create_dir_all(&design_dir).expect("mkdir");
+        let section_path = design_dir.join("overview.md");
+        let original = "---\nsection_status: draft\n---\n# Overview\n";
+        std::fs::write(&section_path, original).expect("write");
+
+        // The port refuses the write (missing works row).
+        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
+            .with_workspace_executor(Some(RecordingExecutor::refusing("Design/overview.md")));
+
+        let err = cap
+            .run(serde_json::json!({
+                "work_ref": "my-design",
+                "section_path": "overview.md",
+                "new_status": "reviewed",
+            }))
+            .await
+            .expect_err("missing work row must refuse the write");
+        assert!(
+            matches!(err, CapabilityError::Forbidden(_)),
+            "expected the port refusal to propagate, got: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&section_path).unwrap(),
+            original,
+            "a refused commit must not touch the section bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_refuses_without_workspace_executor() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let works_root = tmp.path().join("Works");
+        let design_dir = works_root.join("my-design").join("Design");
+        std::fs::create_dir_all(&design_dir).expect("mkdir");
+        std::fs::write(
+            design_dir.join("overview.md"),
+            "---\nsection_status: draft\n---\n# Overview\n",
+        )
+        .expect("write");
+
+        let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone());
+        let err = cap
+            .run(serde_json::json!({
+                "work_ref": "my-design",
+                "section_path": "overview.md",
+                "new_status": "reviewed",
+            }))
+            .await
+            .expect_err("a Work byte write without the port must refuse");
+        assert!(
+            matches!(err, CapabilityError::WorkerUnavailable),
+            "expected WorkerUnavailable, got: {err}"
+        );
     }
 }

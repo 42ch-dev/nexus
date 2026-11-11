@@ -803,14 +803,16 @@ impl CapabilityRegistry {
                     .as_ref()
                     .map_or_else(builtins::NovelProjectScaffold::new, |pool| {
                         builtins::NovelProjectScaffold::with_pool(pool.clone())
-                    }),
+                    })
+                    .with_workspace_executor(deps.workspace_executor.clone()),
             ),
             Box::new(
                 deps.pool
                     .as_ref()
                     .map_or_else(builtins::NovelChapterTransition::new, |pool| {
                         builtins::NovelChapterTransition::with_pool(pool.clone())
-                    }),
+                    })
+                    .with_workspace_executor(deps.workspace_executor.clone()),
             ),
             // V1.52 T-A P2: essay.project_scaffold with runtime deps.
             Box::new(
@@ -818,7 +820,8 @@ impl CapabilityRegistry {
                     .as_ref()
                     .map_or_else(builtins::EssayProjectScaffold::new, |pool| {
                         builtins::EssayProjectScaffold::with_pool(pool.clone())
-                    }),
+                    })
+                    .with_workspace_executor(deps.workspace_executor.clone()),
             ),
             // V1.54 P1: game_bible.project_scaffold with runtime deps.
             Box::new(
@@ -826,7 +829,8 @@ impl CapabilityRegistry {
                     .as_ref()
                     .map_or_else(builtins::GameBibleProjectScaffold::new, |pool| {
                         builtins::GameBibleProjectScaffold::with_pool(pool.clone())
-                    }),
+                    })
+                    .with_workspace_executor(deps.workspace_executor.clone()),
             ),
             // V1.55 P3: script.project_scaffold with runtime deps.
             Box::new(
@@ -834,12 +838,19 @@ impl CapabilityRegistry {
                     .as_ref()
                     .map_or_else(builtins::ScriptProjectScaffold::new, |pool| {
                         builtins::ScriptProjectScaffold::with_pool(pool.clone())
-                    }),
+                    })
+                    .with_workspace_executor(deps.workspace_executor.clone()),
             ),
             // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
-            Box::new(builtins::GameBibleSectionStatusUpdate::new()),
+            Box::new(
+                builtins::GameBibleSectionStatusUpdate::new()
+                    .with_workspace_executor(deps.workspace_executor.clone()),
+            ),
             // V1.67 P2 (R-V160P1-QC1-W001): script.section_status.update
-            Box::new(builtins::ScriptSectionStatusUpdate::new()),
+            Box::new(
+                builtins::ScriptSectionStatusUpdate::new()
+                    .with_workspace_executor(deps.workspace_executor.clone()),
+            ),
             // V1.60 P0: DF-46 local parity — 5 orchestration-scope capabilities
             // (pool-conditional; pool-less returns WorkerUnavailable).
             Box::new(
