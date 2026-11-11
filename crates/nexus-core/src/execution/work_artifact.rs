@@ -24,8 +24,8 @@ pub(crate) enum WorkPath<'a> {
     /// Not under `Works/` — the caller keeps its existing guarded write.
     NonWork,
     /// A case variant of `Works` (`works/…`, `WORKS/…`): the port writes the
-    /// literal `Works` tree and the read path never classifies, so a different
-    /// spelling is refused instead of routed.
+    /// literal `Works` tree, so the read and write halves of the tool surface
+    /// both refuse the spelling instead of routing it.
     CaseVariantWorks,
     /// `Works/<work_ref>/<child…>`: a writable Work artifact.
     Artifact {

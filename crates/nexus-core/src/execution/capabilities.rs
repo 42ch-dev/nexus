@@ -802,11 +802,29 @@ async fn execute_context_assemble(
 
 // ─── fs/* Baseline handlers (V1.33, unchanged behavior) ───────────────────
 
-/// Refusal shared by the read and write halves of `fs/*` for a case-variant
-/// `Works` spelling: neither routes it, so the two cannot disagree.
+// Refusals shared by the read and write halves of `fs/*`: both halves judge the
+// same classification and answer from these, so the two cannot disagree.
+
+/// A case-variant `Works` spelling: neither half routes it.
 fn case_variant_works_refusal(path_str: &str) -> NexusApiError {
     NexusApiError::Forbidden {
         resource: format!("file: path '{path_str}' must spell the Work root 'Works' byte-exactly"),
+    }
+}
+
+/// `Works/<work_ref>` itself: a directory, never a readable or writable file.
+fn work_root_refusal(path_str: &str, work_ref: &str) -> NexusApiError {
+    NexusApiError::Forbidden {
+        resource: format!(
+            "file: path '{path_str}' is the Work root directory 'Works/{work_ref}', not an artifact file"
+        ),
+    }
+}
+
+/// A `..` inside the Work subtree: lexically inside, physically not.
+fn escaped_work_refusal(path_str: &str, work_ref: &str) -> NexusApiError {
+    NexusApiError::Forbidden {
+        resource: format!("file: path '{path_str}' escapes the Works/{work_ref}/ boundary"),
     }
 }
 
@@ -836,6 +854,18 @@ async fn execute_read_file(
             ),
         })?;
 
+    // ADR #485 §4.4: the read half refuses every classification the write half
+    // refuses, and judges the raw spelling first — the same order the write half
+    // uses — so the same path gets the same answer whether or not it exists.
+    match classify_work_path(&path_str) {
+        WorkPath::WorkRoot { work_ref } => return Err(work_root_refusal(&path_str, work_ref)),
+        WorkPath::EscapedWork { work_ref } => {
+            return Err(escaped_work_refusal(&path_str, work_ref));
+        }
+        WorkPath::CaseVariantWorks => return Err(case_variant_works_refusal(&path_str)),
+        WorkPath::Artifact { .. } | WorkPath::NonWork => {}
+    }
+
     let workspace_path = Path::new(&workspace_path_str).to_path_buf();
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), true)
         .await
@@ -854,13 +884,6 @@ async fn execute_read_file(
             },
             other => other,
         })?;
-
-    // ADR #485 §4.4: the Work artifact port refuses a case-variant `Works`
-    // spelling, so the read half refuses it too. Classified only after the
-    // guard succeeds, so a missing file never becomes a spelling refusal.
-    if matches!(classify_work_path(&path_str), WorkPath::CaseVariantWorks) {
-        return Err(case_variant_works_refusal(&path_str));
-    }
 
     let content = tokio::task::spawn_blocking({
         let resolved = resolved.clone();
@@ -947,16 +970,10 @@ async fn execute_write_file(
                 .await?;
         }
         WorkPath::WorkRoot { work_ref } => {
-            return Err(NexusApiError::Forbidden {
-                resource: format!(
-                    "file: path '{path_str}' is the Work root directory 'Works/{work_ref}', not an artifact file"
-                ),
-            });
+            return Err(work_root_refusal(&path_str, work_ref));
         }
         WorkPath::EscapedWork { work_ref } => {
-            return Err(NexusApiError::Forbidden {
-                resource: format!("file: path '{path_str}' escapes the Works/{work_ref}/ boundary"),
-            });
+            return Err(escaped_work_refusal(&path_str, work_ref));
         }
         WorkPath::CaseVariantWorks => {
             return Err(case_variant_works_refusal(&path_str));
@@ -4495,24 +4512,49 @@ mod tests {
             .expect_err("a case-variant read refuses");
         assert_case_variant_works_refusal(read_error, &case_variant);
 
-        // A genuinely missing target keeps the guard's not-found answer: the
-        // spelling is only judged once the path resolves.
+        // The spelling is judged before any lookup, exactly as on write, so a
+        // missing target is the same spelling refusal rather than a not-found.
         let missing = format!("works/{WORK_REF}/Stories/missing.md");
         let missing_error = execute_read_file(&read_request(&missing), &fixture.context)
             .await
-            .expect_err("a missing read is not found");
-        match missing_error {
-            NexusApiError::NotFound { resource } => {
-                assert!(resource.contains("does not exist"), "{missing}: {resource}");
-            }
-            other => panic!("expected NotFound for {missing}, got {other:?}"),
-        }
+            .expect_err("a missing case-variant read is still refused");
+        assert_case_variant_works_refusal(missing_error, &missing);
 
         // The exact spelling stays readable.
         let read = execute_read_file(&read_request(&exact), &fixture.context)
             .await
             .expect("the exact spelling reads");
         assert_eq!(read, serde_json::json!({ "content": "chapter body" }));
+    }
+
+    #[tokio::test]
+    async fn fs_work_escape_is_refused_identically_on_write_and_read() {
+        let fixture = fixture(true).await;
+        // Lexically under `Works/<ref>` but physically the case-variant tree.
+        let escaped = format!("Works/{WORK_REF}/../works/{WORK_REF}/x.md");
+        let expected = format!("escapes the Works/{WORK_REF}/ boundary");
+
+        let write_error = execute_write_file(&write_request(&escaped, "body"), &fixture.context)
+            .await
+            .expect_err("the escaped write refuses");
+        let read_error = execute_read_file(&read_request(&escaped), &fixture.context)
+            .await
+            .expect_err("the escaped read refuses");
+
+        for error in [write_error, read_error] {
+            match error {
+                NexusApiError::Forbidden { resource } => {
+                    assert!(resource.contains(&expected), "{escaped}: {resource}");
+                }
+                other => panic!("expected Forbidden for {escaped}, got {other:?}"),
+            }
+        }
+        assert_eq!(holder(&fixture.pool).await, None, "no lock was taken");
+        assert!(!fixture
+            .workspace
+            .path()
+            .join(format!("works/{WORK_REF}/x.md"))
+            .exists());
     }
 
     #[tokio::test]
