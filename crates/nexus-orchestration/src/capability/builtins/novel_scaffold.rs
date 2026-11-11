@@ -5,9 +5,7 @@
 //! and updates the `works` table — all atomically per V1.36 §5.4.
 
 use super::novel_scaffold_sanitize::{validate_total_chapters, validate_work_ref};
-use super::work_commit::{
-    claim_work_ref, commit_work_bytes, require_executor, resolve_works_dirs, WorkRefClaim,
-};
+use super::work_commit::{claim_work_ref, commit_work_bytes, require_executor, resolve_works_dirs};
 use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use nexus_local_db::{work_chapters, works};
@@ -298,7 +296,7 @@ impl Capability for NovelProjectScaffold {
         }
         // Re-bind to the validated values so downstream code cannot accidentally
         // use the raw input fields.
-        let inp = ScaffoldInput {
+        let mut inp = ScaffoldInput {
             creator_id: inp.creator_id,
             work_id: inp.work_id,
             work_ref,
@@ -397,28 +395,28 @@ impl Capability for NovelProjectScaffold {
 
         let executor = require_executor(self.executor.as_ref())?;
         let (workspace_root, works_dir) = resolve_works_dirs(executor, &self.works_root)?;
-        let root = works_dir.join(&inp.work_ref);
 
         // The Work artifact port resolves `Works/<work_ref>` through the works
         // row, so the ref must already be there when the first byte lands — a
         // first scaffold still has it NULL. A partial re-init that does not
         // select `work_ref` keeps the stored value instead of overwriting it;
         // the prior value is restored if the scaffold fails.
-        let claim = if inp
+        let requested_ref = inp
             .fields_changed
             .as_ref()
             .is_none_or(|fields| fields.iter().any(|field| field == "work_ref"))
-        {
-            claim_work_ref(
-                self.pool.as_ref(),
-                &inp.creator_id,
-                &inp.work_id,
-                &inp.work_ref,
-            )
-            .await?
-        } else {
-            WorkRefClaim::none()
-        };
+            .then_some(inp.work_ref.as_str());
+        let claim = claim_work_ref(
+            self.pool.as_ref(),
+            &inp.creator_id,
+            &inp.work_id,
+            requested_ref,
+        )
+        .await?;
+        // Address the effective ref everywhere below: on a partial re-init the
+        // port resolves the Work by the stored ref, not the requested one.
+        inp.work_ref = claim.effective().to_string();
+        let root = works_dir.join(&inp.work_ref);
 
         let result = async {
 
@@ -791,13 +789,15 @@ impl Capability for NovelProjectScaffold {
         .await;
 
         if result.is_err() {
-            if let Err(restore_err) = claim.restore(self.pool.as_ref()).await {
+            if let Err(restore_err) = claim.restore().await {
                 tracing::warn!(
                     work_id = %inp.work_id,
                     error = %restore_err,
                     "novel.project_scaffold: restore prior work_ref failed"
                 );
             }
+        } else {
+            claim.disarm();
         }
         result
     }

@@ -185,6 +185,13 @@ fn work_record(work_id: &str) -> WorkRecord {
     }
 }
 
+fn work_record_with_ref(work_id: &str, work_ref: &str) -> WorkRecord {
+    WorkRecord {
+        work_ref: Some(work_ref.to_string()),
+        ..work_record(work_id)
+    }
+}
+
 async fn stored_work_ref(pool: &SqlitePool, work_id: &str) -> Option<String> {
     sqlx::query_scalar::<_, Option<String>>("SELECT work_ref FROM works WHERE work_id = ?")
         .bind(work_id)
@@ -432,5 +439,54 @@ async fn a_later_port_refusal_restores_the_canonical_tree() {
         stored_work_ref(&fx.pool, work_id).await,
         None,
         "the failed scaffold restores the claimed work_ref"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_partial_reinit_uses_the_stored_ref_through_the_real_port() {
+    let fx = fixture().await;
+    let _cwd = CwdGuard::enter(fx.cwd.path());
+
+    let work_id = "wrk_prod_novel_partial";
+    works::create_work(&fx.pool, &work_record_with_ref(work_id, "prod-keep-ref"))
+        .await
+        .expect("works row with a stored ref");
+
+    // The selection excludes `work_ref`, so the requested ref must not become
+    // the port's lookup key: only the stored ref resolves this Work's row.
+    let novel = NovelProjectScaffold::with_pool((*fx.pool).clone())
+        .with_workspace_executor(Some(Arc::clone(&fx.executor)));
+    novel
+        .run(json!({
+            "creator_id": CREATOR,
+            "work_id": work_id,
+            "work_ref": "prod-other-ref",
+            "title": "Renamed Production Novel",
+            "create_world": true,
+            "world_title": "Production World",
+            "total_planned_chapters": 1,
+            "fields_changed": ["title"],
+        }))
+        .await
+        .expect("a partial re-init excluding work_ref succeeds through the real port");
+
+    let stored = fx.root.path().join("Works").join("prod-keep-ref");
+    assert!(
+        stored.join("README.md").is_file(),
+        "the scaffold must write under the stored ref: {}",
+        stored.display()
+    );
+    assert!(
+        !fx.root.path().join("Works").join("prod-other-ref").exists(),
+        "the unselected requested ref must not become a second tree"
+    );
+    assert!(
+        !fx.cwd.path().join("Works").join("prod-keep-ref").exists(),
+        "nothing may land in the cwd tree"
+    );
+    assert_eq!(
+        stored_work_ref(&fx.pool, work_id).await.as_deref(),
+        Some("prod-keep-ref"),
+        "a selection without work_ref keeps the stored ref"
     );
 }

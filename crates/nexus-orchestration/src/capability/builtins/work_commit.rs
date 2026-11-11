@@ -41,48 +41,110 @@ pub fn resolve_works_dirs(
     works_root: &Path,
 ) -> Result<(PathBuf, PathBuf), CapabilityError> {
     let works_dir = executor.workspace_root()?.join(works_root);
+    // The port rebuilds its target as `<workspace_root>/Works/<ref>/<child>`,
+    // so a root with any other last component would make the reads and the
+    // commits address two different trees. Alternatives that ARE a `Works`
+    // directory (any absolute tree) stay valid; anything else is refused here,
+    // before the claim or any directory/byte mutation.
+    if works_dir.file_name() != Some(std::ffi::OsStr::new("Works")) {
+        return Err(CapabilityError::InputInvalid(format!(
+            "works_root must name a Works directory: {}",
+            works_dir.display()
+        )));
+    }
     let Some(workspace_root) = works_dir.parent().map(Path::to_path_buf) else {
         return Err(CapabilityError::WorkerUnavailable);
     };
     Ok((workspace_root, works_dir))
 }
 
-/// The `work_ref` this run claimed on the works row, kept so a failed scaffold
-/// can put the prior value back.
+/// The `work_ref` this run claimed on the works row, kept so a failed or
+/// cancelled scaffold can put the prior value back.
+///
+/// The claim stays armed until the scaffold decides: [`Self::disarm`] keeps
+/// the claimed ref, [`Self::restore`] reverts it, and the [`Drop`] guard
+/// reverts it when the future is dropped before either runs.
 pub struct WorkRefClaim {
+    pool: Option<SqlitePool>,
     prior: Option<PriorWorkRef>,
+    effective: String,
 }
 
 struct PriorWorkRef {
     creator_id: String,
     work_id: String,
-    work_ref: Option<String>,
+    prior_ref: Option<String>,
+    claimed_ref: String,
 }
 
 impl WorkRefClaim {
-    /// A run that changed nothing (no pool, or the row already held this ref).
-    pub const fn none() -> Self {
-        Self { prior: None }
+    /// The ref this run must use for every `Works/<ref>/` read and port commit.
+    pub fn effective(&self) -> &str {
+        &self.effective
+    }
+
+    /// Keep the claimed ref: the scaffold finished, so the guard must not fire.
+    pub fn disarm(mut self) {
+        self.prior = None;
     }
 
     /// Put the prior `work_ref` back after an unsuccessful scaffold.
     ///
+    /// The update matches only while the row still holds the ref this run
+    /// claimed, so a concurrent writer's ref is never clobbered.
+    ///
     /// # Errors
     /// [`CapabilityError::Internal`] when the compensating update fails; the
     /// caller reports the original scaffold error and logs this one.
-    pub async fn restore(self, pool: Option<&SqlitePool>) -> Result<(), CapabilityError> {
-        let (Some(pool), Some(prior)) = (pool, self.prior) else {
+    pub async fn restore(mut self) -> Result<(), CapabilityError> {
+        let (Some(pool), Some(prior)) = (self.pool.take(), self.prior.take()) else {
             return Ok(());
         };
-        sqlx::query("UPDATE works SET work_ref = ? WHERE work_id = ? AND creator_id = ?")
-            .bind(prior.work_ref)
-            .bind(&prior.work_id)
-            .bind(&prior.creator_id)
-            .execute(pool)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("restore work_ref: {e}")))?;
-        Ok(())
+        restore_prior(&pool, &prior).await
     }
+}
+
+impl Drop for WorkRefClaim {
+    fn drop(&mut self) {
+        let (Some(pool), Some(prior)) = (self.pool.take(), self.prior.take()) else {
+            return;
+        };
+        // A cancelled scaffold never reaches `restore`, so the revert has to
+        // run from here. Drop cannot await; the runtime finishes the update.
+        // shortcut: needs a live runtime — a cancellation while the runtime is
+        // shutting down can miss the revert.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                if let Err(err) = restore_prior(&pool, &prior).await {
+                    tracing::warn!(
+                        work_id = %prior.work_id,
+                        error = %err,
+                        "cancelled scaffold: restore prior work_ref failed"
+                    );
+                }
+            });
+        } else {
+            tracing::warn!(
+                work_id = %prior.work_id,
+                "cancelled scaffold: no runtime for the prior work_ref restore"
+            );
+        }
+    }
+}
+
+async fn restore_prior(pool: &SqlitePool, prior: &PriorWorkRef) -> Result<(), CapabilityError> {
+    sqlx::query(
+        "UPDATE works SET work_ref = ? \
+         WHERE work_id = ? AND creator_id = ? AND work_ref = ?",
+    )
+    .bind(&prior.prior_ref)
+    .bind(&prior.work_id)
+    .bind(&prior.creator_id)
+    .bind(&prior.claimed_ref)
+    .execute(pool)
+    .await
+    .map_err(|e| CapabilityError::Internal(format!("restore work_ref: {e}")))?;
+    Ok(())
 }
 
 /// Claim `work_ref` for the Work so the port can resolve `Works/<work_ref>/`.
@@ -91,17 +153,34 @@ impl WorkRefClaim {
 /// to publish its ref before the first byte. This publishes only that minimum
 /// identity; the profile and any final metadata land after the files do.
 ///
+/// `requested` is `None` for a partial re-init that does not select
+/// `work_ref`: the stored ref is then kept and returned as the effective one,
+/// so the port and the filesystem reads address the same directory.
+///
 /// # Errors
 /// [`CapabilityError::Forbidden`] when no works row belongs to `creator_id`
-/// (nothing is claimed), [`CapabilityError::Internal`] on a database failure.
+/// (nothing is claimed), [`CapabilityError::InputInvalid`] for a partial
+/// re-init of a Work with no stored ref, [`CapabilityError::Internal`] on a
+/// database failure.
 pub async fn claim_work_ref(
     pool: Option<&SqlitePool>,
     creator_id: &str,
     work_id: &str,
-    work_ref: &str,
+    requested: Option<&str>,
 ) -> Result<WorkRefClaim, CapabilityError> {
     let Some(pool) = pool else {
-        return Ok(WorkRefClaim::none());
+        // No row to read: a partial re-init that excludes `work_ref` cannot
+        // resolve the stored ref, so refuse instead of guessing.
+        let Some(work_ref) = requested else {
+            return Err(CapabilityError::InputInvalid(
+                "a re-init excluding work_ref needs a works row".to_string(),
+            ));
+        };
+        return Ok(WorkRefClaim {
+            pool: None,
+            prior: None,
+            effective: work_ref.to_string(),
+        });
     };
     let prior: Option<Option<String>> =
         sqlx::query_scalar("SELECT work_ref FROM works WHERE work_id = ? AND creator_id = ?")
@@ -115,8 +194,24 @@ pub async fn claim_work_ref(
             "work '{work_id}' has no works row for creator '{creator_id}'"
         )));
     };
+    let Some(work_ref) = requested else {
+        let Some(stored) = prior else {
+            return Err(CapabilityError::InputInvalid(format!(
+                "work '{work_id}' has no stored work_ref to re-init"
+            )));
+        };
+        return Ok(WorkRefClaim {
+            pool: Some(pool.clone()),
+            prior: None,
+            effective: stored,
+        });
+    };
     if prior.as_deref() == Some(work_ref) {
-        return Ok(WorkRefClaim::none());
+        return Ok(WorkRefClaim {
+            pool: Some(pool.clone()),
+            prior: None,
+            effective: work_ref.to_string(),
+        });
     }
     let updated = sqlx::query("UPDATE works SET work_ref = ? WHERE work_id = ? AND creator_id = ?")
         .bind(work_ref)
@@ -131,11 +226,14 @@ pub async fn claim_work_ref(
         )));
     }
     Ok(WorkRefClaim {
+        pool: Some(pool.clone()),
         prior: Some(PriorWorkRef {
             creator_id: creator_id.to_string(),
             work_id: work_id.to_string(),
-            work_ref: prior,
+            prior_ref: prior,
+            claimed_ref: work_ref.to_string(),
         }),
+        effective: work_ref.to_string(),
     })
 }
 
@@ -215,6 +313,7 @@ pub mod test_support {
     pub struct RecordingExecutor {
         commits: std::sync::Mutex<Vec<WorkArtifactCommitInput>>,
         fail_on: Option<&'static str>,
+        hang: Option<std::sync::Arc<tokio::sync::Notify>>,
         workspace_root: Option<std::path::PathBuf>,
     }
 
@@ -241,6 +340,7 @@ pub mod test_support {
                 commits: std::sync::Mutex::new(Vec::new()),
                 fail_on: Some(rel_child),
                 workspace_root: None,
+                ..Self::default()
             })
         }
 
@@ -253,7 +353,24 @@ pub mod test_support {
                 commits: std::sync::Mutex::new(Vec::new()),
                 fail_on: Some(rel_child),
                 workspace_root: Some(workspace_root.into()),
+                ..Self::default()
             })
+        }
+
+        /// [`Self::at`] whose commits signal [`Self::reached`] and then never
+        /// finish — a scaffold suspended mid-write, ready to be cancelled.
+        pub(crate) fn hanging_at(
+            workspace_root: impl Into<std::path::PathBuf>,
+        ) -> std::sync::Arc<Self> {
+            std::sync::Arc::new(Self {
+                hang: Some(std::sync::Arc::new(tokio::sync::Notify::new())),
+                workspace_root: Some(workspace_root.into()),
+                ..Self::default()
+            })
+        }
+
+        pub(crate) fn reached(&self) -> Option<&std::sync::Arc<tokio::sync::Notify>> {
+            self.hang.as_ref()
         }
 
         pub(crate) fn commits(&self) -> Vec<WorkArtifactCommitInput> {
@@ -290,6 +407,10 @@ pub mod test_support {
             &self,
             input: WorkArtifactCommitInput,
         ) -> Result<WorkArtifactCommitOutput, CapabilityError> {
+            if let Some(reached) = &self.hang {
+                reached.notify_one();
+                std::future::pending::<()>().await;
+            }
             if self.fail_on == Some(input.rel_child.as_str()) {
                 return Err(CapabilityError::Forbidden(format!(
                     "work '{}' has no works row in the active workspace",
@@ -489,6 +610,148 @@ mod tests {
             stored_identity(&pool).await.0,
             Some("keep-ref".to_string()),
             "a selection without work_ref must not overwrite the stored ref"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_custom_works_root_reads_and_commits_the_same_tree() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let pool = pool_with_work(tmp.path(), Some("custom-ref"), Some("essay")).await;
+        let elsewhere = tmp.path().join("elsewhere");
+        let works_root = elsewhere.join("Works");
+        let executor = RecordingExecutor::at(elsewhere.clone());
+        let probe = std::sync::Arc::clone(&executor);
+        let cap = EssayProjectScaffold::new_with_root(pool.clone(), works_root.clone())
+            .with_workspace_executor(Some(executor));
+
+        cap.run(json!({
+            "creator_id": CREATOR,
+            "work_id": WORK_ID,
+            "work_ref": "custom-ref",
+            "title": "Custom Root Essay",
+        }))
+        .await
+        .expect("a custom Works root is a supported override");
+
+        let commit = probe.commits().into_iter().next().expect("one commit");
+        assert_eq!(
+            Path::new(&commit.workspace_root).join("Works"),
+            works_root,
+            "the port target must be the same tree the scaffold read"
+        );
+        assert!(works_root.join("custom-ref").join("README.md").is_file());
+        assert!(
+            !tmp.path().join("Works").exists(),
+            "no default Works tree may appear beside the custom root"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_works_root_not_named_works_is_refused_before_mutation() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let pool = pool_with_work(tmp.path(), Some("keep-ref"), Some("essay")).await;
+        let works_root = tmp.path().join("Custom");
+        let executor = RecordingExecutor::at(tmp.path().to_path_buf());
+        let probe = std::sync::Arc::clone(&executor);
+        let cap = EssayProjectScaffold::new_with_root(pool.clone(), works_root.clone())
+            .with_workspace_executor(Some(executor));
+
+        let err = cap
+            .run(json!({
+                "creator_id": CREATOR,
+                "work_id": WORK_ID,
+                "work_ref": "other-ref",
+                "title": "Split Root Essay",
+            }))
+            .await
+            .expect_err("a root that is not a Works directory must be refused");
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected the works_root refusal, got: {err}"
+        );
+        assert!(!works_root.exists(), "no directory may be created");
+        assert!(probe.commits().is_empty(), "no byte may be committed");
+        assert_eq!(
+            stored_identity(&pool).await.0,
+            Some("keep-ref".to_string()),
+            "the refusal lands before the claim"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_scaffold_restores_the_claimed_ref() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let pool = pool_with_work(tmp.path(), Some("prior-ref"), Some("essay")).await;
+        let works_root = tmp.path().join("Works");
+        let executor = RecordingExecutor::hanging_at(tmp.path().to_path_buf());
+        let reached = executor
+            .reached()
+            .expect("hanging executor carries a signal")
+            .clone();
+        let cap = EssayProjectScaffold::new_with_root(pool.clone(), works_root.clone())
+            .with_workspace_executor(Some(executor));
+
+        let run = tokio::spawn(async move {
+            cap.run(json!({
+                "creator_id": CREATOR,
+                "work_id": WORK_ID,
+                "work_ref": "cancelled-ref",
+                "title": "Cancelled Essay",
+            }))
+            .await
+        });
+        // The claim is published before the first commit, so reaching the
+        // hanging commit proves the claim is set when the future is dropped.
+        reached.notified().await;
+        run.abort();
+        assert!(run.await.is_err(), "the scaffold run was cancelled");
+
+        // The drop guard restores on its own task; give it turns to land.
+        let mut restored = false;
+        for _ in 0..200 {
+            if stored_identity(&pool).await.0.as_deref() == Some("prior-ref") {
+                restored = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(
+            restored,
+            "cancellation must restore the prior work_ref, not keep the claim"
+        );
+        assert!(
+            !works_root.join("cancelled-ref").exists(),
+            "the cancelled scaffold also rolls back the tree it created"
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_does_not_clobber_a_concurrent_writers_ref() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let pool = pool_with_work(tmp.path(), Some("prior-ref"), None).await;
+        let claim = claim_work_ref(Some(&pool), CREATOR, WORK_ID, Some("claimed-ref"))
+            .await
+            .expect("claim the ref");
+        assert_eq!(
+            stored_identity(&pool).await.0.as_deref(),
+            Some("claimed-ref")
+        );
+
+        sqlx::query("UPDATE works SET work_ref = ? WHERE work_id = ?")
+            .bind("concurrent-ref")
+            .bind(WORK_ID)
+            .execute(&pool)
+            .await
+            .expect("concurrent write");
+
+        claim
+            .restore()
+            .await
+            .expect("a guarded restore reports no failure");
+        assert_eq!(
+            stored_identity(&pool).await.0.as_deref(),
+            Some("concurrent-ref"),
+            "restore must only match the ref this run claimed"
         );
     }
 }

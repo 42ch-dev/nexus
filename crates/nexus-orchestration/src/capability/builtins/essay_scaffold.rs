@@ -299,8 +299,13 @@ impl Capability for EssayProjectScaffold {
         // row, so the ref must already be there when the first byte lands — a
         // first scaffold still has it NULL. Only the ref is claimed here; the
         // profile lands with the finished scaffold, and a failure restores it.
-        let claim =
-            claim_work_ref(self.pool.as_ref(), &inp.creator_id, &inp.work_id, &work_ref).await?;
+        let claim = claim_work_ref(
+            self.pool.as_ref(),
+            &inp.creator_id,
+            &inp.work_id,
+            Some(&work_ref),
+        )
+        .await?;
 
         let result: Result<(Vec<String>, Vec<String>), CapabilityError> = async {
             // `ScaffoldTransaction` is inherently synchronous (Drop-based
@@ -398,7 +403,7 @@ impl Capability for EssayProjectScaffold {
         let (files_created, dirs_created) = match result {
             Ok(created) => created,
             Err(err) => {
-                if let Err(restore_err) = claim.restore(self.pool.as_ref()).await {
+                if let Err(restore_err) = claim.restore().await {
                     tracing::warn!(
                         work_id = %inp.work_id,
                         error = %restore_err,
@@ -408,6 +413,7 @@ impl Capability for EssayProjectScaffold {
                 return Err(err);
             }
         };
+        claim.disarm();
 
         let output = ScaffoldOutput {
             scaffold_root: work_dir.display().to_string(),
