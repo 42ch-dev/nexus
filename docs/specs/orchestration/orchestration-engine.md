@@ -830,14 +830,14 @@ Current production intake remains the YAML loader in §8.1.
 | `entry` | Selects the initial outer `Task`; the target node id is its `Task::id()`. |
 | `nodes[kind=outer_state]` | `StateCompositeTask`, carrying the node's enter actions, exit condition, routing, and context update. |
 | `outer_state.enter[kind=capability]` | `CapabilityTask`, invoked by the owning `StateCompositeTask`. |
-| `outer_state.enter[kind=host_tool]` | No engine `Task` counterpart in v0; host-tool dispatch is not represented as a graph task. |
+| `outer_state.enter[kind=host_tool]` | `HostToolCallTask`, invoked inline by the owning `StateCompositeTask`; requires the injected daemon tool dispatch and fails closed when unset. It is not added as a graph node. |
 | `outer_state.enter[kind=inner_graph]` | `InnerGraphTask`, launching the referenced inner graph in a child session. |
 | `nodes[kind=inner_step]` with `step_kind=acp_prompt` | `AcpPromptTask` in the inner graph. |
 | `exit_when.kind=rule` | `RuleCheckTask` semantics within the outer state lifecycle. |
 | `exit_when.kind=manual` or `nodes[kind=manual_wait]` | `ManualWaitTask`, returning `NextAction::WaitForInput`. |
 | `exit_when.kind=llm_judge` or `nodes[kind=judge]` | `JudgeTask` semantics after enter actions; go continues and no-go waits. |
 | `exit_when.kind=graph_complete` | `InnerGraphTask` completion lets the outer task return `NextAction::Continue`. |
-| `exit_when.kind=timer` | `TimerWaitTask`, returning `WaitForInput` and scheduling a clock signal. |
+| `exit_when.kind=timer` | `TimerWaitTask`, returning `WaitForInput` and scheduling a clock signal (optional, DR-12). |
 | `nodes[kind=join]`, `merge`, `converge`, `timeout_ms`, `on_timeout` | The `StateCompositeTask` join gate, including arrival tracking and bounded-timeout handling. |
 | `terminal[]` or `nodes[kind=terminal]` | The terminal `StateCompositeTask` returns `NextAction::End`. |
 | `edges[kind=linear|go|nogo|default]` | Outer-graph edges and the source task's corresponding `NextAction` routing. |
