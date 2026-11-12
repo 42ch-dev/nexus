@@ -986,7 +986,14 @@ fn next_from_edges(
                     })?,
                     target: edge.to.clone(),
                 }),
-                WorkflowEdgeKind::Default => default = Some(edge.to.clone()),
+                WorkflowEdgeKind::Default => {
+                    if default.is_some() {
+                        return Err(refuse(format!(
+                            "`{node_id}` has more than one default edge"
+                        )));
+                    }
+                    default = Some(edge.to.clone());
+                }
                 _ => {
                     return Err(refuse(format!(
                         "`{node_id}` mixes conditional and non-conditional edges"
@@ -1006,19 +1013,23 @@ fn next_from_edges(
     }
 
     if edges.iter().any(|edge| edge.label.is_some()) {
-        let labeled = edges
-            .iter()
-            .map(|edge| {
-                let label = edge
-                    .label
-                    .clone()
-                    .ok_or_else(|| refuse(format!("edge `{}` carries no label", edge.id)))?;
-                Ok(LabeledNext {
-                    label,
-                    target: edge.to.clone(),
-                })
-            })
-            .collect::<Result<Vec<_>, WorkflowIrError>>()?;
+        let mut labeled = Vec::new();
+        for edge in edges {
+            if !matches!(&edge.kind, WorkflowEdgeKind::Linear) {
+                return Err(refuse(format!(
+                    "`{node_id}` mixes a `{}` edge into its labeled edges",
+                    edge.kind
+                )));
+            }
+            let label = edge
+                .label
+                .clone()
+                .ok_or_else(|| refuse(format!("edge `{}` carries no label", edge.id)))?;
+            labeled.push(LabeledNext {
+                label,
+                target: edge.to.clone(),
+            });
+        }
         return Ok(Some(NextTarget::Labeled(labeled)));
     }
 
@@ -1404,6 +1415,54 @@ roles:
         let error = export_preset(&imported.document).expect_err("judge node is IR-only");
         assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
         assert!(error.to_string().contains("no preset projection"));
+    }
+
+    #[test]
+    fn export_refuses_duplicate_default_edges() {
+        let (dir, manifest) = bundle();
+        let mut imported = import_preset_bundle(&manifest, dir.path()).expect("import");
+        imported.document.edges.push(WorkflowEdge {
+            id: "work->start#second-default".to_string(),
+            from: "work".to_string(),
+            to: "start".to_string(),
+            kind: WorkflowEdgeKind::Default,
+            label: None,
+            when: None,
+        });
+
+        let error =
+            export_preset(&imported.document).expect_err("two default edges have no projection");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        assert!(error.to_string().contains("more than one default edge"));
+    }
+
+    #[test]
+    fn export_refuses_labeled_families_with_foreign_edge_kinds() {
+        let (dir, manifest) = bundle();
+        let mut imported = import_preset_bundle(&manifest, dir.path()).expect("import");
+        imported.document.edges.push(WorkflowEdge {
+            id: "done->start#labeled".to_string(),
+            from: "done".to_string(),
+            to: "start".to_string(),
+            kind: WorkflowEdgeKind::Linear,
+            label: Some("retry".to_string()),
+            when: None,
+        });
+        imported.document.edges.push(WorkflowEdge {
+            id: "done->work#nogo".to_string(),
+            from: "done".to_string(),
+            to: "work".to_string(),
+            kind: WorkflowEdgeKind::Nogo,
+            label: Some("abort".to_string()),
+            when: None,
+        });
+
+        let error =
+            export_preset(&imported.document).expect_err("foreign kind has no labeled projection");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        assert!(error
+            .to_string()
+            .contains("mixes a `nogo` edge into its labeled edges"));
     }
 
     #[test]
