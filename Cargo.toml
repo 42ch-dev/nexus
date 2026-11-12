@@ -18,6 +18,7 @@ members = [
     "crates/nexus-provider-conformance",
     "crates/nexus-spoke-adapter",
     "crates/nexus-wasm-host",
+    "crates/nexus-workflow-ir",
     "apps/nexus42",
     "crates/nexus-cloud-sync",
     "crates/nexus-cloud-domain",

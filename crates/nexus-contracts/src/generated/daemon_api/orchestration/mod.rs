@@ -3,6 +3,8 @@
 
 pub mod capabilities;
 pub mod sessions;
+pub mod workflow_document;
 
 pub use capabilities::*;
 pub use sessions::*;
+pub use workflow_document::WorkflowDocument;

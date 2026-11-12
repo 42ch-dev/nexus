@@ -4064,6 +4064,7 @@ dependencies = [
  "blake3",
  "include_dir",
  "nexus-contracts",
+ "nexus-workflow-ir",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -4137,6 +4138,14 @@ dependencies = [
  "tracing",
  "wasmtime",
  "wat",
+]
+
+[[package]]
+name = "nexus-workflow-ir"
+version = "0.1.0"
+dependencies = [
+ "nexus-contracts",
+ "serde_json",
 ]
 
 [[package]]

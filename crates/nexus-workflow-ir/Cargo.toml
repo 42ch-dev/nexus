@@ -1,0 +1,17 @@
+[package]
+name = "nexus-workflow-ir"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Thin Workflow IR facade: generated document contract plus Q2 structural validation"
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-contracts = { path = "../nexus-contracts" }
+
+[dev-dependencies]
+serde_json.workspace = true

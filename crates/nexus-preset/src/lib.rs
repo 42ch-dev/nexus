@@ -14,6 +14,7 @@ pub mod source_identity;
 pub mod system_preset_dir;
 pub mod user_preset_dir;
 pub mod validation;
+pub mod workflow_ir;
 
 pub use loader::{
     load_preset, load_preset_from_str, load_preset_from_str_with_limits,
@@ -24,6 +25,7 @@ pub use validation::{
     validate_assets_in_bundle, validate_path_safety, validate_preset_semantic, DiagnosticCategory,
     DiagnosticSeverity, ValidationDiagnostic, ValidationResult,
 };
+pub use workflow_ir::{export_preset, import_preset_bundle, PresetIrImport, WorkflowIrError};
 
 // ---------------------------------------------------------------------------
 // Embedded presets
