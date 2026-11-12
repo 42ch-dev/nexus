@@ -156,4 +156,31 @@ describe('StrategyCanvas — Simulate action', () => {
     await waitFor(() => expect(screen.getByTestId('approve-simulate-failed')).toBeInTheDocument());
     expect(screen.queryByTestId('approve-simulation-level')).not.toBeInTheDocument();
   });
+
+  it('re-runs a stale trajectory instead of offering a dead control', async () => {
+    const simulate = vi.fn(() => HttpResponse.json(simulationTrajectory()));
+    useHandlers(http.post(SIMULATE_PATH, simulate));
+
+    const { rerender } = renderInApp(
+      <StrategyCanvas
+        presetId={STRATEGY_ID}
+        candidate={candidateDocument({ id: STRATEGY_ID, revision: 1 })}
+      />,
+      { client: new BrowserClient() },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
+    await waitFor(() => expect(simulate).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <StrategyCanvas
+        presetId={STRATEGY_ID}
+        candidate={candidateDocument({ id: STRATEGY_ID, revision: 2 })}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTestId('approve-stale')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run simulation' }));
+    await waitFor(() => expect(simulate).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByTestId('approve-stale')).not.toBeInTheDocument());
+  });
 });

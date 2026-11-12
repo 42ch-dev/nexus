@@ -25,7 +25,12 @@ export interface ApproveDisclosureProps {
   status: SimulationStatus;
   trajectory: SimulationTrajectory | null;
   error: unknown;
-  onApprove: () => void;
+  /**
+   * The approval write path. Absent in builds that do not wire it (tracked as
+   * I-000415): Approve then renders disabled with the reason, never as a
+   * clickable no-op.
+   */
+  onApprove?: () => void;
   /** Re-run the static walk for the current candidate (the stale/failed recovery). */
   onRun?: () => void;
 }
@@ -60,14 +65,7 @@ export function ApproveDisclosure({
             role="alert"
             className="mt-2 rounded-card border border-red-700 px-3 py-2 text-copy-13 text-red-1000"
           >
-            {t('strategy.approve.failed', {
-              message:
-                error instanceof Error
-                  ? error.message
-                  : typeof error === 'string'
-                    ? error
-                    : '',
-            })}
+            {t('strategy.approve.failed', { message: errorMessage(error) })}
           </p>
         ) : null}
 
@@ -154,6 +152,15 @@ export function ApproveDisclosure({
           {t('strategy.approve.doesNotPreviewOutput')}
         </p>
 
+        {onApprove ? null : (
+          <p
+            data-testid="approve-unavailable"
+            className="mt-2 rounded-card border border-gray-alpha-400 px-3 py-2 text-copy-13 text-gray-900"
+          >
+            {t('strategy.approve.approvalUnavailable')}
+          </p>
+        )}
+
         <div className="mt-4 flex justify-end gap-2">
           {onRun && status !== 'ready' && status !== 'running' ? (
             <button
@@ -167,7 +174,7 @@ export function ApproveDisclosure({
           <button
             type="button"
             onClick={onApprove}
-            disabled={status !== 'ready'}
+            disabled={status !== 'ready' || !onApprove}
             className="rounded-control bg-purple-700 px-3 py-1.5 text-button-12 text-white hover:bg-purple-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('strategy.approve.approve')}
@@ -176,6 +183,21 @@ export function ApproveDisclosure({
       </DialogContent>
     </Dialog>
   );
+}
+
+/** A throw of any shape still names its cause instead of rendering an empty message. */
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (typeof error === 'object' && error !== null) {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      // Cyclic or BigInt-bearing error object: naming it is better than blank.
+      return 'unserializable error';
+    }
+  }
+  return String(error);
 }
 
 /** `simulation_level` → copy. Unknown levels are surfaced as unsupported, never assumed. */

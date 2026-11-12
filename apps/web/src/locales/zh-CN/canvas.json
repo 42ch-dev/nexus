@@ -284,6 +284,7 @@
       "predictedWaitsLabel_other": "预测（静态）等待：{{count}}",
       "doesNotPreviewOutput": "模拟通过不会预览输出：不调用模型，也不生成任何内容。",
       "approve": "批准",
+      "approvalUnavailable": "当前版本不提供批准操作：批准写路径由 I-000415 跟踪，因此该按钮已禁用。上方的模拟结果仍然展示了本次限制。",
       "rerun": "运行模拟"
     },
     "draftTransitionEditor": "草稿转换编辑器",
