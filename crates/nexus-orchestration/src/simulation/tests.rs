@@ -255,6 +255,27 @@ fn a_judged_node_requires_exactly_one_default_edge() {
 }
 
 #[test]
+fn a_default_edge_to_an_undeclared_node_is_rejected() {
+    let dangling = judge_with_defaults(
+        r#"[{"id": "j->missing", "from": "judge", "to": "missing", "kind": "default"}]"#,
+    );
+    assert_eq!(
+        simulate_document(
+            &dangling,
+            SimulationOptions {
+                capabilities: CapabilityRegistryHolder::new()
+            }
+        )
+        .unwrap_err(),
+        SimulationError::JudgeBranch {
+            node: "judge".into(),
+            count: 0
+        },
+        "a default branch that cannot be walked is not a followed branch"
+    );
+}
+
+#[test]
 fn the_same_document_serializes_to_identical_bytes_twice() {
     let document = document(WAITS_AND_JUDGE);
     let first = serde_json::to_string(&simulate(&document)).expect("trajectory serializes");

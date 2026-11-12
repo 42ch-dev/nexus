@@ -8,6 +8,12 @@
 //!
 //! Static predictions are an over-approximation: a predicted wait may never fire, and a
 //! judge's non-default branches (and everything reachable only through them) are invisible.
+//!
+//! Nest semantics are plain edge reachability, because a `defer_until_apply` child is
+//! unresolved by contract (it is excluded from the canonical identity until Apply records its
+//! hash), so its body carries no nodes or edges in a candidate. Structural validation does not
+//! reject a producer that materialized a deferred body *and* made it edge-reachable; that body
+//! would then be walked and rolled up.
 
 use crate::CapabilityRegistryHolder;
 use nexus_contracts::{
@@ -38,8 +44,11 @@ pub enum SimulationError {
     /// The declared entry is not a node of this document.
     #[error("entry node `{0}` is not declared")]
     EntryNotFound(String),
-    /// A judged node must declare exactly one `default` edge; never guess a branch.
-    #[error("judge node `{node}` declares {count} `default` edges; exactly one is required")]
+    /// A judged node must declare exactly one `default` edge to a node of this document;
+    /// never guess a branch and never claim a branch whose target cannot be walked.
+    #[error(
+        "judge node `{node}` declares {count} walkable `default` edges; exactly one is required"
+    )]
     JudgeBranch { node: String, count: usize },
     /// The approval identity cannot be computed over this document.
     #[error(transparent)]
@@ -51,7 +60,8 @@ pub enum SimulationError {
 /// # Errors
 ///
 /// Returns [`SimulationError`] when the entry is undeclared, a judged node does not declare
-/// exactly one `default` edge, or the canonical content hash cannot be computed.
+/// exactly one `default` edge into this document, or the canonical content hash cannot be
+/// computed.
 pub fn simulate_document(
     document: &WorkflowDocument,
     options: SimulationOptions,
@@ -100,9 +110,14 @@ pub fn simulate_document(
             .as_ref()
             .is_some_and(|exit| exit.kind == WorkflowExitWhenKind::LlmJudge);
         let next: Vec<&str> = if judged {
+            // A default edge to an undeclared node is not a branch the walk can follow, so it
+            // does not count: a judge whose only default edge dangles is refused like a
+            // judge with no default edge, never reported as successfully stubbed.
             let defaults: Vec<&str> = outgoing
                 .iter()
-                .filter(|edge| edge.kind == WorkflowEdgeKind::Default)
+                .filter(|edge| {
+                    edge.kind == WorkflowEdgeKind::Default && by_id.contains_key(edge.to.as_str())
+                })
                 .map(|edge| edge.to.as_str())
                 .collect();
             if defaults.len() != 1 {
