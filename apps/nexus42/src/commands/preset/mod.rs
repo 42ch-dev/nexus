@@ -50,6 +50,7 @@ use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
 };
 use nexus_contracts::generated::daemon_api::preset_management::list_presets_response::ListPresetsResponse;
 use nexus_contracts::ScaffoldPresetRequest;
+use nexus_workflow_ir::Violation;
 
 pub mod patch;
 
@@ -524,9 +525,18 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
         ));
     }
 
-    let caps = CapabilityRegistry::with_builtins();
     let mut errors: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
+
+    // Q2 structural checks the semantic facade cannot see (dangling edge and
+    // dependency targets, duplicate node ids, nest bindings, nest depth). They
+    // run on every IR document, including the IR-only shapes that have no
+    // manifest projection for the loader-level checks to inspect.
+    for violation in structural_violations(&document) {
+        errors.push(format!("{}: {violation}", violation_path(&violation)));
+    }
+
+    let caps = CapabilityRegistry::with_builtins();
 
     // C2 is a manifest-level contract, so a manifest-expressible document is
     // projected back to run the same check the YAML path always runs; IR-only
@@ -567,6 +577,44 @@ fn outer_state_count(document: &WorkflowDocument) -> usize {
             )
         })
         .count()
+}
+
+/// Q2 structural violations worth reporting for one document.
+///
+/// `GraphCycle` is deliberately dropped: outer-state loops are legal for
+/// imported presets, so rejecting them would refuse valid workflows. Every
+/// other violation (dangling edge/dependency, duplicate node, nest id, parent,
+/// child and depth) is a real defect.
+fn structural_violations(document: &WorkflowDocument) -> Vec<Violation> {
+    nexus_workflow_ir::validate(&[document])
+        .err()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|violation| !matches!(violation, Violation::GraphCycle { .. }))
+        .collect()
+}
+
+/// Location prefix for a structural violation, in the same `path: message`
+/// shape the loader and facade diagnostics use.
+fn violation_path(violation: &Violation) -> String {
+    match violation {
+        Violation::DuplicateDocumentId(_) => "id".to_string(),
+        Violation::DuplicateNodeId { node, .. } => format!("nodes.{node}"),
+        Violation::DanglingEdge { edge, .. } => format!("edges.{edge}"),
+        Violation::DanglingDependency { node, .. } => format!("nodes.{node}.depends_on"),
+        Violation::DuplicateNestId { nest, .. } => format!("nests.{nest}"),
+        Violation::UnknownNestParent { nest, .. }
+        | Violation::NestParentNotComposable { nest, .. } => {
+            format!("nests.{nest}.parent_node")
+        }
+        Violation::IncompleteNestChild { nest, .. } => format!("nests.{nest}.child"),
+        // The message carries the nest id / cycle path / depth, so one prefix
+        // suffices for the document-wide nest violations.
+        Violation::EmptyNestId { .. }
+        | Violation::NestCycle { .. }
+        | Violation::NestDepthExceeded { .. } => "nests".to_string(),
+        Violation::GraphCycle { .. } => "edges".to_string(),
+    }
 }
 
 /// Enforce the loader's document size limit before reading a preset file.
@@ -1298,9 +1346,10 @@ states:
         }
     }
 
-    /// The same defect injected into a YAML sample and its golden IR must
-    /// report the same diagnostics: the IR path projects manifest-expressible
-    /// documents back for the loader-level checks, exactly as YAML runs them.
+    /// The same defect injected into a YAML sample and its golden IR must not
+    /// disagree: the IR leg projects manifest-expressible documents back for
+    /// the loader-level checks, exactly as YAML runs them, and may add the
+    /// IR-native structural detail for the same defect.
     #[test]
     fn local_validate_ir_reports_same_defects_as_yaml() {
         let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -1333,9 +1382,117 @@ states:
         let from_ir = validate_preset_local(ir_path.to_str().unwrap()).unwrap();
         let from_yaml = validate_preset_local(yaml_path.to_str().unwrap()).unwrap();
         assert_eq!(from_ir["valid"], serde_json::json!(false));
-        for field in ["errors", "warnings"] {
-            assert_eq!(from_ir[field], from_yaml[field], "{field}");
+        assert_eq!(from_ir["warnings"], from_yaml["warnings"]);
+
+        let strings = |resp: &serde_json::Value, field: &str| -> Vec<String> {
+            resp[field]
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let ir_errors = strings(&from_ir, "errors");
+        for error in strings(&from_yaml, "errors") {
+            assert!(
+                ir_errors.contains(&error),
+                "IR is missing the YAML diagnostic `{error}`: {ir_errors:?}"
+            );
         }
+        // The IR leg additionally names the dangling edge itself.
+        assert!(
+            ir_errors
+                .iter()
+                .any(|error| error.contains("references unknown node `trigger_missing`")),
+            "expected the dangling-edge diagnostic, got: {ir_errors:?}"
+        );
+    }
+
+    /// An IR-only document has no manifest projection, so the Q2 structural
+    /// checks are the only thing that can report its broken references.
+    #[test]
+    fn local_validate_ir_reports_structural_defects_without_manifest_projection() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut ir: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(repo_root.join(
+                "crates/nexus-preset/tests/fixtures/workflow-ir/game-narrative.workflow.ir.json",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        ir["nodes"].as_array_mut().unwrap().push(serde_json::json!({
+            "id": "nested_region",
+            "kind": "nest_group",
+            "effect_class": "pure",
+        }));
+        ir["edges"].as_array_mut().unwrap().push(serde_json::json!({
+            "id": "nested_region->ghost",
+            "from": "nested_region",
+            "to": "ghost",
+            "kind": "linear",
+        }));
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("ir_only.workflow.ir.json");
+        std::fs::write(&path, serde_json::to_string(&ir).unwrap()).unwrap();
+        let path = path.to_str().unwrap();
+
+        let resp = validate_preset_local(path).unwrap();
+        assert_eq!(resp["valid"], serde_json::json!(false), "{resp}");
+        assert!(
+            resp["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .any(|error| error.contains("references unknown node `ghost`")),
+            "expected the dangling-edge diagnostic, got: {resp}"
+        );
+        assert!(
+            validate_preset(path, true).is_err(),
+            "an invalid verdict must still exit non-zero"
+        );
+    }
+
+    /// Outer-state loops are legal for imported presets: the Q2 graph-cycle
+    /// check must not turn a legal cycle into a validation error.
+    #[test]
+    fn local_validate_ir_allows_outer_state_cycles() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut ir: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(repo_root.join(
+                "crates/nexus-preset/tests/fixtures/workflow-ir/game-narrative.workflow.ir.json",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        // scheduled_sweep -> sweep_extract already exists; close the loop.
+        ir["edges"].as_array_mut().unwrap().push(serde_json::json!({
+            "id": "sweep_extract->scheduled_sweep",
+            "from": "sweep_extract",
+            "to": "scheduled_sweep",
+            "kind": "conditional",
+            "when": "_context.again == true",
+        }));
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("cycle.workflow.ir.json");
+        std::fs::write(&path, serde_json::to_string(&ir).unwrap()).unwrap();
+
+        let resp = validate_preset_local(path.to_str().unwrap()).unwrap();
+        assert!(
+            resp["errors"].as_array().is_none_or(|errors| {
+                !errors
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .any(|error| error.contains("not a DAG"))
+            }),
+            "a legal outer-state cycle must not be reported: {resp}"
+        );
     }
 
     /// A document from a newer IR version must fail closed instead of letting
