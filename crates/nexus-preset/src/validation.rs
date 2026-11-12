@@ -1,13 +1,20 @@
-//! Shared semantic preset validation facade (V1.32 P1).
+//! Shared semantic preset validation facade (V1.32 P1; IR-first since v1.236 P1).
 //!
 //! Single validation surface used by:
 //! - Runtime loader (`load_preset_from_str` / `load_preset`)
 //! - Daemon `POST /v1/daemon/presets:validate`
+//! - `nexus42 preset validate` over YAML bundles and `*.ir.json` documents
 //!
-//! Extends the structural checks in `loader::validate_manifest` with:
-//! - A2: Logical completeness (reachability, terminal consistency, id match, orphan inner graphs)
+//! Every semantic check operates on [`WorkflowDocument`]; the `PresetManifest` entries import the
+//! manifest into IR through [`crate::workflow_ir::import_preset_manifest`] and delegate, so YAML
+//! never gains a second semantic implementation. Checks:
+//!
+//! - A2: Logical completeness (reachability, terminal consistency, orphan inner graphs)
 //! - A3: Asset and path safety (file existence in bundle, prompt/template path resolution)
 //! - A4: Capability compatibility (registry lookup, argument drift)
+//!
+//! Diagnostics keep their dot paths over the outer states: an IR node is addressed by its index
+//! among outer-state nodes, i.e. the `states[i]` the manifest would carry.
 //!
 //! ## Architect decision: orphan inner graphs = WARNING
 //!
@@ -17,10 +24,12 @@
 //! may elevate to error in strict mode (future work).
 
 use crate::capability_catalog::CapabilityCatalog;
-use crate::manifest::{
-    EnterAction, ExitWhen, MergeKind, NextTarget, PresetKind, PresetManifest, RunIntent,
+use crate::manifest::{EnterAction, ExitWhen, InitialAction, PresetManifest};
+use nexus_workflow_ir::{
+    WorkflowDocument, WorkflowEdge, WorkflowEdgeKind, WorkflowEnterActionKind, WorkflowMergeKind,
+    WorkflowMetaKind, WorkflowMetaRunIntentsItem, WorkflowNode, WorkflowNodeKind,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -126,15 +135,50 @@ impl ValidationResult {
 }
 
 // ---------------------------------------------------------------------------
-// Public validation entry point
+// Public validation entry points
 // ---------------------------------------------------------------------------
 
-/// Run all semantic validation checks (A1–A4) against a parsed manifest.
+/// Run all semantic validation checks (A1–A4) against a workflow IR document.
 ///
-/// This is the **single shared validation surface** for both the runtime
-/// loader and the daemon/API validate endpoint. Callers that need
-/// filesystem-level checks (template file existence) should also call
-/// [`validate_assets_in_bundle`] with the bundle root path.
+/// This is the single semantic surface for every input format: the `PresetManifest` entries
+/// import and delegate here.
+///
+/// # Arguments
+///
+/// * `document` — The IR document to validate.
+/// * `caps` — The capability registry for name/argument checks.
+///
+/// # Returns
+///
+/// A `ValidationResult` containing all diagnostics (errors + warnings).
+/// The caller decides whether to reject on errors and how to present warnings.
+#[must_use]
+pub fn validate_workflow_ir(
+    document: &WorkflowDocument,
+    caps: &dyn CapabilityCatalog,
+) -> ValidationResult {
+    let mut result = ValidationResult::default();
+
+    // A2: Logical completeness checks
+    check_initial_to_terminal_reachability(document, &mut result);
+    check_terminal_marker_consistency(document, &mut result);
+    check_inner_graph_references(document, &mut result);
+    check_labeled_edge_duplicates(document, &mut result);
+    check_merge_node_integrity(document, &mut result);
+
+    // A4: Capability compatibility checks
+    check_capability_arg_compatibility(document, caps, &mut result);
+
+    // A5: Run intents checks (V1.33 §5)
+    check_run_intents(document, &mut result);
+
+    // A6: CLI args checks (V1.45 §3.3)
+    check_cli_args(document, &mut result);
+
+    result
+}
+
+/// YAML compatibility entry: project the manifest into IR, then run [`validate_workflow_ir`].
 ///
 /// # Arguments
 ///
@@ -143,144 +187,148 @@ impl ValidationResult {
 ///
 /// # Returns
 ///
-/// A `ValidationResult` containing all diagnostics (errors + warnings).
-/// The caller decides whether to reject on errors and how to present warnings.
+/// A `ValidationResult` containing all diagnostics (errors + warnings). A manifest whose
+/// `preset.id` is not a valid IR id cannot be projected and reports that as an `IdMismatch`.
 #[must_use]
 pub fn validate_preset_semantic(
     manifest: &PresetManifest,
     caps: &dyn CapabilityCatalog,
 ) -> ValidationResult {
-    let mut result = ValidationResult::default();
-
-    // A2: Logical completeness checks
-    check_initial_to_terminal_reachability(manifest, &mut result);
-    check_terminal_marker_consistency(manifest, &mut result);
-    check_bundle_id_match(manifest, &mut result);
-    check_inner_graph_references(manifest, &mut result);
-    check_labeled_edge_duplicates(manifest, &mut result);
-    check_merge_node_integrity(manifest, &mut result);
-
-    // A4: Capability compatibility checks
-    check_capability_arg_compatibility(manifest, caps, &mut result);
-
-    // A5: Run intents checks (V1.33 §5)
-    check_run_intents(manifest, &mut result);
-
-    // A6: CLI args checks (V1.45 §3.3)
-    check_cli_args(manifest, &mut result);
-
-    result
+    match crate::workflow_ir::import_preset_manifest(manifest) {
+        Ok(document) => validate_workflow_ir(&document, caps),
+        Err(error) => projection_refusal(&error),
+    }
 }
 
-/// Run asset-path checks against a bundle root directory (A3).
+/// Run asset existence and symlink-escape checks over an IR document (A3).
 ///
-/// Verifies that all `template_file`, `prompt_file`, and `system_prompt_file`
-/// references resolve to files that exist within the bundle sandbox.
+/// Every reference the document names is checked, whether or not it is registered in
+/// [`WorkflowDocument::assets`].
 ///
 /// # Arguments
 ///
-/// * `manifest` — The parsed `PresetManifest`.
+/// * `document` — The IR document whose references to check.
 /// * `bundle_root` — The filesystem root of the preset bundle.
+#[must_use]
+pub fn validate_workflow_ir_assets(
+    document: &WorkflowDocument,
+    bundle_root: &Path,
+) -> ValidationResult {
+    let mut result = ValidationResult::default();
+    check_bundle_id_vs_directory(document, bundle_root, &mut result);
+    check_asset_file_existence(document, bundle_root, &mut result);
+    check_symlink_escapes(document, bundle_root, &mut result);
+    result
+}
+
+/// Run asset-path checks against a bundle root directory (A3, YAML entry).
+///
+/// Verifies that all `template_file`, `prompt_file`, and `system_prompt_file`
+/// references resolve to files that exist within the bundle sandbox.
 #[must_use]
 pub fn validate_assets_in_bundle(
     manifest: &PresetManifest,
     bundle_root: &Path,
 ) -> ValidationResult {
+    match crate::workflow_ir::import_preset_manifest(manifest) {
+        Ok(document) => validate_workflow_ir_assets(&document, bundle_root),
+        Err(error) => projection_refusal(&error),
+    }
+}
+
+/// Run path-safety structural checks over an IR document (A3).
+///
+/// Validates that every referenced asset path is a safe relative path (no `..`, no absolute
+/// paths, no backslashes, no null bytes, no control characters).
+#[must_use]
+pub fn validate_workflow_ir_path_safety(document: &WorkflowDocument) -> ValidationResult {
     let mut result = ValidationResult::default();
-    check_bundle_id_vs_directory(manifest, bundle_root, &mut result);
-    check_asset_file_existence(manifest, bundle_root, &mut result);
-    check_symlink_escapes(manifest, bundle_root, &mut result);
+    check_path_safety(document, &mut result);
     result
 }
 
-/// Run path-safety structural checks against a manifest (A3 — shared with loader).
-///
-/// Validates that all `template_file`, `prompt_file`, and `system_prompt_file`
-/// references are safe relative paths (no `..`, no absolute paths, no backslashes,
-/// no null bytes, no control characters). Returns diagnostics for each unsafe path.
+/// Run path-safety structural checks against a manifest (A3, YAML entry — shared with loader).
 #[must_use]
 pub fn validate_path_safety(manifest: &PresetManifest) -> ValidationResult {
-    let mut result = ValidationResult::default();
-    check_path_safety(manifest, &mut result);
-    result
+    match crate::workflow_ir::import_preset_manifest(manifest) {
+        Ok(document) => validate_workflow_ir_path_safety(&document),
+        Err(error) => projection_refusal(&error),
+    }
+}
+
+/// The only projection failure a validation entry can hit is an id that is not expressible in IR.
+fn projection_refusal(error: &crate::workflow_ir::WorkflowIrError) -> ValidationResult {
+    ValidationResult {
+        diagnostics: vec![ValidationDiagnostic {
+            path: "preset.id".to_string(),
+            message: error.to_string(),
+            severity: DiagnosticSeverity::Error,
+            category: DiagnosticCategory::IdMismatch,
+        }],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// IR view helpers
+// ---------------------------------------------------------------------------
+
+/// Outer-state nodes with the `states[i]` index every diagnostic path uses.
+fn outer_states(document: &WorkflowDocument) -> impl Iterator<Item = (usize, &WorkflowNode)> {
+    document
+        .nodes
+        .iter()
+        .filter(|node| {
+            matches!(
+                node.kind,
+                WorkflowNodeKind::OuterState | WorkflowNodeKind::Terminal
+            )
+        })
+        .enumerate()
+}
+
+fn has_outgoing_edge(document: &WorkflowDocument, node_id: &str) -> bool {
+    document.edges.iter().any(|edge| edge.from == node_id)
+}
+
+fn labeled_edges<'a>(
+    document: &'a WorkflowDocument,
+    from: &'a str,
+) -> impl Iterator<Item = &'a WorkflowEdge> {
+    document
+        .edges
+        .iter()
+        .filter(move |edge| edge.from == from && edge.label.is_some())
 }
 
 // ---------------------------------------------------------------------------
 // A2: Logical completeness checks
 // ---------------------------------------------------------------------------
 
-/// Check that the initial state can reach at least one terminal state via
-/// the outer graph's `next` edges.
+/// Check that the entry node can reach at least one terminal state via outer edges.
 fn check_initial_to_terminal_reachability(
-    manifest: &PresetManifest,
+    document: &WorkflowDocument,
     result: &mut ValidationResult,
 ) {
-    let state_ids: HashSet<&str> = manifest.states.iter().map(|s| s.id.as_str()).collect();
+    let state_ids: HashSet<&str> = outer_states(document)
+        .map(|(_, node)| node.id.as_str())
+        .collect();
 
-    // Build adjacency list from next edges (linear + GoNogo branches).
+    // Outer transitions only: inner-step dependency edges never leave/enter a state.
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
-    for state in &manifest.states {
-        match &state.next {
-            Some(crate::manifest::NextTarget::Linear(target)) => {
-                if state_ids.contains(target.as_str()) {
-                    adj.entry(&state.id).or_default().push(target.as_str());
-                }
-            }
-            Some(crate::manifest::NextTarget::GoNogo(gonogo)) => {
-                if state_ids.contains(gonogo.go.as_str()) {
-                    adj.entry(&state.id).or_default().push(gonogo.go.as_str());
-                }
-                if state_ids.contains(gonogo.nogo.as_str()) {
-                    adj.entry(&state.id).or_default().push(gonogo.nogo.as_str());
-                }
-            }
-            Some(crate::manifest::NextTarget::Labeled(labeled)) => {
-                // V1.52 T-B P0: N-way labeled edges — each edge's target
-                // is a reachable state from the source.
-                for edge in labeled {
-                    if state_ids.contains(edge.target.as_str()) {
-                        adj.entry(&state.id).or_default().push(edge.target.as_str());
-                    }
-                }
-            }
-            Some(crate::manifest::NextTarget::Conditional(next_cond)) => {
-                // V1.56 P2: legacy conditional edges — all rules + default are reachable.
-                for rule in &next_cond.rules {
-                    if state_ids.contains(rule.target.as_str()) {
-                        adj.entry(&state.id).or_default().push(rule.target.as_str());
-                    }
-                }
-                if state_ids.contains(next_cond.default.as_str()) {
-                    adj.entry(&state.id)
-                        .or_default()
-                        .push(next_cond.default.as_str());
-                }
-            }
-            Some(crate::manifest::NextTarget::Branches(branches)) => {
-                // V1.56 P2: Form B multi-branch — all branches + default are reachable.
-                for rule in &branches.branches {
-                    if state_ids.contains(rule.target.as_str()) {
-                        adj.entry(&state.id).or_default().push(rule.target.as_str());
-                    }
-                }
-                if state_ids.contains(branches.default.as_str()) {
-                    adj.entry(&state.id)
-                        .or_default()
-                        .push(branches.default.as_str());
-                }
-            }
-            _ => {}
+    for edge in &document.edges {
+        if state_ids.contains(edge.from.as_str()) && state_ids.contains(edge.to.as_str()) {
+            adj.entry(edge.from.as_str())
+                .or_default()
+                .push(edge.to.as_str());
         }
     }
 
-    // Find terminal states (states with terminal: true or no next AND no exit_when
-    // that could keep them running). For our purposes, a state is terminal if
-    // `terminal: true` or `next` is absent.
-    let terminal_states: HashSet<&str> = manifest
-        .states
-        .iter()
-        .filter(|s| s.terminal || s.next.is_none())
-        .map(|s| s.id.as_str())
+    // A state is terminal when the document marks it, or when it has no outgoing edge.
+    let terminal_states: HashSet<&str> = outer_states(document)
+        .filter(|(_, node)| {
+            node.kind == WorkflowNodeKind::Terminal || !has_outgoing_edge(document, &node.id)
+        })
+        .map(|(_, node)| node.id.as_str())
         .collect();
 
     if terminal_states.is_empty() {
@@ -293,8 +341,8 @@ fn check_initial_to_terminal_reachability(
         return;
     }
 
-    // BFS from initial to any terminal state.
-    let initial = manifest.preset.initial.as_str();
+    // BFS from the entry node to any terminal state.
+    let initial = document.entry.as_str();
     if !state_ids.contains(initial) {
         // Already caught by loader validation; skip here to avoid duplicate.
         return;
@@ -334,20 +382,33 @@ fn check_initial_to_terminal_reachability(
 
 /// Check terminal marker/header consistency.
 ///
-/// The header field `preset.terminal` names the intended terminal state.
-/// States with `terminal: true` are the actual terminal markers.
-/// These must agree: the state named by `preset.terminal` must have `terminal: true`,
-/// and there should be no other states marked `terminal: true` unless they are
-/// unreachable (which is a separate reachability concern).
-fn check_terminal_marker_consistency(manifest: &PresetManifest, result: &mut ValidationResult) {
-    let declared_terminal = manifest.preset.terminal.as_str();
+/// The document's `terminal` field names the declared terminal node. Nodes marked terminal must
+/// agree: the declared node carries the terminal kind, and no other node does.
+fn check_terminal_marker_consistency(document: &WorkflowDocument, result: &mut ValidationResult) {
+    let declared = match document.terminal.as_slice() {
+        [declared] => declared,
+        terminals => {
+            result.diagnostics.push(ValidationDiagnostic {
+                path: "terminal".to_string(),
+                message: format!(
+                    "document declares {} terminal nodes; exactly one is required",
+                    terminals.len()
+                ),
+                severity: DiagnosticSeverity::Error,
+                category: DiagnosticCategory::TerminalConsistency,
+            });
+            return;
+        }
+    };
+    let declared = declared.as_str();
 
-    for (i, state) in manifest.states.iter().enumerate() {
-        if state.id == declared_terminal && !state.terminal {
+    for (i, node) in outer_states(document) {
+        let marked = node.kind == WorkflowNodeKind::Terminal;
+        if node.id == declared && !marked {
             result.diagnostics.push(ValidationDiagnostic {
                 path: format!("states[{i}].terminal"),
                 message: format!(
-                    "state '{declared_terminal}' is declared as preset.terminal but is not marked terminal: true"
+                    "state '{declared}' is declared as preset.terminal but is not marked terminal: true"
                 ),
                 severity: DiagnosticSeverity::Error,
                 category: DiagnosticCategory::TerminalConsistency,
@@ -355,12 +416,12 @@ fn check_terminal_marker_consistency(manifest: &PresetManifest, result: &mut Val
         }
         // States marked terminal that are NOT the declared terminal: warning only.
         // They won't cause a runtime error, but may indicate authoring confusion.
-        if state.terminal && state.id != declared_terminal {
+        if marked && node.id != declared {
             result.diagnostics.push(ValidationDiagnostic {
                 path: format!("states[{i}].terminal"),
                 message: format!(
-                    "state '{}' is marked terminal: true but is not the declared preset.terminal ('{declared_terminal}')",
-                    state.id
+                    "state '{}' is marked terminal: true but is not the declared preset.terminal ('{declared}')",
+                    node.id
                 ),
                 severity: DiagnosticSeverity::Warning,
                 category: DiagnosticCategory::TerminalConsistency,
@@ -369,66 +430,29 @@ fn check_terminal_marker_consistency(manifest: &PresetManifest, result: &mut Val
     }
 }
 
-/// Check that the manifest id matches the expected bundle directory id.
-///
-/// This is a semantic check that the `preset.id` field is consistent.
-/// When loading from a bundle directory, the caller should compare the
-/// directory name with `manifest.preset.id`. This function checks the
-/// manifest id is a valid non-empty slug.
-fn check_bundle_id_match(manifest: &PresetManifest, result: &mut ValidationResult) {
-    let id = &manifest.preset.id;
-    if id.is_empty() {
-        result.diagnostics.push(ValidationDiagnostic {
-            path: "preset.id".to_string(),
-            message: "preset.id must not be empty".to_string(),
-            severity: DiagnosticSeverity::Error,
-            category: DiagnosticCategory::IdMismatch,
-        });
-        return;
-    }
-
-    // Validate id format: lowercase alphanumeric, dots, hyphens, underscores.
-    if !id
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-' || c == '_')
-    {
-        result.diagnostics.push(ValidationDiagnostic {
-            path: "preset.id".to_string(),
-            message: format!(
-                "preset.id '{id}' contains invalid characters (expected: lowercase alphanumeric, '.', '-', '_')"
-            ),
-            severity: DiagnosticSeverity::Error,
-            category: DiagnosticCategory::IdMismatch,
-        });
-    }
-
-    if !id.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
-        result.diagnostics.push(ValidationDiagnostic {
-            path: "preset.id".to_string(),
-            message: format!("preset.id '{id}' must start with a lowercase letter"),
-            severity: DiagnosticSeverity::Error,
-            category: DiagnosticCategory::IdMismatch,
-        });
-    }
-}
-
 /// Check inner graph references:
 /// - Referenced inner graphs must exist (already in loader validation, but we add
 ///   a consistent diagnostic here).
 /// - Orphan inner graphs (defined but never referenced) produce a WARNING.
-fn check_inner_graph_references(manifest: &PresetManifest, result: &mut ValidationResult) {
-    let inner_graph_names: HashSet<&str> = manifest
-        .inner_graphs
-        .as_ref()
-        .map(|igs| igs.keys().map(std::string::String::as_str).collect())
-        .unwrap_or_default();
+fn check_inner_graph_references(document: &WorkflowDocument, result: &mut ValidationResult) {
+    // An inner graph exists as the `<graph>/<node>` prefix of its inner-step nodes.
+    // shortcut: a graph with zero nodes has no IR carrier and a reference to it reads as missing,
+    // upgrade when the IR gains a graph record.
+    let inner_graph_names: BTreeSet<&str> = document
+        .nodes
+        .iter()
+        .filter(|node| node.kind == WorkflowNodeKind::InnerStep)
+        .filter_map(|node| node.id.split_once('/').map(|(graph, _)| graph))
+        .collect();
 
     // Collect all referenced inner graph names from enter actions.
-    let mut referenced: HashSet<&str> = HashSet::new();
-    for state in &manifest.states {
-        for enter in &state.enter {
-            if let EnterAction::InnerGraph { name } = enter {
-                referenced.insert(name.as_str());
+    let mut referenced: BTreeSet<&str> = BTreeSet::new();
+    for (_, node) in outer_states(document) {
+        for enter in &node.enter {
+            if enter.kind == WorkflowEnterActionKind::InnerGraph {
+                if let Some(name) = enter.name.as_deref() {
+                    referenced.insert(name);
+                }
             }
         }
     }
@@ -475,23 +499,22 @@ fn check_inner_graph_references(manifest: &PresetManifest, result: &mut Validati
 ///    targeting the same merge node. The runtime dedupes by label, so
 ///    duplicates from different sources would prevent `arrived_count` from
 ///    ever reaching `expected_incoming` — a silent session stall.
-fn check_labeled_edge_duplicates(manifest: &PresetManifest, result: &mut ValidationResult) {
+fn check_labeled_edge_duplicates(document: &WorkflowDocument, result: &mut ValidationResult) {
     // Within-state check.
-    for (i, state) in manifest.states.iter().enumerate() {
-        if let Some(NextTarget::Labeled(edges)) = &state.next {
-            let mut seen_labels: HashSet<&str> = HashSet::new();
-            for (k, edge) in edges.iter().enumerate() {
-                if !seen_labels.insert(&edge.label) {
-                    result.diagnostics.push(ValidationDiagnostic {
-                        path: format!("states[{i}].next[{k}].label"),
-                        message: format!(
-                            "duplicate label '{}' in labeled next edges of state '{}'",
-                            edge.label, state.id
-                        ),
-                        severity: DiagnosticSeverity::Error,
-                        category: DiagnosticCategory::DuplicateLabel,
-                    });
-                }
+    for (i, node) in outer_states(document) {
+        let mut seen_labels: HashSet<&str> = HashSet::new();
+        for (k, edge) in labeled_edges(document, &node.id).enumerate() {
+            let label = edge.label.as_deref().unwrap_or_default();
+            if !seen_labels.insert(label) {
+                result.diagnostics.push(ValidationDiagnostic {
+                    path: format!("states[{i}].next[{k}].label"),
+                    message: format!(
+                        "duplicate label '{label}' in labeled next edges of state '{}'",
+                        node.id
+                    ),
+                    severity: DiagnosticSeverity::Error,
+                    category: DiagnosticCategory::DuplicateLabel,
+                });
             }
         }
     }
@@ -499,24 +522,23 @@ fn check_labeled_edge_duplicates(manifest: &PresetManifest, result: &mut Validat
     // W-QC3-1: Cross-state check — for each (target, label) pair, verify
     // no two source states share the same label targeting the same merge node.
     let mut merge_labels: HashMap<(&str, &str), &str> = HashMap::new();
-    for (i, state) in manifest.states.iter().enumerate() {
-        if let Some(NextTarget::Labeled(edges)) = &state.next {
-            for (k, edge) in edges.iter().enumerate() {
-                let key = (edge.target.as_str(), edge.label.as_str());
-                if let Some(&existing_source) = merge_labels.get(&key) {
-                    result.diagnostics.push(ValidationDiagnostic {
-                        path: format!("states[{i}].next[{k}].label"),
-                        message: format!(
-                            "duplicate label '{}' targeting merge node '{}' from state '{}' \
-                             (also emitted by state '{existing_source}')",
-                            edge.label, edge.target, state.id
-                        ),
-                        severity: DiagnosticSeverity::Error,
-                        category: DiagnosticCategory::DuplicateLabel,
-                    });
-                } else {
-                    merge_labels.insert(key, state.id.as_str());
-                }
+    for (i, node) in outer_states(document) {
+        for (k, edge) in labeled_edges(document, &node.id).enumerate() {
+            let label = edge.label.as_deref().unwrap_or_default();
+            let key = (edge.to.as_str(), label);
+            if let Some(&existing_source) = merge_labels.get(&key) {
+                result.diagnostics.push(ValidationDiagnostic {
+                    path: format!("states[{i}].next[{k}].label"),
+                    message: format!(
+                        "duplicate label '{label}' targeting merge node '{}' from state '{}' \
+                         (also emitted by state '{existing_source}')",
+                        edge.to, node.id
+                    ),
+                    severity: DiagnosticSeverity::Error,
+                    category: DiagnosticCategory::DuplicateLabel,
+                });
+            } else {
+                merge_labels.insert(key, node.id.as_str());
             }
         }
     }
@@ -529,26 +551,18 @@ fn check_labeled_edge_duplicates(manifest: &PresetManifest, result: &mut Validat
 /// - For `quorum N/M`: N ≥ 1 and N ≤ M.
 /// - M must equal the count of incoming labeled edges.
 /// - Merge nodes must have at least one outgoing edge.
-fn check_merge_node_integrity(manifest: &PresetManifest, result: &mut ValidationResult) {
-    // Count incoming labeled edges per state.
+fn check_merge_node_integrity(document: &WorkflowDocument, result: &mut ValidationResult) {
+    // Count incoming labeled edges per state; Go/nogo edges converge on merge nodes too.
     let mut incoming_labeled: HashMap<&str, usize> = HashMap::new();
-    for state in &manifest.states {
-        if let Some(NextTarget::Labeled(edges)) = &state.next {
-            for edge in edges {
-                *incoming_labeled.entry(edge.target.as_str()).or_insert(0) += 1;
-            }
+    for edge in &document.edges {
+        if edge.label.is_some()
+            || matches!(edge.kind, WorkflowEdgeKind::Go | WorkflowEdgeKind::Nogo)
+        {
+            *incoming_labeled.entry(edge.to.as_str()).or_insert(0) += 1;
         }
     }
 
-    // Also count GoNogo edges (they also converge on merge nodes).
-    for state in &manifest.states {
-        if let Some(NextTarget::GoNogo(gonogo)) = &state.next {
-            *incoming_labeled.entry(gonogo.go.as_str()).or_insert(0) += 1;
-            *incoming_labeled.entry(gonogo.nogo.as_str()).or_insert(0) += 1;
-        }
-    }
-
-    for (i, state) in manifest.states.iter().enumerate() {
+    for (i, state) in outer_states(document) {
         let Some(merge) = &state.merge else {
             continue;
         };
@@ -571,8 +585,10 @@ fn check_merge_node_integrity(manifest: &PresetManifest, result: &mut Validation
         }
 
         // Quorum: validate N/M bounds.
-        if let MergeKind::Quorum { n, m } = merge {
-            if *n < 1 {
+        if merge.kind == WorkflowMergeKind::Quorum {
+            let n = merge.n.unwrap_or_default();
+            let m = merge.m.unwrap_or_default();
+            if n < 1 {
                 result.diagnostics.push(ValidationDiagnostic {
                     path: format!("{state_path}.merge.n"),
                     message: format!("quorum merge node '{}' n must be >= 1, got {n}", state.id),
@@ -580,7 +596,7 @@ fn check_merge_node_integrity(manifest: &PresetManifest, result: &mut Validation
                     category: DiagnosticCategory::MergeIntegrity,
                 });
             }
-            if *n > *m {
+            if n > m {
                 result.diagnostics.push(ValidationDiagnostic {
                     path: format!("{state_path}.merge"),
                     message: format!(
@@ -591,7 +607,7 @@ fn check_merge_node_integrity(manifest: &PresetManifest, result: &mut Validation
                     category: DiagnosticCategory::MergeIntegrity,
                 });
             }
-            if *m != incoming {
+            if m != i64::try_from(incoming).unwrap_or(i64::MAX) {
                 result.diagnostics.push(ValidationDiagnostic {
                     path: format!("{state_path}.merge.m"),
                     message: format!(
@@ -605,7 +621,7 @@ fn check_merge_node_integrity(manifest: &PresetManifest, result: &mut Validation
         }
 
         // Merge nodes must have at least one outgoing edge (not terminal without next).
-        if state.next.is_none() && !state.terminal {
+        if !has_outgoing_edge(document, &state.id) && state.kind != WorkflowNodeKind::Terminal {
             result.diagnostics.push(ValidationDiagnostic {
                 path: format!("{state_path}.merge"),
                 message: format!(
@@ -690,10 +706,10 @@ pub(crate) fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(S
     }
 
     // initial_action template_file
-    if let Some(crate::manifest::InitialAction::SeedExpansion {
-        template_file: Some(ref tf),
+    if let Some(InitialAction::SeedExpansion {
+        template_file: Some(tf),
         ..
-    }) = manifest.preset.initial_action
+    }) = &manifest.preset.initial_action
     {
         refs.push((
             "preset.initial_action.template_file".to_string(),
@@ -712,21 +728,112 @@ pub(crate) fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(S
     refs
 }
 
+/// Collect every file-backed asset reference the IR document names.
+///
+/// Returns `(dot_path, relative_path)` pairs with the same dot paths the manifest collector
+/// produces, so both entries report the same `path` for the same defect. The sweep reads the
+/// carriers themselves, not [`WorkflowDocument::assets`], so a reference the document does not
+/// register in `assets` cannot bypass the A3 checks.
+fn collect_ir_asset_references(document: &WorkflowDocument) -> Vec<(String, String)> {
+    let mut refs: Vec<(String, String)> = Vec::new();
+
+    for (i, node) in outer_states(document) {
+        // exit_when template_file
+        if let Some(template) = node
+            .exit_when
+            .as_ref()
+            .and_then(|exit| exit.template.as_ref())
+        {
+            refs.push((
+                format!("states[{i}].exit_when.template_file"),
+                template.clone(),
+            ));
+        }
+
+        // context_update template_file
+        if let Some(template) = node
+            .context_update
+            .as_ref()
+            .and_then(|hook| hook.template.as_ref())
+        {
+            refs.push((
+                format!("states[{i}].context_update.template_file"),
+                template.clone(),
+            ));
+        }
+
+        // Enter action prompt_file / system_prompt_file
+        for (j, enter) in node.enter.iter().enumerate() {
+            let Some(args) = enter.args.as_ref().and_then(|args| args.as_object()) else {
+                continue;
+            };
+            for key in ["prompt_file", "system_prompt_file"] {
+                if let Some(path) = args.get(key).and_then(|value| value.as_str()) {
+                    refs.push((
+                        format!("states[{i}].enter[{j}].args.{key}"),
+                        path.to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    // Inner graph node template_file; `k` keeps its index within the graph.
+    let mut inner_index: HashMap<&str, usize> = HashMap::new();
+    for node in document
+        .nodes
+        .iter()
+        .filter(|node| node.kind == WorkflowNodeKind::InnerStep)
+    {
+        let Some((graph, _)) = node.id.split_once('/') else {
+            continue;
+        };
+        let k = inner_index.entry(graph).or_insert(0);
+        if let Some(template) = &node.template {
+            refs.push((
+                format!("inner_graphs.{graph}.nodes[{k}].template_file"),
+                template.clone(),
+            ));
+        }
+        *k += 1;
+    }
+
+    // initial_action template_file
+    if let Some(template) = document
+        .initial_action
+        .as_ref()
+        .and_then(|action| action.template.as_ref())
+    {
+        refs.push((
+            "preset.initial_action.template_file".to_string(),
+            template.clone(),
+        ));
+    }
+
+    // Role system_prompt_file
+    for (i, role) in document.roles.iter().enumerate() {
+        refs.push((
+            format!("roles[{i}].system_prompt_file"),
+            role.system_prompt_file.clone(),
+        ));
+    }
+
+    refs
+}
+
 /// Check that all file-backed asset references exist within the bundle.
 fn check_asset_file_existence(
-    manifest: &PresetManifest,
+    document: &WorkflowDocument,
     bundle_root: &Path,
     result: &mut ValidationResult,
 ) {
-    let refs = collect_asset_file_references(manifest);
-
-    for (dot_path, rel_path) in &refs {
+    for (dot_path, rel_path) in collect_ir_asset_references(document) {
         // Skip structural checks (already done by assert_template_file_safe in loader).
         // Only check existence here.
-        let full_path = bundle_root.join(rel_path);
+        let full_path = bundle_root.join(&rel_path);
         if !full_path.exists() {
             result.diagnostics.push(ValidationDiagnostic {
-                path: dot_path.clone(),
+                path: dot_path,
                 message: format!(
                     "referenced file '{rel_path}' does not exist in bundle at {}",
                     bundle_root.display()
@@ -742,7 +849,7 @@ fn check_asset_file_existence(
 /// the bundle sandbox. This is defense-in-depth beyond the structural `..`
 /// check already in the loader.
 fn check_symlink_escapes(
-    manifest: &PresetManifest,
+    document: &WorkflowDocument,
     bundle_root: &Path,
     result: &mut ValidationResult,
 ) {
@@ -750,14 +857,12 @@ fn check_symlink_escapes(
         return; // Bundle root doesn't exist; not our problem here.
     };
 
-    let refs = collect_asset_file_references(manifest);
-
-    for (dot_path, rel_path) in &refs {
-        let full_path = bundle_root.join(rel_path);
+    for (dot_path, rel_path) in collect_ir_asset_references(document) {
+        let full_path = bundle_root.join(&rel_path);
         if let Ok(canonical) = full_path.canonicalize() {
             if !canonical.starts_with(&canonical_root) {
                 result.diagnostics.push(ValidationDiagnostic {
-                    path: dot_path.clone(),
+                    path: dot_path,
                     message: format!(
                         "file '{rel_path}' resolves outside the bundle sandbox (symlink escape)"
                     ),
@@ -769,23 +874,23 @@ fn check_symlink_escapes(
     }
 }
 
-/// Check that the manifest `preset.id` matches the bundle directory basename.
+/// Check that the document `id` matches the bundle directory basename.
 ///
 /// When loading from a bundle directory (e.g. `~/.nexus42/presets/my-preset/`),
-/// the `preset.id` field in the YAML must match the directory name. This prevents
+/// the `id` field in the YAML must match the directory name. This prevents
 /// identity spoofing and ensures filesystem-level consistency.
 fn check_bundle_id_vs_directory(
-    manifest: &PresetManifest,
+    document: &WorkflowDocument,
     bundle_root: &Path,
     result: &mut ValidationResult,
 ) {
     if let Some(dir_name) = bundle_root.file_name().and_then(|n| n.to_str()) {
-        let manifest_id = &manifest.preset.id;
-        if manifest_id != dir_name {
+        let document_id = document.id.as_str();
+        if document_id != dir_name {
             result.diagnostics.push(ValidationDiagnostic {
                 path: "preset.id".to_string(),
                 message: format!(
-                    "preset.id '{manifest_id}' does not match bundle directory name '{dir_name}'"
+                    "preset.id '{document_id}' does not match bundle directory name '{dir_name}'"
                 ),
                 severity: DiagnosticSeverity::Error,
                 category: DiagnosticCategory::IdMismatch,
@@ -798,13 +903,11 @@ fn check_bundle_id_vs_directory(
 ///
 /// Reuses `loader::assert_template_file_safe` to validate each path is free of
 /// `..` traversal, absolute paths, backslashes, null bytes, and control characters.
-fn check_path_safety(manifest: &PresetManifest, result: &mut ValidationResult) {
-    let refs = collect_asset_file_references(manifest);
-    for (dot_path, rel_path) in &refs {
-        if let Err(reason) = super::loader::assert_template_file_safe(rel_path) {
-            // Sanitize: don't leak the full path in the error, just the relative portion.
+fn check_path_safety(document: &WorkflowDocument, result: &mut ValidationResult) {
+    for (dot_path, rel_path) in collect_ir_asset_references(document) {
+        if let Err(reason) = super::loader::assert_template_file_safe(&rel_path) {
             result.diagnostics.push(ValidationDiagnostic {
-                path: dot_path.clone(),
+                path: dot_path,
                 message: reason,
                 severity: DiagnosticSeverity::Error,
                 category: DiagnosticCategory::PathSafety,
@@ -826,13 +929,13 @@ fn check_path_safety(manifest: &PresetManifest, result: &mut ValidationResult) {
 /// 3. If the registry lacks schema metadata, emit a "schema check skipped"
 ///    diagnostic so the user knows not all checks were possible.
 fn check_capability_arg_compatibility(
-    manifest: &PresetManifest,
+    document: &WorkflowDocument,
     caps: &dyn CapabilityCatalog,
     result: &mut ValidationResult,
 ) {
     // Also check requires_capabilities (already done by loader, but we produce
     // richer diagnostics).
-    for (i, req_cap) in manifest.preset.requires_capabilities.iter().enumerate() {
+    for (i, req_cap) in document.meta.requires_capabilities.iter().enumerate() {
         if caps.input_schema(req_cap).is_none() {
             result.diagnostics.push(ValidationDiagnostic {
                 path: format!("preset.requires_capabilities[{i}]"),
@@ -844,46 +947,46 @@ fn check_capability_arg_compatibility(
     }
 
     // Check enter action capabilities.
-    for (i, state) in manifest.states.iter().enumerate() {
-        for (j, enter) in state.enter.iter().enumerate() {
+    for (i, node) in outer_states(document) {
+        for (j, enter) in node.enter.iter().enumerate() {
+            if enter.kind != WorkflowEnterActionKind::Capability {
+                continue;
+            }
             let enter_path = format!("states[{i}].enter[{j}]");
+            let name = enter.name.as_deref().unwrap_or_default();
+            let cap_path = format!("{enter_path}.name");
 
-            if let EnterAction::Capability { name, args } = enter {
-                let cap_path = format!("{enter_path}.name");
-
-                match caps.input_schema(name) {
-                    None => {
+            match caps.input_schema(name) {
+                None => {
+                    result.diagnostics.push(ValidationDiagnostic {
+                        path: cap_path,
+                        message: format!("capability '{name}' not found in registry"),
+                        severity: DiagnosticSeverity::Error,
+                        category: DiagnosticCategory::MissingCapability,
+                    });
+                }
+                Some(schema_str) => {
+                    // Try to parse the capability's input_schema to detect drift.
+                    if let Ok(schema_value) = serde_json::from_str::<serde_json::Value>(schema_str)
+                    {
+                        check_args_against_schema(
+                            &enter_path,
+                            name,
+                            enter.args.as_ref(),
+                            &schema_value,
+                            result,
+                        );
+                    } else {
+                        // Schema is not valid JSON — cannot check args.
                         result.diagnostics.push(ValidationDiagnostic {
-                            path: cap_path,
-                            message: format!("capability '{name}' not found in registry"),
-                            severity: DiagnosticSeverity::Error,
-                            category: DiagnosticCategory::MissingCapability,
-                        });
-                    }
-                    Some(schema_str) => {
-                        // Try to parse the capability's input_schema to detect drift.
-                        if let Ok(schema_value) =
-                            serde_json::from_str::<serde_json::Value>(schema_str)
-                        {
-                            check_args_against_schema(
-                                &enter_path,
-                                name,
-                                args.as_ref(),
-                                &schema_value,
-                                result,
-                            );
-                        } else {
-                            // Schema is not valid JSON — cannot check args.
-                            result.diagnostics.push(ValidationDiagnostic {
-                                path: format!("{enter_path}.args"),
-                                message: format!(
-                                    "schema check skipped for capability '{name}': \
+                            path: format!("{enter_path}.args"),
+                            message: format!(
+                                "schema check skipped for capability '{name}': \
                                      input_schema is not valid JSON"
-                                ),
-                                severity: DiagnosticSeverity::Warning,
-                                category: DiagnosticCategory::SchemaCheckSkipped,
-                            });
-                        }
+                            ),
+                            severity: DiagnosticSeverity::Warning,
+                            category: DiagnosticCategory::SchemaCheckSkipped,
+                        });
                     }
                 }
             }
@@ -1040,11 +1143,13 @@ fn check_any_of_semantics(
 ///
 /// - Every `kind: creator` preset must have at least one of `work_init` or `work_continue`.
 /// - `kind: system` presets may have empty `run_intents` or include `system_maintenance`.
-fn check_run_intents(manifest: &PresetManifest, result: &mut ValidationResult) {
-    let intents: HashSet<RunIntent> = manifest.preset.run_intents.iter().copied().collect();
+fn check_run_intents(document: &WorkflowDocument, result: &mut ValidationResult) {
+    let intents: HashSet<WorkflowMetaRunIntentsItem> =
+        document.meta.run_intents.iter().copied().collect();
+    let id = document.id.as_str();
 
-    match manifest.preset.kind {
-        PresetKind::Creator => {
+    match document.meta.kind {
+        WorkflowMetaKind::Creator => {
             // R-V133P1-05: Creator presets must declare at least one run_intent.
             // Promoted from Warning to Error — the engine requires at least one
             // intent to schedule a run; surfacing at load time prevents runtime failures.
@@ -1052,8 +1157,7 @@ fn check_run_intents(manifest: &PresetManifest, result: &mut ValidationResult) {
                 result.diagnostics.push(ValidationDiagnostic {
                     path: "preset.run_intents".to_string(),
                     message: format!(
-                        "creator preset '{}' must declare at least one run_intent (e.g. work_init, work_continue, knowledge_ingest, work_maintenance)",
-                        manifest.preset.id
+                        "creator preset '{id}' must declare at least one run_intent (e.g. work_init, work_continue, knowledge_ingest, work_maintenance)"
                     ),
                     severity: DiagnosticSeverity::Error,
                     category: DiagnosticCategory::RunIntents,
@@ -1063,34 +1167,35 @@ fn check_run_intents(manifest: &PresetManifest, result: &mut ValidationResult) {
             // R-V133P1-05: Creator presets must not claim system-only intents.
             // Per work-experience-model §5.1, cross-claim (creator claiming
             // system_maintenance) is an Error, not a Warning.
-            if intents.contains(&RunIntent::SystemMaintenance) {
+            if intents.contains(&WorkflowMetaRunIntentsItem::SystemMaintenance) {
                 result.diagnostics.push(ValidationDiagnostic {
                     path: "preset.run_intents".to_string(),
                     message: format!(
-                        "creator preset '{}' must not declare system_maintenance (system-only intent)",
-                        manifest.preset.id
+                        "creator preset '{id}' must not declare system_maintenance (system-only intent)"
                     ),
                     severity: DiagnosticSeverity::Error,
                     category: DiagnosticCategory::RunIntents,
                 });
             }
         }
-        PresetKind::System => {
+        WorkflowMetaKind::System => {
             // R-V133P1-05: System presets must not claim creator-only intents.
             // Per work-experience-model §5.1, cross-claim (system claiming
             // work_init/work_continue) is an Error.
-            let creator_only_intents = [RunIntent::WorkInit, RunIntent::WorkContinue];
+            let creator_only_intents = [
+                WorkflowMetaRunIntentsItem::WorkInit,
+                WorkflowMetaRunIntentsItem::WorkContinue,
+            ];
             let cross_claims: Vec<String> = creator_only_intents
                 .iter()
-                .filter(|ri| intents.contains(ri))
-                .map(|ri| format!("{ri:?}"))
+                .filter(|intent| intents.contains(intent))
+                .map(|intent| format!("{intent:?}"))
                 .collect();
             if !cross_claims.is_empty() {
                 result.diagnostics.push(ValidationDiagnostic {
                     path: "preset.run_intents".to_string(),
                     message: format!(
-                        "system preset '{}' must not declare creator-only intents: {}",
-                        manifest.preset.id,
+                        "system preset '{id}' must not declare creator-only intents: {}",
                         cross_claims.join(", ")
                     ),
                     severity: DiagnosticSeverity::Error,
@@ -1099,12 +1204,13 @@ fn check_run_intents(manifest: &PresetManifest, result: &mut ValidationResult) {
             }
 
             // System presets with run_intents should include system_maintenance.
-            if !intents.is_empty() && !intents.contains(&RunIntent::SystemMaintenance) {
+            if !intents.is_empty()
+                && !intents.contains(&WorkflowMetaRunIntentsItem::SystemMaintenance)
+            {
                 result.diagnostics.push(ValidationDiagnostic {
                     path: "preset.run_intents".to_string(),
                     message: format!(
-                        "system preset '{}' has run_intents but none is system_maintenance",
-                        manifest.preset.id
+                        "system preset '{id}' has run_intents but none is system_maintenance"
                     ),
                     severity: DiagnosticSeverity::Warning,
                     category: DiagnosticCategory::RunIntents,
@@ -1124,8 +1230,8 @@ fn check_run_intents(manifest: &PresetManifest, result: &mut ValidationResult) {
 /// - Flag names match `^[a-z][a-z0-9-]*$` (kebab-case, no leading digit).
 /// - No duplicate names within the same preset.
 /// - `required: true` flags must not declare a `default`.
-fn check_cli_args(manifest: &PresetManifest, result: &mut ValidationResult) {
-    let cli_args = &manifest.preset.cli_args;
+fn check_cli_args(document: &WorkflowDocument, result: &mut ValidationResult) {
+    let cli_args = &document.meta.cli_args;
     if cli_args.is_empty() {
         return;
     }
@@ -1167,7 +1273,7 @@ fn check_cli_args(manifest: &PresetManifest, result: &mut ValidationResult) {
         }
 
         // required + default conflict
-        if arg.required && arg.default.is_some() {
+        if arg.required.unwrap_or(false) && arg.default.is_some() {
             result.diagnostics.push(ValidationDiagnostic {
                 path: "preset.cli_args".to_string(),
                 message: format!(
@@ -1397,9 +1503,9 @@ states:
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::IdMismatch
-                    && d.message.contains("must not be empty")
+                    && d.message.contains("is not an IR id")
             }),
-            "expected empty id error: {:?}",
+            "expected empty id refusal: {:?}",
             result.diagnostics
         );
     }
@@ -1430,9 +1536,9 @@ states:
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::IdMismatch
-                    && d.message.contains("invalid characters")
+                    && d.message.contains("is not an IR id")
             }),
-            "expected invalid chars error: {:?}",
+            "expected invalid id refusal: {:?}",
             result.diagnostics
         );
     }
@@ -1555,6 +1661,7 @@ states:
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::MissingAsset
+                    && d.path == "states[0].exit_when.template_file"
                     && d.message.contains("nonexistent.md")
             }),
             "expected missing asset error: {:?}",
@@ -2228,5 +2335,404 @@ states:
             "quorum with m != actual incoming should error: {:?}",
             result.diagnostics
         );
+    }
+
+    // ── IR parity: YAML and IR share one semantic path ──────────────────
+
+    fn diagnostic_shape(
+        result: &ValidationResult,
+    ) -> Vec<(String, String, DiagnosticSeverity, DiagnosticCategory)> {
+        result
+            .diagnostics
+            .iter()
+            .map(|d| (d.path.clone(), d.message.clone(), d.severity, d.category))
+            .collect()
+    }
+
+    /// Validate the same preset through the YAML entry and through its projected IR document;
+    /// both must report the same paths, messages, severity, category, and order.
+    fn yaml_ir_parity(yaml: &str) -> Vec<(String, String, DiagnosticSeverity, DiagnosticCategory)> {
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let document = crate::workflow_ir::import_preset_manifest(&manifest).expect("project");
+        let caps = BuiltinCapabilityCatalog;
+        let via_yaml = diagnostic_shape(&validate_preset_semantic(&manifest, &caps));
+        let via_ir = diagnostic_shape(&validate_workflow_ir(&document, &caps));
+        assert_eq!(
+            via_yaml, via_ir,
+            "YAML and IR entries disagree for:\n{yaml}"
+        );
+        via_yaml
+    }
+
+    #[test]
+    fn parity_clean_preset_reports_nothing() {
+        let clean = yaml_ir_parity(
+            r"
+preset:
+  id: parity-clean
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+",
+        );
+        assert!(clean.is_empty(), "clean preset diagnosed: {clean:?}");
+    }
+
+    #[test]
+    fn parity_reports_unreachable_terminal() {
+        let stuck = yaml_ir_parity(
+            r"
+preset:
+  id: parity-stuck
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: c
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    enter: []
+    exit_when: { kind: manual }
+    next: a
+  - id: c
+    terminal: true
+",
+        );
+        assert!(
+            stuck
+                .iter()
+                .any(|(_, _, _, category)| *category == DiagnosticCategory::Reachability),
+            "unreachable terminal not reported: {stuck:?}"
+        );
+    }
+
+    #[test]
+    fn parity_reports_terminal_marker_disagreement() {
+        let terminals = yaml_ir_parity(
+            r"
+preset:
+  id: parity-terminal
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    enter: []
+    exit_when: { kind: manual }
+  - id: c
+    terminal: true
+",
+        );
+        assert!(
+            terminals.iter().any(|(path, message, _, _)| {
+                path == "states[1].terminal" && message.contains("not marked terminal")
+            }),
+            "terminal marker mismatch missing: {terminals:?}"
+        );
+        assert!(
+            terminals.iter().any(|(path, _, severity, _)| {
+                path == "states[2].terminal" && *severity == DiagnosticSeverity::Warning
+            }),
+            "extra terminal warning missing: {terminals:?}"
+        );
+    }
+
+    #[test]
+    fn parity_reports_inner_graph_defects() {
+        let graphs = yaml_ir_parity(
+            r"
+preset:
+  id: parity-graphs
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter:
+      - kind: inner_graph
+        name: nonexistent_graph
+    exit_when: { kind: graph_complete }
+    next: b
+  - id: b
+    terminal: true
+inner_graphs:
+  orphan_graph:
+    nodes:
+      - id: n2
+        kind: acp_prompt
+",
+        );
+        assert!(
+            graphs
+                .iter()
+                .any(|(_, message, _, _)| message.contains("nonexistent_graph")),
+            "missing inner graph error absent: {graphs:?}"
+        );
+        assert!(
+            graphs
+                .iter()
+                .any(|(_, message, severity, _)| message.contains("orphan_graph")
+                    && *severity == DiagnosticSeverity::Warning),
+            "orphan inner graph warning absent: {graphs:?}"
+        );
+    }
+
+    #[test]
+    fn parity_reports_label_and_merge_defects() {
+        let merge = yaml_ir_parity(
+            r"
+preset:
+  id: parity-merge
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: done
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      - label: foo
+        target: merged
+  - id: b
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      - label: foo
+        target: merged
+  - id: merged
+    merge:
+      kind: quorum
+      n: 1
+      m: 5
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+",
+        );
+        assert!(
+            merge.iter().any(|(_, message, _, category)| *category
+                == DiagnosticCategory::DuplicateLabel
+                && message.contains("state 'b'")),
+            "cross-state duplicate label absent: {merge:?}"
+        );
+        assert!(
+            merge
+                .iter()
+                .any(|(_, message, _, _)| { message.contains("does not match actual incoming") }),
+            "quorum m mismatch absent: {merge:?}"
+        );
+    }
+
+    #[test]
+    fn parity_reports_capability_and_intent_defects() {
+        let capability = yaml_ir_parity(
+            r"
+preset:
+  id: parity-capability
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [system_maintenance]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter:
+      - kind: capability
+        name: nope.does.not.exist
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+",
+        );
+        assert!(
+            capability
+                .iter()
+                .any(|(_, message, _, _)| message.contains("nope.does.not.exist")),
+            "missing capability error absent: {capability:?}"
+        );
+        assert!(
+            capability
+                .iter()
+                .any(|(_, message, _, _)| message.contains("system_maintenance")),
+            "run intent cross-claim absent: {capability:?}"
+        );
+    }
+
+    #[test]
+    fn yaml_and_ir_entries_report_identical_asset_diagnostics() {
+        let yaml = r"
+preset:
+  id: asset-parity
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/missing.md
+    next: b
+  - id: b
+    terminal: true
+";
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let document = crate::workflow_ir::import_preset_manifest(&manifest).expect("project");
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("asset-parity");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+
+        let via_yaml = validate_assets_in_bundle(&manifest, &bundle_root);
+        let via_ir = validate_workflow_ir_assets(&document, &bundle_root);
+        assert_eq!(diagnostic_shape(&via_yaml), diagnostic_shape(&via_ir));
+        assert!(
+            via_yaml
+                .diagnostics
+                .iter()
+                .any(|d| d.category == DiagnosticCategory::MissingAsset
+                    && d.path == "states[0].exit_when.template_file"
+                    && d.message.contains("prompts/missing.md")),
+            "missing asset not reported at its manifest path: {:?}",
+            via_yaml.diagnostics
+        );
+
+        let via_yaml = validate_path_safety(&manifest);
+        let via_ir = validate_workflow_ir_path_safety(&document);
+        assert_eq!(diagnostic_shape(&via_yaml), diagnostic_shape(&via_ir));
+        assert!(
+            !via_yaml.has_errors(),
+            "safe path diagnosed: {:?}",
+            via_yaml.diagnostics
+        );
+    }
+
+    #[test]
+    fn unregistered_asset_reference_still_fails_safety_checks() {
+        // A reference the document does not register in `assets` must not bypass A3.
+        let yaml = r"
+preset:
+  id: unregistered-asset
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt_file: ../../etc/passwd
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+";
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let document = crate::workflow_ir::import_preset_manifest(&manifest).expect("project");
+        assert!(
+            document.assets.is_empty(),
+            "projection must not pre-register references: {:?}",
+            document.assets
+        );
+
+        let safety = validate_workflow_ir_path_safety(&document);
+        assert!(
+            safety.diagnostics.iter().any(|d| {
+                d.category == DiagnosticCategory::PathSafety
+                    && d.path == "states[0].enter[0].args.prompt_file"
+                    && d.message.contains("..")
+            }),
+            "unsafe unregistered reference not reported: {:?}",
+            safety.diagnostics
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("unregistered-asset");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+        let assets = validate_workflow_ir_assets(&document, &bundle_root);
+        assert!(
+            assets.diagnostics.iter().any(|d| {
+                d.category == DiagnosticCategory::MissingAsset
+                    && d.path == "states[0].enter[0].args.prompt_file"
+            }),
+            "unregistered reference bypassed the existence check: {:?}",
+            assets.diagnostics
+        );
+    }
+
+    #[test]
+    fn golden_ir_fixtures_validate_identically_through_both_entries() {
+        let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let sample_root = crate_root.join("../..");
+        let caps = BuiltinCapabilityCatalog;
+
+        for sample in ["game-narrative", "react-trpg-turn"] {
+            let yaml = std::fs::read_to_string(
+                sample_root
+                    .join("strategy-samples")
+                    .join(sample)
+                    .join("preset.yaml"),
+            )
+            .expect("read sample preset.yaml");
+            let golden = std::fs::read_to_string(
+                crate_root
+                    .join("tests/fixtures/workflow-ir")
+                    .join(format!("{sample}.workflow.ir.json")),
+            )
+            .expect("read golden IR");
+            let manifest: PresetManifest = serde_yaml::from_str(&yaml).expect("parse sample");
+            let document: WorkflowDocument = serde_json::from_str(&golden).expect("parse golden");
+
+            assert_eq!(
+                diagnostic_shape(&validate_preset_semantic(&manifest, &caps)),
+                diagnostic_shape(&validate_workflow_ir(&document, &caps)),
+                "`{sample}` YAML and golden IR disagree"
+            );
+        }
     }
 }

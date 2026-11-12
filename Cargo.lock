@@ -4185,6 +4185,7 @@ dependencies = [
  "nexus-preset",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
+ "nexus-workflow-ir",
  "nix 0.31.3",
  "predicates",
  "regex",

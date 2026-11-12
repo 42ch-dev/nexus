@@ -86,6 +86,9 @@ nexus-home-layout = { path = "../../crates/nexus-home-layout" }
 # the `basic-cli` feature must not be a dependency switch (it is `[]`).
 nexus-core = { path = "../../crates/nexus-core" }
 nexus-preset = { path = "../../crates/nexus-preset" }
+# The `preset validate` IR leg runs the crate's Q2 structural checks
+# (`nexus_workflow_ir::validate`) alongside the preset facade.
+nexus-workflow-ir = { path = "../../crates/nexus-workflow-ir" }
 nexus-orchestration = { path = "../../crates/nexus-orchestration", optional = true }
 nexus-moment-context-assembly = { path = "../../crates/nexus-moment-context-assembly", optional = true, features = ["cloud-stage"] }
 nexus-creator-memory = { path = "../../crates/nexus-creator-memory", optional = true }

@@ -157,10 +157,40 @@ pub fn import_preset_bundle(
         asset_bytes.insert(path, bytes);
     }
 
+    let terminal_count = manifest
+        .states
+        .iter()
+        .filter(|state| state.terminal)
+        .count();
+    if terminal_count > 1 {
+        return Err(WorkflowIrError::MultipleTerminalStates {
+            count: terminal_count,
+        });
+    }
+
     Ok(PresetIrImport {
         document: document_from_manifest(manifest, assets)?,
         assets: asset_bytes,
     })
+}
+
+/// Project a manifest into IR for semantic validation: no filesystem reads.
+///
+/// Asset references stay on their carriers (node `template`s, exit/context templates, enter
+/// args, role prompts) and are not registered in [`WorkflowDocument::assets`]: validation sweeps
+/// the carriers, so an unregistered reference cannot bypass the asset checks.
+///
+/// Unlike [`import_preset_bundle`] this does not refuse a manifest whose terminal markers disagree
+/// with `preset.terminal` or whose asset files are missing or unsafe — validation reports those
+/// defects on the document instead.
+///
+/// # Errors
+///
+/// Returns [`WorkflowIrError::NotProjectable`] when `preset.id` is not a valid IR id.
+pub fn import_preset_manifest(
+    manifest: &PresetManifest,
+) -> Result<WorkflowDocument, WorkflowIrError> {
+    document_from_manifest(manifest, Vec::new())
 }
 
 fn document_from_manifest(
@@ -187,17 +217,18 @@ fn document_from_manifest(
     }
 
     let effect_summary = summary_effect(&nodes);
-    let terminal: Vec<String> = manifest
-        .states
-        .iter()
-        .filter(|state| state.terminal)
-        .map(|state| state.id.clone())
-        .collect();
-    if terminal.len() > 1 {
-        return Err(WorkflowIrError::MultipleTerminalStates {
-            count: terminal.len(),
-        });
-    }
+    // The header names the declared terminal; per-state markers ride on the node kinds. A preset
+    // whose markers disagree with the header still projects, so validation can report the defect.
+    let terminal = if header.terminal.is_empty() {
+        manifest
+            .states
+            .iter()
+            .filter(|state| state.terminal)
+            .map(|state| state.id.clone())
+            .collect()
+    } else {
+        vec![header.terminal.clone()]
+    };
 
     Ok(WorkflowDocument {
         ir_version: IR_VERSION,
