@@ -174,8 +174,11 @@ pub fn import_preset_bundle(
     })
 }
 
-/// Project a manifest into IR for semantic validation: no filesystem reads, asset references carry
-/// only their bundle-relative paths.
+/// Project a manifest into IR for semantic validation: no filesystem reads.
+///
+/// Asset references stay on their carriers (node `template`s, exit/context templates, enter
+/// args, role prompts) and are not registered in [`WorkflowDocument::assets`]: validation sweeps
+/// the carriers, so an unregistered reference cannot bypass the asset checks.
 ///
 /// Unlike [`import_preset_bundle`] this does not refuse a manifest whose terminal markers disagree
 /// with `preset.terminal` or whose asset files are missing or unsafe — validation reports those
@@ -187,19 +190,7 @@ pub fn import_preset_bundle(
 pub fn import_preset_manifest(
     manifest: &PresetManifest,
 ) -> Result<WorkflowDocument, WorkflowIrError> {
-    let mut references = crate::validation::collect_asset_file_references(manifest);
-    references.sort_by(|a, b| a.1.cmp(&b.1));
-    references.dedup_by(|a, b| a.1 == b.1);
-    let assets = references
-        .into_iter()
-        .map(|(_, path)| WorkflowAssetRef {
-            id: path.clone(),
-            path,
-            kind: WorkflowAssetRefKind::Template,
-            content_hash: None,
-        })
-        .collect();
-    document_from_manifest(manifest, assets)
+    document_from_manifest(manifest, Vec::new())
 }
 
 fn document_from_manifest(

@@ -196,15 +196,18 @@ pub fn validate_preset_semantic(
 ) -> ValidationResult {
     match crate::workflow_ir::import_preset_manifest(manifest) {
         Ok(document) => validate_workflow_ir(&document, caps),
-        Err(error) => projection_refusal(error),
+        Err(error) => projection_refusal(&error),
     }
 }
 
 /// Run asset existence and symlink-escape checks over an IR document (A3).
 ///
+/// Every reference the document names is checked, whether or not it is registered in
+/// [`WorkflowDocument::assets`].
+///
 /// # Arguments
 ///
-/// * `document` — The IR document whose referenced assets to check.
+/// * `document` — The IR document whose references to check.
 /// * `bundle_root` — The filesystem root of the preset bundle.
 #[must_use]
 pub fn validate_workflow_ir_assets(
@@ -229,7 +232,7 @@ pub fn validate_assets_in_bundle(
 ) -> ValidationResult {
     match crate::workflow_ir::import_preset_manifest(manifest) {
         Ok(document) => validate_workflow_ir_assets(&document, bundle_root),
-        Err(error) => projection_refusal(error),
+        Err(error) => projection_refusal(&error),
     }
 }
 
@@ -249,12 +252,12 @@ pub fn validate_workflow_ir_path_safety(document: &WorkflowDocument) -> Validati
 pub fn validate_path_safety(manifest: &PresetManifest) -> ValidationResult {
     match crate::workflow_ir::import_preset_manifest(manifest) {
         Ok(document) => validate_workflow_ir_path_safety(&document),
-        Err(error) => projection_refusal(error),
+        Err(error) => projection_refusal(&error),
     }
 }
 
 /// The only projection failure a validation entry can hit is an id that is not expressible in IR.
-fn projection_refusal(error: crate::workflow_ir::WorkflowIrError) -> ValidationResult {
+fn projection_refusal(error: &crate::workflow_ir::WorkflowIrError) -> ValidationResult {
     ValidationResult {
         diagnostics: vec![ValidationDiagnostic {
             path: "preset.id".to_string(),
@@ -725,22 +728,114 @@ pub(crate) fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(S
     refs
 }
 
+/// Collect every file-backed asset reference the IR document names.
+///
+/// Returns `(dot_path, relative_path)` pairs with the same dot paths the manifest collector
+/// produces, so both entries report the same `path` for the same defect. The sweep reads the
+/// carriers themselves, not [`WorkflowDocument::assets`], so a reference the document does not
+/// register in `assets` cannot bypass the A3 checks.
+fn collect_ir_asset_references(document: &WorkflowDocument) -> Vec<(String, String)> {
+    let mut refs: Vec<(String, String)> = Vec::new();
+
+    for (i, node) in outer_states(document) {
+        // exit_when template_file
+        if let Some(template) = node
+            .exit_when
+            .as_ref()
+            .and_then(|exit| exit.template.as_ref())
+        {
+            refs.push((
+                format!("states[{i}].exit_when.template_file"),
+                template.clone(),
+            ));
+        }
+
+        // context_update template_file
+        if let Some(template) = node
+            .context_update
+            .as_ref()
+            .and_then(|hook| hook.template.as_ref())
+        {
+            refs.push((
+                format!("states[{i}].context_update.template_file"),
+                template.clone(),
+            ));
+        }
+
+        // Enter action prompt_file / system_prompt_file
+        for (j, enter) in node.enter.iter().enumerate() {
+            let Some(args) = enter.args.as_ref().and_then(|args| args.as_object()) else {
+                continue;
+            };
+            for key in ["prompt_file", "system_prompt_file"] {
+                if let Some(path) = args.get(key).and_then(|value| value.as_str()) {
+                    refs.push((
+                        format!("states[{i}].enter[{j}].args.{key}"),
+                        path.to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    // Inner graph node template_file; `k` keeps its index within the graph.
+    let mut inner_index: HashMap<&str, usize> = HashMap::new();
+    for node in document
+        .nodes
+        .iter()
+        .filter(|node| node.kind == WorkflowNodeKind::InnerStep)
+    {
+        let Some((graph, _)) = node.id.split_once('/') else {
+            continue;
+        };
+        let k = inner_index.entry(graph).or_insert(0);
+        if let Some(template) = &node.template {
+            refs.push((
+                format!("inner_graphs.{graph}.nodes[{k}].template_file"),
+                template.clone(),
+            ));
+        }
+        *k += 1;
+    }
+
+    // initial_action template_file
+    if let Some(template) = document
+        .initial_action
+        .as_ref()
+        .and_then(|action| action.template.as_ref())
+    {
+        refs.push((
+            "preset.initial_action.template_file".to_string(),
+            template.clone(),
+        ));
+    }
+
+    // Role system_prompt_file
+    for (i, role) in document.roles.iter().enumerate() {
+        refs.push((
+            format!("roles[{i}].system_prompt_file"),
+            role.system_prompt_file.clone(),
+        ));
+    }
+
+    refs
+}
+
 /// Check that all file-backed asset references exist within the bundle.
 fn check_asset_file_existence(
     document: &WorkflowDocument,
     bundle_root: &Path,
     result: &mut ValidationResult,
 ) {
-    for asset in &document.assets {
+    for (dot_path, rel_path) in collect_ir_asset_references(document) {
         // Skip structural checks (already done by assert_template_file_safe in loader).
         // Only check existence here.
-        let full_path = bundle_root.join(&asset.path);
+        let full_path = bundle_root.join(&rel_path);
         if !full_path.exists() {
             result.diagnostics.push(ValidationDiagnostic {
-                path: asset.id.clone(),
+                path: dot_path,
                 message: format!(
-                    "referenced file '{}' does not exist in bundle at {}",
-                    asset.path,
+                    "referenced file '{rel_path}' does not exist in bundle at {}",
                     bundle_root.display()
                 ),
                 severity: DiagnosticSeverity::Error,
@@ -762,15 +857,14 @@ fn check_symlink_escapes(
         return; // Bundle root doesn't exist; not our problem here.
     };
 
-    for asset in &document.assets {
-        let full_path = bundle_root.join(&asset.path);
+    for (dot_path, rel_path) in collect_ir_asset_references(document) {
+        let full_path = bundle_root.join(&rel_path);
         if let Ok(canonical) = full_path.canonicalize() {
             if !canonical.starts_with(&canonical_root) {
                 result.diagnostics.push(ValidationDiagnostic {
-                    path: asset.id.clone(),
+                    path: dot_path,
                     message: format!(
-                        "file '{}' resolves outside the bundle sandbox (symlink escape)",
-                        asset.path
+                        "file '{rel_path}' resolves outside the bundle sandbox (symlink escape)"
                     ),
                     severity: DiagnosticSeverity::Error,
                     category: DiagnosticCategory::PathSafety,
@@ -810,10 +904,10 @@ fn check_bundle_id_vs_directory(
 /// Reuses `loader::assert_template_file_safe` to validate each path is free of
 /// `..` traversal, absolute paths, backslashes, null bytes, and control characters.
 fn check_path_safety(document: &WorkflowDocument, result: &mut ValidationResult) {
-    for asset in &document.assets {
-        if let Err(reason) = super::loader::assert_template_file_safe(&asset.path) {
+    for (dot_path, rel_path) in collect_ir_asset_references(document) {
+        if let Err(reason) = super::loader::assert_template_file_safe(&rel_path) {
             result.diagnostics.push(ValidationDiagnostic {
-                path: asset.id.clone(),
+                path: dot_path,
                 message: reason,
                 severity: DiagnosticSeverity::Error,
                 category: DiagnosticCategory::PathSafety,
@@ -1567,6 +1661,7 @@ states:
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::MissingAsset
+                    && d.path == "states[0].exit_when.template_file"
                     && d.message.contains("nonexistent.md")
             }),
             "expected missing asset error: {:?}",
@@ -2270,7 +2365,7 @@ states:
     }
 
     #[test]
-    fn yaml_and_ir_entries_report_identical_semantic_diagnostics() {
+    fn parity_clean_preset_reports_nothing() {
         let clean = yaml_ir_parity(
             r"
 preset:
@@ -2292,9 +2387,11 @@ states:
 ",
         );
         assert!(clean.is_empty(), "clean preset diagnosed: {clean:?}");
+    }
 
-        // Unreachable terminal.
-        assert!(!yaml_ir_parity(
+    #[test]
+    fn parity_reports_unreachable_terminal() {
+        let stuck = yaml_ir_parity(
             r"
 preset:
   id: parity-stuck
@@ -2317,10 +2414,17 @@ states:
   - id: c
     terminal: true
 ",
-        )
-        .is_empty());
+        );
+        assert!(
+            stuck
+                .iter()
+                .any(|(_, _, _, category)| *category == DiagnosticCategory::Reachability),
+            "unreachable terminal not reported: {stuck:?}"
+        );
+    }
 
-        // Declared terminal not marked, plus an extra terminal marker.
+    #[test]
+    fn parity_reports_terminal_marker_disagreement() {
         let terminals = yaml_ir_parity(
             r"
 preset:
@@ -2356,8 +2460,10 @@ states:
             }),
             "extra terminal warning missing: {terminals:?}"
         );
+    }
 
-        // Orphan inner graph and a missing inner graph reference.
+    #[test]
+    fn parity_reports_inner_graph_defects() {
         let graphs = yaml_ir_parity(
             r"
 preset:
@@ -2398,8 +2504,10 @@ inner_graphs:
                     && *severity == DiagnosticSeverity::Warning),
             "orphan inner graph warning absent: {graphs:?}"
         );
+    }
 
-        // Duplicate labels across states plus a quorum m mismatch.
+    #[test]
+    fn parity_reports_label_and_merge_defects() {
         let merge = yaml_ir_parity(
             r"
 preset:
@@ -2447,8 +2555,10 @@ states:
                 .any(|(_, message, _, _)| { message.contains("does not match actual incoming") }),
             "quorum m mismatch absent: {merge:?}"
         );
+    }
 
-        // Unknown capability on an enter action and a creator claiming a system intent.
+    #[test]
+    fn parity_reports_capability_and_intent_defects() {
         let capability = yaml_ir_parity(
             r"
 preset:
@@ -2521,8 +2631,9 @@ states:
                 .diagnostics
                 .iter()
                 .any(|d| d.category == DiagnosticCategory::MissingAsset
+                    && d.path == "states[0].exit_when.template_file"
                     && d.message.contains("prompts/missing.md")),
-            "missing asset not reported: {:?}",
+            "missing asset not reported at its manifest path: {:?}",
             via_yaml.diagnostics
         );
 
@@ -2533,6 +2644,64 @@ states:
             !via_yaml.has_errors(),
             "safe path diagnosed: {:?}",
             via_yaml.diagnostics
+        );
+    }
+
+    #[test]
+    fn unregistered_asset_reference_still_fails_safety_checks() {
+        // A reference the document does not register in `assets` must not bypass A3.
+        let yaml = r"
+preset:
+  id: unregistered-asset
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt_file: ../../etc/passwd
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+";
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let document = crate::workflow_ir::import_preset_manifest(&manifest).expect("project");
+        assert!(
+            document.assets.is_empty(),
+            "projection must not pre-register references: {:?}",
+            document.assets
+        );
+
+        let safety = validate_workflow_ir_path_safety(&document);
+        assert!(
+            safety.diagnostics.iter().any(|d| {
+                d.category == DiagnosticCategory::PathSafety
+                    && d.path == "states[0].enter[0].args.prompt_file"
+                    && d.message.contains("..")
+            }),
+            "unsafe unregistered reference not reported: {:?}",
+            safety.diagnostics
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("unregistered-asset");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+        let assets = validate_workflow_ir_assets(&document, &bundle_root);
+        assert!(
+            assets.diagnostics.iter().any(|d| {
+                d.category == DiagnosticCategory::MissingAsset
+                    && d.path == "states[0].enter[0].args.prompt_file"
+            }),
+            "unregistered reference bypassed the existence check: {:?}",
+            assets.diagnostics
         );
     }
 
