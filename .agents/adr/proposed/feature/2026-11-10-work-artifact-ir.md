@@ -339,6 +339,8 @@ Works/<work_ref>/
 
 Path construction MUST live in the IR/port, not as duplicated string formats in scaffold, seed, and sync.
 
+The existing `works_root` enforcement (I-000387, closed without a carried deferral) is part of this contract; it does not introduce arbitrary-root support. A default or empty `works_root` means workspace-relative `Works`. Resolve a relative value against the executor's canonical workspace root, and accept an absolute or relative value only when it resolves exactly to `<canonical_workspace_root>/Works`. Refuse every external, parent-relative, or nested alternative with `InputInvalid` before Work claim, mkdir, or byte mutation. The port separately requires `workspace_root` to canonicalize to that same canonical workspace root.
+
 #### 3.7 Frontmatter contracts (sketch → normative on promotion)
 
 Minimum novel chapter body frontmatter (from `workflow-profile.md` §4.3): `title`, `chapter`, optional `volume`, `status`, optional `word_count`, optional `world_refs`. Outline heading contracts and essay/script/game-bible section frontmatter remain as in their profile Masters until promotion copies the normative tables here.
@@ -462,14 +464,14 @@ Rules:
 
 | Phase | Replace / add | Exit gate |
 | --- | --- | --- |
-| **P0 Port stub + inventory** | Trait + in-process FS adapter behind a flag; catalogue remaining direct-write sites; define lock + append + mkdir in the trait | Tests compile; no production behavior change; inventory list checked in or referenced from this spec |
+| **P0 Port + inventory** | Trait + in-process FS adapter; catalogue remaining direct-write sites; define lock + append + mkdir in the trait | Tests compile; no production behavior change; inventory list checked in or referenced from this spec |
 | **P1 Hot path** | Route Work-path `execute_write_file` through the port; adapter uses `fsync_write_atomic` semantics + parent mkdir + `WorkLock`; non-Work paths keep fallback | Draft-chapter writes under `Works/` no longer call bare `std::fs::write` in the tool handler; path-guard tests still pass; Windows manuscript write still works |
 | **P2 Sibling writers** | Outline, scaffolds, review-log ingest/write, missing-KB log, rules/history (**append**), narrative index, auto-chronology, chapter-transition file writes | Those modules do not call `std::fs::write` / `tokio::fs::write` directly (helpers may live only inside the adapter) |
 | **P3 Dry-run stub** | Inject stub in Simulate / isolated tests; plan JSON for one novel produce sample | A produce dry-run leaves `Works/` unchanged |
-| **P4 Reconcile admission** | Reconcile is a port op oriented toward **IR authority** (index refresh); dual-read window documented until Master amendment | Existing reconcile behavior preserved or explicitly migrated; callers use the port |
-| **P5 Default-on + lint** | Flag default on; CI/lint fails new direct writes in the inventoried modules | Acceptance §6.3 green |
+| **P4 Reconcile admission** | Admit reconcile through the port during the dual-read window in §3.8; later promotion makes it IR-authoritative index refresh | Existing reconcile behavior preserved or explicitly migrated; callers use the port |
+| **P5 Direct-write lint** | CI/lint fails new direct writes in the inventoried modules | Acceptance §6.3 green |
 
-Do **not** require P5 before P1 ships behind a flag. Prefer "hot path first, then close the remaining doors."
+Do **not** require P5 before P1 lands. Prefer "hot path first, then close the remaining doors" during the migration window.
 
 Promotion + Master amendments (§0.4) MAY land in parallel with P4/P5 but MUST NOT leave dual SSOT claims.
 
