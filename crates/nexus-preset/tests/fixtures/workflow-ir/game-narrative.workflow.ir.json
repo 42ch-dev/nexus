@@ -1,0 +1,238 @@
+{
+  "assets": [
+    {
+      "content_hash": "5f5c983c0ec6d880778a3add9fba5ca673eba715e5edab7db095306a2858caec",
+      "id": "templates/import-character-sheet.md",
+      "kind": "template",
+      "path": "templates/import-character-sheet.md"
+    },
+    {
+      "content_hash": "287252c86c5f3b6f13d996e7540e0cb1f920d9ae6de484fad90cb6a5b344c692",
+      "id": "templates/import-worldview.md",
+      "kind": "template",
+      "path": "templates/import-worldview.md"
+    },
+    {
+      "content_hash": "2b391bc1de99ea20b985674b840fe94a302b8d7562ab57f699232a1fa4941250",
+      "id": "templates/lane-route.md",
+      "kind": "template",
+      "path": "templates/lane-route.md"
+    },
+    {
+      "content_hash": "19fece0f77d504a647f0581fb8d2d730fb8d5a36bace9aa42645fcde5eb683a0",
+      "id": "templates/scheduled-sweep-exit.md",
+      "kind": "template",
+      "path": "templates/scheduled-sweep-exit.md"
+    },
+    {
+      "content_hash": "295eeb49288936e45c20b8e816cd4f810c67c30ae24b2876852d2ad4bb2cb2c1",
+      "id": "templates/scheduled-sweep.md",
+      "kind": "template",
+      "path": "templates/scheduled-sweep.md"
+    },
+    {
+      "content_hash": "7a1008912d3e2054e4a89e5d326342116721a798532abefb78ad48e42078f39f",
+      "id": "templates/trigger-game-event.md",
+      "kind": "template",
+      "path": "templates/trigger-game-event.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "routing",
+      "id": "routing->scheduled_sweep",
+      "kind": "conditional",
+      "to": "scheduled_sweep",
+      "when": "_context._judge_result == true"
+    },
+    {
+      "from": "routing",
+      "id": "routing->trigger_extract",
+      "kind": "default",
+      "to": "trigger_extract"
+    },
+    {
+      "from": "trigger_extract",
+      "id": "trigger_extract->done",
+      "kind": "linear",
+      "to": "done"
+    },
+    {
+      "from": "scheduled_sweep",
+      "id": "scheduled_sweep->sweep_extract",
+      "kind": "linear",
+      "to": "sweep_extract"
+    },
+    {
+      "from": "sweep_extract",
+      "id": "sweep_extract->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "routing",
+  "id": "game-narrative",
+  "initial_action": {
+    "kind": "seed_direct"
+  },
+  "ir_version": 0,
+  "meta": {
+    "description": "Game narrative import: game-event (trigger) and interval-sweep (scheduled) lanes extracting worldview/character KnowledgeEntry drafts + Relation hints",
+    "kind": "creator",
+    "requires_capabilities": [
+      "acp.prompt",
+      "creator.inject_prompt",
+      "judge.llm"
+    ],
+    "run_intents": [
+      "knowledge_ingest"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "template": "templates/lane-route.md"
+      },
+      "id": "routing",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Lane selector: judge reads preset.input.mode -> scheduled sweep (GO) or game-event trigger (NOGO)"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "trigger_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "trigger_extract",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Trigger lane: game event -> extraction/assembly task"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "templates/scheduled-sweep.md"
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT1H",
+        "template": "templates/scheduled-sweep-exit.md"
+      },
+      "id": "scheduled_sweep",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Scheduled lane: inventory new/changed worldview + character documents and judge whether to import (scan state — extraction is a separate state)"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "sweep_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "sweep_extract",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Scheduled lane extraction: worldview/character KnowledgeEntry drafts + Relation hints (runs only after the sweep judge says GO)"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    },
+    {
+      "effect_class": "external",
+      "id": "sweep_graph/extract_worldview",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "templates/import-worldview.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "sweep_graph/extract_worldview"
+      ],
+      "effect_class": "external",
+      "id": "sweep_graph/extract_characters",
+      "kind": "inner_step",
+      "output_binding": "extract_characters.text",
+      "step_kind": "acp_prompt",
+      "template": "templates/import-character-sheet.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "effect_class": "external",
+      "id": "trigger_graph/trigger_parse",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "templates/trigger-game-event.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "trigger_graph/trigger_parse"
+      ],
+      "effect_class": "external",
+      "id": "trigger_graph/extract_worldview",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "templates/import-worldview.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "trigger_graph/extract_worldview"
+      ],
+      "effect_class": "external",
+      "id": "trigger_graph/extract_characters",
+      "kind": "inner_step",
+      "output_binding": "extract_characters.text",
+      "step_kind": "acp_prompt",
+      "template": "templates/import-character-sheet.md",
+      "tool_policy": "auto_grant_read_only"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [
+    {
+      "action": "force_transition",
+      "name": "game_event",
+      "target": "trigger_extract"
+    }
+  ],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}

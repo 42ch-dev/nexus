@@ -247,7 +247,7 @@ nexus42 creator works reconcile-chapters [<work_id>] [--dry-run] [--yes|-y] [--j
 
 | Flag | Requirement | Implementation |
 | --- | --- | --- |
-| `--dry-run` | Compute `ReconcileReport` only; **no** filesystem or DB writes; **no** runtime lock acquire | Threads `?dry_run=true` query param; daemon skips `RuntimeLockGuard::acquire` and calls `reconcile_from_filesystem(..., dry_run=true)` which gates all writes behind `if !dry_run` while keeping counter increments accurate |
+| `--dry-run` | Compute `ReconcileReport` only; **no** filesystem or DB writes; **no** runtime lock acquire | Threads `?dry_run=true` query param; `port.reconcile(...)` computes the `ReconcileReport` under dry-run without acquiring the runtime lock or writing files/DB, while keeping counter increments accurate |
 | `--yes` (or `-y`) | Skip interactive confirmation when not dry-run | CLI skips `confirm_reconcile_interactive`; daemon mutating path unchanged |
 | default | Prompt before mutating when stdin is a TTY (same policy family as rules reset) | `confirm_reconcile_interactive` errors when stdin is non-TTY (scripted use must pass `--yes`); `--dry-run` takes precedence over `--yes` |
 

@@ -143,3 +143,38 @@ files), claiming it before the first byte is a real ordering change:
 - Cancellation test: hold the port's DB connection so the restore cannot run, abort the future
   mid-await, then assert the prior ref returns from the guard's own task.
 
+### Reconcile admission through the same port
+
+A reconcile that rewrites frontmatter status is a Work byte write like any other, so it belongs
+inside the port rather than beside it:
+
+- Extend the existing port with one `reconcile` operation; do not open a second trait or a public
+  adapter so a DB crate can reach it. The adapter owns: profile gate → unlocked diff walk →
+  dry-run early return → acquire → per-file `write_locked` → DB index apply → release.
+- Keep the pure parts in the DB crate (scan, diff, index mutation, status rendering) and delete
+  its direct frontmatter write. Returning `Option<rendered>` from the renderer keeps the DB crate
+  IO-free.
+- A re-check that must cover the walk cannot run before the walk moved into the port: pass it as
+  a callback (`&dyn Fn() -> Result<(), CoreError>`) and call it after the diff and immediately
+  before acquiring the lock, with a test proving a failing re-check takes no lock and writes no
+  byte.
+- A documented stale-diff window (diff computed unlocked, applied under the lock) is acceptable
+  for a local single-writer daemon **only when the record says so**; do not leave the trade-off
+  implicit.
+
+### Static guard for a closed writer set
+
+Once a writer family is "closed", a text guard keeps it closed without a runtime cost:
+
+- Scan only the inventoried production modules; cut at a `#[cfg(test)]`-annotated `mod` (to EOF),
+  never at the first `#[cfg(test)]` line — a test-only const hides production below it.
+- Key exemptions by `path → symbol → expected_count`, not by file or function name. Count
+  occurrences per line (`findall`), not matched lines, so two calls on one line still trip.
+- Glob the directories instead of freezing a file list; require an explicit opt-out row for any
+  skipped file, and fail on a stale row, a duplicate key, or a missing module.
+- Prove the gate bites: a synthetic direct write, a mixed port-plus-direct-write function, and a
+  same-line double write must each exit non-zero in CI before the repository run must exit zero.
+- State the unscanned spellings (`File::create(..).write_all`, `fs::copy`) as a `shortcut:` note
+  in the script; the guard is honest about its boundary, not silent about it.
+
+

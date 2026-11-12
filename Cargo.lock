@@ -4064,6 +4064,7 @@ dependencies = [
  "blake3",
  "include_dir",
  "nexus-contracts",
+ "nexus-workflow-ir",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -4140,6 +4141,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-workflow-ir"
+version = "0.1.0"
+dependencies = [
+ "nexus-contracts",
+ "serde_json",
+]
+
+[[package]]
 name = "nexus42"
 version = "0.1.0"
 dependencies = [
@@ -4176,6 +4185,7 @@ dependencies = [
  "nexus-preset",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
+ "nexus-workflow-ir",
  "nix 0.31.3",
  "predicates",
  "regex",

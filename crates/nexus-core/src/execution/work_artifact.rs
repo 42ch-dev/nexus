@@ -5,12 +5,17 @@
 //! surface classifies its raw path with [`classify_work_path`] and hands the
 //! `Works/<work_ref>/<child…>` shape here; every other workspace path keeps
 //! its caller's own guarded write — this port never widens to the workspace.
+//!
+//! No flag, environment variable or configuration selects this port (ADR #485
+//! §6.1 P5): every production route constructs [`FsWorkArtifactPort`], so
+//! Work-path writes are default-on.
 
 use std::path::{Component, Path, PathBuf};
 
 use nexus_home_layout::active_context::{
     read_active_creator_id, workspace_slug_selection, WorkspaceSlugSelection,
 };
+use nexus_local_db::work_chapters::{self, ReconcileDiff, ReconcileOp, ReconcileReport};
 use nexus_local_db::works;
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
@@ -18,6 +23,7 @@ use sqlx::SqlitePool;
 use crate::content::{create_parent_dirs, fsync_write_atomic, WorkLock};
 use crate::error::CoreError as NexusApiError;
 use crate::slug::validate_slug_name;
+use crate::works::RuntimeLockGuard;
 
 /// A raw tool path classified against the `Works/<work_ref>/` shape.
 #[derive(Debug)]
@@ -120,6 +126,27 @@ pub(crate) struct WorkArtifactWrite<'a> {
     pub(crate) content: &'a str,
 }
 
+/// One reconcile admission handed to a [`WorkArtifactPort`].
+///
+/// The caller has already resolved and authorised the Work; this request only
+/// names what the port needs to reconcile its index with the tree.
+pub(crate) struct WorkReconcile<'a> {
+    /// The workspace whose `Works/` tree is the projection being reconciled.
+    pub(crate) workspace_root: &'a Path,
+    /// Owner of the Work, from the caller's verified principal.
+    pub(crate) creator_id: &'a str,
+    /// The Work whose `work_chapters` index is reconciled.
+    pub(crate) work_id: &'a str,
+    /// The Work directory name below `Works/`.
+    pub(crate) work_ref: &'a str,
+    /// Timestamp stamped on the applied DB index rows.
+    pub(crate) now: &'a str,
+    /// Label for the minted `cli:<kind>:<uuid>` runtime-lock holder.
+    pub(crate) holder_kind: &'a str,
+    /// Report the diff without acquiring the lock or writing anything.
+    pub(crate) dry_run: bool,
+}
+
 /// The single byte-write port for Work artifacts.
 #[allow(async_fn_in_trait)] // matches the `KbStore` precedent (nexus-knowledge)
 pub(crate) trait WorkArtifactPort {
@@ -138,6 +165,33 @@ pub(crate) trait WorkArtifactPort {
     /// `Works/<work_ref>/` boundary, and [`NexusApiError::Internal`] for a
     /// lookup, directory or write failure.
     async fn commit(&self, write: WorkArtifactWrite<'_>) -> Result<(), NexusApiError>;
+
+    /// Reconcile one Work's `work_chapters` index with its Markdown tree.
+    ///
+    /// The read-only diff (filesystem walk + per-chapter DB reads) runs
+    /// unlocked; only the write phase — each chapter file's frontmatter status
+    /// committed through this port's own byte-write path, then the DB index
+    /// operations — holds the per-Work runtime lock. A `dry_run` request
+    /// acquires no lock and writes nothing.
+    ///
+    /// `recheck` is the caller's own principal/workspace validation. It runs
+    /// after the unlocked walk and immediately before the lock is acquired, so
+    /// the check still covers the walk; a refusal acquires no lock and writes
+    /// nothing. The diff may be stale by the time the lock is re-acquired —
+    /// that is accepted for the local-first single-writer daemon model (one
+    /// active creator, schedule operations serialized through the daemon).
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever `recheck` returns, [`NexusApiError::Internal`]
+    /// (`DATABASE_ERROR`) for a profile gate, diff or apply failure, and the
+    /// lock's own [`NexusApiError::Forbidden`] (`work_locked:…`) when another
+    /// holder owns the Work.
+    async fn reconcile(
+        &self,
+        request: WorkReconcile<'_>,
+        recheck: &(dyn Fn() -> Result<(), NexusApiError> + Send + Sync),
+    ) -> Result<ReconcileReport, NexusApiError>;
 }
 
 /// Production [`WorkArtifactPort`]: SQLite-backed Work resolution plus the
@@ -199,6 +253,53 @@ impl FsWorkArtifactPort {
     /// Build the adapter for one dispatch.
     pub(crate) const fn new(pool: SqlitePool, nexus_home: PathBuf) -> Self {
         Self { pool, nexus_home }
+    }
+
+    /// Write phase of [`WorkArtifactPort::reconcile`], run while the caller
+    /// holds the Work runtime lock: every file resync commits through this
+    /// port's own byte-write path, then the DB index operations apply.
+    async fn apply_reconcile(
+        &self,
+        request: &WorkReconcile<'_>,
+        diff: &ReconcileDiff,
+    ) -> Result<ReconcileReport, NexusApiError> {
+        for op in &diff.ops {
+            let ReconcileOp::ResyncFileStatus {
+                rel_child,
+                db_status,
+            } = op
+            else {
+                continue;
+            };
+            let target = request
+                .workspace_root
+                .join("Works")
+                .join(request.work_ref)
+                .join(rel_child);
+            let content =
+                std::fs::read_to_string(&target).map_err(|e| NexusApiError::Internal {
+                    category: format!(
+                        "FILE_READ_FAILED: failed to read chapter file {}: {e}",
+                        target.display()
+                    ),
+                })?;
+            let Some(rendered) = work_chapters::render_frontmatter_status(&content, db_status)
+            else {
+                continue;
+            };
+            self.write_locked(&WorkArtifactWrite {
+                workspace_root: request.workspace_root,
+                work_ref: request.work_ref,
+                rel_child,
+                content: &rendered,
+            })
+            .await?;
+        }
+        work_chapters::apply_reconcile_diff(&self.pool, request.work_id, request.now, diff)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                category: format!("DATABASE_ERROR: reconcile apply failed: {e}"),
+            })
     }
 
     /// The write itself, run while the caller holds the Work lock:
@@ -347,6 +448,71 @@ impl WorkArtifactPort for FsWorkArtifactPort {
         lock.release().await;
         result
     }
+
+    async fn reconcile(
+        &self,
+        request: WorkReconcile<'_>,
+        recheck: &(dyn Fn() -> Result<(), NexusApiError> + Send + Sync),
+    ) -> Result<ReconcileReport, NexusApiError> {
+        // `Stories/` is novel-only: refuse an explicitly non-novel profile
+        // before any walk, lock or write.
+        work_chapters::ensure_novel_profile(&self.pool, request.work_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                category: format!("DATABASE_ERROR: reconcile profile gate failed: {e}"),
+            })?;
+
+        // Phase A (unlocked): the slow filesystem walk + per-chapter reads.
+        let diff = work_chapters::compute_reconcile_diff(
+            &self.pool,
+            request.work_id,
+            request.work_ref,
+            request.workspace_root,
+        )
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: reconcile diff failed: {e}"),
+        })?;
+        if request.dry_run {
+            tracing::info!(work_id = %request.work_id, work_ref = %request.work_ref, "dry-run reconcile");
+            return Ok(diff.to_report());
+        }
+
+        // Phase B (locked): only the writes, so the window stays short. A
+        // read-phase failure above never acquires the lock at all. The
+        // unlocked walk is the stale-read window, so the caller's
+        // principal/workspace check re-runs immediately before the lock: a
+        // refusal takes no lock and writes nothing.
+        recheck()?;
+        let lock = RuntimeLockGuard::acquire(
+            &self.pool,
+            request.creator_id,
+            request.work_id,
+            request.holder_kind,
+        )
+        .await
+        .map_err(NexusApiError::from)?;
+        let acquired_at = chrono::Utc::now();
+        tracing::info!(
+            work_id = %request.work_id,
+            acquired_at = %acquired_at.to_rfc3339(),
+            pending_ops = diff.ops.len(),
+            "runtime_lock: acquired for reconcile write phase"
+        );
+
+        let result = self.apply_reconcile(&request, &diff).await;
+
+        // V1.48 P4-fix1 (W-2 qc3): release on both Ok and Err paths — a failed
+        // reconcile must never leave the Work unwritable until the TTL.
+        lock.release().await;
+        let held_ms = (chrono::Utc::now() - acquired_at).num_milliseconds().max(0);
+        tracing::info!(
+            work_id = %request.work_id,
+            held_ms,
+            "runtime_lock: released after reconcile write phase"
+        );
+        result
+    }
 }
 
 /// One recorded intended write in a [`RecordingWorkArtifactPort`] log.
@@ -412,6 +578,21 @@ impl WorkArtifactPort for RecordingWorkArtifactPort {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(record);
         Ok(())
+    }
+
+    // Reconcile diffs the tree against the DB index; this stub performs no
+    // read, so it refuses rather than reporting an invented empty diff.
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn reconcile(
+        &self,
+        _request: WorkReconcile<'_>,
+        _recheck: &(dyn Fn() -> Result<(), NexusApiError> + Send + Sync),
+    ) -> Result<ReconcileReport, NexusApiError> {
+        Err(NexusApiError::Internal {
+            category: "SIMULATE_UNSUPPORTED: reconcile requires the DB index and the recording \
+                       port performs no read"
+                .to_string(),
+        })
     }
 }
 
@@ -532,6 +713,54 @@ mod tests {
                     .into_owned()
             })
             .collect()
+    }
+
+    fn chapter_path(workspace: &Path, file: &str) -> PathBuf {
+        workspace.join("Works/demo/Stories").join(file)
+    }
+
+    fn write_chapter(path: &Path, status: &str, body: &str) {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("stories dir");
+        std::fs::write(
+            path,
+            format!("---\nchapter: 1\nstatus: {status}\n---\n{body}"),
+        )
+        .expect("chapter file");
+    }
+
+    async fn seed_chapter(pool: &SqlitePool, status: &str) {
+        nexus_local_db::work_chapters::seed_chapters(
+            pool,
+            WORK_ID,
+            WORK_REF,
+            1,
+            "2026-06-04T10:00:00Z",
+        )
+        .await
+        .expect("seed chapters");
+        nexus_local_db::work_chapters::update_status(
+            pool,
+            WORK_ID,
+            1,
+            1,
+            status,
+            None,
+            "2026-06-04T10:00:00Z",
+        )
+        .await
+        .expect("chapter status");
+    }
+
+    fn reconcile(fixture: &Fixture, dry_run: bool) -> WorkReconcile<'_> {
+        WorkReconcile {
+            workspace_root: fixture.workspace.path(),
+            creator_id: CREATOR,
+            work_id: WORK_ID,
+            work_ref: WORK_REF,
+            now: "2026-06-04T11:00:00Z",
+            holder_kind: "core",
+            dry_run,
+        }
     }
 
     #[test]
@@ -1061,5 +1290,127 @@ mod tests {
 
         // Zero filesystem change: not even the `Works/` directory exists.
         assert!(!workspace.path().join("Works").exists());
+    }
+
+    #[tokio::test]
+    async fn reconcile_resyncs_a_conflicting_chapter_and_releases_the_lock() {
+        let fixture = fixture(true).await;
+        seed_chapter(&fixture.pool, "draft").await;
+        let path = chapter_path(fixture.workspace.path(), "ch01-intro.md");
+        write_chapter(&path, "finalized", "Body text");
+
+        let report = fixture
+            .port
+            .reconcile(reconcile(&fixture, false), &|| Ok(()))
+            .await
+            .expect("reconcile");
+
+        assert_eq!(report.resynced, 1, "the conflicting file is re-synced");
+        assert_eq!(report.created, 0);
+        assert_eq!(report.updated, 0);
+        assert_eq!(report.preserved, 0);
+        let content = std::fs::read_to_string(&path).expect("read");
+        assert!(content.contains("status: draft"), "{content}");
+        assert!(content.contains("Body text"), "{content}");
+        assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
+    }
+
+    #[tokio::test]
+    async fn reconcile_dry_run_reports_the_diff_and_writes_nothing() {
+        let fixture = fixture(true).await;
+        seed_chapter(&fixture.pool, "draft").await;
+        let conflicting = chapter_path(fixture.workspace.path(), "ch01-intro.md");
+        write_chapter(&conflicting, "finalized", "Body text");
+        write_chapter(
+            &chapter_path(fixture.workspace.path(), "ch02-body.md"),
+            "not_started",
+            "Second body",
+        );
+        let before = std::fs::read_to_string(&conflicting).expect("read");
+
+        let report = fixture
+            .port
+            .reconcile(reconcile(&fixture, true), &|| Ok(()))
+            .await
+            .expect("preview");
+
+        assert_eq!(report.resynced, 1);
+        assert_eq!(report.created, 1);
+        assert_eq!(
+            std::fs::read_to_string(&conflicting).expect("read"),
+            before,
+            "dry-run writes no frontmatter bytes"
+        );
+        assert!(
+            nexus_local_db::work_chapters::get_chapter(&fixture.pool, WORK_ID, 2, 1)
+                .await
+                .expect("chapter read")
+                .is_none(),
+            "dry-run applies no DB index op"
+        );
+        assert_eq!(holder(&fixture.pool).await, None, "dry-run takes no lock");
+    }
+
+    /// The principal is re-validated after the unlocked walk and before the
+    /// lock: a refusal there takes no lock and writes nothing, even though the
+    /// diff already named a write.
+    #[tokio::test]
+    async fn reconcile_refuses_before_the_lock_when_the_recheck_fails() {
+        let fixture = fixture(true).await;
+        seed_chapter(&fixture.pool, "draft").await;
+        let path = chapter_path(fixture.workspace.path(), "ch01-intro.md");
+        write_chapter(&path, "finalized", "Body text");
+        let before = std::fs::read_to_string(&path).expect("read");
+
+        let result = fixture
+            .port
+            .reconcile(reconcile(&fixture, false), &|| {
+                Err(NexusApiError::AuthRequired)
+            })
+            .await;
+
+        assert!(
+            matches!(result, Err(NexusApiError::AuthRequired)),
+            "the recheck's own refusal propagates"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            before,
+            "no frontmatter byte is written"
+        );
+        assert_eq!(
+            holder(&fixture.pool).await,
+            None,
+            "no lock is acquired for the refused admission"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reconcile_releases_the_lock_when_the_resync_write_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = fixture(true).await;
+        seed_chapter(&fixture.pool, "draft").await;
+        let stories = fixture.workspace.path().join("Works/demo/Stories");
+        write_chapter(&stories.join("ch01-intro.md"), "finalized", "Body text");
+        std::fs::set_permissions(&stories, std::fs::Permissions::from_mode(0o555))
+            .expect("read-only Stories/");
+
+        let result = fixture
+            .port
+            .reconcile(reconcile(&fixture, false), &|| Ok(()))
+            .await;
+
+        std::fs::set_permissions(&stories, std::fs::Permissions::from_mode(0o755))
+            .expect("restore Stories/ permissions");
+        assert!(
+            result.is_err(),
+            "a read-only Stories/ must fail the write phase"
+        );
+        assert_eq!(
+            holder(&fixture.pool).await,
+            None,
+            "the lock is released on the error path"
+        );
     }
 }

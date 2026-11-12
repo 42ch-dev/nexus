@@ -77,6 +77,7 @@ jobs:
               - '.sqlx/**'
               - 'strategy-samples/**'
               - 'tooling/check-*.sh'
+              - 'tooling/work-artifact-write-allowlist.tsv'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
               - '!**/*.md'
@@ -526,6 +527,47 @@ jobs:
       # provides it.
       - name: Check graph pins
         run: bash tooling/check-graph-pins.sh
+      # V1.236 P5-T2 (ADR #485 §6.1 P5): the Work artifact byte-write guard.
+      # Prove the gate bites on synthetic fixtures (synthetic direct write,
+      # mixed function, and an exempt symbol with a second write), then run it
+      # against the globbed inventory with exact path+symbol+count exemptions.
+      - name: Work artifact write guard — synthetic direct write must fail
+        run: |
+          tmpdir="$(mktemp -d)"
+          fixture="$tmpdir/synthetic.rs"
+          printf 'fn sneaky() {\n    std::fs::write("Works/wrk_x/ch1.md", b"x").unwrap();\n}\n' > "$fixture"
+          if bash tooling/check-work-artifact-writes.sh "$fixture"; then
+            echo "::error::work artifact write guard accepted a synthetic direct Work write"
+            exit 1
+          fi
+          # A mixed function (port commit then a direct write) must also fail:
+          # the non-Work fallback is an exact (path, symbol) pair, not a
+          # function-wide property.
+          mixed="$tmpdir/mixed.rs"
+          printf 'fn mixed(executor: &dyn WorkspaceExecutor) {\n    let _ = WorkPath::Artifact; let _ = FsWorkArtifactPort;\n    std::fs::write("Works/wrk_x/ch2.md", b"x").unwrap();\n}\n' > "$mixed"
+          if bash tooling/check-work-artifact-writes.sh "$mixed"; then
+            echo "::error::work artifact write guard waived a mixed-function direct Work write"
+            exit 1
+          fi
+          # An exempt symbol that gains a second direct write must fail the
+          # expected-count check (exemption keys carry an exact hit count).
+          count_dir="$tmpdir/count"
+          mkdir -p "$count_dir/crates/nexus-orchestration/src/capability/builtins"
+          printf 'struct ScaffoldTransaction;\nimpl Drop for ScaffoldTransaction {\n    fn drop(&mut self) {\n        std::fs::write(path, original);\n        std::fs::write(path, other);\n    }\n}\n' > "$count_dir/crates/nexus-orchestration/src/capability/builtins/essay_scaffold.rs"
+          if bash tooling/check-work-artifact-writes.sh "$count_dir"; then
+            echo "::error::work artifact write guard ignored a second direct write in an exempt symbol"
+            exit 1
+          fi
+          # Two direct writes on one line must count as two occurrences.
+          same_line="$tmpdir/same-line"
+          mkdir -p "$same_line/crates/nexus-orchestration/src/capability/builtins"
+          printf 'struct ScaffoldTransaction;\nimpl Drop for ScaffoldTransaction {\n    fn drop(&mut self) {\n        std::fs::write(path, original); std::fs::write(path, other);\n    }\n}\n' > "$same_line/crates/nexus-orchestration/src/capability/builtins/essay_scaffold.rs"
+          if bash tooling/check-work-artifact-writes.sh "$same_line"; then
+            echo "::error::work artifact write guard counted one line as one write"
+            exit 1
+          fi
+      - name: Work artifact write guard
+        run: bash tooling/check-work-artifact-writes.sh
 
   # Compute module DX — SDK + modules (V1.170 P0, AR-12). Runs only when
   # module-affecting paths change (or on manual workflow_dispatch). The leg is

@@ -27,6 +27,7 @@ export * from './daemon-api/findings';
 export * from './daemon-api/inspector';
 export * from './daemon-api/kb';
 export * from './daemon-api/memory';
+export * from './daemon-api/orchestration';
 export * from './daemon-api/orchestration/capabilities';
 export * from './daemon-api/orchestration/sessions';
 export * from './daemon-api/preset-management';
@@ -293,6 +294,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ListSessionsResponse: 2,
   SessionDetailResponse: 1,
   SessionSummary: 1,
+  WorkflowDocument: 1,
   GetPresetResponse: 1,
   ListPresetsResponse: 1,
   PresetSummary: 1,

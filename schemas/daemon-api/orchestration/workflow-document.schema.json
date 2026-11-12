@@ -1,0 +1,506 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/workflow-document.schema.json",
+  "schema_version": 1,
+  "title": "NexusWorkflowDocument",
+  "description": "Workflow IR v0 — the single source of truth for the composed workflow document. A distinct document from `preset.yaml`: YAML is a projection, never a second grammar. Executable preset carriers (signals, roles, initial_action, cli_args, output_binding, every exit_when kind) are preserved; canvas-only nests, lifecycle state, effect fence and provenance are IR-only. `ir_version` stays 0 until P1 parity.",
+  "type": "object",
+  "required": [
+    "ir_version",
+    "id",
+    "version",
+    "revision",
+    "state",
+    "meta",
+    "entry",
+    "terminal",
+    "nodes",
+    "edges",
+    "nests",
+    "assets",
+    "signals",
+    "roles",
+    "effect_summary",
+    "provenance"
+  ],
+  "properties": {
+    "ir_version": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Workflow IR document version. 0 is the v0 draft (P0); a bump is required for any nest-rule or hash-membership change."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]*$",
+      "description": "Strategy identifier; same id rules as `preset.id` today."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Authored document version, preserved for projection back to `preset.version`. Not a content identity."
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Mutable candidate CAS version used by Canvas/API patches. A revision alone never proves content identity."
+    },
+    "content_hash": {
+      "type": ["string", "null"],
+      "description": "BLAKE3 tree hash over canonical IR plus the resolved pattern/asset hash set. Null until computed; approval and Apply bind this value."
+    },
+    "state": {
+      "type": "string",
+      "enum": ["candidate", "approved", "applied_ref"],
+      "description": "Document lifecycle state. Candidates are mutable; approved and applied snapshots are frozen (a new candidate is required to change one). Silent candidate→applied promotion is not representable."
+    },
+    "meta": {
+      "title": "WorkflowMeta",
+      "description": "Document metadata carried from the manifest header and enqueue-time gate declarations.",
+      "type": "object",
+      "required": ["description", "kind", "run_intents", "requires_capabilities"],
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string", "description": "Human-readable description." },
+        "kind": {
+          "type": "string",
+          "enum": ["creator", "system"],
+          "description": "Creator-facing or internal system strategy."
+        },
+        "author": { "type": ["string", "null"], "description": "Optional author name." },
+        "license": { "type": ["string", "null"], "description": "Optional license identifier." },
+        "homepage": { "type": ["string", "null"], "description": "Optional homepage/docs URL (non-executable)." },
+        "run_intents": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "work_init",
+              "work_continue",
+              "knowledge_ingest",
+              "work_maintenance",
+              "system_maintenance"
+            ]
+          },
+          "description": "Declared run intents."
+        },
+        "requires_capabilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Capabilities the workflow requires; resolution fails when any is missing."
+        },
+        "cli_args": {
+          "type": "array",
+          "items": {
+            "title": "WorkflowCliArg",
+            "description": "Preset-specific CLI argument declaration, preserved for the generic runner.",
+            "type": "object",
+            "required": ["name", "type"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "description": "Flag name without the `--` prefix." },
+              "type": {
+                "type": "string",
+                "enum": ["string", "integer", "boolean"],
+                "description": "Value type used for parsing and JSON coercion."
+              },
+              "required": { "type": ["boolean", "null"], "description": "Whether the flag is required." },
+              "default": { "description": "Default value applied when the flag is omitted (optional flags only)." },
+              "description": { "type": ["string", "null"], "description": "Help text shown in `--help` output." }
+            }
+          },
+          "description": "Preset-specific CLI argument declarations."
+        },
+        "gates": {
+          "type": "array",
+          "items": {
+            "title": "WorkflowGate",
+            "description": "Enqueue-time precondition. Gates remain enqueue-time; ownership stays with the schedule Master.",
+            "type": "object",
+            "required": ["kind"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["work_field", "filesystem", "previous_preset"],
+                "description": "Gate family."
+              },
+              "field": { "type": ["string", "null"], "description": "Work-table column for `work_field` gates." },
+              "op": {
+                "type": "string",
+                "enum": ["equals", "not_equals", "required", "in", "not_in"],
+                "description": "Comparison operator for `work_field` gates."
+              },
+              "value": { "description": "Comparison operand: a scalar for equals/not_equals, an array for in/not_in, absent for required." },
+              "path": { "type": ["string", "null"], "description": "Path template for `filesystem` gates." },
+              "must_exist": { "type": ["boolean", "null"], "description": "Whether the path must exist (`filesystem` gates)." },
+              "preset": { "type": ["string", "null"], "description": "Prior preset id (`previous_preset` gates)." },
+              "status": {
+                "type": "string",
+                "enum": ["complete", "any_session"],
+                "description": "Required status of the prior preset (`previous_preset` gates)."
+              },
+              "scope": { "type": ["string", "null"], "description": "Gate scope; only `work` is normative." }
+            }
+          },
+          "description": "Enqueue-time gate declarations."
+        }
+      }
+    },
+    "entry": { "type": "string", "description": "Entry node id. Replaces `preset.initial`." },
+    "initial_action": {
+      "title": "WorkflowInitialAction",
+      "description": "Seeds `core_context` when a run starts (today `preset.initial_action`).",
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["seed_direct", "seed_expansion"],
+          "description": "Use the seed directly, or expand it through a capability first."
+        },
+        "capability": { "type": ["string", "null"], "description": "Expansion capability (seed_expansion only)." },
+        "template": { "type": ["string", "null"], "description": "Asset id of the expansion prompt template (seed_expansion only)." },
+        "payload_kind": { "type": ["string", "null"], "description": "Expected payload kind after expansion." }
+      }
+    },
+    "terminal": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Terminal node ids."
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "title": "WorkflowNode",
+        "description": "A document node. `kind` selects the role; kind-specific fields are optional so one record shape carries outer states, inner steps, pattern slots, nest groups and control nodes.",
+        "type": "object",
+        "required": ["id", "kind", "effect_class"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "description": "Unique node id within this document." },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "outer_state",
+              "inner_step",
+              "pattern_slot",
+              "nest_group",
+              "join",
+              "terminal",
+              "manual_wait",
+              "judge"
+            ],
+            "description": "Node role in the composed graph."
+          },
+          "effect_class": {
+            "type": "string",
+            "enum": ["pure", "read", "write_candidate", "external"],
+            "description": "Worst-case effect this node can cause."
+          },
+          "ui": {
+            "title": "WorkflowNodeUi",
+            "description": "Canvas chrome only; must not affect execution semantics.",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": ["string", "null"], "description": "Canvas label." },
+              "description": { "type": ["string", "null"], "description": "Canvas description." }
+            }
+          },
+          "enter": {
+            "type": "array",
+            "items": {
+              "title": "WorkflowEnterAction",
+              "description": "Action executed on entering the node.",
+              "type": "object",
+              "required": ["kind"],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["capability", "inner_graph", "host_tool"],
+                  "description": "Action family."
+                },
+                "name": { "type": ["string", "null"], "description": "Capability name, or inner graph name for `inner_graph`." },
+                "tool_name": { "type": ["string", "null"], "description": "Daemon host tool name (`host_tool` only)." },
+                "args": { "description": "Action arguments (may contain template placeholders)." }
+              }
+            },
+            "description": "Actions executed when the node is entered."
+          },
+          "exit_when": {
+            "title": "WorkflowExitWhen",
+            "description": "Condition that must hold before the node advances. Covers every preset exit_when kind.",
+            "type": "object",
+            "required": ["kind"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["manual", "rule", "llm_judge", "graph_complete", "timer"],
+                "description": "Exit condition family."
+              },
+              "template": { "type": ["string", "null"], "description": "Asset id of the judge prompt template (llm_judge only)." },
+              "judge_capability": { "type": ["string", "null"], "description": "Judge capability to call (llm_judge only)." },
+              "min_interval": { "type": ["string", "null"], "description": "Minimum ISO-8601 interval between re-evaluations (llm_judge only)." },
+              "duration": { "type": ["string", "null"], "description": "ISO-8601 wait duration (timer only)." }
+            }
+          },
+          "converge": {
+            "title": "WorkflowConverge",
+            "description": "Dedicated merge-point convergence strategy.",
+            "type": "object",
+            "required": ["strategy"],
+            "additionalProperties": false,
+            "properties": {
+              "strategy": {
+                "type": "string",
+                "enum": ["wait_for_all", "first_completed", "any"],
+                "description": "Merge-point strategy."
+              }
+            }
+          },
+          "merge": {
+            "title": "WorkflowMerge",
+            "description": "Merge semantics for a node with multiple incoming labeled edges.",
+            "type": "object",
+            "required": ["kind"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["all", "any", "quorum"],
+                "description": "Merge kind."
+              },
+              "n": { "type": ["integer", "null"], "description": "Minimum arrivals (quorum only)." },
+              "m": { "type": ["integer", "null"], "description": "Expected incoming edges (quorum only)." }
+            }
+          },
+          "context_update": {
+            "title": "WorkflowContextUpdate",
+            "description": "Hook fired on node exit that edits the schedule's core_context. Preset-sourced hooks are additive only.",
+            "type": "object",
+            "required": ["op"],
+            "additionalProperties": false,
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": ["append", "struct_merge", "replace", "struct_remove", "llm_summarize"],
+                "description": "Context edit operation."
+              },
+              "template": { "type": ["string", "null"], "description": "Asset id of the edit-content template." },
+              "body": { "type": ["string", "null"], "description": "Body content (append/replace)." },
+              "path": { "type": ["string", "null"], "description": "Removal path (struct_remove)." },
+              "patch": { "description": "Patch JSON (struct_merge)." },
+              "capability": { "type": ["string", "null"], "description": "Summarize capability (llm_summarize)." }
+            }
+          },
+          "timeout_ms": { "type": ["integer", "null"], "description": "Bounded-join deadline in milliseconds (join nodes only)." },
+          "on_timeout": { "type": ["string", "null"], "description": "Node id to reroute to when the deadline fires." },
+          "step_kind": {
+            "type": "string",
+            "enum": ["acp_prompt"],
+            "description": "Inner-step executor kind."
+          },
+          "template": { "type": ["string", "null"], "description": "Asset id of the prompt/template this step renders." },
+          "tool_policy": { "type": ["string", "null"], "description": "Tool policy for the step's ACP prompt." },
+          "depends_on": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Node ids this step depends on (inner-graph DAG)."
+          },
+          "role": { "type": ["string", "null"], "description": "Role id bound to this step; must match a `roles[].id`." },
+          "output_binding": { "type": ["string", "null"], "description": "Which subgraph output is exported as the named state output (e.g. `select.text`)." },
+          "pattern": {
+            "title": "WorkflowPatternRef",
+            "description": "Exact pattern pin carried by an unexpanded pattern slot.",
+            "type": "object",
+            "required": ["registry_id", "version"],
+            "additionalProperties": false,
+            "properties": {
+              "registry_id": { "type": "string", "description": "Pattern registry id." },
+              "version": { "type": "string", "description": "Exact pattern version." },
+              "content_hash": { "type": ["string", "null"], "description": "Pattern content hash recorded when resolved." }
+            }
+          },
+          "bind": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Pattern slot bindings (slot name → bound node/asset/parameter)."
+          },
+          "child_workflow_id": { "type": ["string", "null"], "description": "Child workflow id for a nest group." },
+          "collapsed_view": { "type": ["boolean", "null"], "description": "Canvas collapse flag for a nest group; never affects execution." }
+        }
+      },
+      "description": "Document nodes."
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "title": "WorkflowEdge",
+        "description": "A directed transition between nodes.",
+        "type": "object",
+        "required": ["id", "from", "to", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "description": "Unique edge id." },
+          "from": { "type": "string", "description": "Source node id." },
+          "to": { "type": "string", "description": "Target node id." },
+          "kind": {
+            "type": "string",
+            "enum": ["linear", "go", "nogo", "conditional", "default", "depends_on"],
+            "description": "Transition family: linear, judge GO/NOGO, expression-conditional, fallback, or inner-graph dependency."
+          },
+          "label": { "type": ["string", "null"], "description": "Judge label selecting this edge (N-way labeled routing)." },
+          "when": { "type": ["string", "null"], "description": "Rule expression guarding this edge." }
+        }
+      },
+      "description": "Document edges."
+    },
+    "nests": {
+      "type": "array",
+      "items": {
+        "title": "WorkflowNestBinding",
+        "description": "First-class composition binding. `id` is the stable address for atomic replace-subtree-by-nest_id.",
+        "type": "object",
+        "required": ["id", "parent_node", "child", "expansion", "pin_policy"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "description": "Stable nest id; the region address for partial regeneration." },
+          "parent_node": { "type": "string", "description": "Node id of the pattern slot or nest group that owns this nest." },
+          "expansion": {
+            "type": "string",
+            "enum": ["defer_until_apply", "expand_in_candidate"],
+            "description": "When the nest expands into concrete nodes and edges."
+          },
+          "pin_policy": {
+            "type": "string",
+            "enum": ["exact"],
+            "description": "Pin policy. v0 supports exact pins only."
+          },
+          "child": {
+            "title": "WorkflowNestChild",
+            "description": "Nested child: an exact pattern pin or a child workflow reference.",
+            "type": "object",
+            "required": ["kind"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["pattern", "workflow"],
+                "description": "Nested child family."
+              },
+              "registry_id": { "type": ["string", "null"], "description": "Pattern registry id (pattern children)." },
+              "version": { "type": ["string", "null"], "description": "Exact pattern version (pattern children)." },
+              "content_hash": { "type": ["string", "null"], "description": "Child content hash recorded when resolved." },
+              "workflow_id": { "type": ["string", "null"], "description": "Child workflow id (workflow children)." },
+              "workflow_revision": { "type": ["integer", "null"], "description": "Child workflow revision (workflow children)." }
+            }
+          }
+        }
+      },
+      "description": "Composition bindings; at most three unexpanded nest levels, no cycles."
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "title": "WorkflowAssetRef",
+        "description": "Referenced template/prompt asset. `id` is what nodes and hooks reference; `path` stays bundle-relative for projection.",
+        "type": "object",
+        "required": ["id", "path", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "description": "Asset id referenced by nodes, exit_when and context_update hooks." },
+          "path": { "type": "string", "description": "Bundle-relative asset path." },
+          "kind": {
+            "type": "string",
+            "enum": ["template", "prompt", "other"],
+            "description": "Asset family."
+          },
+          "content_hash": { "type": ["string", "null"], "description": "Content hash participating in the approved hash set." }
+        }
+      },
+      "description": "Referenced assets."
+    },
+    "signals": {
+      "type": "array",
+      "items": {
+        "title": "WorkflowSignalBinding",
+        "description": "Executable external signal binding.",
+        "type": "object",
+        "required": ["name", "action"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "description": "Signal name." },
+          "action": {
+            "type": "string",
+            "enum": ["pause", "force_transition"],
+            "description": "What the signal does on receipt."
+          },
+          "target": { "type": ["string", "null"], "description": "Target node id (force_transition only)." }
+        }
+      },
+      "description": "Signal bindings."
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "title": "WorkflowRoleDefinition",
+        "description": "Executable role definition for multi-agent workflows.",
+        "type": "object",
+        "required": ["id", "description", "system_prompt_file"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "description": "Unique role id within this document." },
+          "description": { "type": "string", "description": "Human-readable role description." },
+          "system_prompt_file": { "type": "string", "description": "Bundle-relative system prompt path." },
+          "recommended_skills": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Ordered skill slugs; first entry is primary."
+          }
+        }
+      },
+      "description": "Role definitions."
+    },
+    "effect_summary": {
+      "type": "string",
+      "enum": ["pure", "read", "write_candidate", "external"],
+      "description": "Rolled-up effect fence for Simulate/Approve: the lattice join of every node and nested child effect class. Nesting never hides a write or external effect."
+    },
+    "provenance": {
+      "title": "WorkflowProvenance",
+      "description": "How this document came to be, including the resolved pin set an approval binds.",
+      "type": "object",
+      "required": ["source"],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["generate", "compose", "import_preset"],
+          "description": "Document origin. `generate` is data only in P0; no generator runtime exists."
+        },
+        "agent_run_id": { "type": ["string", "null"], "description": "Agent run that produced or patched the document." },
+        "parent_candidate_id": { "type": ["string", "null"], "description": "Lineage link for partial regeneration." },
+        "resolved_pins": {
+          "type": "array",
+          "items": {
+            "title": "WorkflowResolvedPin",
+            "description": "A pattern pin resolved for this document.",
+            "type": "object",
+            "required": ["registry_id", "version"],
+            "additionalProperties": false,
+            "properties": {
+              "registry_id": { "type": "string", "description": "Pattern registry id." },
+              "version": { "type": "string", "description": "Exact pattern version." },
+              "content_hash": { "type": ["string", "null"], "description": "Resolved pattern content hash." }
+            }
+          },
+          "description": "Resolved pattern pins; Apply verifies them."
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}
