@@ -43,7 +43,9 @@ impl CoreService {
             })?,
         };
         let document = match bundle_dir {
-            Some(dir) => import_preset_bundle(&loaded.manifest, &dir).map(|imported| imported.document),
+            Some(dir) => {
+                import_preset_bundle(&loaded.manifest, &dir).map(|imported| imported.document)
+            }
             None => import_preset_manifest(&loaded.manifest),
         }
         .map_err(|error| CoreError::InvalidInput {

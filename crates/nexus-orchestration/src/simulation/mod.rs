@@ -184,7 +184,9 @@ fn effect_summary(effect: WorkflowNodeEffectClass) -> SimulationTrajectoryEffect
     match effect {
         WorkflowNodeEffectClass::Pure => SimulationTrajectoryEffectSummary::Pure,
         WorkflowNodeEffectClass::Read => SimulationTrajectoryEffectSummary::Read,
-        WorkflowNodeEffectClass::WriteCandidate => SimulationTrajectoryEffectSummary::WriteCandidate,
+        WorkflowNodeEffectClass::WriteCandidate => {
+            SimulationTrajectoryEffectSummary::WriteCandidate
+        }
         WorkflowNodeEffectClass::External => SimulationTrajectoryEffectSummary::External,
     }
 }

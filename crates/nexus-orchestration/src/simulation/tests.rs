@@ -218,7 +218,8 @@ fn judge_with_defaults(edges: &str) -> WorkflowDocument {
 
 #[test]
 fn a_judged_node_requires_exactly_one_default_edge() {
-    let none = judge_with_defaults(r#"[{"id": "j->d", "from": "judge", "to": "done", "kind": "go"}]"#);
+    let none =
+        judge_with_defaults(r#"[{"id": "j->d", "from": "judge", "to": "done", "kind": "go"}]"#);
     assert_eq!(
         simulate_document(
             &none,

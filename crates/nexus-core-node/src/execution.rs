@@ -888,8 +888,9 @@ impl NativeCore {
     ) -> Result<Buffer> {
         let request: StrategySimulationRequest = decode(request_json, "request")?;
         self.json_call(principal_handle, async move |core, principal| {
-            let response: SimulationTrajectory =
-                core.simulate_strategy(&principal, strategy_id, request).await?;
+            let response: SimulationTrajectory = core
+                .simulate_strategy(&principal, strategy_id, request)
+                .await?;
             Ok(response)
         })
         .await

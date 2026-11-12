@@ -48,18 +48,23 @@ pub fn content_hash(document: &WorkflowDocument) -> Result<String, CanonicalHash
     let canonical = serde_json::to_string(&sort_keys(&body))
         .map_err(|error| CanonicalHashError::Serialize(error.to_string()))?;
 
-    let assets = resolved_hashes(
-        document
-            .assets
-            .iter()
-            .map(|asset| (format!("assets[{}]", asset.id), asset.content_hash.as_deref())),
-    )?;
+    let assets = resolved_hashes(document.assets.iter().map(|asset| {
+        (
+            format!("assets[{}]", asset.id),
+            asset.content_hash.as_deref(),
+        )
+    }))?;
     let nests = resolved_hashes(
         document
             .nests
             .iter()
             .filter(|nest| nest.expansion == WorkflowNestBindingExpansion::ExpandInCandidate)
-            .map(|nest| (format!("nests[{}]", nest.id), nest.child.content_hash.as_deref())),
+            .map(|nest| {
+                (
+                    format!("nests[{}]", nest.id),
+                    nest.child.content_hash.as_deref(),
+                )
+            }),
     )?;
 
     let mut hasher = blake3::Hasher::new();
@@ -195,7 +200,11 @@ mod tests {
             format!(
                 r#"[{{"id": "n1", "parent_node": "a", "expansion": "{expansion}", "pin_policy": "exact",
                     "child": {{"kind": "pattern", "registry_id": "r", "version": "1"{}}}}}]"#,
-                if resolved { r#", "content_hash": "bb""# } else { "" }
+                if resolved {
+                    r#", "content_hash": "bb""#
+                } else {
+                    ""
+                }
             )
         };
 
@@ -208,8 +217,7 @@ mod tests {
                 serde_json::from_str(&nest("expand_in_candidate", false)).expect("nest");
         });
         let deferred = document(|value| {
-            value["nests"] =
-                serde_json::from_str(&nest("defer_until_apply", false)).expect("nest");
+            value["nests"] = serde_json::from_str(&nest("defer_until_apply", false)).expect("nest");
         });
 
         assert_ne!(hash_of(&expanded), hash_of(&deferred));
