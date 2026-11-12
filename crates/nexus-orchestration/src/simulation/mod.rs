@@ -64,10 +64,10 @@ pub enum SimulationError {
 /// computed.
 pub fn simulate_document(
     document: &WorkflowDocument,
-    options: SimulationOptions,
+    options: &SimulationOptions,
 ) -> Result<SimulationTrajectory, SimulationError> {
-    // Held for the walk's lifetime and never read: nothing here resolves a capability (D9).
-    let SimulationOptions { capabilities: _ } = options;
+    // Borrowed for the walk's lifetime and never read: nothing here resolves a capability (D9).
+    let _ = &options.capabilities;
 
     let mut by_id: HashMap<&str, &WorkflowNode> = HashMap::with_capacity(document.nodes.len());
     for node in &document.nodes {
@@ -180,7 +180,7 @@ pub fn simulate_document(
 }
 
 /// The one conversion from the IR effect lattice to the trajectory wire enum.
-fn effect_summary(effect: WorkflowNodeEffectClass) -> SimulationTrajectoryEffectSummary {
+const fn effect_summary(effect: WorkflowNodeEffectClass) -> SimulationTrajectoryEffectSummary {
     match effect {
         WorkflowNodeEffectClass::Pure => SimulationTrajectoryEffectSummary::Pure,
         WorkflowNodeEffectClass::Read => SimulationTrajectoryEffectSummary::Read,

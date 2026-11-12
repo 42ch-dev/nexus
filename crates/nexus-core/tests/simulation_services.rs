@@ -107,7 +107,7 @@ async fn simulate_returns_the_trajectory_for_a_candidate_document() {
 
     assert_eq!(trajectory.nodes_visited, ["done", "start"]);
     assert!(trajectory.predicted_waits.is_empty());
-    assert!(trajectory.stubbed_judges.is_empty());
+    assert_eq!(trajectory.stubbed_judges, [] as [String; 0]);
     assert_eq!(
         trajectory.effect_summary,
         SimulationTrajectoryEffectSummary::Read

@@ -26,6 +26,8 @@ impl CoreService {
     ///
     /// Returns `CoreError` when the principal is rejected, the id does not resolve, or the
     /// installed preset cannot be projected into an IR document.
+    // async is the await-symmetric public signature; the body has no await today.
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn strategy_workflow_ir(
         &self,
         principal: &Principal,
@@ -64,6 +66,8 @@ impl CoreService {
     /// Returns `CoreError` when the principal is rejected, the path id disagrees with the
     /// document, the document is not a candidate, the body is not a valid IR, or the static
     /// walk cannot produce a deterministic trajectory.
+    // async is the await-symmetric public signature; the body has no await today.
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn simulate_strategy(
         &self,
         principal: &Principal,
@@ -102,7 +106,7 @@ impl CoreService {
             })?;
         simulate_document(
             &document,
-            SimulationOptions {
+            &SimulationOptions {
                 capabilities: CapabilityRegistryHolder::new(),
             },
         )
