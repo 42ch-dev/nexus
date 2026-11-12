@@ -293,6 +293,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("ListSessionsResponse", 2),
     ("SessionDetailResponse", 1),
     ("SessionSummary", 1),
+    ("WorkflowDocument", 1),
     ("GetPresetResponse", 1),
     ("ListPresetsResponse", 1),
     ("PresetSummary", 1),

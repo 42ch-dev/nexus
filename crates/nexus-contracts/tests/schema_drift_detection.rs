@@ -953,6 +953,12 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ListCapabilitiesResponse
         ),
+        // ── daemon-api/orchestration/ (v1.236 P0 T1 — Workflow IR v0) ───────
+        entry!(
+            "schemas/daemon-api/orchestration/workflow-document.schema.json",
+            Strict,
+            WorkflowDocument
+        ),
         // ── daemon-api/preset-management/ (V1.63 P3) ────────────────────────
         entry!(
             "schemas/daemon-api/preset-management/preset-summary.schema.json",
