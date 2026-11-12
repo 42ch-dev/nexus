@@ -11,9 +11,9 @@
 # Classification rules (mirrors .mstar/sdd/v234-work-artifact-ir-p0-p1/inventory.md):
 #   - production source = every line before the file's first `#[cfg(test)]`
 #     (or `#[cfg(all(test, …))]`); later hits are fixtures.
-#   - a direct write in a function that explicitly routes `WorkPath::Artifact`
-#     to the port before writing is the non-Work fallback, not a Work write
-#     (`execute_write_file`); it is reported, never silently ignored.
+#   - one exact (path, symbol) pair is the port-routed non-Work fallback: the
+#     guarded-write else-branch of `execute_write_file` (EXACT_FALLBACK below).
+#     It is reported, never silently ignored.
 #   - every other direct write is a violation unless the exact
 #     path<TAB>symbol<TAB>disposition row exists in the allowlist.
 #
@@ -59,7 +59,17 @@ INVENTORY = [
     "crates/nexus-orchestration/src/capability/builtins/essay_draft_status.rs",
 ]
 
-WRITE_RE = re.compile(r"(?<![\w:])(?:std::fs|tokio::fs|fs)::write\s*\(")
+# shortcut: only `fs::write` spellings are scanned; `File::create(..).write_all(..)`
+# and `fs::copy` are out of scope until a writer is observed using them.
+WRITE_RE = re.compile(r"(?<![\w])(?:std::fs|tokio::fs|fs)::write\s*\(")
+
+# The one non-Work direct write that is allowed without an allowlist row: it is
+# the guarded-write else-branch of `execute_write_file`, which routes every
+# `WorkPath::Artifact` to the port before reaching this call. This is an exact
+# (path, symbol) pair — never a function-wide property.
+EXACT_FALLBACK = {
+    ("crates/nexus-core/src/execution/capabilities.rs", "execute_write_file"),
+}
 TEST_ATTR_RE = re.compile(r"^\s*#\[cfg\((?:all\()?test")
 FN_RE = re.compile(r"\bfn\s+([A-Za-z_]\w*)")
 IMPL_FOR_RE = re.compile(r"\bimpl(?:\s*<[^>]*>)?\s+[^{]*?\bfor\s+([A-Za-z_]\w*)")
@@ -83,7 +93,11 @@ def load_allowlist():
             if len(parts) != 3 or not all(parts):
                 fail(f"{allowlist_path}:{num}: expected path<TAB>symbol<TAB>disposition")
                 continue
-            rows[(parts[0], parts[1])] = parts[2]
+            key = (parts[0], parts[1])
+            if key in rows:
+                fail(f"{allowlist_path}:{num}: duplicate exemption for {key[0]} {key[1]}")
+                continue
+            rows[key] = parts[2]
     return rows
 
 
@@ -97,35 +111,26 @@ def production_prefix(lines):
 def symbol_at(lines, idx):
     """Enclosing `Impl::fn` (or bare `fn`) for the 0-based hit line."""
     fn = impl = None
+    impl_locked = False
     for j in range(idx - 1, -1, -1):
         line = lines[j]
         if fn is None:
             m = FN_RE.search(line)
             if m:
                 fn = m.group(1)
-        if impl is None:
+        if impl is None and not impl_locked:
             m = IMPL_FOR_RE.search(line) or IMPL_RE.search(line)
             if m:
                 impl = m.group(1)
+            elif line.startswith("}"):
+                # Column-0 `}` closes a top-level item: any earlier `impl` is a
+                # sibling, not an ancestor.
+                impl_locked = True
         if fn and impl:
             break
     if impl and fn:
         return f"{impl}::{fn}"
     return fn or "<unknown>"
-
-
-def routes_work_to_port(lines, idx):
-    start = None
-    for j in range(idx - 1, -1, -1):
-        if FN_RE.search(lines[j]):
-            start = j
-            break
-    if start is None:
-        return False
-    body = "\n".join(lines[start:idx])
-    return "WorkPath::" in body and (
-        "FsWorkArtifactPort" in body or "commit_work_bytes" in body
-    )
 
 
 def scan_file(path):
@@ -135,8 +140,7 @@ def scan_file(path):
     hits = []
     for idx, line in enumerate(production_prefix(lines)):
         if WRITE_RE.search(line):
-            hits.append((idx, line.strip(), symbol_at(lines, idx),
-                         routes_work_to_port(lines, idx)))
+            hits.append((idx, line.strip(), symbol_at(lines, idx)))
     return rel, hits
 
 
@@ -170,13 +174,13 @@ def main(argv):
 
     for target in targets:
         rel, hits = scan_file(target)
-        for _idx, text, symbol, routed in hits:
+        for _idx, text, symbol in hits:
             key = (rel, symbol)
             if key in allow:
                 seen_rows.add(key)
                 exempt += 1
                 print(f"exempt: {rel} {symbol} — {allow[key]}")
-            elif routed:
+            elif key in EXACT_FALLBACK:
                 fallback += 1
                 print(f"non-Work fallback (Work paths routed to the port): {rel} {symbol}")
             else:
@@ -193,11 +197,12 @@ def main(argv):
     for msg in errors:
         print(f"::error::{msg}")
 
-    if violations:
+    if violations or errors:
         print(
             f"\nWork artifact write guard FAILED: {violations} unexempted direct "
-            "write(s). Route Work bytes through the Work artifact port, or add an "
-            "exact allowlist row with a disposition."
+            f"write(s), {len(errors)} guard/allowlist error(s). Route Work bytes "
+            "through the Work artifact port, or add an exact allowlist row with a "
+            "disposition."
         )
     else:
         print(
