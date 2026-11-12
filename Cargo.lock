@@ -4064,6 +4064,7 @@ dependencies = [
  "blake3",
  "include_dir",
  "nexus-contracts",
+ "nexus-workflow-ir",
  "serde",
  "serde_json",
  "serde_yaml",

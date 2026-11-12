@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+nexus-workflow-ir = { path = "../nexus-workflow-ir" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 serde_yaml.workspace = true
