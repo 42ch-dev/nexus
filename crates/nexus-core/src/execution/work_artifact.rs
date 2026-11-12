@@ -5,6 +5,10 @@
 //! surface classifies its raw path with [`classify_work_path`] and hands the
 //! `Works/<work_ref>/<child…>` shape here; every other workspace path keeps
 //! its caller's own guarded write — this port never widens to the workspace.
+//!
+//! No flag, environment variable or configuration selects this port (ADR #485
+//! §6.1 P5): every production route constructs [`FsWorkArtifactPort`], so
+//! Work-path writes are default-on.
 
 use std::path::{Component, Path, PathBuf};
 
