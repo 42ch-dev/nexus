@@ -14,7 +14,7 @@ fn document(text: &str) -> WorkflowDocument {
 fn simulate(document: &WorkflowDocument) -> SimulationTrajectory {
     simulate_document(
         document,
-        SimulationOptions {
+        &SimulationOptions {
             capabilities: CapabilityRegistryHolder::new(),
         },
     )
@@ -223,7 +223,7 @@ fn a_judged_node_requires_exactly_one_default_edge() {
     assert_eq!(
         simulate_document(
             &none,
-            SimulationOptions {
+            &SimulationOptions {
                 capabilities: CapabilityRegistryHolder::new()
             }
         )
@@ -243,7 +243,7 @@ fn a_judged_node_requires_exactly_one_default_edge() {
     assert_eq!(
         simulate_document(
             &two,
-            SimulationOptions {
+            &SimulationOptions {
                 capabilities: CapabilityRegistryHolder::new()
             }
         )
@@ -263,7 +263,7 @@ fn a_default_edge_to_an_undeclared_node_is_rejected() {
     assert_eq!(
         simulate_document(
             &dangling,
-            SimulationOptions {
+            &SimulationOptions {
                 capabilities: CapabilityRegistryHolder::new()
             }
         )
@@ -347,7 +347,7 @@ fn a_capability_bearing_document_simulates_with_zero_dispatch() {
 
     let trajectory = simulate_document(
         &document(CAPABILITY_BEARING),
-        SimulationOptions {
+        &SimulationOptions {
             capabilities: CapabilityRegistryHolder::with_registry(registry),
         },
     )

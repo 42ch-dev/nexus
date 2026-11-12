@@ -64,7 +64,9 @@ export function ApproveDisclosure({
               message:
                 error instanceof Error
                   ? error.message
-                  : String(error ?? ''),
+                  : typeof error === 'string'
+                    ? error
+                    : '',
             })}
           </p>
         ) : null}

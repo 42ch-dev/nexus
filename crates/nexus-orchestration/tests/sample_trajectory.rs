@@ -18,7 +18,7 @@ fn sample() -> WorkflowDocument {
 fn simulate(document: &WorkflowDocument) -> nexus_contracts::SimulationTrajectory {
     simulate_document(
         document,
-        SimulationOptions {
+        &SimulationOptions {
             capabilities: nexus_orchestration::CapabilityRegistryHolder::new(),
         },
     )
