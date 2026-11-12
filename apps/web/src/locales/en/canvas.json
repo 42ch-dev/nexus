@@ -234,7 +234,7 @@
       "showGraph": "Show graph",
       "showList": "Show list",
       "createTransition": "Create",
-      "approve": "Approve…",
+      "simulate": "Simulate…",
       "livePrefix": "Live:",
       "liveStatus": ""
     },

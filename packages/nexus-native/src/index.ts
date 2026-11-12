@@ -191,6 +191,7 @@ import type {
   StrategyPatchPromptTemplateRequest,
   StrategySimulationRequest,
   SimulationTrajectory,
+  WorkflowDocument,
   AddScheduleRequest,
   AddScheduleResponse,
   CoreWorkflowEventBatch,
@@ -779,6 +780,10 @@ export interface NativeCore {
     strategyId: string,
     request: StrategySimulationRequest,
   ): Promise<SimulationTrajectory>;
+  strategyWorkflowIr(
+    principal: PrincipalHandle,
+    strategyId: string,
+  ): Promise<WorkflowDocument>;
   addSchedule(
     principal: PrincipalHandle,
     request: AddScheduleRequest,
@@ -1104,6 +1109,7 @@ type DomainSurface = Pick<
   | 'patchStrategyTransition'
   | 'patchStrategyPromptTemplate'
   | 'simulateStrategy'
+  | 'strategyWorkflowIr'
   | 'addSchedule'
   | 'signalSchedule'
   | 'listSchedules'
@@ -1592,6 +1598,9 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
       return json(
         await inner.simulateStrategy(principal, strategyId, wire(request, 'request')),
       );
+    },
+    async strategyWorkflowIr(principal, strategyId) {
+      return json(await inner.strategyWorkflowIr(principal, strategyId));
     },
     async addSchedule(principal, request) {
       return json(await inner.addSchedule(principal, wire(request, 'request')));

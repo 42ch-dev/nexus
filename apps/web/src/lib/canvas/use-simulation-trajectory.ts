@@ -32,6 +32,8 @@ export interface SimulationState {
   /** The refused simulate call, kept apart from "never simulated". */
   error: unknown;
   run: (candidate: WorkflowDocument) => Promise<void>;
+  /** Simulate the installed strategy: read its candidate IR, then walk it. */
+  runStrategy: (strategyId: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -44,26 +46,34 @@ export function useSimulationTrajectory(
   const [isRunning, setIsRunning] = useState(false);
 
   const isStale = useMemo(() => {
-    if (!snapshot) return false;
+    // A fetched document has no live candidate prop to go stale against.
+    if (!snapshot || !candidate) return false;
     return (
       candidate?.revision !== snapshot.revision ||
       (candidate?.content_hash ?? null) !== snapshot.contentHash
     );
   }, [candidate?.revision, candidate?.content_hash, snapshot]);
 
-  const run = useCallback(
+  const simulate = useCallback(
     async (doc: WorkflowDocument) => {
+      const trajectory = await client.simulateStrategy(doc.id, { document: doc });
+      setSnapshot({
+        trajectory,
+        revision: doc.revision,
+        contentHash: doc.content_hash ?? null,
+      });
+    },
+    [client],
+  );
+
+  const walk = useCallback(
+    async (load: () => Promise<WorkflowDocument>) => {
       setIsRunning(true);
       setError(null);
       try {
-        const trajectory = await client.simulateStrategy(doc.id, { document: doc });
-        setSnapshot({
-          trajectory,
-          revision: doc.revision,
-          contentHash: doc.content_hash ?? null,
-        });
+        await simulate(await load());
       } catch (caught) {
-        // A refused simulate is an explicit failure, never an empty trajectory:
+        // A refused read/walk is an explicit failure, never an empty trajectory:
         // the surface must not read as approval-ready.
         setSnapshot(null);
         setError(caught);
@@ -71,7 +81,17 @@ export function useSimulationTrajectory(
         setIsRunning(false);
       }
     },
-    [client],
+    [simulate],
+  );
+
+  const run = useCallback(
+    (doc: WorkflowDocument) => walk(() => Promise.resolve(doc)),
+    [walk],
+  );
+
+  const runStrategy = useCallback(
+    (strategyId: string) => walk(() => client.getStrategyWorkflowIr(strategyId)),
+    [client, walk],
   );
 
   const reset = useCallback(() => {
@@ -89,5 +109,5 @@ export function useSimulationTrajectory(
           : 'ready'
         : 'idle';
 
-  return { status, trajectory: snapshot?.trajectory ?? null, error, run, reset };
+  return { status, trajectory: snapshot?.trajectory ?? null, error, run, runStrategy, reset };
 }

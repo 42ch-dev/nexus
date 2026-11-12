@@ -117,6 +117,7 @@ import type {
   StrategyPatchTransitionRequest,
   StrategySimulationRequest,
   SimulationTrajectory,
+  WorkflowDocument,
   TimelineOverviewResponse,
   TimelinePatchEventRequest,
   ListTimelineEventsResponse,
@@ -557,6 +558,8 @@ export interface NexusClient extends CoreSliceClient {
     strategyId: string,
     request: StrategySimulationRequest,
   ): Promise<SimulationTrajectory>;
+  /** `GET /v1/daemon/strategies/{strategy_id}/workflow-ir` — the installed strategy as candidate IR. */
+  getStrategyWorkflowIr(strategyId: string): Promise<WorkflowDocument>;
 
   // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────
   /** `GET /v1/daemon/works/{work_id}/chapters` — cursor list (F-P3 `items` key). */

@@ -1792,7 +1792,7 @@ fn system_preset_dir_for_id(nexus_home: &std::path::Path, preset_id: &str) -> st
 }
 
 /// Locate a preset by ID and return its source + filesystem path.
-fn locate_preset(
+pub(crate) fn locate_preset(
     nexus_home: &std::path::Path,
     preset_id: &str,
 ) -> Result<(String, Option<std::path::PathBuf>), PresetError> {

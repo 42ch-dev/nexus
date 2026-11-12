@@ -22,6 +22,7 @@ import type {
   UpdatePresetResponse,
   ValidatePresetRequest,
   ValidatePresetResponse,
+  WorkflowDocument,
 } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import type { DomainRoute } from './routes.js';
@@ -147,6 +148,16 @@ export function simulateStrategy(
   );
 }
 
+/** `GET /v1/daemon/strategies/{strategy_id}/workflow-ir` — the installed strategy as candidate IR. */
+export function strategyWorkflowIr(
+  service: ServiceCore,
+  strategyId: string,
+): Promise<WorkflowDocument> {
+  return withPrincipal(service, (principal) =>
+    service.core.strategyWorkflowIr(principal, strategyId),
+  );
+}
+
 /** Exact path/verb/tier identities this family owns (composer input). */
 export const PRESET_ROUTES: readonly DomainRoute[] = [
   {
@@ -263,6 +274,13 @@ export const PRESET_ROUTES: readonly DomainRoute[] = [
         wirePayload<StrategyPatchPromptTemplateRequest>(body, 'request'),
       ),
     }),
+  },
+  {
+    method: 'GET',
+    pattern: /^\/v1\/daemon\/strategies\/([^/]+)\/workflow-ir$/,
+    tier: 'tier2',
+    family: 'presets',
+    handle: async (service, params) => ({ body: await strategyWorkflowIr(service, params[0]) }),
   },
   {
     method: 'POST',

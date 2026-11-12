@@ -894,6 +894,19 @@ impl NativeCore {
         })
         .await
     }
+
+    /// `GET /v1/daemon/strategies/{strategy_id}/workflow-ir`.
+    #[napi]
+    pub async fn strategy_workflow_ir(
+        &self,
+        principal_handle: String,
+        strategy_id: String,
+    ) -> Result<Buffer> {
+        self.json_call(principal_handle, async move |core, principal| {
+            core.strategy_workflow_ir(&principal, strategy_id).await
+        })
+        .await
+    }
 }
 
 #[cfg(test)]

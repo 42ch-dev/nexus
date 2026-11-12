@@ -110,6 +110,7 @@ import type {
   StrategyPatchTransitionRequest,
   StrategySimulationRequest,
   SimulationTrajectory,
+  WorkflowDocument,
   TimelineOverviewResponse,
   TimelinePatchEventRequest,
   UpdateFindingRequest,
@@ -656,6 +657,11 @@ export class BrowserClient implements NexusClient {
     return this.post<SimulationTrajectory>(
       `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/simulate`,
       request,
+    );
+  }
+  getStrategyWorkflowIr(strategyId: string): Promise<WorkflowDocument> {
+    return this.get<WorkflowDocument>(
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/workflow-ir`,
     );
   }
 

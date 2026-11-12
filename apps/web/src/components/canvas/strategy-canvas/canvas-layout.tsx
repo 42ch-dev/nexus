@@ -20,7 +20,7 @@ export function CanvasHeader({
   showAlt,
   setShowAlt,
   onOpenCreateTransition,
-  onOpenApprove,
+  onSimulate,
 }: {
   revision: number;
   status: 'clean' | 'dirty' | 'conflict';
@@ -35,10 +35,11 @@ export function CanvasHeader({
    */
   onOpenCreateTransition?: () => void;
   /**
-   * Approve entry point. Rendered only when the surface holds the open
-   * candidate IR; the disclosure it opens renders the simulation limit.
+   * Simulate entry point: resolves the open strategy's IR (a supplied
+   * candidate, or the installed preset read) and opens the disclosure that
+   * renders the simulation limit.
    */
-  onOpenApprove?: () => void;
+  onSimulate?: () => void;
 }) {
   const { t } = useTranslation('canvas');
 
@@ -84,13 +85,13 @@ export function CanvasHeader({
               {t('strategy.header.createTransition')}
             </button>
           ) : null}
-          {onOpenApprove ? (
+          {onSimulate ? (
             <button
               type="button"
-              onClick={onOpenApprove}
+              onClick={onSimulate}
               className="rounded-control border border-gray-alpha-400 px-3 py-1.5 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
             >
-              {t('strategy.header.approve')}
+              {t('strategy.header.simulate')}
             </button>
           ) : null}
           <button

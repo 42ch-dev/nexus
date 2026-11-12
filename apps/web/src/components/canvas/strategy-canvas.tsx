@@ -165,6 +165,19 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     strategyState.setSaveStatuses((prev) => ({ ...prev, [section]: status }));
   }
 
+  // One Simulate action for the open strategy: a supplied candidate is walked
+  // as-is; otherwise the installed preset is read as its candidate IR first.
+  function handleSimulate() {
+    setApproveOpen(true);
+    if (candidate) {
+      if (simulation.status === 'idle' || simulation.status === 'failed') {
+        void simulation.run(candidate);
+      }
+      return;
+    }
+    if (simulation.status !== 'running') void simulation.runStrategy(presetId);
+  }
+
   function handleUseCurrent() {
     strategyState.setConflict(null);
     setIsEditing(false);
@@ -281,16 +294,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         showAlt={surface.showAlt}
         setShowAlt={surface.setShowAlt}
         onOpenCreateTransition={() => setCreateDialogOpen(true)}
-        onOpenApprove={
-          candidate
-            ? () => {
-                setApproveOpen(true);
-                if (simulation.status === 'idle' || simulation.status === 'failed') {
-                  void simulation.run(candidate);
-                }
-              }
-            : undefined
-        }
+        onSimulate={handleSimulate}
       />
 
       {surface.showAlt && parsed ? (
@@ -340,7 +344,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         status={simulation.status}
         trajectory={simulation.trajectory}
         error={simulation.error}
-        onRun={candidate ? () => void simulation.run(candidate) : undefined}
+        onRun={handleSimulate}
         onApprove={() => onApproveCandidate?.()}
       />
 

@@ -229,7 +229,7 @@
       "showGraph": "显示图谱",
       "showList": "显示列表",
       "createTransition": "创建",
-      "approve": "批准…",
+      "simulate": "模拟…",
       "livePrefix": "实时：",
       "liveStatus": ""
     },
