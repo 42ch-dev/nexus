@@ -13,7 +13,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StrategyCanvas } from '@/components/canvas/strategy-canvas';
 import { BrowserClient } from '@/lib/nexus';
 import { useHandlers } from '@/test/msw-server';
-import { candidateDocument, simulationTrajectory } from '@/test/simulation-fixture';
+import {
+  candidateDocument,
+  servedIrDocument,
+  simulationTrajectory,
+} from '@/test/simulation-fixture';
 import { renderInApp } from '@/test/test-providers';
 
 vi.mock('@/components/canvas/canvas-shell', () => ({
@@ -113,7 +117,7 @@ afterEach(() => cleanup());
 describe('StrategyCanvas — Simulate action', () => {
   it('reads the strategy IR, walks it, and opens the disclosure with the trajectory', async () => {
     const requests: { ir: number; simulateBody: unknown } = { ir: 0, simulateBody: null };
-    const document = candidateDocument({ id: STRATEGY_ID });
+    const document = servedIrDocument({ id: STRATEGY_ID });
     useHandlers(
       http.get(IR_PATH, () => {
         requests.ir += 1;
@@ -158,7 +162,7 @@ describe('StrategyCanvas — Simulate action', () => {
   });
 
   it('re-opens a fresh preset trajectory without walking it again', async () => {
-    const irDocument = candidateDocument({ id: STRATEGY_ID });
+    const irDocument = servedIrDocument({ id: STRATEGY_ID });
     const simulate = vi.fn(() => HttpResponse.json(simulationTrajectory()));
     let irReads = 0;
     useHandlers(
@@ -183,15 +187,15 @@ describe('StrategyCanvas — Simulate action', () => {
   });
 
   it('re-walks an installed preset whose IR moved on between opens', async () => {
-    let irDocument = candidateDocument({ id: STRATEGY_ID, revision: 1, content_hash: 'hash-1' });
-    const walkedRevisions: number[] = [];
+    let irDocument = servedIrDocument({ id: STRATEGY_ID });
+    const walkedEntries: string[] = [];
     useHandlers(
       http.get(IR_PATH, () => HttpResponse.json(irDocument)),
       http.post(SIMULATE_PATH, async ({ request }) => {
-        const body = (await request.json()) as { document: { revision: number } };
-        walkedRevisions.push(body.document.revision);
+        const body = (await request.json()) as { document: { entry: string } };
+        walkedEntries.push(body.document.entry);
         // Hold the re-walk in flight so the stale surface is observable.
-        if (walkedRevisions.length === 2) await delay(100);
+        if (walkedEntries.length === 2) await delay(100);
         return HttpResponse.json(simulationTrajectory());
       }),
     );
@@ -201,7 +205,8 @@ describe('StrategyCanvas — Simulate action', () => {
     await waitFor(() => expect(screen.getByTestId('approve-simulation-level')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
-    irDocument = candidateDocument({ id: STRATEGY_ID, revision: 2, content_hash: 'hash-2' });
+    // The route keeps `revision: 0`; only the document content moves.
+    irDocument = servedIrDocument({ id: STRATEGY_ID, entry: 'routing' });
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
 
     // The held trajectory is named stale while its replacement is walked.
@@ -210,7 +215,7 @@ describe('StrategyCanvas — Simulate action', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('approve-stale')).not.toBeInTheDocument(),
     );
-    expect(walkedRevisions).toEqual([1, 2]);
+    expect(walkedEntries).toEqual(['draft', 'routing']);
   });
 
   it('re-opens a fresh candidate trajectory without walking it again', async () => {
@@ -252,7 +257,7 @@ describe('StrategyCanvas — Simulate action', () => {
     rerender(
       <StrategyCanvas
         presetId={STRATEGY_ID}
-        candidate={candidateDocument({ id: STRATEGY_ID, revision: 2 })}
+        candidate={candidateDocument({ id: STRATEGY_ID, entry: 'routing' })}
       />,
     );
     await waitFor(() => expect(screen.getByTestId('approve-stale')).toBeInTheDocument());

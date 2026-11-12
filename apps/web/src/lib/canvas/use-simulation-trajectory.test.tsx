@@ -4,20 +4,20 @@
  * simulate is its own `failed` state, never `idle`.
  */
 import { fireEvent, screen, waitFor } from '@testing-library/react';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BrowserClient } from '@/lib/nexus';
 import { useHandlers } from '@/test/msw-server';
-import { candidateDocument, simulationTrajectory } from '@/test/simulation-fixture';
+import { candidateDocument, servedIrDocument, simulationTrajectory } from '@/test/simulation-fixture';
 import { renderInApp } from '@/test/test-providers';
 
 import { useSimulationTrajectory } from './use-simulation-trajectory';
 
 const SIMULATE_PATH = '/v1/daemon/strategies/:strategyId/simulate';
 
-function Harness({ revision }: { revision: number }) {
-  const candidate = candidateDocument({ revision, content_hash: `hash-${revision}` });
+function Harness({ entry = 'draft' }: { entry?: string }) {
+  const candidate = candidateDocument({ entry });
   const simulation = useSimulationTrajectory(candidate);
   return (
     <div>
@@ -43,9 +43,15 @@ function PresetHarness() {
 }
 
 describe('useSimulationTrajectory', () => {
-  it('re-reads a fetched IR: unchanged keeps the trajectory, moved re-walks it', async () => {
-    let doc = candidateDocument({ id: 'novel-writing', revision: 1, content_hash: 'hash-1' });
-    const posts = vi.fn(() => HttpResponse.json(simulationTrajectory()));
+  it('re-reads a fetched IR: unchanged content keeps the trajectory, changed content re-walks it', async () => {
+    let doc = servedIrDocument({ id: 'novel-writing' });
+    let walks = 0;
+    const posts = vi.fn(async () => {
+      walks += 1;
+      // Hold the re-walk in flight so the stale surface is observable.
+      if (walks === 2) await delay(100);
+      return HttpResponse.json(simulationTrajectory());
+    });
     useHandlers(
       http.get('/v1/daemon/strategies/novel-writing/workflow-ir', () => HttpResponse.json(doc)),
       http.post(SIMULATE_PATH, posts),
@@ -55,13 +61,16 @@ describe('useSimulationTrajectory', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
 
-    // Nothing changed: the trajectory in hand still describes the preset.
+    // The route serves `revision: 0` and no hash both times; the content is
+    // equal, so the trajectory in hand still describes the preset.
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
     expect(posts).toHaveBeenCalledTimes(1);
 
-    doc = candidateDocument({ id: 'novel-writing', revision: 2, content_hash: 'hash-2' });
+    // Same revision, different content: only the document can say it moved.
+    doc = servedIrDocument({ id: 'novel-writing', entry: 'routing' });
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
+    await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('stale'));
     await waitFor(() => expect(posts).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
   });
@@ -75,24 +84,24 @@ describe('useSimulationTrajectory', () => {
       }),
     );
 
-    renderInApp(<Harness revision={1} />, { client: new BrowserClient() });
+    renderInApp(<Harness />, { client: new BrowserClient() });
     expect(screen.getByTestId('status')).toHaveTextContent('idle');
 
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('ready'));
     expect(screen.getByTestId('level')).toHaveTextContent('reachability');
-    expect(requestBody).toMatchObject({ document: { id: 'user/demo', revision: 1 } });
+    expect(requestBody).toMatchObject({ document: { id: 'user/demo', entry: 'draft' } });
   });
 
-  it('marks the trajectory stale when the candidate revision changes after the run', async () => {
+  it('marks the trajectory stale when the candidate content changes after the run', async () => {
     useHandlers(http.post(SIMULATE_PATH, () => HttpResponse.json(simulationTrajectory())));
 
-    const view = renderInApp(<Harness revision={1} />, { client: new BrowserClient() });
+    const view = renderInApp(<Harness />, { client: new BrowserClient() });
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('ready'));
 
-    view.rerender(<Harness revision={2} />);
+    view.rerender(<Harness entry="routing" />);
 
     expect(screen.getByTestId('status')).toHaveTextContent('stale');
   });
@@ -107,7 +116,7 @@ describe('useSimulationTrajectory', () => {
       ),
     );
 
-    renderInApp(<Harness revision={1} />, { client: new BrowserClient() });
+    renderInApp(<Harness />, { client: new BrowserClient() });
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('failed'));

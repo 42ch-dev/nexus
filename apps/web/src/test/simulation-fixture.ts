@@ -41,6 +41,19 @@ export function candidateDocument(overrides: Partial<WorkflowDocument> = {}): Wo
   };
 }
 
+/**
+ * The shape `/v1/daemon/strategies/{id}/workflow-ir` really serves: the server
+ * derives `revision: 0` and no content hash, so those fields cannot signal a
+ * change. Tests that vary the document must vary its content.
+ */
+export function servedIrDocument(overrides: Partial<WorkflowDocument> = {}): WorkflowDocument {
+  const { content_hash: _contentHash, ...document } = candidateDocument({
+    revision: 0,
+    ...overrides,
+  });
+  return document;
+}
+
 export function simulationTrajectory(
   overrides: Partial<SimulationTrajectory> = {},
 ): SimulationTrajectory {
