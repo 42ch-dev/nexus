@@ -25,6 +25,13 @@ pub enum Violation {
         edge: String,
         node: String,
     },
+    /// A node's `depends_on` entry names no node in the document. Dependency targets carry no
+    /// edge id, so the owning node is reported instead.
+    DanglingDependency {
+        document: String,
+        node: String,
+        dependency: String,
+    },
     EmptyNestId {
         document: String,
     },
@@ -80,6 +87,14 @@ impl std::fmt::Display for Violation {
             } => write!(
                 f,
                 "`{document}`: edge `{edge}` references unknown node `{node}`"
+            ),
+            Self::DanglingDependency {
+                document,
+                node,
+                dependency,
+            } => write!(
+                f,
+                "`{document}`: node `{node}` depends on unknown node `{dependency}`"
             ),
             Self::EmptyNestId { document } => write!(f, "`{document}`: a nest has an empty id"),
             Self::DuplicateNestId { document, nest } => {
@@ -149,7 +164,8 @@ pub fn validate(documents: &[&WorkflowDocument]) -> Result<(), Vec<Violation>> {
     if let Some(path) = find_cycle(&references, &roots) {
         violations.push(Violation::NestCycle { path });
     } else {
-        // Depth is only meaningful on an acyclic reference graph.
+        // A reference cycle has no finite depth, so depth is skipped for the whole set when
+        // any cycle exists.
         let mut memo = HashMap::new();
         for root in roots {
             let depth = nest_depth(root, &index, &mut memo);
@@ -180,6 +196,18 @@ fn validate_document(document: &WorkflowDocument, violations: &mut Vec<Violation
                 document: id.to_owned(),
                 node: node.id.clone(),
             });
+        }
+    }
+
+    for node in &document.nodes {
+        for dependency in &node.depends_on {
+            if !nodes.contains_key(dependency.as_str()) {
+                violations.push(Violation::DanglingDependency {
+                    document: id.to_owned(),
+                    node: node.id.clone(),
+                    dependency: dependency.clone(),
+                });
+            }
         }
         edges
             .entry(node.id.as_str())
@@ -619,6 +647,49 @@ mod tests {
                 node: "missing".to_owned(),
             }]
         );
+    }
+
+    #[test]
+    fn validates_dependency_targets() {
+        let dangling = document(
+            "root",
+            &json!([
+                node("a", "inner_step"),
+                {
+                    "id": "b",
+                    "kind": "inner_step",
+                    "effect_class": "pure",
+                    "depends_on": ["missing"]
+                },
+            ]),
+            &json!([]),
+            &json!([]),
+        );
+        let violations = validate(&[&dangling]).unwrap_err();
+        assert_eq!(
+            violations,
+            vec![Violation::DanglingDependency {
+                document: "root".to_owned(),
+                node: "b".to_owned(),
+                dependency: "missing".to_owned(),
+            }]
+        );
+
+        let resolved = document(
+            "root",
+            &json!([
+                node("a", "inner_step"),
+                {
+                    "id": "b",
+                    "kind": "inner_step",
+                    "effect_class": "pure",
+                    "depends_on": ["a"]
+                },
+            ]),
+            &json!([]),
+            &json!([]),
+        );
+        assert_eq!(validate(&[&resolved]), Ok(()));
     }
 
     #[test]
