@@ -115,6 +115,22 @@ export const StrategyStateNode = memo(function StrategyStateNode({
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
       <KindTag kind={d.stateKind} />
+      {d.predictedWait ? (
+        <span
+          data-testid="strategy-node-predicted-wait"
+          className="mt-0.5 inline-block rounded-pill bg-amber-100 px-1.5 py-0.5 text-label-12 text-gray-1000"
+        >
+          {t('strategy.node.predictedWait')}
+        </span>
+      ) : null}
+      {d.branchNotExplored ? (
+        <span
+          data-testid="strategy-node-branch-not-explored"
+          className="mt-0.5 inline-block rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 text-label-12 text-gray-900"
+        >
+          {t('strategy.node.branchNotExplored')}
+        </span>
+      ) : null}
       {d.description ? <p className="mt-1 text-copy-13 text-gray-900 line-clamp-2">{d.description}</p> : null}
       {d.isInitial ? <span className="mt-1 inline-block text-label-12 text-purple-700">{t('strategy.node.start')}</span> : null}
       <Handle type="source" position={Position.Bottom} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />

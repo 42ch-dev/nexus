@@ -2,7 +2,10 @@
 //! the candidate check and the wire→IR bridge the daemon route depends on.
 #![cfg(feature = "execution")]
 
-use nexus_contracts::{SimulationTrajectoryEffectSummary, StrategySimulationRequest};
+use nexus_contracts::{
+    SimulationTrajectoryEffectSummary, StrategySimulationRequest,
+    WorkflowDocument as WireWorkflowDocument,
+};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, PresetError, Principal};
 use nexus_workflow_ir::{content_hash, WorkflowDocument};
 use tempfile::TempDir;
@@ -116,6 +119,42 @@ async fn simulate_returns_the_trajectory_for_a_candidate_document() {
     assert_eq!(
         trajectory.ir_content_hash,
         content_hash(&ir).expect("the fixture hashes")
+    );
+    core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn workflow_ir_reads_the_installed_strategy_as_a_candidate_document() {
+    let (_tmp, core, principal) = setup().await;
+    let document = core
+        .strategy_workflow_ir(&principal, "novel-writing".into())
+        .await
+        .unwrap();
+
+    assert_eq!(document.id.as_str(), "novel-writing");
+    assert_eq!(document.state.to_string(), "candidate");
+    assert!(!document.nodes.is_empty());
+
+    // The response IS the schema-owned DTO: a decode of its own serialization proves
+    // the document the route serves round-trips through the wire shape.
+    let wire = serde_json::to_value(&document).expect("document is serializable");
+    let decoded: WireWorkflowDocument =
+        serde_json::from_value(wire).expect("document decodes as the schema DTO");
+    assert_eq!(decoded.id, document.id);
+    assert_eq!(decoded.nodes.len(), document.nodes.len());
+    core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn workflow_ir_refuses_an_unknown_strategy() {
+    let (_tmp, core, principal) = setup().await;
+    let error = core
+        .strategy_workflow_ir(&principal, "missing-strategy".into())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, CoreError::Preset(PresetError::NotFound(_))),
+        "expected the existing not-found shape, got {error:?}"
     );
     core.close().await.unwrap();
 }

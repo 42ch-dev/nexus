@@ -17,9 +17,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Connection, Edge, Node } from '@xyflow/react';
 
+import type { WorkflowDocument } from '@42ch/nexus-contracts';
+
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { ErrorState, LoadingState, UnavailableState } from '@/components/ui/states';
 import { useRegisterCommand } from '@/lib/canvas/command-registry';
+import { useSimulationTrajectory } from '@/lib/canvas/use-simulation-trajectory';
 import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
 import type { StrategyEdgeData, StrategyNodeData } from '@/lib/canvas/strategy-graph';
 import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
@@ -31,6 +34,7 @@ import {
   type StrategyCanvasAdapterContext,
   type StrategySurfaceGraph,
 } from './strategy-canvas/strategy-canvas-adapter';
+import { ApproveDisclosure } from './strategy-canvas/approve-disclosure';
 import { InspectorPanel, StrategyConflictModal } from './strategy-canvas/inspector-panel';
 import { EdgeCreateDialog } from './strategy-canvas/edge-create-dialog';
 import { DraftEdgeInspector } from './strategy-canvas/inspectors/edge-inspector';
@@ -46,15 +50,25 @@ import type { IdeaArtifact } from '@/components/canvas/idea-input';
 
 export interface StrategyCanvasProps {
   presetId: string;
+  /**
+   * The open candidate IR. Approve disclosure and the canvas overlay exist
+   * only for a candidate: the static walk answers questions about that
+   * document, not about the stored preset.
+   */
+  candidate?: WorkflowDocument;
+  /** Approval write path for a fresh trajectory. */
+  onApproveCandidate?: () => void;
 }
 
-export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
+export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: StrategyCanvasProps) {
   const { t } = useTranslation('canvas');
   const strategyState = useStrategyCanvas(presetId);
+  const simulation = useSimulationTrajectory(candidate);
 
   const [artifacts, setArtifacts] = useState<IdeaArtifact[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [approveOpen, setApproveOpen] = useState(false);
 
   const ctxRef = useRef<StrategyCanvasAdapterContext>({
     presetId,
@@ -98,6 +112,7 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
         revision: data.revision,
         parsed: data.parsed,
         activeSession: strategyState.activeSession,
+        trajectory: simulation.trajectory,
       },
       isLoading: strategyState.graphQuery.isLoading,
       isError: strategyState.graphQuery.isError,
@@ -111,6 +126,7 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
     strategyState.graphQuery.error,
     strategyState.graphQuery.refetch,
     strategyState.activeSession,
+    simulation.trajectory,
   ]);
 
   const surface = useCanvasSurface(adapter, surfaceQuery);
@@ -147,6 +163,19 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
 
   function onSaveStatus(section: Section, status: SaveStatus | undefined) {
     strategyState.setSaveStatuses((prev) => ({ ...prev, [section]: status }));
+  }
+
+  // One Simulate action for the open strategy: a supplied candidate is walked
+  // as-is; otherwise the installed preset is read as its candidate IR first.
+  function handleSimulate() {
+    setApproveOpen(true);
+    if (candidate) {
+      if (simulation.status === 'idle' || simulation.status === 'failed') {
+        void simulation.run(candidate);
+      }
+      return;
+    }
+    if (simulation.status !== 'running') void simulation.runStrategy(presetId);
   }
 
   function handleUseCurrent() {
@@ -265,6 +294,7 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
         showAlt={surface.showAlt}
         setShowAlt={surface.setShowAlt}
         onOpenCreateTransition={() => setCreateDialogOpen(true)}
+        onSimulate={handleSimulate}
       />
 
       {surface.showAlt && parsed ? (
@@ -307,6 +337,16 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
           <ValidationPanel problems={problems} dangling={dangling} />
         </CanvasShell>
       )}
+
+      <ApproveDisclosure
+        open={approveOpen}
+        onOpenChange={setApproveOpen}
+        status={simulation.status}
+        trajectory={simulation.trajectory}
+        error={simulation.error}
+        onRun={handleSimulate}
+        onApprove={() => onApproveCandidate?.()}
+      />
 
       <StrategyConflictModal
         conflict={strategyState.conflict}

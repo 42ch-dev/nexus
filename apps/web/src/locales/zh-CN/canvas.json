@@ -229,6 +229,7 @@
       "showGraph": "显示图谱",
       "showList": "显示列表",
       "createTransition": "创建",
+      "simulate": "模拟…",
       "livePrefix": "实时：",
       "liveStatus": ""
     },
@@ -251,7 +252,9 @@
       "end": "结束",
       "innerGraph": "内部 DAG · {{id}}",
       "join": "合并 · {{strategy}}",
-      "currentExecutionNode": "当前执行节点"
+      "currentExecutionNode": "当前执行节点",
+      "predictedWait": "预测等待（静态）",
+      "branchNotExplored": "分支未探索"
     },
     "toast": {
       "runQueued": "预设运行已排队",
@@ -261,6 +264,28 @@
       "steerResumeConflict": "想法已保存为核心上下文版本 {{version}}；该计划正在等待人工步骤，因此恢复被作为状态冲突拒绝"
     },
     "draftTransitionLabel": "草稿转换",
+    "approve": {
+      "title": "批准候选",
+      "notSimulated": "尚未模拟。没有轨迹的候选不具备批准条件。",
+      "running": "正在运行静态模拟…",
+      "failed": "模拟失败：{{message}}。这是失败的运行，不是“尚未模拟”，不具备批准条件。",
+      "stale": "轨迹已过期：候选在此次模拟后发生了变化。请重新模拟后再批准。",
+      "simulationLevel": "模拟级别",
+      "level": {
+        "reachability": "仅可达性；未探索判断分支",
+        "unsupported": "{{level}} —— 当前应用版本不认识该级别，轨迹按不受支持处理"
+      },
+      "stubbedJudges": "未探索的判断分支",
+      "stubbedJudgesCount_other": "{{count}} 个未探索的判断分支",
+      "stubbedJudgesExpand": "展开占位判断节点 id",
+      "effectSummary": "效果摘要",
+      "effectFence": "最坏情况效果围栏：{{effect}} —— 是围栏，不是预测。",
+      "predictedWaits": "等待点",
+      "predictedWaitsLabel_other": "预测（静态）等待：{{count}}",
+      "doesNotPreviewOutput": "模拟通过不会预览输出：不调用模型，也不生成任何内容。",
+      "approve": "批准",
+      "rerun": "运行模拟"
+    },
     "draftTransitionEditor": "草稿转换编辑器",
     "revisionBadge": {
       "label": "修订 {{revision}}",

@@ -108,6 +108,9 @@ import type {
   StrategyPatchResponse,
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
+  StrategySimulationRequest,
+  SimulationTrajectory,
+  WorkflowDocument,
   TimelineOverviewResponse,
   TimelinePatchEventRequest,
   UpdateFindingRequest,
@@ -640,6 +643,25 @@ export class BrowserClient implements NexusClient {
     return this.post<StrategyPatchResponse>(
       `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/states/${encodeURIComponent(stateId)}/prompt/patch`,
       request,
+    );
+  }
+  /**
+   * `POST /v1/daemon/strategies/{strategy_id}/simulate` — static trajectory of
+   * the candidate IR in the body. Non-mutating: nothing is stored and no
+   * revision is consumed.
+   */
+  simulateStrategy(
+    strategyId: string,
+    request: StrategySimulationRequest,
+  ): Promise<SimulationTrajectory> {
+    return this.post<SimulationTrajectory>(
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/simulate`,
+      request,
+    );
+  }
+  getStrategyWorkflowIr(strategyId: string): Promise<WorkflowDocument> {
+    return this.get<WorkflowDocument>(
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/workflow-ir`,
     );
   }
 
