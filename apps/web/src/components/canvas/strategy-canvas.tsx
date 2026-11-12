@@ -166,21 +166,17 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   }
 
   // One Simulate action for the open strategy: a supplied candidate is walked
-  // as-is; otherwise the installed preset is read as its candidate IR first.
+  // as-is; otherwise the installed preset's IR is re-read and walked only when
+  // it no longer matches the trajectory in hand.
   function handleSimulate() {
     setApproveOpen(true);
-    // A fresh trajectory is reopened, never re-walked; only states that have no
-    // current trajectory (or an outdated one) run.
-    const needsRun =
-      simulation.status === 'idle' ||
-      simulation.status === 'failed' ||
-      simulation.status === 'stale';
-    if (!needsRun) return;
-    if (candidate) {
-      void simulation.run(candidate);
+    if (simulation.status === 'running') return;
+    if (!candidate) {
+      void simulation.runStrategy(presetId);
       return;
     }
-    void simulation.runStrategy(presetId);
+    // A candidate that still matches its trajectory is reopened, never re-walked.
+    if (simulation.status !== 'ready') void simulation.run(candidate);
   }
 
   function handleUseCurrent() {

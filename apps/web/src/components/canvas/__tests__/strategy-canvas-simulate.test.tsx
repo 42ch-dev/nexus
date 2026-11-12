@@ -7,7 +7,7 @@
  * trajectory; a failed IR read or walk lands on the same failed state.
  */
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { StrategyCanvas } from '@/components/canvas/strategy-canvas';
@@ -155,6 +155,84 @@ describe('StrategyCanvas — Simulate action', () => {
 
     await waitFor(() => expect(screen.getByTestId('approve-simulate-failed')).toBeInTheDocument());
     expect(screen.queryByTestId('approve-simulation-level')).not.toBeInTheDocument();
+  });
+
+  it('re-opens a fresh preset trajectory without walking it again', async () => {
+    const irDocument = candidateDocument({ id: STRATEGY_ID });
+    const simulate = vi.fn(() => HttpResponse.json(simulationTrajectory()));
+    let irReads = 0;
+    useHandlers(
+      http.get(IR_PATH, () => {
+        irReads += 1;
+        return HttpResponse.json(irDocument);
+      }),
+      http.post(SIMULATE_PATH, simulate),
+    );
+
+    renderCanvas();
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
+    await waitFor(() => expect(screen.getByTestId('approve-simulation-level')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
+    await waitFor(() => expect(irReads).toBe(2));
+
+    expect(simulate).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('approve-simulation-level')).toBeInTheDocument();
+    expect(screen.queryByTestId('approve-stale')).not.toBeInTheDocument();
+  });
+
+  it('re-walks an installed preset whose IR moved on between opens', async () => {
+    let irDocument = candidateDocument({ id: STRATEGY_ID, revision: 1, content_hash: 'hash-1' });
+    const walkedRevisions: number[] = [];
+    useHandlers(
+      http.get(IR_PATH, () => HttpResponse.json(irDocument)),
+      http.post(SIMULATE_PATH, async ({ request }) => {
+        const body = (await request.json()) as { document: { revision: number } };
+        walkedRevisions.push(body.document.revision);
+        // Hold the re-walk in flight so the stale surface is observable.
+        if (walkedRevisions.length === 2) await delay(100);
+        return HttpResponse.json(simulationTrajectory());
+      }),
+    );
+
+    renderCanvas();
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
+    await waitFor(() => expect(screen.getByTestId('approve-simulation-level')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    irDocument = candidateDocument({ id: STRATEGY_ID, revision: 2, content_hash: 'hash-2' });
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
+
+    // The held trajectory is named stale while its replacement is walked.
+    await waitFor(() => expect(screen.getByTestId('approve-stale')).toBeInTheDocument());
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('approve-stale')).not.toBeInTheDocument(),
+    );
+    expect(walkedRevisions).toEqual([1, 2]);
+  });
+
+  it('re-opens a fresh candidate trajectory without walking it again', async () => {
+    const simulate = vi.fn(() => HttpResponse.json(simulationTrajectory()));
+    useHandlers(http.post(SIMULATE_PATH, simulate));
+
+    renderInApp(
+      <StrategyCanvas
+        presetId={STRATEGY_ID}
+        candidate={candidateDocument({ id: STRATEGY_ID, revision: 1 })}
+      />,
+      { client: new BrowserClient() },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
+    await waitFor(() => expect(screen.getByTestId('approve-simulation-level')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
+    await waitFor(() => expect(screen.getByTestId('approve-simulation-level')).toBeInTheDocument());
+
+    expect(simulate).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('approve-stale')).not.toBeInTheDocument();
   });
 
   it('re-runs a stale trajectory instead of offering a dead control', async () => {
