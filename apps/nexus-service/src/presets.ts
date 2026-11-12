@@ -13,9 +13,11 @@ import type {
   ReloadPresetResponse,
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
+  SimulationTrajectory,
   StrategyPatchPromptTemplateRequest,
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
+  StrategySimulationRequest,
   UpdatePresetRequest,
   UpdatePresetResponse,
   ValidatePresetRequest,
@@ -126,6 +128,22 @@ export function patchStrategyPromptTemplate(
 ): Promise<CoreStrategyPatchResponse> {
   return withPrincipal(service, (principal) =>
     service.core.patchStrategyPromptTemplate(principal, strategyId, stateId, request),
+  );
+}
+
+/**
+ * `POST /v1/daemon/strategies/{strategy_id}/simulate`.
+ *
+ * Non-mutating: the body carries the whole candidate IR, so nothing is stored, no revision is
+ * consumed and no Apply happens. Core validates the path id and the candidate state.
+ */
+export function simulateStrategy(
+  service: ServiceCore,
+  strategyId: string,
+  request: StrategySimulationRequest,
+): Promise<SimulationTrajectory> {
+  return withPrincipal(service, (principal) =>
+    service.core.simulateStrategy(principal, strategyId, request),
   );
 }
 
@@ -243,6 +261,19 @@ export const PRESET_ROUTES: readonly DomainRoute[] = [
         params[0],
         params[1],
         wirePayload<StrategyPatchPromptTemplateRequest>(body, 'request'),
+      ),
+    }),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/v1\/daemon\/strategies\/([^/]+)\/simulate$/,
+    tier: 'tier2',
+    family: 'presets',
+    handle: async (service, params, _search, body) => ({
+      body: await simulateStrategy(
+        service,
+        params[0],
+        wirePayload<StrategySimulationRequest>(body, 'request'),
       ),
     }),
   },

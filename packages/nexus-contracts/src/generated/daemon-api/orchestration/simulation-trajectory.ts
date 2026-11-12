@@ -21,7 +21,7 @@ export interface SimulationTrajectory {
    */
   simulation_level: string;
   /**
-   * Node ids reached from `entry`, in deterministic walk order.
+   * Node ids reached from `entry`, sorted lexicographically in `str` order (not traversal order), so the same IR yields the same list across runs.
    */
   nodes_visited: string[];
   /**

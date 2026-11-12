@@ -10,6 +10,11 @@ description = "Orchestration engine (graph-flow adapter + capability registry + 
 [lints]
 workspace = true
 
+[features]
+# Static Simulate: the reachability walk needs only the thin IR contract. Nothing
+# here constructs an executor or a provider, so the default build stays unchanged.
+simulate = ["dep:nexus-workflow-ir"]
+
 [dependencies]
 # 2026-09-10 dependency sweep (#276): 0.2.3 → 0.8.0. default-features=false
 # disables upstream's new `postgres` default (production storage is the
@@ -33,6 +38,9 @@ serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 nexus-contracts = { path = "../nexus-contracts" }
+# Optional: only the `simulate` walk reads a candidate IR document. No other feature
+# pulls it, and it carries no provider or execution edge.
+nexus-workflow-ir = { path = "../nexus-workflow-ir", optional = true }
 nexus-preset = { path = "../nexus-preset" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-knowledge = { path = "../nexus-knowledge" }

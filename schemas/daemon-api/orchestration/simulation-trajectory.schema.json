@@ -32,7 +32,7 @@
     "nodes_visited": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Node ids reached from `entry`, in deterministic walk order."
+      "description": "Node ids reached from `entry`, sorted lexicographically in `str` order (not traversal order), so the same IR yields the same list across runs."
     },
     "predicted_waits": {
       "type": "array",

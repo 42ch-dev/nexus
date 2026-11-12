@@ -79,7 +79,7 @@ pub struct SimulationTrajectory {
     pub effect_summary: SimulationTrajectoryEffectSummary,
     ///BLAKE3 canonical content hash recomputed over the request's candidate IR. Never echoed from an optional request `content_hash`.
     pub ir_content_hash: ::std::string::String,
-    ///Node ids reached from `entry`, in deterministic walk order.
+    ///Node ids reached from `entry`, sorted lexicographically in `str` order (not traversal order), so the same IR yields the same list across runs.
     pub nodes_visited: ::std::vec::Vec<::std::string::String>,
     ///Static parking points reachable from `entry`.
     pub predicted_waits: ::std::vec::Vec<SimulationPredictedWait>,
