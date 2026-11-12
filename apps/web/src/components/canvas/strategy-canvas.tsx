@@ -343,6 +343,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         open={approveOpen}
         onOpenChange={setApproveOpen}
         status={simulation.status}
+        isStale={simulation.isStale}
         trajectory={simulation.trajectory}
         error={simulation.error}
         onRun={handleSimulate}

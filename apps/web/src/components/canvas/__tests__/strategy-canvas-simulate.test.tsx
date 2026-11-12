@@ -209,8 +209,10 @@ describe('StrategyCanvas — Simulate action', () => {
     irDocument = servedIrDocument({ id: STRATEGY_ID, entry: 'routing' });
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
 
-    // The held trajectory is named stale while its replacement is walked.
+    // While its replacement is walked the surface reports progress; the stale
+    // banner stays visible from the held snapshot's own staleness.
     await waitFor(() => expect(screen.getByTestId('approve-stale')).toBeInTheDocument());
+    expect(screen.getByText('Running the static simulation…')).toBeInTheDocument();
 
     await waitFor(() =>
       expect(screen.queryByTestId('approve-stale')).not.toBeInTheDocument(),
