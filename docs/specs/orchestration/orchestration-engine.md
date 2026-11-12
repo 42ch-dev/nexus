@@ -830,23 +830,26 @@ Current production intake remains the YAML loader in §8.1.
 | `entry` | Selects the initial outer `Task`; the target node id is its `Task::id()`. |
 | `nodes[kind=outer_state]` | `StateCompositeTask`, carrying the node's enter actions, exit condition, routing, and context update. |
 | `outer_state.enter[kind=capability]` | `CapabilityTask`, invoked by the owning `StateCompositeTask`. |
+| `outer_state.enter[kind=host_tool]` | No engine `Task` counterpart in v0; host-tool dispatch is not represented as a graph task. |
 | `outer_state.enter[kind=inner_graph]` | `InnerGraphTask`, launching the referenced inner graph in a child session. |
 | `nodes[kind=inner_step]` with `step_kind=acp_prompt` | `AcpPromptTask` in the inner graph. |
 | `exit_when.kind=rule` | `RuleCheckTask` semantics within the outer state lifecycle. |
 | `exit_when.kind=manual` or `nodes[kind=manual_wait]` | `ManualWaitTask`, returning `NextAction::WaitForInput`. |
 | `exit_when.kind=llm_judge` or `nodes[kind=judge]` | `JudgeTask` semantics after enter actions; go continues and no-go waits. |
 | `exit_when.kind=graph_complete` | `InnerGraphTask` completion lets the outer task return `NextAction::Continue`. |
+| `exit_when.kind=timer` | `TimerWaitTask`, returning `WaitForInput` and scheduling a clock signal. |
 | `nodes[kind=join]`, `merge`, `converge`, `timeout_ms`, `on_timeout` | The `StateCompositeTask` join gate, including arrival tracking and bounded-timeout handling. |
 | `terminal[]` or `nodes[kind=terminal]` | The terminal `StateCompositeTask` returns `NextAction::End`. |
 | `edges[kind=linear|go|nogo|default]` | Outer-graph edges and the source task's corresponding `NextAction` routing. |
-| `edges[kind=conditional]` | Conditional outer-graph edges evaluated by the source `StateCompositeTask`. |
+| `edges[kind=conditional]` | `add_conditional_edge` and the runtime conditional-edge evaluator; the source task supplies `_state_result` but does not evaluate the edge. |
 | `edges[kind=depends_on]` or `inner_step.depends_on` | Inner-graph dependency edges (`add_edge(dependency, step)`). |
 | `output_binding` | `InnerGraphTask` post-run export to the named outer-state output. |
 | `initial_action` | Engine initialization before the first `Task`; it seeds the initial context rather than adding a node. |
 | `signals[]` | Engine signal handling around task execution; no additional graph `Task` is created. |
 | `roles[]` and `node.role` | Role and prompt configuration consumed by the applicable prompt `Task`. |
 | `assets[]` and `node.template` | Validated prompt/template inputs resolved for the consuming `Task`. |
-| `meta.run_intents`, `meta.requires_capabilities`, `meta.cli_args` | Admission, loader, and CLI-argument inputs checked before or while constructing tasks; they do not create graph nodes. |
+| `nodes[].effect_class` and `effect_summary` | Schema-required effect-fence metadata for validation and approval; neither creates a `Task` or changes graph execution. |
+| `meta.run_intents`, `meta.requires_capabilities`, `meta.cli_args`, `meta.gates` | Admission, loader, enqueue-time gate, and CLI-argument inputs checked before or while constructing tasks; they do not create graph nodes. |
 
 `pattern_slot`, `nest_group`, and `nests[]` are composition concepts, not P1 executable tasks.
 They require deterministic expansion into the concrete nodes and edges above before any future
