@@ -113,7 +113,7 @@ describe('ApproveDisclosure — approval readiness', () => {
   });
 
   it('shows the trajectory as stale and disables Approve after a revision change', () => {
-    renderDisclosure({ status: 'stale' });
+    renderDisclosure({ status: 'stale', isStale: true });
 
     expect(screen.getByTestId('approve-stale')).toBeInTheDocument();
     expect(screen.getByTestId('approve-simulation-level')).toBeInTheDocument();

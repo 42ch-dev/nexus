@@ -23,6 +23,11 @@ export interface ApproveDisclosureProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   status: SimulationStatus;
+  /**
+   * The held trajectory no longer describes the document. Read apart from
+   * `status` so the stale banner stays visible while a replacement walk runs.
+   */
+  isStale?: boolean;
   trajectory: SimulationTrajectory | null;
   error: unknown;
   /**
@@ -39,6 +44,7 @@ export function ApproveDisclosure({
   open,
   onOpenChange,
   status,
+  isStale = false,
   trajectory,
   error,
   onApprove,
@@ -69,7 +75,7 @@ export function ApproveDisclosure({
           </p>
         ) : null}
 
-        {status === 'stale' ? (
+        {isStale ? (
           <p
             data-testid="approve-stale"
             role="alert"

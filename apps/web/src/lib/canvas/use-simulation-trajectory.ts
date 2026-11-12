@@ -16,8 +16,12 @@
  * A fetched (installed-preset) document has no live candidate prop, so
  * `runStrategy` re-reads it and compares the same identity itself: unchanged
  * keeps the trajectory in hand, moved marks it stale and walks it again.
+ *
+ * One walk runs at a time (a click while one is pending is a no-op), the
+ * identity is taken before the request is issued, and a failed read or walk
+ * keeps the snapshot in hand: only the error is new.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import type { SimulationTrajectory, WorkflowDocument } from '@42ch/nexus-contracts';
 
@@ -61,6 +65,12 @@ function sameDocument(snapshot: SimulationSnapshot, doc: WorkflowDocument): bool
 
 export interface SimulationState {
   status: SimulationStatus;
+  /**
+   * Whether the held trajectory no longer describes the document. Read apart
+   * from `status` so the stale banner survives a walk in flight (`running`) or
+   * a failed re-read (`failed`).
+   */
+  isStale: boolean;
   trajectory: SimulationTrajectory | null;
   /** The refused simulate call, kept apart from "never simulated". */
   error: unknown;
@@ -93,30 +103,39 @@ export function useSimulationTrajectory(
 
   const simulate = useCallback(
     async (doc: WorkflowDocument) => {
+      // Taken before the request: a mutation while the POST is in flight must
+      // not record an identity the server never walked.
+      const identity = identityOf(doc);
       const trajectory = await client.simulateStrategy(doc.id, { document: doc });
-      setSnapshot({ trajectory, identity: identityOf(doc) });
+      setSnapshot({ trajectory, identity });
       setMovedOn(false);
     },
     [client],
   );
 
+  const inFlight = useRef(false);
+
   const walk = useCallback(
     // A `null` load result means the held trajectory still describes the
     // document, so nothing is walked.
     async (load: () => Promise<WorkflowDocument | null>) => {
+      // One walk at a time. `status` cannot carry this alone: a stale snapshot
+      // is re-walked while it is still held, so a second click would otherwise
+      // start a second walk.
+      if (inFlight.current) return;
+      inFlight.current = true;
       setIsRunning(true);
       setError(null);
       try {
         const doc = await load();
         if (doc) await simulate(doc);
       } catch (caught) {
-        // A refused read/walk is an explicit failure, never an empty trajectory:
-        // the surface must not read as approval-ready. A stale flag from the
-        // failed attempt would outrank the error, so it goes too.
-        setSnapshot(null);
-        setMovedOn(false);
+        // A refused read/walk must not discard a trajectory in hand: the
+        // snapshot still records the document the server walked, so keep it.
+        // Only the error is new, and the next open re-reads.
         setError(caught);
       } finally {
+        inFlight.current = false;
         setIsRunning(false);
       }
     },
@@ -145,17 +164,26 @@ export function useSimulationTrajectory(
     setError(null);
   }, []);
 
-  // A stale trajectory is named as such even while its re-walk is in flight:
-  // the surface must never present a superseded trajectory as current.
-  const status: SimulationStatus = isStale
-    ? 'stale'
-    : isRunning
-      ? 'running'
-      : error !== null
-        ? 'failed'
+  // A walk in flight outranks a stale snapshot so the surface shows progress;
+  // the snapshot's own staleness (`isStale`) still drives the stale banner.
+  // A failed walk outranks staleness too: the error is the newer fact.
+  const status: SimulationStatus = isRunning
+    ? 'running'
+    : error !== null
+      ? 'failed'
+      : isStale
+        ? 'stale'
         : snapshot
           ? 'ready'
           : 'idle';
 
-  return { status, trajectory: snapshot?.trajectory ?? null, error, run, runStrategy, reset };
+  return {
+    status,
+    isStale,
+    trajectory: snapshot?.trajectory ?? null,
+    error,
+    run,
+    runStrategy,
+    reset,
+  };
 }
