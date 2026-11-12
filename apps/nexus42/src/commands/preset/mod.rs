@@ -45,10 +45,17 @@ use nexus_contracts::generated::core::orchestration_presets::preset_profile_resp
 // generated `preset_management` response (its `source` enum displays the real
 // `embedded` / `system` / `user` label), so the CLI reads that type directly
 // instead of the retired daemon client's private copy.
+use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
+    WorkflowDocument, WorkflowNodeKind,
+};
 use nexus_contracts::generated::daemon_api::preset_management::list_presets_response::ListPresetsResponse;
 use nexus_contracts::ScaffoldPresetRequest;
 
 pub mod patch;
+
+/// Newest Workflow IR document version this build can validate — the v0 draft
+/// `nexus_preset::workflow_ir` emits. A schema bump has to move both.
+const SUPPORTED_IR_VERSION: u64 = 0;
 
 #[derive(Debug, Subcommand)]
 pub enum PresetCommand {
@@ -384,7 +391,7 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
     use nexus_preset::{
         loader_validate_manifest_compat, validate_assets_in_bundle, validate_path_safety,
         validate_preset_semantic, yaml_value_depth, ValidationResult as PresetValidationResult,
-        DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
+        DEFAULT_MAX_YAML_DEPTH,
     };
 
     let file_path = std::path::Path::new(path);
@@ -429,14 +436,7 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
     }
 
     // Size limit (same 1 MiB limit the loader/daemon enforce).
-    let metadata = std::fs::metadata(&preset_yaml_path)?;
-    if metadata.len() > DEFAULT_MAX_YAML_SIZE as u64 {
-        return Err(CliError::Other(format!(
-            "Preset YAML exceeds maximum size ({} bytes, limit is {} bytes)",
-            metadata.len(),
-            DEFAULT_MAX_YAML_SIZE
-        )));
-    }
+    ensure_document_size(&preset_yaml_path, "Preset YAML")?;
 
     let yaml = std::fs::read_to_string(&preset_yaml_path)?;
 
@@ -499,16 +499,30 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
 /// defect. An IR file carries no bundle root, so asset checks are skipped
 /// exactly as for a standalone YAML file.
 fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::Value> {
-    use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
-        WorkflowDocument, WorkflowNodeKind,
-    };
     use nexus_orchestration::CapabilityRegistry;
     use nexus_preset::validation::{validate_workflow_ir, validate_workflow_ir_path_safety};
     use nexus_preset::{export_preset, loader_validate_manifest_compat};
 
+    ensure_document_size(file_path, "Workflow IR")?;
     let json = std::fs::read_to_string(file_path)?;
     let document: WorkflowDocument = serde_json::from_str(&json)
         .map_err(|e| CliError::Other(format!("workflow IR parse error: {e}")))?;
+
+    // A document from a newer IR version cannot be interpreted here, so no
+    // check below it is trustworthy: refuse it instead of letting the
+    // exporter's refusal fall silent (the wording mirrors `export_preset`).
+    if document.ir_version > SUPPORTED_IR_VERSION {
+        return Ok(validation_response(
+            document.id.as_str(),
+            serde_json::json!(document.version),
+            outer_state_count(&document),
+            &[format!(
+                "ir_version: document ir_version {} is newer than supported {SUPPORTED_IR_VERSION}",
+                document.ir_version
+            )],
+            &[],
+        ));
+    }
 
     let caps = CapabilityRegistry::with_builtins();
     let mut errors: Vec<String> = Vec::new();
@@ -531,9 +545,19 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
         push_diagnostic(diagnostic, &mut errors, &mut warnings);
     }
 
-    // `state_count` counts the outer states the YAML verdict reports; inner
-    // steps are graph children of a state, not states of their own.
-    let state_count = document
+    Ok(validation_response(
+        document.id.as_str(),
+        serde_json::json!(document.version),
+        outer_state_count(&document),
+        &errors,
+        &warnings,
+    ))
+}
+
+/// States the YAML verdict counts: outer states and terminals. Inner steps are
+/// graph children of a state, not states of their own.
+fn outer_state_count(document: &WorkflowDocument) -> usize {
+    document
         .nodes
         .iter()
         .filter(|node| {
@@ -542,15 +566,23 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
                 WorkflowNodeKind::OuterState | WorkflowNodeKind::Terminal
             )
         })
-        .count();
+        .count()
+}
 
-    Ok(validation_response(
-        document.id.as_str(),
-        serde_json::json!(document.version),
-        state_count,
-        &errors,
-        &warnings,
-    ))
+/// Enforce the loader's document size limit before reading a preset file.
+///
+/// `label` names the document kind in the error, so both input formats share
+/// one gate without changing the message the YAML path already emitted.
+fn ensure_document_size(path: &std::path::Path, label: &str) -> Result<()> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.len() > nexus_preset::DEFAULT_MAX_YAML_SIZE as u64 {
+        return Err(CliError::Other(format!(
+            "{label} exceeds maximum size ({} bytes, limit is {} bytes)",
+            metadata.len(),
+            nexus_preset::DEFAULT_MAX_YAML_SIZE
+        )));
+    }
+    Ok(())
 }
 
 /// Fold one facade diagnostic into the verdict's error/warning strings.
@@ -1304,6 +1336,55 @@ states:
         for field in ["errors", "warnings"] {
             assert_eq!(from_ir[field], from_yaml[field], "{field}");
         }
+    }
+
+    /// A document from a newer IR version must fail closed instead of letting
+    /// the exporter's refusal fall silent, and the verdict must keep the
+    /// non-zero exit `validate_preset` maps it to.
+    #[test]
+    fn local_validate_ir_rejects_future_ir_version() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut ir: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(repo_root.join(
+                "crates/nexus-preset/tests/fixtures/workflow-ir/game-narrative.workflow.ir.json",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        ir["ir_version"] = serde_json::json!(1);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("future.workflow.ir.json");
+        std::fs::write(&path, serde_json::to_string(&ir).unwrap()).unwrap();
+        let path = path.to_str().unwrap();
+
+        let resp = validate_preset_local(path).unwrap();
+        assert_eq!(resp["valid"], serde_json::json!(false), "{resp}");
+        assert!(
+            resp["errors"][0]
+                .as_str()
+                .unwrap_or_default()
+                .contains("newer than supported 0"),
+            "expected the exporter's ir_version refusal, got: {resp}"
+        );
+        assert!(
+            validate_preset(path, true).is_err(),
+            "an invalid verdict must still exit non-zero"
+        );
+    }
+
+    /// The IR leg applies the same document size gate as the YAML leg.
+    #[test]
+    fn local_validate_ir_rejects_oversize_document() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("huge.workflow.ir.json");
+        std::fs::write(&file, vec![b' '; nexus_preset::DEFAULT_MAX_YAML_SIZE + 1]).unwrap();
+
+        let err = validate_preset_local(file.to_str().unwrap()).unwrap_err();
+        assert!(
+            err.to_string().contains("exceeds maximum size"),
+            "expected the shared size gate error, got: {err}"
+        );
     }
 
     #[test]
