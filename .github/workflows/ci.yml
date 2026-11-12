@@ -526,6 +526,20 @@ jobs:
       # provides it.
       - name: Check graph pins
         run: bash tooling/check-graph-pins.sh
+      # V1.236 P5-T2 (ADR #485 §6.1 P5): the Work artifact byte-write guard.
+      # First prove the gate bites on a synthetic direct Work write (the step
+      # fails if the guard exits 0), then run it against the inventoried
+      # modules with only the exact-symbol allowlist exemptions.
+      - name: Work artifact write guard — synthetic direct write must fail
+        run: |
+          fixture="$(mktemp --suffix=.rs)"
+          printf 'fn sneaky() {\n    std::fs::write("Works/wrk_x/ch1.md", b"x").unwrap();\n}\n' > "$fixture"
+          if bash tooling/check-work-artifact-writes.sh "$fixture"; then
+            echo "::error::work artifact write guard accepted a synthetic direct Work write"
+            exit 1
+          fi
+      - name: Work artifact write guard
+        run: bash tooling/check-work-artifact-writes.sh
 
   # Compute module DX — SDK + modules (V1.170 P0, AR-12). Runs only when
   # module-affecting paths change (or on manual workflow_dispatch). The leg is
