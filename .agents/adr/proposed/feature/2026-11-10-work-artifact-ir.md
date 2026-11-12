@@ -127,7 +127,7 @@ Works/<work_ref>/
 
 Essay, script, and game-bible scaffolds write a different subtree under the same `Works/<work_ref>/` root (see §3.5).
 
-`work_chapters` rows store `outline_path` and `body_path` as relative strings such as `Works/<work_ref>/Stories/ch01-ch01.md`. The chapter **bytes are not in SQLite**. Reconcile walks the filesystem and updates pointers (`crates/nexus-local-db/src/work_chapters.rs`, `reconcile_from_filesystem` / `compute_reconcile_diff`). Today, on status disagreement, **DB wins** (`workflow-profile.md` §4.5.3) — that authority direction is what this Exploration replaces after promotion.
+`work_chapters` rows store `outline_path` and `body_path` as relative strings such as `Works/<work_ref>/Stories/ch01-ch01.md`. The chapter **bytes are not in SQLite**. Reconcile walks the filesystem and updates pointers (`crates/nexus-local-db/src/work_chapters.rs`, `port.reconcile` / `compute_reconcile_diff`). Today, on status disagreement, **DB wins** (`workflow-profile.md` §4.5.3) — that authority direction is what this Exploration replaces after promotion.
 
 #### 1.2 Write paths (uneven durability, scattered owners)
 
@@ -339,6 +339,8 @@ Works/<work_ref>/
 
 Path construction MUST live in the IR/port, not as duplicated string formats in scaffold, seed, and sync.
 
+The existing `works_root` enforcement (I-000387, closed without a carried deferral) is part of this contract; it does not introduce arbitrary-root support. A default (absent/null) `works_root` means workspace-relative `Works`. A value is accepted only when it matches `<canonical_workspace_root>/Works` exactly by lexical join against the canonical root. Every other value—including `""`, external, parent-relative, or nested—is refused with `InputInvalid` before Work claim, mkdir, or byte mutation. On the commit path, the port separately requires `workspace_root` to canonicalize to that same canonical workspace root.
+
 #### 3.7 Frontmatter contracts (sketch → normative on promotion)
 
 Minimum novel chapter body frontmatter (from `workflow-profile.md` §4.3): `title`, `chapter`, optional `volume`, `status`, optional `word_count`, optional `world_refs`. Outline heading contracts and essay/script/game-bible section frontmatter remain as in their profile Masters until promotion copies the normative tables here.
@@ -348,8 +350,10 @@ Minimum novel chapter body frontmatter (from `workflow-profile.md` §4.3): `titl
 | Today (Shipped) | Target (after promotion) |
 | --- | --- |
 | Status disagreement: **DB wins**; next run re-syncs frontmatter | **IR wins**; DB `work_chapters` is rebuilt/updated as index/cache |
-| `reconcile_from_filesystem` rebuilds rows from disk | `port.reconcile()` rebuilds IR (+ index) from disk projection **or** refreshes index from IR — IR remains the named SSOT |
+| `port.reconcile` rebuilds rows from disk | `port.reconcile()` rebuilds IR (+ index) from disk projection **or** refreshes index from IR — IR remains the named SSOT |
 | chapter-content-local-api: `work_chapters` is metadata SSOT | Wire DTO still reads/writes through Daemon; authority citation points at IR |
+
+During the dual-read window, until Work IR promotion and both Shipped Master amendments in §0.4 land in the same change, the Markdown tree and `work_chapters` remain the dual-read projection/index, and the current **DB-wins** conflict behavior remains authoritative. `port.reconcile()` is the single admission/write seam; no **parallel JSON** snapshot tree is introduced. When that promotion and both amendments land together, the same `port.reconcile()` becomes **IR-authoritative** index refresh and the DB becomes a cache; until then, this statement does not claim IR authority.
 
 #### 3.9 Encoding (open, see §8)
 
@@ -460,14 +464,14 @@ Rules:
 
 | Phase | Replace / add | Exit gate |
 | --- | --- | --- |
-| **P0 Port stub + inventory** | Trait + in-process FS adapter behind a flag; catalogue remaining direct-write sites; define lock + append + mkdir in the trait | Tests compile; no production behavior change; inventory list checked in or referenced from this spec |
+| **P0 Port + inventory** | Trait + in-process FS adapter; catalogue remaining direct-write sites; define lock + append + mkdir in the trait | Tests compile; no production behavior change; inventory list checked in or referenced from this spec |
 | **P1 Hot path** | Route Work-path `execute_write_file` through the port; adapter uses `fsync_write_atomic` semantics + parent mkdir + `WorkLock`; non-Work paths keep fallback | Draft-chapter writes under `Works/` no longer call bare `std::fs::write` in the tool handler; path-guard tests still pass; Windows manuscript write still works |
 | **P2 Sibling writers** | Outline, scaffolds, review-log ingest/write, missing-KB log, rules/history (**append**), narrative index, auto-chronology, chapter-transition file writes | Those modules do not call `std::fs::write` / `tokio::fs::write` directly (helpers may live only inside the adapter) |
 | **P3 Dry-run stub** | Inject stub in Simulate / isolated tests; plan JSON for one novel produce sample | A produce dry-run leaves `Works/` unchanged |
-| **P4 Reconcile admission** | Reconcile is a port op oriented toward **IR authority** (index refresh); dual-read window documented until Master amendment | Existing reconcile behavior preserved or explicitly migrated; callers use the port |
-| **P5 Default-on + lint** | Flag default on; CI/lint fails new direct writes in the inventoried modules | Acceptance §6.3 green |
+| **P4 Reconcile admission** | Admit reconcile through the port during the dual-read window in §3.8; later promotion makes it IR-authoritative index refresh | Existing reconcile behavior preserved or explicitly migrated; callers use the port |
+| **P5 Direct-write lint** | CI/lint fails new direct writes in the inventoried modules | Acceptance §6.3 green |
 
-Do **not** require P5 before P1 ships behind a flag. Prefer "hot path first, then close the remaining doors."
+Do **not** require P5 before P1 lands. Prefer "hot path first, then close the remaining doors" during the migration window.
 
 Promotion + Master amendments (§0.4) MAY land in parallel with P4/P5 but MUST NOT leave dual SSOT claims.
 

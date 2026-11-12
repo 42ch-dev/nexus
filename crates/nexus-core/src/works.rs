@@ -1,6 +1,7 @@
 //! Work lifecycle and authoring operations over the guarded core workspace.
 //! HTTP envelopes stay in adapters; these projections are owned domain values.
 
+use crate::execution::work_artifact::{FsWorkArtifactPort, WorkArtifactPort, WorkReconcile};
 use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 use nexus_contracts::{
     AppendInspirationRequest, AppendInspirationResponse, CoreWorkSelection, CreateWorkRequest,
@@ -296,7 +297,9 @@ pub struct WorkReconcileReport {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum WorkFault {
+// Crate-internal despite the private module: `RuntimeLockGuard` exposes it.
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) enum WorkFault {
     #[error("{message}")]
     BadRequest { code: String, message: String },
     #[error("{message}")]
@@ -503,7 +506,6 @@ impl CoreService {
                 resynced: report.resynced,
                 preserved: report.preserved,
             })
-            .map_err(CoreError::from)
     }
     /// # Errors
     ///
@@ -1748,22 +1750,19 @@ async fn reconcile_chapters(
     work_id: String,
     holder_kind: &str,
     dry_run_query: ReconcileDryRunQuery,
-) -> Result<nexus_local_db::work_chapters::ReconcileReport, WorkFault> {
-    let creator_id = principal.creator_id().to_string();
-    let pool = &service.inner.pool;
+) -> CoreResult<nexus_local_db::work_chapters::ReconcileReport> {
     let dry_run = dry_run_query.dry_run.unwrap_or(false);
 
     // Get the Work record to find work_ref
     let work = service.resolve_owned_work(principal, &work_id).await?;
 
-    let work_ref = work
-        .story_ref
-        .as_deref()
-        .ok_or_else(|| WorkFault::BadRequest {
+    let work_ref = work.story_ref.as_deref().ok_or_else(|| {
+        CoreError::from(WorkFault::BadRequest {
             code: "precondition_failed".to_string(),
             message: "`story_ref` (work_ref) not set on Work; run novel-project-init first"
                 .to_string(),
-        })?;
+        })
+    })?;
 
     // Defense in depth: validate work_ref slug before passing to filesystem
     // layer. Matches the same policy as
@@ -1774,106 +1773,36 @@ async fn reconcile_chapters(
             message: format!(
                 "work_ref '{work_ref}' is not a valid slug (expected [a-z0-9][a-z0-9-]{{0,63}})"
             ),
-        });
+        }
+        .into());
     }
 
     // Resolve workspace root from state
     let workspace_path_str = service.work_workspace_path(principal)?.unwrap_or_default();
     let workspace_root = std::path::Path::new(&workspace_path_str);
-
     let now = chrono::Utc::now().to_rfc3339();
 
-    // V1.49 P2 (R-V148P4-W2): dry-run path — compute the report only, with no
-    // runtime-lock acquire and no filesystem/DB writes (overlay §8.2).
-    if dry_run {
-        tracing::info!(
-            work_id = %work_id,
-            work_ref = %work_ref,
-            "dry-run reconcile for work_id={work_id}"
-        );
-        let report = nexus_local_db::work_chapters::reconcile_from_filesystem(
-            pool,
-            &work_id,
-            work_ref,
+    // The port re-runs this immediately before it takes the Work runtime lock:
+    // the unlocked diff walk in between is the stale-read window, so what is
+    // re-validated is exactly the caller's principal — its open generation, its
+    // on-disk creator/workspace selection, and the service's open state.
+    let recheck = || service.verify_principal(principal);
+
+    let port =
+        FsWorkArtifactPort::new(service.inner.pool.clone(), service.inner.nexus_home.clone());
+    port.reconcile(
+        WorkReconcile {
             workspace_root,
-            &now,
-            true,
-        )
-        .await
-        .map_err(|e| WorkFault::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: format!("reconcile preview failed: {e}"),
-        })?;
-        return Ok(report);
-    }
-
-    // V1.49 P3 (R-V148P4-W3): shorten the runtime-lock window.
-    //
-    // The previous implementation acquired the lock for the *entire* reconcile
-    // — filesystem walk + per-chapter DB reads + writes + file frontmatter
-    // syncs — blocking other schedule operations on the same Work for the
-    // full duration. Reconcile is now split into a read-only
-    // [`compute_reconcile_diff`] (unlocked; the slow walk + reads live here)
-    // and a write-only [`apply_reconcile_diff`] (the only phase that needs the
-    // lock). Trade-off: under concurrent reconcile + mutate from the same
-    // client the diff may be stale by the time the lock is re-acquired; this is
-    // accepted for the local-first single-writer daemon model (documented in
-    // the plan). The V1.48 P4-fix1 lock-release-on-error guarantee is
-    // preserved on the apply phase below.
-    let diff = nexus_local_db::work_chapters::compute_reconcile_diff(
-        pool,
-        &work_id,
-        work_ref,
-        workspace_root,
+            creator_id: principal.creator_id(),
+            work_id: &work_id,
+            work_ref,
+            now: &now,
+            holder_kind,
+            dry_run,
+        },
+        &recheck,
     )
     .await
-    .map_err(|e| WorkFault::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: format!("reconcile diff failed: {e}"),
-    })?;
-
-    // Phase B: acquire the lock and apply only the writes.
-    service.verify_principal(principal)?;
-    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id, holder_kind).await?;
-    let lock_acquired_at = chrono::Utc::now();
-    tracing::info!(
-        work_id = %work_id,
-        acquired_at = %lock_acquired_at.to_rfc3339(),
-        pending_ops = diff.ops.len(),
-        "runtime_lock: acquired for reconcile write phase"
-    );
-
-    // V1.48 P4-fix1 (W-2 qc3): release the lock on both Ok and Err paths.
-    // The previous `?` propagation on the reconcile call could return early
-    // without releasing the runtime lock, leaving the Work unwritable until
-    // restart. Mirrors the V1.42.1 hotfix pattern (R-V142-MERGE-CI-001).
-    let report = match nexus_local_db::work_chapters::apply_reconcile_diff(
-        pool, &work_id, &now, &diff,
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            lock.release().await;
-            return Err(WorkFault::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: format!("reconcile apply failed: {e}"),
-            });
-        }
-    };
-
-    // V1.42 P0 (T2): Release runtime lock before returning.
-    lock.release().await;
-    let held_ms = (chrono::Utc::now() - lock_acquired_at)
-        .num_milliseconds()
-        .max(0);
-    tracing::info!(
-        work_id = %work_id,
-        held_ms,
-        "runtime_lock: released after reconcile write phase"
-    );
-
-    Ok(report)
 }
 
 async fn list_pool(
@@ -2529,7 +2458,10 @@ fn is_valid_work_ref(s: &str) -> bool {
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-struct RuntimeLockGuard {
+// Crate-internal despite the private module: `crate::execution::work_artifact`
+// runs reconcile under this one lock implementation.
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) struct RuntimeLockGuard {
     pool: sqlx::SqlitePool,
     creator_id: String,
     work_id: String,
@@ -2538,7 +2470,7 @@ struct RuntimeLockGuard {
 impl RuntimeLockGuard {
     /// `holder_kind` labels the minted `cli:<kind>:<uuid>` holder; the daemon
     /// HTTP surface passes `http` so 423 reasons keep the legacy label.
-    async fn acquire(
+    pub(crate) async fn acquire(
         pool: &sqlx::SqlitePool,
         creator_id: &str,
         work_id: &str,
@@ -2560,7 +2492,7 @@ impl RuntimeLockGuard {
             nexus_local_db::AcquireResult::Locked { holder, .. } => Err(WorkFault::Locked { resource: "work".into(), reason: format!("work {work_id} is locked by '{holder}'; wait for release or check 'creator works status'") }),
         }
     }
-    async fn release(self) {
+    pub(crate) async fn release(self) {
         if let Err(error) = nexus_local_db::release_runtime_lock(
             &self.pool,
             &self.creator_id,

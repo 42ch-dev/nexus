@@ -523,6 +523,10 @@ pub struct ReconcileReport {
     /// Number of existing chapter rows updated.
     pub updated: u32,
     /// Number of chapter files re-synced to the DB status (DB-as-SSOT).
+    ///
+    /// These bytes are committed by the caller's Work byte-write port, never by
+    /// [`apply_reconcile_diff`] — this counter is a file count, not a DB row
+    /// count.
     pub resynced: u32,
     /// Number of chapter rows preserved unchanged.
     pub preserved: u32,
@@ -531,7 +535,9 @@ pub struct ReconcileReport {
 /// A single write decision produced by [`compute_reconcile_diff`] (V1.49 P3,
 /// R-V148P4-W3).
 ///
-/// Each variant maps 1:1 to a mutation performed by [`apply_reconcile_diff`].
+/// Each variant names exactly one intended mutation. Every variant but
+/// [`ReconcileOp::ResyncFileStatus`] is applied by [`apply_reconcile_diff`];
+/// the file resync is committed by the caller's Work byte-write port.
 /// Splitting reconcile into a read-only "compute" phase and a write-only
 /// "apply" phase lets the daemon hold the runtime lock **only** for the fast
 /// write phase, while the slow filesystem walk + per-chapter DB reads run
@@ -556,9 +562,14 @@ pub enum ReconcileOp {
     },
     /// Resync the chapter file's frontmatter `status` to the DB source of
     /// truth (DB-as-SSOT; the file was ahead/conflicting).
+    ///
+    /// **Index-only in [`apply_reconcile_diff`]**: that function treats this
+    /// variant as a documented no-op. The bytes are rendered by
+    /// [`render_frontmatter_status`] and committed by the caller's Work
+    /// byte-write port, so `resynced` counts file resyncs, never DB rows.
     ResyncFileStatus {
-        /// Absolute path to the chapter `.md` file.
-        path: std::path::PathBuf,
+        /// Chapter `.md` path below `Works/<work_ref>/` (`Stories/<file>.md`).
+        rel_child: std::path::PathBuf,
         /// DB status to write into the file frontmatter.
         db_status: String,
     },
@@ -648,25 +659,20 @@ fn verify_stories_dir_in_workspace(
     Ok(())
 }
 
-/// Rewrite the `status` key in a chapter file's YAML frontmatter to match the
-/// DB source of truth, preserving the body content.
+/// Render `content`'s YAML frontmatter with `status` as its `status` value,
+/// preserving every other line including the body.
 ///
-/// If the file lacks a well-formed frontmatter block (opening `---` without a
-/// closing `---`), it is left unchanged.
+/// Returns `None` when the file has no well-formed frontmatter block (no
+/// opening `---`, or one that never closes): such a file is left alone.
 ///
-/// The write is performed atomically: content is written to a sibling temp
-/// file, flushed, and then renamed over the target. This prevents a partial
-/// write from corrupting the chapter file if the process crashes or the
-/// filesystem loses power between the write and the rename.
-fn sync_frontmatter_status(path: &std::path::Path, status: &str) -> Result<(), LocalDbError> {
-    let content = std::fs::read_to_string(path).map_err(|e| LocalDbError::IoWithPath {
-        path: path.to_string_lossy().to_string(),
-        source: e,
-    })?;
-
+/// Pure: no read, no write. The caller commits the returned bytes through its
+/// own durable, locked Work byte-write path, so this module never writes a
+/// chapter file itself.
+#[must_use]
+pub fn render_frontmatter_status(content: &str, status: &str) -> Option<String> {
     // Only process files that start with a frontmatter delimiter.
     if !content.trim_start().starts_with("---") {
-        return Ok(());
+        return None;
     }
 
     let mut output = Vec::new();
@@ -708,117 +714,55 @@ fn sync_frontmatter_status(path: &std::path::Path, status: &str) -> Result<(), L
 
     // If frontmatter was never closed or never opened, leave the file alone.
     if !found_first || in_frontmatter {
-        return Ok(());
+        return None;
     }
 
     let mut new_content = output.join("\n");
     if content.ends_with('\n') && !new_content.ends_with('\n') {
         new_content.push('\n');
     }
-
-    // Atomic write: temp file next to target, flush, then rename.
-    // On any error we try to clean up the temp file; the original error is
-    // still returned so callers see the actual failure mode.
-    let tmp_extension = format!(
-        "md.tmp.{}.{}",
-        std::process::id(),
-        chrono::Utc::now().timestamp_millis()
-    );
-    let temp_path = path.with_extension(&tmp_extension);
-    let write_result = std::fs::write(&temp_path, &new_content)
-        .and_then(|()| std::fs::File::open(&temp_path)?.sync_data())
-        .and_then(|()| std::fs::rename(&temp_path, path));
-
-    if let Err(e) = write_result {
-        // Best-effort cleanup; ignore failures because we're already returning
-        // the underlying I/O error.
-        let _ = std::fs::remove_file(&temp_path);
-        return Err(LocalDbError::IoWithPath {
-            path: path.to_string_lossy().to_string(),
-            source: e,
-        });
-    }
-
-    Ok(())
+    Some(new_content)
 }
 
-/// Reconcile `work_chapters` rows from the filesystem.
+/// Refuse chapter reconcile for an explicitly non-novel Work profile.
 ///
-/// Walks `Works/<work_ref>/Stories/`, parses each `.md` file's frontmatter
-/// for chapter number and status, and rebuilds/updates `work_chapters` rows.
-/// For new files, inserts a row. For existing rows, updates status if
-/// frontmatter has changed. Preserves rows that match.
+/// Chapter reconciliation reads `Works/<work_ref>/Stories/`, which only novel
+/// Works have. `work_profile IS NULL` is a legacy Work and stays admitted for
+/// backwards compatibility (it predates the profile system).
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` if any database or I/O operation fails.
-/// Returns `LocalDbError::PathEscape` if `work_ref` would cause the resolved
-/// path to escape the `Works/<work_ref>/` subtree.
-///
-/// # Dry-run (V1.49 P2, R-V148P4-W2)
-///
-/// When `dry_run` is `true`, the function walks the filesystem and the DB to
-/// compute the **same** `ReconcileReport` it would return when mutating, but
-/// performs **no** writes: no chapter rows are inserted/updated, no chapter
-/// file frontmatter is rewritten. Counters (`created` / `updated` / `resynced`
-/// / `preserved`) reflect what the mutating path would do. Callers that only
-/// want a preview should pass `dry_run = true`; the daemon reconcile handler
-/// additionally skips the runtime-lock acquire on this path (overlay §8.2).
-///
-/// # Implementation (V1.49 P3, R-V148P4-W3)
-///
-/// This is now a thin wrapper over [`compute_reconcile_diff`] (read-only) and
-/// [`apply_reconcile_diff`] (write-only). The daemon handler calls those two
-/// directly so the runtime lock is held **only** for the fast write phase.
-pub async fn reconcile_from_filesystem(
-    pool: &SqlitePool,
-    work_id: &str,
-    work_ref: &str,
-    workspace_root: &std::path::Path,
-    now: &str,
-    dry_run: bool,
-) -> Result<ReconcileReport, LocalDbError> {
+/// Returns [`LocalDbError::Io`] when the Work's profile is explicitly
+/// non-novel, and [`LocalDbError`] when the profile read fails.
+pub async fn ensure_novel_profile(pool: &SqlitePool, work_id: &str) -> Result<(), LocalDbError> {
+    // SAFETY: SELECT work_profile — runtime query for profile gate.
+    let profile: Option<String> =
+        sqlx::query_scalar("SELECT work_profile FROM works WHERE work_id = ?")
+            .bind(work_id)
+            .fetch_optional(pool)
+            .await?
+            .flatten();
     // SAFETY: game-bible profile gate (V1.54 P1).
-    // Chapter reconciliation reads `Works/<work_ref>/Stories/` which is
-    // novel-specific. Non-novel profiles (game-bible, essay) do not have
-    // chapter files and should not run this code path. Return a clear
-    // error rather than silently operating on a missing directory.
-    {
-        // SAFETY: SELECT work_profile — runtime query for profile gate.
-        let profile: Option<String> =
-            sqlx::query_scalar("SELECT work_profile FROM works WHERE work_id = ?")
-                .bind(work_id)
-                .fetch_optional(pool)
-                .await?
-                .flatten();
-        // SAFETY: game-bible profile gate (V1.54 P1).
-        // Block reconcile for explicitly non-novel profiles (game_bible, essay).
-        // Legacy Works (work_profile IS NULL) are treated as novel for backwards
-        // compatibility — they were created before the profile system existed.
-        // R-V154P1-S002: warn!-level audit trace when reconcile is blocked by
-        // profile gate, so operators can see why reconcile is not running.
-        if profile.as_deref().is_some() && !crate::is_novel_profile(profile.as_deref()) {
-            tracing::warn!(
-                target: "reconcile",
-                work_id,
-                work_ref,
-                work_profile = ?profile.as_deref(),
-                "chapter reconciliation blocked: work_profile is not novel; \
-                 only novel Works have chapter files under Stories/"
-            );
-            return Err(LocalDbError::Io(format!(
-                "chapter reconciliation is not supported for work_profile '{}' (work_id: {work_id}); \
-                 only novel Works have chapter files under Stories/",
-                profile.as_deref().unwrap_or("null")
-            )));
-        }
+    // Block reconcile for explicitly non-novel profiles (game_bible, essay).
+    // Legacy Works (work_profile IS NULL) are treated as novel for backwards
+    // compatibility — they were created before the profile system existed.
+    // R-V154P1-S002: warn!-level audit trace when reconcile is blocked by
+    // profile gate, so operators can see why reconcile is not running.
+    if profile.as_deref().is_some() && !crate::is_novel_profile(profile.as_deref()) {
+        tracing::warn!(
+            target: "reconcile",
+            work_id,
+            work_profile = ?profile.as_deref(),
+            "chapter reconciliation blocked: work_profile is not novel; \
+             only novel Works have chapter files under Stories/"
+        );
+        return Err(LocalDbError::Io(format!(
+            "chapter reconciliation is not supported for work_profile '{}' (work_id: {work_id}); \
+             only novel Works have chapter files under Stories/",
+            profile.as_deref().unwrap_or("null")
+        )));
     }
-
-    let diff = compute_reconcile_diff(pool, work_id, work_ref, workspace_root).await?;
-    if dry_run {
-        return Ok(diff.to_report());
-    }
-    apply_reconcile_diff(pool, work_id, now, &diff).await
+    Ok(())
 }
 
 /// Read-only phase of reconcile (V1.49 P3, R-V148P4-W3).
@@ -934,7 +878,7 @@ pub async fn compute_reconcile_diff(
                 let status_conflicts = fm_status.as_ref().is_some_and(|s| s != &db_status);
                 if status_conflicts {
                     diff.ops.push(ReconcileOp::ResyncFileStatus {
-                        path: path.clone(),
+                        rel_child: std::path::Path::new("Stories").join(&fname),
                         db_status: db_status.clone(),
                     });
                 }
@@ -966,16 +910,20 @@ pub async fn compute_reconcile_diff(
 
 /// Write phase of reconcile (V1.49 P3, R-V148P4-W3).
 ///
-/// Executes each [`ReconcileOp`] in `diff` in order, reproducing the legacy
-/// single-pass behavior. This is the only phase that mutates the DB or the
-/// chapter files, so the daemon holds the runtime lock **only** across this
-/// call. Returns a [`ReconcileReport`] derived from the diff (identical to
-/// what [`ReconcileDiff::to_report`] produces), so the report never depends on
-/// a post-write re-read.
+/// Executes the DB index mutations of `diff` in order, reproducing the legacy
+/// single-pass behavior. This is the only phase that mutates the database, so
+/// the caller holds the runtime lock **only** across this call.
+///
+/// Chapter-file frontmatter is **not** written here: each
+/// [`ReconcileOp::ResyncFileStatus`] is committed by the caller's Work
+/// byte-write port first, using [`render_frontmatter_status`] for the bytes.
+/// Returns a [`ReconcileReport`] derived from the diff (identical to what
+/// [`ReconcileDiff::to_report`] produces), so the report never depends on a
+/// post-write re-read.
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` if any database or I/O write fails.
+/// Returns `LocalDbError` if any database write fails.
 pub async fn apply_reconcile_diff(
     pool: &SqlitePool,
     work_id: &str,
@@ -1020,9 +968,9 @@ pub async fn apply_reconcile_diff(
                     .await?;
                 }
             }
-            ReconcileOp::ResyncFileStatus { path, db_status } => {
-                sync_frontmatter_status(path, db_status)?;
-            }
+            // Committed through the caller's Work byte-write port before this
+            // call; the DB index has nothing to mutate for a file resync.
+            ReconcileOp::ResyncFileStatus { .. } => {}
             ReconcileOp::UpdateWordCount {
                 chapter,
                 volume,
@@ -1970,6 +1918,40 @@ mod tests {
         .unwrap();
     }
 
+    /// Test composition of the reconcile phases: read-only diff, file resync
+    /// through the pure renderer, then the DB index apply. Production commits
+    /// the resync bytes through the core Work byte-write port instead.
+    async fn reconcile_for_test(
+        pool: &SqlitePool,
+        work_id: &str,
+        work_ref: &str,
+        workspace_root: &std::path::Path,
+        now: &str,
+    ) -> Result<ReconcileReport, LocalDbError> {
+        let diff = compute_reconcile_diff(pool, work_id, work_ref, workspace_root).await?;
+        for op in &diff.ops {
+            let ReconcileOp::ResyncFileStatus {
+                rel_child,
+                db_status,
+            } = op
+            else {
+                continue;
+            };
+            let path = workspace_root.join("Works").join(work_ref).join(rel_child);
+            let content = std::fs::read_to_string(&path).map_err(|e| LocalDbError::IoWithPath {
+                path: path.to_string_lossy().to_string(),
+                source: e,
+            })?;
+            if let Some(rendered) = render_frontmatter_status(&content, db_status) {
+                std::fs::write(&path, rendered).map_err(|e| LocalDbError::IoWithPath {
+                    path: path.to_string_lossy().to_string(),
+                    source: e,
+                })?;
+            }
+        }
+        apply_reconcile_diff(pool, work_id, now, &diff).await
+    }
+
     #[tokio::test]
     async fn test_seed_chapters_creates_rows() {
         let (pool, _dir) = fresh_pool().await;
@@ -2295,7 +2277,7 @@ mod tests {
     // Reconcile: 3-chapter workspace
     // -----------------------------------------------------------------------
     #[tokio::test]
-    async fn test_reconcile_from_filesystem() {
+    async fn test_reconcile_creates_rows_from_filesystem() {
         let (pool, dir) = fresh_pool().await;
         insert_test_work(&pool, "wrk_recon_001").await;
 
@@ -2319,13 +2301,12 @@ mod tests {
         )
         .unwrap();
 
-        let report = reconcile_from_filesystem(
+        let report = reconcile_for_test(
             &pool,
             "wrk_recon_001",
             "my-novel",
             dir.path(),
             "2026-06-07T10:00:00Z",
-            false,
         )
         .await
         .unwrap();
@@ -2438,13 +2419,12 @@ mod tests {
         )
         .unwrap();
 
-        let report = reconcile_from_filesystem(
+        let report = reconcile_for_test(
             &pool,
             "wrk_recon_002",
             "my-novel",
             dir.path(),
             "2026-06-07T11:00:00Z",
-            false,
         )
         .await
         .unwrap();
@@ -2489,13 +2469,12 @@ mod tests {
         );
 
         // Re-run reconcile — should be fully idempotent now that file matches DB.
-        let report2 = reconcile_from_filesystem(
+        let report2 = reconcile_for_test(
             &pool,
             "wrk_recon_002",
             "my-novel",
             dir.path(),
             "2026-06-07T12:00:00Z",
-            false,
         )
         .await
         .unwrap();
@@ -2505,91 +2484,31 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // V1.48 P4-fix1 (W-1 qc2): sync_frontmatter_status writes atomically.
+    // Frontmatter re-sync rendering is pure (V1.48 P4-fix1 W-1 qc2). The atomic
+    // byte write itself is the Work port's `fsync_write_atomic`, covered by
+    // nexus-core's `work_artifact` tests.
     // -----------------------------------------------------------------------
-    #[tokio::test]
-    async fn test_sync_frontmatter_status_writes_via_temp_file() {
-        let (pool, dir) = fresh_pool().await;
-        insert_test_work(&pool, "wrk_recon_atomic").await;
-
-        // Pre-seed one chapter as `draft` in DB.
-        seed_chapters(
-            &pool,
-            "wrk_recon_atomic",
-            "my-novel",
-            1,
-            "2026-06-07T10:00:00Z",
-        )
-        .await
-        .unwrap();
-        update_status(
-            &pool,
-            "wrk_recon_atomic",
-            1,
-            1,
-            "draft",
-            None,
-            "2026-06-07T11:00:00Z",
-        )
-        .await
-        .unwrap();
-
-        // Create a file whose frontmatter claims a different status.
-        let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
-        std::fs::create_dir_all(&stories_dir).unwrap();
-        let ch1_path = stories_dir.join("ch01-intro.md");
-        std::fs::write(
-            &ch1_path,
+    #[test]
+    fn test_render_frontmatter_status_resyncs_and_preserves_body() {
+        let rendered = render_frontmatter_status(
             "---\ntitle: Intro\nchapter: 1\nstatus: finalized\n---\nContent",
+            "draft",
         )
-        .unwrap();
-
-        let report = reconcile_from_filesystem(
-            &pool,
-            "wrk_recon_atomic",
-            "my-novel",
-            dir.path(),
-            "2026-06-07T12:00:00Z",
-            false,
-        )
-        .await
-        .unwrap();
-
-        // The file was re-synced; no DB update because word_count is absent.
-        assert_eq!(
-            report.resynced, 1,
-            "status conflict should count as resynced"
-        );
-        assert_eq!(report.updated, 0);
-        assert_eq!(report.preserved, 0);
-        assert_eq!(report.created, 0);
-
-        // Final file content matches DB status and body is preserved.
-        let ch1_file = std::fs::read_to_string(&ch1_path).unwrap();
+        .expect("well-formed frontmatter renders");
+        assert!(rendered.contains("status: draft"), "{rendered}");
         assert!(
-            ch1_file.contains("status: draft"),
-            "frontmatter should be re-synced to DB status"
+            !rendered.contains("status: finalized"),
+            "the DB status replaces the file status: {rendered}"
         );
+        assert!(rendered.contains("title: Intro"), "{rendered}");
         assert!(
-            ch1_file.contains("Content"),
-            "body content must be preserved"
+            rendered.contains("Content"),
+            "body content must be preserved: {rendered}"
         );
 
-        // No temp file should be left behind.
-        let leftover_tmp: Vec<_> = std::fs::read_dir(&stories_dir)
-            .unwrap()
-            .flatten()
-            .filter(|e| {
-                e.path()
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.contains(".tmp."))
-            })
-            .collect();
-        assert!(
-            leftover_tmp.is_empty(),
-            "atomic write should not leave temp files behind: {leftover_tmp:?}"
-        );
+        // No frontmatter block, or one that never closes: leave the file alone.
+        assert!(render_frontmatter_status("Body only\n", "draft").is_none());
+        assert!(render_frontmatter_status("---\nstatus: draft\nBody only\n", "draft").is_none());
     }
 
     // -----------------------------------------------------------------------
@@ -2618,13 +2537,12 @@ mod tests {
         )
         .unwrap();
 
-        let report = reconcile_from_filesystem(
+        let report = reconcile_for_test(
             &pool,
             "wrk_recon_vol",
             "my-novel",
             dir.path(),
             "2026-06-12T10:00:00Z",
-            false,
         )
         .await
         .unwrap();
@@ -3534,13 +3452,12 @@ mod tests {
         )
         .unwrap();
 
-        let report = reconcile_from_filesystem(
+        let report = reconcile_for_test(
             &pool,
             "wrk_neg_vol",
             "my-novel",
             dir.path(),
             "2026-06-12T10:00:00Z",
-            false,
         )
         .await
         .unwrap();

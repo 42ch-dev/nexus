@@ -3,6 +3,36 @@
 //! Covers novel-workflow-profile §4.5.7 tests #4 (resume draft row) and
 //! #5 (`reconcile-chapters` with DB-as-status-SSOT conflict rules).
 
+/// The reconcile phases the core Work port composes: read-only diff, file
+/// resync through the pure renderer, then the DB index apply.
+async fn reconcile_for_test(
+    pool: &sqlx::SqlitePool,
+    work_id: &str,
+    work_ref: &str,
+    workspace_root: &std::path::Path,
+    now: &str,
+) -> Result<nexus_local_db::work_chapters::ReconcileReport, nexus_local_db::LocalDbError> {
+    use nexus_local_db::work_chapters::{compute_reconcile_diff, ReconcileOp};
+    let diff = compute_reconcile_diff(pool, work_id, work_ref, workspace_root).await?;
+    for op in &diff.ops {
+        let ReconcileOp::ResyncFileStatus {
+            rel_child,
+            db_status,
+        } = op
+        else {
+            continue;
+        };
+        let path = workspace_root.join("Works").join(work_ref).join(rel_child);
+        let content = std::fs::read_to_string(&path).unwrap();
+        if let Some(rendered) =
+            nexus_local_db::work_chapters::render_frontmatter_status(&content, db_status)
+        {
+            std::fs::write(&path, rendered).unwrap();
+        }
+    }
+    nexus_local_db::work_chapters::apply_reconcile_diff(pool, work_id, now, &diff).await
+}
+
 /// §4.5.7 #4 — Resume behavior: a new run against a Work with one `draft` row
 /// resumes that row and does not create a new row.
 ///
@@ -175,16 +205,9 @@ async fn v148_serial_reconcile_preserves_db_status_and_creates_missing() {
     )
     .unwrap();
 
-    let report = nexus_local_db::work_chapters::reconcile_from_filesystem(
-        &pool,
-        work_id,
-        work_ref,
-        tmp.path(),
-        "2026-06-16T12:00:00Z",
-        false,
-    )
-    .await
-    .unwrap();
+    let report = reconcile_for_test(&pool, work_id, work_ref, tmp.path(), "2026-06-16T12:00:00Z")
+        .await
+        .unwrap();
 
     // ch01: DB status preserved (SSOT), word_count mirrored, frontmatter
     // re-synced → counts as both updated and resynced.
