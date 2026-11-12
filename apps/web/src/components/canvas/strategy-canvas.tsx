@@ -169,13 +169,18 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   // as-is; otherwise the installed preset is read as its candidate IR first.
   function handleSimulate() {
     setApproveOpen(true);
+    // A fresh trajectory is reopened, never re-walked; only states that have no
+    // current trajectory (or an outdated one) run.
+    const needsRun =
+      simulation.status === 'idle' ||
+      simulation.status === 'failed' ||
+      simulation.status === 'stale';
+    if (!needsRun) return;
     if (candidate) {
-      // A stale trajectory re-runs too: the disclosure offers that re-run, so
-      // every non-running state must actually execute it.
-      if (simulation.status !== 'running') void simulation.run(candidate);
+      void simulation.run(candidate);
       return;
     }
-    if (simulation.status !== 'running') void simulation.runStrategy(presetId);
+    void simulation.runStrategy(presetId);
   }
 
   function handleUseCurrent() {
