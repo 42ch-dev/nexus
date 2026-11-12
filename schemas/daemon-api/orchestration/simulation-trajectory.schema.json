@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/simulation-trajectory.schema.json",
+  "schema_version": 1,
+  "title": "Nexus SimulationTrajectory",
+  "description": "Deterministic trajectory of a candidate workflow document under a static walk (Simulate output). Produced from the request's candidate IR; nothing executes, no provider is called, and the input document is not mutated. The same IR yields the same bytes twice.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "ir_content_hash",
+    "simulation_level",
+    "nodes_visited",
+    "predicted_waits",
+    "effect_summary",
+    "stubbed_judges"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Trajectory contract revision, fixed at 1 for this shape. A structural change bumps it; adding a `simulation_level` value does not."
+    },
+    "ir_content_hash": {
+      "type": "string",
+      "description": "BLAKE3 canonical content hash recomputed over the request's candidate IR. Never echoed from an optional request `content_hash`."
+    },
+    "simulation_level": {
+      "type": "string",
+      "description": "Open string naming how deeply the walk explored the graph. `reachability` is the only value v0 emits: judge branches are not explored (each `llm_judge` follows its declared default edge and is listed in `stubbed_judges`) and no provider is called. Consumers MUST treat an unknown value as a newer, unsupported level instead of failing deserialization or assuming `reachability`."
+    },
+    "nodes_visited": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Node ids reached from `entry`, in deterministic walk order."
+    },
+    "predicted_waits": {
+      "type": "array",
+      "items": {
+        "title": "SimulationPredictedWait",
+        "description": "A statically predicted parking point. Static over-approximation: the wait may never fire at run time.",
+        "type": "object",
+        "required": ["reason", "subject"],
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": ["manual", "signal"],
+            "description": "Why the walk stops: a manual wait node, or a `pause` signal binding."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Node id when `reason` is `manual`; signal name for a global `signals[].action: pause` binding, which has no target node."
+          }
+        }
+      },
+      "description": "Static parking points reachable from `entry`."
+    },
+    "effect_summary": {
+      "type": "string",
+      "enum": ["pure", "read", "write_candidate", "external"],
+      "description": "Worst-case effect fence over the visited default-branch nodes and their nested children, compared by the total order `pure < read < write_candidate < external` (a parent is the maximum of its children). The generated Rust enum derives `Ord`/`PartialOrd` in exactly this declaration order, so consumers compare with those derives instead of a local rank table."
+    },
+    "stubbed_judges": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Node ids visited through an `exit_when.kind: llm_judge` whose declared default branch was followed without a model call."
+    }
+  }
+}

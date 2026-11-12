@@ -959,6 +959,17 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorkflowDocument
         ),
+        // ── daemon-api/orchestration/ (v1.237 P2 — simulator contracts) ─────
+        entry!(
+            "schemas/daemon-api/orchestration/simulation-trajectory.schema.json",
+            Strict,
+            SimulationTrajectory
+        ),
+        entry!(
+            "schemas/daemon-api/orchestration/strategy-simulation-request.schema.json",
+            Strict,
+            StrategySimulationRequest
+        ),
         // ── daemon-api/preset-management/ (V1.63 P3) ────────────────────────
         entry!(
             "schemas/daemon-api/preset-management/preset-summary.schema.json",

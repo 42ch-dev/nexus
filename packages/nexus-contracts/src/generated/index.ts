@@ -294,6 +294,8 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ListSessionsResponse: 2,
   SessionDetailResponse: 1,
   SessionSummary: 1,
+  SimulationTrajectory: 1,
+  StrategySimulationRequest: 1,
   WorkflowDocument: 1,
   GetPresetResponse: 1,
   ListPresetsResponse: 1,
