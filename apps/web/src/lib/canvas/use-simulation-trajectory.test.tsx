@@ -5,7 +5,7 @@
  */
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { BrowserClient } from '@/lib/nexus';
 import { useHandlers } from '@/test/msw-server';
@@ -30,7 +30,42 @@ function Harness({ revision }: { revision: number }) {
   );
 }
 
+function PresetHarness() {
+  const simulation = useSimulationTrajectory(undefined);
+  return (
+    <div>
+      <span data-testid="preset-status">{simulation.status}</span>
+      <button type="button" onClick={() => void simulation.runStrategy('novel-writing')}>
+        Walk preset
+      </button>
+    </div>
+  );
+}
+
 describe('useSimulationTrajectory', () => {
+  it('re-reads a fetched IR: unchanged keeps the trajectory, moved re-walks it', async () => {
+    let doc = candidateDocument({ id: 'novel-writing', revision: 1, content_hash: 'hash-1' });
+    const posts = vi.fn(() => HttpResponse.json(simulationTrajectory()));
+    useHandlers(
+      http.get('/v1/daemon/strategies/novel-writing/workflow-ir', () => HttpResponse.json(doc)),
+      http.post(SIMULATE_PATH, posts),
+    );
+
+    renderInApp(<PresetHarness />, { client: new BrowserClient() });
+    fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
+    await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
+
+    // Nothing changed: the trajectory in hand still describes the preset.
+    fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
+    await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
+    expect(posts).toHaveBeenCalledTimes(1);
+
+    doc = candidateDocument({ id: 'novel-writing', revision: 2, content_hash: 'hash-2' });
+    fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
+    await waitFor(() => expect(posts).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
+  });
+
   it('posts the candidate and exposes the returned trajectory', async () => {
     let requestBody: unknown = null;
     useHandlers(

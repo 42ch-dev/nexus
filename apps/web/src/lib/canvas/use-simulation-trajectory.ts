@@ -11,6 +11,10 @@
  * Rust-side), so staleness compares the identity fields the candidate carries
  * against the values captured at request time. `ir_content_hash` in the
  * trajectory is the server's recomputation, recorded for display only.
+ *
+ * A fetched (installed-preset) document has no live candidate prop, so
+ * `runStrategy` re-reads it and compares the same identity itself: unchanged
+ * keeps the trajectory in hand, moved marks it stale and walks it again.
  */
 import { useCallback, useMemo, useState } from 'react';
 
@@ -26,13 +30,23 @@ export interface SimulationSnapshot {
 
 export type SimulationStatus = 'idle' | 'running' | 'ready' | 'failed' | 'stale';
 
+/** Does the snapshot still describe this document? */
+function sameDocument(snapshot: SimulationSnapshot, doc: WorkflowDocument): boolean {
+  return (
+    doc.revision === snapshot.revision && (doc.content_hash ?? null) === snapshot.contentHash
+  );
+}
+
 export interface SimulationState {
   status: SimulationStatus;
   trajectory: SimulationTrajectory | null;
   /** The refused simulate call, kept apart from "never simulated". */
   error: unknown;
   run: (candidate: WorkflowDocument) => Promise<void>;
-  /** Simulate the installed strategy: read its candidate IR, then walk it. */
+  /**
+   * Simulate the installed strategy: re-read its candidate IR and walk it only
+   * when that IR no longer matches the trajectory in hand.
+   */
   runStrategy: (strategyId: string) => Promise<void>;
   reset: () => void;
 }
@@ -42,17 +56,18 @@ export function useSimulationTrajectory(
 ): SimulationState {
   const client = useNexusClient();
   const [snapshot, setSnapshot] = useState<SimulationSnapshot | null>(null);
+  // Set when a re-read installed document moved on: the held trajectory is
+  // superseded even though no candidate prop exists to compare against.
+  const [movedOn, setMovedOn] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [isRunning, setIsRunning] = useState(false);
 
   const isStale = useMemo(() => {
-    // A fetched document has no live candidate prop to go stale against.
-    if (!snapshot || !candidate) return false;
-    return (
-      candidate?.revision !== snapshot.revision ||
-      (candidate?.content_hash ?? null) !== snapshot.contentHash
-    );
-  }, [candidate?.revision, candidate?.content_hash, snapshot]);
+    if (!snapshot) return false;
+    // A fetched document has no live candidate prop; `runStrategy` decides.
+    if (!candidate) return movedOn;
+    return !sameDocument(snapshot, candidate);
+  }, [candidate?.revision, candidate?.content_hash, snapshot, movedOn]);
 
   const simulate = useCallback(
     async (doc: WorkflowDocument) => {
@@ -62,16 +77,20 @@ export function useSimulationTrajectory(
         revision: doc.revision,
         contentHash: doc.content_hash ?? null,
       });
+      setMovedOn(false);
     },
     [client],
   );
 
   const walk = useCallback(
-    async (load: () => Promise<WorkflowDocument>) => {
+    // A `null` load result means the held trajectory still describes the
+    // document, so nothing is walked.
+    async (load: () => Promise<WorkflowDocument | null>) => {
       setIsRunning(true);
       setError(null);
       try {
-        await simulate(await load());
+        const doc = await load();
+        if (doc) await simulate(doc);
       } catch (caught) {
         // A refused read/walk is an explicit failure, never an empty trajectory:
         // the surface must not read as approval-ready.
@@ -90,24 +109,33 @@ export function useSimulationTrajectory(
   );
 
   const runStrategy = useCallback(
-    (strategyId: string) => walk(() => client.getStrategyWorkflowIr(strategyId)),
-    [client, walk],
+    (strategyId: string) =>
+      walk(async () => {
+        const doc = await client.getStrategyWorkflowIr(strategyId);
+        if (snapshot && sameDocument(snapshot, doc)) return null;
+        if (snapshot) setMovedOn(true);
+        return doc;
+      }),
+    [client, walk, snapshot],
   );
 
   const reset = useCallback(() => {
     setSnapshot(null);
+    setMovedOn(false);
     setError(null);
   }, []);
 
-  const status: SimulationStatus = isRunning
-    ? 'running'
-    : error !== null
-      ? 'failed'
-      : snapshot
-        ? isStale
-          ? 'stale'
-          : 'ready'
-        : 'idle';
+  // A stale trajectory is named as such even while its re-walk is in flight:
+  // the surface must never present a superseded trajectory as current.
+  const status: SimulationStatus = isStale
+    ? 'stale'
+    : isRunning
+      ? 'running'
+      : error !== null
+        ? 'failed'
+        : snapshot
+          ? 'ready'
+          : 'idle';
 
   return { status, trajectory: snapshot?.trajectory ?? null, error, run, runStrategy, reset };
 }
