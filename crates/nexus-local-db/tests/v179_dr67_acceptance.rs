@@ -26,8 +26,8 @@
 //! the documented finalize advance lands as the just-finalized number.
 
 use nexus_local_db::work_chapters::{
-    count_chapters, is_work_completed, next_chapter, reconcile_from_filesystem, seed_chapters,
-    update_status,
+    apply_reconcile_diff, compute_reconcile_diff, count_chapters, is_work_completed, next_chapter,
+    render_frontmatter_status, seed_chapters, update_status, ReconcileOp,
 };
 use nexus_local_db::works::WorkPatch;
 
@@ -359,7 +359,23 @@ async fn w179_dr67_05_reconcile_rebuilds_missing_rows_with_db_status_ssot() {
     )
     .unwrap();
 
-    let report = reconcile_from_filesystem(&pool, work_id, work_ref, workspace_root, NOW, false)
+    let diff = compute_reconcile_diff(&pool, work_id, work_ref, workspace_root)
+        .await
+        .unwrap();
+    for op in &diff.ops {
+        let ReconcileOp::ResyncFileStatus {
+            rel_child,
+            db_status,
+        } = op
+        else {
+            continue;
+        };
+        let path = workspace_root.join("Works").join(work_ref).join(rel_child);
+        let content = std::fs::read_to_string(&path).unwrap();
+        let rendered = render_frontmatter_status(&content, db_status).unwrap();
+        std::fs::write(&path, rendered).unwrap();
+    }
+    let report = apply_reconcile_diff(&pool, work_id, NOW, &diff)
         .await
         .unwrap();
     assert_eq!(report.created, 1, "missing ch2 row is rebuilt from file");
