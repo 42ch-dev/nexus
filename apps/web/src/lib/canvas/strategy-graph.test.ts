@@ -12,6 +12,10 @@
 import { describe, expect, it } from 'vitest';
 import type { MutableRefObject } from 'react';
 
+import type { SimulationTrajectory } from '@42ch/nexus-contracts';
+
+import { simulationTrajectory } from '@/test/simulation-fixture';
+
 import { parsePresetYaml } from './preset-yaml';
 import { buildStrategyGraph } from './strategy-graph';
 import {
@@ -96,11 +100,16 @@ function makeCtxRef() {
   >;
 }
 
-function project(yaml: string) {
+function project(yaml: string, trajectory: SimulationTrajectory | null = null) {
   const ctxRef = makeCtxRef();
   const adapter = createStrategyCanvasAdapter(ctxRef);
   const parsed = parsePresetYaml(yaml);
-  const result = adapter.projectGraph({ parsed, revision: parsed.revision ?? 0, activeSession: null });
+  const result = adapter.projectGraph({
+    parsed,
+    revision: parsed.revision ?? 0,
+    activeSession: null,
+    trajectory,
+  });
   return { result, ctxRef, parsed };
 }
 
@@ -142,6 +151,19 @@ describe('StrategyCanvasAdapter.projectGraph — projection equivalence', () => 
     const direct = buildStrategyGraph(parsed);
     expect(result.nodes).toEqual(direct.nodes);
     expect(result.edges).toEqual(direct.edges);
+  });
+
+  it('overlays predicted waits and stubbed judges from the trajectory', () => {
+    const { result } = project(
+      SAMPLE_YAML,
+      simulationTrajectory({ stubbed_judges: ['gathering'], predicted_waits: [] }),
+    );
+
+    const gathering = result.nodes.find((n) => n.id === 'gathering')!;
+    expect(gathering.data.branchNotExplored).toBe(true);
+    const outlining = result.nodes.find((n) => n.id === 'outlining')!;
+    expect(outlining.data.branchNotExplored).toBeUndefined();
+    expect(outlining.data.predictedWait).toBeUndefined();
   });
 
   it('creates one top-level node per outer state', () => {

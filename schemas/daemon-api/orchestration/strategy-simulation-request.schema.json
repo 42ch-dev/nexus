@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/strategy-simulation-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus StrategySimulationRequest",
+  "description": "Body of the non-mutating simulate route. The document in the body is the candidate input, so no stored-candidate id, `base_revision` or persistence binding is carried.",
+  "type": "object",
+  "required": ["document"],
+  "additionalProperties": false,
+  "properties": {
+    "document": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/workflow-document.schema.json"
+    }
+  }
+}

@@ -1,6 +1,8 @@
 import type { MutableRefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 
+import type { SimulationTrajectory } from '@42ch/nexus-contracts';
+
 import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
 import type { ConflictModalProps } from '../conflict-modal';
 import { StrategyAltView } from '../strategy-alt-view';
@@ -13,6 +15,7 @@ import { isStrategyConflictError } from '@/lib/canvas/use-strategy-data';
 import { EdgeInspector } from './inspectors/edge-inspector';
 import { PromptInspector } from './inspectors/prompt-inspector';
 import { StateInspector } from './inspectors/state-inspector';
+import { applyTrajectoryOverlay } from './simulation-overlay';
 import {
   getChangedFields,
   getConflictDraft,
@@ -39,6 +42,11 @@ export interface StrategySurfaceGraph {
   revision: number;
   parsed: ParsedPreset;
   activeSession: ActiveSession | null | undefined;
+  /**
+   * Static trajectory of the open candidate, when a simulation has run. It is
+   * part of the graph payload so a new trajectory re-projects the nodes.
+   */
+  trajectory: SimulationTrajectory | null;
 }
 
 /**
@@ -142,7 +150,7 @@ export function createStrategyCanvasAdapter(
       const drafts = localEdges.filter((e) => !baseIds.has(e.id));
 
       return {
-        nodes,
+        nodes: applyTrajectoryOverlay(nodes, graph.trajectory),
         edges: [...projected.edges, ...drafts],
       };
     },

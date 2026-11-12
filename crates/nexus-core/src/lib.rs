@@ -57,6 +57,8 @@ mod principal;
 mod provider_journal;
 mod reading;
 mod service;
+#[cfg(feature = "execution")]
+mod simulate;
 mod soul;
 mod storage_status;
 mod sync;

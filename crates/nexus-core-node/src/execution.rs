@@ -71,8 +71,9 @@ use nexus_contracts::local::schedule::http::{
 };
 use nexus_contracts::{
     CoreStrategyPatchResponse, GetPresetResponse, ReloadPresetResponse, ScaffoldPresetRequest,
-    StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest, StrategyPatchTransitionRequest,
-    UpdatePresetRequest, UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
+    SimulationTrajectory, StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest,
+    StrategyPatchTransitionRequest, StrategySimulationRequest, UpdatePresetRequest,
+    UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
 };
 use nexus_core::execution::ExecutionOpenError;
 use nexus_core::CoreError;
@@ -873,6 +874,37 @@ impl NativeCore {
                 .patch_strategy_prompt_template(&principal, strategy_id, state_id, request)
                 .await?;
             Ok(response)
+        })
+        .await
+    }
+
+    /// `POST /v1/daemon/strategies/{strategy_id}/simulate`.
+    #[napi]
+    pub async fn simulate_strategy(
+        &self,
+        principal_handle: String,
+        strategy_id: String,
+        request_json: Buffer,
+    ) -> Result<Buffer> {
+        let request: StrategySimulationRequest = decode(request_json, "request")?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let response: SimulationTrajectory = core
+                .simulate_strategy(&principal, strategy_id, request)
+                .await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `GET /v1/daemon/strategies/{strategy_id}/workflow-ir`.
+    #[napi]
+    pub async fn strategy_workflow_ir(
+        &self,
+        principal_handle: String,
+        strategy_id: String,
+    ) -> Result<Buffer> {
+        self.json_call(principal_handle, async move |core, principal| {
+            core.strategy_workflow_ir(&principal, strategy_id).await
         })
         .await
     }

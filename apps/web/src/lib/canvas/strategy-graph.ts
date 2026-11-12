@@ -44,6 +44,14 @@ export interface StrategyNodeData extends Record<string, unknown> {
   /** Live overlay status (filled by the overlay layer, not the adapter). */
   status?: string;
   description?: string;
+  /**
+   * Static-simulation overlay: this state is a predicted parking point. It is
+   * an over-approximation from the static walk, never a commitment that a run
+   * pauses here.
+   */
+  predictedWait?: 'manual' | 'signal';
+  /** Static-simulation overlay: an `llm_judge` state collapsed to its declared default branch. */
+  branchNotExplored?: boolean;
 }
 
 /** Data carried by a Strategy edge (Draft §3.4 StrategyEdgeData). */

@@ -20,6 +20,7 @@ export function CanvasHeader({
   showAlt,
   setShowAlt,
   onOpenCreateTransition,
+  onSimulate,
 }: {
   revision: number;
   status: 'clean' | 'dirty' | 'conflict';
@@ -33,6 +34,12 @@ export function CanvasHeader({
    * field, select, or contenteditable so authors can type the letter N.
    */
   onOpenCreateTransition?: () => void;
+  /**
+   * Simulate entry point: resolves the open strategy's IR (a supplied
+   * candidate, or the installed preset read) and opens the disclosure that
+   * renders the simulation limit.
+   */
+  onSimulate?: () => void;
 }) {
   const { t } = useTranslation('canvas');
 
@@ -76,6 +83,15 @@ export function CanvasHeader({
             >
               <Plus className="h-3.5 w-3.5" aria-hidden />
               {t('strategy.header.createTransition')}
+            </button>
+          ) : null}
+          {onSimulate ? (
+            <button
+              type="button"
+              onClick={onSimulate}
+              className="rounded-control border border-gray-alpha-400 px-3 py-1.5 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
+            >
+              {t('strategy.header.simulate')}
             </button>
           ) : null}
           <button

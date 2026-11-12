@@ -234,6 +234,7 @@
       "showGraph": "Show graph",
       "showList": "Show list",
       "createTransition": "Create",
+      "simulate": "Simulate…",
       "livePrefix": "Live:",
       "liveStatus": ""
     },
@@ -256,7 +257,9 @@
       "end": "End",
       "innerGraph": "Inner DAG · {{id}}",
       "join": "Join · {{strategy}}",
-      "currentExecutionNode": "Current execution node"
+      "currentExecutionNode": "Current execution node",
+      "predictedWait": "Predicted wait (static)",
+      "branchNotExplored": "Branch not explored"
     },
     "toast": {
       "runQueued": "Preset run queued",
@@ -266,6 +269,31 @@
       "steerResumeConflict": "Idea saved as core context version {{version}}; this schedule is waiting on a manual step, so the resume was refused as a state conflict"
     },
     "draftTransitionLabel": "Draft transition",
+    "approve": {
+      "title": "Approve candidate",
+      "notSimulated": "Not simulated. A candidate with no trajectory is not approval-ready.",
+      "running": "Running the static simulation…",
+      "failed": "Simulation failed: {{message}}. This is a failed run, not an un-simulated candidate, and it is not approval-ready.",
+      "stale": "Stale trajectory: the candidate changed after this simulation. Re-run Simulate before approving.",
+      "simulationLevel": "Simulation level",
+      "level": {
+        "reachability": "Reachability only; judge branches not explored",
+        "unsupported": "{{level}} — this app version does not know this level, so the trajectory is treated as unsupported"
+      },
+      "stubbedJudges": "Judge branches not explored",
+      "stubbedJudgesCount_one": "{{count}} judge branch not explored",
+      "stubbedJudgesCount_other": "{{count}} judge branches not explored",
+      "stubbedJudgesExpand": "Show stubbed judge ids",
+      "effectSummary": "Effect summary",
+      "effectFence": "Worst-case effect fence: {{effect}} — a fence, not a forecast.",
+      "predictedWaits": "Wait points",
+      "predictedWaitsLabel_one": "Predicted (static) waits: {{count}}",
+      "predictedWaitsLabel_other": "Predicted (static) waits: {{count}}",
+      "doesNotPreviewOutput": "A passed simulation does not preview output: no model is called and nothing is generated.",
+      "approve": "Approve",
+      "approvalUnavailable": "Approval is not available in this build: the approval write path is tracked as I-000415, so this action is disabled. The simulation above still shows the limit.",
+      "rerun": "Run simulation"
+    },
     "draftTransitionEditor": "Draft transition editor",
     "revisionBadge": {
       "label": "rev {{revision}}",
