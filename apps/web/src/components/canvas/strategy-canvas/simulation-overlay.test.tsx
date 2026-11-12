@@ -94,6 +94,23 @@ describe('applyTrajectoryOverlay', () => {
 
     expect(nodes[0].data.predictedWait).toBeUndefined();
   });
+
+  it('does not attach a signal wait to a node whose id equals the signal name', () => {
+    const nodes = applyTrajectoryOverlay(
+      [canvasNode('draft'), canvasNode('resume')],
+      simulationTrajectory({
+        predicted_waits: [
+          { reason: 'signal', subject: 'resume' },
+          { reason: 'manual', subject: 'draft' },
+        ],
+        stubbed_judges: [],
+      }),
+    );
+    const byId = new Map(nodes.map((n) => [n.id, n.data]));
+
+    expect(byId.get('resume')?.predictedWait).toBeUndefined();
+    expect(byId.get('draft')?.predictedWait).toBe('manual');
+  });
 });
 
 describe('StrategyStateNode — simulation markers', () => {

@@ -291,6 +291,7 @@
       "predictedWaitsLabel_other": "Predicted (static) waits: {{count}}",
       "doesNotPreviewOutput": "A passed simulation does not preview output: no model is called and nothing is generated.",
       "approve": "Approve",
+      "approvalUnavailable": "Approval is not available in this build: the approval write path is tracked as I-000415, so this action is disabled. The simulation above still shows the limit.",
       "rerun": "Run simulation"
     },
     "draftTransitionEditor": "Draft transition editor",

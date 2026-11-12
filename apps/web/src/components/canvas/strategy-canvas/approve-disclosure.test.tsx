@@ -143,4 +143,19 @@ describe('ApproveDisclosure — approval readiness', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Run simulation' }));
     expect(onRun).toHaveBeenCalledTimes(1);
   });
+
+  it('disables Approve, and names why, when no approval write path is wired', () => {
+    renderDisclosure({ onApprove: undefined });
+
+    expect(approveButton()).toBeDisabled();
+    expect(screen.getByTestId('approve-unavailable')).toHaveTextContent('I-000415');
+    // The disclosure itself still works: the limit is visible without approval.
+    expect(screen.getByTestId('approve-simulation-level')).toBeInTheDocument();
+  });
+
+  it('names a non-Error, non-string throw instead of swallowing it', () => {
+    renderDisclosure({ status: 'failed', trajectory: null, error: { code: 'walk_refused' } });
+
+    expect(screen.getByTestId('approve-simulate-failed')).toHaveTextContent('walk_refused');
+  });
 });

@@ -170,9 +170,9 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   function handleSimulate() {
     setApproveOpen(true);
     if (candidate) {
-      if (simulation.status === 'idle' || simulation.status === 'failed') {
-        void simulation.run(candidate);
-      }
+      // A stale trajectory re-runs too: the disclosure offers that re-run, so
+      // every non-running state must actually execute it.
+      if (simulation.status !== 'running') void simulation.run(candidate);
       return;
     }
     if (simulation.status !== 'running') void simulation.runStrategy(presetId);
@@ -345,7 +345,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         trajectory={simulation.trajectory}
         error={simulation.error}
         onRun={handleSimulate}
-        onApprove={() => onApproveCandidate?.()}
+        onApprove={onApproveCandidate}
       />
 
       <StrategyConflictModal

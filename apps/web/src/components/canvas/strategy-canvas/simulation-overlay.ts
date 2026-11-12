@@ -18,15 +18,17 @@ export function applyTrajectoryOverlay(
 ): Node<StrategyNodeData>[] {
   if (!trajectory) return nodes;
 
-  const waitBySubject = new Map<string, 'manual' | 'signal'>();
+  // Only a `manual` wait names a node id; a `signal` subject is a signal name,
+  // so a signal colliding with a state id must not attach to that node.
+  const waitByNode = new Map<string, 'manual'>();
   for (const wait of trajectory.predicted_waits) {
-    waitBySubject.set(wait.subject, wait.reason);
+    if (wait.reason === 'manual') waitByNode.set(wait.subject, wait.reason);
   }
   const stubbed = new Set(trajectory.stubbed_judges);
 
   return nodes.map((node) => {
     const { stateId } = node.data;
-    const predictedWait = waitBySubject.get(stateId);
+    const predictedWait = waitByNode.get(stateId);
     const branchNotExplored = stubbed.has(stateId);
     if (!predictedWait && !branchNotExplored) return node;
     return {
