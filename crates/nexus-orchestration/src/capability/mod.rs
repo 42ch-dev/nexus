@@ -1436,8 +1436,7 @@ states:
     }
 
     #[tokio::test]
-    async fn preflight_t1_recording_registry_is_per_run_and_sees_no_dispatch_without_a_capability()
-    {
+    async fn preflight_t1_recording_registries_are_per_run_and_isolate_dispatch_between_engines() {
         use crate::engine::GraphFlowEngine;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
@@ -1445,23 +1444,51 @@ states:
         // Positive control: the counter is live, and the ONLY row the run can
         // resolve is the probe (the real builtins are absent from this
         // registry, so any bypass fails the run instead of passing silently).
-        let probe_hits = Arc::new(AtomicUsize::new(0));
-        let probe_caps = recording_registry(&probe_hits);
+        let first_hits = Arc::new(AtomicUsize::new(0));
+        let first_caps = recording_registry(&first_hits);
         assert!(
-            probe_caps.get("judge.rule").is_none(),
+            first_caps.get("judge.rule").is_none(),
             "no builtins in the recording registry"
         );
-        let probe_loaded = nexus_preset::load_preset_from_str(T1_PROBE_PRESET, probe_caps.as_ref())
+        let probe_loaded = nexus_preset::load_preset_from_str(T1_PROBE_PRESET, first_caps.as_ref())
             .expect("probe preset loads against the recording registry");
         let probe_engine = GraphFlowEngine::new_with_storage(
             Arc::new(graph_flow::InMemorySessionStorage::new()),
-            CapabilityRegistryHolder::with_registry(probe_caps.clone()),
+            CapabilityRegistryHolder::with_registry(first_caps.clone()),
         );
         run_to_completion(&probe_engine, &probe_loaded).await;
         assert_eq!(
-            probe_hits.load(Ordering::SeqCst),
+            first_hits.load(Ordering::SeqCst),
             1,
             "one reachable capability, one dispatch"
+        );
+
+        // Second engine, same dispatching graph, its own registry: if this
+        // engine resolved the first engine's registry instead, the dispatch
+        // below would land in `first_hits` and leave `second_hits` at zero.
+        let second_hits = Arc::new(AtomicUsize::new(0));
+        let second_caps = recording_registry(&second_hits);
+        assert!(
+            second_caps.get("judge.rule").is_none(),
+            "no builtins in the second recording registry"
+        );
+        let second_loaded =
+            nexus_preset::load_preset_from_str(T1_PROBE_PRESET, second_caps.as_ref())
+                .expect("probe preset loads against the second registry");
+        let second_engine = GraphFlowEngine::new_with_storage(
+            Arc::new(graph_flow::InMemorySessionStorage::new()),
+            CapabilityRegistryHolder::with_registry(second_caps.clone()),
+        );
+        run_to_completion(&second_engine, &second_loaded).await;
+        assert_eq!(
+            second_hits.load(Ordering::SeqCst),
+            1,
+            "the second engine dispatched through its own registry"
+        );
+        assert_eq!(
+            first_hits.load(Ordering::SeqCst),
+            1,
+            "the second run did not touch the first engine's counter"
         );
 
         // Negative: a graph with no capability-reachable state records zero.
@@ -1480,13 +1507,10 @@ states:
             "no dispatch without a capability"
         );
 
-        // The two runs never shared a registry, so nothing leaked between them.
-        assert!(!Arc::ptr_eq(&probe_caps, &quiet_caps));
-        assert_eq!(
-            probe_hits.load(Ordering::SeqCst),
-            1,
-            "the first run's counter is untouched"
-        );
+        // No two runs shared a registry, so nothing leaked between them.
+        assert!(!Arc::ptr_eq(&first_caps, &second_caps));
+        assert!(!Arc::ptr_eq(&first_caps, &quiet_caps));
+        assert!(!Arc::ptr_eq(&second_caps, &quiet_caps));
         assert!(
             CapabilityRegistryHolder::new().get().is_none(),
             "a fresh holder is empty, never the production one"
