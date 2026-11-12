@@ -22,10 +22,13 @@ import type { SimulationStatus } from '@/lib/canvas/use-simulation-trajectory';
 export interface ApproveDisclosureProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Authoritative surface state: `'stale'` alone renders the stale banner. */
   status: SimulationStatus;
   /**
-   * The held trajectory no longer describes the document. Read apart from
-   * `status` so the stale banner stays visible while a replacement walk runs.
+   * The finer staleness fact `status` cannot carry: a stale snapshot whose
+   * replacement walk reports `running` (or whose re-read reports `failed`)
+   * still has to show the banner. Optional — a caller that passes only
+   * `status` is complete, and the banner follows `status === 'stale'`.
    */
   isStale?: boolean;
   trajectory: SimulationTrajectory | null;
@@ -51,6 +54,9 @@ export function ApproveDisclosure({
   onRun,
 }: ApproveDisclosureProps) {
   const { t } = useTranslation('canvas');
+  // `status` owns the banner; `isStale` only re-adds it while a newer fact
+  // (`running`, `failed`) outranks staleness in `status`.
+  const showStale = status === 'stale' || isStale;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -75,7 +81,7 @@ export function ApproveDisclosure({
           </p>
         ) : null}
 
-        {isStale ? (
+        {showStale ? (
           <p
             data-testid="approve-stale"
             role="alert"

@@ -151,7 +151,12 @@ export function useSimulationTrajectory(
     (strategyId: string) =>
       walk(async () => {
         const doc = await client.getStrategyWorkflowIr(strategyId);
-        if (snapshot && sameDocument(snapshot, doc)) return null;
+        if (snapshot && sameDocument(snapshot, doc)) {
+          // The document came back to what the held trajectory walked, so the
+          // moved-on mark no longer applies and must not pin the surface stale.
+          setMovedOn(false);
+          return null;
+        }
         if (snapshot) setMovedOn(true);
         return doc;
       }),

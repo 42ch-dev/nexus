@@ -112,6 +112,20 @@ describe('ApproveDisclosure — approval readiness', () => {
     expect(props.onApprove).toHaveBeenCalledTimes(1);
   });
 
+  it('renders the stale banner from status alone', () => {
+    renderDisclosure({ status: 'stale' });
+
+    expect(screen.getByTestId('approve-stale')).toBeInTheDocument();
+    expect(approveButton()).toBeDisabled();
+  });
+
+  it('keeps the stale banner visible while a replacement walk runs', () => {
+    renderDisclosure({ status: 'running', isStale: true });
+
+    expect(screen.getByTestId('approve-stale')).toBeInTheDocument();
+    expect(screen.getByText('Running the static simulation…')).toBeInTheDocument();
+  });
+
   it('shows the trajectory as stale and disables Approve after a revision change', () => {
     renderDisclosure({ status: 'stale', isStale: true });
 
@@ -140,6 +154,8 @@ describe('ApproveDisclosure — approval readiness', () => {
     const onRun = vi.fn();
     renderDisclosure({ status: 'stale', onRun });
 
+    // `stale` is the product's own stale state; the banner belongs to it.
+    expect(screen.getByTestId('approve-stale')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Run simulation' }));
     expect(onRun).toHaveBeenCalledTimes(1);
   });

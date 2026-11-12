@@ -98,6 +98,40 @@ describe('useSimulationTrajectory', () => {
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
   });
 
+  it('clears the moved-on mark when the re-read matches the walked document again', async () => {
+    let doc = servedIrDocument({ id: 'novel-writing' });
+    let posts = 0;
+    useHandlers(
+      http.get(IR_PATH, () => HttpResponse.json(doc)),
+      http.post(SIMULATE_PATH, () => {
+        posts += 1;
+        return posts === 2
+          ? HttpResponse.json(
+              { error: { code: 'unavailable', message: 'walk refused' } },
+              { status: 503 },
+            )
+          : HttpResponse.json(simulationTrajectory());
+      }),
+    );
+
+    renderInApp(<PresetHarness />, { client: new BrowserClient() });
+    fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
+    await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
+
+    // The preset moved on, and the walk that would replace the trajectory
+    // fails: the moved-on mark outlives the refused walk.
+    doc = servedIrDocument({ id: 'novel-writing', entry: 'routing' });
+    fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
+    await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('failed'));
+
+    // The content is back to what the held trajectory walked: nothing is
+    // walked and the trajectory is fresh again, not pinned at stale.
+    doc = servedIrDocument({ id: 'novel-writing' });
+    fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
+    await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
+    expect(posts).toBe(2);
+  });
+
   it('posts the candidate and exposes the returned trajectory', async () => {
     let requestBody: unknown = null;
     useHandlers(
