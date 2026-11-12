@@ -480,6 +480,8 @@ This section is **maintainer guidance** for how to land the two Explorations and
 | **3** | Resolve §9 open questions that #482/#483 share | Nest depth, IR encoding, generator home, simulate fidelity, Approve policy — decide against #482 constraints, record answers here or in a follow-up Proposed/Draft. |
 | **4** | Draft/Master promotion (later, separate PR) | Only then does this design outrank active Masters; link-migration sweep per AGENTS.md. |
 
+For iteration `v1.236-adr-foundation`, these seven questions are answered in `.mstar/iterations/v1.236-adr-foundation/specs/workflow-ir-decisions.md`, the round-1 decision record; YAML/Canvas/execution switches remain governed by the redesign ADR's phase plan.
+
 **Anti-pattern:** merging #483 first “because it is more detailed,” or implementing P0 while #482 is still contested. Review of #483 MAY happen in parallel with #482 review; **merge and treat-as-constraint** SHOULD be #482 → #483.
 
 **Optional review tactic:** if maintainers want the replacement story narrated first, review #483 for understanding, then merge #482 as the short direction (merge still does **not** confer implement authority), then merge #483 — repository merge order still #482 then #483.

@@ -155,6 +155,8 @@ This aligns with [lightweight-core-modular-packaging.md](2026-11-10-lightweight-
 6. Pattern version pins vs hot-update: exact pin at Compose-time, re-resolve at Apply, or allow controlled hot-reload after Apply with source-freeze exceptions?
 7. During a compose session, how do **local / partial Agent regenerations** of a nested region stay merged into a **single IR truth** without forking shadow candidates the user cannot reconcile?
 
+For iteration `v1.236-adr-foundation`, these seven questions are answered in `.mstar/iterations/v1.236-adr-foundation/specs/workflow-ir-decisions.md`, the round-1 decision record; YAML/Canvas/execution switches remain governed by the redesign ADR's phase plan.
+
 ---
 
 ### 9. References
