@@ -4140,6 +4140,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-workflow-ir"
+version = "0.1.0"
+dependencies = [
+ "nexus-contracts",
+ "serde_json",
+]
+
+[[package]]
 name = "nexus42"
 version = "0.1.0"
 dependencies = [
