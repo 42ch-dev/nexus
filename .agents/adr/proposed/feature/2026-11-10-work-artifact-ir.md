@@ -1,6 +1,6 @@
 # ADR: Work Artifact IR — Read/Write Ports for Creative Work Output
 
-Status: proposed — not implement authority. Nothing here schedules crates or claims a shipped feature.
+Status: proposed — P0–P5 shipped in v1.236 (schema/import, validation parity, reconcile admission, direct-write guard); the record stays in `proposed/` until the Proposal→Decision rewrite promotes it to `implemented/`.
 Date: 2026-11-10
 Scope: Detailed design for a **Work Artifact IR** that is the **SSOT** for a Work's durable creative artifacts (chapter bodies, outlines, review/quality logs, derived narrative and rules files, scaffolded tree layout, chapter-state fields that today live in `work_chapters`, path rules, frontmatter/kind vocabulary), plus **read/write ports** that production and dry-run share. Lifecycle is **Load → Validate → Dry-run → Commit** (a storage-and-commit pipeline, not a strategy Generate → Execute pipeline).
 Source: migrated from the retired tracked specs corpus
@@ -24,7 +24,7 @@ Source: migrated from the retired tracked specs corpus
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | **Proposed** — not implement authority. Nothing here schedules crates or claims a shipped feature. |
+| **Status** | **Proposed** — P0–P5 shipped in v1.236; bucket promotion awaits the Proposal→Decision rewrite. |
 | **Document class** | Exploration |
 | **Scope** | Detailed design for a **Work Artifact IR** that is the **SSOT** for a Work's durable creative artifacts (chapter bodies, outlines, review/quality logs, derived narrative and rules files, scaffolded tree layout, chapter-state fields that today live in `work_chapters`, path rules, frontmatter/kind vocabulary), plus **read/write ports** that production and dry-run share. Lifecycle is **Load → Validate → Dry-run → Commit** (a storage-and-commit pipeline, not a strategy Generate → Execute pipeline). |
 | **Coordinates with** | [chapter-content-local-api.md](../../../../docs/specs/runtime/chapter-content-local-api.md) (HTTP wire; today asserts `work_chapters` metadata SSOT — target authority moves here; amendment in a later promotion PR), [workflow-profile.md](../../../../docs/specs/novel-writing/workflow-profile.md) (profile behavior; today owns layout + chapter-state — target layout/chapter-state authority moves here; amendment in a later promotion PR), [quality-loop.md](../../../../docs/specs/novel-writing/quality-loop.md), [sync-contract.md](../../../../docs/specs/novel-writing/sync-contract.md), [creator-workflow.md](../../../../docs/specs/creator/creator-workflow.md), [essay-profile.md](../../../../docs/specs/creator/essay-profile.md) / [script-profile.md](../../../../docs/specs/creator/script-profile.md) / [game-bible-profile.md](../../../../docs/specs/creator/game-bible-profile.md), [orchestration-engine.md](../../../../docs/specs/orchestration/orchestration-engine.md) (`WorkspaceExecutor`, SessionStorage), Canvas + Workflow IR redesign ([PR #483](https://github.com/42ch-dev/nexus/pull/483); sibling Exploration — strategy SSOT only; path lands with #483) |
@@ -458,7 +458,7 @@ Rules:
 
 ### 6. Migration plan
 
-**Prerequisite:** this Exploration is accepted as direction + detailed design (still not implement authority until Draft/Master promotion). Implementation of #482 / #483 is **not** a blocker: this landing MAY proceed in parallel. Shared constraint: if a Workflow Simulate path can reach a Work write, it MUST use this port's stub (cross-link [PR #483](https://github.com/42ch-dev/nexus/pull/483)). Prefer having at least the port stub definition before #483 P2 Simulator relies on Work writes.
+**Prerequisite:** this Exploration is accepted as direction + detailed design. (P0–P5 have since shipped in v1.236; see Status. This paragraph records the landing premise, not a current authority limit.) Implementation of #482 / #483 is **not** a blocker: this landing MAY proceed in parallel. Shared constraint: if a Workflow Simulate path can reach a Work write, it MUST use this port's stub (cross-link [PR #483](https://github.com/42ch-dev/nexus/pull/483)). Prefer having at least the port stub definition before #483 P2 Simulator relies on Work writes.
 
 #### 6.1 Phase plan (steady, gated, no big-bang rewrite)
 
