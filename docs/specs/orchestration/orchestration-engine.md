@@ -818,6 +818,40 @@ CLI and daemon `POST /v1/daemon/presets:validate` call these functions directly 
 | `inner_graphs.<name>.nodes[].depends_on`              | `add_edge(dep, this)` in inner graph                                              |
 | `inner_graphs.<name>.output_binding`                  | `InnerGraphTask` post-run: reads `ctx[binding_path]`, writes `state.<x>.output`   |
 
+##### 8.2.1 IR → Task mapping
+
+The IR → Task mapping preserves the YAML → graph-flow semantics above. IR validation uses the
+[shared semantic validation facade](#761-shared-semantic-validation-facade) (§7.6.1); this table
+does not add an IR execution intake, simulator, Apply path, or second validation implementation.
+Current production intake remains the YAML loader in §8.1.
+
+| IR document concept | Task / graph-flow execution counterpart |
+| --- | --- |
+| `entry` | Selects the initial outer `Task`; the target node id is its `Task::id()`. |
+| `nodes[kind=outer_state]` | `StateCompositeTask`, carrying the node's enter actions, exit condition, routing, and context update. |
+| `outer_state.enter[kind=capability]` | `CapabilityTask`, invoked by the owning `StateCompositeTask`. |
+| `outer_state.enter[kind=inner_graph]` | `InnerGraphTask`, launching the referenced inner graph in a child session. |
+| `nodes[kind=inner_step]` with `step_kind=acp_prompt` | `AcpPromptTask` in the inner graph. |
+| `exit_when.kind=rule` | `RuleCheckTask` semantics within the outer state lifecycle. |
+| `exit_when.kind=manual` or `nodes[kind=manual_wait]` | `ManualWaitTask`, returning `NextAction::WaitForInput`. |
+| `exit_when.kind=llm_judge` or `nodes[kind=judge]` | `JudgeTask` semantics after enter actions; go continues and no-go waits. |
+| `exit_when.kind=graph_complete` | `InnerGraphTask` completion lets the outer task return `NextAction::Continue`. |
+| `nodes[kind=join]`, `merge`, `converge`, `timeout_ms`, `on_timeout` | The `StateCompositeTask` join gate, including arrival tracking and bounded-timeout handling. |
+| `terminal[]` or `nodes[kind=terminal]` | The terminal `StateCompositeTask` returns `NextAction::End`. |
+| `edges[kind=linear|go|nogo|default]` | Outer-graph edges and the source task's corresponding `NextAction` routing. |
+| `edges[kind=conditional]` | Conditional outer-graph edges evaluated by the source `StateCompositeTask`. |
+| `edges[kind=depends_on]` or `inner_step.depends_on` | Inner-graph dependency edges (`add_edge(dependency, step)`). |
+| `output_binding` | `InnerGraphTask` post-run export to the named outer-state output. |
+| `initial_action` | Engine initialization before the first `Task`; it seeds the initial context rather than adding a node. |
+| `signals[]` | Engine signal handling around task execution; no additional graph `Task` is created. |
+| `roles[]` and `node.role` | Role and prompt configuration consumed by the applicable prompt `Task`. |
+| `assets[]` and `node.template` | Validated prompt/template inputs resolved for the consuming `Task`. |
+| `meta.run_intents`, `meta.requires_capabilities`, `meta.cli_args` | Admission, loader, and CLI-argument inputs checked before or while constructing tasks; they do not create graph nodes. |
+
+`pattern_slot`, `nest_group`, and `nests[]` are composition concepts, not P1 executable tasks.
+They require deterministic expansion into the concrete nodes and edges above before any future
+IR execution intake can construct a graph.
+
 #### 8.3 Caching and reloading
 
 - Loader caches `LoadedPreset` keyed by `source_hash`.
