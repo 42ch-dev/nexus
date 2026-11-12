@@ -1,0 +1,10 @@
+# Work artifact direct-write exemptions (ADR #485 §6.1 P5).
+# Format: path<TAB>symbol<TAB>expected_count<TAB>disposition — exact path,
+# exact enclosing symbol, and the exact number of direct writes the guard must
+# observe. Never a module, line-number or suppression-comment waiver. A count
+# mismatch, duplicate row or stale row fails the guard.
+# An opt-out row (`path<TAB>-<TAB>0<TAB>disposition`) is required to skip a
+# file in the inventoried builtins glob; no file opts out today.
+crates/nexus-orchestration/src/capability/builtins/essay_scaffold.rs	ScaffoldTransaction::drop	1	rollback-restore (P2 row 10): synchronous Drop cannot await; restores only pre-existing bytes, never creates content
+crates/nexus-orchestration/src/capability/builtins/game_bible_scaffold.rs	ScaffoldTransaction::drop	1	rollback-restore (P2 row 12): synchronous Drop cannot await; restores only pre-existing bytes, never creates content
+crates/nexus-orchestration/src/capability/builtins/script_scaffold.rs	ScaffoldTransaction::drop	1	rollback-restore (P2 row 17): synchronous Drop cannot await; restores only pre-existing bytes, never creates content

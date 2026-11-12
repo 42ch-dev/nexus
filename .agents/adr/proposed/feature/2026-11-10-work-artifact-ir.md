@@ -486,6 +486,27 @@ Promotion + Master amendments (§0.4) MAY land in parallel with P4/P5 but MUST N
 - DB as SSOT for Work **rows** and for `completion_locked_at` (run authority — unchanged).
 - World binding / World KB / Memory / KnowledgeStore ownership unchanged (§0.3).
 
+#### 6.3 P5 exemption dispositions and acceptance evidence
+
+The P5 allowlist contains exactly the following live direct-write exemptions. Each exemption is keyed by the same exact path and symbol in `tooling/work-artifact-write-allowlist.tsv`; none waives a whole module or a forward write.
+
+| Exact path | Exact symbol | P2 row | Disposition | Owner | Follow-up trigger |
+| --- | --- | --- | --- | --- | --- |
+| `crates/nexus-orchestration/src/capability/builtins/essay_scaffold.rs` | `ScaffoldTransaction::drop` | 10 | `rollback-restore`: synchronous `Drop` restores only pre-existing bytes and never creates content | Work Artifact IR scaffold maintainer | When scaffold rollback gains an async/port-based restore path, migrate this restore and remove its allowlist row in the same change |
+| `crates/nexus-orchestration/src/capability/builtins/game_bible_scaffold.rs` | `ScaffoldTransaction::drop` | 12 | `rollback-restore`: synchronous `Drop` restores only pre-existing bytes and never creates content | Work Artifact IR scaffold maintainer | When scaffold rollback gains an async/port-based restore path, migrate this restore and remove its allowlist row in the same change |
+| `crates/nexus-orchestration/src/capability/builtins/script_scaffold.rs` | `ScaffoldTransaction::drop` | 17 | `rollback-restore`: synchronous `Drop` restores only pre-existing bytes and never creates content | Work Artifact IR scaffold maintainer | When scaffold rollback gains an async/port-based restore path, migrate this restore and remove its allowlist row in the same change |
+
+There is no exemption row for `rules_history.rs`, whose dead writer was removed in P2, or for `work_chapters.rs`, whose P2-deferred write was migrated through the port in P4.
+
+P5 acceptance evidence at commits `86be9a3bc9b4cbff9888d682cddf5bf892fa0a94` (default-on) and `dc2faaf09f78d8f73e791d2260d019a4409e88b9` (guard and CI):
+
+1. **Default-on port:** `execute_write_file` routes every `WorkPath::Artifact` through `FsWorkArtifactPort` without a runtime flag, while non-Work paths retain the guarded fallback. `cargo test -p nexus-core --lib execution::capabilities` passed 14/14 tests, including Work-port routing and the unchanged non-Work fallback; `cargo test -p nexus-core --lib execution::work_artifact` passed 18/18 tests.
+2. **Repository guard success:** `bash tooling/check-work-artifact-writes.sh` exited 0 with `Work artifact write guard OK: 3 exact-symbol exemption(s), 1 port-routed non-Work fallback(s).` The three exemptions are exactly the rows above.
+3. **Synthetic-fixture failure:** a synthetic `sneaky` function containing `std::fs::write("Works/wrk_x/ch1.md", ...)` made `bash tooling/check-work-artifact-writes.sh <fixture>` exit 1 with `Work artifact write guard FAILED: 1 unexempted direct write(s), 0 guard/allowlist error(s).`
+4. **CI parity:** the existing `schema-consistency-check` job first requires non-zero guard results for synthetic direct-write and mixed port-plus-direct-write fixtures, then runs `bash tooling/check-work-artifact-writes.sh` against the repository and requires success. No runtime write guard or additional Work writer family is introduced.
+
+These observations satisfy the P5 exit gate in §6.1: the port is default-on, the repository guard succeeds with only the three recorded dispositions, and CI proves that a new synthetic direct Work write fails.
+
 ### 7. Safety invariants
 
 1. **No silent tree mutation in Dry-run / Simulate.** Stub or record only.
