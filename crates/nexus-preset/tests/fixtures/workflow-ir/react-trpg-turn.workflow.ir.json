@@ -1,0 +1,220 @@
+{
+  "assets": [
+    {
+      "content_hash": "c19c3ba169b7628b04677adc28c99d27b8fc220e30cb22b42dcde846d795a151",
+      "id": "templates/lane-route.md",
+      "kind": "template",
+      "path": "templates/lane-route.md"
+    },
+    {
+      "content_hash": "26b80f74c0816ce01ebbd25cce88116726df271b8b335c7dd2a64152b3b7da4b",
+      "id": "templates/natural-language-intent.md",
+      "kind": "template",
+      "path": "templates/natural-language-intent.md"
+    },
+    {
+      "content_hash": "cbb75cb55178f6edf746adc6db1816f98647a597e3236a754bf94d1a135d9d9d",
+      "id": "templates/natural-language-op-request.md",
+      "kind": "template",
+      "path": "templates/natural-language-op-request.md"
+    },
+    {
+      "content_hash": "31abedf4da09a7310b03a7327a2b9d492106e639c2095121ca278213aa7375d0",
+      "id": "templates/receipt-narration.md",
+      "kind": "template",
+      "path": "templates/receipt-narration.md"
+    },
+    {
+      "content_hash": "bf30696eeaa7b401bf32be0d63412d973d2d4f7e5474d10b96da2bff852ae25c",
+      "id": "templates/settle-receipt.md",
+      "kind": "template",
+      "path": "templates/settle-receipt.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "routing",
+      "id": "routing->mechanical_turn",
+      "kind": "go",
+      "to": "mechanical_turn"
+    },
+    {
+      "from": "routing",
+      "id": "routing->natural_language_turn",
+      "kind": "nogo",
+      "to": "natural_language_turn"
+    },
+    {
+      "from": "mechanical_turn",
+      "id": "mechanical_turn->wait_for_player",
+      "kind": "linear",
+      "to": "wait_for_player"
+    },
+    {
+      "from": "natural_language_turn",
+      "id": "natural_language_turn->wait_for_player",
+      "kind": "linear",
+      "to": "wait_for_player"
+    },
+    {
+      "from": "wait_for_player",
+      "id": "wait_for_player->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "routing",
+  "id": "react-trpg-turn",
+  "ir_version": 0,
+  "meta": {
+    "description": "TRPG turn loop: mechanical-op and natural-language-turn lanes — AI proposes, host-local module settles over Connect compute, AI narrates confirmed receipts only, stops at the player response point",
+    "kind": "creator",
+    "requires_capabilities": [
+      "acp.prompt",
+      "judge.llm"
+    ],
+    "run_intents": [
+      "work_continue"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "template": "templates/lane-route.md"
+      },
+      "id": "routing",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Lane selector: judge reads preset.input.trigger_type -> mechanical-op lane (GO) or natural-language-turn lane (NOGO)"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "mechanical_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "mechanical_turn",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Mechanical-op lane: the caller settles FIRST with the client-supplied op id + params (E2 compute op over Connect, read-only), then settle_receipt confirms the module receipt -> receipt_narration (optional-skip in the client) narrates confirmed results only"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "natural_language_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "natural_language_turn",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Natural-language-turn lane: intent_parse -> op_request proposes op + params (no outcome claims) -> settle_receipt confirms the module receipt -> receipt_narration narrates confirmed results only"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "wait_for_player",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Stop at the player response point: ExitWhen::Manual -> NextAction::WaitForInput; no automatic transition, extra op, or outcome narration before the player resumes"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    },
+    {
+      "effect_class": "external",
+      "id": "mechanical_graph/settle_receipt",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "templates/settle-receipt.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "mechanical_graph/settle_receipt"
+      ],
+      "effect_class": "external",
+      "id": "mechanical_graph/receipt_narration",
+      "kind": "inner_step",
+      "output_binding": "receipt_narration.text",
+      "step_kind": "acp_prompt",
+      "template": "templates/receipt-narration.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "effect_class": "external",
+      "id": "natural_language_graph/intent_parse",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "templates/natural-language-intent.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "natural_language_graph/intent_parse"
+      ],
+      "effect_class": "external",
+      "id": "natural_language_graph/op_request",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "templates/natural-language-op-request.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "natural_language_graph/op_request"
+      ],
+      "effect_class": "external",
+      "id": "natural_language_graph/settle_receipt",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "templates/settle-receipt.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "natural_language_graph/settle_receipt"
+      ],
+      "effect_class": "external",
+      "id": "natural_language_graph/receipt_narration",
+      "kind": "inner_step",
+      "output_binding": "receipt_narration.text",
+      "step_kind": "acp_prompt",
+      "template": "templates/receipt-narration.md",
+      "tool_policy": "auto_grant_read_only"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}
