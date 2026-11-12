@@ -351,6 +351,8 @@ Minimum novel chapter body frontmatter (from `workflow-profile.md` §4.3): `titl
 | `reconcile_from_filesystem` rebuilds rows from disk | `port.reconcile()` rebuilds IR (+ index) from disk projection **or** refreshes index from IR — IR remains the named SSOT |
 | chapter-content-local-api: `work_chapters` is metadata SSOT | Wire DTO still reads/writes through Daemon; authority citation points at IR |
 
+During the dual-read window, until Work IR promotion and both Shipped Master amendments in §0.4 land in the same change, the Markdown tree and `work_chapters` remain the dual-read projection/index, and the current **DB-wins** conflict behavior remains authoritative. `port.reconcile()` is the single admission/write seam; no **parallel JSON** snapshot tree is introduced. When that promotion and both amendments land together, the same `port.reconcile()` becomes **IR-authoritative** index refresh and the DB becomes a cache; until then, this statement does not claim IR authority.
+
 #### 3.9 Encoding (open, see §8)
 
 On-disk projection during transition MUST remain the current Markdown tree so sync and presets keep working. Whether a canonical IR snapshot is also persisted (JSON/CBOR beside the tree, or only reconstructed in process + DB index) is an open question. This Exploration does **not** require a second parallel tree of IR files in v1.
