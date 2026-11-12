@@ -1,6 +1,7 @@
 //! Work lifecycle and authoring operations over the guarded core workspace.
 //! HTTP envelopes stay in adapters; these projections are owned domain values.
 
+#[cfg(feature = "execution")]
 use crate::execution::work_artifact::{FsWorkArtifactPort, WorkArtifactPort, WorkReconcile};
 use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 use nexus_contracts::{
@@ -487,6 +488,7 @@ impl CoreService {
     ///
     /// Returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
+    #[cfg(feature = "execution")]
     pub async fn reconcile_work_chapters(
         &self,
         principal: &Principal,
@@ -1744,6 +1746,7 @@ async fn delete_work(
     Ok(())
 }
 
+#[cfg(feature = "execution")]
 async fn reconcile_chapters(
     service: &CoreService,
     principal: &Principal,
