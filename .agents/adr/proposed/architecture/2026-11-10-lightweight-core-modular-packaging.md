@@ -18,7 +18,7 @@ Whole-workspace rebuild cost is high and packaging is coupled: `nexus-core` (~16
 | **Status** | **Proposed** — not implement authority. |
 | **Document class** | Exploration |
 | **Scope** | Crate-graph and publish strategy to reduce whole-workspace rebuilds, ship stable feature packages incrementally, and keep the user-facing layer on TypeScript while Rust owns narrative/orchestration truth. |
-| **Coordinates with** | [docs/specs/architecture/overview.md](../../../../docs/specs/architecture/overview.md), [rust-core-service-boundary.md](../../../../docs/specs/architecture/rust-core-service-boundary.md), [dynamic-workflow-and-simulation.md](2026-11-10-dynamic-workflow-and-simulation.md), modules/nexus-module-sdk (existing standalone publish precedent) |
+| **Coordinates with** | [docs/specs/architecture/overview.md](../../../../docs/specs/architecture/overview.md), [rust-core-service-boundary.md](../../../../docs/specs/architecture/rust-core-service-boundary.md), [canvas-composition-and-pattern-packages.md](2026-11-10-canvas-composition-and-pattern-packages.md), modules/nexus-module-sdk (existing standalone publish precedent) |
 
 ---
 
@@ -70,7 +70,7 @@ Observed on `main` @ `3263aa71f` (local analysis, Asia/Shanghai 2026-11-10):
 
 ### 5. Relationship to dynamic workflow
 
-The companion proposal [dynamic-workflow-and-simulation.md](2026-11-10-dynamic-workflow-and-simulation.md) depends on this packaging:
+The companion proposal [canvas-composition-and-pattern-packages.md](2026-11-10-canvas-composition-and-pattern-packages.md) depends on this packaging:
 
 - **Workflow IR** is a stable crate so generators, **Canvas compose**, validators, and **pattern runtime** do not link the full orchestration graph.
 - **Pattern packages** version independently and are consumed by Compose (end-user nest/combine) and by generators as building blocks.

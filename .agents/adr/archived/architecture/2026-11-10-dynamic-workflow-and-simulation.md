@@ -1,6 +1,8 @@
 # ADR: Dynamic Workflow Generation and Orchestration Simulation
 
-Status: proposed — not implement authority. Nothing here schedules work or claims a shipped feature.
+Status: implemented — split into three records on 2026-11-13
+Archived: 2026-11-13 — split into three records
+Superseded-by: ../../implemented/architecture/2026-11-10-workflow-ir-document-model.md, ../../implemented/architecture/2026-11-10-strategy-simulation-fence.md, ../../proposed/architecture/2026-11-10-canvas-composition-and-pattern-packages.md
 Date: 2026-11-10
 Scope: Product and engine direction for strategy workflows: **Workflow IR as a core universal mechanism** (not a developer-only tool). End users MAY **nest or compose** IR (including published patterns); developers primarily **author and publish reusable patterns** (subgraph / template packages). Lifecycle is **Generate or Compose → validate → simulate → approve → apply** onto the existing graph-flow path, with `preset.yaml` retained as a **compat import/export**. Strategy Canvas is a **composition surface** (composition + HITL are the duty; explainability is the applied-IR inspector view) — neither a mandatory from-scratch drag-edit-only authoring path nor a pure read-only viewer of Agent output.
 Source: migrated from the retired tracked specs corpus
@@ -24,7 +26,7 @@ Gaps:
 
 ---
 
-## Proposal
+## Decision
 
 ### 0. Document position
 
@@ -33,7 +35,7 @@ Gaps:
 | **Status** | **Proposed** — not implement authority. Nothing here schedules work or claims a shipped feature. |
 | **Document class** | Exploration |
 | **Scope** | Product and engine direction for strategy workflows: **Workflow IR as a core universal mechanism** (not a developer-only tool). End users MAY **nest or compose** IR (including published patterns); developers primarily **author and publish reusable patterns** (subgraph / template packages). Lifecycle is **Generate or Compose → validate → simulate → approve → apply** onto the existing graph-flow path, with `preset.yaml` retained as a **compat import/export**. Strategy Canvas is a **composition surface** (composition + HITL are the duty; explainability is the applied-IR inspector view) — neither a mandatory from-scratch drag-edit-only authoring path nor a pure read-only viewer of Agent output. |
-| **Coordinates with** | [orchestration-engine.md](../../../../docs/specs/orchestration/orchestration-engine.md) (graph-flow + current preset intake), [docs/strategy-authoring.md](../../../../docs/strategy-authoring.md), [STRATEGY.md](../../../../STRATEGY.md) (Harness / Canvas pillars), [lightweight-core-modular-packaging.md](2026-11-10-lightweight-core-modular-packaging.md) (crate packaging implications), Canvas + Workflow IR redesign ([PR #483](https://github.com/42ch-dev/nexus/pull/483); schema, Canvas ops, P4/P6 intake cutover), Work Artifact IR ([PR #485](https://github.com/42ch-dev/nexus/pull/485); sibling, Work-output SSOT only — not this IR) |
+| **Coordinates with** | [orchestration-engine.md](../../../../docs/specs/orchestration/orchestration-engine.md) (graph-flow + current preset intake), [docs/strategy-authoring.md](../../../../docs/strategy-authoring.md), [STRATEGY.md](../../../../STRATEGY.md) (Harness / Canvas pillars), [lightweight-core-modular-packaging.md](../../proposed/architecture/2026-11-10-lightweight-core-modular-packaging.md) (crate packaging implications), Canvas + Workflow IR redesign ([PR #483](https://github.com/42ch-dev/nexus/pull/483); schema, Canvas ops, P4/P6 intake cutover), Work Artifact IR ([PR #485](https://github.com/42ch-dev/nexus/pull/485); sibling, Work-output SSOT only — not this IR) |
 | **Merge / land order** | Merge **this PR (#482) first**, then [#483](https://github.com/42ch-dev/nexus/pull/483). [#485](https://github.com/42ch-dev/nexus/pull/485) is independent and MAY proceed in parallel. Neither merge confers implement authority until Draft/Master promotion. |
 
 The key words MUST, MUST NOT, SHOULD, and MAY are RFC 2119 terms for a conforming implementation of this proposal only.
@@ -128,7 +130,7 @@ Detailed safety and migration gates live in [#483](https://github.com/42ch-dev/n
 | Generator tooling | Agent-host capability or thin tool crate | High churn; must not force `nexus-core` rebuilds for prompt iteration |
 | TS Canvas / service | Consumes codegen DTOs only; compose UX + projection | Locked user-facing stack |
 
-This aligns with [lightweight-core-modular-packaging.md](2026-11-10-lightweight-core-modular-packaging.md): IR is a spine-adjacent stable API; patterns are independently versioned feature content; the simulator is a feature package for review graphs (companion §5), so default production graphs need not compile it.
+This aligns with [lightweight-core-modular-packaging.md](../../proposed/architecture/2026-11-10-lightweight-core-modular-packaging.md): IR is a spine-adjacent stable API; patterns are independently versioned feature content; the simulator is a feature package for review graphs (companion §5), so default production graphs need not compile it.
 
 ---
 
@@ -172,7 +174,7 @@ For iteration `v1.236-adr-foundation`, these seven questions are answered in `.m
 
 Not stated as a separate comparison in the migrated proposal; where the body names a rejected direction, that record stays in the proposal.
 
-## Acceptance criteria
+## Consequences
 
 Not stated as a separate acceptance list; where the proposal defines a landing or promotion sequence, it stays in the proposal.
 
