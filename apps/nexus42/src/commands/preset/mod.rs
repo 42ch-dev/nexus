@@ -283,7 +283,7 @@ async fn scaffold_preset(config: &CliConfig, name: &str, json: bool) -> Result<(
     Ok(())
 }
 
-/// Validate a preset YAML/bundle at a given path.
+/// Validate a preset YAML/bundle or Workflow IR document at a given path.
 ///
 /// Validation runs in process through [`validate_preset_local`] — the sole
 /// validator behind this command (v1.193 P1-T1). There is no daemon leg and
@@ -372,9 +372,10 @@ fn print_validate_verdict(resp: &serde_json::Value) {
 /// downgrades capability-arg-drift errors to warnings.
 ///
 /// `path` may be a bundle directory (containing `preset.yaml`), a
-/// `preset.yaml` file (asset checks run against its parent), or a
+/// `preset.yaml` file (asset checks run against its parent), a
 /// standalone YAML file (no asset checks — same as the daemon's
-/// `infer_bundle_root`).
+/// `infer_bundle_root`), or a Workflow IR document (`*.ir.json`), which
+/// is validated directly (§ CLI parity surface).
 ///
 /// Moved from `system` (V1.153 P3) — the shared validator core, not
 /// re-implemented (AR-24).
@@ -382,14 +383,30 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
     use nexus_orchestration::CapabilityRegistry;
     use nexus_preset::{
         loader_validate_manifest_compat, validate_assets_in_bundle, validate_path_safety,
-        validate_preset_semantic, yaml_value_depth, DiagnosticSeverity,
-        ValidationResult as PresetValidationResult, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
+        validate_preset_semantic, yaml_value_depth, ValidationResult as PresetValidationResult,
+        DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
     };
+
+    let file_path = std::path::Path::new(path);
+
+    // An explicit `*.ir.json` file selects direct IR validation; every other
+    // path form keeps resolving through the YAML bundle rules below.
+    if file_path
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().ends_with(".ir.json"))
+    {
+        if !file_path.exists() {
+            return Err(CliError::Other(format!(
+                "File not found: {}",
+                file_path.display()
+            )));
+        }
+        return validate_workflow_ir_file(file_path);
+    }
 
     // Resolve the target file + optional bundle root (mirrors the daemon's
     // `infer_bundle_root`: only a file literally named `preset.yaml` has a
     // bundle root; a directory argument points at its preset.yaml).
-    let file_path = std::path::Path::new(path);
     let (preset_yaml_path, bundle_root) = if file_path.is_dir() {
         (file_path.join("preset.yaml"), Some(file_path.to_path_buf()))
     } else {
@@ -463,34 +480,115 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
         )
         .chain(asset_result.diagnostics.iter())
     {
-        match diagnostic.severity {
-            DiagnosticSeverity::Error => {
-                errors.push(format!("{}: {}", diagnostic.path, diagnostic.message));
-            }
-            DiagnosticSeverity::Warning => {
-                warnings.push(format!("{}: {}", diagnostic.path, diagnostic.message));
-            }
+        push_diagnostic(diagnostic, &mut errors, &mut warnings);
+    }
+
+    Ok(validation_response(
+        &manifest.preset.id,
+        serde_json::json!(manifest.preset.version),
+        manifest.states.len(),
+        &errors,
+        &warnings,
+    ))
+}
+
+/// Validate a Workflow IR document directly (`... .ir.json`).
+///
+/// The document is parsed as IR and the same checks the YAML path runs are
+/// applied to it, so both formats report the same diagnostics for the same
+/// defect. An IR file carries no bundle root, so asset checks are skipped
+/// exactly as for a standalone YAML file.
+fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::Value> {
+    use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
+        WorkflowDocument, WorkflowNodeKind,
+    };
+    use nexus_orchestration::CapabilityRegistry;
+    use nexus_preset::validation::{validate_workflow_ir, validate_workflow_ir_path_safety};
+    use nexus_preset::{export_preset, loader_validate_manifest_compat};
+
+    let json = std::fs::read_to_string(file_path)?;
+    let document: WorkflowDocument = serde_json::from_str(&json)
+        .map_err(|e| CliError::Other(format!("workflow IR parse error: {e}")))?;
+
+    let caps = CapabilityRegistry::with_builtins();
+    let mut errors: Vec<String> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+
+    // C2 is a manifest-level contract, so a manifest-expressible document is
+    // projected back to run the same check the YAML path always runs; IR-only
+    // shapes (joins, nest groups, pattern slots) have no manifest projection.
+    if let Ok(manifest) = export_preset(&document) {
+        for problem in loader_validate_manifest_compat(&manifest, &caps) {
+            errors.push(format!("{}: {}", problem.path, problem.error));
         }
     }
 
-    // Same response shape as the daemon endpoint (warnings omitted when
-    // empty, matching the daemon's `skip_serializing_if`).
+    for diagnostic in validate_workflow_ir_path_safety(&document)
+        .diagnostics
+        .iter()
+        .chain(validate_workflow_ir(&document, &caps).diagnostics.iter())
+    {
+        push_diagnostic(diagnostic, &mut errors, &mut warnings);
+    }
+
+    // `state_count` counts the outer states the YAML verdict reports; inner
+    // steps are graph children of a state, not states of their own.
+    let state_count = document
+        .nodes
+        .iter()
+        .filter(|node| {
+            matches!(
+                node.kind,
+                WorkflowNodeKind::OuterState | WorkflowNodeKind::Terminal
+            )
+        })
+        .count();
+
+    Ok(validation_response(
+        document.id.as_str(),
+        serde_json::json!(document.version),
+        state_count,
+        &errors,
+        &warnings,
+    ))
+}
+
+/// Fold one facade diagnostic into the verdict's error/warning strings.
+fn push_diagnostic(
+    diagnostic: &nexus_preset::ValidationDiagnostic,
+    errors: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) {
+    match diagnostic.severity {
+        nexus_preset::DiagnosticSeverity::Error => {
+            errors.push(format!("{}: {}", diagnostic.path, diagnostic.message));
+        }
+        nexus_preset::DiagnosticSeverity::Warning => {
+            warnings.push(format!("{}: {}", diagnostic.path, diagnostic.message));
+        }
+    }
+}
+
+/// Build the verdict both input formats return — same shape as the daemon
+/// endpoint (warnings omitted when empty, matching the daemon's
+/// `skip_serializing_if`).
+fn validation_response(
+    id: &str,
+    version: serde_json::Value,
+    state_count: usize,
+    errors: &[String],
+    warnings: &[String],
+) -> serde_json::Value {
     let mut resp = serde_json::Map::new();
     resp.insert("valid".to_string(), serde_json::json!(errors.is_empty()));
-    resp.insert("id".to_string(), serde_json::json!(manifest.preset.id));
-    resp.insert(
-        "version".to_string(),
-        serde_json::json!(manifest.preset.version),
-    );
-    resp.insert(
-        "state_count".to_string(),
-        serde_json::json!(manifest.states.len()),
-    );
+    resp.insert("id".to_string(), serde_json::json!(id));
+    resp.insert("version".to_string(), version);
+    resp.insert("state_count".to_string(), serde_json::json!(state_count));
     resp.insert("errors".to_string(), serde_json::json!(errors));
     if !warnings.is_empty() {
         resp.insert("warnings".to_string(), serde_json::json!(warnings));
     }
-    Ok(serde_json::Value::Object(resp))
+    serde_json::Value::Object(resp)
 }
 
 // ---------------------------------------------------------------------------
@@ -1146,6 +1244,66 @@ states:
             resp["valid"], true,
             "standalone YAML file should validate: {resp}"
         );
+    }
+
+    /// The P0 golden IR and its YAML sample must reach the same verdict through
+    /// this one command: `*.ir.json` selects direct IR validation, YAML imports
+    /// first, so a divergence means the two input formats disagree on a defect.
+    #[test]
+    fn local_validate_ir_parity_with_yaml_samples() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for sample in ["game-narrative", "react-trpg-turn"] {
+            let yaml = repo_root.join(format!("strategy-samples/{sample}/preset.yaml"));
+            let ir = repo_root.join(format!(
+                "crates/nexus-preset/tests/fixtures/workflow-ir/{sample}.workflow.ir.json"
+            ));
+
+            let from_yaml = validate_preset_local(yaml.to_str().unwrap()).unwrap();
+            let from_ir = validate_preset_local(ir.to_str().unwrap()).unwrap();
+            for field in ["id", "version", "state_count", "valid", "errors"] {
+                assert_eq!(from_ir[field], from_yaml[field], "{sample}: {field}");
+            }
+        }
+    }
+
+    /// The same defect injected into a YAML sample and its golden IR must
+    /// report the same diagnostics: the IR path projects manifest-expressible
+    /// documents back for the loader-level checks, exactly as YAML runs them.
+    #[test]
+    fn local_validate_ir_reports_same_defects_as_yaml() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let tmp = tempfile::tempdir().unwrap();
+
+        let mut ir: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(repo_root.join(
+                "crates/nexus-preset/tests/fixtures/workflow-ir/game-narrative.workflow.ir.json",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let edge = ir["edges"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|edge| edge["id"] == "routing->trigger_extract")
+            .unwrap();
+        edge["to"] = serde_json::json!("trigger_missing");
+        let ir_path = tmp.path().join("broken.workflow.ir.json");
+        std::fs::write(&ir_path, serde_json::to_string(&ir).unwrap()).unwrap();
+
+        let yaml =
+            std::fs::read_to_string(repo_root.join("strategy-samples/game-narrative/preset.yaml"))
+                .unwrap()
+                .replace("default: trigger_extract", "default: trigger_missing");
+        let yaml_path = tmp.path().join("broken.preset.yaml");
+        std::fs::write(&yaml_path, yaml).unwrap();
+
+        let from_ir = validate_preset_local(ir_path.to_str().unwrap()).unwrap();
+        let from_yaml = validate_preset_local(yaml_path.to_str().unwrap()).unwrap();
+        assert_eq!(from_ir["valid"], serde_json::json!(false));
+        for field in ["errors", "warnings"] {
+            assert_eq!(from_ir[field], from_yaml[field], "{field}");
+        }
     }
 
     #[test]
