@@ -71,6 +71,12 @@ pub enum WorkflowIrError {
         /// What could not be represented.
         reason: String,
     },
+    /// The manifest marks more than one state `terminal: true`; a preset header names exactly one.
+    #[error("preset declares {count} terminal states; a v0 document carries exactly one")]
+    MultipleTerminalStates {
+        /// Number of states marked terminal.
+        count: usize,
+    },
 }
 
 fn refuse(reason: impl Into<String>) -> WorkflowIrError {
@@ -181,6 +187,17 @@ fn document_from_manifest(
     }
 
     let effect_summary = summary_effect(&nodes);
+    let terminal: Vec<String> = manifest
+        .states
+        .iter()
+        .filter(|state| state.terminal)
+        .map(|state| state.id.clone())
+        .collect();
+    if terminal.len() > 1 {
+        return Err(WorkflowIrError::MultipleTerminalStates {
+            count: terminal.len(),
+        });
+    }
 
     Ok(WorkflowDocument {
         ir_version: IR_VERSION,
@@ -210,12 +227,7 @@ fn document_from_manifest(
         },
         entry: header.initial.clone(),
         initial_action: header.initial_action.as_ref().map(initial_action_ir),
-        terminal: manifest
-            .states
-            .iter()
-            .filter(|state| state.terminal)
-            .map(|state| state.id.clone())
-            .collect(),
+        terminal,
         nodes,
         edges,
         nests: Vec::new(),
@@ -723,6 +735,12 @@ fn summary_effect(nodes: &[WorkflowNode]) -> WorkflowDocumentEffectSummary {
 /// Returns [`WorkflowIrError::NotProjectable`] for IR-only nodes (pattern slots, nest groups,
 /// joins), mixed edge families, or a required payload the document leaves empty.
 pub fn export_preset(document: &WorkflowDocument) -> Result<PresetManifest, WorkflowIrError> {
+    if document.ir_version > IR_VERSION {
+        return Err(refuse(format!(
+            "document ir_version {} is newer than supported {IR_VERSION}",
+            document.ir_version
+        )));
+    }
     let (states, inner_graphs) = project_nodes(document)?;
     Ok(PresetManifest {
         preset: preset_header(document)?,
@@ -833,11 +851,15 @@ fn preset_header(document: &WorkflowDocument) -> Result<PresetHeader, WorkflowIr
             document.version
         ))
     })?;
-    let terminal = document
-        .terminal
-        .first()
-        .cloned()
-        .ok_or_else(|| refuse("document declares no terminal node"))?;
+    let terminal = match document.terminal.as_slice() {
+        [terminal] => terminal.clone(),
+        terminals => {
+            return Err(refuse(format!(
+                "document declares {} terminal nodes; a preset carries exactly one",
+                terminals.len()
+            )))
+        }
+    };
     Ok(PresetHeader {
         id: document.id.as_str().to_string(),
         version,
@@ -909,7 +931,13 @@ fn state_from_node(
         converge: node.converge.as_ref().map(|converge| ConvergeConfig {
             strategy: converge_strategy_preset(converge.strategy),
         }),
-        timeout_ms: node.timeout_ms.and_then(|ms| u64::try_from(ms).ok()),
+        timeout_ms: node
+            .timeout_ms
+            .map(|ms| {
+                u64::try_from(ms)
+                    .map_err(|_| refuse(format!("node `{}` has a negative timeout_ms", node.id)))
+            })
+            .transpose()?,
         on_timeout: node.on_timeout.clone(),
     })
 }
@@ -930,6 +958,11 @@ fn next_from_edges(
             .iter()
             .find(|edge| matches!(&edge.kind, WorkflowEdgeKind::Nogo))
             .ok_or_else(|| refuse(format!("`{node_id}` has a `go` edge without a `nogo` edge")))?;
+        if edges.len() != 2 {
+            return Err(refuse(format!(
+                "`{node_id}` has edges beyond its go/nogo pair"
+            )));
+        }
         return Ok(Some(NextTarget::GoNogo(GoNogoNext {
             go: go.to.clone(),
             nogo: nogo.to.clone(),
@@ -1371,6 +1404,55 @@ roles:
         let error = export_preset(&imported.document).expect_err("judge node is IR-only");
         assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
         assert!(error.to_string().contains("no preset projection"));
+    }
+
+    #[test]
+    fn export_refuses_edges_beyond_the_go_nogo_pair() {
+        let (dir, manifest) = bundle();
+        let mut imported = import_preset_bundle(&manifest, dir.path()).expect("import");
+        imported.document.edges.push(WorkflowEdge {
+            id: "start->work#sibling".to_string(),
+            from: "start".to_string(),
+            to: "work".to_string(),
+            kind: WorkflowEdgeKind::Linear,
+            label: None,
+            when: None,
+        });
+
+        let error =
+            export_preset(&imported.document).expect_err("sibling edge has no preset projection");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        assert!(error.to_string().contains("beyond its go/nogo pair"));
+    }
+
+    #[test]
+    fn import_refuses_multiple_terminal_states() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manifest: PresetManifest = serde_yaml::from_str(
+            r#"
+preset:
+  id: two-terminals
+  version: 1
+  kind: creator
+  description: "two terminals"
+  requires_capabilities: []
+  initial: a
+  terminal: a
+states:
+  - id: a
+    terminal: true
+  - id: b
+    terminal: true
+"#,
+        )
+        .expect("manifest parses");
+
+        let error =
+            import_preset_bundle(&manifest, dir.path()).expect_err("multi-terminal refused");
+        assert!(matches!(
+            error,
+            WorkflowIrError::MultipleTerminalStates { count: 2 }
+        ));
     }
 
     #[test]
