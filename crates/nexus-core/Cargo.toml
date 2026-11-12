@@ -26,6 +26,10 @@ provider-host = ["dep:nexus-agent-host", "dep:nexus-acp-host", "dep:nexus-provid
 operation-id = ["dep:sha2", "dep:hex"]
 execution = [
     "dep:nexus-orchestration",
+    # The Simulate route is served at this execution edge only: the walk runs in-process,
+    # constructs no executor or provider, and stays out of the default/domain cohort.
+    "nexus-orchestration/simulate",
+    "dep:nexus-workflow-ir",
     "dep:nexus-provider-ports",
     "dep:graph-flow",
     "dep:tokio-util",
@@ -104,6 +108,8 @@ nexus-narrative = { path = "../nexus-narrative" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }
 nexus-orchestration = { path = "../nexus-orchestration", optional = true }
+# Simulate route input type: the candidate IR the walk reads. Enabled with `execution` only.
+nexus-workflow-ir = { path = "../nexus-workflow-ir", optional = true }
 # v1.190 P4-T3 connect-client cohort edges: the WS transport speaks the
 # spoke remote-adapter Transport; tungstenite is the bounded WS wire.
 spoke-connect = { workspace = true, features = ["remote-adapter"], optional = true }

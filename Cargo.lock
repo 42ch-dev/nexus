@@ -3795,6 +3795,7 @@ dependencies = [
  "nexus-spoke-adapter",
  "nexus-storage-guard",
  "nexus-wasm-host",
+ "nexus-workflow-ir",
  "nix 0.31.3",
  "parking_lot 0.13.0",
  "rmcp",
@@ -4040,6 +4041,7 @@ dependencies = [
  "nexus-preset",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
+ "nexus-workflow-ir",
  "regex",
  "reqwest",
  "serde",
@@ -4144,6 +4146,7 @@ dependencies = [
 name = "nexus-workflow-ir"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "nexus-contracts",
  "serde_json",
 ]

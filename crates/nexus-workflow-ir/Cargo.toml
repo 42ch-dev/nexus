@@ -12,6 +12,6 @@ workspace = true
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
-
-[dev-dependencies]
+# Q3 canonical content hash: canonical JSON + BLAKE3 over the resolved hash set.
 serde_json.workspace = true
+blake3.workspace = true

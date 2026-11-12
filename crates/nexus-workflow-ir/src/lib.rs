@@ -8,5 +8,7 @@
 
 pub use nexus_contracts::generated::daemon_api::orchestration::workflow_document::*;
 
+pub mod canonical;
 pub mod structure;
+pub use canonical::{content_hash, CanonicalHashError};
 pub use structure::{validate, Violation, MAX_NEST_DEPTH};

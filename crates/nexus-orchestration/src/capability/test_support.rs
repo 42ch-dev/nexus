@@ -76,3 +76,16 @@ pub fn write_capability_dir(root: &Path, name: &str) {
     let sha = write_module_pair(&dir);
     std::fs::write(dir.join("capability.json"), descriptor_json(name, &sha)).unwrap();
 }
+
+/// A registry holding exactly `caps` and no builtins: a path that resolves through it can
+/// only reach the caller's own rows, so a bypassed resolution fails loudly instead of
+/// passing silently.
+#[must_use]
+pub fn registry_with(
+    caps: Vec<Box<dyn super::Capability>>,
+) -> std::sync::Arc<super::CapabilityRegistry> {
+    let mut registry = super::CapabilityRegistry::empty();
+    registry.capabilities.extend(caps);
+    registry.build_index();
+    std::sync::Arc::new(registry)
+}
