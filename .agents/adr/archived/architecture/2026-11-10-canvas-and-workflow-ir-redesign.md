@@ -1,6 +1,8 @@
 # ADR: Canvas and Workflow IR Redesign — Strategy Orchestration Replacement
 
-Status: proposed — not implement authority. Nothing here schedules work or claims a shipped feature.
+Status: implemented — split into three records on 2026-11-13
+Archived: 2026-11-13 — split into three records
+Superseded-by: ../../implemented/architecture/2026-11-10-workflow-ir-document-model.md, ../../implemented/architecture/2026-11-10-strategy-simulation-fence.md, ../../proposed/architecture/2026-11-10-canvas-composition-and-pattern-packages.md
 Date: 2026-11-10
 Scope: Detailed design for a **Canvas + Workflow IR** stack that **MAY completely replace** today's strategy-orchestration authoring and intake path (hand-authored `preset.yaml` → loader → graph-flow; Strategy Canvas as YAML explainability + node-granular patch). Lifecycle remains **Generate or Compose → Validate → Simulate → Approve → Apply → Execute**.
 Source: migrated from the retired tracked specs corpus
@@ -16,7 +18,7 @@ Source: migrated from the retired tracked specs corpus
 
 ---
 
-## Proposal
+## Decision
 
 ### 0. Document position
 
@@ -467,7 +469,7 @@ All MUST hold on a reference workspace:
 
 Not stated as a separate comparison in the migrated proposal; where the body names a rejected direction, that record stays in the proposal.
 
-## Acceptance criteria
+## Consequences
 
 This section is **maintainer guidance** for how to land the two Explorations and then the §7 migration phases. It does not schedule work by itself.
 
