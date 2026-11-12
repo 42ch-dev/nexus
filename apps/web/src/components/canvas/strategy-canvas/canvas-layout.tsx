@@ -20,6 +20,7 @@ export function CanvasHeader({
   showAlt,
   setShowAlt,
   onOpenCreateTransition,
+  onOpenApprove,
 }: {
   revision: number;
   status: 'clean' | 'dirty' | 'conflict';
@@ -33,6 +34,11 @@ export function CanvasHeader({
    * field, select, or contenteditable so authors can type the letter N.
    */
   onOpenCreateTransition?: () => void;
+  /**
+   * Approve entry point. Rendered only when the surface holds the open
+   * candidate IR; the disclosure it opens renders the simulation limit.
+   */
+  onOpenApprove?: () => void;
 }) {
   const { t } = useTranslation('canvas');
 
@@ -76,6 +82,15 @@ export function CanvasHeader({
             >
               <Plus className="h-3.5 w-3.5" aria-hidden />
               {t('strategy.header.createTransition')}
+            </button>
+          ) : null}
+          {onOpenApprove ? (
+            <button
+              type="button"
+              onClick={onOpenApprove}
+              className="rounded-control border border-gray-alpha-400 px-3 py-1.5 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
+            >
+              {t('strategy.header.approve')}
             </button>
           ) : null}
           <button

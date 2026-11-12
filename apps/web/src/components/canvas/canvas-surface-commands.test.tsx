@@ -209,6 +209,17 @@ vi.mock('@/components/canvas/strategy-canvas/state-machine', () => ({
 vi.mock('@/components/canvas/strategy-alt-view', () => ({
   StrategyAltView: () => null,
 }));
+// The simulation hook needs a client provider; this suite is about palette
+// commands, so it stays inert.
+vi.mock('@/lib/canvas/use-simulation-trajectory', () => ({
+  useSimulationTrajectory: () => ({
+    status: 'idle',
+    trajectory: null,
+    error: null,
+    run: async () => {},
+    reset: () => {},
+  }),
+}));
 vi.mock('@/components/canvas/strategy-nodes', () => ({
   strategyNodeTypes: {},
 }));
