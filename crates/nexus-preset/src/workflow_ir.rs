@@ -18,8 +18,10 @@
 //!   catalog: a capability call, ACP step, host tool or LLM judge is `external`; a
 //!   `context_update` hook is `write_candidate`; everything else is `pure`. This can only
 //!   over-report, never hide an effect.
-//! - Export refuses nodes it did not produce (pattern slots, nest groups, joins) instead of
-//!   inventing preset fields.
+//! - Export refuses nodes it did not produce (pattern slots, nest groups, joins, `judge` and
+//!   `manual_wait`) instead of inventing preset fields: a `judge` node flattened onto a preset
+//!   state would either drop its judgment or emit `next: go/nogo` with no `exit_when`, which the
+//!   preset validator rejects.
 //!
 //! shortcut: legacy `next: { kind: conditional, rules: [...] }` exports as the equivalent
 //! `branches` form; upgrade when a consumer needs the legacy spelling back.
@@ -96,7 +98,8 @@ pub struct PresetIrImport {
 /// # Errors
 ///
 /// Returns [`WorkflowIrError::AssetRead`] when a referenced asset is missing or unreadable, and
-/// [`WorkflowIrError::NotProjectable`] when the manifest header cannot form a document.
+/// [`WorkflowIrError::NotProjectable`] when a referenced path is unsafe (absolute, `..` traversal,
+/// or a symlink resolving outside the bundle) or the manifest header cannot form a document.
 pub fn import_preset_bundle(
     manifest: &PresetManifest,
     bundle_root: &Path,
@@ -105,14 +108,39 @@ pub fn import_preset_bundle(
     references.sort_by(|a, b| a.1.cmp(&b.1));
     references.dedup_by(|a, b| a.1 == b.1);
 
+    // Fail closed before touching the filesystem: the manifest chooses these paths, and the same
+    // rule the loader/validator enforce (`assert_template_file_safe`) applies here.
+    for (_, path) in &references {
+        if let Err(reason) = crate::loader::assert_template_file_safe(path) {
+            return Err(refuse(format!("unsafe asset path `{path}`: {reason}")));
+        }
+    }
+    let canonical_root =
+        bundle_root
+            .canonicalize()
+            .map_err(|source| WorkflowIrError::AssetRead {
+                path: ".".to_string(),
+                source,
+            })?;
+
     let mut assets = Vec::with_capacity(references.len());
     let mut asset_bytes = BTreeMap::new();
     for (_, path) in references {
-        let bytes = std::fs::read(bundle_root.join(&path)).map_err(|source| {
-            WorkflowIrError::AssetRead {
+        let canonical = canonical_root
+            .join(&path)
+            .canonicalize()
+            .map_err(|source| WorkflowIrError::AssetRead {
                 path: path.clone(),
                 source,
-            }
+            })?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err(refuse(format!(
+                "asset `{path}` resolves outside the bundle sandbox (symlink escape)"
+            )));
+        }
+        let bytes = std::fs::read(&canonical).map_err(|source| WorkflowIrError::AssetRead {
+            path: path.clone(),
+            source,
         })?;
         assets.push(WorkflowAssetRef {
             id: path.clone(),
@@ -737,10 +765,7 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
 
     for node in &document.nodes {
         match &node.kind {
-            WorkflowNodeKind::OuterState
-            | WorkflowNodeKind::Terminal
-            | WorkflowNodeKind::ManualWait
-            | WorkflowNodeKind::Judge => {
+            WorkflowNodeKind::OuterState | WorkflowNodeKind::Terminal => {
                 let next_edges = outgoing
                     .get(node.id.as_str())
                     .map_or(&[][..], |edges| edges.as_slice());
@@ -1329,5 +1354,35 @@ roles:
             serde_json::to_value(&exported).expect("exported json"),
             serde_json::to_value(&manifest).expect("manifest json")
         );
+    }
+
+    #[test]
+    fn export_refuses_ir_only_node_kinds() {
+        let (dir, manifest) = bundle();
+        let mut imported = import_preset_bundle(&manifest, dir.path()).expect("import");
+        imported
+            .document
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "start")
+            .expect("start node")
+            .kind = WorkflowNodeKind::Judge;
+
+        let error = export_preset(&imported.document).expect_err("judge node is IR-only");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        assert!(error.to_string().contains("no preset projection"));
+    }
+
+    #[test]
+    fn import_refuses_unsafe_asset_paths() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manifest: PresetManifest =
+            serde_yaml::from_str(&MANIFEST.replace("prompts/judge.md", "../evil.md"))
+                .expect("manifest parses");
+
+        let error =
+            import_preset_bundle(&manifest, dir.path()).expect_err("parent traversal refused");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        assert!(error.to_string().contains("unsafe asset path `../evil.md`"));
     }
 }
