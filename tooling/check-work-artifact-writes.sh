@@ -208,8 +208,12 @@ def scan_file(path, base):
     for idx, line in enumerate(lines):
         if idx in skip:
             continue
-        if WRITE_RE.search(line):
-            hits.append((idx, line.strip(), enclosing_symbol(lines, idx)))
+        # Count every call, not every matching line: two direct writes on one
+        # line must register as two hits.
+        occurrences = len(WRITE_RE.findall(line))
+        if occurrences:
+            symbol = enclosing_symbol(lines, idx)
+            hits.extend([(idx, line.strip(), symbol)] * occurrences)
     return rel, hits
 
 
