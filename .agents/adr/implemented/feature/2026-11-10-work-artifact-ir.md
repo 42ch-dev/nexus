@@ -1,8 +1,8 @@
 # ADR: Work Artifact IR — Read/Write Ports for Creative Work Output
 
-Status: implemented — P0–P5 shipped in v1.236 (schema/import, validation parity, reconcile admission, direct-write guard)
+Status: implemented — P0–P2 shipped through v1.235 and P4–P5 shipped in v1.236; P3 added only the recording stub, with Simulate selection still open
 Date: 2026-11-10
-Scope: Detailed design for a **Work Artifact IR** that is the **SSOT** for a Work's durable creative artifacts (chapter bodies, outlines, review/quality logs, derived narrative and rules files, scaffolded tree layout, chapter-state fields that today live in `work_chapters`, path rules, frontmatter/kind vocabulary), plus **read/write ports** that production and dry-run share. Lifecycle is **Load → Validate → Dry-run → Commit** (a storage-and-commit pipeline, not a strategy Generate → Execute pipeline).
+Scope: Detailed design for a **Work Artifact IR** that is the **SSOT** for a Work's durable creative artifacts (chapter bodies, outlines, review/quality logs, derived narrative and rules files, scaffolded tree layout, chapter-state fields that today live in `work_chapters`, path rules, frontmatter/kind vocabulary), plus a production port for byte commit and reconcile. The wider Load → Validate → Dry-run → Commit lifecycle is an open consequence, not shipped behavior.
 Source: migrated from the retired tracked specs corpus
 
 ## Problem
@@ -11,7 +11,7 @@ Source: migrated from the retired tracked specs corpus
 2. **Durability was inconsistent.** Outline and `commit_fs` used fsync and rename; `execute_write_file` did not.
 3. **Boundary policy was duplicated.** `resolve_guarded_path_async`, `checked_work_directory`, and assorted `Works/<work_ref>/...` joins confined paths differently.
 4. **Layout was hard-coded** in scaffolds, seed_chapters, sync discovery (`crates/nexus-orchestration/src/sync_module.rs` scans `Works/<work_ref>/Stories/*.md`), and tests.
-5. **Dry-run had no stub at this seam.** A Simulate or test that exercised produce could create real chapter files if the tool was live.
+5. **Production dry-run still has no selected stub at this seam.** A Simulate or test that exercises produce with the live tool can create real chapter files.
 6. **HTTP body remains read-only** (intentional). A Work Artifact port preserves that product split.
 7. **Concurrency authority was split.** Outline / HTTP patch acquired `WorkLock` (`crates/nexus-core/src/content.rs`); the hot-path tool write did not.
 8. **Append kinds had no port op.** `rules_history` is append-only; `quality_log` is advisory append-ish; a naïve create/replace/delete port cannot express them.
@@ -42,7 +42,7 @@ The FL-E stage named `persist` maps to `kb-extract`; it is not manuscript persis
 
 Work Artifact IR is the SSOT for Work durable creative artifacts and their chapter-state, path, and frontmatter contracts. It is neither a derived snapshot, a port-local cache, nor a read model of `work_chapters`. Database rows are an index/cache; reconcile rebuilds or refreshes that index from IR and the filesystem projection.
 
-Workflow IR answers what strategy graph is generated, composed, simulated, approved, and run. Work Artifact IR answers what durable files and metadata constitute a Work and how production and dry-run read and commit them. The two remain separate documents, types, versions, and landing paths. They share port/adapter practice, not one runtime type. If Workflow Simulate reaches a Work-artifact write, it uses this port's stub.
+Workflow IR answers what strategy graph is generated, composed, simulated, approved, and run. Work Artifact IR answers what durable files and metadata constitute a Work and how production commits and reconciles them. The two remain separate documents, types, versions, and landing paths. They share port/adapter practice, not one runtime type. Workflow Simulate selection of the recording stub is not wired into the shipped execution plane; the P3 reopen condition is recorded in `Consequences`.
 
 Work Artifact IR coordinates with [chapter-content-local-api.md](../../../../docs/specs/runtime/chapter-content-local-api.md), [workflow-profile.md](../../../../docs/specs/novel-writing/workflow-profile.md), [quality-loop.md](../../../../docs/specs/novel-writing/quality-loop.md), [sync-contract.md](../../../../docs/specs/novel-writing/sync-contract.md), [creator-workflow.md](../../../../docs/specs/creator/creator-workflow.md), and the essay/script/game-bible profile documents. Those documents retain HTTP wire, profile behavior, stage chains, gates, prompts, completion semantics, and World binding; Work Artifact IR owns artifact layout and chapter-state authority.
 
@@ -80,25 +80,21 @@ The following stay outside this IR:
           └────────┬────────┴─────────┬───────┘
                    ▼
           Work Artifact Port
-          (load / validate / dry-run / commit / append / lock)
+             (commit / reconcile)
                    │
-     ┌─────────────┼──────────────────┐
-     ▼             ▼                  ▼
-Production      Metadata            Dry-run
-adapter         index adapter       stub
-(byte path:     (work_chapters      (records intended
- fsync_write_    as cache of IR)     writes; no Work
- atomic;                             tree mutation)
- structured
- commits MAY
- use commit_fs)
-     │             │
-     ▼             ▼
+     ┌─────────────┴──────────────────┐
+     ▼                                ▼
+Production byte adapter          Metadata index adapter
+(fsync_write_atomic;             (work_chapters index;
+ parent mkdir; WorkLock)          reconcile diff/apply)
+     │                                │
+     └──────────────┬─────────────────┘
+                    ▼
 Work Artifact IR + filesystem projection + DB index/cache rows
 ```
 
-1. All production reads and writes of Work artifacts go through the port or a documented facade. Produce, scaffold, outline, review-log, rules, and narrative-index paths do not add direct `std::fs::write` or `tokio::fs::write` calls.
-2. Simulate, dry-run, and isolated tests stub the port and never create, replace, or delete files under `Works/`.
+1. All production Work byte writes and reconcile admissions go through the port. Produce, scaffold, outline, review-log, rules, and narrative-index paths do not add direct `std::fs::write` or `tokio::fs::write` calls.
+2. `RecordingWorkArtifactPort` exists for tests, but no production Simulate/dry-run execution plane selects it; production write isolation is therefore not claimed.
 3. HTTP `chapter_body` remains read-only; the port does not revive a browser manuscript editor.
 4. Path guards, frontmatter contracts, workspace confinement, and `WorkLock` are owned once by the port rather than recopied at callers.
 5. Port scope is `Works/<work_ref>/` only. Non-Work paths retain the separate guarded workspace fallback and are not forced through Work Artifact IR.
@@ -116,7 +112,7 @@ A snapshot describes one Work at one revision:
 | `work_id` | Stable Work UUID key (`wrk_…`) |
 | `work_ref` | Human slug used in `Works/<work_ref>/` |
 | `work_profile` | `novel`, `essay`, `script`, `game_bible`, or a later profile |
-| `revision` | CAS token: content hash over included artifacts, declared tree, and chapter-state section |
+| `revision` | Snapshot revision identity; the shipped port exposes no CAS token |
 | `workspace_root` | Binding to the pinned workspace, not a free path in artifact payloads |
 
 Each artifact record carries:
@@ -156,7 +152,7 @@ Workflow IR nodes, `preset.yaml` states, graph-flow Task ids, inner-graph bindin
 | `chronology_document` | Outline/chronology files | Derived narrative |
 | `log_stub_dir` | `Logs/{brainstorm,write,review,publish}/` | Tree entry |
 | `completion_lock_file` | `.completion-lock.json` | Derived only |
-| `tree_directory` | Scaffold directories | First-class for dry-run mkdir |
+| `tree_directory` | Scaffold directories | Directory artifact |
 
 A new profile kind MUST NOT smuggle strategy, memory, or knowledge-store records into the IR.
 
@@ -212,59 +208,63 @@ Reconcile refreshes the DB index from IR plus the filesystem projection. `port.r
 
 #### 5.1 Port operations
 
+The shipped `WorkArtifactPort` declares exactly two operations:
+
 | Op | Behavior |
 | --- | --- |
-| `load(work_id \| work_ref)` | Read tree, chapter state, metadata, and optional payloads |
-| `read(rel_path)` | Guarded read under `Works/<work_ref>/` |
-| `validate(intent)` | Path, kind/frontmatter/schema, status, no-escape, and lock checks |
-| `plan(intent)` | Return creates/replaces/deletes/mkdir/appends without writing |
-| `commit(plan)` | Durable apply under `WorkLock`, then index reconcile |
-| `append(kind, rel_path, bytes)` | True append semantics for history and advisory logs |
-| `reconcile()` | Filesystem ↔ IR ↔ DB-index diff and apply |
+| `commit(WorkArtifactWrite)` | Commit one artifact's bytes under the per-Work runtime lock. The write carries `workspace_root`, `work_ref`, `rel_child`, and `content`. |
+| `reconcile(WorkReconcile, recheck)` | Compute and optionally apply the `work_chapters` ↔ Markdown-tree diff. `WorkReconcile.dry_run = true` returns the read-only diff without acquiring the lock or writing; otherwise the apply phase runs under the lock. |
 
-An intent is a list of artifact mutations (kind, rel_path, payload, expected_hash), not a Workflow IR document.
+There is no separate intent list in the shipped interface. `commit` does not automatically run reconcile, and neither operation accepts an expected content hash.
 
-#### 5.2 Production and dry-run adapters
+#### 5.2 Production and recording adapters
 
-- **Production byte path:** `fsync_write_atomic` semantics—temp + fsync + rename + final fsync + parent-dir fsync—across supported platforms. The port owns CAS/hash, parent mkdir, and `WorkLock`.
+- **Production byte path:** `fsync_write_atomic` semantics—temp + fsync + rename + final fsync + parent-dir fsync—across supported platforms. The port owns boundary re-checks, parent mkdir, and `WorkLock`.
 - **Structured commit:** preset `workspace.commit` change lists MAY retain `WorkspaceExecutor` / `commit_fs`; this is not the sole manuscript backend while non-Unix refusal and fixed caps remain.
 - **Metadata index:** `work_chapters` and selected `works` pointer columns mirror IR.
-- **Dry-run:** records intended writes and would-be hashes without mutating `Works/` or persistent index rows.
-- The port permits alternate object, encrypted, or remote backends without making them v1 requirements.
+- **Recording adapter:** `RecordingWorkArtifactPort` records intended writes and content digests without filesystem, SQLite, or lock operations, but it is test-only/dead-code outside tests until a Simulate execution plane selects it. It is not a shipped production dry-run path.
 
 `execute_write_file`, outline services, scaffold builtins, review ingest, quality-loop logs, narrative index, rules layers, auto-chronology, and chapter transitions depend on the port rather than concrete filesystem helpers.
 
 If Work structured bundles use `commit_fs`, file/change/total caps are reviewed and parameterized by kind/plan rather than silently retaining manuscript-incompatible defaults. Streaming and hash-while-stage avoid holding whole files twice. Unix, macOS, and Windows behavior is explicit.
 
-Parent-directory creation is a first-class guarded operation with failure cleanup. `tree_directory` and scaffold mkdir intents preserve first-write behavior; a thin `commit_fs` forwarder against missing parents is not valid.
+Parent-directory creation is a first-class guarded operation with failure cleanup. `tree_directory` and scaffold mkdir preserve first-write behavior; a thin `commit_fs` forwarder against missing parents is not valid.
 
 For `fs/write_text_file` specifically:
 
 1. Tool id and outside-workspace `Forbidden` behavior remain stable.
-2. Work paths use `port.plan` / `port.commit`; other workspace paths use the existing guarded fallback.
+2. Work paths use `WorkArtifactPort::commit`; other workspace paths use the existing guarded fallback.
 3. The JSON result remains `{ "written": true }` absent a versioned tool change.
-4. Dry-run/Simulate injects the stub.
-5. Work-path commits acquire `WorkLock` or the equivalent port-owned lock.
+4. Work-path commits acquire `WorkLock` or write under the existing schedule holder.
 
-Append-only `rules_history` and advisory `quality_log` writes use append or an explicit replace-CAS exclusion. Undocumented full-file rewrites racing concurrent appenders are forbidden unless a single-writer lock and rewrite protocol are documented.
+### 6. Commit and reconcile lifecycle
 
-### 6. Lifecycle
-
-Work Artifact IR is a storage and commit pipeline, not a strategy authoring pipeline:
+The shipped port covers byte commit and reconcile admission, not the full Load → Validate → Dry-run → Commit surface:
 
 ```text
-Load  →  Validate  →  Dry-run?  →  Commit
-                 ↘  (reject)
+Work byte write → boundary/identity/lock checks → durable commit
+Reconcile request → unlocked diff → dry-run report OR locked apply
 ```
 
-| Stage | Meaning | Side effects |
-| --- | --- | --- |
-| Load | Resolve Work identity, tree, chapter state, pointers, and optional payloads | Read-only |
-| Validate | Path, frontmatter, status, hash, lock, and traversal checks | Read-only |
-| Dry-run | `plan(intent)` against a stub or copy-on-write view | No Work tree, World KB, or cloud-sync mutation |
-| Commit | Durable apply under lock followed by index reconcile | Only stage mutating Work tree / IR revision |
+A byte commit validates `rel_child`, resolves the active creator/workspace and Work, rechecks the confined target, creates parents, acquires or inherits the Work lock, and writes durable bytes. It does not apply Workflow IR or automatically reconcile the chapter index.
 
-Commit is CAS-aware when `expected_hash` is present. Load and Validate do not start orchestration or apply Workflow IR. Derived completion-lock files are written only as projections of DB run state.
+Reconcile computes its diff without the lock. A request with `dry_run = true` stops at the report and writes nothing. A mutating reconcile rechecks caller authorization, acquires the runtime lock, writes any frontmatter-status resync through the same byte path, applies the DB index operations, and releases the lock on success or failure.
+
+Derived completion-lock files remain projections of DB run state. The wider load/read/validate/plan/append operations and production Simulate stub selection are open items in `Consequences`, not stages available to callers today.
+
+### 6.1 Direct-write guard (P5)
+
+P5 makes the Work port unconditional and default-on: no runtime flag, environment variable, or configuration selects a different Work byte writer. `tooling/check-work-artifact-writes.sh` statically scans the inventoried production Work-writer modules and fails new direct `std::fs::write`, `tokio::fs::write`, or imported `fs::write` calls outside exact path+symbol exemptions. CI proves the guard fails on synthetic direct-write and mixed port-plus-direct-write fixtures before requiring the repository scan to pass.
+
+The allowlist contains exactly three synchronous rollback restores:
+
+| Exact path | Exact symbol | Disposition |
+| --- | --- | --- |
+| `crates/nexus-orchestration/src/capability/builtins/essay_scaffold.rs` | `ScaffoldTransaction::drop` | Restore only pre-existing bytes during rollback; never create content |
+| `crates/nexus-orchestration/src/capability/builtins/game_bible_scaffold.rs` | `ScaffoldTransaction::drop` | Restore only pre-existing bytes during rollback; never create content |
+| `crates/nexus-orchestration/src/capability/builtins/script_scaffold.rs` | `ScaffoldTransaction::drop` | Restore only pre-existing bytes during rollback; never create content |
+
+Each exemption is keyed by the same exact path and symbol in `tooling/work-artifact-write-allowlist.tsv` and leaves when scaffold rollback gains an async/port-based restore path. The removed `rules_history.rs` writer and migrated `work_chapters.rs` write have no exemptions. P5 does not claim that P3 production Simulate stub selection has shipped.
 
 ## Alternatives considered
 
@@ -280,30 +280,30 @@ Commit is CAS-aware when `expected_hash` is present. Load and Validate do not st
 
 ## Consequences
 
-The shipped port provides one guarded, durable, lock-aware seam for Work output while preserving non-Work fallback writes, read-only HTTP bodies, existing layouts, and dry-run isolation. First writes retain parent creation; append kinds retain their history semantics; reconcile converges pointers without a second prose store.
+The shipped port provides one guarded, durable, lock-aware seam for Work byte output while preserving non-Work fallback writes, read-only HTTP bodies, and existing layouts. Reconcile converges DB index pointers with the Markdown tree and supports its own read-only `dry_run` diff. These facts do not imply a general production dry-run for Work writes.
 
-P0–P5 are shipped. The default-on `execute_write_file` routes every `WorkPath::Artifact` through `FsWorkArtifactPort`; the direct-write repository guard and CI synthetic-fixture checks protect the seam. The original acceptance observations become standing behavior:
+Git history and the shipped source establish the phase boundary: P0/P1 introduced the port and hot-path routing; P2 routed the domain Work writers through it; P3 added `RecordingWorkArtifactPort` but not its production selection; P4 admitted reconcile through the port; P5 made the port default-on and added the direct-write guard.
 
-1. Work-path `draft_chapter` / `fs/write_text_file` writes and dry-runs only through the port.
-2. Outline PATCH and novel/essay/script/game-bible scaffolds share the port.
-3. Dry-run does not mutate `Works/`.
-4. Reconcile converges DB index pointers with tree/IR.
-5. Novel sync still discovers canonical `Stories/*.md`.
-6. The Work port has no Workflow IR compile/runtime dependency.
-7. Append-only kinds avoid undocumented replace races.
-8. First-write parent creation matches prior tool behavior.
+The resulting standing behavior is:
 
-The direct-write allowlist retains exactly three synchronous rollback restores: `ScaffoldTransaction::drop` in `essay_scaffold.rs`, `game_bible_scaffold.rs`, and `script_scaffold.rs`. Each restores only pre-existing bytes, never creates content, and is keyed by exact path and symbol in `tooling/work-artifact-write-allowlist.tsv`. The removed `rules_history.rs` writer and migrated `work_chapters.rs` write have no exemptions.
+1. Work-path `draft_chapter` / `fs/write_text_file` writes use `WorkArtifactPort::commit`.
+2. The P2 domain Work writers share the port.
+3. Reconcile converges the `work_chapters` index with the tree; its `dry_run` request returns a diff without writing.
+4. Novel sync still discovers canonical `Stories/*.md`.
+5. The Work port has no Workflow IR compile/runtime dependency.
+6. First-write parent creation matches prior tool behavior.
+7. The P5 guard rejects new direct writes outside the three exact rollback exemptions.
 
-The costs and remaining design sensitivities are carried explicitly:
+The open costs and design sensitivities are explicit:
 
-1. Canonical snapshot encoding and the exact division between tree hash and DB row version define the revision/CAS contract.
-2. Structured Work bundles retain `WorkspaceExecutor` only where that seam fits; preset `workspace.commit` remains the clear case.
-3. Layout freezing versus profile-specific path maps must preserve sync and preset assumptions.
-4. Review-report parsing stays pure; the port owns I/O.
-5. `fs/write_text_file` hash-conflict errors must preserve a stable, typed caller contract.
-6. Multi-volume paths use validated builders or patterns without duplicating path rules.
-7. Scaffold rollback and mixed FS+DB transaction ordering must remain atomic around IR revision changes; the three exact rollback exemptions are the bounded residue.
-8. `WorkLock` holder-kind conventions distinguish tool, HTTP, and CLI acquisitions without weakening serialization.
+1. **Open — intended port surface:** `load`, `read`, `validate`, `plan`, and `append` are not shipped operations. `WorkArtifactWrite` has no `expected_hash`, and the port has no CAS/hash-precondition contract or typed hash-conflict result. The intents behind those operations, including append-only history semantics and conflict reporting, remain unsatisfied rather than being attributed to `commit` or `reconcile`.
+2. **Open — P3 production dry-run isolation:** `RecordingWorkArtifactPort` is unused outside tests and is not selected by a production Simulate execution plane. The reopen condition is plan `v235-work-ir-p3`: the first Simulate execution plane must select the stub at the per-dispatch construction point so one selection covers every Work write. Until then, no production dry-run isolation property is claimed; reconcile's read-only `dry_run` diff is a separate, shipped feature.
+3. Canonical snapshot encoding and revision semantics remain design sensitivities; no port-level revision precondition is claimed.
+4. Structured Work bundles retain `WorkspaceExecutor` only where that seam fits; preset `workspace.commit` remains the clear case.
+5. Layout freezing versus profile-specific path maps must preserve sync and preset assumptions.
+6. Review-report parsing stays pure; the port owns I/O.
+7. Multi-volume paths use validated builders or patterns without duplicating path rules.
+8. Scaffold rollback and mixed FS+DB transaction ordering must remain atomic around IR revision changes; the three exact rollback exemptions are the bounded residue.
+9. `WorkLock` holder-kind conventions distinguish tool, HTTP, and CLI acquisitions without weakening serialization.
 
 References for the implementation anchors and sibling contracts are [orchestration-engine.md](../../../../docs/specs/orchestration/orchestration-engine.md), the profile/specification documents linked above, and the Work Artifact IR implementation under `crates/nexus-core/src/execution/`, `crates/nexus-orchestration/src/`, and `crates/nexus-local-db/src/work_chapters.rs`.
