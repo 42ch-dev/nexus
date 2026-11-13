@@ -252,6 +252,9 @@ impl<'de> ::serde::Deserialize<'de> for NestPackageVersion {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct NestPayload {
+    ///Existing node the new slot is wired after: the daemon writes one `linear` edge `attach_to -> parent_node` on the committed document, so the static walk reaches the slot. Omitted or null writes no edge, and a target that names no node is refused as a dangling edge.
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub attach_to: ::std::option::Option<NestPayloadAttachTo>,
     ///When the region expands into concrete nodes and edges.
     pub expansion: NestPayloadExpansion,
     ///Stable nest id; the region address for `unnest`, `replace_subtree` and `bind_slot`.
@@ -263,6 +266,60 @@ pub struct NestPayload {
 impl NestPayload {
     pub fn builder() -> builder::NestPayload {
         Default::default()
+    }
+}
+///Existing node the new slot is wired after: the daemon writes one `linear` edge `attach_to -> parent_node` on the committed document, so the static walk reaches the slot. Omitted or null writes no edge, and a target that names no node is refused as a dangling edge.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct NestPayloadAttachTo(::std::string::String);
+impl ::std::ops::Deref for NestPayloadAttachTo {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<NestPayloadAttachTo> for ::std::string::String {
+    fn from(value: NestPayloadAttachTo) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for NestPayloadAttachTo {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<&str> for NestPayloadAttachTo {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for NestPayloadAttachTo {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for NestPayloadAttachTo {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::string::String::deserialize(deserializer)?
+            .parse()
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
     }
 }
 ///When the region expands into concrete nodes and edges.
@@ -914,6 +971,10 @@ pub mod builder {
     }
     #[derive(Clone, Debug)]
     pub struct NestPayload {
+        attach_to: ::std::result::Result<
+            ::std::option::Option<super::NestPayloadAttachTo>,
+            ::std::string::String,
+        >,
         expansion: ::std::result::Result<
             super::NestPayloadExpansion,
             ::std::string::String,
@@ -928,6 +989,7 @@ pub mod builder {
     impl ::std::default::Default for NestPayload {
         fn default() -> Self {
             Self {
+                attach_to: Ok(Default::default()),
                 expansion: Err("no value supplied for expansion".to_string()),
                 nest_id: Err("no value supplied for nest_id".to_string()),
                 package: Err("no value supplied for package".to_string()),
@@ -936,6 +998,20 @@ pub mod builder {
         }
     }
     impl NestPayload {
+        pub fn attach_to<T>(mut self, value: T) -> Self
+        where
+            T: ::std::convert::TryInto<
+                ::std::option::Option<super::NestPayloadAttachTo>,
+            >,
+            T::Error: ::std::fmt::Display,
+        {
+            self.attach_to = value
+                .try_into()
+                .map_err(|e| {
+                    format!("error converting supplied value for attach_to: {e}")
+                });
+            self
+        }
         pub fn expansion<T>(mut self, value: T) -> Self
         where
             T: ::std::convert::TryInto<super::NestPayloadExpansion>,
@@ -991,6 +1067,7 @@ pub mod builder {
             value: NestPayload,
         ) -> ::std::result::Result<Self, super::error::ConversionError> {
             Ok(Self {
+                attach_to: value.attach_to?,
                 expansion: value.expansion?,
                 nest_id: value.nest_id?,
                 package: value.package?,
@@ -1001,6 +1078,7 @@ pub mod builder {
     impl ::std::convert::From<super::NestPayload> for NestPayload {
         fn from(value: super::NestPayload) -> Self {
             Self {
+                attach_to: Ok(value.attach_to),
                 expansion: Ok(value.expansion),
                 nest_id: Ok(value.nest_id),
                 package: Ok(value.package),

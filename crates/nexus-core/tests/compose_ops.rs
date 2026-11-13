@@ -11,7 +11,8 @@ use nexus_core::{
     CoreOpenOptions, CoreService, NestOp, PatternPackageRef, Principal, ReplaceSubtreeOp, UnnestOp,
 };
 use nexus_workflow_ir::{
-    WorkflowDocument, WorkflowDocumentEffectSummary, WorkflowNestBindingExpansion, WorkflowNodeKind,
+    WorkflowDocument, WorkflowDocumentEffectSummary, WorkflowEdgeKind,
+    WorkflowNestBindingExpansion, WorkflowNodeKind,
 };
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
@@ -61,9 +62,21 @@ fn package(id: &str, version: &str) -> PatternPackageRef {
 }
 
 fn nest(nest_id: &str, parent_node: &str, id: &str, version: &str) -> ComposeOp {
+    wired_nest(nest_id, parent_node, None, id, version)
+}
+
+/// A nest that wires the new slot after `attach_to`, so the walk reaches it.
+fn wired_nest(
+    nest_id: &str,
+    parent_node: &str,
+    attach_to: Option<&str>,
+    id: &str,
+    version: &str,
+) -> ComposeOp {
     ComposeOp::Nest(NestOp {
         nest_id: nest_id.to_owned(),
         parent_node: parent_node.to_owned(),
+        attach_to: attach_to.map(str::to_owned),
         package: package(id, version),
         expansion: WorkflowNestBindingExpansion::ExpandInCandidate,
     })
@@ -452,6 +465,133 @@ async fn nest_inserts_the_collapsed_slot_and_the_resolved_pin() {
         }]
     );
 
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn nest_wires_each_slot_after_its_attach_target() {
+    let setup = setup().await;
+    write_registry(&setup.home);
+    let before = current(&setup).await;
+    let entry = before.document.entry.clone();
+
+    // Two patterns composed into one candidate: the second hangs off the first slot.
+    let first = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            wired_nest("first", "first-slot", Some(&entry), "prompt-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    let second = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            first.candidate.revision,
+            wired_nest(
+                "second",
+                "second-slot",
+                Some("first-slot"),
+                "write-step",
+                "1.0.0",
+            ),
+        )
+        .await
+        .unwrap();
+
+    let document = &second.candidate.document;
+    let inbound = |to: &str| -> Vec<(String, String, WorkflowEdgeKind)> {
+        document
+            .edges
+            .iter()
+            .filter(|edge| edge.to == to)
+            .map(|edge| (edge.id.clone(), edge.from.clone(), edge.kind))
+            .collect()
+    };
+    assert_eq!(
+        inbound("first-slot"),
+        vec![(
+            format!("{entry}->first-slot"),
+            entry.clone(),
+            WorkflowEdgeKind::Linear
+        )],
+        "the commit wires the slot from the client's attach target, exactly once"
+    );
+    assert_eq!(
+        inbound("second-slot"),
+        vec![(
+            "first-slot->second-slot".to_owned(),
+            "first-slot".to_owned(),
+            WorkflowEdgeKind::Linear
+        )]
+    );
+
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_nest_without_an_attach_target_writes_no_edge() {
+    let setup = setup().await;
+    write_registry(&setup.home);
+    let before = current(&setup).await;
+
+    let outcome = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            nest("unwired", "unwired-slot", "write-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::to_value(&outcome.candidate.document.edges).unwrap(),
+        serde_json::to_value(&before.document.edges).unwrap(),
+        "an omitted attach target leaves the graph as it was"
+    );
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn an_attach_target_that_names_no_node_is_refused_and_writes_nothing() {
+    let setup = setup().await;
+    write_registry(&setup.home);
+    let before = current(&setup).await;
+
+    let error = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            wired_nest(
+                "orphan",
+                "orphan-slot",
+                Some("no-such-node"),
+                "prompt-step",
+                "1.0.0",
+            ),
+        )
+        .await
+        .unwrap_err();
+
+    let details = refusal(error);
+    assert_eq!(details["reason"], "invalid_document");
+    assert!(
+        details["violations"][0]
+            .as_str()
+            .unwrap_or_default()
+            .contains("no-such-node"),
+        "the dangling edge names the target it cannot reach: {details}"
+    );
+    assert!(stored_row(setup.core.pool(), STRATEGY).await.is_none());
+    assert_eq!(current(&setup).await.revision, 0);
     setup.core.close().await.unwrap();
 }
 

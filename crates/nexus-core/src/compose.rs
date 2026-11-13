@@ -28,9 +28,10 @@ use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
-    WorkflowAssetRef, WorkflowNestBinding, WorkflowNestBindingExpansion,
-    WorkflowNestBindingPinPolicy, WorkflowNestChild, WorkflowNestChildKind, WorkflowNode,
-    WorkflowNodeEffectClass, WorkflowNodeKind, WorkflowPatternRef,
+    WorkflowAssetRef, WorkflowEdge, WorkflowEdgeKind, WorkflowNestBinding,
+    WorkflowNestBindingExpansion, WorkflowNestBindingPinPolicy, WorkflowNestChild,
+    WorkflowNestChildKind, WorkflowNode, WorkflowNodeEffectClass, WorkflowNodeKind,
+    WorkflowPatternRef,
 };
 use nexus_contracts::generated::daemon_api::patterns::pattern_manifest::{
     NexusPatternSlotKind, PatternManifest, PatternManifestEffectClass,
@@ -68,6 +69,9 @@ pub struct NestOp {
     pub nest_id: String,
     /// Id of the collapsed slot node this operation inserts.
     pub parent_node: String,
+    /// Existing node the new slot is wired after: the commit writes one `linear` edge from it to
+    /// the slot, which is what makes the slot reachable to the walk. `None` writes no edge.
+    pub attach_to: Option<String>,
     /// Exact package to pin.
     pub package: PatternPackageRef,
     /// When the region expands into concrete nodes and edges.
@@ -707,6 +711,21 @@ fn nest_pattern(
         parent_node: op.parent_node.clone(),
         pin_policy: WorkflowNestBindingPinPolicy::Exact,
     });
+    // The walk only reaches a node an edge reaches, so the slot stays unreachable unless the
+    // commit wires it. A target that names no node is left to `settle`, which reports it as the
+    // dangling edge it is.
+    if let Some(attach_to) = op.attach_to.as_deref() {
+        let mut taken: HashSet<String> =
+            document.edges.iter().map(|edge| edge.id.clone()).collect();
+        document.edges.push(WorkflowEdge {
+            id: fresh_id(&format!("{attach_to}->{}", op.parent_node), &mut taken),
+            from: attach_to.to_owned(),
+            kind: WorkflowEdgeKind::Linear,
+            label: None,
+            to: op.parent_node.clone(),
+            when: None,
+        });
+    }
     Ok(())
 }
 

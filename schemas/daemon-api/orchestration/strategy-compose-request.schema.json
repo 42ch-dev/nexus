@@ -35,6 +35,11 @@
               "minLength": 1,
               "description": "Id of the collapsed `pattern_slot` node this operation inserts."
             },
+            "attach_to": {
+              "type": ["string", "null"],
+              "minLength": 1,
+              "description": "Existing node the new slot is wired after: the daemon writes one `linear` edge `attach_to -> parent_node` on the committed document, so the static walk reaches the slot. Omitted or null writes no edge, and a target that names no node is refused as a dangling edge."
+            },
             "package": {
               "title": "NestPackage",
               "type": "object",

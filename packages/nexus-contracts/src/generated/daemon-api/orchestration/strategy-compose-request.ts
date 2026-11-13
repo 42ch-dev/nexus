@@ -29,6 +29,10 @@ export interface NestPayload {
    * Id of the collapsed `pattern_slot` node this operation inserts.
    */
   parent_node: string;
+  /**
+   * Existing node the new slot is wired after: the daemon writes one `linear` edge `attach_to -> parent_node` on the committed document, so the static walk reaches the slot. Omitted or null writes no edge, and a target that names no node is refused as a dangling edge.
+   */
+  attach_to?: string | null;
   package: NestPackage;
   /**
    * When the region expands into concrete nodes and edges.
