@@ -1162,7 +1162,7 @@ fn dropped_bindings(
         .nodes
         .iter()
         .find(|node| node.id == parent_node)
-        .map(|node| {
+        .map_or_default(|node| {
             node.bind
                 .keys()
                 .map(|slot| ComposeDiagnostic::DroppedSlotBinding {
@@ -1171,7 +1171,6 @@ fn dropped_bindings(
                 })
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 /// Point everything that referenced the slot node at the flattened body's boundary nodes.
