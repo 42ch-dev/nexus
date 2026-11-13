@@ -705,7 +705,7 @@ fn add_knowledge_entry_audience_rejects_every_non_native_shape() {
     ] {
         assert!(
             serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
-                &audience.clone()
+                &audience
             ))
             .is_err(),
             "accepted non-native audience {audience}"

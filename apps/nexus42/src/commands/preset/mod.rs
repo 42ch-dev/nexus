@@ -1385,16 +1385,13 @@ states:
         assert_eq!(from_ir["warnings"], from_yaml["warnings"]);
 
         let strings = |resp: &serde_json::Value, field: &str| -> Vec<String> {
-            resp[field]
-                .as_array()
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(serde_json::Value::as_str)
-                        .map(str::to_string)
-                        .collect()
-                })
-                .unwrap_or_default()
+            resp[field].as_array().map_or_default(|items| {
+                items
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
         };
         let ir_errors = strings(&from_ir, "errors");
         for error in strings(&from_yaml, "errors") {

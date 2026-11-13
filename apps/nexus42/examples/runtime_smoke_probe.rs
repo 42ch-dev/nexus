@@ -140,8 +140,7 @@ async fn main() {
         serde_json::from_str(&manifest_json).expect("manifest json parses");
     let served_ops: Vec<&str> = manifest["extensions"]["nexus"]["served_ops"]
         .as_array()
-        .map(|ops| ops.iter().filter_map(|op| op.as_str()).collect())
-        .unwrap_or_default();
+        .map_or_default(|ops| ops.iter().filter_map(|op| op.as_str()).collect());
     println!("SERVED_OPS={}", served_ops.join(","));
 
     // Session usable after the reads: a non-served op is refused with the

@@ -256,8 +256,7 @@ mod tests {
     fn load_corrupt_file_returns_empty() {
         let _home = crate::testutil::isolated_home();
         let nexus_dir = std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default()
+            .map_or_default(std::path::PathBuf::from)
             .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
         std::fs::write(nexus_dir.join(FILENAME), "not valid json{{{").expect("write corrupt");

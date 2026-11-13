@@ -480,8 +480,7 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
     let live_join_keys: Vec<String> = row
         .live_join_keys
         .as_deref()
-        .map(|comma| comma.split(',').map(str::to_string).collect())
-        .unwrap_or_default();
+        .map_or_default(|comma| comma.split(',').map(str::to_string).collect());
     let has_live_join_keys = !live_join_keys.is_empty();
     // Same corrupt-vs-shape honesty as detail mode, from the SQL flags.
     let unreadable_kind = if !row.context_valid_json {

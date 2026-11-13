@@ -90,7 +90,7 @@ impl PartialApplyResult {
             let info = DeltaApplyInfo {
                 delta_index,
                 apply_status: apply_status.clone(),
-                error_code: error_code.clone(),
+                error_code,
                 applied_entity_revision,
             };
 

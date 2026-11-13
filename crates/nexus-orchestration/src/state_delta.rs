@@ -173,8 +173,7 @@ pub async fn apply_state_delta_in_tx(
 
         let mut body: KnowledgeEntryBody = body_json_str
             .as_deref()
-            .map(|s| serde_json::from_str(s).unwrap_or_default())
-            .unwrap_or_default();
+            .map_or_default(|s| serde_json::from_str(s).unwrap_or_default());
 
         let mut state = body
             .state

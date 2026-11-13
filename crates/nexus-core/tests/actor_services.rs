@@ -3028,7 +3028,7 @@ async fn retained_character_list_offset_pagination_bounds() {
             )
             .await
             .expect("create");
-        expected.push(String::from(created.character.character_id.clone()));
+        expected.push(String::from(created.character.character_id));
     }
     expected.sort();
 
@@ -3896,7 +3896,7 @@ async fn retained_knowledge_view_stored_bytes_and_keyset_tie_break() {
         if !page.has_more {
             break;
         }
-        cursor = page.next_cursor.clone();
+        cursor = page.next_cursor;
         assert!(cursor.is_some(), "a continuing page carries a cursor");
         assert!(seen.len() <= 4, "the walk must terminate");
     }

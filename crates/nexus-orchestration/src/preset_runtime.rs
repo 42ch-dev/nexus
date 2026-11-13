@@ -119,8 +119,7 @@ pub fn build_outer_graph(
         let incoming = *incoming_labeled.get(state.id.as_str()).unwrap_or(&0);
         let preds: std::collections::HashSet<String> = converge_predecessors
             .get(state.id.as_str())
-            .map(|hs| hs.iter().map(std::string::ToString::to_string).collect())
-            .unwrap_or_default();
+            .map_or_default(|hs| hs.iter().map(std::string::ToString::to_string).collect());
         let task = StateCompositeTask::from_manifest(state)
             .with_expected_incoming(incoming)
             .with_converge_predecessors(preds);
@@ -256,8 +255,7 @@ pub fn build_wired_outer_graph(
         let incoming = *incoming_labeled.get(state.id.as_str()).unwrap_or(&0);
         let preds: std::collections::HashSet<String> = converge_predecessors
             .get(state.id.as_str())
-            .map(|hs| hs.iter().map(std::string::ToString::to_string).collect())
-            .unwrap_or_default();
+            .map_or_default(|hs| hs.iter().map(std::string::ToString::to_string).collect());
         let mut task = StateCompositeTask::from_manifest(state)
             .with_resolved_template(&loaded.id)
             .with_expected_incoming(incoming)

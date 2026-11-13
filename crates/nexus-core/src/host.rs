@@ -1468,8 +1468,7 @@ impl HostHandle {
                     CoreHostQueryFormat::Scan => {
                         let config = HostManager::agent_config(&self.host).await;
                         let probe_dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
-                            .map(|path| std::env::split_paths(&path).collect())
-                            .unwrap_or_default();
+                            .map_or_default(|path| std::env::split_paths(&path).collect());
                         // Repair discovery deliberately ignores the configured
                         // ids: an enabled-but-stale entry (its command removed)
                         // must not hide the working PATH binary of the same id.

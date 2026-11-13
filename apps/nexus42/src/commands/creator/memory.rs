@@ -376,12 +376,11 @@ impl MemoryLine {
                 .map_or_else(|| live.updated_at.to_rfc3339(), ToString::to_string),
             source_session_ids: legacy
                 .and_then(|legacy| legacy["source_session_ids"].as_array())
-                .map(|ids| {
+                .map_or_default(|ids| {
                     ids.iter()
                         .filter_map(|id| id.as_str().map(str::to_string))
                         .collect()
-                })
-                .unwrap_or_default(),
+                }),
             body: live.content.text.clone(),
         })
     }

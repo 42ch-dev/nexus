@@ -2176,7 +2176,7 @@ impl FixtureMemoryProvider {
         let classification = classify(&capture_content);
         let now = Utc::now();
         let provenance = json!({
-            "source_context_ids": placement.map(|context| vec![context]).unwrap_or_default(),
+            "source_context_ids": placement.map_or_default(|context| vec![context]),
             "anchors": [],
             "captured_by": "nexus:fixture-operator",
             "captured_at": timestamp_text(now),

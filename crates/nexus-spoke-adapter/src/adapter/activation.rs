@@ -837,8 +837,8 @@ fn run_primary_pass(
 
         trace.push(ActivationTraceEntry {
             entry_id: entry_id.clone(),
-            canonical_name: canonical_name.clone(),
-            reason: reason.clone(),
+            canonical_name,
+            reason,
             accepted,
             hop_origin_entry_id: None,
             hop_depth: None,

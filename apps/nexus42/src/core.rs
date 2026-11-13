@@ -377,9 +377,7 @@ fn map_memory_provider_refusal(
     family: nexus_core::MemoryProviderRefusal,
     conflict_code: Option<&str>,
 ) -> CliError {
-    let wire = wire_code
-        .map(|wire_code| format!(", wire code: {wire_code}"))
-        .unwrap_or_default();
+    let wire = wire_code.map_or_default(|wire_code| format!(", wire code: {wire_code}"));
     conflict_code.map_or_else(
         || {
             let status = match family {

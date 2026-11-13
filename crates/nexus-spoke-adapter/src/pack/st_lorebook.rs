@@ -447,14 +447,13 @@ fn key_tokens(obj: &Map<String, Value>) -> Vec<String> {
 fn keys_entries(obj: &Map<String, Value>) -> Vec<String> {
     obj.get("keys")
         .and_then(Value::as_array)
-        .map(|items| {
+        .map_or_default(|items| {
             items
                 .iter()
                 .filter_map(Value::as_str)
                 .map(str::to_string)
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 /// The activation keys of an entry: the `keys` array when present, else the

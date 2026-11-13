@@ -1130,13 +1130,11 @@ fn load_permission_policy(workspace_path: &str) -> Option<WorkspacePermissionPol
     let grant = policy
         .get("grant")
         .and_then(|v| v.as_table())
-        .map(table_keys)
-        .unwrap_or_default();
+        .map_or_default(table_keys);
     let deny = policy
         .get("deny")
         .and_then(|v| v.as_table())
-        .map(table_keys)
-        .unwrap_or_default();
+        .map_or_default(table_keys);
 
     Some(WorkspacePermissionPolicy {
         default,
@@ -1165,8 +1163,7 @@ pub(crate) async fn audit_tool_execution(
     let param_summary: Vec<String> = req
         .parameters
         .as_object()
-        .map(|obj| obj.keys().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
+        .map_or_default(|obj| obj.keys().cloned().collect::<Vec<_>>());
 
     let outcome = if decision == "success" {
         "success".to_string()
@@ -2361,8 +2358,7 @@ async fn execute_manuscript_read_range(
             let end_idx = end.min(total);
             let selected: Vec<&str> = lines
                 .get(start_idx..end_idx)
-                .map(<[&str]>::to_vec)
-                .unwrap_or_default();
+                .map_or_default(<[&str]>::to_vec);
             (selected.join("\n"), end < total, total)
         } else {
             let total = content.lines().count();

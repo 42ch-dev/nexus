@@ -79,7 +79,7 @@ pub fn project_entity(kb: &KnowledgeEntryRecord) -> WorldKbEntityProjection {
     let source_anchor_count = u64::from(kb.source_work_id.is_some());
     WorldKbEntityProjection {
         key_block_id: kb.entry_id.clone(),
-        world_id: kb.world_id().map(str::to_string).unwrap_or_default(),
+        world_id: kb.world_id().map_or_default(str::to_string),
         block_type: wire_cast(kb.block_type),
         canonical_name: wire_cast(kb.canonical_name.clone()),
         status: kb.status.clone(),
