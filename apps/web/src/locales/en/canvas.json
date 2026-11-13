@@ -236,7 +236,9 @@
       "createTransition": "Create",
       "simulate": "Simulate…",
       "livePrefix": "Live:",
-      "liveStatus": ""
+      "liveStatus": "",
+      "staging": "Staging",
+      "addPattern": "Add pattern…"
     },
     "node": {
       "status": {
@@ -259,7 +261,17 @@
       "join": "Join · {{strategy}}",
       "currentExecutionNode": "Current execution node",
       "predictedWait": "Predicted wait (static)",
-      "branchNotExplored": "Branch not explored"
+      "branchNotExplored": "Branch not explored",
+      "slotExpand": "Expand",
+      "slotCollapse": "Collapse",
+      "simulated": "Simulated",
+      "unboundSlots": "Unbound required slot: {{slots}}",
+      "effect": {
+        "pure": "effect: pure",
+        "read": "effect: read",
+        "write_candidate": "effect: write candidate",
+        "external": "effect: external"
+      }
     },
     "toast": {
       "runQueued": "Preset run queued",
@@ -292,7 +304,17 @@
       "doesNotPreviewOutput": "A passed simulation does not preview output: no model is called and nothing is generated.",
       "approve": "Approve",
       "approvalUnavailable": "Approval is not available in this build: the approval write path is tracked as I-000415, so this action is disabled. The simulation above still shows the limit.",
-      "rerun": "Run simulation"
+      "rerun": "Run simulation",
+      "pending": "Approving…",
+      "frozen": "Approved as {{approvalId}}. The snapshot is frozen: the candidate, its content hash, the exact pins and the simulation identity below do not change.",
+      "noPublish": "Approval does not publish, apply, schedule or execute. A later edit produces a new candidate revision and needs a new approval.",
+      "pins": "Exact pattern pins",
+      "simulationIdentity": "Simulation identity",
+      "candidateRevision": "Candidate revision",
+      "slotUnbound": "Bind slot {{slot}} on {{pattern}} before approval.",
+      "listingUnreadable": "The pattern listing is unreadable: {{message}}. Unbound required slots are unknown, so approval is not ready.",
+      "listingPending": "The pattern listing has not loaded yet. Unbound required slots are unknown, so approval is not ready.",
+      "pinChanged": "Pattern {{id}}@{{version}} changed: recorded {{recorded}}, current {{current}}. Recompose and simulate again before approval."
     },
     "draftTransitionEditor": "Draft transition editor",
     "revisionBadge": {
@@ -359,7 +381,8 @@
         "saved": "Saved",
         "saveFailed": "Save failed",
         "saving": "Saving…",
-        "updated": "State updated"
+        "updated": "State updated",
+        "composeDisabled": "States are authored in the candidate while composing; this YAML editor is disabled."
       },
       "transition": {
         "title": "Transition",
@@ -369,7 +392,8 @@
         "saved": "Saved",
         "saveFailed": "Save failed",
         "saving": "Saving…",
-        "updated": "Transition updated"
+        "updated": "Transition updated",
+        "composeDisabled": "Transitions are authored in the candidate while composing; this YAML editor is disabled."
       },
       "prompt": {
         "title": "Prompt",
@@ -393,6 +417,28 @@
       "transitionConflict": {
         "title": "Transition conflict"
       }
+    },
+    "composeLoading": "Loading the strategy candidate…",
+    "slot": {
+      "title": "Pattern slot {{pattern}}",
+      "bind": "Bind",
+      "replace": "Replace pattern",
+      "replacePlaceholder": "Choose a pattern…",
+      "replaceCommit": "Replace",
+      "unnest": "Unnest"
+    },
+    "picker": {
+      "title": "Add pattern",
+      "attach": "Nests at node {{node}}; the connecting edge is wired so the walk reaches the new slot.",
+      "empty": "No available patterns in the registry.",
+      "cancel": "Cancel",
+      "nest": "Nest"
+    },
+    "composeConflict": {
+      "title": "Candidate conflict",
+      "reload": "Reload revision {{revision}} and reapply the edit.",
+      "reloadAction": "Reload",
+      "dismiss": "Dismiss"
     }
   },
   "conflict": {
@@ -548,9 +594,20 @@
         "jsonError": "{{field}} must be valid JSON.",
         "orderError": "{{field}} must be a whole number.",
         "option": {
-          "truth": { "True": "True", "False": "False", "Unknown": "Unknown" },
-          "access": { "Private": "Private", "Shared": "Shared", "Public": "Public" },
-          "representation": { "Explicit": "Explicit", "Implicit": "Implicit" },
+          "truth": {
+            "True": "True",
+            "False": "False",
+            "Unknown": "Unknown"
+          },
+          "access": {
+            "Private": "Private",
+            "Shared": "Shared",
+            "Public": "Public"
+          },
+          "representation": {
+            "Explicit": "Explicit",
+            "Implicit": "Implicit"
+          },
           "content_type": {
             "Location": "Location",
             "Contents_Physical_State": "Contents/Physical State",

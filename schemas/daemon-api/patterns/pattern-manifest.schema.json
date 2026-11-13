@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/patterns/pattern-manifest.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PatternManifest",
+  "description": "Declarative manifest of one pattern package directory (`pattern.toml`). A manifest is data, never authority: it records what the package declares. Readability, IR compatibility, effect-rollup agreement, trust and loadability are runtime facts owned by the registry reader, and none of them is claimed here.",
+  "type": "object",
+  "required": [
+    "id",
+    "version",
+    "ir_compat",
+    "description",
+    "effect_class",
+    "slots",
+    "requires_capabilities"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]*$",
+      "description": "Package id. It MUST equal the package directory name; a mismatch is an unavailable package, never an alias."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+      "description": "SemVer 2.0.0 version label. This pattern is the single authority over which labels are accepted: the registry reader does not re-parse it, so a value the pattern admits is a valid label even when its numeric identifiers exceed a machine integer, exactly as SemVer 2.0.0 specifies. It is a human version selector, never the content identity: the pin is the canonical content hash of the package's IR fragment, so two packages may declare the same version with different bytes."
+    },
+    "ir_compat": {
+      "title": "PatternIrCompat",
+      "description": "Inclusive range of workflow IR versions this package supports. A package whose range excludes the daemon's current `ir_version` is unavailable.",
+      "type": "object",
+      "required": ["min", "max"],
+      "additionalProperties": false,
+      "properties": {
+        "min": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Lowest supported IR version (inclusive)."
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Highest supported IR version (inclusive). `min > max` is an invalid range and makes the package unavailable."
+        }
+      }
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Non-empty human label shown wherever the package is listed."
+    },
+    "effect_class": {
+      "type": "string",
+      "enum": ["pure", "read", "write_candidate", "external"],
+      "description": "Worst-case effect this package declares for its fragment. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (the rollup the reader compares against), so a vocabulary change there is a change here. The reader compares the declaration with its own rollup of the fragment; a disagreement makes the package unavailable and neither value is rewritten."
+    },
+    "slots": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/daemon-api/patterns/pattern-slot.schema.json"
+      },
+      "description": "Named slot declarations, possibly empty. Slot names are unique within the manifest."
+    },
+    "requires_capabilities": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Non-empty unique capability ids the package requires; instantiation unions them into the parent. Capability presence is checked by shared semantic validation, not by this manifest."
+    }
+  }
+}

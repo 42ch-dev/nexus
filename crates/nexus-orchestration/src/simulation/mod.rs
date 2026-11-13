@@ -16,10 +16,10 @@
 //! would then be walked and rolled up.
 
 use crate::CapabilityRegistryHolder;
-use nexus_contracts::{
-    SimulationPredictedWait, SimulationPredictedWaitReason, SimulationTrajectory,
-    SimulationTrajectoryEffectSummary,
+use nexus_contracts::generated::daemon_api::orchestration::simulation_trajectory::{
+    SimulationPredictedWait, SimulationPredictedWaitReason,
 };
+use nexus_contracts::{SimulationTrajectory, SimulationTrajectoryEffectSummary};
 use nexus_workflow_ir::{
     content_hash, WorkflowDocument, WorkflowEdge, WorkflowEdgeKind, WorkflowExitWhenKind,
     WorkflowNode, WorkflowNodeEffectClass, WorkflowNodeKind, WorkflowSignalBindingAction,

@@ -1,0 +1,14 @@
+id = "prompt-step"
+version = "1.0.0"
+description = "Draft an answer to a topic with one prompt step"
+effect_class = "external"
+requires_capabilities = ["acp.prompt"]
+
+[ir_compat]
+min = 0
+max = 0
+
+[[slots]]
+name = "topic"
+kind = "string"
+required = true

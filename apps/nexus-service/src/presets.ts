@@ -6,6 +6,7 @@
  * conflict, validation failure) is the core's own.
  */
 import type {
+  ApprovedStrategySnapshot,
   CoreStrategyPatchResponse,
   GetPresetResponse,
   OrchestrationPresetListResponse,
@@ -14,6 +15,9 @@ import type {
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   SimulationTrajectory,
+  StrategyApproveRequest,
+  StrategyComposeRequest,
+  StrategyComposeResponse,
   StrategyPatchPromptTemplateRequest,
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
@@ -158,6 +162,61 @@ export function strategyWorkflowIr(
   );
 }
 
+/**
+ * `GET /v1/daemon/strategies/{strategy_id}/candidate` — the canonical candidate.
+ *
+ * The stored compose row when one exists, otherwise the revision-`0` import projection the
+ * `workflow-ir` read serves. The document's `revision` is the row revision, which is what a
+ * stale compose reloads and re-applies against; the read never writes, so a strategy with no
+ * row stays rowless.
+ */
+export function strategyCandidate(
+  service: ServiceCore,
+  strategyId: string,
+): Promise<WorkflowDocument> {
+  return withPrincipal(service, (principal) =>
+    service.core.strategyCandidate(principal, strategyId),
+  );
+}
+
+/**
+ * `POST /v1/daemon/strategies/{strategy_id}/compose`.
+ *
+ * One typed operation per request, guarded by the `base_revision` the client last read. The
+ * response carries the complete committed document, so the client replaces its candidate with
+ * the server's copy rather than predicting normalization or resolved pins. A stale base is the
+ * core's 409 `strategy_candidate_conflict`; a refused op is a 422 that names the nest or slot.
+ */
+export function composeStrategy(
+  service: ServiceCore,
+  strategyId: string,
+  request: StrategyComposeRequest,
+): Promise<StrategyComposeResponse> {
+  return withPrincipal(service, (principal) =>
+    service.core.composeStrategy(principal, strategyId, request),
+  );
+}
+
+/**
+ * `POST /v1/daemon/strategies/{strategy_id}/approve`.
+ *
+ * The write half of Approve: the core re-runs validation, pin verification and the
+ * deterministic walk over the candidate at `base_revision`, requires the supplied trajectory to
+ * be that walk's exact result, and freezes one immutable snapshot. A stale base is the core's
+ * 409 `strategy_candidate_conflict`; a changed pin or missing/stale simulation is a 422
+ * `invalid_input` whose `details` carry the refusal reason and hashes; a repeat approve of the
+ * same content is the core's 409 `strategy_already_approved`.
+ */
+export function approveStrategy(
+  service: ServiceCore,
+  strategyId: string,
+  request: StrategyApproveRequest,
+): Promise<ApprovedStrategySnapshot> {
+  return withPrincipal(service, (principal) =>
+    service.core.approveStrategy(principal, strategyId, request),
+  );
+}
+
 /** Exact path/verb/tier identities this family owns (composer input). */
 export const PRESET_ROUTES: readonly DomainRoute[] = [
   {
@@ -283,6 +342,26 @@ export const PRESET_ROUTES: readonly DomainRoute[] = [
     handle: async (service, params) => ({ body: await strategyWorkflowIr(service, params[0]) }),
   },
   {
+    method: 'GET',
+    pattern: /^\/v1\/daemon\/strategies\/([^/]+)\/candidate$/,
+    tier: 'tier2',
+    family: 'presets',
+    handle: async (service, params) => ({ body: await strategyCandidate(service, params[0]) }),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/v1\/daemon\/strategies\/([^/]+)\/compose$/,
+    tier: 'tier2',
+    family: 'presets',
+    handle: async (service, params, _search, body) => ({
+      body: await composeStrategy(
+        service,
+        params[0],
+        wirePayload<StrategyComposeRequest>(body, 'request'),
+      ),
+    }),
+  },
+  {
     method: 'POST',
     pattern: /^\/v1\/daemon\/strategies\/([^/]+)\/simulate$/,
     tier: 'tier2',
@@ -292,6 +371,19 @@ export const PRESET_ROUTES: readonly DomainRoute[] = [
         service,
         params[0],
         wirePayload<StrategySimulationRequest>(body, 'request'),
+      ),
+    }),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/v1\/daemon\/strategies\/([^/]+)\/approve$/,
+    tier: 'tier2',
+    family: 'presets',
+    handle: async (service, params, _search, body) => ({
+      body: await approveStrategy(
+        service,
+        params[0],
+        wirePayload<StrategyApproveRequest>(body, 'request'),
       ),
     }),
   },

@@ -109,6 +109,12 @@ import type {
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
   StrategySimulationRequest,
+  StrategyApproveRequest,
+  StrategyComposeRequest,
+  StrategyComposeResponse,
+  ApprovedStrategySnapshot,
+  ListPatternsQuery,
+  ListPatternsResponse,
   SimulationTrajectory,
   WorkflowDocument,
   TimelineOverviewResponse,
@@ -663,6 +669,32 @@ export class BrowserClient implements NexusClient {
     return this.get<WorkflowDocument>(
       `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/workflow-ir`,
     );
+  }
+  getStrategyCandidate(strategyId: string): Promise<WorkflowDocument> {
+    return this.get<WorkflowDocument>(
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/candidate`,
+    );
+  }
+  composeStrategy(
+    strategyId: string,
+    request: StrategyComposeRequest,
+  ): Promise<StrategyComposeResponse> {
+    return this.post<StrategyComposeResponse>(
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/compose`,
+      request,
+    );
+  }
+  approveStrategy(
+    strategyId: string,
+    request: StrategyApproveRequest,
+  ): Promise<ApprovedStrategySnapshot> {
+    return this.post<ApprovedStrategySnapshot>(
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/approve`,
+      request,
+    );
+  }
+  listPatterns(query?: ListPatternsQuery): Promise<ListPatternsResponse> {
+    return this.get<ListPatternsResponse>('/v1/daemon/patterns', query);
   }
 
   // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────

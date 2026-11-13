@@ -32,6 +32,7 @@ export interface NativeCoreBinding {
   saveAgentHostConfig(configJson: Uint8Array): Promise<void>;
   restartExecutionOwner(): Promise<Uint8Array>;
   listCapabilities(): Promise<Uint8Array>;
+  listPatterns(principal: string): Promise<Uint8Array>;
   changes(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   providerCall(requestJson: Uint8Array): Promise<Uint8Array>;
   nextProviderEvents(operationId: string, maxEvents: number, maxBytes: number): Promise<Uint8Array>;
@@ -366,7 +367,18 @@ export interface NativeCoreBinding {
     strategyId: string,
     requestJson: Uint8Array,
   ): Promise<Uint8Array>;
+  composeStrategy(
+    principal: string,
+    strategyId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  approveStrategy(
+    principal: string,
+    strategyId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
   strategyWorkflowIr(principal: string, strategyId: string): Promise<Uint8Array>;
+  strategyCandidate(principal: string, strategyId: string): Promise<Uint8Array>;
   addSchedule(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   signalSchedule(principal: string, scheduleId: string, requestJson: Uint8Array): Promise<Uint8Array>;
   listSchedules(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;

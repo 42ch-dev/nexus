@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/patterns/pattern-summary.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PatternSummary",
+  "description": "One pattern package as reported by the read-only pattern registry listing. `available` and `reason` are runtime observations made while reading the package directory; they are never publication, provenance or trust signals, and a listed package is not thereby endorsed.",
+  "type": "object",
+  "required": [
+    "package_dir",
+    "id",
+    "version",
+    "description",
+    "content_hash",
+    "effect_class",
+    "slots",
+    "requires_capabilities",
+    "available",
+    "reason"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "package_dir": {
+      "type": "string",
+      "description": "Cursor identity of the package directory: its basename, never an absolute path, kept as valid UTF-8 with `%` and every byte outside valid UTF-8 percent-escaped, so two distinct directories never share one identity. The listing is ordered by this value compared as UTF-8 bytes, and `pagination.next_cursor` carries it."
+    },
+    "id": {
+      "type": ["string", "null"],
+      "description": "Declared package id; null when the manifest is unreadable or invalid."
+    },
+    "version": {
+      "type": ["string", "null"],
+      "description": "Declared version label; null when the manifest is unreadable or invalid."
+    },
+    "description": {
+      "type": ["string", "null"],
+      "description": "Declared human label; null when the manifest is unreadable or invalid."
+    },
+    "content_hash": {
+      "type": ["string", "null"],
+      "description": "Canonical content hash of the package's IR fragment; null when it could not be computed."
+    },
+    "effect_class": {
+      "type": ["string", "null"],
+      "enum": ["pure", "read", "write_candidate", "external", null],
+      "description": "Declared effect class, which must equal the reader's rollup of the fragment. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (that rollup), so a vocabulary change there is a change here. Null only when the manifest itself was unreadable or invalid: a package whose manifest parsed keeps its declared class even when the package is unavailable for another reason."
+    },
+    "slots": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/daemon-api/patterns/pattern-slot.schema.json"
+      },
+      "description": "Declared slots. Empty only when the manifest itself was unreadable or invalid; a package whose manifest parsed keeps its declarations even when the package is unavailable for another reason."
+    },
+    "requires_capabilities": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Declared capability ids. Empty only when the manifest itself was unreadable or invalid; a package whose manifest parsed keeps its declarations even when the package is unavailable for another reason."
+    },
+    "available": {
+      "type": "boolean",
+      "description": "True only when the manifest parsed, every enforced field was valid, the member files were regular and within the reader's size ceiling, the fragment hash was computed and the declared effect class agreed with the rollup. It never means published or trusted. A false item still reports whatever its manifest declared when it parsed; only an unreadable or invalid manifest leaves those fields null or empty."
+    },
+    "reason": {
+      "type": ["string", "null"],
+      "description": "Null when available; otherwise an actionable reason naming what made the package unavailable."
+    }
+  }
+}

@@ -28,7 +28,9 @@ use std::path::Path;
 use crate::config::{user_home_dir, CliConfig};
 use crate::errors::{CliError, Result};
 use nexus_contracts::CoreCloseReport;
-use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
+use nexus_core::{
+    CoreAccess, CoreError, CoreOpenOptions, CoreService, StrategyCandidateConflictError,
+};
 
 /// Open the direct-writer core over the raw user home.
 ///
@@ -287,6 +289,8 @@ pub fn map_core_error(err: CoreError) -> CliError {
         CoreError::OutlineValidation(v) => {
             map_validation_refusal("outline_validation_failed", &v.errors)
         }
+        CoreError::StrategyCandidateConflict(conflict) => map_candidate_conflict(&conflict),
+        CoreError::StrategyAlreadyApproved(conflict) => map_already_approved(&conflict),
         CoreError::OwnerBusy | CoreError::Busy => CliError::Locked {
             holder_pid: 0,
             holder_name: "workspace writer".to_string(),
@@ -423,6 +427,42 @@ fn map_validation_refusal(prefix: &str, errors: &[String]) -> CliError {
     CliError::Api {
         status: 422,
         message: format!("{prefix}: {}", errors.join("; ")),
+    }
+}
+
+/// The retained 409 envelope of a stale-base compose write.
+///
+/// The code travels in the message prefix like every other direct-call
+/// conflict; the daemon adapter owns the structured `details` object.
+fn map_candidate_conflict(conflict: &StrategyCandidateConflictError) -> CliError {
+    CliError::Api {
+        status: 409,
+        message: format!(
+            "[strategy_candidate_conflict] strategy {}, base_revision {}, current_revision {}, conflicting_path {}, recovery_hint {}",
+            conflict.strategy_id,
+            conflict.base_revision,
+            conflict.current_revision,
+            conflict.conflicting_path,
+            conflict.recovery_hint
+        ),
+    }
+}
+
+/// The retained 409 envelope of a repeat approve.
+///
+/// A repeat approve keeps the daemon's dedicated `strategy_already_approved` code so the CLI
+/// reads the same conflict over either transport: the snapshot that already froze this content
+/// is named in the message.
+fn map_already_approved(conflict: &nexus_core::StrategyAlreadyApprovedError) -> CliError {
+    CliError::Api {
+        status: 409,
+        message: format!(
+            "[strategy_already_approved] strategy {}, content_hash {}, approval_id {}, candidate_revision {}",
+            conflict.strategy_id,
+            conflict.content_hash,
+            conflict.approval_id,
+            conflict.candidate_revision
+        ),
     }
 }
 

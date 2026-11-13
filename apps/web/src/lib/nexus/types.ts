@@ -116,6 +116,12 @@ import type {
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
   StrategySimulationRequest,
+  StrategyApproveRequest,
+  StrategyComposeRequest,
+  StrategyComposeResponse,
+  ApprovedStrategySnapshot,
+  ListPatternsQuery,
+  ListPatternsResponse,
   SimulationTrajectory,
   WorkflowDocument,
   TimelineOverviewResponse,
@@ -560,6 +566,36 @@ export interface NexusClient extends CoreSliceClient {
   ): Promise<SimulationTrajectory>;
   /** `GET /v1/daemon/strategies/{strategy_id}/workflow-ir` — the installed strategy as candidate IR. */
   getStrategyWorkflowIr(strategyId: string): Promise<WorkflowDocument>;
+  /**
+   * `GET /v1/daemon/strategies/{strategy_id}/candidate` — the canonical candidate: the stored
+   * compose row, else the revision-`0` import projection. Its `revision` is the CAS base to
+   * reload and re-apply against; the read never writes.
+   */
+  getStrategyCandidate(strategyId: string): Promise<WorkflowDocument>;
+  /**
+   * `POST /v1/daemon/strategies/{strategy_id}/compose` — one guarded composition op
+   * (`nest` / `unnest` / `replace_subtree` / `bind_slot`). The response document is
+   * the committed candidate at `new_revision` and replaces the client's copy.
+   */
+  composeStrategy(
+    strategyId: string,
+    request: StrategyComposeRequest,
+  ): Promise<StrategyComposeResponse>;
+  /**
+   * `POST /v1/daemon/strategies/{strategy_id}/approve` — freeze the simulated candidate
+   * into an immutable snapshot, or refuse with a named reason. Approve does not apply,
+   * schedule or execute.
+   */
+  approveStrategy(
+    strategyId: string,
+    request: StrategyApproveRequest,
+  ): Promise<ApprovedStrategySnapshot>;
+  /**
+   * `GET /v1/daemon/patterns` — one page of the read-only pattern registry listing.
+   * `cursor`/`limit` select the page; a caller that needs every package follows
+   * `pagination.next_cursor`.
+   */
+  listPatterns(query?: ListPatternsQuery): Promise<ListPatternsResponse>;
 
   // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────
   /** `GET /v1/daemon/works/{work_id}/chapters` — cursor list (F-P3 `items` key). */

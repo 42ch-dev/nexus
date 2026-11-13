@@ -59,6 +59,7 @@ import type {
   PackExportResponse,
   PackImportRequest,
   PackImportResponse,
+  PatternSummary,
   WorldFindingsListResponse,
   WorldRuleCreateRequest,
   WorldRuleResponse,
@@ -189,6 +190,10 @@ import type {
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
   StrategyPatchPromptTemplateRequest,
+  StrategyComposeRequest,
+  StrategyComposeResponse,
+  StrategyApproveRequest,
+  ApprovedStrategySnapshot,
   StrategySimulationRequest,
   SimulationTrajectory,
   WorkflowDocument,
@@ -289,6 +294,11 @@ export interface NativeCore {
   restartExecutionOwner(): Promise<unknown>;
   /** The live orchestration capability registry rows (`{ items }`). */
   listCapabilities(): Promise<unknown>;
+  /**
+   * Every pattern package directory under `<home>/.nexus42/patterns`, unavailable
+   * ones included with their reason. Read-only: it never writes or creates the root.
+   */
+  listPatterns(principal: PrincipalHandle): Promise<PatternSummary[]>;
   changes(principal: PrincipalHandle, request: CoreChangesRequest): Promise<CoreChangesResponse>;
   providerCall(request: ProviderCall): Promise<ProviderReply>;
   nextProviderEvents(
@@ -780,7 +790,21 @@ export interface NativeCore {
     strategyId: string,
     request: StrategySimulationRequest,
   ): Promise<SimulationTrajectory>;
+  composeStrategy(
+    principal: PrincipalHandle,
+    strategyId: string,
+    request: StrategyComposeRequest,
+  ): Promise<StrategyComposeResponse>;
+  approveStrategy(
+    principal: PrincipalHandle,
+    strategyId: string,
+    request: StrategyApproveRequest,
+  ): Promise<ApprovedStrategySnapshot>;
   strategyWorkflowIr(
+    principal: PrincipalHandle,
+    strategyId: string,
+  ): Promise<WorkflowDocument>;
+  strategyCandidate(
     principal: PrincipalHandle,
     strategyId: string,
   ): Promise<WorkflowDocument>;
@@ -913,6 +937,9 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
     },
     async listCapabilities() {
       return parseJsonBuffer<unknown>(await inner.listCapabilities());
+    },
+    async listPatterns(principal) {
+      return parseJsonBuffer<PatternSummary[]>(await inner.listPatterns(principal));
     },
     async changes(principal, request) {
       return parseJsonBuffer(
@@ -1109,7 +1136,10 @@ type DomainSurface = Pick<
   | 'patchStrategyTransition'
   | 'patchStrategyPromptTemplate'
   | 'simulateStrategy'
+  | 'composeStrategy'
+  | 'approveStrategy'
   | 'strategyWorkflowIr'
+  | 'strategyCandidate'
   | 'addSchedule'
   | 'signalSchedule'
   | 'listSchedules'
@@ -1599,8 +1629,21 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
         await inner.simulateStrategy(principal, strategyId, wire(request, 'request')),
       );
     },
+    async composeStrategy(principal, strategyId, request) {
+      return json(
+        await inner.composeStrategy(principal, strategyId, wire(request, 'request')),
+      );
+    },
+    async approveStrategy(principal, strategyId, request) {
+      return json(
+        await inner.approveStrategy(principal, strategyId, wire(request, 'request')),
+      );
+    },
     async strategyWorkflowIr(principal, strategyId) {
       return json(await inner.strategyWorkflowIr(principal, strategyId));
+    },
+    async strategyCandidate(principal, strategyId) {
+      return json(await inner.strategyCandidate(principal, strategyId));
     },
     async addSchedule(principal, request) {
       return json(await inner.addSchedule(principal, wire(request, 'request')));

@@ -30,7 +30,9 @@
 // V1.229 N3 P4 (D18): 30 → 31 — content-free remote binding-memory dependency metadata: independent per-wire-attempt admissions plus monotone known candidate/record facts, both RESTRICT-bound to the Nexus binding (migration 20261104000001_remote_binding_memory_dependencies.sql).
 // V1.230 N4-R: 31 → 32 — append-only memory_reflections envelopes (spoke-memory §7.25–§7.27): verbatim pinned selection/filter/basis JSON with the insert-only guard + insert outbox family (reflections are immutable — no update/delete triggers, no retention sweep; migration 20261110000001_memory_reflections.sql).
 // V1.231: 32 → 33 — knowledge_entries + reference_sources DROP (ADR K1 §3.1–§3.2: the archived User KnowledgeStore and reference registry are retired, not sealed; migration 20261111000001_retire_user_and_reference_stores.sql).
-pub const DB_SCHEMA_VERSION: u32 = 33;
+// V1.239 P3: 33 → 34 — strategy_candidates draft table (plan v239-p3-compose-ops §Candidate storage Q4/D17) + its writer-protocol guard/outbox family (migration 20261113000001_strategy_candidates.sql).
+// V1.239 P3: 34 → 35 — strategy_approvals immutable snapshot table (plan v239-p3-approve-route §Q4) + its writer-protocol guard/outbox family (migration 20261113000002_strategy_approvals.sql).
+pub const DB_SCHEMA_VERSION: u32 = 35;
 
 /// Contract schema version from generated wire types
 ///

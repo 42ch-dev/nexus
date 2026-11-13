@@ -231,7 +231,9 @@
       "createTransition": "创建",
       "simulate": "模拟…",
       "livePrefix": "实时：",
-      "liveStatus": ""
+      "liveStatus": "",
+      "staging": "暂存",
+      "addPattern": "添加模式…"
     },
     "node": {
       "status": {
@@ -254,7 +256,17 @@
       "join": "合并 · {{strategy}}",
       "currentExecutionNode": "当前执行节点",
       "predictedWait": "预测等待（静态）",
-      "branchNotExplored": "分支未探索"
+      "branchNotExplored": "分支未探索",
+      "slotExpand": "展开",
+      "slotCollapse": "折叠",
+      "simulated": "已模拟",
+      "unboundSlots": "必需的槽位未绑定：{{slots}}",
+      "effect": {
+        "pure": "效果：pure",
+        "read": "效果：read",
+        "write_candidate": "效果：写候选",
+        "external": "效果：external"
+      }
     },
     "toast": {
       "runQueued": "预设运行已排队",
@@ -285,7 +297,17 @@
       "doesNotPreviewOutput": "模拟通过不会预览输出：不调用模型，也不生成任何内容。",
       "approve": "批准",
       "approvalUnavailable": "当前版本不提供批准操作：批准写路径由 I-000415 跟踪，因此该按钮已禁用。上方的模拟结果仍然展示了本次限制。",
-      "rerun": "运行模拟"
+      "rerun": "运行模拟",
+      "pending": "正在批准…",
+      "frozen": "已批准为 {{approvalId}}。快照已冻结：候选、内容哈希、精确固定与下方模拟标识均不再改变。",
+      "noPublish": "批准不会发布、应用、调度或执行。之后的编辑会产生新的候选版本，需要重新批准。",
+      "pins": "精确模式固定",
+      "simulationIdentity": "模拟标识",
+      "candidateRevision": "候选版本",
+      "slotUnbound": "请先绑定 {{pattern}} 上的槽位 {{slot}}，然后再批准。",
+      "listingUnreadable": "模式列表读取失败：{{message}}。无法确定必需槽位是否未绑定，因此暂不可批准。",
+      "listingPending": "模式列表尚未加载完成。无法确定必需槽位是否未绑定，因此暂不可批准。",
+      "pinChanged": "模式 {{id}}@{{version}} 已更改：记录哈希 {{recorded}}，当前哈希 {{current}}。请重新组合并再次模拟后再批准。"
     },
     "draftTransitionEditor": "草稿转换编辑器",
     "revisionBadge": {
@@ -352,7 +374,8 @@
         "saved": "已保存",
         "saveFailed": "保存失败",
         "saving": "保存中…",
-        "updated": "状态已更新"
+        "updated": "状态已更新",
+        "composeDisabled": "组合期间状态由候选文档写入，此 YAML 编辑器已禁用。"
       },
       "transition": {
         "title": "转换",
@@ -362,7 +385,8 @@
         "saved": "已保存",
         "saveFailed": "保存失败",
         "saving": "保存中…",
-        "updated": "转换已更新"
+        "updated": "转换已更新",
+        "composeDisabled": "组合期间转换由候选文档写入，此 YAML 编辑器已禁用。"
       },
       "prompt": {
         "title": "提示词",
@@ -386,6 +410,28 @@
       "transitionConflict": {
         "title": "转换冲突"
       }
+    },
+    "composeLoading": "正在加载策略候选…",
+    "slot": {
+      "title": "模式槽位 {{pattern}}",
+      "bind": "绑定",
+      "replace": "替换模式",
+      "replacePlaceholder": "选择一个模式…",
+      "replaceCommit": "替换",
+      "unnest": "取消嵌套"
+    },
+    "picker": {
+      "title": "添加模式",
+      "attach": "嵌套于节点 {{node}}；将连接边，使静态遍历可达新槽位。",
+      "empty": "注册表中没有可用模式。",
+      "cancel": "取消",
+      "nest": "嵌套"
+    },
+    "composeConflict": {
+      "title": "候选冲突",
+      "reload": "重新加载版本 {{revision}} 并重新应用编辑。",
+      "reloadAction": "重新加载",
+      "dismiss": "关闭"
     }
   },
   "conflict": {
@@ -540,9 +586,20 @@
         "jsonError": "{{field}} 必须是有效的 JSON。",
         "orderError": "{{field}} 必须是整数。",
         "option": {
-          "truth": { "True": "真", "False": "假", "Unknown": "未知" },
-          "access": { "Private": "私有", "Shared": "共享", "Public": "公开" },
-          "representation": { "Explicit": "外显", "Implicit": "内隐" },
+          "truth": {
+            "True": "真",
+            "False": "假",
+            "Unknown": "未知"
+          },
+          "access": {
+            "Private": "私有",
+            "Shared": "共享",
+            "Public": "公开"
+          },
+          "representation": {
+            "Explicit": "外显",
+            "Implicit": "内隐"
+          },
           "content_type": {
             "Location": "位置",
             "Contents_Physical_State": "内容/物理状态",

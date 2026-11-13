@@ -91,6 +91,30 @@ describe('DraftEdgeInspector (FB-SE-002)', () => {
     expect(commit).toBeDisabled();
   });
 
+  it('disables the commit with the named reason when the candidate is the structural authority (Y3)', () => {
+    const onCommit = vi.fn();
+    renderInApp(
+      <DraftEdgeInspector
+        sourceStateId="draft"
+        targetStateId="revise"
+        isCommitting={false}
+        onCommit={onCommit}
+        onCancel={vi.fn()}
+        structuralWritesDisabled
+      />,
+      { client: noopClient },
+    );
+
+    const commit = screen.getByRole('button', { name: 'Create' });
+    expect(commit).toBeDisabled();
+    expect(screen.getByTestId('draft-transition-structural-disabled')).toHaveTextContent(
+      'Transitions are authored in the candidate while composing; this YAML editor is disabled.',
+    );
+
+    fireEvent.click(commit);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
   it('cancel discards the draft without committing', () => {
     const onCancel = vi.fn();
     const onCommit = vi.fn();

@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 
-import { useNexusClient } from '@/lib/client-context';
+import { useStrategyYamlAuthority } from '@/lib/canvas/strategy-yaml-authority';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useToast } from '@/lib/use-toast';
 import type { StrategyPatchResponse, StrategyPatchTransitionRequest } from '@42ch/nexus-contracts';
@@ -27,18 +27,16 @@ export interface PatchStrategyTransitionArgs {
   transitionKind?: StrategyPatchTransitionRequest['transition_kind'];
 }
 
-export function usePatchStrategyTransition(): UseMutationResult<
-  StrategyPatchResponse,
-  unknown,
-  PatchStrategyTransitionArgs
-> {
-  const client = useNexusClient();
+export function usePatchStrategyTransition(
+  structuralWritesDisabled = false,
+): UseMutationResult<StrategyPatchResponse, unknown, PatchStrategyTransitionArgs> {
+  const yaml = useStrategyYamlAuthority(structuralWritesDisabled);
   const qc = useQueryClient();
   const { t } = useTranslation('canvas');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (args: PatchStrategyTransitionArgs) =>
-      client.strategyPatchTransition(args.strategyId, {
+      yaml.patchTransition(args.strategyId, {
         strategy_id: args.strategyId,
         base_revision: args.baseRevision,
         source_state_id: args.sourceStateId,
@@ -69,6 +67,11 @@ interface EdgeInspectorProps {
   saveStatus: SaveStatus | undefined;
   onSaveStatus: (status: SaveStatus | undefined) => void;
   onConflict: (currentRevision: number, section: Section) => void;
+  /**
+   * Compose path: the candidate document is the only structural authority, so
+   * this YAML transition patch is shown with its reason but cannot be issued.
+   */
+  structuralWritesDisabled?: boolean;
 }
 
 export function EdgeInspector({
@@ -81,15 +84,18 @@ export function EdgeInspector({
   saveStatus,
   onSaveStatus,
   onConflict,
+  structuralWritesDisabled = false,
 }: EdgeInspectorProps) {
   const { t } = useTranslation('canvas');
-  const patch = usePatchStrategyTransition();
+  const patch = usePatchStrategyTransition(structuralWritesDisabled);
   const original = originalFormOf(selectedState);
   const dirty = isSectionDirty('transition', form, original);
   const lastHandledTriggerRef = useRef(0);
 
   const handleSave = useCallback(async () => {
-    if (!dirty || patch.isPending || typeof selectedState.next !== 'string') return;
+    if (!dirty || patch.isPending || typeof selectedState.next !== 'string') {
+      return;
+    }
     onSaveStatus(undefined);
 
     try {
@@ -138,7 +144,7 @@ export function EdgeInspector({
         <button
           type="button"
           onClick={handleSave}
-          disabled={!dirty || patch.isPending}
+          disabled={structuralWritesDisabled || !dirty || patch.isPending}
           className="rounded-control border border-gray-alpha-400 px-2 py-1 text-button-12 text-gray-900 hover:bg-gray-alpha-100 disabled:text-gray-500"
         >
           {patch.isPending ? t('strategy.inspector.transition.saving') : t('strategy.inspector.transition.save')}
@@ -150,10 +156,15 @@ export function EdgeInspector({
           type="text"
           value={form.nextTarget}
           onChange={(e) => onChange('nextTarget', e.target.value)}
+          disabled={structuralWritesDisabled}
           className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
         />
       </label>
-      {saveStatus ? (
+      {structuralWritesDisabled ? (
+        <p data-testid="transition-structural-disabled" className="text-copy-12 text-gray-700">
+          {t('strategy.inspector.transition.composeDisabled')}
+        </p>
+      ) : saveStatus ? (
         <p
           className={
             saveStatus.type === 'success'
@@ -193,6 +204,12 @@ export interface DraftEdgeInspectorProps {
   onCommit: (args: DraftCommitArgs) => void;
   /** Discard the draft edge without a daemon call. */
   onCancel: () => void;
+  /**
+   * Compose path: the candidate document is the only structural authority, so a
+   * draft authored on the flag-off surface is shown with its reason but cannot
+   * be committed through this YAML path.
+   */
+  structuralWritesDisabled?: boolean;
 }
 
 /**
@@ -210,6 +227,7 @@ export function DraftEdgeInspector({
   isCommitting,
   onCommit,
   onCancel,
+  structuralWritesDisabled = false,
 }: DraftEdgeInspectorProps) {
   const { t } = useTranslation('canvas');
   const [condition, setCondition] = useState('');
@@ -236,7 +254,7 @@ export function DraftEdgeInspector({
           <button
             type="button"
             onClick={handleCommit}
-            disabled={isCommitting}
+            disabled={isCommitting || structuralWritesDisabled}
             className="rounded-control bg-purple-700 px-2 py-1 text-button-12 text-white hover:bg-purple-800 disabled:opacity-disabled"
           >
             {isCommitting ? t('strategy.edgeCreate.creating') : t('strategy.edgeCreate.submit')}
@@ -260,6 +278,11 @@ export function DraftEdgeInspector({
           className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
         />
       </label>
+      {structuralWritesDisabled ? (
+        <p data-testid="draft-transition-structural-disabled" className="text-copy-12 text-gray-700">
+          {t('strategy.inspector.transition.composeDisabled')}
+        </p>
+      ) : null}
     </section>
   );
 }

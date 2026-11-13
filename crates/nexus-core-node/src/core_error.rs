@@ -459,6 +459,56 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             details: serde_json::Map::from_iter([("conflict_code".into(), Value::String(code))]),
             http_status: Some(409),
         },
+        // A stale candidate compose base: the plan's canonical 409 envelope under
+        // the dedicated `strategy_candidate_conflict` code, with exactly the
+        // details the plan's Q2 contract names.
+        DomainError::StrategyCandidateConflict(conflict) => CoreError {
+            code: CoreErrorCode::StrategyCandidateConflict,
+            message: format!(
+                "Candidate changed before this edit. Reload revision {} and reapply the change.",
+                conflict.current_revision
+            ),
+            details: serde_json::Map::from_iter([
+                ("strategy_id".into(), Value::String(conflict.strategy_id)),
+                (
+                    "base_revision".into(),
+                    serde_json::Number::from(conflict.base_revision).into(),
+                ),
+                (
+                    "current_revision".into(),
+                    serde_json::Number::from(conflict.current_revision).into(),
+                ),
+                (
+                    "conflicting_path".into(),
+                    Value::String(conflict.conflicting_path),
+                ),
+                (
+                    "recovery_hint".into(),
+                    Value::String(conflict.recovery_hint),
+                ),
+            ]),
+            http_status: Some(409),
+        },
+        // A second approve of the same content: the snapshot that already froze it is the
+        // answer, never a second row. A dedicated 409 code keeps this distinct from the
+        // stale-compose-base conflict above.
+        DomainError::StrategyAlreadyApproved(conflict) => CoreError {
+            code: CoreErrorCode::StrategyAlreadyApproved,
+            message: format!(
+                "This exact content is already approved as snapshot {}. Edit the candidate before approving again.",
+                conflict.approval_id
+            ),
+            details: serde_json::Map::from_iter([
+                ("strategy_id".into(), Value::String(conflict.strategy_id)),
+                ("content_hash".into(), Value::String(conflict.content_hash)),
+                ("approval_id".into(), Value::String(conflict.approval_id)),
+                (
+                    "candidate_revision".into(),
+                    serde_json::Number::from(conflict.candidate_revision).into(),
+                ),
+            ]),
+            http_status: Some(409),
+        },
         DomainError::Internal { category } => CoreError {
             code: CoreErrorCode::Internal,
             message: "internal error".into(),

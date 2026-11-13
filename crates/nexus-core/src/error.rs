@@ -40,6 +40,14 @@ pub enum CoreError {
     Preset(#[from] crate::presets::PresetError),
     #[error("outline conflict")]
     OutlineConflict(OutlineConflictError),
+    /// Stale-base refusal of a candidate compose write (HTTP 409 at the adapter).
+    /// Nothing was written: the store's CAS statement matched no row.
+    #[error("strategy candidate conflict")]
+    StrategyCandidateConflict(StrategyCandidateConflictError),
+    /// Repeat-approve refusal (HTTP 409 at the adapter): this exact content already has a
+    /// snapshot, and one content hash approves at most once per strategy.
+    #[error("strategy already approved")]
+    StrategyAlreadyApproved(StrategyAlreadyApprovedError),
     #[error("outline validation failed")]
     OutlineValidation(OutlineValidationError),
     #[error("world kb conflict")]
@@ -171,6 +179,27 @@ pub struct OutlineConflictError {
     pub node_id: String,
     pub conflicting_path: String,
     pub recovery_hint: String,
+}
+
+/// Structured stale-base payload of a candidate compose write (HTTP 409 at the
+/// adapter), carrying exactly the plan's `strategy_candidate_conflict` details.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StrategyCandidateConflictError {
+    pub strategy_id: String,
+    pub base_revision: u64,
+    pub current_revision: u64,
+    pub conflicting_path: String,
+    pub recovery_hint: String,
+}
+
+/// Structured repeat-approve payload (HTTP 409 at the adapter): the snapshot that already froze
+/// this exact content, so the client can point at it instead of re-approving.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StrategyAlreadyApprovedError {
+    pub strategy_id: String,
+    pub content_hash: String,
+    pub approval_id: String,
+    pub candidate_revision: u64,
 }
 
 /// Structured outline-canvas validation payload (HTTP 422 at the adapter).

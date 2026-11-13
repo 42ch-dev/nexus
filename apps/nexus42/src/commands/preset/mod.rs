@@ -586,7 +586,7 @@ fn outer_state_count(document: &WorkflowDocument) -> usize {
 /// other violation (dangling edge/dependency, duplicate node, nest id, parent,
 /// child and depth) is a real defect.
 fn structural_violations(document: &WorkflowDocument) -> Vec<Violation> {
-    nexus_workflow_ir::validate(&[document])
+    nexus_workflow_ir::validate(&[document], &[])
         .err()
         .unwrap_or_default()
         .into_iter()

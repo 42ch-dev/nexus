@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/patterns/list-patterns-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListPatternsResponse",
+  "description": "Response for GET /v1/daemon/patterns (cursor-based pagination). Every scanned package directory appears as its own item; an unavailable package carries its reason and never suppresses the valid ones.",
+  "type": "object",
+  "required": ["items", "pagination"],
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/daemon-api/patterns/pattern-summary.schema.json"
+      }
+    },
+    "pagination": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/kb/pagination-info.schema.json"
+    }
+  }
+}
