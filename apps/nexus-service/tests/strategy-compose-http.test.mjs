@@ -23,6 +23,15 @@ const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** An embedded preset, so the revision-0 candidate exists without a shipped bundle. */
 const STRATEGY = 'novel-writing';
 const COMPOSE_PATH = `/v1/daemon/strategies/${STRATEGY}/compose`;
+/**
+ * The fence is proven on an embedded preset the static walk already accepts. `novel-writing`
+ * (the T7 strategy) imports judged states carrying `linear` edges, so the reachability walk
+ * refuses it before compose is involved — a separate, pre-existing import/simulate mismatch.
+ */
+const WALKABLE_STRATEGY = 'novel-project-init';
+const WALKABLE_COMPOSE_PATH = `/v1/daemon/strategies/${WALKABLE_STRATEGY}/compose`;
+const WALKABLE_SIMULATE_PATH = `/v1/daemon/strategies/${WALKABLE_STRATEGY}/simulate`;
+
 const HASH = /^[0-9a-f]{64}$/;
 
 /** One package directory: `pattern.toml` plus the IR fragment it pins. */
@@ -398,5 +407,140 @@ describe('compose route (v1.239 P3-T7)', () => {
     const { status, payload } = await post(COMPOSE_PATH, { op: 'nest', payload: {} });
     assert.equal(status, 400, JSON.stringify(payload));
     assert.equal(payload.error.code, 'invalid_input');
+  });
+});
+
+describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
+  let home;
+  let service;
+  let revision = 0;
+
+  before(async () => {
+    home = mkdtempSync(join(tmpdir(), 'nexus-service-compose-simulate-'));
+    const seed = spawnSync(
+      'cargo',
+      ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home],
+      { stdio: 'inherit' },
+    );
+    assert.equal(seed.status, 0, seed.stderr?.toString());
+    writeRegistry(home);
+
+    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
+      cwd: serviceRoot,
+      stdio: 'inherit',
+    });
+    assert.equal(build.status, 0);
+    const { startService } = await import(join(serviceRoot, 'dist', 'index.js'));
+    service = await startService({
+      home,
+      host: '127.0.0.1',
+      port: 0,
+      allowRemote: false,
+      domainOnly: true,
+    });
+  });
+
+  after(async () => {
+    if (service) await service.close();
+    if (home) rmSync(home, { recursive: true, force: true });
+  });
+
+  async function post(path, body) {
+    const response = await fetch(`${service.url}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const text = await response.text();
+    return { status: response.status, payload: text.length > 0 ? JSON.parse(text) : null };
+  }
+
+  async function compose(body) {
+    const { status, payload } = await post(WALKABLE_COMPOSE_PATH, body);
+    assert.equal(status, 200, JSON.stringify(payload));
+    revision = payload.new_revision;
+    return payload;
+  }
+
+  let composed;
+
+  test('the fence accepts the composed document unchanged', async () => {
+    composed = await compose(
+      nest(0, {
+        nestId: 'source-research',
+        parentNode: 'collect-sources',
+        packageId: 'prompt-step',
+      }),
+    );
+    const document = composed.document;
+
+    const first = await post(WALKABLE_SIMULATE_PATH, { document });
+    assert.equal(first.status, 200, JSON.stringify(first.payload));
+    assert.match(first.payload.ir_content_hash, HASH);
+    assert.equal(first.payload.simulation_level, 'reachability');
+    assert.equal(first.payload.schema_version, 1);
+
+    // The hash is recomputed from the body, so the same document yields the same hash and a
+    // changed document yields a different one.
+    const again = await post(WALKABLE_SIMULATE_PATH, { document });
+    assert.equal(again.payload.ir_content_hash, first.payload.ir_content_hash);
+
+    const unnest = await compose({
+      base_revision: revision,
+      op: 'unnest',
+      payload: { nest_id: 'source-research' },
+    });
+    const withoutSlot = await post(WALKABLE_SIMULATE_PATH, { document: unnest.document });
+    assert.equal(withoutSlot.status, 200);
+    assert.notEqual(withoutSlot.payload.ir_content_hash, first.payload.ir_content_hash);
+
+    // Nothing persisted and no revision consumed: the candidate still commits from `revision`.
+    const stillThere = await compose(nest(revision, {
+      nestId: 'fence-check',
+      parentNode: 'fence-check-slot',
+      packageId: 'prompt-step',
+    }));
+    assert.equal(stillThere.new_revision, revision);
+  });
+
+  test('a slot the graph wires is named by the trajectory', async () => {
+    const document = composed.document;
+    const wired = {
+      ...document,
+      edges: [
+        ...document.edges,
+        {
+          id: `${document.entry}->collect-sources`,
+          from: document.entry,
+          to: 'collect-sources',
+          kind: 'linear',
+        },
+      ],
+    };
+
+    const trajectory = await post(WALKABLE_SIMULATE_PATH, { document: wired });
+    assert.equal(trajectory.status, 200, JSON.stringify(trajectory.payload));
+    assert.ok(
+      trajectory.payload.nodes_visited.includes('collect-sources'),
+      `the walk names the pattern slot: ${JSON.stringify(trajectory.payload.nodes_visited)}`,
+    );
+    // The slot contributes its resolved pin's declared class, not the fragment body.
+    assert.equal(trajectory.payload.effect_summary, 'external');
+  });
+
+  test('the path id and the candidate state are still enforced', async () => {
+    const mismatch = await post(WALKABLE_SIMULATE_PATH, {
+      document: { ...composed.document, id: 'another-strategy' },
+    });
+    assert.equal(mismatch.status, 400, JSON.stringify(mismatch.payload));
+    assert.equal(mismatch.payload.error.code, 'invalid_input');
+    assert.equal(mismatch.payload.error.details.wire_code, 'strategy_id_mismatch');
+
+    const approved = await post(WALKABLE_SIMULATE_PATH, {
+      document: { ...composed.document, state: 'approved' },
+    });
+    assert.equal(approved.status, 400, JSON.stringify(approved.payload));
+    assert.equal(approved.payload.error.code, 'invalid_input');
+    assert.equal(approved.payload.error.details.wire_code, 'strategy_not_candidate');
   });
 });
