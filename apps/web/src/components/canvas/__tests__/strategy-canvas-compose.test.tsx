@@ -23,8 +23,13 @@ import { useHandlers } from '@/test/msw-server';
 import { servedIrDocument, simulationTrajectory } from '@/test/simulation-fixture';
 import { renderInApp } from '@/test/test-providers';
 
+const shellProps = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+
 vi.mock('@/components/canvas/canvas-shell', () => ({
-  CanvasShell: () => null,
+  CanvasShell: (props: Record<string, unknown>) => {
+    shellProps.current = props;
+    return null;
+  },
   useNodeChangeHandler: () => () => {},
 }));
 
@@ -206,8 +211,11 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     renderCanvas();
     expect(await screen.findByTestId('strategy-staging')).toBeInTheDocument();
     expect(screen.getByTestId('strategy-add-pattern')).toBeInTheDocument();
-    // One structural authority: the YAML transition author is gone on the compose path.
+    // One structural authority: the YAML transition author is gone on the compose path,
+    // and no canvas gesture can start a structural edit outside the candidate.
     expect(screen.queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
+    expect(shellProps.current.onConnect).toBeUndefined();
+    expect(shellProps.current.onReconnect).toBeUndefined();
 
     // Nest: pick the pattern and commit.
     fireEvent.click(screen.getByTestId('strategy-add-pattern'));
@@ -389,8 +397,10 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
     expect(irReads).toBe(0);
     expect(patternReads).toBe(0);
 
-    // The legacy transition author stays exactly where it was.
+    // The legacy transition author and both connection gestures stay exactly where they were.
     expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
+    expect(typeof shellProps.current.onConnect).toBe('function');
+    expect(typeof shellProps.current.onReconnect).toBe('function');
 
     // Today's Simulate behaviour: resolve the installed preset IR and walk it.
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
