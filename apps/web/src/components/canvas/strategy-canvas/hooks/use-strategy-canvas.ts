@@ -21,7 +21,7 @@ import {
   usePresetGraph,
   usePresetSchedules,
 } from '@/lib/canvas/use-strategy-data';
-import { useNexusClient } from '@/lib/client-context';
+import { useStrategyYamlAuthority } from '@/lib/canvas/strategy-yaml-authority';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useToast } from '@/lib/use-toast';
 
@@ -47,7 +47,7 @@ export interface ConflictInfo {
   retry?: () => void;
 }
 
-export function useStrategyCanvas(presetId: string) {
+export function useStrategyCanvas(presetId: string, structuralWritesDisabled = false) {
   const { t } = useTranslation('canvas');
   const graphQuery = usePresetGraph(presetId);
   const activeSession = useActiveSession(presetId);
@@ -161,7 +161,7 @@ export function useStrategyCanvas(presetId: string) {
     return states?.find((s) => s.id === selectedDraftEdge.source);
   }, [selectedDraftEdge, states]);
 
-  const nexusClient = useNexusClient();
+  const yaml = useStrategyYamlAuthority(structuralWritesDisabled);
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -180,7 +180,7 @@ export function useStrategyCanvas(presetId: string) {
   const commitDraftMutation = useMutation({
     mutationFn: async (args: { condition?: string }) => {
       if (!selectedDraftEdge) throw new Error('No draft transition to commit');
-      return nexusClient.strategyPatchTransition(presetId, {
+      return yaml.patchTransition(presetId, {
         strategy_id: presetId,
         base_revision: workingRevisionRef.current,
         source_state_id: selectedDraftEdge.source,
@@ -241,7 +241,7 @@ export function useStrategyCanvas(presetId: string) {
       transitionKind?: 'next' | 'branch' | 'default';
       condition?: string;
     }) => {
-      return nexusClient.strategyPatchTransition(presetId, {
+      return yaml.patchTransition(presetId, {
         strategy_id: presetId,
         base_revision: workingRevisionRef.current,
         source_state_id: args.sourceStateId,
@@ -299,7 +299,7 @@ export function useStrategyCanvas(presetId: string) {
       const { oldEdge, newConnection } = args;
       if (!newConnection.target) throw new Error('Reconnect is missing a new target');
       const data = oldEdge.data as { transitionKind?: string; condition?: string } | undefined;
-      return nexusClient.strategyPatchTransition(presetId, {
+      return yaml.patchTransition(presetId, {
         strategy_id: presetId,
         base_revision: workingRevisionRef.current,
         source_state_id: oldEdge.source,

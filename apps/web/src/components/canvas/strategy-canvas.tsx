@@ -28,6 +28,10 @@ import type { StrategyEdgeData, StrategyNodeData } from '@/lib/canvas/strategy-g
 import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
 
 import { useStrategyCanvas } from '@/components/canvas/strategy-canvas/hooks/use-strategy-canvas';
+import { useStrategyCompose } from '@/components/canvas/strategy-canvas/hooks/use-strategy-compose';
+import { useApproveStrategy } from '@/components/canvas/strategy-canvas/hooks/use-approve-strategy';
+import { useStrategyCanvasComposeFlag } from '@/lib/canvas/strategy-compose-flag';
+import { i18n } from '@/lib/i18n/config';
 import { CanvasFooter, CanvasHeader } from './strategy-canvas/canvas-layout';
 import {
   createStrategyCanvasAdapter,
@@ -35,6 +39,8 @@ import {
   type StrategySurfaceGraph,
 } from './strategy-canvas/strategy-canvas-adapter';
 import { ApproveDisclosure } from './strategy-canvas/approve-disclosure';
+import { ComposeConflictDialog } from './strategy-canvas/compose-conflict-dialog';
+import { PatternPickerDialog } from './strategy-canvas/pattern-picker-dialog';
 import { InspectorPanel, StrategyConflictModal } from './strategy-canvas/inspector-panel';
 import { EdgeCreateDialog } from './strategy-canvas/edge-create-dialog';
 import { DraftEdgeInspector } from './strategy-canvas/inspectors/edge-inspector';
@@ -62,12 +68,25 @@ export interface StrategyCanvasProps {
 
 export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: StrategyCanvasProps) {
   const { t } = useTranslation('canvas');
-  const strategyState = useStrategyCanvas(presetId);
-  const simulation = useSimulationTrajectory(candidate);
+  // v239-p3-canvas-compose-ui: per-surface flag (compass D14/D18). Off → the
+  // canvas renders exactly as today (YAML projection, disabled Approve).
+  const composeEnabled = useStrategyCanvasComposeFlag();
+  // With the flag on the candidate is the one structural authority, so a draft
+  // authored while it was off cannot commit through the YAML path.
+  const strategyState = useStrategyCanvas(presetId, composeEnabled);
+  const compose = useStrategyCompose(presetId, composeEnabled);
+  const approval = useApproveStrategy(presetId);
+  // The compose path simulates the working candidate it holds in hand; the
+  // flag-off path keeps the shipped preset/candidate behaviour.
+  const simulationCandidate = composeEnabled
+    ? (compose.workingDocument ?? undefined)
+    : candidate;
+  const simulation = useSimulationTrajectory(simulationCandidate);
 
   const [artifacts, setArtifacts] = useState<IdeaArtifact[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [patternPickerOpen, setPatternPickerOpen] = useState(false);
   const [approveOpen, setApproveOpen] = useState(false);
 
   const ctxRef = useRef<StrategyCanvasAdapterContext>({
@@ -113,6 +132,16 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         parsed: data.parsed,
         activeSession: strategyState.activeSession,
         trajectory: simulation.trajectory,
+        // Compose path only: the working candidate + slot chrome. Absent with
+        // the flag off, so the adapter projects from YAML exactly as today.
+        ...(composeEnabled
+          ? {
+              document: compose.workingDocument ?? undefined,
+              patterns: compose.patternsQuery.data?.items,
+              expandedSlots: compose.expandedSlots,
+              containment: new Map(Object.entries(compose.containment)),
+            }
+          : {}),
       },
       isLoading: strategyState.graphQuery.isLoading,
       isError: strategyState.graphQuery.isError,
@@ -127,6 +156,11 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     strategyState.graphQuery.refetch,
     strategyState.activeSession,
     simulation.trajectory,
+    composeEnabled,
+    compose.workingDocument,
+    compose.patternsQuery.data,
+    compose.expandedSlots,
+    compose.containment,
   ]);
 
   const surface = useCanvasSurface(adapter, surfaceQuery);
@@ -167,17 +201,54 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
 
   // One Simulate action for the open strategy: a supplied candidate is walked
   // as-is; otherwise the installed preset's IR is re-read and walked only when
-  // it no longer matches the trajectory in hand.
+  // it no longer matches the trajectory in hand. On the compose path the
+  // working candidate (committed document + authored connecting edges) is the
+  // walked document, so a wired slot is named by the trajectory (T3b).
   function handleSimulate() {
     setApproveOpen(true);
     if (simulation.status === 'running') return;
-    if (!candidate) {
+    if (!simulationCandidate) {
       void simulation.runStrategy(presetId);
       return;
     }
     // A candidate that still matches its trajectory is reopened, never re-walked.
-    if (simulation.status !== 'ready') void simulation.run(candidate);
+    if (simulation.status !== 'ready') void simulation.run(simulationCandidate);
   }
+
+  /**
+   * T6 — the real approve route, compose path only. A current successful
+   * trajectory is required (the disclosure disables Approve otherwise) and an
+   * unbound required slot gates the button with its named reason. The daemon's
+   * refusal renders verbatim with its recovery copy; nothing auto-retries.
+   */
+  function handleApprove() {
+    void approval
+      .approve({
+        baseRevision: compose.revision,
+        trajectory: simulation.trajectory,
+      })
+      .catch(() => {
+        // The refusal renders from `approval.approval`; no toast duplication.
+      });
+  }
+
+  /** Approve stays disabled while a required slot is unbound (named per pattern). */
+  const approveGateReason = composeEnabled
+    ? compose.unboundSlots
+        .map((unbound) =>
+          i18n.t('strategy.approve.slotUnbound', {
+            ns: 'canvas',
+            slot: unbound.slots.join(', '),
+            pattern: unbound.patternId,
+          }),
+        )
+        .join(' ')
+    : null;
+
+  /** Nest attaches at the selected node, else the candidate entry. */
+  const nestAttachNodeId =
+    (surface.selectedNode?.data as StrategyNodeData | undefined)?.stateId ??
+    compose.workingDocument?.entry;
 
   function handleUseCurrent() {
     strategyState.setConflict(null);
@@ -210,6 +281,18 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     onDismiss: () => strategyState.setConflict(null),
     danglingTargets: ctxRef.current.danglingTargets,
     localEdges: strategyState.draftEdges as Edge<StrategyEdgeData>[],
+    patterns: compose.patternsQuery.data?.items,
+    ...(composeEnabled
+      ? {
+          compose: {
+            isComposing: compose.isComposing,
+            onToggleSlotExpanded: compose.toggleSlotExpanded,
+            onBindSlot: compose.bindSlot,
+            onReplaceSubtree: compose.replaceSubtree,
+            onUnnest: compose.unnest,
+          },
+        }
+      : {}),
   };
 
   const showAltRef = useRef(surface.showAlt);
@@ -241,6 +324,9 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       'strategy.create-transition.keywords.link-states',
     ],
     handler: () => setCreateDialogOpen(true),
+    // Compose path: the candidate is the one structural authority, so the YAML
+    // transition author stays out of the palette (D: one writer per path).
+    available: () => !composeEnabled,
   });
 
   useEffect(() => {
@@ -261,6 +347,20 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   );
 
   if (strategyState.graphQuery.isLoading) return <LoadingState label={t('strategy.loading')} />;
+  // Compose path: the working candidate seeds from the one IR read the wire
+  // serves; until it lands there is nothing to project.
+  if (composeEnabled && compose.seedQuery.isError) {
+    return (
+      <ErrorState
+        title={t('strategy.loadErrorTitle')}
+        description={t('strategy.loadError')}
+        onRetry={() => void compose.seedQuery.refetch()}
+      />
+    );
+  }
+  if (composeEnabled && !compose.workingDocument) {
+    return <LoadingState label={t('strategy.composeLoading')} />;
+  }
   if (strategyState.graphQuery.isError) {
     if (isOrchestrationEngineUnavailable(strategyState.graphQuery.error)) {
       return (
@@ -289,13 +389,15 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   return (
     <div className="flex flex-col gap-4">
       <CanvasHeader
-        revision={strategyState.baseRevision}
+        revision={composeEnabled ? compose.revision : strategyState.baseRevision}
         status={revisionStatus}
         activeSession={strategyState.activeSession}
         showAlt={surface.showAlt}
         setShowAlt={surface.setShowAlt}
-        onOpenCreateTransition={() => setCreateDialogOpen(true)}
+        onOpenCreateTransition={composeEnabled ? undefined : () => setCreateDialogOpen(true)}
         onSimulate={handleSimulate}
+        staging={composeEnabled}
+        onAddPattern={composeEnabled ? () => setPatternPickerOpen(true) : undefined}
       />
 
       {surface.showAlt && parsed ? (
@@ -306,8 +408,10 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
           edges={surface.edges}
           nodeTypes={surface.nodeTypes}
           onNodesChange={surface.onNodesChange}
-          onConnect={onConnect}
-          onReconnect={strategyState.onReconnect}
+          // Compose path: a displayed edge is never authored through the YAML
+          // authority — connect/reconnect write the preset, not the candidate.
+          onConnect={composeEnabled ? undefined : onConnect}
+          onReconnect={composeEnabled ? undefined : strategyState.onReconnect}
           summaryText={surface.summaryText}
           ariaLabel={t('strategy.graphAriaLabel')}
           relayout={surface.relayout}
@@ -319,7 +423,9 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
             setIsEditing={setIsEditing}
             onFocusSection={strategyState.setActiveSection}
           >
-            {selectedState ? surface.inspector : null}
+            {selectedState || surface.selectedNode?.type === 'strategy-pattern-slot'
+              ? surface.inspector
+              : null}
           </InspectorPanel>
           {strategyState.selectedDraftEdge ? (
             <aside
@@ -332,6 +438,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
                 isCommitting={strategyState.isCommittingDraft}
                 onCommit={strategyState.commitDraft}
                 onCancel={strategyState.cancelDraft}
+                structuralWritesDisabled={composeEnabled}
               />
             </aside>
           ) : null}
@@ -347,7 +454,30 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         trajectory={simulation.trajectory}
         error={simulation.error}
         onRun={handleSimulate}
-        onApprove={onApproveCandidate}
+        onApprove={composeEnabled ? handleApprove : onApproveCandidate}
+        approval={composeEnabled ? approval.approval : null}
+        gateReason={composeEnabled ? approveGateReason : null}
+      />
+
+      <ComposeConflictDialog
+        conflict={compose.conflict}
+        refusal={compose.refusal}
+        onReload={() => {
+          void compose.reload();
+        }}
+        onDismiss={() => {
+          compose.dismissConflict();
+          compose.dismissRefusal();
+        }}
+      />
+
+      <PatternPickerDialog
+        open={patternPickerOpen}
+        onOpenChange={setPatternPickerOpen}
+        patterns={compose.patternsQuery.data?.items ?? []}
+        attachNodeId={nestAttachNodeId ?? compose.workingDocument?.entry ?? presetId}
+        isComposing={compose.isComposing}
+        onNest={compose.nestPattern}
       />
 
       <StrategyConflictModal

@@ -163,6 +163,23 @@ export function strategyWorkflowIr(
 }
 
 /**
+ * `GET /v1/daemon/strategies/{strategy_id}/candidate` — the canonical candidate.
+ *
+ * The stored compose row when one exists, otherwise the revision-`0` import projection the
+ * `workflow-ir` read serves. The document's `revision` is the row revision, which is what a
+ * stale compose reloads and re-applies against; the read never writes, so a strategy with no
+ * row stays rowless.
+ */
+export function strategyCandidate(
+  service: ServiceCore,
+  strategyId: string,
+): Promise<WorkflowDocument> {
+  return withPrincipal(service, (principal) =>
+    service.core.strategyCandidate(principal, strategyId),
+  );
+}
+
+/**
  * `POST /v1/daemon/strategies/{strategy_id}/compose`.
  *
  * One typed operation per request, guarded by the `base_revision` the client last read. The
@@ -323,6 +340,13 @@ export const PRESET_ROUTES: readonly DomainRoute[] = [
     tier: 'tier2',
     family: 'presets',
     handle: async (service, params) => ({ body: await strategyWorkflowIr(service, params[0]) }),
+  },
+  {
+    method: 'GET',
+    pattern: /^\/v1\/daemon\/strategies\/([^/]+)\/candidate$/,
+    tier: 'tier2',
+    family: 'presets',
+    handle: async (service, params) => ({ body: await strategyCandidate(service, params[0]) }),
   },
   {
     method: 'POST',

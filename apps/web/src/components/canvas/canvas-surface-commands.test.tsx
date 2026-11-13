@@ -19,8 +19,12 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
+import { MemoryRouter } from 'react-router';
 
 import { clearCommands, getCommands, type Command } from '@/lib/canvas/command-registry';
+import { ClientProvider } from '@/lib/client-context';
+import { EntranceProvider } from '@/lib/entrance-context';
+import { noopClient } from '@/test/test-providers';
 
 // ---------------------------------------------------------------------------
 // Shared mocks — CanvasShell (React Flow) as a no-op so jsdom stays cheap.
@@ -328,7 +332,15 @@ const queryClient = new QueryClient({
 
 /** Wrap an element in the QueryClientProvider the canvas hooks require. */
 function withProviders(element: ReactElement): ReactElement {
-  return <QueryClientProvider client={queryClient}>{element}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <ClientProvider client={noopClient} desktop={null} connectionConfig={null}>
+          <EntranceProvider>{element}</EntranceProvider>
+        </ClientProvider>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
 }
 
 beforeEach(() => {

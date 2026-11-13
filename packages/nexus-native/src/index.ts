@@ -804,6 +804,10 @@ export interface NativeCore {
     principal: PrincipalHandle,
     strategyId: string,
   ): Promise<WorkflowDocument>;
+  strategyCandidate(
+    principal: PrincipalHandle,
+    strategyId: string,
+  ): Promise<WorkflowDocument>;
   addSchedule(
     principal: PrincipalHandle,
     request: AddScheduleRequest,
@@ -1135,6 +1139,7 @@ type DomainSurface = Pick<
   | 'composeStrategy'
   | 'approveStrategy'
   | 'strategyWorkflowIr'
+  | 'strategyCandidate'
   | 'addSchedule'
   | 'signalSchedule'
   | 'listSchedules'
@@ -1636,6 +1641,9 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     },
     async strategyWorkflowIr(principal, strategyId) {
       return json(await inner.strategyWorkflowIr(principal, strategyId));
+    },
+    async strategyCandidate(principal, strategyId) {
+      return json(await inner.strategyCandidate(principal, strategyId));
     },
     async addSchedule(principal, request) {
       return json(await inner.addSchedule(principal, wire(request, 'request')));

@@ -21,6 +21,8 @@ export function CanvasHeader({
   setShowAlt,
   onOpenCreateTransition,
   onSimulate,
+  staging = false,
+  onAddPattern,
 }: {
   revision: number;
   status: 'clean' | 'dirty' | 'conflict';
@@ -40,6 +42,12 @@ export function CanvasHeader({
    * renders the simulation limit.
    */
   onSimulate?: () => void;
+  /**
+   * Compose path (flag on): the header shows the `Staging` badge and an
+   * **Add pattern…** entry point that opens the pattern picker (nest).
+   */
+  staging?: boolean;
+  onAddPattern?: () => void;
 }) {
   const { t } = useTranslation('canvas');
 
@@ -69,12 +77,31 @@ export function CanvasHeader({
           <div className="flex items-center gap-2">
             <h2 className="text-heading-20 font-heading text-gray-1000">{t('strategy.header.title')}</h2>
             <RevisionBadge revision={revision} status={status} />
+            {staging ? (
+              <span
+                data-testid="strategy-staging"
+                className="inline-block rounded-pill bg-purple-100 px-1.5 py-0.5 text-label-12 text-purple-1000"
+              >
+                {t('strategy.header.staging')}
+              </span>
+            ) : null}
           </div>
           <p className="text-copy-13 text-gray-700">
             {t('strategy.header.description')}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {onAddPattern ? (
+            <button
+              type="button"
+              data-testid="strategy-add-pattern"
+              onClick={onAddPattern}
+              className="inline-flex items-center gap-1 rounded-control bg-purple-700 px-3 py-1.5 text-button-12 text-white hover:bg-purple-800"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+              {t('strategy.header.addPattern')}
+            </button>
+          ) : null}
           {onOpenCreateTransition ? (
             <button
               type="button"

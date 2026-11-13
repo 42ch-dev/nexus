@@ -31,6 +31,8 @@ const COMPOSE_PATH = `/v1/daemon/strategies/${STRATEGY}/compose`;
 const WALKABLE_STRATEGY = 'novel-project-init';
 const WALKABLE_COMPOSE_PATH = `/v1/daemon/strategies/${WALKABLE_STRATEGY}/compose`;
 const WALKABLE_SIMULATE_PATH = `/v1/daemon/strategies/${WALKABLE_STRATEGY}/simulate`;
+const WALKABLE_CANDIDATE_PATH = `/v1/daemon/strategies/${WALKABLE_STRATEGY}/candidate`;
+const WALKABLE_APPROVE_PATH = `/v1/daemon/strategies/${WALKABLE_STRATEGY}/approve`;
 
 const HASH = /^[0-9a-f]{64}$/;
 
@@ -122,13 +124,14 @@ function writeRegistry(home) {
   writePackage(home, { id: 'chain-d', effectClass: 'pure', fragment: fragment('chain-d', 'pure') });
 }
 
-function nest(baseRevision, { nestId, parentNode, packageId, version = '1.0.0' }) {
+function nest(baseRevision, { nestId, parentNode, packageId, version = '1.0.0', attachTo }) {
   return {
     base_revision: baseRevision,
     op: 'nest',
     payload: {
       nest_id: nestId,
       parent_node: parentNode,
+      ...(attachTo === undefined ? {} : { attach_to: attachTo }),
       package: { id: packageId, version },
       expansion: 'expand_in_candidate',
     },
@@ -143,10 +146,10 @@ describe('compose route (v1.239 P3-T7)', () => {
   let home;
   let service;
   /**
-   * The candidate revision this suite last committed. A candidate has no read route yet, so
-   * each successful compose advances the shared base and every refusal is asserted to leave it
-   * exactly where it was — the revision is the store's own CAS authority, so this is the
-   * strongest "nothing was written" evidence the wire exposes.
+   * The candidate revision this suite last committed. Each successful compose advances the
+   * shared base and every refusal is asserted to leave it exactly where it was — the revision is
+   * the store's own CAS authority, so this is the strongest "nothing was written" evidence the
+   * wire exposes.
    */
   let revision = 0;
 
@@ -470,6 +473,12 @@ describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
     return { status: response.status, payload: text.length > 0 ? JSON.parse(text) : null };
   }
 
+  async function get(path) {
+    const response = await fetch(`${service.url}${path}`);
+    const text = await response.text();
+    return { status: response.status, payload: text.length > 0 ? JSON.parse(text) : null };
+  }
+
   async function compose(body) {
     const { status, payload } = await post(WALKABLE_COMPOSE_PATH, body);
     assert.equal(status, 200, JSON.stringify(payload));
@@ -478,12 +487,27 @@ describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
   }
 
   let composed;
+  let imported;
+
+  test('the candidate read serves the import for a strategy with no row', async () => {
+    const { status, payload } = await get(WALKABLE_CANDIDATE_PATH);
+    assert.equal(status, 200, JSON.stringify(payload));
+    assert.equal(payload.id, WALKABLE_STRATEGY);
+    assert.equal(payload.revision, 0);
+    assert.equal(payload.state, 'candidate');
+
+    const again = await get(WALKABLE_CANDIDATE_PATH);
+    assert.equal(again.payload.revision, 0, 'the read creates no row');
+    imported = payload;
+  });
 
   test('the fence accepts the composed document unchanged', async () => {
+    // The read above created no row, so the first compose still commits from base 0.
     composed = await compose(
       nest(0, {
         nestId: 'source-research',
         parentNode: 'collect-sources',
+        attachTo: imported.entry,
         packageId: 'prompt-step',
       }),
     );
@@ -510,30 +534,32 @@ describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
     assert.notEqual(withoutSlot.payload.ir_content_hash, first.payload.ir_content_hash);
 
     // Nothing persisted and no revision consumed: the candidate still commits from `revision`.
+    // A slot-free package, so the approval test below starts without an unbound slot.
     const stillThere = await compose(nest(revision, {
       nestId: 'fence-check',
       parentNode: 'fence-check-slot',
-      packageId: 'prompt-step',
+      packageId: 'chain-d',
     }));
     assert.equal(stillThere.new_revision, revision);
   });
 
   test('a slot the graph wires is named by the trajectory', async () => {
+    // The committed document is what Simulate walks: `nest` wrote the connecting edge from the
+    // client's attach target, so no edge is authored on the way to the route.
     const document = composed.document;
-    const wired = {
-      ...document,
-      edges: [
-        ...document.edges,
+    assert.deepEqual(
+      document.edges.filter((edge) => edge.to === 'collect-sources'),
+      [
         {
-          id: `${document.entry}->collect-sources`,
-          from: document.entry,
+          id: `${imported.entry}->collect-sources`,
+          from: imported.entry,
           to: 'collect-sources',
           kind: 'linear',
         },
       ],
-    };
+    );
 
-    const trajectory = await post(WALKABLE_SIMULATE_PATH, { document: wired });
+    const trajectory = await post(WALKABLE_SIMULATE_PATH, { document });
     assert.equal(trajectory.status, 200, JSON.stringify(trajectory.payload));
     assert.ok(
       trajectory.payload.nodes_visited.includes('collect-sources'),
@@ -541,6 +567,46 @@ describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
     );
     // The slot contributes its resolved pin's declared class, not the fragment body.
     assert.equal(trajectory.payload.effect_summary, 'external');
+  });
+
+  test('approve is reachable on a wired, bound candidate', async () => {
+    // Compose two patterns into the candidate and wire both slots from the committed entry.
+    const nested = await compose(
+      nest(revision, {
+        nestId: 'approval-nest',
+        parentNode: 'approval-slot',
+        attachTo: composed.document.entry,
+        packageId: 'prompt-step',
+      }),
+    );
+    const bound = await compose({
+      base_revision: revision,
+      op: 'bind_slot',
+      payload: { nest_id: 'approval-nest', slot: 'topic', value: 'water policy' },
+    });
+    assert.equal(bound.new_revision, nested.new_revision + 1);
+
+    // The canonical read now serves the stored row at that revision, byte for byte.
+    const stored = await get(WALKABLE_CANDIDATE_PATH);
+    assert.equal(stored.status, 200, JSON.stringify(stored.payload));
+    assert.equal(stored.payload.revision, bound.new_revision);
+    assert.deepEqual(stored.payload, bound.document);
+
+    const trajectory = await post(WALKABLE_SIMULATE_PATH, { document: bound.document });
+    assert.equal(trajectory.status, 200, JSON.stringify(trajectory.payload));
+    assert.ok(
+      trajectory.payload.nodes_visited.includes('approval-slot'),
+      `the walk names the bound slot: ${JSON.stringify(trajectory.payload.nodes_visited)}`,
+    );
+
+    const approved = await post(WALKABLE_APPROVE_PATH, {
+      base_revision: bound.new_revision,
+      trajectory: trajectory.payload,
+    });
+    assert.equal(approved.status, 200, JSON.stringify(approved.payload));
+    assert.equal(approved.payload.candidate_revision, bound.new_revision);
+    assert.equal(approved.payload.trajectory.ir_content_hash, trajectory.payload.ir_content_hash);
+    assert.ok(approved.payload.approval_id);
   });
 
   test('the path id and the candidate state are still enforced', async () => {

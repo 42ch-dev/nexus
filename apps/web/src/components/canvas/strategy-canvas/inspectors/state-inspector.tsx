@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 
-import { useNexusClient } from '@/lib/client-context';
+import { useStrategyYamlAuthority } from '@/lib/canvas/strategy-yaml-authority';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useToast } from '@/lib/use-toast';
 import type { StrategyPatchResponse, StrategyPatchStateRequest } from '@42ch/nexus-contracts';
@@ -37,18 +37,16 @@ function buildPatchStateRequest(args: PatchStrategyStateArgs): StrategyPatchStat
   };
 }
 
-export function usePatchStrategyState(): UseMutationResult<
-  StrategyPatchResponse,
-  unknown,
-  PatchStrategyStateArgs
-> {
-  const client = useNexusClient();
+export function usePatchStrategyState(
+  structuralWritesDisabled = false,
+): UseMutationResult<StrategyPatchResponse, unknown, PatchStrategyStateArgs> {
+  const yaml = useStrategyYamlAuthority(structuralWritesDisabled);
   const qc = useQueryClient();
   const { t } = useTranslation('canvas');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (args: PatchStrategyStateArgs) =>
-      client.strategyPatchState(args.strategyId, args.stateId, buildPatchStateRequest(args)),
+      yaml.patchState(args.strategyId, args.stateId, buildPatchStateRequest(args)),
     onSuccess: (_data, args) => {
       // Show the new label after a rename; fall back to the immutable id for
       // description-only edits (R-V171P1-QC1-003 B10).
@@ -69,6 +67,8 @@ interface StateInspectorProps {
   saveStatus: SaveStatus | undefined;
   onSaveStatus: (status: SaveStatus | undefined) => void;
   onConflict: (currentRevision: number, section: Section) => void;
+  /** Compose path: structural writes belong to the candidate document. */
+  structuralWritesDisabled?: boolean;
 }
 
 export function StateInspector({
@@ -81,9 +81,10 @@ export function StateInspector({
   saveStatus,
   onSaveStatus,
   onConflict,
+  structuralWritesDisabled = false,
 }: StateInspectorProps) {
   const { t } = useTranslation('canvas');
-  const patch = usePatchStrategyState();
+  const patch = usePatchStrategyState(structuralWritesDisabled);
   const original = originalFormOf(selectedState);
   const dirty = isSectionDirty('state', form, original);
   const lastHandledTriggerRef = useRef(0);
@@ -137,7 +138,7 @@ export function StateInspector({
         <button
           type="button"
           onClick={handleSave}
-          disabled={!dirty || patch.isPending}
+          disabled={structuralWritesDisabled || !dirty || patch.isPending}
           className="rounded-control border border-gray-alpha-400 px-2 py-1 text-button-12 text-gray-900 hover:bg-gray-alpha-100 disabled:text-gray-500"
         >
           {patch.isPending ? t('strategy.inspector.state.saving') : t('strategy.inspector.state.save')}
@@ -149,6 +150,7 @@ export function StateInspector({
           type="text"
           value={form.label}
           onChange={(e) => onChange('label', e.target.value)}
+          disabled={structuralWritesDisabled}
           className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
         />
       </label>
@@ -157,11 +159,16 @@ export function StateInspector({
         <textarea
           value={form.description}
           onChange={(e) => onChange('description', e.target.value)}
+          disabled={structuralWritesDisabled}
           rows={3}
           className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
         />
       </label>
-      {saveStatus ? (
+      {structuralWritesDisabled ? (
+        <p data-testid="state-structural-disabled" className="text-copy-12 text-gray-700">
+          {t('strategy.inspector.state.composeDisabled')}
+        </p>
+      ) : saveStatus ? (
         <p
           className={
             saveStatus.type === 'success'

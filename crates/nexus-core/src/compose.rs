@@ -28,9 +28,10 @@ use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
-    WorkflowAssetRef, WorkflowNestBinding, WorkflowNestBindingExpansion,
-    WorkflowNestBindingPinPolicy, WorkflowNestChild, WorkflowNestChildKind, WorkflowNode,
-    WorkflowNodeEffectClass, WorkflowNodeKind, WorkflowPatternRef,
+    WorkflowAssetRef, WorkflowEdge, WorkflowEdgeKind, WorkflowNestBinding,
+    WorkflowNestBindingExpansion, WorkflowNestBindingPinPolicy, WorkflowNestChild,
+    WorkflowNestChildKind, WorkflowNode, WorkflowNodeEffectClass, WorkflowNodeKind,
+    WorkflowPatternRef,
 };
 use nexus_contracts::generated::daemon_api::patterns::pattern_manifest::{
     NexusPatternSlotKind, PatternManifest, PatternManifestEffectClass,
@@ -68,6 +69,9 @@ pub struct NestOp {
     pub nest_id: String,
     /// Id of the collapsed slot node this operation inserts.
     pub parent_node: String,
+    /// Existing node the new slot is wired after: the commit writes one `linear` edge from it to
+    /// the slot, which is what makes the slot reachable to the walk. `None` writes no edge.
+    pub attach_to: Option<String>,
     /// Exact package to pin.
     pub package: PatternPackageRef,
     /// When the region expands into concrete nodes and edges.
@@ -158,6 +162,20 @@ pub enum ComposeRefusal {
         /// The node id that is already taken.
         parent_node: String,
     },
+    /// `attach_to` names the slot this nest inserts, so the connecting edge would be a self-loop.
+    SelfAttach {
+        /// The requested nest id.
+        nest_id: String,
+        /// The node the request tried to both insert and attach to.
+        node: String,
+    },
+    /// `attach_to` names no node in this candidate, so the connecting edge would reach nothing.
+    UnknownAttachTarget {
+        /// The requested nest id.
+        nest_id: String,
+        /// The requested attach target.
+        attach_to: String,
+    },
     /// The write would close a nest-reference cycle.
     NestCycle {
         /// The requested nest id.
@@ -228,6 +246,8 @@ impl ComposeRefusal {
             Self::UnknownNest { .. } => "unknown_nest",
             Self::DuplicateNest { .. } => "duplicate_nest",
             Self::OccupiedParent { .. } => "occupied_parent",
+            Self::SelfAttach { .. } => "self_attach",
+            Self::UnknownAttachTarget { .. } => "unknown_attach_target",
             Self::NestCycle { .. } => "nest_cycle",
             Self::NestTooDeep { .. } => "nest_depth_exceeded",
             Self::InvalidDocument { .. } => "invalid_document",
@@ -244,6 +264,8 @@ impl ComposeRefusal {
             | Self::UnknownNest { nest_id }
             | Self::DuplicateNest { nest_id }
             | Self::OccupiedParent { nest_id, .. }
+            | Self::SelfAttach { nest_id, .. }
+            | Self::UnknownAttachTarget { nest_id, .. }
             | Self::NestCycle { nest_id, .. }
             | Self::NestTooDeep { nest_id, .. }
             | Self::InvalidDocument { nest_id, .. }
@@ -273,6 +295,12 @@ impl ComposeRefusal {
             }
             Self::OccupiedParent { parent_node, .. } => {
                 details.insert("parent_node".to_string(), Value::from(parent_node.clone()));
+            }
+            Self::SelfAttach { node, .. } => {
+                details.insert("attach_to".to_string(), Value::from(node.clone()));
+            }
+            Self::UnknownAttachTarget { attach_to, .. } => {
+                details.insert("attach_to".to_string(), Value::from(attach_to.clone()));
             }
             Self::NestCycle { path, .. } => {
                 details.insert("path".to_string(), Value::from(path.clone()));
@@ -348,6 +376,14 @@ impl std::fmt::Display for ComposeRefusal {
             } => write!(
                 f,
                 "nest `{nest_id}` cannot insert slot `{parent_node}`: a node with that id exists"
+            ),
+            Self::SelfAttach { nest_id, node } => write!(
+                f,
+                "nest `{nest_id}` cannot attach slot `{node}` to itself: the edge would be a self-loop"
+            ),
+            Self::UnknownAttachTarget { nest_id, attach_to } => write!(
+                f,
+                "nest `{nest_id}` cannot attach to `{attach_to}`: no node with that id is in this candidate"
             ),
             Self::NestCycle { nest_id, path } => write!(
                 f,
@@ -694,6 +730,25 @@ fn nest_pattern(
         });
     }
 
+    // The connecting edge must reach one node that already exists and is not the slot this nest
+    // inserts: `settle` filters only `GraphCycle`, so a self-loop or an unknown target would
+    // commit bytes that every later operation refuses.
+    let attach_to = op.attach_to.as_deref();
+    if let Some(attach_to) = attach_to {
+        if attach_to == op.parent_node {
+            return Err(ComposeRefusal::SelfAttach {
+                nest_id: op.nest_id.clone(),
+                node: attach_to.to_owned(),
+            });
+        }
+        if !document.nodes.iter().any(|node| node.id == attach_to) {
+            return Err(ComposeRefusal::UnknownAttachTarget {
+                nest_id: op.nest_id.clone(),
+                attach_to: attach_to.to_owned(),
+            });
+        }
+    }
+
     document.nodes.push(slot_node(
         &op.parent_node,
         &op.package,
@@ -707,6 +762,20 @@ fn nest_pattern(
         parent_node: op.parent_node.clone(),
         pin_policy: WorkflowNestBindingPinPolicy::Exact,
     });
+    // The walk only reaches a node an edge reaches, so the slot stays unreachable unless the
+    // commit wires it. The target was proven to name an existing node above.
+    if let Some(attach_to) = attach_to {
+        let mut taken: HashSet<String> =
+            document.edges.iter().map(|edge| edge.id.clone()).collect();
+        document.edges.push(WorkflowEdge {
+            id: fresh_id(&format!("{attach_to}->{}", op.parent_node), &mut taken),
+            from: attach_to.to_owned(),
+            kind: WorkflowEdgeKind::Linear,
+            label: None,
+            to: op.parent_node.clone(),
+            when: None,
+        });
+    }
     Ok(())
 }
 

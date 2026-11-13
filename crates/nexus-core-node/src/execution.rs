@@ -109,6 +109,7 @@ fn compose_op(request: StrategyComposeRequest) -> (u64, nexus_core::ComposeOp) {
             nexus_core::ComposeOp::Nest(nexus_core::NestOp {
                 nest_id: payload.nest_id.into(),
                 parent_node: payload.parent_node.into(),
+                attach_to: payload.attach_to.map(Into::into),
                 package: nexus_core::PatternPackageRef {
                     id: payload.package.id.into(),
                     version: payload.package.version.into(),
@@ -1121,6 +1122,27 @@ impl NativeCore {
     ) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
             core.strategy_workflow_ir(&principal, strategy_id).await
+        })
+        .await
+    }
+
+    /// `GET /v1/daemon/strategies/{strategy_id}/candidate`.
+    ///
+    /// The canonical candidate of §Q4/D17: the stored row when one exists, otherwise the
+    /// `workflow-ir` import projection at revision `0`. The document carries the revision the
+    /// candidate is at, so this is the read a stale compose reloads from. It never writes: a
+    /// strategy with no row stays rowless.
+    #[napi]
+    pub async fn strategy_candidate(
+        &self,
+        principal_handle: String,
+        strategy_id: String,
+    ) -> Result<Buffer> {
+        self.json_call(principal_handle, async move |core, principal| {
+            let candidate = core
+                .read_strategy_candidate(&principal, &strategy_id)
+                .await?;
+            Ok(candidate.document)
         })
         .await
     }

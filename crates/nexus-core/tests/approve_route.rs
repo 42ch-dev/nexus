@@ -308,6 +308,7 @@ async fn a_changed_pinned_package_is_refused_naming_package_and_both_hashes() {
             ComposeOp::Nest(NestOp {
                 nest_id: "approve-nest".to_owned(),
                 parent_node: "approve-slot".to_owned(),
+                attach_to: None,
                 package: package("approve-step"),
                 expansion: WorkflowNestBindingExpansion::ExpandInCandidate,
             }),
@@ -365,6 +366,7 @@ async fn a_pin_whose_package_is_absent_is_refused_naming_the_pin() {
             ComposeOp::Nest(NestOp {
                 nest_id: "gone-nest".to_owned(),
                 parent_node: "gone-slot".to_owned(),
+                attach_to: None,
                 package: package("gone-step"),
                 expansion: WorkflowNestBindingExpansion::ExpandInCandidate,
             }),
@@ -534,6 +536,7 @@ async fn a_required_slot_inside_a_nested_pattern_blocks_the_approval() {
             ComposeOp::Nest(NestOp {
                 nest_id: "outer-nest".to_owned(),
                 parent_node: "outer-slot".to_owned(),
+                attach_to: None,
                 package: package("outer-chain"),
                 expansion: WorkflowNestBindingExpansion::ExpandInCandidate,
             }),
@@ -573,5 +576,70 @@ async fn a_required_slot_inside_a_nested_pattern_blocks_the_approval() {
         stored_revision(setup.core.pool()).await,
         Some(i64::try_from(composed.candidate.revision).unwrap())
     );
+    setup.core.close().await.unwrap();
+}
+
+/// I-000423: the compose-only path end to end — two patterns nested into one candidate, the
+/// daemon-written edges carrying the walk to both slots, and an approval that is reachable because
+/// the committed document is the one that was simulated (no client-authored edge).
+#[tokio::test]
+async fn a_composed_candidate_is_reachable_and_reaches_approval() {
+    let setup = setup().await;
+    write_package(&setup.home, "approve-step", "composed bytes");
+    write_package(&setup.home, "second-step", "second bytes");
+    let before = candidate(&setup.core, &setup.principal).await;
+    let entry = before.document.entry.clone();
+
+    let first = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            ComposeOp::Nest(NestOp {
+                nest_id: "first-nest".to_owned(),
+                parent_node: "first-slot".to_owned(),
+                attach_to: Some(entry),
+                package: package("approve-step"),
+                expansion: WorkflowNestBindingExpansion::ExpandInCandidate,
+            }),
+        )
+        .await
+        .unwrap();
+    let composed = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            first.candidate.revision,
+            ComposeOp::Nest(NestOp {
+                nest_id: "second-nest".to_owned(),
+                parent_node: "second-slot".to_owned(),
+                attach_to: Some("first-slot".to_owned()),
+                package: package("second-step"),
+                expansion: WorkflowNestBindingExpansion::ExpandInCandidate,
+            }),
+        )
+        .await
+        .unwrap();
+
+    let revision = composed.candidate.revision;
+    let trajectory = simulate(&setup.core, &setup.principal, &composed.candidate.document).await;
+    assert!(
+        trajectory.nodes_visited.contains(&"first-slot".to_owned())
+            && trajectory.nodes_visited.contains(&"second-slot".to_owned()),
+        "the committed edges carry the walk to both slots: {:?}",
+        trajectory.nodes_visited
+    );
+
+    let snapshot = setup
+        .core
+        .approve_strategy(&setup.principal, STRATEGY, revision, Some(trajectory))
+        .await
+        .unwrap();
+
+    assert_eq!(snapshot.candidate_revision, revision);
+    assert_eq!(snapshot.pins.len(), 2, "both resolved pins are frozen");
+    assert_eq!(snapshot_count(setup.core.pool()).await, 1);
     setup.core.close().await.unwrap();
 }

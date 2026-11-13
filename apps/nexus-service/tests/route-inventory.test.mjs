@@ -136,6 +136,7 @@ describe('route-inventory (P5-T5)', () => {
   ['GET', '/v1/daemon/runtime/cert-fingerprint', 'unguarded', 'runtime'],
   ['GET', '/v1/daemon/runtime/health', 'unguarded', 'runtime'],
   ['GET', '/v1/daemon/runtime/status', 'unguarded', 'runtime'],
+  ['GET', '/v1/daemon/strategies/([^/]+)/candidate', 'tier2', 'presets'],
   ['GET', '/v1/daemon/strategies/([^/]+)/workflow-ir', 'tier2', 'presets'],
   ['GET', '/v1/daemon/timeline/overview', 'tier2', 'worlds'],
   ['GET', '/v1/daemon/works', 'tier2', 'works'],
