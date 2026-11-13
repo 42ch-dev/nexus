@@ -88,9 +88,9 @@ fn valid_package(root: &Path, package_dir: &str, effect_class: &str) {
 fn reason<'a>(packages: &'a [PatternPackage], package_dir: &str) -> &'a str {
     let package = packages
         .iter()
-        .find(|package| package.package_dir == package_dir)
+        .find(|package| package.package_dir() == package_dir)
         .expect("package discovered");
-    package.reason.as_deref().expect("package unavailable")
+    package.reason().expect("package unavailable")
 }
 
 #[test]
@@ -104,8 +104,8 @@ fn two_valid_packages_are_available() {
     assert!(packages.iter().all(PatternPackage::available));
 
     let alpha = &packages[0];
-    assert_eq!(alpha.package_dir, "alpha");
-    let manifest = alpha.manifest.as_ref().expect("manifest parsed from disk");
+    assert_eq!(alpha.package_dir(), "alpha");
+    let manifest = alpha.manifest().expect("manifest parsed from disk");
     assert_eq!(manifest.id.as_str(), "alpha");
     assert_eq!(manifest.version.as_str(), "1.0.0");
     assert_eq!(
@@ -121,7 +121,7 @@ fn two_valid_packages_are_available() {
         ["search"]
     );
     assert_eq!(manifest.slots.len(), 1);
-    assert!(alpha.fragment.is_some());
+    assert!(alpha.fragment().is_some());
 
     let summary = PatternSummary::from(alpha);
     assert!(summary.available);
@@ -178,7 +178,7 @@ fn broken_packages_do_not_hide_their_peers() {
     let available: Vec<&str> = packages
         .iter()
         .filter(|package| package.available())
-        .map(|package| package.package_dir.as_str())
+        .map(PatternPackage::package_dir)
         .collect();
     assert_eq!(available, ["alpha", "beta"]);
 
@@ -187,20 +187,25 @@ fn broken_packages_do_not_hide_their_peers() {
         .filter(|package| !package.available())
         .collect();
     assert_eq!(unavailable.len(), 3);
-    assert!(unavailable.iter().all(|package| package.fragment.is_none()));
+    assert!(unavailable
+        .iter()
+        .all(|package| package.fragment().is_none()));
 
     // A manifest that parsed stays readable on an unavailable package, so a client can name it.
     let bad_toml = packages
         .iter()
-        .find(|package| package.package_dir == "bad-toml")
+        .find(|package| package.package_dir() == "bad-toml")
         .expect("bad-toml discovered");
-    assert!(bad_toml.manifest.is_none());
+    assert!(bad_toml.manifest().is_none());
     for package_dir in ["no-fragment", "stale-ir"] {
         let package = packages
             .iter()
-            .find(|package| package.package_dir == package_dir)
+            .find(|package| package.package_dir() == package_dir)
             .expect("package discovered");
-        assert!(package.manifest.is_some(), "{package_dir} manifest parsed");
+        assert!(
+            package.manifest().is_some(),
+            "{package_dir} manifest parsed"
+        );
         let summary = PatternSummary::from(package);
         assert!(!summary.available);
         assert_eq!(summary.id.as_deref(), Some(package_dir));
@@ -210,7 +215,7 @@ fn broken_packages_do_not_hide_their_peers() {
 
     let reasons: HashSet<&str> = unavailable
         .iter()
-        .map(|package| package.reason.as_deref().expect("reason"))
+        .map(|package| package.reason().expect("reason"))
         .collect();
     assert_eq!(reasons.len(), 3, "reasons are distinct: {reasons:?}");
 
@@ -235,7 +240,7 @@ fn declared_effect_must_match_the_fragment_rollup() {
     let packages = scan_pattern_packages(root.path(), IR_VERSION).expect("scan");
     let package = &packages[0];
     assert!(!package.available());
-    let reason = package.reason.as_deref().expect("reason");
+    let reason = package.reason().expect("reason");
     assert!(
         reason.contains("`pure`") && reason.contains("`external`"),
         "{reason}"
@@ -312,11 +317,10 @@ fn manifest_rules_are_enforced() {
 fn pin(packages: &[PatternPackage], package_dir: &str) -> String {
     packages
         .iter()
-        .find(|package| package.package_dir == package_dir)
+        .find(|package| package.package_dir() == package_dir)
         .unwrap_or_else(|| panic!("{package_dir} discovered"))
-        .content_hash
-        .clone()
-        .unwrap_or_else(|| panic!("{package_dir} carries a pin"))
+        .content_hash()
+        .map_or_else(|| panic!("{package_dir} carries a pin"), str::to_owned)
 }
 
 #[test]
@@ -372,9 +376,9 @@ fn a_fragment_whose_pin_cannot_be_computed_is_unavailable() {
     let packages = scan_pattern_packages(root.path(), IR_VERSION).expect("scan");
     let package = &packages[0];
     assert!(!package.available());
-    assert_eq!(package.content_hash, None);
+    assert_eq!(package.content_hash(), None);
     assert_eq!(PatternSummary::from(package).content_hash, None);
-    let reason = package.reason.as_deref().expect("reason");
+    let reason = package.reason().expect("reason");
     assert!(
         reason.contains("content hash") && reason.contains("assets[tpl]"),
         "{reason}"
@@ -411,11 +415,10 @@ fn the_version_label_is_owned_by_the_manifest_schema() {
 
     let packages = scan_pattern_packages(root.path(), IR_VERSION).expect("scan");
     let package = &packages[0];
-    assert!(package.available(), "{:?}", package.reason);
+    assert!(package.available(), "{:?}", package.reason());
     assert_eq!(
         package
-            .manifest
-            .as_ref()
+            .manifest()
             .expect("manifest parsed")
             .version
             .as_str(),
@@ -457,7 +460,7 @@ fn a_fifo_member_is_unavailable_without_stalling_the_scan() {
     );
     assert!(packages
         .iter()
-        .any(|package| package.package_dir == "peer" && package.available()));
+        .any(|package| package.package_dir() == "peer" && package.available()));
 }
 
 #[test]
@@ -477,5 +480,5 @@ fn an_oversized_member_is_unavailable_without_being_read() {
     assert!(oversized_reason.contains("above the"), "{oversized_reason}");
     assert!(packages
         .iter()
-        .any(|package| package.package_dir == "peer" && package.available()));
+        .any(|package| package.package_dir() == "peer" && package.available()));
 }

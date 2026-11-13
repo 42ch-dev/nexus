@@ -44,21 +44,24 @@ pub const FRAGMENT_FILE: &str = "workflow.ir.json";
 pub const MAX_MEMBER_BYTES: u64 = 1 << 20;
 
 /// One discovered package directory.
+///
+/// Fields are private and read-only: only the scanner builds the load state, so a fragment and its
+/// pin cannot be edited apart after loading.
 #[derive(Debug, Clone)]
 pub struct PatternPackage {
     /// Directory name as a cursor identity: valid UTF-8 verbatim, with `%` and every byte outside
     /// valid UTF-8 percent-escaped; never an absolute path.
-    pub package_dir: String,
+    package_dir: String,
     /// Manifest parsed from `pattern.toml`; absent only when the manifest itself could not be read
     /// or parsed, so an unavailable package can still be named by id and version.
-    pub manifest: Option<PatternManifest>,
+    manifest: Option<PatternManifest>,
     /// Fragment parsed from `workflow.ir.json`; present only when the package is available.
-    pub fragment: Option<WorkflowDocument>,
+    fragment: Option<WorkflowDocument>,
     /// Canonical content hash of the fragment document — the pin staging approval compares.
     /// Manifest metadata is not part of it. Present only when the package is available.
-    pub content_hash: Option<String>,
+    content_hash: Option<String>,
     /// Why the package did not load; `None` only when the package is available.
-    pub reason: Option<String>,
+    reason: Option<String>,
 }
 
 impl PatternPackage {
@@ -66,6 +69,36 @@ impl PatternPackage {
     #[must_use]
     pub const fn available(&self) -> bool {
         self.reason.is_none()
+    }
+
+    /// Cursor identity of the package directory.
+    #[must_use]
+    pub fn package_dir(&self) -> &str {
+        &self.package_dir
+    }
+
+    /// Manifest parsed from `pattern.toml`, if it could be read and parsed.
+    #[must_use]
+    pub const fn manifest(&self) -> Option<&PatternManifest> {
+        self.manifest.as_ref()
+    }
+
+    /// Fragment parsed from `workflow.ir.json`, present only when the package is available.
+    #[must_use]
+    pub const fn fragment(&self) -> Option<&WorkflowDocument> {
+        self.fragment.as_ref()
+    }
+
+    /// Canonical content hash of the fragment, present only when the package is available.
+    #[must_use]
+    pub fn content_hash(&self) -> Option<&str> {
+        self.content_hash.as_deref()
+    }
+
+    /// Why the package did not load; `None` only when the package is available.
+    #[must_use]
+    pub fn reason(&self) -> Option<&str> {
+        self.reason.as_deref()
     }
 }
 

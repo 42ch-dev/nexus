@@ -27,7 +27,7 @@ const STEP_WITH_JUDGE_HASH: &str =
 fn summary(packages: &[PatternPackage], package_dir: &str) -> PatternSummary {
     let package = packages
         .iter()
-        .find(|package| package.package_dir == package_dir)
+        .find(|package| package.package_dir() == package_dir)
         .unwrap_or_else(|| panic!("`{package_dir}` is committed under the fixture root"));
     PatternSummary::from(package)
 }
@@ -38,7 +38,7 @@ fn the_committed_packages_load_with_their_pins() {
     assert_eq!(
         packages
             .iter()
-            .map(|package| package.package_dir.as_str())
+            .map(PatternPackage::package_dir)
             .collect::<Vec<_>>(),
         ["broken-manifest", "prompt-step", "step-with-judge"],
     );
