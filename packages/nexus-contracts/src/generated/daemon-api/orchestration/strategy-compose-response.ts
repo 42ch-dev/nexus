@@ -585,19 +585,19 @@ export interface WorkflowResolvedPin {
 }
 export interface StrategyComposeDiagnostic {
   /**
-   * Diagnostic family: an unbound required slot, or a slot binding flattening had to drop.
+   * Diagnostic family: an unbound required slot, a slot binding flattening had to drop, or a pin outside the operation's reach whose bytes changed.
    */
-  code: "unbound_required_slot" | "slot_binding_dropped";
+  code: "unbound_required_slot" | "slot_binding_dropped" | "stale_pin";
   /**
    * The nest that pins the package.
    */
   nest_id: string;
   /**
-   * The pinned package (present for `unbound_required_slot`).
+   * The pinned package (present for `unbound_required_slot` and `stale_pin`).
    */
   package_id?: string;
   /**
-   * The pinned package version (present for `unbound_required_slot`).
+   * The pinned package version (present for `unbound_required_slot` and `stale_pin`).
    */
   package_version?: string;
   /**

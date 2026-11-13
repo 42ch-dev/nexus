@@ -213,6 +213,16 @@ fn compose_diagnostic(diagnostic: &ComposeDiagnostic) -> StrategyComposeDiagnost
             package_version: None,
             slot: Some(slot.clone()),
         },
+        ComposeDiagnostic::StalePin {
+            nest_id, package, ..
+        } => StrategyComposeDiagnostic {
+            code: StrategyComposeDiagnosticCode::StalePin,
+            message: diagnostic.to_string(),
+            nest_id: nest_id.clone(),
+            package_id: Some(package.id.clone()),
+            package_version: Some(package.version.clone()),
+            slot: None,
+        },
     }
 }
 

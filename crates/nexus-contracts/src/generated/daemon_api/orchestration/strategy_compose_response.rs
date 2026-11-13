@@ -230,16 +230,16 @@ impl ::std::convert::TryFrom<::std::string::String> for NexusWorkflowDocumentSta
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct StrategyComposeDiagnostic {
-    ///Diagnostic family: an unbound required slot, or a slot binding flattening had to drop.
+    ///Diagnostic family: an unbound required slot, a slot binding flattening had to drop, or a pin outside the operation's reach whose bytes changed.
     pub code: StrategyComposeDiagnosticCode,
     ///Human-readable diagnostic safe for UI display.
     pub message: ::std::string::String,
     ///The nest that pins the package.
     pub nest_id: ::std::string::String,
-    ///The pinned package (present for `unbound_required_slot`).
+    ///The pinned package (present for `unbound_required_slot` and `stale_pin`).
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub package_id: ::std::option::Option<::std::string::String>,
-    ///The pinned package version (present for `unbound_required_slot`).
+    ///The pinned package version (present for `unbound_required_slot` and `stale_pin`).
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub package_version: ::std::option::Option<::std::string::String>,
     ///The slot name: unbound for `unbound_required_slot`, dropped for `slot_binding_dropped`.
@@ -251,7 +251,7 @@ impl StrategyComposeDiagnostic {
         Default::default()
     }
 }
-///Diagnostic family: an unbound required slot, or a slot binding flattening had to drop.
+///Diagnostic family: an unbound required slot, a slot binding flattening had to drop, or a pin outside the operation's reach whose bytes changed.
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,
@@ -269,12 +269,15 @@ pub enum StrategyComposeDiagnosticCode {
     UnboundRequiredSlot,
     #[serde(rename = "slot_binding_dropped")]
     SlotBindingDropped,
+    #[serde(rename = "stale_pin")]
+    StalePin,
 }
 impl ::std::fmt::Display for StrategyComposeDiagnosticCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
             Self::UnboundRequiredSlot => f.write_str("unbound_required_slot"),
             Self::SlotBindingDropped => f.write_str("slot_binding_dropped"),
+            Self::StalePin => f.write_str("stale_pin"),
         }
     }
 }
@@ -286,6 +289,7 @@ impl ::std::str::FromStr for StrategyComposeDiagnosticCode {
         match value {
             "unbound_required_slot" => Ok(Self::UnboundRequiredSlot),
             "slot_binding_dropped" => Ok(Self::SlotBindingDropped),
+            "stale_pin" => Ok(Self::StalePin),
             _ => Err("invalid value".into()),
         }
     }

@@ -7,8 +7,8 @@
 use std::path::{Path, PathBuf};
 
 use nexus_core::{
-    BindSlotOp, ComposeDiagnostic, ComposeOp, CoreAccess, CoreError, CoreOpenOptions, CoreService,
-    NestOp, PatternPackageRef, Principal, ReplaceSubtreeOp, UnnestOp,
+    BindSlotOp, ComposeDiagnostic, ComposeOp, ComposeOutcome, CoreAccess, CoreError,
+    CoreOpenOptions, CoreService, NestOp, PatternPackageRef, Principal, ReplaceSubtreeOp, UnnestOp,
 };
 use nexus_workflow_ir::{
     WorkflowDocument, WorkflowDocumentEffectSummary, WorkflowNestBindingExpansion, WorkflowNodeKind,
@@ -1539,6 +1539,343 @@ async fn a_stale_base_is_refused_before_the_registry_is_scanned() {
         }
         other => panic!("expected the candidate conflict before any registry scan, got {other:?}"),
     }
+
+    setup.core.close().await.unwrap();
+}
+
+/// Every stale-pin diagnostic of one outcome, in document order.
+fn stale_pins(outcome: &ComposeOutcome) -> Vec<ComposeDiagnostic> {
+    outcome
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| matches!(diagnostic, ComposeDiagnostic::StalePin { .. }))
+        .cloned()
+        .collect()
+}
+
+/// Rewrite a package's fragment in place under the same id and version: new bytes, new hash.
+fn rework_package(home: &Path, id: &str, effect_class: &str, slots: &str, description: &str) {
+    let mut reworked = fragment(
+        id,
+        effect_class,
+        &json!([fragment_node(effect_class)]),
+        &json!([]),
+    );
+    reworked["meta"]["description"] = json!(description);
+    write_package(home, id, effect_class, slots, &reworked);
+}
+
+#[tokio::test]
+async fn two_stale_pins_refuse_only_the_region_the_operation_uses() {
+    let setup = setup().await;
+    write_registry(&setup.home);
+    let before = current(&setup).await;
+    let first = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            nest("first", "first-slot", "prompt-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    let second = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            first.candidate.revision,
+            nest("second", "second-slot", "write-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    let recorded = slot_node(&second.candidate.document, "second-slot")["pattern"]["content_hash"]
+        .as_str()
+        .expect("the pin records the resolved hash")
+        .to_owned();
+
+    // Both packages are edited in place under the same versions: two regions are stale at once.
+    rework_package(
+        &setup.home,
+        "prompt-step",
+        "external",
+        "[[slots]]\nname = \"topic\"\nkind = \"string\"\nrequired = true\n",
+        "prompt-step, reworked",
+    );
+    rework_package(
+        &setup.home,
+        "write-step",
+        "write_candidate",
+        "",
+        "write-step, reworked",
+    );
+    let stored = stored_row(setup.core.pool(), STRATEGY).await;
+
+    // The region the operation resolves refuses, naming both hashes.
+    let error = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            second.candidate.revision,
+            bind("second", "topic", json!("water policy")),
+        )
+        .await
+        .unwrap_err();
+    let details = refusal(error);
+    assert_eq!(details["reason"], "pin_mismatch");
+    assert_eq!(details["nest_id"], "second");
+    assert_eq!(details["recorded_content_hash"], recorded.as_str());
+    let scanned = details["scanned_content_hash"]
+        .as_str()
+        .expect("the refusal names the scanned hash")
+        .to_owned();
+    assert_ne!(scanned, recorded);
+    let message = details["message"].as_str().unwrap();
+    assert!(
+        message.contains(&recorded) && message.contains(&scanned),
+        "the refusal names both hashes: {message}"
+    );
+    assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);
+
+    // Re-pinning `first` is the remedy. It runs even though `second` is still stale, and that
+    // other region is reported, never allowed to wedge every operation.
+    let replaced = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            second.candidate.revision,
+            replace("first", "prompt-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(replaced.candidate.revision, 3);
+    assert_eq!(
+        stale_pins(&replaced),
+        vec![ComposeDiagnostic::StalePin {
+            nest_id: "second".to_owned(),
+            package: package("write-step", "1.0.0"),
+            recorded_hash: recorded,
+            scanned_hash: scanned.clone(),
+        }]
+    );
+    assert!(
+        replaced
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.to_string().contains(&scanned)),
+        "the diagnostic names the hash the registry serves"
+    );
+
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_changed_inner_pin_surfaces_before_the_shared_walk_dedupes() {
+    let setup = setup().await;
+    write_registry(&setup.home);
+    let before = current(&setup).await;
+    let inner = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            nest("inner", "inner-slot", "prompt-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    let recorded = slot_node(&inner.candidate.document, "inner-slot")["pattern"]["content_hash"]
+        .as_str()
+        .expect("the pin records the resolved hash")
+        .to_owned();
+
+    // An outer package whose own fragment pins `prompt-step` at the bytes it had here.
+    let mut outer = chain_fragment("outer", "prompt-step");
+    outer["nests"][0]["child"]["content_hash"] = json!(recorded);
+    write_package(&setup.home, "outer", "pure", "", &outer);
+    let nested = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            inner.candidate.revision,
+            nest("outer-region", "outer-slot", "outer", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stale_pins(&nested), Vec::new());
+
+    rework_package(
+        &setup.home,
+        "prompt-step",
+        "external",
+        "[[slots]]\nname = \"topic\"\nkind = \"string\"\nrequired = true\n",
+        "prompt-step, reworked",
+    );
+
+    // Re-pinning the direct region is allowed; the outer fragment records the same pin, and that
+    // carrier is reached only after the walk has de-duped `prompt-step` — so it is the one that
+    // proves the hash is compared before the de-dupe.
+    let replaced = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            nested.candidate.revision,
+            replace("inner", "prompt-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    let scanned = slot_node(&replaced.candidate.document, "inner-slot")["pattern"]["content_hash"]
+        .as_str()
+        .expect("the re-pinned region records the new hash")
+        .to_owned();
+    assert_ne!(scanned, recorded);
+    assert_eq!(
+        stale_pins(&replaced),
+        vec![ComposeDiagnostic::StalePin {
+            nest_id: "outer-nest".to_owned(),
+            package: package("prompt-step", "1.0.0"),
+            recorded_hash: recorded.clone(),
+            scanned_hash: scanned.clone(),
+        }]
+    );
+    let diagnostic = stale_pins(&replaced)[0].to_string();
+    assert!(
+        diagnostic.contains(&recorded) && diagnostic.contains(&scanned),
+        "the diagnostic names both hashes: {diagnostic}"
+    );
+
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn unnest_refuses_a_body_declaration_the_parent_level_cannot_carry() {
+    let setup = setup().await;
+    // `move_body` carries nodes and edges, not the body's own role declarations.
+    let mut body = fragment(
+        "role-step",
+        "read",
+        &json!([{
+            "id": "work",
+            "kind": "inner_step",
+            "effect_class": "read",
+            "step_kind": "acp_prompt",
+            "role": "reviewer"
+        }]),
+        &json!([]),
+    );
+    body["roles"] = json!([{
+        "id": "reviewer",
+        "description": "reviews the draft",
+        "system_prompt_file": "roles/reviewer.md"
+    }]);
+    write_package(&setup.home, "role-step", "read", "", &body);
+    let before = current(&setup).await;
+    let nested = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            nest("role-region", "role-slot", "role-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    let stored = stored_row(setup.core.pool(), STRATEGY).await;
+
+    let error = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            nested.candidate.revision,
+            nest_id_op("role-region"),
+        )
+        .await
+        .unwrap_err();
+    let details = refusal(error);
+    assert_eq!(details["reason"], "nest_unflattenable");
+    assert_eq!(details["nest_id"], "role-region");
+    let message = details["message"].as_str().unwrap();
+    assert!(
+        message.contains("role `reviewer`"),
+        "the refusal names what would be lost: {message}"
+    );
+    assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);
+
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn unnest_refuses_the_control_references_the_slot_node_owns() {
+    let setup = setup().await;
+    write_registry(&setup.home);
+    let before = current(&setup).await;
+    let nested = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            nest("wired", "wired-slot", "write-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    let wired = setup
+        .core
+        .commit_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            nested.candidate.revision,
+            |document| {
+                let mut next = document.clone();
+                next.nodes.push(
+                    serde_json::from_value(json!({
+                        "id": "prepare",
+                        "kind": "inner_step",
+                        "effect_class": "pure",
+                        "step_kind": "acp_prompt"
+                    }))
+                    .unwrap(),
+                );
+                let slot = next
+                    .nodes
+                    .iter_mut()
+                    .find(|node| node.id == "wired-slot")
+                    .expect("the nested slot node is in the document");
+                slot.depends_on = vec!["prepare".to_owned()];
+                slot.on_timeout = Some("prepare".to_owned());
+                Ok(next)
+            },
+        )
+        .await
+        .unwrap();
+    let stored = stored_row(setup.core.pool(), STRATEGY).await;
+
+    // The slot node is removed by the flatten, so its own control references would go with it.
+    let error = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            wired.revision,
+            nest_id_op("wired"),
+        )
+        .await
+        .unwrap_err();
+    let details = refusal(error);
+    assert_eq!(details["reason"], "nest_unflattenable");
+    assert_eq!(details["nest_id"], "wired");
+    let message = details["message"].as_str().unwrap();
+    assert!(
+        message.contains("depends_on `prepare`") && message.contains("on_timeout"),
+        "the refusal names both control references: {message}"
+    );
+    assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);
 
     setup.core.close().await.unwrap();
 }

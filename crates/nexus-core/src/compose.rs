@@ -9,14 +9,16 @@
 //!
 //! `nest` inserts one collapsed `pattern_slot` node carrying the exact pin plus one
 //! `WorkflowNestBinding`; the daemon resolves `{id, version}` against `nexus-pattern` and records
-//! the fragment's current `content_hash`. Every later operation re-resolves the pins the document
-//! already carries and refuses a package whose bytes no longer hash to the recorded value, so a
-//! package that changed under an unchanged version fails closed. `replace_subtree` is the only
-//! operation allowed to establish a new pin, and it says so by re-pinning exactly one region.
-//! `unnest` flattens the pinned fragment's body into the parent level and reports every slot
-//! binding it had to drop. `bind_slot` writes one slot binding on the slot node and validates the
-//! value against the manifest's slot declaration; an unbound required slot stays a named
-//! diagnostic, never a default.
+//! the fragment's current `content_hash`. Each operation re-resolves the pins it actually reads and
+//! refuses a package whose bytes no longer hash to the recorded value, so the bytes it interprets
+//! are the bytes the document identifies; a stale pin the operation does not reach is reported as
+//! a diagnostic instead, so one changed region cannot wedge every other operation.
+//! `replace_subtree` is the only operation allowed to establish a new pin, and it says so by
+//! re-pinning exactly one region. `unnest` flattens the pinned fragment's body into the parent
+//! level, reports every slot binding it had to drop, and refuses when the body declares something
+//! the parent level cannot carry. `bind_slot` writes one slot binding on the slot node and
+//! validates the value against the manifest's slot declaration; an unbound required slot stays a
+//! named diagnostic, never a default.
 //!
 //! Nest policy and effect rollup are the shared `nexus-workflow-ir` walk and lattice: this module
 //! resolves pins into [`PatternBody`]s and never re-derives depth, cycles or the enum order.
@@ -422,6 +424,19 @@ pub enum ComposeDiagnostic {
         /// The bound slot name that had to be dropped.
         slot: String,
     },
+    /// A pin outside the current operation's reach no longer hashes to what the document
+    /// recorded. Reported, never refused: one stale region cannot wedge every other operation,
+    /// and refusing here would make two stale regions refuse each other's fix.
+    StalePin {
+        /// The nest that records the pin.
+        nest_id: String,
+        /// The pinned package.
+        package: PatternPackageRef,
+        /// The hash the document recorded.
+        recorded_hash: String,
+        /// The hash the registry now serves.
+        scanned_hash: String,
+    },
 }
 
 impl std::fmt::Display for ComposeDiagnostic {
@@ -439,6 +454,16 @@ impl std::fmt::Display for ComposeDiagnostic {
                 f,
                 "nest `{nest_id}`: flattening dropped slot binding `{slot}`, which the flattened \
                  fragment does not address"
+            ),
+            Self::StalePin {
+                nest_id,
+                package,
+                recorded_hash,
+                scanned_hash,
+            } => write!(
+                f,
+                "nest `{nest_id}` pinned `{package}` at content hash `{recorded_hash}`, but the \
+                 registry now serves `{scanned_hash}`: replace this region to adopt the new bytes"
             ),
         }
     }
@@ -503,9 +528,10 @@ impl CoreService {
 /// Apply one operation to a copy of `document`, then hold the result to the shared nest rules and
 /// the effect rollup.
 ///
-/// Pins the document already carries are verified before the operation runs, so a changed package
-/// refuses the write instead of being reinterpreted. The operation's own diagnostics travel back
-/// with the document.
+/// The pins the operation itself resolves must still hash to what the document recorded, so a
+/// changed package refuses the write instead of being reinterpreted. Every other recorded pin the
+/// walk reaches is reported as a diagnostic, never refused: a stale region the operation does not
+/// use must not wedge it. The operation's own diagnostics travel back with the document.
 fn apply_compose(
     document: &WorkflowDocument,
     op: &ComposeOp,
@@ -520,30 +546,36 @@ fn apply_compose(
         ComposeOp::ReplaceSubtree(payload) => replace_subtree(&mut next, payload, packages)?,
         ComposeOp::BindSlot(payload) => bind_slot(&mut next, payload, packages)?,
     }
-    settle(&mut next, op.nest_id(), packages)?;
+    settle(&mut next, op.nest_id(), packages, &mut diagnostics)?;
     Ok((next, diagnostics))
 }
 
-/// Every pin the document already carries must still resolve to the hash it recorded.
+/// Every pin the current operation resolves and uses must still hash to what the document
+/// recorded.
 ///
-/// `replace_subtree` is the only operation allowed to establish a new pin, so the region it
-/// re-pins is exempt; every other operation refuses when the registry's bytes changed under the
-/// same version, naming both hashes before any write.
+/// Only the addressed region is checked: `nest` records a new pin, `bind_slot` reads the pattern
+/// of the region it binds, and `unnest` reads that region's body. `replace_subtree` is the one
+/// operation allowed to establish a new pin, so its target is exempt. A stale pin anywhere else
+/// is a diagnostic from the shared walk ([`PackageIndex::bodies`]) — refusing it here would let
+/// two stale regions refuse each other's fix.
 fn verify_pins(
     document: &WorkflowDocument,
     op: &ComposeOp,
     packages: &PackageIndex<'_>,
 ) -> Result<(), ComposeRefusal> {
-    for nest in &document.nests {
-        let Some(pin) = pinned_pattern(&nest.child) else {
-            continue;
-        };
-        if matches!(op, ComposeOp::ReplaceSubtree(replaced) if replaced.nest_id == nest.id) {
-            continue;
-        }
-        verify_pin(&nest.id, &pin, nest.child.content_hash.as_deref(), packages)?;
-    }
-    Ok(())
+    let nest_id = match op {
+        ComposeOp::Nest(_) | ComposeOp::ReplaceSubtree(_) => return Ok(()),
+        ComposeOp::Unnest(payload) => &payload.nest_id,
+        ComposeOp::BindSlot(payload) => &payload.nest_id,
+    };
+    // An unknown nest or an unresolved child is the operation's own refusal, not this check's.
+    let Some(nest) = document.nests.iter().find(|nest| nest.id == *nest_id) else {
+        return Ok(());
+    };
+    let Some(pin) = pinned_pattern(&nest.child) else {
+        return Ok(());
+    };
+    verify_pin(&nest.id, &pin, nest.child.content_hash.as_deref(), packages)
 }
 
 /// Resolve one pin and compare the scanned hash with the hash the document recorded. A pin the
@@ -573,13 +605,14 @@ fn verify_pin(
 ///
 /// `GraphCycle` is not compose policy: outer-state loops are legal for imported presets, which is
 /// the exception the CLI's structural report already makes. Every other violation is a defect this
-/// write must not preserve silently.
+/// write must not preserve silently. The walk also reports every recorded pin whose bytes changed.
 fn settle(
     document: &mut WorkflowDocument,
     nest_id: &str,
     packages: &PackageIndex<'_>,
+    diagnostics: &mut Vec<ComposeDiagnostic>,
 ) -> Result<(), ComposeRefusal> {
-    let bodies = packages.bodies(document)?;
+    let bodies = packages.bodies(document, diagnostics);
     let violations: Vec<Violation> = validate(&[document], &bodies)
         .err()
         .unwrap_or_default()
@@ -661,7 +694,10 @@ fn nest_pattern(
 ///
 /// The slot bindings the node carried are dropped: the flattened body declares no slot the parent
 /// level could address them by, and inventing a default is what this module refuses to do. Every
-/// dropped binding is reported so the editor can rebind it on the flattened body.
+/// dropped binding is reported so the editor can rebind it on the flattened body. Anything else the
+/// body or the removed slot owns and the parent level cannot carry — a role, asset or signal a moved
+/// child refers to, the slot's own dependencies and timeout reroute — refuses the flatten before any
+/// write instead of being dropped.
 fn unnest_slot(
     document: &mut WorkflowDocument,
     op: &UnnestOp,
@@ -691,6 +727,11 @@ fn unnest_slot(
             format!("package `{pin}` has no fragment body to move"),
         ));
     };
+    // The body's own pins become this candidate's graph, so they are checked before it moves.
+    verify_body_pins(body, packages, &mut HashSet::new())?;
+    if let Some(lost) = lost_declarations(document, body, &parent_node) {
+        return Err(unflattenable(&op.nest_id, lost));
+    }
 
     let (node_ids, entry, terminals) = remap_body_ids(document, &op.nest_id, body, &pin)?;
     let outgoing = document.terminal.iter().any(|id| id == &parent_node)
@@ -716,6 +757,87 @@ fn unflattenable(nest_id: &str, reason: String) -> ComposeRefusal {
         nest_id: nest_id.to_owned(),
         reason,
     }
+}
+
+/// Every pin a body records must still hash to what it recorded: flattening turns that body into
+/// this candidate's graph, so its pins are the pins the operation consumes.
+fn verify_body_pins(
+    body: &WorkflowDocument,
+    packages: &PackageIndex<'_>,
+    seen: &mut HashSet<String>,
+) -> Result<(), ComposeRefusal> {
+    for nest in &body.nests {
+        let Some(pin) = pinned_pattern(&nest.child) else {
+            continue;
+        };
+        verify_pin(&nest.id, &pin, nest.child.content_hash.as_deref(), packages)?;
+        if !seen.insert(pin.to_string()) {
+            continue;
+        }
+        if let Some(fragment) = packages
+            .get(&pin)
+            .and_then(nexus_pattern::PatternPackage::fragment)
+        {
+            verify_body_pins(fragment, packages, seen)?;
+        }
+    }
+    Ok(())
+}
+
+/// What flattening would lose silently: body-level declarations a moved child still refers to, and
+/// the control references the removed slot node itself owns. `None` when the move carries
+/// everything the body needs.
+fn lost_declarations(
+    document: &WorkflowDocument,
+    body: &WorkflowDocument,
+    parent_node: &str,
+) -> Option<String> {
+    let mut lost = Vec::new();
+    for role in &body.roles {
+        if body
+            .nodes
+            .iter()
+            .any(|node| node.role.as_deref() == Some(role.id.as_str()))
+        {
+            lost.push(format!("role `{}`", role.id));
+        }
+    }
+    for asset in &body.assets {
+        let referenced = body.nodes.iter().any(|node| {
+            node.template.as_deref() == Some(asset.id.as_str())
+                || node
+                    .bind
+                    .values()
+                    .any(|value| value.as_str() == Some(asset.id.as_str()))
+        });
+        if referenced {
+            lost.push(format!("asset `{}`", asset.id));
+        }
+    }
+    for signal in &body.signals {
+        let target = signal.target.as_deref();
+        if target.is_some_and(|target| body.nodes.iter().any(|node| node.id == target)) {
+            lost.push(format!("signal `{}`", signal.name));
+        }
+    }
+    if let Some(slot) = document.nodes.iter().find(|node| node.id == parent_node) {
+        if !slot.depends_on.is_empty() {
+            lost.push(format!(
+                "the slot's depends_on `{}`",
+                slot.depends_on.join("`, `")
+            ));
+        }
+        if slot.on_timeout.is_some() {
+            lost.push("the slot's on_timeout".to_owned());
+        }
+    }
+    if lost.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "the parent level does not carry {}, so flattening would drop it",
+        lost.join(", ")
+    ))
 }
 
 /// A flattened body's node ids remapped to this level, plus the entry and terminals they answer
@@ -1125,13 +1247,20 @@ impl<'a> PackageIndex<'a> {
     }
 
     /// The pattern bodies reachable from `document`, so the shared walk follows resolved fragments
-    /// instead of treating every pattern pin as a leaf. Every pin the walk follows is checked
-    /// against the hash its carrier recorded, so a fragment's own pins fail closed too.
-    fn bodies(&self, document: &WorkflowDocument) -> Result<Vec<PatternBody<'a>>, ComposeRefusal> {
+    /// instead of treating every pattern pin as a leaf.
+    ///
+    /// Every carrier of a recorded pin is reported as a [`ComposeDiagnostic::StalePin`] when the
+    /// registry's bytes changed — the operation's own region included, so a successful write never
+    /// leaves a pin it read silently unverified.
+    fn bodies(
+        &self,
+        document: &WorkflowDocument,
+        diagnostics: &mut Vec<ComposeDiagnostic>,
+    ) -> Vec<PatternBody<'a>> {
         let mut bodies = Vec::new();
         let mut seen = HashSet::new();
-        self.collect_bodies(document, &mut bodies, &mut seen)?;
-        Ok(bodies)
+        self.collect_bodies(document, &mut bodies, &mut seen, diagnostics);
+        bodies
     }
 
     fn collect_bodies(
@@ -1139,11 +1268,15 @@ impl<'a> PackageIndex<'a> {
         document: &WorkflowDocument,
         bodies: &mut Vec<PatternBody<'a>>,
         seen: &mut HashSet<String>,
-    ) -> Result<(), ComposeRefusal> {
+        diagnostics: &mut Vec<ComposeDiagnostic>,
+    ) {
         for nest in &document.nests {
             let Some(pin) = pinned_pattern(&nest.child) else {
                 continue;
             };
+            // The recorded hash is checked before this walk de-dupes the pin and before a package
+            // that failed to load is skipped, so a carrier whose bytes changed is always reported.
+            self.report_stale_pin(nest, &pin, diagnostics);
             if !seen.insert(pin.to_string()) {
                 continue;
             }
@@ -1153,7 +1286,6 @@ impl<'a> PackageIndex<'a> {
             let Some(manifest) = found.manifest() else {
                 continue;
             };
-            verify_pin(&nest.id, &pin, nest.child.content_hash.as_deref(), self)?;
             let (registry_id, version) = (manifest.id.as_str(), manifest.version.as_str());
             match found.fragment() {
                 Some(fragment) => {
@@ -1162,7 +1294,7 @@ impl<'a> PackageIndex<'a> {
                         version,
                         body: PatternBodyKind::Fragment(fragment),
                     });
-                    self.collect_bodies(fragment, bodies, seen)?;
+                    self.collect_bodies(fragment, bodies, seen, diagnostics);
                 }
                 None => bodies.push(PatternBody {
                     registry_id,
@@ -1171,7 +1303,34 @@ impl<'a> PackageIndex<'a> {
                 }),
             }
         }
-        Ok(())
+    }
+
+    /// Report one carrier whose bytes no longer hash to the pin it stores. A package that did not
+    /// load has no hash to compare, so it is not reported here.
+    fn report_stale_pin(
+        &self,
+        nest: &WorkflowNestBinding,
+        pin: &PatternPackageRef,
+        diagnostics: &mut Vec<ComposeDiagnostic>,
+    ) {
+        let Some(recorded) = nest.child.content_hash.as_deref() else {
+            return;
+        };
+        let Some(scanned) = self
+            .get(pin)
+            .and_then(nexus_pattern::PatternPackage::content_hash)
+        else {
+            return;
+        };
+        if scanned == recorded {
+            return;
+        }
+        diagnostics.push(ComposeDiagnostic::StalePin {
+            nest_id: nest.id.clone(),
+            package: pin.clone(),
+            recorded_hash: recorded.to_owned(),
+            scanned_hash: scanned.to_owned(),
+        });
     }
 }
 
