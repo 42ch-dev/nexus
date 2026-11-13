@@ -454,6 +454,9 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       <ComposeConflictDialog
         conflict={compose.conflict}
         refusal={compose.refusal}
+        onReload={() => {
+          void compose.reload();
+        }}
         onDismiss={() => {
           compose.dismissConflict();
           compose.dismissRefusal();

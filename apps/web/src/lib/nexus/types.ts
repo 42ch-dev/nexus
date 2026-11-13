@@ -566,6 +566,12 @@ export interface NexusClient extends CoreSliceClient {
   /** `GET /v1/daemon/strategies/{strategy_id}/workflow-ir` — the installed strategy as candidate IR. */
   getStrategyWorkflowIr(strategyId: string): Promise<WorkflowDocument>;
   /**
+   * `GET /v1/daemon/strategies/{strategy_id}/candidate` — the canonical candidate: the stored
+   * compose row, else the revision-`0` import projection. Its `revision` is the CAS base to
+   * reload and re-apply against; the read never writes.
+   */
+  getStrategyCandidate(strategyId: string): Promise<WorkflowDocument>;
+  /**
    * `POST /v1/daemon/strategies/{strategy_id}/compose` — one guarded composition op
    * (`nest` / `unnest` / `replace_subtree` / `bind_slot`). The response document is
    * the committed candidate at `new_revision` and replaces the client's copy.

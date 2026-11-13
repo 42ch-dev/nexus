@@ -1,10 +1,10 @@
 /**
  * Compose interactions (v239-p3-canvas-compose-ui T3, T3b, T4) at the hook
- * level over msw: every op sends the last-read `base_revision`; the nest
- * interaction authors the connecting edge the walk needs (T3b); a 409/422
- * leaves the working document unchanged, never auto-retries, and the 409
- * recovery names the missing candidate read route instead of inventing a
- * client-side cache (T4).
+ * level over msw: every op sends the last-read `base_revision`; `nest` sends
+ * its attach target and the daemon writes the connecting edge, so the canvas
+ * adds no edge of its own (T3b); a 409/422 leaves the working document
+ * unchanged, never auto-retries, and the 409 recovery reloads the canonical
+ * candidate at the revision the daemon holds (T4).
  */
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -23,7 +23,7 @@ import { candidateDocument, servedIrDocument } from '@/test/simulation-fixture';
 
 const STRATEGY_ID = 'user/demo';
 const PATTERNS_PATH = '/v1/daemon/patterns';
-const IR_PATH = `/v1/daemon/strategies/${encodeURIComponent(STRATEGY_ID)}/workflow-ir`;
+const CANDIDATE_PATH = `/v1/daemon/strategies/${encodeURIComponent(STRATEGY_ID)}/candidate`;
 const COMPOSE_PATH = `/v1/daemon/strategies/${encodeURIComponent(STRATEGY_ID)}/compose`;
 
 const SEED = servedIrDocument({ id: STRATEGY_ID });
@@ -43,11 +43,15 @@ const PATTERN_ITEMS = [
   },
 ];
 
-/** Seed document plus the slot the nest op commits (server-side view: no edge). */
+/** Seed document plus the slot and connecting edge the nest op commits. */
 function nestedDocument(revision: number, bind: Record<string, unknown> = {}): WorkflowDocument {
   return {
     ...SEED,
     revision,
+    edges: [
+      ...SEED.edges,
+      { id: 'draft->prompt-step-slot', from: 'draft', to: 'prompt-step-slot', kind: 'linear' },
+    ],
     nodes: [
       ...SEED.nodes,
       {
@@ -73,7 +77,7 @@ function nestedDocument(revision: number, bind: Record<string, unknown> = {}): W
 function seedHandlers() {
   useHandlers(
     http.get(PATTERNS_PATH, () => HttpResponse.json({ items: PATTERN_ITEMS, pagination: { limit: 100, has_more: false } })),
-    http.get(IR_PATH, () => HttpResponse.json(SEED)),
+    http.get(CANDIDATE_PATH, () => HttpResponse.json(SEED)),
   );
 }
 
@@ -145,24 +149,28 @@ describe('useStrategyCompose', () => {
       payload: {
         nest_id: 'prompt-step',
         parent_node: 'prompt-step-slot',
+        attach_to: 'draft',
         package: { id: 'prompt-step', version: '1.0.0' },
         expansion: 'expand_in_candidate',
       },
     });
 
-    // The committed document carries no edge into the slot (the daemon writes
-    // none); the interaction authored the connecting edge the walk needs.
+    // The daemon wrote the connecting edge on the committed document, and the
+    // canvas added no second one of its own.
     const committed = result.current.workingDocument!;
     const slot = committed.nodes.find((node) => node.id === 'prompt-step-slot');
     expect(slot?.kind).toBe('pattern_slot');
     expect(committed.revision).toBe(1);
-    expect(committed.edges.some((edge) => edge.to === 'prompt-step-slot')).toBe(true);
+    const inbound = committed.edges.filter((edge) => edge.to === 'prompt-step-slot');
+    expect(inbound).toEqual([
+      { id: 'draft->prompt-step-slot', from: 'draft', to: 'prompt-step-slot', kind: 'linear' },
+    ]);
     expect(result.current.unboundSlots).toEqual([
       { slotNodeId: 'prompt-step-slot', patternId: 'prompt-step', patternVersion: '1.0.0', slots: ['topic'] },
     ]);
   });
 
-  it('bind_slot advances the revision and keeps the authored edge across the response', async () => {
+  it('bind_slot advances the revision and keeps the committed edge across the response', async () => {
     seedHandlers();
     let revision = 0;
     useHandlers(
@@ -201,10 +209,18 @@ describe('useStrategyCompose', () => {
     expect(result.current.unboundSlots).toEqual([]);
   });
 
-  it('a stale base is the typed conflict: unchanged graph, no auto-retry, reload named unavailable (T4)', async () => {
-    seedHandlers();
+  it('a stale base is the typed conflict: unchanged graph, no auto-retry, reload at the current revision (T4)', async () => {
     let composeCalls = 0;
+    let candidateReads = 0;
     useHandlers(
+      http.get(PATTERNS_PATH, () =>
+        HttpResponse.json({ items: PATTERN_ITEMS, pagination: { limit: 100, has_more: false } }),
+      ),
+      // The daemon moved on: the reload reads the candidate at revision 1.
+      http.get(CANDIDATE_PATH, () => {
+        candidateReads += 1;
+        return HttpResponse.json(candidateReads === 1 ? SEED : nestedDocument(1));
+      }),
       http.post(COMPOSE_PATH, async ({ request }) => {
         composeCalls += 1;
         const body = (await request.json()) as { base_revision: number };
@@ -242,9 +258,16 @@ describe('useStrategyCompose', () => {
       message: 'Candidate changed before this edit. Reload revision 1 and reapply the change.',
       baseRevision: 0,
       currentRevision: 1,
-      reloadAvailable: false,
     });
     expect(result.current.workingDocument).toBe(before);
+
+    // The recovery reads the canonical candidate at the revision the daemon holds and drops the
+    // conflict, so the next op is applied against those bytes.
+    await act(async () => {
+      await result.current.reload();
+    });
+    expect(result.current.conflict).toBeNull();
+    expect(result.current.workingDocument?.revision).toBe(1);
   });
 
   it('a named 422 refusal leaves the candidate and revision unchanged', async () => {
@@ -287,7 +310,7 @@ describe('useStrategyCompose', () => {
   it('does nothing while disabled (flag off) — no reads, no mutations', () => {
     useHandlers(
       http.get(PATTERNS_PATH, () => HttpResponse.json({ items: [], pagination: { limit: 100, has_more: false } })),
-      http.get(IR_PATH, () => HttpResponse.json(candidateDocument())),
+      http.get(CANDIDATE_PATH, () => HttpResponse.json(candidateDocument())),
     );
     const { result } = renderHook(() => useStrategyCompose(STRATEGY_ID, false), {
       wrapper: makeWrapper(),

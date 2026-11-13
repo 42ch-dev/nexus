@@ -432,7 +432,8 @@
     },
     "composeConflict": {
       "title": "Candidate conflict",
-      "reloadUnavailable": "Reload and reapply needs the canonical candidate read route, which does not exist yet (tracked as a blocking gap), so the reload cannot be offered. The canvas still shows the candidate it last read (revision {{revision}} is current on the daemon).",
+      "reload": "Reload revision {{revision}} and reapply the edit.",
+      "reloadAction": "Reload",
       "dismiss": "Dismiss"
     }
   },

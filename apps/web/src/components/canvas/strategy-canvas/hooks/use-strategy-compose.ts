@@ -1,25 +1,20 @@
 /**
  * Compose-path state for the Strategy canvas (v239-p3-canvas-compose-ui T3/T3b/T4).
  *
- * The canvas holds the candidate document in hand: seeded from the one IR read
- * the wire offers (`GET /strategies/{id}/workflow-ir`, the import projection at
- * revision 0) and replaced by every committed compose response, which is the
- * authoritative candidate at `new_revision`. The last-read revision is the CAS
- * guard every op sends as `base_revision`.
+ * The canvas holds the candidate document in hand: seeded from the canonical
+ * candidate read (`GET /strategies/{id}/candidate`, the stored row or the
+ * revision-0 import projection) and replaced by every committed compose
+ * response, which is the authoritative candidate at `new_revision`. The
+ * last-read revision is the CAS guard every op sends as `base_revision`.
  *
- * T3b (I-000423): the compose wire has no edge-carrying op and `nest` writes no
- * edge, so the connecting edge that makes a nested slot reachable — the walk
- * only visits nodes an edge reaches — is authored by the nest interaction and
- * kept as canvas chrome on top of the committed document. Simulate walks the
- * working document and the overlay names the slot.
- * shortcut: the edge is not persisted — the stored candidate trails the working
- * document by exactly that edge until the compose wire grows an edge op, so an
- * approve of a nested candidate is refused `simulation_stale` by the daemon.
+ * T3b (I-000423): `nest` writes the connecting edge itself (`attach_to`), so
+ * the slot is reachable on the committed document and Simulate walks it. The
+ * canvas authors no edge: the only chrome it keeps is spatial (grouping and
+ * expand/collapse), never graph structure.
  *
  * T4: a refused op (409/422) leaves the working document unchanged and is never
- * auto-retried. The 409 recovery (reload the canonical candidate and reapply)
- * is blocked on the missing candidate read route — `reloadAvailable` stays
- * false instead of inventing a client-side cache (R1, compose-ops report).
+ * auto-retried. The 409 recovery reloads the canonical candidate at its current
+ * revision, so the user reapplies the op against what the daemon holds.
  */
 import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -34,19 +29,11 @@ import type {
 import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
 
-type IrEdge = WorkflowDocument['edges'][number];
-
 export interface ComposeConflict {
   /** The daemon's message: "Candidate changed before this edit. Reload revision N and reapply the change." */
   message: string;
   baseRevision: number;
   currentRevision: number;
-  /**
-   * False while no candidate read route exists: recovery cannot reload the
-   * canonical candidate, so the dialog names the gap instead of offering a
-   * reload that would clobber the candidate with the import projection.
-   */
-  reloadAvailable: false;
 }
 
 export interface ComposeRefusal {
@@ -74,9 +61,11 @@ interface CommittedCandidate {
   diagnostics: StrategyComposeResponse['validation_summary'];
 }
 
-/** Chrome the canvas authors around the committed candidate. */
+/**
+ * Spatial chrome the canvas authors around the committed candidate. Graph
+ * structure (nodes, edges, nests) is the daemon's alone.
+ */
 interface ComposeChrome {
-  edges: IrEdge[];
   containment: Record<string, string>;
   expandedSlots: ReadonlySet<string>;
 }
@@ -86,9 +75,6 @@ function dropChromeFor(
   removedNodeIds: ReadonlySet<string>,
 ): ComposeChrome {
   return {
-    edges: chrome.edges.filter(
-      (edge) => !removedNodeIds.has(edge.from) && !removedNodeIds.has(edge.to),
-    ),
     containment: Object.fromEntries(
       Object.entries(chrome.containment).filter(
         ([child, parent]) => !removedNodeIds.has(child) && !removedNodeIds.has(parent),
@@ -119,18 +105,18 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
     staleTime: 30_000,
   });
 
-  // The only candidate-shaped read the wire serves today. It projects the
-  // installed preset (revision 0); committed compose responses replace it.
+  // The canonical candidate: the stored row, or the revision-0 import projection
+  // for a strategy that has never been composed. Committed compose responses
+  // replace it.
   const seedQuery = useQuery({
     queryKey: ['canvas', 'strategy-compose', 'seed', presetId],
-    queryFn: () => client.getStrategyWorkflowIr(presetId),
+    queryFn: () => client.getStrategyCandidate(presetId),
     enabled,
     staleTime: 30_000,
   });
 
   const [committed, setCommitted] = useState<CommittedCandidate | null>(null);
   const [chrome, setChrome] = useState<ComposeChrome>({
-    edges: [],
     containment: {},
     expandedSlots: new Set(),
   });
@@ -140,15 +126,8 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
 
   const committedDocument = committed?.document ?? seedQuery.data ?? null;
 
-  /** Committed candidate plus the chrome the canvas authored around it. */
-  const workingDocument = useMemo<WorkflowDocument | null>(() => {
-    if (!committedDocument) return null;
-    if (chrome.edges.length === 0) return committedDocument;
-    const edgeIds = new Set(committedDocument.edges.map((edge) => edge.id));
-    const extra = chrome.edges.filter((edge) => !edgeIds.has(edge.id));
-    if (extra.length === 0) return committedDocument;
-    return { ...committedDocument, edges: [...committedDocument.edges, ...extra] };
-  }, [committedDocument, chrome.edges]);
+  /** The candidate the daemon holds, verbatim: the canvas adds no graph structure. */
+  const workingDocument = committedDocument;
 
   const revision = committedDocument?.revision ?? 0;
   const diagnostics = committed?.diagnostics ?? [];
@@ -163,7 +142,6 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
         const nodeIds = new Set(response.document.nodes.map((node) => node.id));
         const removed = new Set(
           [
-            ...prev.edges.flatMap((edge) => [edge.from, edge.to]),
             ...Object.keys(prev.containment),
             ...Object.values(prev.containment),
             ...prev.expandedSlots,
@@ -191,7 +169,6 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
             message: error.message,
             baseRevision: request.base_revision,
             currentRevision: details.current_revision ?? 0,
-            reloadAvailable: false,
           });
         } else if (error instanceof NexusClientError && error.status === 422) {
           const details = (error.details ?? {}) as Record<string, unknown>;
@@ -210,9 +187,20 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
   );
 
   /**
-   * T3b — nest a pattern and wire the connecting edge. The daemon commits the
-   * slot node + region; the walk only visits the slot through an edge, so the
-   * interaction authors `attach → slot` as canvas chrome (see module doc).
+   * T4 recovery — reload the canonical candidate at the revision the daemon
+   * holds and drop the stale conflict, so the user reapplies the op against
+   * current bytes instead of the revision they no longer have.
+   */
+  const reload = useCallback(async () => {
+    const document = await client.getStrategyCandidate(presetId);
+    setCommitted({ document, diagnostics: [] });
+    setConflict(null);
+  }, [client, presetId]);
+
+  /**
+   * T3b — nest a pattern under `attachNodeId`. The daemon commits the slot, the
+   * region and the connecting edge (`attach_to`), so the committed candidate is
+   * what Simulate walks; only the spatial grouping is canvas chrome.
    */
   const nestPattern = useCallback(
     async ({ attachNodeId, package: pkg }: NestTarget) => {
@@ -224,28 +212,26 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
       const nestId = freshId(pkg.id, (id) =>
         committedDocument.nests.some((nest) => nest.id === id),
       );
+      const attachToSlot =
+        committedDocument.nodes.find((node) => node.id === attachNodeId)?.kind === 'pattern_slot';
       await runCompose({
         base_revision: committedDocument.revision,
         op: 'nest',
         payload: {
           nest_id: nestId,
           parent_node: slotNodeId,
+          attach_to: attachNodeId,
           package: { id: pkg.id, version: pkg.version },
           expansion: 'expand_in_candidate',
         },
       });
       setChrome((prev) => ({
         ...prev,
-        edges: [
-          ...prev.edges,
-          { id: `authored-${attachNodeId}-${slotNodeId}`, from: attachNodeId, to: slotNodeId, kind: 'linear' },
-        ],
         // Nesting into an expanded slot is spatial chrome (the wire records no
         // graph position for a nested region).
-        containment:
-          committedDocument.nodes.find((node) => node.id === attachNodeId)?.kind === 'pattern_slot'
-            ? { ...prev.containment, [slotNodeId]: attachNodeId }
-            : prev.containment,
+        containment: attachToSlot
+          ? { ...prev.containment, [slotNodeId]: attachNodeId }
+          : prev.containment,
         expandedSlots: new Set([...prev.expandedSlots, slotNodeId]),
       }));
     },
@@ -340,6 +326,7 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
     replaceSubtree,
     bindSlot,
     toggleSlotExpanded,
+    reload,
     dismissConflict: useCallback(() => setConflict(null), []),
     dismissRefusal: useCallback(() => setRefusal(null), []),
   };

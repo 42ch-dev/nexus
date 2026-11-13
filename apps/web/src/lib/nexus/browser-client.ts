@@ -669,6 +669,11 @@ export class BrowserClient implements NexusClient {
       `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/workflow-ir`,
     );
   }
+  getStrategyCandidate(strategyId: string): Promise<WorkflowDocument> {
+    return this.get<WorkflowDocument>(
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/candidate`,
+    );
+  }
   composeStrategy(
     strategyId: string,
     request: StrategyComposeRequest,

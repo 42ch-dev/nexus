@@ -1,10 +1,9 @@
 /**
  * Compose conflict dialog (v239-p3-canvas-compose-ui T4) — a stale
  * `base_revision` is the typed 409 `strategy_candidate_conflict`. The rendered
- * graph is unchanged and nothing auto-retries. Reload-and-reapply is the
- * recovery, but the canonical candidate has no read route yet (R1), so the
- * dialog names that gap instead of offering a reload that would clobber the
- * candidate with the import projection.
+ * graph is unchanged and nothing auto-retries. Reload reads the canonical
+ * candidate at the revision the daemon holds, so the user reapplies the op
+ * against current bytes.
  */
 import { useTranslation } from 'react-i18next';
 
@@ -14,10 +13,16 @@ import type { ComposeConflict, ComposeRefusal } from './hooks/use-strategy-compo
 export interface ComposeConflictDialogProps {
   conflict: ComposeConflict | null;
   refusal: ComposeRefusal | null;
+  onReload: () => void;
   onDismiss: () => void;
 }
 
-export function ComposeConflictDialog({ conflict, refusal, onDismiss }: ComposeConflictDialogProps) {
+export function ComposeConflictDialog({
+  conflict,
+  refusal,
+  onReload,
+  onDismiss,
+}: ComposeConflictDialogProps) {
   const { t } = useTranslation('canvas');
   const open = conflict !== null || refusal !== null;
   return (
@@ -29,9 +34,7 @@ export function ComposeConflictDialog({ conflict, refusal, onDismiss }: ComposeC
               {conflict.message}
             </p>
             <p className="rounded-card border border-gray-alpha-400 px-3 py-2 text-copy-13 text-gray-900">
-              {t('strategy.composeConflict.reloadUnavailable', {
-                revision: conflict.currentRevision,
-              })}
+              {t('strategy.composeConflict.reload', { revision: conflict.currentRevision })}
             </p>
           </div>
         ) : null}
@@ -40,7 +43,17 @@ export function ComposeConflictDialog({ conflict, refusal, onDismiss }: ComposeC
             {refusal.message}
           </p>
         ) : null}
-        <div className="mt-4 flex justify-end">
+        <div className="mt-4 flex justify-end gap-2">
+          {conflict ? (
+            <button
+              type="button"
+              data-testid="compose-conflict-reload"
+              onClick={onReload}
+              className="rounded-control border border-gray-alpha-400 px-3 py-1.5 text-button-12 text-gray-1000 hover:bg-gray-alpha-100"
+            >
+              {t('strategy.composeConflict.reloadAction')}
+            </button>
+          ) : null}
           <button
             type="button"
             data-testid="compose-conflict-dismiss"

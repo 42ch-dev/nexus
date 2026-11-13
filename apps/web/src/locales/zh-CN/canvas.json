@@ -425,7 +425,8 @@
     },
     "composeConflict": {
       "title": "候选冲突",
-      "reloadUnavailable": "重新加载并重新应用需要候选读取路由，而该路由尚不存在（已记录为阻塞缺口），因此无法提供重新加载。画布仍显示上次读取的候选（守护进程上的当前版本为 {{revision}}）。",
+      "reload": "重新加载版本 {{revision}} 并重新应用编辑。",
+      "reloadAction": "重新加载",
       "dismiss": "关闭"
     }
   },

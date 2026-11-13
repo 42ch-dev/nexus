@@ -109,6 +109,7 @@ vi.mock('@/components/canvas/idea-input', () => ({
 
 const STRATEGY_ID = 'novel-writing';
 const IR_PATH = `/v1/daemon/strategies/${STRATEGY_ID}/workflow-ir`;
+const CANDIDATE_PATH = `/v1/daemon/strategies/${STRATEGY_ID}/candidate`;
 const COMPOSE_PATH = `/v1/daemon/strategies/${STRATEGY_ID}/compose`;
 const SIMULATE_PATH = `/v1/daemon/strategies/${STRATEGY_ID}/simulate`;
 const APPROVE_PATH = `/v1/daemon/strategies/${STRATEGY_ID}/approve`;
@@ -149,6 +150,11 @@ function nestedResponse(bind: Record<string, unknown> = {}) {
           pattern: { registry_id: 'prompt-step', version: '1.0.0', content_hash: 'abc' },
         },
       ],
+      // The daemon writes the connecting edge `nest` commits (`attach_to`).
+      edges: [
+        ...SEED.edges,
+        { id: 'draft->prompt-step-slot', from: 'draft', to: 'prompt-step-slot', kind: 'linear' },
+      ],
       nests: [
         {
           id: 'prompt-step',
@@ -181,7 +187,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     const composeBodies: unknown[] = [];
     const simulateBodies: unknown[] = [];
     useHandlers(
-      http.get(IR_PATH, () => HttpResponse.json(SEED)),
+      http.get(CANDIDATE_PATH, () => HttpResponse.json(SEED)),
       http.get(PATTERNS_PATH, () =>
         HttpResponse.json({ items: patternItems(true), pagination: { limit: 100, has_more: false } }),
       ),
@@ -210,11 +216,15 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     expect(composeBodies[0]).toMatchObject({
       base_revision: 0,
       op: 'nest',
-      payload: { parent_node: 'prompt-step-slot', package: { id: 'prompt-step', version: '1.0.0' } },
+      payload: {
+        parent_node: 'prompt-step-slot',
+        attach_to: 'draft',
+        package: { id: 'prompt-step', version: '1.0.0' },
+      },
     });
 
-    // Simulate walks the working document — the authored connecting edge into
-    // the slot is present, so the walk reaches and names the slot (T3b).
+    // Simulate walks the committed document — the edge `nest` wrote from the
+    // canvas's attach target reaches the slot, so no client-authored edge (T3b).
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
     await waitFor(() => expect(simulateBodies).toHaveLength(1));
     const walked = simulateBodies[0];
@@ -248,7 +258,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
   it('approves through the real route and renders the frozen snapshot', async () => {
     const approveBodies: unknown[] = [];
     useHandlers(
-      http.get(IR_PATH, () => HttpResponse.json(SEED)),
+      http.get(CANDIDATE_PATH, () => HttpResponse.json(SEED)),
       http.get(PATTERNS_PATH, () =>
         HttpResponse.json({ items: patternItems(false), pagination: { limit: 100, has_more: false } }),
       ),
@@ -294,8 +304,12 @@ describe('StrategyCanvas — compose path (flag on)', () => {
 
   it('surfaces a 409 conflict, leaves the graph alone, and never auto-retries', async () => {
     let composeCalls = 0;
+    let candidateReads = 0;
     useHandlers(
-      http.get(IR_PATH, () => HttpResponse.json(SEED)),
+      http.get(CANDIDATE_PATH, () => {
+        candidateReads += 1;
+        return HttpResponse.json(candidateReads === 1 ? SEED : { ...SEED, revision: 7 });
+      }),
       http.get(PATTERNS_PATH, () =>
         HttpResponse.json({ items: patternItems(true), pagination: { limit: 100, has_more: false } }),
       ),
@@ -329,14 +343,15 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     expect(screen.getByTestId('compose-conflict')).toHaveTextContent(
       'Candidate changed before this edit. Reload revision 7 and reapply the change.',
     );
-    // The recovery names the missing candidate read route instead of a reload
-    // that would clobber the candidate with the import projection.
-    expect(screen.getByText(/candidate read route/i)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId('compose-conflict-dismiss'));
+    // The recovery is a real reload of the canonical candidate at the revision
+    // the daemon holds, so the user can reapply the edit against those bytes.
+    expect(screen.getByTestId('compose-conflict-reload')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('compose-conflict-reload'));
     await waitFor(() =>
       expect(screen.queryByTestId('compose-conflict')).not.toBeInTheDocument(),
     );
+    expect(candidateReads).toBe(2);
+    // Nothing auto-retried the refused op.
     expect(composeCalls).toBe(1);
   });
 });
