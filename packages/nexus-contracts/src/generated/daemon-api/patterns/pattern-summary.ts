@@ -9,7 +9,7 @@
  */
 export interface PatternSummary {
   /**
-   * Package directory basename, never an absolute path.
+   * Cursor identity of the package directory: its basename, never an absolute path, kept as valid UTF-8 with `%` and every byte outside valid UTF-8 percent-escaped, so two distinct directories never share one identity. The listing is ordered by this value compared as UTF-8 bytes, and `pagination.next_cursor` carries it.
    */
   package_dir: string;
   /**
@@ -29,19 +29,19 @@ export interface PatternSummary {
    */
   content_hash: string | null;
   /**
-   * Declared effect class, which must equal the reader's rollup of the fragment; null when unavailable. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (that rollup), so a vocabulary change there is a change here.
+   * Declared effect class, which must equal the reader's rollup of the fragment. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (that rollup), so a vocabulary change there is a change here. Null only when the manifest itself was unreadable or invalid: a package whose manifest parsed keeps its declared class even when the package is unavailable for another reason.
    */
   effect_class: "pure" | "read" | "write_candidate" | "external" | null;
   /**
-   * Declared slots; empty when the package is unavailable.
+   * Declared slots. Empty only when the manifest itself was unreadable or invalid; a package whose manifest parsed keeps its declarations even when the package is unavailable for another reason.
    */
   slots: NexusPatternSlot[];
   /**
-   * Declared capability ids; empty when the package is unavailable.
+   * Declared capability ids. Empty only when the manifest itself was unreadable or invalid; a package whose manifest parsed keeps its declarations even when the package is unavailable for another reason.
    */
   requires_capabilities: string[];
   /**
-   * True only when the manifest parsed, every enforced field was valid, the fragment hash was computed and the declared effect class agreed with the rollup. It never means published or trusted.
+   * True only when the manifest parsed, every enforced field was valid, the member files were regular and within the reader's size ceiling, the fragment hash was computed and the declared effect class agreed with the rollup. It never means published or trusted. A false item still reports whatever its manifest declared when it parsed; only an unreadable or invalid manifest leaves those fields null or empty.
    */
   available: boolean;
   /**

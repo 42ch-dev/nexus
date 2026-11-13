@@ -13,7 +13,7 @@ export interface PatternManifest {
    */
   id: string;
   /**
-   * SemVer 2.0.0 version label, matched by this schema and re-checked by the registry reader with the `semver` crate. It is a human version selector, never the content identity: the pin is the canonical content hash of the package's IR fragment, so two packages may declare the same version with different bytes.
+   * SemVer 2.0.0 version label. This pattern is the single authority over which labels are accepted: the registry reader does not re-parse it, so a value the pattern admits is a valid label even when its numeric identifiers exceed a machine integer, exactly as SemVer 2.0.0 specifies. It is a human version selector, never the content identity: the pin is the canonical content hash of the package's IR fragment, so two packages may declare the same version with different bytes.
    */
   version: string;
   ir_compat: PatternIrCompat;

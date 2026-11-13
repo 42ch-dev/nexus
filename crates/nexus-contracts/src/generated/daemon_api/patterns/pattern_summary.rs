@@ -135,7 +135,7 @@ impl<'de> ::serde::Deserialize<'de> for NexusPatternSlotName {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct PatternSummary {
-    ///True only when the manifest parsed, every enforced field was valid, the fragment hash was computed and the declared effect class agreed with the rollup. It never means published or trusted.
+    ///True only when the manifest parsed, every enforced field was valid, the member files were regular and within the reader's size ceiling, the fragment hash was computed and the declared effect class agreed with the rollup. It never means published or trusted. A false item still reports whatever its manifest declared when it parsed; only an unreadable or invalid manifest leaves those fields null or empty.
     pub available: bool,
     ///Canonical content hash of the package's IR fragment; null when it could not be computed.
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
@@ -143,20 +143,20 @@ pub struct PatternSummary {
     ///Declared human label; null when the manifest is unreadable or invalid.
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub description: ::std::option::Option<::std::string::String>,
-    ///Declared effect class, which must equal the reader's rollup of the fragment; null when unavailable. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (that rollup), so a vocabulary change there is a change here.
+    ///Declared effect class, which must equal the reader's rollup of the fragment. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (that rollup), so a vocabulary change there is a change here. Null only when the manifest itself was unreadable or invalid: a package whose manifest parsed keeps its declared class even when the package is unavailable for another reason.
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub effect_class: ::std::option::Option<PatternSummaryEffectClass>,
     ///Declared package id; null when the manifest is unreadable or invalid.
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub id: ::std::option::Option<::std::string::String>,
-    ///Package directory basename, never an absolute path.
+    ///Cursor identity of the package directory: its basename, never an absolute path, kept as valid UTF-8 with `%` and every byte outside valid UTF-8 percent-escaped, so two distinct directories never share one identity. The listing is ordered by this value compared as UTF-8 bytes, and `pagination.next_cursor` carries it.
     pub package_dir: ::std::string::String,
     ///Null when available; otherwise an actionable reason naming what made the package unavailable.
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub reason: ::std::option::Option<::std::string::String>,
-    ///Declared capability ids; empty when the package is unavailable.
+    ///Declared capability ids. Empty only when the manifest itself was unreadable or invalid; a package whose manifest parsed keeps its declarations even when the package is unavailable for another reason.
     pub requires_capabilities: ::std::vec::Vec<::std::string::String>,
-    ///Declared slots; empty when the package is unavailable.
+    ///Declared slots. Empty only when the manifest itself was unreadable or invalid; a package whose manifest parsed keeps its declarations even when the package is unavailable for another reason.
     pub slots: ::std::vec::Vec<NexusPatternSlot>,
     ///Declared version label; null when the manifest is unreadable or invalid.
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
@@ -167,7 +167,7 @@ impl PatternSummary {
         Default::default()
     }
 }
-///Declared effect class, which must equal the reader's rollup of the fragment; null when unavailable. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (that rollup), so a vocabulary change there is a change here.
+///Declared effect class, which must equal the reader's rollup of the fragment. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (that rollup), so a vocabulary change there is a change here. Null only when the manifest itself was unreadable or invalid: a package whose manifest parsed keeps its declared class even when the package is unavailable for another reason.
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,

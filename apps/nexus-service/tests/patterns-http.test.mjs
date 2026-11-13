@@ -131,6 +131,44 @@ describe('patterns route (v1.239 P3-T4)', () => {
     assert.equal(second.body.pagination.next_cursor, undefined);
   });
 
+  test('two lossy-identical names page apart and reach their trailing peer', async () => {
+    // APFS rejects non-UTF-8 directory names, so the identities a Linux registry produces are
+    // seeded directly: the reader escapes each name's own bytes, so a one-item walk can address
+    // both of them and still reach the valid package after them.
+    const items = ['lossy-%FE', 'lossy-%FF', 'prompt-step'].map((package_dir, index) =>
+      index < 2
+        ? {
+            ...ITEMS[0],
+            package_dir,
+            available: false,
+            content_hash: null,
+            reason: 'package directory name is not UTF-8',
+          }
+        : { ...ITEMS[0], package_dir },
+    );
+
+    const served = [];
+    let cursor;
+    for (let page = 0; page < 4; page += 1) {
+      const search = new URLSearchParams({ limit: '1', ...(cursor ? { cursor } : {}) });
+      const response = await handle(search, serviceWith(items));
+      served.push(...response.body.items.map((item) => item.package_dir));
+      if (!response.body.pagination.has_more) break;
+      cursor = response.body.pagination.next_cursor;
+    }
+    assert.deepEqual(served, ['lossy-%FE', 'lossy-%FF', 'prompt-step']);
+  });
+
+  test('orders by UTF-8 bytes, not by host locale', async () => {
+    // `localeCompare` puts `a` before `B`; the reader's byte order puts `B` first.
+    const items = ['a', 'B'].map((package_dir) => ({ ...ITEMS[0], package_dir }));
+    const response = await handle(new URLSearchParams(), serviceWith(items));
+    assert.deepEqual(
+      response.body.items.map((item) => item.package_dir),
+      ['B', 'a'],
+    );
+  });
+
   test('an empty registry is an empty listing, not an error', async () => {
     const response = await handle(new URLSearchParams(), serviceWith([]));
     assert.deepEqual(response.body.items, []);
@@ -159,6 +197,22 @@ describe('patterns route (v1.239 P3-T4)', () => {
         },
       );
     }
+  });
+
+  test('a limit above the documented ceiling is a typed 400 and the ceiling is served', async () => {
+    for (const limit of ['201', '4294967296']) {
+      await assert.rejects(
+        () => handle(new URLSearchParams({ limit })),
+        (error) => {
+          assert.equal(error.status, 400);
+          assert.equal(error.code, 'invalid_input');
+          return true;
+        },
+      );
+    }
+
+    const response = await handle(new URLSearchParams({ limit: '200' }));
+    assert.equal(response.body.pagination.limit, 200);
   });
 
   test('refuses an undocumented query key instead of widening the page', async () => {

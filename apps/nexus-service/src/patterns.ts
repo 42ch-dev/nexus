@@ -5,8 +5,10 @@
  * The reader owns discovery, manifest validation and the fragment pin; nothing
  * here writes, creates the directory or loads a capability. Pagination lives in
  * this tier so the native lane stays a passthrough: the cursor is the
- * `package_dir` of the last served item, and a cursor that names no package is a
- * typed 400 rather than a silent re-serve of page one.
+ * `package_dir` of the last served item — an identity the reader escapes, never a
+ * lossy rendering — and a cursor that names no package is a typed 400 rather than
+ * a silent re-serve of page one. `package_dir` is ordered as UTF-8 bytes, the
+ * order the reader sorts in, so the cursor means one position on every host.
  */
 import type {
   ListPatternsQuery,
@@ -21,13 +23,17 @@ import { parseOptionalInteger, refuseUnknownQueryKeys, withPrincipal } from './w
 /** Page size when the query names none. */
 const DEFAULT_LIMIT = 100;
 
-/** `GET /v1/daemon/patterns` — cursor-paginated, `package_dir` ascending. */
+/** Largest page one request may ask for: what a UI can render as one listing page. */
+const MAX_LIMIT = 200;
+
+/** `GET /v1/daemon/patterns` — cursor-paginated, `package_dir` ascending as UTF-8 bytes. */
 export async function listPatterns(
   service: ServiceCore,
   searchParams: URLSearchParams,
 ): Promise<ListPatternsResponse> {
   refuseUnknownQueryKeys(searchParams, ['cursor', 'limit']);
-  const limit = parseOptionalInteger(searchParams, 'limit', { min: 1 }) ?? DEFAULT_LIMIT;
+  const limit =
+    parseOptionalInteger(searchParams, 'limit', { min: 1, max: MAX_LIMIT }) ?? DEFAULT_LIMIT;
   const cursor = searchParams.get('cursor');
   const query: ListPatternsQuery = {
     ...(cursor !== null ? { cursor } : {}),
@@ -35,9 +41,10 @@ export async function listPatterns(
   };
 
   const scanned = await withPrincipal(service, (principal) => service.core.listPatterns(principal));
-  // The listing contract owns the order, not the scan that happened to produce it.
+  // The listing contract owns the order, not the scan that happened to produce it: UTF-8 byte
+  // order, which is what the reader sorts by, never a locale-dependent collation.
   let items: PatternSummary[] = [...scanned].sort((left, right) =>
-    left.package_dir.localeCompare(right.package_dir),
+    Buffer.compare(Buffer.from(left.package_dir, 'utf8'), Buffer.from(right.package_dir, 'utf8')),
   );
   if (query.cursor !== undefined) {
     const position = items.findIndex((item) => item.package_dir === query.cursor);
