@@ -23,7 +23,7 @@ workspace = true
 # carries prompt errors on the session stream (`SessionMessage::
 # PromptResponse`). Stable protocol v1 only; `default = []` unchanged;
 # no `unstable_*` feature is enabled.
-agent-client-protocol = "=5.0.0"
+agent-client-protocol = "=5.1.0"
 tokio = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

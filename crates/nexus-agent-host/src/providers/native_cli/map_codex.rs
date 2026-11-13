@@ -473,6 +473,8 @@ mod tests {
                 CodexError::JsonRpc {
                     code: -32000,
                     message: "server error".to_string(),
+                    // codex-codes 0.167.4 added the structured `data` payload.
+                    data: None,
                 },
                 "provider_error",
             ),
