@@ -970,6 +970,32 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             StrategySimulationRequest
         ),
+        // ── daemon-api/patterns/ (v1.239 P3 — pattern packages) ─────────────
+        entry!(
+            "schemas/daemon-api/patterns/pattern-slot.schema.json",
+            Strict,
+            PatternSlot
+        ),
+        entry!(
+            "schemas/daemon-api/patterns/pattern-manifest.schema.json",
+            Strict,
+            PatternManifest
+        ),
+        entry!(
+            "schemas/daemon-api/patterns/pattern-summary.schema.json",
+            Strict,
+            PatternSummary
+        ),
+        entry!(
+            "schemas/daemon-api/patterns/list-patterns-query.schema.json",
+            Strict,
+            ListPatternsQuery
+        ),
+        entry!(
+            "schemas/daemon-api/patterns/list-patterns-response.schema.json",
+            Strict,
+            ListPatternsResponse
+        ),
         // ── daemon-api/preset-management/ (V1.63 P3) ────────────────────────
         entry!(
             "schemas/daemon-api/preset-management/preset-summary.schema.json",
@@ -1804,6 +1830,11 @@ fn make_dummy_string(prop_def: &Value) -> Value {
     // Handle pattern constraints — Nexus patterns look like `^prefix_[a-zA-Z0-9]+$`.
     // Extract the literal prefix and append a valid suffix.
     if let Some(pattern) = prop_def.get("pattern").and_then(|p| p.as_str()) {
+        // SemVer 2.0.0 (`pattern-manifest` `version`): alternation-heavy, so the
+        // generic prefix extraction below cannot build a conforming value.
+        if pattern.contains("(0|[1-9]") {
+            return Value::String("1.0.0".to_string());
+        }
         let inner = pattern.trim_start_matches('^').trim_end_matches('$');
         if !inner.is_empty()
             && !inner.chars().any(|c| {

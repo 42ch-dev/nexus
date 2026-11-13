@@ -52,6 +52,7 @@ pub mod slug;
 #[cfg(feature = "operation-id")]
 pub mod operation_id;
 mod outline;
+mod patterns;
 mod presets;
 mod principal;
 mod provider_journal;

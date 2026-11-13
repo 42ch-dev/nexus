@@ -24,6 +24,7 @@
 | [daemon-api/agent-host/](daemon-api/agent-host) | 12 | Agent Host scan/session/operation contracts + optional Actor/Viewpoint pair (v1.184 P2) |
 | [daemon-api/orchestration/sessions/](daemon-api/orchestration/sessions) | 4 | Orchestration engine session READ schemas (V1.63 P3) |
 | [daemon-api/orchestration/capabilities/](daemon-api/orchestration/capabilities) | 2 | Capability registry READ schemas (V1.63 P3) |
+| [daemon-api/patterns/](daemon-api/patterns) | 5 | Pattern package manifest + registry listing schemas (v1.239 P3) |
 | [daemon-api/preset-management/](daemon-api/preset-management) | 7 | Preset management full-surface schemas (V1.63 P3) |
 
 **Removed paths (do not recreate):**

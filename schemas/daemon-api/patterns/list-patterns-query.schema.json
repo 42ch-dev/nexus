@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/patterns/list-patterns-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListPatternsQuery",
+  "description": "Query parameters for GET /v1/daemon/patterns (cursor-based pagination, `package_dir` ascending as UTF-8 bytes). No `sort` parameter is exposed.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "cursor": {
+      "type": "string",
+      "description": "Opaque pagination cursor returned by the previous response's `pagination.next_cursor`. Clients MUST NOT parse it. It addresses one `package_dir` in a listing ordered by that field compared as UTF-8 bytes, which is the order the reader sorts in on every host — never a locale-dependent collation."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 100,
+      "description": "Maximum number of items to return, defaulting to 100. The ceiling is 200: one listing page of local packages that a UI can render as a list. A value outside 1–200 is a typed 400, never a silently clamped page."
+    }
+  }
+}

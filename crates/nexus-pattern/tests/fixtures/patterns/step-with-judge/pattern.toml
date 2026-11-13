@@ -1,0 +1,19 @@
+id = "step-with-judge"
+version = "1.0.0"
+description = "Draft an answer, then let a judge accept or reject it"
+effect_class = "external"
+requires_capabilities = ["acp.prompt", "judge.llm"]
+
+[ir_compat]
+min = 0
+max = 0
+
+[[slots]]
+name = "topic"
+kind = "string"
+required = true
+
+[[slots]]
+name = "rubric"
+kind = "asset"
+required = false

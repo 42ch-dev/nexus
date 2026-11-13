@@ -1,0 +1,71 @@
+{
+  "ir_version": 0,
+  "id": "step-with-judge",
+  "version": 1,
+  "revision": 0,
+  "state": "candidate",
+  "meta": {
+    "description": "Draft an answer, then let a judge accept or reject it",
+    "kind": "creator",
+    "run_intents": [
+      "work_continue"
+    ],
+    "requires_capabilities": [
+      "acp.prompt",
+      "judge.llm"
+    ]
+  },
+  "entry": "draft",
+  "terminal": [
+    "verdict"
+  ],
+  "nodes": [
+    {
+      "id": "draft",
+      "kind": "inner_step",
+      "effect_class": "external",
+      "step_kind": "acp_prompt",
+      "template": "templates/draft.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "id": "verdict",
+      "kind": "judge",
+      "effect_class": "external",
+      "exit_when": {
+        "kind": "llm_judge",
+        "template": "templates/verdict.md",
+        "judge_capability": "judge.llm"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "draft->verdict",
+      "from": "draft",
+      "to": "verdict",
+      "kind": "linear"
+    }
+  ],
+  "nests": [],
+  "assets": [
+    {
+      "id": "templates/draft.md",
+      "path": "templates/draft.md",
+      "kind": "template",
+      "content_hash": "9d8a58ce7703eb27ebccbc2b902ea6a451bb2b86c787caeb5edc374389827084"
+    },
+    {
+      "id": "templates/verdict.md",
+      "path": "templates/verdict.md",
+      "kind": "template",
+      "content_hash": "77edc1df267da6e18827cd454676162e2a302be55776c9286bf56be8d08ef6f3"
+    }
+  ],
+  "signals": [],
+  "roles": [],
+  "effect_summary": "external",
+  "provenance": {
+    "source": "compose"
+  }
+}

@@ -33,6 +33,7 @@ import { WORKSPACE_ROUTES } from './workspaces.js';
 import { MEMORY_ROUTES } from './memory.js';
 import { CONTEXT_ROUTES } from './context.js';
 import { PRESET_ROUTES } from './presets.js';
+import { PATTERN_ROUTES } from './patterns.js';
 import { EXECUTION_ROUTES } from './execution.js';
 import { COMPUTE_ROUTES } from './compute.js';
 import { WORKFLOW_OBSERVATION_ROUTES } from './workflow-observation.js';
@@ -79,6 +80,7 @@ export type DomainFamily =
   | 'memory'
   | 'context'
   | 'presets'
+  | 'patterns'
   | 'execution'
   | 'compute'
   | 'workflow_observation'
@@ -539,6 +541,7 @@ export const DOMAIN_ROUTES: readonly DomainRoute[] = [
   ...MEMORY_ROUTES,
   ...CONTEXT_ROUTES,
   ...PRESET_ROUTES,
+  ...PATTERN_ROUTES,
   ...EXECUTION_ROUTES,
   ...COMPUTE_ROUTES,
   ...WORKFLOW_OBSERVATION_ROUTES,

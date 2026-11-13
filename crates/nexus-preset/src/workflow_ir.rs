@@ -37,21 +37,20 @@ use nexus_contracts::local::orchestration::preset_gate::{Gate, GateOp, PreviousP
 use nexus_workflow_ir::{
     WorkflowAssetRef, WorkflowAssetRefKind, WorkflowCliArg, WorkflowCliArgType,
     WorkflowContextUpdate, WorkflowContextUpdateOp, WorkflowConverge, WorkflowConvergeStrategy,
-    WorkflowDocument, WorkflowDocumentEffectSummary, WorkflowDocumentId, WorkflowDocumentState,
-    WorkflowEdge, WorkflowEdgeKind, WorkflowEnterAction, WorkflowEnterActionKind, WorkflowExitWhen,
-    WorkflowExitWhenKind, WorkflowGate, WorkflowGateKind, WorkflowGateOp, WorkflowGateStatus,
-    WorkflowInitialAction, WorkflowInitialActionKind, WorkflowMerge, WorkflowMergeKind,
-    WorkflowMeta, WorkflowMetaKind, WorkflowMetaRunIntentsItem, WorkflowNode,
-    WorkflowNodeEffectClass, WorkflowNodeKind, WorkflowNodeStepKind, WorkflowNodeUi,
-    WorkflowProvenance, WorkflowProvenanceSource, WorkflowRoleDefinition, WorkflowSignalBinding,
-    WorkflowSignalBindingAction,
+    WorkflowDocument, WorkflowDocumentId, WorkflowDocumentState, WorkflowEdge, WorkflowEdgeKind,
+    WorkflowEnterAction, WorkflowEnterActionKind, WorkflowExitWhen, WorkflowExitWhenKind,
+    WorkflowGate, WorkflowGateKind, WorkflowGateOp, WorkflowGateStatus, WorkflowInitialAction,
+    WorkflowInitialActionKind, WorkflowMerge, WorkflowMergeKind, WorkflowMeta, WorkflowMetaKind,
+    WorkflowMetaRunIntentsItem, WorkflowNode, WorkflowNodeEffectClass, WorkflowNodeKind,
+    WorkflowNodeStepKind, WorkflowNodeUi, WorkflowProvenance, WorkflowProvenanceSource,
+    WorkflowRoleDefinition, WorkflowSignalBinding, WorkflowSignalBindingAction,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use thiserror::Error;
 
 // IR version emitted by this adapter; v0 stays 0 until P1 parity.
-const IR_VERSION: u64 = 0;
+const IR_VERSION: u64 = nexus_workflow_ir::IR_VERSION;
 
 /// Adapter failure. Every refusal names the carrier it could not project.
 #[derive(Debug, Error)]
@@ -216,7 +215,7 @@ fn document_from_manifest(
         }
     }
 
-    let effect_summary = summary_effect(&nodes);
+    let effect_summary = nexus_workflow_ir::effect_summary(&nodes);
     // The header names the declared terminal; per-state markers ride on the node kinds. A preset
     // whose markers disagree with the header still projects, so validation can report the defect.
     let terminal = if header.terminal.is_empty() {
@@ -729,29 +728,6 @@ const fn effect_from_rank(rank: u8) -> WorkflowNodeEffectClass {
         2 => WorkflowNodeEffectClass::WriteCandidate,
         1 => WorkflowNodeEffectClass::Read,
         _ => WorkflowNodeEffectClass::Pure,
-    }
-}
-
-const fn effect_rank(class: WorkflowNodeEffectClass) -> u8 {
-    match class {
-        WorkflowNodeEffectClass::External => 3,
-        WorkflowNodeEffectClass::WriteCandidate => 2,
-        WorkflowNodeEffectClass::Read => 1,
-        WorkflowNodeEffectClass::Pure => 0,
-    }
-}
-
-fn summary_effect(nodes: &[WorkflowNode]) -> WorkflowDocumentEffectSummary {
-    let rank = nodes
-        .iter()
-        .map(|node| effect_rank(node.effect_class))
-        .max()
-        .unwrap_or(0);
-    match rank {
-        3 => WorkflowDocumentEffectSummary::External,
-        2 => WorkflowDocumentEffectSummary::WriteCandidate,
-        1 => WorkflowDocumentEffectSummary::Read,
-        _ => WorkflowDocumentEffectSummary::Pure,
     }
 }
 
@@ -1421,7 +1397,7 @@ roles:
         assert_eq!(imported.assets["prompts/judge.md"], b"judge.md");
         assert_eq!(
             document.effect_summary,
-            WorkflowDocumentEffectSummary::External
+            nexus_workflow_ir::WorkflowDocumentEffectSummary::External
         );
 
         let exported = export_preset(document).expect("export");
