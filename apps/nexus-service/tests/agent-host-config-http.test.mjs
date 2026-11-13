@@ -114,6 +114,82 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
     assert.equal(response.body.providers[0].id, 'claude-acp');
   });
 
+  test('a replacement save disables the replaced provider so readiness reports the new owner', async () => {
+    const oldProvider = {
+      id: 'old-acp',
+      protocol: 'acp',
+      command: 'old-agent',
+      enabled: true,
+    };
+    const replacement = {
+      id: 'replacement-acp',
+      protocol: 'acp',
+      command: 'replacement-agent',
+      enabled: true,
+    };
+    // Only the replacement is installed: readiness is true exactly when the
+    // document selects it alone, which is the native rule (`enabled` set).
+    const available = new Set([replacement.id]);
+    let stored = { ...DEFAULT_CONFIG, providers: [oldProvider] };
+    const service = {
+      workspaceInitialized: true,
+      providerReady: false,
+      engineEpoch: 0,
+      core: {
+        getAgentHostConfig: async () => stored,
+        saveAgentHostConfig: async (config) => {
+          stored = config;
+        },
+        restartExecutionOwner: async () => {
+          const selected = stored.providers.filter((provider) => provider.enabled !== false);
+          return {
+            engine_epoch: 11,
+            provider_ready:
+              selected.length > 0 && selected.every((provider) => available.has(provider.id)),
+          };
+        },
+      },
+    };
+
+    // The client replacement: the saved entry is enabled and the entry it
+    // replaces is still enabled on the way in.
+    const response = await handle('PUT', service, {
+      ...DEFAULT_CONFIG,
+      providers: [oldProvider, replacement],
+    });
+
+    assert.deepEqual(
+      response.body.providers,
+      [{ ...oldProvider, enabled: false }, replacement],
+      'the replaced entry is kept but disabled, the saved one is enabled',
+    );
+    assert.deepEqual(stored.providers.map((provider) => provider.id), ['old-acp', 'replacement-acp']);
+    assert.equal(service.providerReady, true, 'readiness follows the replacement');
+    assert.equal(service.engineEpoch, 11);
+  });
+
+  test('a no-op save disables nothing', async () => {
+    const provider = {
+      id: 'claude-acp',
+      protocol: 'acp',
+      command: 'claude-agent-acp',
+      enabled: true,
+    };
+    const disabled = { id: 'codex-acp', protocol: 'acp', command: null, enabled: false };
+    const { service, saves } = storeService({
+      ...DEFAULT_CONFIG,
+      providers: [provider, disabled],
+    });
+
+    const response = await handle('PUT', service, {
+      ...DEFAULT_CONFIG,
+      providers: [provider, disabled],
+    });
+
+    assert.deepEqual(response.body.providers, [provider, disabled]);
+    assert.deepEqual(saves[0].providers, [provider, disabled]);
+  });
+
   test('two overlapping PUTs apply in order and both restart', async () => {
     let stored = { ...DEFAULT_CONFIG };
     const restarts = [];

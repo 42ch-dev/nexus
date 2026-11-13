@@ -178,6 +178,34 @@ export async function getAgentHostConfig(service: ServiceCore): Promise<AgentHos
   }
 }
 
+/**
+ * Replacement upsert: the saved document's LAST enabled entry becomes the ONE
+ * selected provider — readiness reads only enabled entries, so leaving a
+ * replaced provider enabled would keep claiming an owner the user retired. A
+ * document that already selects exactly that provider is returned untouched, so
+ * a no-op save disables nothing.
+ */
+function withReplacementSelected(config: AgentHostConfig): AgentHostConfig {
+  const selected = config.providers.findLastIndex((provider) => provider.enabled !== false);
+  if (selected < 0) {
+    return config;
+  }
+  const changes = config.providers.some(
+    (provider, index) => (provider.enabled !== false) !== (index === selected),
+  );
+  if (!changes) {
+    return config;
+  }
+  return {
+    ...config,
+    providers: config.providers.map((provider, index) =>
+      index === selected
+        ? { ...provider, enabled: true }
+        : { ...provider, enabled: false },
+    ),
+  };
+}
+
 /** The owner facts the restart publishes; the same shape the boot start returns. */
 interface EngineOwnerFacts {
   engine_epoch: number | null;
@@ -192,8 +220,11 @@ export function putAgentHostConfig(
   // The ONE owner-lifecycle lock (shared with selectWorkspace): a provider
   // save+restart must never interleave with a first-run selection.
   return withSelectionLock(service, async () => {
+    // Upsert after validation, inside the lock: the entry the user just saved
+    // owns readiness and the entries it replaced are disabled.
+    const next = withReplacementSelected(config);
     try {
-      await service.core.saveAgentHostConfig(config);
+      await service.core.saveAgentHostConfig(next);
     } catch (error) {
       throw mapNativeError(error);
     }
