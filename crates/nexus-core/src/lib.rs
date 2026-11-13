@@ -134,6 +134,8 @@ pub use principal::Principal;
 // Provider-owned memory contract objects (spoke §6): the E1/E2 direct-core
 // callers name the Creator record and SOUL profile documents through
 // `nexus_core` instead of a second DTO set.
+#[cfg(feature = "execution")]
+pub use compose::document_bodies;
 pub use compose::{
     BindSlotOp, ComposeDiagnostic, ComposeOp, ComposeOutcome, ComposeRefusal, NestOp,
     PatternPackageRef, ReplaceSubtreeOp, UnnestOp,

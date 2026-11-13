@@ -230,16 +230,16 @@ impl ::std::convert::TryFrom<::std::string::String> for NexusWorkflowDocumentSta
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct StrategyComposeDiagnostic {
-    ///Diagnostic family: an unbound required slot, a slot binding flattening had to drop, or a pin outside the operation's reach whose bytes changed.
+    ///Diagnostic family: an unbound required slot, a slot binding flattening had to drop, a pin outside the operation's reach whose bytes changed, or a recorded pin whose package the registry no longer resolves.
     pub code: StrategyComposeDiagnosticCode,
     ///Human-readable diagnostic safe for UI display.
     pub message: ::std::string::String,
     ///The nest that pins the package.
     pub nest_id: ::std::string::String,
-    ///The pinned package (present for `unbound_required_slot` and `stale_pin`).
+    ///The pinned package (present for `unbound_required_slot`, `stale_pin` and `pin_unavailable`).
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub package_id: ::std::option::Option<::std::string::String>,
-    ///The pinned package version (present for `unbound_required_slot` and `stale_pin`).
+    ///The pinned package version (present for `unbound_required_slot`, `stale_pin` and `pin_unavailable`).
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub package_version: ::std::option::Option<::std::string::String>,
     ///The slot name: unbound for `unbound_required_slot`, dropped for `slot_binding_dropped`.
@@ -251,7 +251,7 @@ impl StrategyComposeDiagnostic {
         Default::default()
     }
 }
-///Diagnostic family: an unbound required slot, a slot binding flattening had to drop, or a pin outside the operation's reach whose bytes changed.
+///Diagnostic family: an unbound required slot, a slot binding flattening had to drop, a pin outside the operation's reach whose bytes changed, or a recorded pin whose package the registry no longer resolves.
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,
@@ -271,6 +271,8 @@ pub enum StrategyComposeDiagnosticCode {
     SlotBindingDropped,
     #[serde(rename = "stale_pin")]
     StalePin,
+    #[serde(rename = "pin_unavailable")]
+    PinUnavailable,
 }
 impl ::std::fmt::Display for StrategyComposeDiagnosticCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -278,6 +280,7 @@ impl ::std::fmt::Display for StrategyComposeDiagnosticCode {
             Self::UnboundRequiredSlot => f.write_str("unbound_required_slot"),
             Self::SlotBindingDropped => f.write_str("slot_binding_dropped"),
             Self::StalePin => f.write_str("stale_pin"),
+            Self::PinUnavailable => f.write_str("pin_unavailable"),
         }
     }
 }
@@ -290,6 +293,7 @@ impl ::std::str::FromStr for StrategyComposeDiagnosticCode {
             "unbound_required_slot" => Ok(Self::UnboundRequiredSlot),
             "slot_binding_dropped" => Ok(Self::SlotBindingDropped),
             "stale_pin" => Ok(Self::StalePin),
+            "pin_unavailable" => Ok(Self::PinUnavailable),
             _ => Err("invalid value".into()),
         }
     }

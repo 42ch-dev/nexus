@@ -240,6 +240,16 @@ fn compose_diagnostic(diagnostic: &ComposeDiagnostic) -> StrategyComposeDiagnost
             package_version: Some(package.version.clone()),
             slot: None,
         },
+        ComposeDiagnostic::PinUnavailable {
+            nest_id, package, ..
+        } => StrategyComposeDiagnostic {
+            code: StrategyComposeDiagnosticCode::PinUnavailable,
+            message: diagnostic.to_string(),
+            nest_id: nest_id.clone(),
+            package_id: Some(package.id.clone()),
+            package_version: Some(package.version.clone()),
+            slot: None,
+        },
     }
 }
 

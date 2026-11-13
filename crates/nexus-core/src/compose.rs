@@ -439,6 +439,19 @@ pub enum ComposeDiagnostic {
         /// The hash the registry now serves.
         scanned_hash: String,
     },
+    /// A recorded pin whose package the registry does not resolve, so there are no bytes to
+    /// compare. Reported for the same reason a changed pin is: the pin cannot be confirmed today,
+    /// and an approval that freezes it would claim bytes nobody can check.
+    PinUnavailable {
+        /// The nest that records the pin.
+        nest_id: String,
+        /// The pinned package.
+        package: PatternPackageRef,
+        /// The hash the document recorded.
+        recorded_hash: String,
+        /// Why resolution failed: no directory declares the pin, or the package did not load.
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for ComposeDiagnostic {
@@ -466,6 +479,17 @@ impl std::fmt::Display for ComposeDiagnostic {
                 f,
                 "nest `{nest_id}` pinned `{package}` at content hash `{recorded_hash}`, but the \
                  registry now serves `{scanned_hash}`: replace this region to adopt the new bytes"
+            ),
+            Self::PinUnavailable {
+                nest_id,
+                package,
+                recorded_hash,
+                reason,
+            } => write!(
+                f,
+                "nest `{nest_id}` pinned `{package}` at content hash `{recorded_hash}`, but the \
+                 package is unavailable ({reason}): restore it before approving or consuming this \
+                 region"
             ),
         }
     }
@@ -786,10 +810,12 @@ fn verify_body_pins(
     Ok(())
 }
 
-/// The resolved pattern bodies the shared walk follows, plus the stale-pin diagnostics it reports,
-/// for a caller that validates without writing (Approve). Same index and same walk as compose,
-/// and the one [`verify_pin`] comparison: an approval refuses on the first `StalePin` it reports.
+/// The resolved pattern bodies the shared walk follows, plus the pin findings it reports.
+///
+/// For a caller that validates without writing (Approve): same index and same walk as compose,
+/// and the one [`verify_pin`] comparison: an approval refuses on the first pin it cannot confirm.
 #[cfg(feature = "execution")]
+#[must_use]
 pub fn document_bodies<'a>(
     document: &'a WorkflowDocument,
     packages: &'a [PatternPackage],
@@ -1353,9 +1379,10 @@ impl<'a> PackageIndex<'a> {
     /// The pattern bodies reachable from `document`, so the shared walk follows resolved fragments
     /// instead of treating every pattern pin as a leaf.
     ///
-    /// Every carrier of a recorded pin is reported as a [`ComposeDiagnostic::StalePin`] when the
-    /// registry's bytes changed — the operation's own region included, so a successful write never
-    /// leaves a pin it read silently unverified.
+    /// Every carrier of a recorded pin is reported when the pin cannot be confirmed — a
+    /// [`ComposeDiagnostic::StalePin`] for changed bytes, a [`ComposeDiagnostic::PinUnavailable`]
+    /// for a package the registry no longer resolves — the operation's own region included, so a
+    /// successful write never leaves a pin it read silently unverified.
     fn bodies(
         &self,
         document: &WorkflowDocument,
@@ -1379,8 +1406,9 @@ impl<'a> PackageIndex<'a> {
                 continue;
             };
             // The recorded hash is checked before this walk de-dupes the pin and before a package
-            // that failed to load is skipped, so a carrier whose bytes changed is always reported.
-            self.report_stale_pin(nest, &pin, diagnostics);
+            // that failed to load is skipped, so a carrier whose bytes changed or whose package is
+            // gone is always reported.
+            self.report_unusable_pin(nest, &pin, diagnostics);
             if !seen.insert(pin.to_string()) {
                 continue;
             }
@@ -1409,30 +1437,41 @@ impl<'a> PackageIndex<'a> {
         }
     }
 
-    /// Report one carrier whose bytes no longer hash to the pin it stores, through the one
-    /// [`verify_pin`] comparison. A package that did not load has no bytes to compare, so it is
-    /// not reported here.
-    fn report_stale_pin(
+    /// Report one carrier whose recorded pin cannot be confirmed against the registry, through the
+    /// one [`verify_pin`] comparison: bytes that changed are a [`ComposeDiagnostic::StalePin`], and
+    /// a pin whose package does not resolve is a [`ComposeDiagnostic::PinUnavailable`]. A carrier
+    /// with no recorded hash names nothing to confirm and is not reported.
+    fn report_unusable_pin(
         &self,
         nest: &WorkflowNestBinding,
         pin: &PatternPackageRef,
         diagnostics: &mut Vec<ComposeDiagnostic>,
     ) {
-        let Err(ComposeRefusal::PinMismatch {
-            nest_id,
-            package,
-            recorded_hash,
-            scanned_hash,
-        }) = verify_pin(&nest.id, pin, nest.child.content_hash.as_deref(), self)
-        else {
+        let Some(recorded_hash) = nest.child.content_hash.as_deref() else {
             return;
         };
-        diagnostics.push(ComposeDiagnostic::StalePin {
-            nest_id,
-            package,
-            recorded_hash,
-            scanned_hash,
-        });
+        match verify_pin(&nest.id, pin, Some(recorded_hash), self) {
+            Err(ComposeRefusal::PinMismatch {
+                package,
+                recorded_hash,
+                scanned_hash,
+                ..
+            }) => diagnostics.push(ComposeDiagnostic::StalePin {
+                nest_id: nest.id.clone(),
+                package,
+                recorded_hash,
+                scanned_hash,
+            }),
+            Err(ComposeRefusal::PackageUnavailable {
+                package, reason, ..
+            }) => diagnostics.push(ComposeDiagnostic::PinUnavailable {
+                nest_id: nest.id.clone(),
+                package,
+                recorded_hash: recorded_hash.to_owned(),
+                reason,
+            }),
+            Ok(()) | Err(_) => {}
+        }
     }
 }
 

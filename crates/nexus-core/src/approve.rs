@@ -5,10 +5,11 @@
 //! Approve is the only place a candidate becomes authoritative, so each refusal here is a safety
 //! property. The route reads the canonical candidate (the stored row, or the revision-0 import
 //! projection), CAS-checks the revision the client simulated, re-runs the shared structural and
-//! nest-policy validation, verifies every recorded pattern pin against the registry bytes, and
-//! recomputes the deterministic simulation over the same document. The supplied trajectory must
-//! equal that recomputation: its `ir_content_hash` is the approval identity, so a different hash is
-//! stale evidence and nothing is written.
+//! nest-policy validation, confirms every recorded pattern pin against the registry bytes (a
+//! changed pin and a pin whose package is gone both refuse), and recomputes the deterministic
+//! simulation over the same document. The supplied trajectory must equal that recomputation: its
+//! `ir_content_hash` is the approval identity, so a different hash is stale evidence and nothing
+//! is written.
 //!
 //! The snapshot is keyed by `(strategy_id, content_hash)`: one content approves once. A repeat
 //! approve is the typed 409 refusal, never a second row and never a mutated candidate. The insert
@@ -81,6 +82,18 @@ pub enum ApproveRefusal {
         /// The hash the registry now serves.
         scanned_hash: String,
     },
+    /// The document records a pin the registry does not resolve at all, so there are no bytes to
+    /// compare and the approval would freeze a hash nobody can check.
+    PinUnavailable {
+        /// The nest that pins the package.
+        nest_id: String,
+        /// The pinned package id.
+        package_id: String,
+        /// The pinned package version.
+        package_version: String,
+        /// The hash the document recorded.
+        recorded_hash: String,
+    },
 }
 
 impl ApproveRefusal {
@@ -95,6 +108,7 @@ impl ApproveRefusal {
             Self::InvalidDocument { .. } => "invalid_document",
             Self::SlotUnbound { .. } => "slot_unbound",
             Self::PinChanged { .. } => "pin_changed",
+            Self::PinUnavailable { .. } => "pin_unavailable",
         }
     }
 
@@ -169,6 +183,23 @@ impl ApproveRefusal {
                     Value::from(scanned_hash.clone()),
                 );
             }
+            Self::PinUnavailable {
+                nest_id,
+                package_id,
+                package_version,
+                recorded_hash,
+            } => {
+                details.insert("nest_id".into(), Value::from(nest_id.clone()));
+                details.insert("package_id".into(), Value::from(package_id.clone()));
+                details.insert(
+                    "package_version".into(),
+                    Value::from(package_version.clone()),
+                );
+                details.insert(
+                    "recorded_content_hash".into(),
+                    Value::from(recorded_hash.clone()),
+                );
+            }
         }
         Value::Object(details)
     }
@@ -181,8 +212,9 @@ impl ApproveRefusal {
         }
     }
 
-    /// Reuse compose's own findings as approval refusals: the two the walk reports as refusals to
-    /// an approval are a slot a pinned pattern requires and a pin whose bytes moved.
+    /// Reuse compose's own findings as approval refusals: the three the walk reports as refusals
+    /// to an approval are a slot a pinned pattern requires, a pin whose bytes moved, and a pin
+    /// whose package the registry no longer resolves.
     fn from_diagnostic(diagnostic: ComposeDiagnostic) -> Self {
         match diagnostic {
             ComposeDiagnostic::UnboundRequiredSlot {
@@ -205,6 +237,17 @@ impl ApproveRefusal {
                 package_version: package.version,
                 recorded_hash,
                 scanned_hash,
+            },
+            ComposeDiagnostic::PinUnavailable {
+                nest_id,
+                package,
+                recorded_hash,
+                ..
+            } => Self::PinUnavailable {
+                nest_id,
+                package_id: package.id,
+                package_version: package.version,
+                recorded_hash,
             },
             other @ ComposeDiagnostic::DroppedSlotBinding { .. } => Self::InvalidDocument {
                 violations: vec![other.to_string()],
@@ -264,6 +307,17 @@ impl std::fmt::Display for ApproveRefusal {
                  `{recorded_hash}`, but the registry now serves `{scanned_hash}`: restore the \
                  package or replace this region before approving"
             ),
+            Self::PinUnavailable {
+                nest_id,
+                package_id,
+                package_version,
+                recorded_hash,
+            } => write!(
+                f,
+                "nest `{nest_id}` pinned `{package_id}@{package_version}` at content hash \
+                 `{recorded_hash}`, but the registry has no available package for that pin: \
+                 restore the package before approving"
+            ),
         }
     }
 }
@@ -297,9 +351,9 @@ impl CoreService {
     ///
     /// Returns [`CoreError::StrategyCandidateConflict`] when the stored revision is not
     /// `base_revision`, [`CoreError::InputValidation`] carrying an [`ApproveRefusal::details`]
-    /// envelope for missing/stale simulation evidence, invalid content or a changed pin,
-    /// [`CoreError::StrategyAlreadyApproved`] when this content already has a snapshot, and the
-    /// principal/store errors otherwise.
+    /// envelope for missing/stale simulation evidence, invalid content, or a pin that cannot be
+    /// confirmed, [`CoreError::StrategyAlreadyApproved`] when this content already has a snapshot,
+    /// and the principal/store errors otherwise.
     pub async fn approve_strategy(
         &self,
         principal: &Principal,
@@ -340,13 +394,16 @@ impl CoreService {
         {
             return Err(ApproveRefusal::from_diagnostic(unbound).into_error());
         }
-        // The walk reports every pin whose bytes moved, through the one `verify_pin` comparison.
-        // An approval freezes the whole document, so the first such finding refuses it.
-        if let Some(stale) = diagnostics
-            .into_iter()
-            .find(|finding| matches!(finding, ComposeDiagnostic::StalePin { .. }))
-        {
-            return Err(ApproveRefusal::from_diagnostic(stale).into_error());
+        // The walk reports every pin it cannot confirm, through the one `verify_pin` comparison:
+        // bytes that moved, and a pin whose package is absent. An approval freezes the whole
+        // document, so the first such finding refuses it.
+        if let Some(unconfirmed) = diagnostics.into_iter().find(|finding| {
+            matches!(
+                finding,
+                ComposeDiagnostic::StalePin { .. } | ComposeDiagnostic::PinUnavailable { .. }
+            )
+        }) {
+            return Err(ApproveRefusal::from_diagnostic(unconfirmed).into_error());
         }
 
         let recomputed = simulate_document(

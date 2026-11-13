@@ -1,8 +1,9 @@
 //! The Approve write path, executed through a real `CoreService` and a real pattern registry:
-//! one approval freezes exactly one snapshot; a missing/stale simulation, a changed pin, a slot a
-//! nested pattern requires and a repeat approve are typed refusals that write no snapshot and
-//! consume no candidate revision; a compose that lands between the revision check and the insert
-//! makes the insert fail instead of freezing a stale revision.
+//! one approval freezes exactly one snapshot; a missing/stale simulation, a changed pin, a pin
+//! whose package is gone, a slot a nested pattern requires and a repeat approve are typed
+//! refusals that write no snapshot and consume no candidate revision; a compose that lands
+//! between the revision check and the insert makes the insert fail instead of freezing a stale
+//! revision.
 //!
 //! Plan: `.mstar/plans/v239-p3-approve-route.md` T1–T6.
 
@@ -342,6 +343,60 @@ async fn a_changed_pinned_package_is_refused_naming_package_and_both_hashes() {
         .as_str()
         .expect("the refusal names the current bytes");
     assert_ne!(scanned, recorded_hash);
+    assert_eq!(snapshot_count(setup.core.pool()).await, 0);
+    assert_eq!(
+        stored_revision(setup.core.pool()).await,
+        Some(i64::try_from(revision).unwrap()),
+        "a refused approve consumes no candidate revision"
+    );
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_pin_whose_package_is_absent_is_refused_naming_the_pin() {
+    let setup = setup().await;
+    write_package(&setup.home, "gone-step", "original bytes");
+    let composed = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            0,
+            ComposeOp::Nest(NestOp {
+                nest_id: "gone-nest".to_owned(),
+                parent_node: "gone-slot".to_owned(),
+                package: package("gone-step"),
+                expansion: WorkflowNestBindingExpansion::ExpandInCandidate,
+            }),
+        )
+        .await
+        .unwrap();
+    let revision = composed.candidate.revision;
+    let recorded_hash = composed.candidate.document.nests[0]
+        .child
+        .content_hash
+        .clone()
+        .expect("the nest records the resolved pin");
+    let trajectory = simulate(&setup.core, &setup.principal, &composed.candidate.document).await;
+
+    // The package is gone, so the recorded hash names bytes no registry serves: there is no
+    // scanned hash to compare, and the refusal must not pretend there is one.
+    std::fs::remove_dir_all(setup.home.join("patterns").join("gone-step")).unwrap();
+
+    let error = setup
+        .core
+        .approve_strategy(&setup.principal, STRATEGY, revision, Some(trajectory))
+        .await
+        .unwrap_err();
+
+    let details = refusal(&error);
+    assert_eq!(details["reason"], "pin_unavailable");
+    assert_eq!(details["package_id"].as_str(), Some("gone-step"));
+    assert_eq!(details["package_version"].as_str(), Some("1.0.0"));
+    assert_eq!(
+        details["recorded_content_hash"].as_str(),
+        Some(recorded_hash.as_str())
+    );
     assert_eq!(snapshot_count(setup.core.pool()).await, 0);
     assert_eq!(
         stored_revision(setup.core.pool()).await,
