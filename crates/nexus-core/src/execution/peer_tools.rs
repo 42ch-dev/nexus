@@ -385,8 +385,7 @@ impl PeerToolRegistry {
             .unwrap_or_else(PoisonError::into_inner)
             .sessions
             .get(peer_id)
-            .map(|s| s.tool_ids.clone())
-            .unwrap_or_default()
+            .map_or_default(|s| s.tool_ids.clone())
     }
 
     /// Number of dispatchable peer tools.

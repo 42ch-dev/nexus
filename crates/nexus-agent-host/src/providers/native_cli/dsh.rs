@@ -4631,11 +4631,7 @@ mod tests {
         let entries = wait_for_observed(
             "both recipes to be spawned",
             // The fixture may not have written anything yet at first poll.
-            || {
-                std::fs::read_to_string(&req_log)
-                    .map(|text| parse_req_log(&text))
-                    .unwrap_or_default()
-            },
+            || std::fs::read_to_string(&req_log).map_or_default(|text| parse_req_log(&text)),
             |entries| spawn_records(entries).len() == 2,
         )
         .await;
@@ -4709,11 +4705,7 @@ mod tests {
         let entries = wait_for_observed(
             "both recipes to be spawned",
             // The fixture may not have written anything yet at first poll.
-            || {
-                std::fs::read_to_string(&req_log)
-                    .map(|text| parse_req_log(&text))
-                    .unwrap_or_default()
-            },
+            || std::fs::read_to_string(&req_log).map_or_default(|text| parse_req_log(&text)),
             |entries| spawn_records(entries).len() == 2,
         )
         .await;

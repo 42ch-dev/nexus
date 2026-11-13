@@ -888,13 +888,12 @@ fn pinned_selection(raw: &str) -> Result<Selection, String> {
             context_ids: value
                 .get("context_ids")
                 .and_then(Value::as_array)
-                .map(|ids| {
+                .map_or_default(|ids| {
                     ids.iter()
                         .filter_map(Value::as_str)
                         .map(str::to_string)
                         .collect()
-                })
-                .unwrap_or_default(),
+                }),
             include_shared: value
                 .get("include_shared")
                 .and_then(Value::as_bool)

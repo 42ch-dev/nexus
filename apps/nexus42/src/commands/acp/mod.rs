@@ -368,17 +368,13 @@ fn print_list_table(registry: &nexus_acp_host::registry::Registry) {
 
     for agent in &registry.agents {
         let source = agent.distribution.source_kind();
-        let desc = agent
-            .description
-            .as_deref()
-            .map(|d| {
-                if d.len() > 60 {
-                    format!("{}...", &d[..57])
-                } else {
-                    d.to_string()
-                }
-            })
-            .unwrap_or_default();
+        let desc = agent.description.as_deref().map_or_default(|d| {
+            if d.len() > 60 {
+                format!("{}...", &d[..57])
+            } else {
+                d.to_string()
+            }
+        });
         println!(
             "{:<id_width$}  {:<version_width$}  {:<9}  {}",
             agent.id,
@@ -405,8 +401,7 @@ fn print_list_json(
     let cached_at = std::fs::read_to_string(&meta)
         .ok()
         .and_then(|data| serde_json::from_str::<nexus_acp_host::registry::CacheMeta>(&data).ok())
-        .map(|m| m.fetched_at)
-        .unwrap_or_default();
+        .map_or_default(|m| m.fetched_at);
 
     let output = serde_json::json!({
         "registry_version": registry.version,

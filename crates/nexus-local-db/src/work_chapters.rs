@@ -819,8 +819,7 @@ pub async fn compute_reconcile_diff(
         }
         let fname = path
             .file_name()
-            .map(|n: &std::ffi::OsStr| n.to_string_lossy().to_string())
-            .unwrap_or_default();
+            .map_or_default(|n: &std::ffi::OsStr| n.to_string_lossy().to_string());
         if fname.starts_with('.') || fname == "README.md" {
             continue;
         }

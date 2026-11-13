@@ -2146,13 +2146,12 @@ static NULL_LEGACY: Value = Value::Null;
 pub fn record_keywords(record: &Value) -> Vec<String> {
     nexus_legacy(record)["keywords"]
         .as_array()
-        .map(|values| {
+        .map_or_default(|values| {
             values
                 .iter()
                 .filter_map(|value| value.as_str().map(str::to_string))
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 /// The world provenance of one Creator record: the legacy column when the row
@@ -2311,12 +2310,11 @@ fn creator_memory_identity(record: &Value) -> (String, String, Vec<String>) {
         .unwrap_or_else(|| "custom".to_string());
     let source_session_ids = legacy["source_session_ids"]
         .as_array()
-        .map(|ids| {
+        .map_or_default(|ids| {
             ids.iter()
                 .filter_map(|id| id.as_str().map(str::to_string))
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     (memory_id, kind, source_session_ids)
 }
 
@@ -3425,8 +3423,7 @@ impl CoreService {
             let rows = body
                 .get_mut("records")
                 .and_then(Value::as_array_mut)
-                .map(std::mem::take)
-                .unwrap_or_default();
+                .map_or_default(std::mem::take);
             for record in rows {
                 match memory
                     .character_fragment_origin(&record, binding_id.as_deref())

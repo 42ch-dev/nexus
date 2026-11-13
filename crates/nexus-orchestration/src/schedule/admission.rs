@@ -95,8 +95,7 @@ impl RunningSet {
     fn ids_for_creator(&self, creator_id: &str) -> Vec<&ScheduleId> {
         self.by_creator
             .get(creator_id)
-            .map(|ids| ids.iter().collect())
-            .unwrap_or_default()
+            .map_or_default(|ids| ids.iter().collect())
     }
 }
 

@@ -912,14 +912,12 @@ impl EngineSharedState {
             }
         };
         let active_terminal_children: Vec<String> =
-            crate::resume_rules::context_data(&parent_context)
-                .map(|data| {
-                    data.iter()
-                        .filter(|(key, _)| key.starts_with("_inner_child_session_"))
-                        .filter_map(|(_, value)| value.as_str().map(str::to_owned))
-                        .collect()
-                })
-                .unwrap_or_default();
+            crate::resume_rules::context_data(&parent_context).map_or_default(|data| {
+                data.iter()
+                    .filter(|(key, _)| key.starts_with("_inner_child_session_"))
+                    .filter_map(|(_, value)| value.as_str().map(str::to_owned))
+                    .collect()
+            });
         let mut checkpoints = Vec::with_capacity(children.len());
         for child in &children {
             if child.status.is_terminal()
@@ -1385,7 +1383,7 @@ impl EngineSharedState {
                     if let Some(store) = &self.workflow_store {
                         let persisted = store.load_children(&SessionId(parent.clone())).await?;
                         for child in persisted {
-                            let child_id = child.session_id.0.clone();
+                            let child_id = child.session_id.0;
                             if child_id != session_id.0 && !ids.contains(&child_id) {
                                 ids.push(child_id.clone());
                                 queue.push_back(child_id);
@@ -2964,8 +2962,7 @@ impl EngineSharedState {
             .await
             .iter()
             .find(|summary| summary.session_id.0 == parent_session_id)
-            .map(|summary| (summary.creator_id.clone(), summary.preset_id.clone()))
-            .unwrap_or_default();
+            .map_or_default(|summary| (summary.creator_id.clone(), summary.preset_id.clone()));
         // Register the reattached child in the in-memory session tracker so
         // `get_status`/`InnerGraphTask` can observe its durable status
         // (terminal children are attached and consumed, never re-stepped —
@@ -3972,8 +3969,7 @@ impl GraphFlowEngine {
                     .map_err(EngineError::GraphFlow)?;
                 let parent_task = parent_session
                     .as_ref()
-                    .map(|session| session.current_task_id.clone())
-                    .unwrap_or_default();
+                    .map_or_default(|session| session.current_task_id.clone());
                 let parent_is_root = parent.0 == session_id.0;
                 let expected_inner = if parent_is_root {
                     inner_graph_entered_by_state(&loaded, &parent_task)

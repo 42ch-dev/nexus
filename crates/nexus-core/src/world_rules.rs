@@ -411,8 +411,7 @@ async fn create_world_rule(
     let rule_id = format!("rul_{}", uuid::Uuid::new_v4().simple());
     let now_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
-        .unwrap_or_default();
+        .map_or_default(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
 
     let row = SpokeRuleRow {
         rule_id: rule_id.clone(),

@@ -268,7 +268,7 @@ pub fn scan_user_capabilities(
         // captured above rides the outcome so the watcher's baseline is
         // scan-time ground truth (see `digest_from_admitted`).
         outcome.admitted_stats.push(AdmittedCapabilityStats {
-            name: descriptor.name.clone(),
+            name: descriptor.name,
             files,
         });
     }

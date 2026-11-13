@@ -43,7 +43,7 @@ pub fn check(
             vec![ConformanceFinding {
                 invariant: InvariantId::SingleTerminal,
                 message,
-                evidence: stream_error.map(|(index, _)| vec![*index]).unwrap_or_default(),
+                evidence: stream_error.map_or_default(|(index, _)| vec![*index]),
             }]
         }
         1 => {

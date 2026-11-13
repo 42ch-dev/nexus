@@ -225,14 +225,13 @@ pub fn memory_document(record: &RetainedRecord) -> MemoryDocument {
             .map_or_else(|| memory_updated_at(record).to_rfc3339(), str::to_string),
         source_session_ids: member("source_session_ids")
             .and_then(Value::as_array)
-            .map(|sessions| {
+            .map_or_default(|sessions| {
                 sessions
                     .iter()
                     .filter_map(Value::as_str)
                     .map(str::to_string)
                     .collect()
-            })
-            .unwrap_or_default(),
+            }),
         body: memory_body(record).to_string(),
     }
 }

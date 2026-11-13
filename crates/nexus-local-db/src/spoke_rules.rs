@@ -139,8 +139,7 @@ pub async fn set_rule_status(
 ) -> Result<bool, LocalDbError> {
     let now_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
-        .unwrap_or_default();
+        .map_or_default(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
     let result = sqlx::query!(
         "UPDATE spoke_rules SET status = ?, updated_at = ? \
          WHERE rule_id = ? AND world_id = ?",
@@ -256,8 +255,7 @@ where
 {
     let now_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
-        .unwrap_or_default();
+        .map_or_default(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
     let result = sqlx::query!(
         "UPDATE spoke_rules SET \
          canonical_name = COALESCE(?, canonical_name), \
