@@ -175,8 +175,7 @@ impl ConflictResponse {
         let conflicts = val
             .get("conflicts")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().map(parse_conflict_detail).collect())
-            .unwrap_or_default();
+            .map_or_default(|arr| arr.iter().map(parse_conflict_detail).collect());
 
         let server_world_revision = val
             .get("server_world_revision")
@@ -278,13 +277,11 @@ fn parse_conflict_detail(val: &Value) -> ConflictDetail {
     let code = val
         .get("code")
         .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string)
-        .unwrap_or_default();
+        .map_or_default(std::string::ToString::to_string);
     let message = val
         .get("message")
         .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string)
-        .unwrap_or_default();
+        .map_or_default(std::string::ToString::to_string);
     let delta_index = val
         .get("delta_index")
         .and_then(serde_json::Value::as_u64)

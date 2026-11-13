@@ -723,8 +723,7 @@ mod tests {
                     .as_ref()
                     .and_then(|d| d.get("foreign_rule_ids"))
                     .and_then(Value::as_array)
-                    .map(|ids| ids.iter().filter_map(Value::as_str).collect())
-                    .unwrap_or_default();
+                    .map_or_default(|ids| ids.iter().filter_map(Value::as_str).collect());
                 foreign_ids.sort_unstable();
                 assert_eq!(
                     foreign_ids,

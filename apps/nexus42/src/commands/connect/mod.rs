@@ -236,10 +236,7 @@ fn render_peer_lines(peers: &[ObservedPeerHost]) -> Vec<String> {
             "{:<40} {:<32} {:<56} {}",
             sanitize_cell(peer.manifest.host_id.as_str()),
             sanitize_cell(&peer.manifest.capabilities.join(", ")),
-            peer.last_peer_id
-                .as_deref()
-                .map(sanitize_cell)
-                .unwrap_or_default(),
+            peer.last_peer_id.as_deref().map_or_default(sanitize_cell),
             normalize_last_seen(&peer.last_seen)
         ));
     }

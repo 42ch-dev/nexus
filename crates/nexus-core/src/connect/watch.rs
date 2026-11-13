@@ -387,7 +387,7 @@ where
                         error = %message,
                         "peer config reload failed; keeping last-good config"
                     );
-                    apply_error_logged = Some(message.clone());
+                    apply_error_logged = Some(message);
                     stats.warnings += 1;
                 }
             }

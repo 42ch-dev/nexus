@@ -1025,8 +1025,7 @@ fn render_character_mind_headings(mind: &CharacterMindInput) -> String {
         .soul
         .as_deref()
         .filter(|s| !s.is_empty())
-        .map(|s| format!("{s}\n"))
-        .unwrap_or_default();
+        .map_or_default(|s| format!("{s}\n"));
     let memory = if mind.memory.is_empty() {
         String::new()
     } else {

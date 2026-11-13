@@ -75,8 +75,7 @@ fn build_launch_strategy(agent: &nexus_acp_host::registry::AgentEntry) -> Launch
             env: npx
                 .env
                 .as_ref()
-                .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-                .unwrap_or_default(),
+                .map_or_default(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
         };
     }
 

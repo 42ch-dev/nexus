@@ -278,7 +278,7 @@ async fn creator_pending_count_matches_the_listed_length_across_pages() {
             .await
             .expect("list pending reviews");
         listed.extend(page.items.iter().map(|item| item.pending_id.clone()));
-        match page.pagination.next_cursor.clone() {
+        match page.pagination.next_cursor {
             Some(next) => cursor = Some(next),
             None => break,
         }

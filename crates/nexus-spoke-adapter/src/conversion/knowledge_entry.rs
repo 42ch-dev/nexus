@@ -123,12 +123,11 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
     let attributes = body
         .and_then(|b| b.attributes.as_ref())
         .and_then(Value::as_object)
-        .map(|obj| {
+        .map_or_default(|obj| {
             obj.iter()
                 .filter_map(|(k, v)| nexus_attr_to_spoke(k, v))
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     let spoke_body = SpokeKnowledgeEntryBody {
         attributes,
         // 0.15.1 wire parity: upstream omits `computable` only when it is
