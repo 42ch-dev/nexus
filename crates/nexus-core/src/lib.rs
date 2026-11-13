@@ -5,6 +5,10 @@ mod actor_knowledge;
 #[cfg(feature = "provider-host")]
 pub mod actor_sessions;
 mod actors;
+// v1.241 P3.5 Task 2: the apply write. Gated with approve — both are the P3 approval/apply
+// surface the daemon route exposes, and neither links without `execution`.
+#[cfg(feature = "execution")]
+mod apply;
 #[cfg(feature = "execution")]
 mod approve;
 mod changes;
@@ -94,6 +98,8 @@ pub use actors::{
     require_actor_holder, ActorPairMode, ActorViewpoint, AdmittedActor, AdmittedActorContext,
     CoreActorAdmission, CHARACTER_WIRE_INVALID_PREFIX,
 };
+#[cfg(feature = "execution")]
+pub use apply::AppliedStrategy;
 pub use chronology::CoreWorkChronology;
 pub use config_lock::with_config_lock;
 pub use content::{resolve_guarded_path, resolve_guarded_path_async, CoreChapterContentQuery};
