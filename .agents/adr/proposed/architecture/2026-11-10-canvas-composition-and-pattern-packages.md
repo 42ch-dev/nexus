@@ -16,7 +16,8 @@ identity, and a candidate can be simulated and approved. What the cutover still 
    document, its content hash and its pins; nothing turns that snapshot into the identity production intake
    reads. Apply is the missing stage, and it is what makes "applied IR" mean something.
 2. **Production intake is still YAML-only.** A controlled dual-read transition has to exist before
-   IR-primary execution can replace the YAML-only mapper, and it has nothing to load until (1) is solved.
+   IR-primary execution can replace the YAML-only mapper. It can begin on imported preset bundles — today's
+   intake — but loading an *applied* IR identity waits on (1).
 3. **New strategy authoring, compatibility export, and retirement of the hand-authored YAML main path**
    need explicit exit criteria so the two grammars do not evolve independently.
 4. **The candidate lifecycle stops at Approve.** Review needs compose, simulation, approval *and*
@@ -28,13 +29,13 @@ identity, and a candidate can be simulated and approved. What the cutover still 
 ### 1–4. Shipped surface — read the spec, not this record
 
 The composition surface, the nest/compose operations, the pattern-package contract and the candidate
-lifecycle **up to Approve** shipped in v1.239 (#515). **Canvas Apply and Execute did not**, and this
-record does not assign them to a phase: P6's fourth acceptance item ("compose and generate candidates pass
-validate, simulate, approve, and apply") and §6's rollback-by-new-Apply both assume a stage that does not
-exist yet. Apply is therefore its own stage — **P3.5 Apply** below — and it precedes P4 in practice: dual-read
-can begin by loading imported preset bundles (the intake that exists today) to prove the IR→Graph mapping,
-but it cannot load an *applied* IR identity until Apply produces one. The plan that takes P4 owns placing
-Apply first.
+lifecycle **up to Approve** shipped in v1.239 (#515). **Canvas Apply and Execute did not**, and P6's fourth
+acceptance item ("compose and generate candidates pass validate, simulate, approve, and apply") together
+with §6's rollback-by-new-Apply both assume a stage that does not exist yet.
+
+Apply is therefore its own stage — **P3.5 Apply** below — and it precedes P4 in practice: dual-read can
+begin by loading imported preset bundles (today's intake) to prove the IR→Graph mapping, but it cannot load
+an *applied* IR identity until Apply produces one. The plan that takes P4 owns placing Apply first.
 
 The shipped contract — manifest fields, the content-hash pin, the four operations and their CAS, the
 approval freeze, the flag and its per-audience default — lives in
@@ -58,7 +59,7 @@ the composition spec. What remains:
 | Phase | Change | Exit criteria |
 | --- | --- | --- |
 | **P3.5 Apply/Execute** | Turn an approved snapshot into the identity production intake reads; Execute continues to run graph-flow | An approved candidate is applied and an existing schedule runs from that applied identity; a rollback installs the previous snapshot through a new Apply |
-| **P4 Dual-read loader** | Engine loads applied IR or a preset bundle | Existing YAML-preset schedules remain unbroken; IR→Graph mapping matches orchestration-engine §8.2 |
+| **P4 Dual-read loader** | Engine loads applied IR or a preset bundle | Existing YAML-preset schedules remain unbroken; IR→Graph mapping matches the IR→Task table in orchestration-engine §8.2.1 |
 | **P5 IR-primary authoring** | Documentation and samples are authored as IR; YAML export remains compatibility output | New repository strategies land as IR |
 | **P6 Retire hand-authored YAML main path** | Hand-edit and YAML patch cease to be the default authoring/intake path; import/export remains | Retirement acceptance below passes; the legacy YAML mapper defaults off in new installs and the import tool remains |
 
