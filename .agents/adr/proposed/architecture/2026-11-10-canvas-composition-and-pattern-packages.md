@@ -22,7 +22,10 @@ The remaining problems are:
 ### 1–4. Shipped surface — read the spec, not this record
 
 The composition surface, the nest/compose operations, the pattern-package contract and the candidate
-lifecycle all shipped in v1.239 (#515). Their current contract — manifest fields, the content-hash pin,
+lifecycle **up to Approve** shipped in v1.239 (#515). **Canvas Apply and Execute did not**, and this
+record does not assign them to a phase: P6's fourth acceptance item ("compose and generate candidates pass
+validate, simulate, approve, and apply") and §6's rollback-by-new-Apply both assume a stage that does not
+exist yet, so whichever plan takes P6 must place Apply first. Nothing in P4 or P5 needs it. Their current contract — manifest fields, the content-hash pin,
 the four operations and their CAS, the approval freeze, the flag and its per-audience default — lives in
 [the composition spec](../../../../docs/specs/orchestration/strategy-composition.md). This record keeps
 only the reasoning for what is still unshipped.
