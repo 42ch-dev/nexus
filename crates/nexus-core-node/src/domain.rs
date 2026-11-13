@@ -308,6 +308,15 @@ impl NativeCore {
         .await
     }
 
+    /// `GET /v1/daemon/patterns` — read-only pattern package registry listing.
+    #[napi]
+    pub async fn list_patterns(&self, principal_handle: String) -> Result<Buffer> {
+        self.json_call(principal_handle, async move |core, principal| {
+            core.list_patterns(&principal).await
+        })
+        .await
+    }
+
     // ── Timeline reads (P0-T3) ──────────────────────────────────────────────
 
     /// `GET /v1/daemon/timeline/overview?cursor=`.

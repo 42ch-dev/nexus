@@ -59,6 +59,7 @@ import type {
   PackExportResponse,
   PackImportRequest,
   PackImportResponse,
+  PatternSummary,
   WorldFindingsListResponse,
   WorldRuleCreateRequest,
   WorldRuleResponse,
@@ -289,6 +290,11 @@ export interface NativeCore {
   restartExecutionOwner(): Promise<unknown>;
   /** The live orchestration capability registry rows (`{ items }`). */
   listCapabilities(): Promise<unknown>;
+  /**
+   * Every pattern package directory under `<home>/.nexus42/patterns`, unavailable
+   * ones included with their reason. Read-only: it never writes or creates the root.
+   */
+  listPatterns(principal: PrincipalHandle): Promise<PatternSummary[]>;
   changes(principal: PrincipalHandle, request: CoreChangesRequest): Promise<CoreChangesResponse>;
   providerCall(request: ProviderCall): Promise<ProviderReply>;
   nextProviderEvents(
@@ -913,6 +919,9 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
     },
     async listCapabilities() {
       return parseJsonBuffer<unknown>(await inner.listCapabilities());
+    },
+    async listPatterns(principal) {
+      return parseJsonBuffer<PatternSummary[]>(await inner.listPatterns(principal));
     },
     async changes(principal, request) {
       return parseJsonBuffer(

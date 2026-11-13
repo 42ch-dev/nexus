@@ -3790,6 +3790,7 @@ dependencies = [
  "nexus-moment-context-assembly",
  "nexus-narrative",
  "nexus-orchestration",
+ "nexus-pattern",
  "nexus-preset",
  "nexus-provider-ports",
  "nexus-spoke-adapter",
