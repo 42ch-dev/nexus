@@ -312,6 +312,7 @@
       "simulationIdentity": "Simulation identity",
       "candidateRevision": "Candidate revision",
       "slotUnbound": "Bind slot {{slot}} on {{pattern}} before approval.",
+      "listingUnreadable": "The pattern listing is unreadable: {{message}}. Unbound required slots are unknown, so approval is not ready.",
       "pinChanged": "Pattern {{id}}@{{version}} changed: recorded {{recorded}}, current {{current}}. Recompose and simulate again before approval."
     },
     "draftTransitionEditor": "Draft transition editor",

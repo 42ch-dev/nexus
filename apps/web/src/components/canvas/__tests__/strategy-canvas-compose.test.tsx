@@ -429,6 +429,30 @@ describe('StrategyCanvas — compose path (flag on)', () => {
       'registry read failed',
     );
   });
+
+  it('refuses to claim completeness at the approve gate when the listing is unreadable', async () => {
+    useHandlers(
+      // The candidate does pin a required slot, but the failed listing leaves
+      // its slots unreadable: the gate must name the failure, not "[nothing] unbound".
+      http.get(CANDIDATE_PATH, () => HttpResponse.json(nestedResponse().document)),
+      http.get(PATTERNS_PATH, () =>
+        HttpResponse.json(
+          { error: { code: 'internal', message: 'registry read failed' } },
+          { status: 500 },
+        ),
+      ),
+      http.post(SIMULATE_PATH, () => HttpResponse.json(simulationTrajectory())),
+    );
+
+    renderCanvas();
+
+    // The disclosure opens on Simulate; the gate names the listing failure.
+    fireEvent.click(await screen.findByRole('button', { name: 'Simulate…' }));
+    expect(await screen.findByTestId('approve-gate')).toHaveTextContent(
+      'The pattern listing is unreadable: registry read failed.',
+    );
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
+  });
 });
 
 describe('StrategyCanvas — flag-off parity (T7)', () => {

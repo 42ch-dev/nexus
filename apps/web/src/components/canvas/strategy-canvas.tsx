@@ -232,17 +232,26 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       });
   }
 
-  /** Approve stays disabled while a required slot is unbound (named per pattern). */
+  /**
+   * Approve stays disabled while a required slot is unbound (named per pattern).
+   * An unreadable listing yields no unbound slots, so the gate names that
+   * failure instead of claiming nothing needs binding.
+   */
   const approveGateReason = composeEnabled
-    ? compose.unboundSlots
-        .map((unbound) =>
-          i18n.t('strategy.approve.slotUnbound', {
-            ns: 'canvas',
-            slot: unbound.slots.join(', '),
-            pattern: unbound.patternId,
-          }),
-        )
-        .join(' ')
+    ? compose.patternsQuery.isError
+      ? i18n.t('strategy.approve.listingUnreadable', {
+          ns: 'canvas',
+          message: compose.patternsQuery.error.message,
+        })
+      : compose.unboundSlots
+          .map((unbound) =>
+            i18n.t('strategy.approve.slotUnbound', {
+              ns: 'canvas',
+              slot: unbound.slots.join(', '),
+              pattern: unbound.patternId,
+            }),
+          )
+          .join(' ')
     : null;
 
   /** Nest attaches at the selected node, else the candidate entry. */
