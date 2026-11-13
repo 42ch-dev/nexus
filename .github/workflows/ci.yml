@@ -219,8 +219,12 @@ jobs:
         with:
           filter: blob:none
       - uses: ./.github/actions/free-disk-space
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # pinned
         with:
+          # Pinned: clippy 1.100 denies ~84 pre-existing sites (map_or_default,
+          # redundant_clone). Moving the lint gate is its own change, not a
+          # side effect of a feature PR.
+          toolchain: "1.99.1"
           components: rustfmt, clippy
           # nexus-wasm-host's build.rs compiles embedded modules from source
           # (see crates/nexus-wasm-host/build.rs).
@@ -311,8 +315,10 @@ jobs:
         with:
           filter: blob:none
       - uses: ./.github/actions/free-disk-space
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # pinned
         with:
+          # Same pin as the workspace clippy gate.
+          toolchain: "1.99.1"
           components: clippy
           # nexus-wasm-host is a nexus42 dev-dependency (--all-targets pulls
           # it in); its build.rs compiles embedded modules from source
