@@ -174,6 +174,16 @@ import type {
   RecordCharacterTomResponse,
   ReviewCharacterMemoryRequest,
   ReviewCharacterMemoryResponse,
+  // ── Actor family: actor knowledge (`schemas/daemon-api/actor-knowledge/*`) ──
+  AddKnowledgeEntryRequest,
+  AddKnowledgeEntryResponse,
+  DeleteKnowledgeEntryQuery,
+  KnowledgeEntryDetail,
+  ListCharacterKnowledgeQuery,
+  ListCharacterKnowledgeResponse,
+  UpdateKnowledgeEntryRequest,
+  ViewRequest,
+  ViewResponse,
   // ── P5-T1 World/Work/content/knowledge family DTOs (`schemas/core/*` +
   // `schemas/daemon-api/*` producers) ────────────────────────────────────────
   NarrativeWorldsListResponse,
@@ -504,6 +514,53 @@ export class BrowserClient implements NexusClient {
       `/v1/daemon/characters/${encodeURIComponent(characterId)}/tom`,
       request,
     );
+  }
+
+  // ── Actor knowledge (plan v240; I-000128) ──────────────────────────────────
+  // Character-scoped knowledge lives under the character path; view and create
+  // live under the admitted-principal path. The split is the point: the
+  // character path has no create.
+  listCharacterKnowledge(
+    characterId: string,
+    query?: ListCharacterKnowledgeQuery,
+  ): Promise<ListCharacterKnowledgeResponse> {
+    return this.get<ListCharacterKnowledgeResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/knowledge`,
+      query,
+    );
+  }
+  getCharacterKnowledge(characterId: string, entryId: string): Promise<KnowledgeEntryDetail> {
+    return this.get<KnowledgeEntryDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/knowledge/${encodeURIComponent(entryId)}`,
+    );
+  }
+  patchCharacterKnowledge(
+    characterId: string,
+    entryId: string,
+    request: UpdateKnowledgeEntryRequest,
+  ): Promise<KnowledgeEntryDetail> {
+    return this.patch<KnowledgeEntryDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/knowledge/${encodeURIComponent(entryId)}`,
+      request,
+    );
+  }
+  deleteCharacterKnowledge(
+    characterId: string,
+    entryId: string,
+    query: DeleteKnowledgeEntryQuery,
+  ): Promise<void> {
+    return this.delete<void>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/knowledge/${encodeURIComponent(entryId)}`,
+      query,
+    );
+  }
+  viewActorKnowledge(request: ViewRequest): Promise<ViewResponse> {
+    return this.post<ViewResponse>('/v1/daemon/actor-knowledge/view', request);
+  }
+  createActorKnowledgeEntry(
+    request: AddKnowledgeEntryRequest,
+  ): Promise<AddKnowledgeEntryResponse> {
+    return this.post<AddKnowledgeEntryResponse>('/v1/daemon/actor-knowledge/entries', request);
   }
 
   // ── Workspaces (plan v1219 T3; create added by v1220 T3) ──────────────────

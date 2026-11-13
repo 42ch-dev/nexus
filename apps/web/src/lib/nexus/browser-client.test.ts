@@ -1694,3 +1694,177 @@ describe('BrowserClient per-character memory family (v240 actor web surfaces, I-
     expect(res.revision).toBe(5);
   });
 });
+
+describe('BrowserClient actor-knowledge family (v240 actor web surfaces, I-000128)', () => {
+  const characterId = 'chr_0123456789abcdef0123456789abcdef';
+  const bindingId = 'awb_0123456789abcdef0123456789abcdef';
+  const worldId = 'wld_0123456789abcdef0123456789abcdef';
+  const entryId = 'kne_0123456789abcdef0123456789abcdef';
+  const characterPath = `/v1/daemon/characters/${characterId}`;
+  const knowledgePath = `${characterPath}/knowledge`;
+
+  const item = {
+    entry_id: entryId,
+    owner: { kind: 'character', id: characterId },
+    holder_entry_id: 'hld_0123456789abcdef0123456789abcdef',
+    disclosure: 'owner-private',
+    block_type: 'character',
+    canonical_name: 'Mira',
+    status: 'confirmed',
+    revision: 3,
+    created_at: '2026-11-03T00:00:00Z',
+  };
+
+  it('lists character-scoped knowledge from GET /characters/:id/knowledge with cursor params', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get(knowledgePath, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({
+          items: [item],
+          pagination: { limit: 25, has_more: true, next_cursor: 'cur-2' },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listCharacterKnowledge(characterId, {
+      limit: 25,
+      cursor: 'cur-1',
+    });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(knowledgePath);
+    expect(url.searchParams.get('limit')).toBe('25');
+    expect(url.searchParams.get('cursor')).toBe('cur-1');
+    expect(res.items[0]!.entry_id).toBe(entryId);
+    expect(res.items[0]!.owner).toEqual({ kind: 'character', id: characterId });
+    expect(res.pagination.next_cursor).toBe('cur-2');
+  });
+
+  it('reads one character-scoped entry from GET /characters/:id/knowledge/:entry_id', async () => {
+    let seenMethod = '';
+    useHandlers(
+      http.get(`${knowledgePath}/${entryId}`, ({ request }) => {
+        seenMethod = request.method;
+        return HttpResponse.json({ item, summary: 'the harbor pilot' });
+      }),
+    );
+
+    const res = await new BrowserClient().getCharacterKnowledge(characterId, entryId);
+
+    expect(seenMethod).toBe('GET');
+    expect(res.item.entry_id).toBe(entryId);
+    expect(res.summary).toBe('the harbor pilot');
+  });
+
+  it('patches a character-scoped entry with canonical_name, summary and audience under CAS', async () => {
+    let sent: unknown;
+    let seenMethod = '';
+    useHandlers(
+      http.patch(`${knowledgePath}/${entryId}`, async ({ request }) => {
+        seenMethod = request.method;
+        sent = await request.json();
+        return HttpResponse.json({ item: { ...item, revision: 4 }, summary: null });
+      }),
+    );
+
+    const res = await new BrowserClient().patchCharacterKnowledge(characterId, entryId, {
+      expected_revision: 3,
+      canonical_name: 'Mira Vell',
+      summary: null,
+      audience: { kind: 'shared' },
+    });
+
+    expect(seenMethod).toBe('PATCH');
+    expect(sent).toEqual({
+      expected_revision: 3,
+      canonical_name: 'Mira Vell',
+      summary: null,
+      audience: { kind: 'shared' },
+    });
+    expect(res.item.revision).toBe(4);
+    expect(res.summary).toBeNull();
+  });
+
+  it('deletes a character-scoped entry with expected_revision as a query member', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.delete(`${knowledgePath}/${entryId}`, ({ request }) => {
+        seenUrl = request.url;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    await expect(
+      new BrowserClient().deleteCharacterKnowledge(characterId, entryId, { expected_revision: 4 }),
+    ).resolves.toBeUndefined();
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(`${knowledgePath}/${entryId}`);
+    expect(url.searchParams.get('expected_revision')).toBe('4');
+  });
+
+  it('reads the admitted-principal view from POST /actor-knowledge/view', async () => {
+    let sent: unknown;
+    let seenUrl = '';
+    useHandlers(
+      http.post('/v1/daemon/actor-knowledge/view', async ({ request }) => {
+        seenUrl = request.url;
+        sent = await request.json();
+        return HttpResponse.json({
+          items: [item],
+          pagination: { limit: 10, has_more: false },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().viewActorKnowledge({
+      actor_ref: { actor_kind: 'character', character_id: characterId },
+      world_id: worldId,
+      binding_id: bindingId,
+      limit: 10,
+    });
+
+    expect(new URL(seenUrl).pathname).toBe('/v1/daemon/actor-knowledge/view');
+    // Scope is the body's admitted actor ref; the path carries no character id.
+    expect(sent).toEqual({
+      actor_ref: { actor_kind: 'character', character_id: characterId },
+      world_id: worldId,
+      binding_id: bindingId,
+      limit: 10,
+    });
+    expect(res.items[0]!.entry_id).toBe(entryId);
+    expect(res.pagination.has_more).toBe(false);
+  });
+
+  it('creates an entry through the admitted-principal route, not the character path', async () => {
+    let sent: unknown;
+    let seenUrl = '';
+    useHandlers(
+      http.post('/v1/daemon/actor-knowledge/entries', async ({ request }) => {
+        seenUrl = request.url;
+        sent = await request.json();
+        return HttpResponse.json({ item }, { status: 201 });
+      }),
+    );
+
+    const res = await new BrowserClient().createActorKnowledgeEntry({
+      owner_kind: 'character',
+      character_id: characterId,
+      block_type: 'character',
+      canonical_name: 'Mira',
+      audience: { kind: 'author-only' },
+    });
+
+    // Creation addresses the principal, never `…/characters/{id}/knowledge`.
+    expect(new URL(seenUrl).pathname).toBe('/v1/daemon/actor-knowledge/entries');
+    expect(sent).toEqual({
+      owner_kind: 'character',
+      character_id: characterId,
+      block_type: 'character',
+      canonical_name: 'Mira',
+      audience: { kind: 'author-only' },
+    });
+    expect(res.item.entry_id).toBe(entryId);
+  });
+});

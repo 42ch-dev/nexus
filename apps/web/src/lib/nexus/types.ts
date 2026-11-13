@@ -199,6 +199,16 @@ import type {
   RecordCharacterTomResponse,
   ReviewCharacterMemoryRequest,
   ReviewCharacterMemoryResponse,
+  // Actor family — actor knowledge (plan v240; I-000128; `schemas/daemon-api/actor-knowledge/…`).
+  AddKnowledgeEntryRequest,
+  AddKnowledgeEntryResponse,
+  DeleteKnowledgeEntryQuery,
+  KnowledgeEntryDetail,
+  ListCharacterKnowledgeQuery,
+  ListCharacterKnowledgeResponse,
+  UpdateKnowledgeEntryRequest,
+  ViewRequest,
+  ViewResponse,
   CoreSliceClient,
 } from '@42ch/nexus-contracts';
 
@@ -536,6 +546,53 @@ export interface NexusClient extends CoreSliceClient {
     characterId: string,
     request: RecordCharacterTomRequest,
   ): Promise<RecordCharacterTomResponse>;
+
+  // ── Actor knowledge (plan v240; I-000128) ──────────────────────────────────
+  // Knowledge is addressed two ways and the method names say which: by
+  // character (list/get/patch/delete under `…/characters/{character_id}/knowledge`)
+  // and by admitted principal (`/v1/daemon/actor-knowledge/{view,entries}`).
+  // Creation exists only on the admitted-principal route — the character path
+  // has no create.
+  /** `GET /v1/daemon/characters/{character_id}/knowledge` — character-scoped cursor list. */
+  listCharacterKnowledge(
+    characterId: string,
+    query?: ListCharacterKnowledgeQuery,
+  ): Promise<ListCharacterKnowledgeResponse>;
+  /** `GET /v1/daemon/characters/{character_id}/knowledge/{entry_id}` — character-scoped read. */
+  getCharacterKnowledge(characterId: string, entryId: string): Promise<KnowledgeEntryDetail>;
+  /**
+   * `PATCH /v1/daemon/characters/{character_id}/knowledge/{entry_id}` —
+   * character-scoped update of `canonical_name`/`summary`/`audience` under an
+   * `expected_revision` CAS.
+   */
+  patchCharacterKnowledge(
+    characterId: string,
+    entryId: string,
+    request: UpdateKnowledgeEntryRequest,
+  ): Promise<KnowledgeEntryDetail>;
+  /**
+   * `DELETE /v1/daemon/characters/{character_id}/knowledge/{entry_id}` — 204.
+   * `expected_revision` travels as a query member, not a body.
+   */
+  deleteCharacterKnowledge(
+    characterId: string,
+    entryId: string,
+    query: DeleteKnowledgeEntryQuery,
+  ): Promise<void>;
+  /**
+   * `POST /v1/daemon/actor-knowledge/view` — admitted-principal page. The read
+   * policy is server-chosen from the admitted context; the payload carries no
+   * policy, holder or viewpoint.
+   */
+  viewActorKnowledge(request: ViewRequest): Promise<ViewResponse>;
+  /**
+   * `POST /v1/daemon/actor-knowledge/entries` — 201. Admitted-principal
+   * creation is the only create: the owner is resolved from stored rows and
+   * `audience` is the sole governance input.
+   */
+  createActorKnowledgeEntry(
+    request: AddKnowledgeEntryRequest,
+  ): Promise<AddKnowledgeEntryResponse>;
 
   // ── Workspaces (plan v1219 T3 + v1220 T3 create) ──────────────────────────
   /** `GET /v1/daemon/workspaces` — cursor list of the creator's workspaces. */
