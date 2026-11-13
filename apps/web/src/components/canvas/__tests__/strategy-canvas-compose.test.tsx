@@ -410,6 +410,25 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     expect(screen.getByTestId('compose-conflict')).toBeInTheDocument();
     expect(candidateReads).toBe(2);
   });
+
+  it('names a failed pattern listing instead of presenting it as an empty registry', async () => {
+    useHandlers(
+      http.get(CANDIDATE_PATH, () => HttpResponse.json(SEED)),
+      http.get(PATTERNS_PATH, () =>
+        HttpResponse.json(
+          { error: { code: 'internal', message: 'registry read failed' } },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    renderCanvas();
+    fireEvent.click(await screen.findByTestId('strategy-add-pattern'));
+
+    expect(await screen.findByTestId('pattern-picker-error')).toHaveTextContent(
+      'registry read failed',
+    );
+  });
 });
 
 describe('StrategyCanvas — flag-off parity (T7)', () => {

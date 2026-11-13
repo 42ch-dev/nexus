@@ -468,6 +468,63 @@ async fn a_pin_whose_package_is_absent_is_refused_naming_the_pin() {
     setup.core.close().await.unwrap();
 }
 
+/// A package the registry can no longer resolve still reports the slots its manifest declared, so
+/// the unbound-slot check could answer first and tell the user to bind a slot of a package that
+/// cannot be loaded. The pin is the root cause and must be the refusal.
+#[tokio::test]
+async fn an_unresolvable_pin_refuses_before_the_slots_it_declares() {
+    let setup = setup().await;
+    write_declaring_package(
+        &setup.home,
+        "declared-step",
+        "[[slots]]\nname = \"topic\"\nkind = \"string\"\nrequired = true\n",
+        &slot_fragment("declared-step", "declared bytes"),
+    );
+    let composed = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            0,
+            ComposeOp::Nest(NestOp {
+                nest_id: "declared-nest".to_owned(),
+                parent_node: "declared-slot".to_owned(),
+                attach_to: None,
+                package: package("declared-step"),
+                expansion: WorkflowNestBindingExpansion::ExpandInCandidate,
+            }),
+        )
+        .await
+        .unwrap();
+    let revision = composed.candidate.revision;
+    let trajectory = simulate(&setup.core, &setup.principal, &composed.candidate.document).await;
+
+    // The manifest still parses, so the package keeps its declared required slot; the body is gone,
+    // so the pin it recorded cannot be confirmed.
+    std::fs::remove_file(
+        setup
+            .home
+            .join("patterns")
+            .join("declared-step")
+            .join("workflow.ir.json"),
+    )
+    .unwrap();
+
+    let error = setup
+        .core
+        .approve_strategy(&setup.principal, STRATEGY, revision, Some(trajectory))
+        .await
+        .unwrap_err();
+
+    let details = refusal(&error);
+    assert_eq!(details["reason"], "pin_unavailable");
+    assert_eq!(details["nest_id"].as_str(), Some("declared-nest"));
+    assert_eq!(details["package_id"].as_str(), Some("declared-step"));
+    assert_eq!(details["package_version"].as_str(), Some("1.0.0"));
+    assert_eq!(snapshot_count(setup.core.pool()).await, 0);
+    setup.core.close().await.unwrap();
+}
+
 #[tokio::test]
 async fn a_repeat_approve_of_the_same_content_is_the_conflict_and_writes_nothing() {
     let setup = setup().await;

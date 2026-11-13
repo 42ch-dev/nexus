@@ -8,7 +8,7 @@
 //! depth reachable.
 
 use crate::{
-    WorkflowDocument, WorkflowNestBinding, WorkflowNestChildKind, WorkflowNode,
+    WorkflowDocument, WorkflowNestBinding, WorkflowNestChild, WorkflowNestChildKind, WorkflowNode,
     WorkflowNodeEffectClass, WorkflowNodeKind,
 };
 use std::collections::{HashMap, HashSet};
@@ -52,6 +52,25 @@ impl PatternBody<'_> {
 /// One document or pattern body is addressed by this label in the nest walk.
 fn pattern_label(registry_id: &str, version: &str) -> String {
     format!("{registry_id}@{version}")
+}
+
+/// The exact `{id, version}` a pattern nest child pins.
+///
+/// Both halves must be present and non-empty: an empty half names no package, so such a child is a
+/// malformed pin rather than a pin whose package is missing, and [`Violation::IncompleteNestChild`]
+/// refuses it. Every walk that reads a pin asks this one function — structural validation, the nest
+/// walk, and compose's resolution — so none of them counts a half-pin the others skip.
+#[must_use]
+pub fn pattern_pin(child: &WorkflowNestChild) -> Option<(&str, &str)> {
+    if child.kind != WorkflowNestChildKind::Pattern {
+        return None;
+    }
+    let id = child.registry_id.as_deref().filter(|id| !id.is_empty())?;
+    let version = child
+        .version
+        .as_deref()
+        .filter(|version| !version.is_empty())?;
+    Some((id, version))
 }
 
 /// A structural violation. Every violation found is returned, never only the first.
@@ -182,8 +201,9 @@ impl std::error::Error for Violation {}
 /// Validate a document set against the Q2 structural rules.
 ///
 /// `patterns` carries the pattern bodies the caller resolved; a pin with no entry there is a leaf,
-/// so this never requires a registry. A fragment body is held to its own node-graph checks by
-/// [`validate_fragment`]; its nest bindings are judged by the document walk that nests it.
+/// so this never requires a registry. A resolved fragment body gets [`validate_fragment`]'s four
+/// node-graph checks and nothing more: its nests join the nest walk below for cycles and depth, and
+/// [`validate_nests`] runs on documents only.
 ///
 /// # Errors
 ///
@@ -244,14 +264,15 @@ fn validate_document(document: &WorkflowDocument, violations: &mut Vec<Violation
     validate_nests(document, &nodes, violations);
 }
 
-/// A resolved pattern fragment, held to the checks its own nodes, edges and `depends_on` entries
-/// answer: duplicate node ids, edge endpoints and dependencies that name no node, and reference
-/// cycles.
+/// A resolved pattern fragment, held to the four checks its own graph answers and no others:
+/// duplicate node ids, edge endpoints and `depends_on` entries that name no node, and node cycles.
 ///
-/// The nest-context rules in [`validate_nests`] are deliberately skipped. A fragment is a body, not
-/// a document: its nest bindings address the fragment's own nodes and are judged by the shared nest
-/// walk of the document that nests it, so running those rules here would report one body twice and
-/// refuse fragments for defects the composing document is the right place to name.
+/// [`validate_nests`]' nest-context rules (stable unique nest ids, a composable parent, a child that
+/// pins what its kind requires) run on documents only, deliberately. A fragment is a body, not a
+/// document: its nests name the body's own nodes, and the walks that read them answer what applies
+/// here — the nest walk below judges cycles and depth, and compose's flatten re-issues every nest id
+/// and refuses a nest whose parent the body does not hold. The remaining rules say how a nest sits in
+/// a level, so they are answered on the level each nest lands in, never on the body.
 fn validate_fragment(fragment: &WorkflowDocument, violations: &mut Vec<Violation>) {
     validate_node_graph(fragment, violations);
 }
@@ -360,9 +381,7 @@ fn validate_nests(
         }
 
         let child_pinned = match nest.child.kind {
-            WorkflowNestChildKind::Pattern => {
-                nest.child.registry_id.is_some() && nest.child.version.is_some()
-            }
+            WorkflowNestChildKind::Pattern => pattern_pin(&nest.child).is_some(),
             WorkflowNestChildKind::Workflow => nest.child.workflow_id.is_some(),
         };
         if !child_pinned {
@@ -439,13 +458,13 @@ impl<'a> NestGraph<'a> {
 }
 
 /// The label of a nest's child. An unresolved child keeps its label as a leaf so the depth walk
-/// still counts the binding as one unexpanded level.
+/// still counts the binding as one unexpanded level; a malformed pin has no label at all.
 fn nest_child_label(nest: &WorkflowNestBinding) -> Option<String> {
     match nest.child.kind {
-        WorkflowNestChildKind::Pattern => Some(pattern_label(
-            nest.child.registry_id.as_deref()?,
-            nest.child.version.as_deref()?,
-        )),
+        WorkflowNestChildKind::Pattern => {
+            let (registry_id, version) = pattern_pin(&nest.child)?;
+            Some(pattern_label(registry_id, version))
+        }
         WorkflowNestChildKind::Workflow => nest.child.workflow_id.clone(),
     }
 }
@@ -758,6 +777,34 @@ mod tests {
                 Violation::IncompleteNestChild {
                     document: "root".to_owned(),
                     nest: "n3".to_owned(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_a_pattern_pin_with_an_empty_half() {
+        // An empty half names no package: the child omits its pin instead of pinning one, so a
+        // document carrying it never reaches the walks that only follow resolved pins.
+        let doc = slot_document(
+            "root",
+            &json!([
+                nest("n1", "slot", &pattern("", "1.0.0")),
+                nest("n2", "slot", &pattern("story.arc", "")),
+            ]),
+        );
+
+        let violations = validate(&[&doc], &[]).unwrap_err();
+        assert_eq!(
+            violations,
+            vec![
+                Violation::IncompleteNestChild {
+                    document: "root".to_owned(),
+                    nest: "n1".to_owned(),
+                },
+                Violation::IncompleteNestChild {
+                    document: "root".to_owned(),
+                    nest: "n2".to_owned(),
                 },
             ]
         );

@@ -38,8 +38,8 @@ use nexus_contracts::generated::daemon_api::patterns::pattern_manifest::{
 };
 use nexus_pattern::PatternPackage;
 use nexus_workflow_ir::{
-    document_summary, validate, PatternBody, PatternBodyKind, Violation, WorkflowDocument,
-    IR_VERSION,
+    document_summary, pattern_pin, validate, PatternBody, PatternBodyKind, Violation,
+    WorkflowDocument, IR_VERSION,
 };
 use serde_json::Value;
 
@@ -1630,18 +1630,15 @@ fn resolve<'a>(
 
 /// The exact pattern pin a nest child carries, when it is a resolved pattern child.
 ///
-/// A pin is resolved only with both halves of `{id, version}`: an empty or absent half names no
-/// package, so treating it as resolved would mislabel what the nest points at.
+/// The definition is the structural validator's [`pattern_pin`], not a second copy: a pin is
+/// resolved only with both halves of `{id, version}` non-empty, and validation refuses a child that
+/// carries an empty half, so every pin walk here reads exactly the pins the validator accepted.
 fn pinned_pattern(child: &WorkflowNestChild) -> Option<PatternPackageRef> {
-    if child.kind != WorkflowNestChildKind::Pattern {
-        return None;
-    }
-    let id = child.registry_id.clone().filter(|id| !id.is_empty())?;
-    let version = child
-        .version
-        .clone()
-        .filter(|version| !version.is_empty())?;
-    Some(PatternPackageRef { id, version })
+    let (id, version) = pattern_pin(child)?;
+    Some(PatternPackageRef {
+        id: id.to_owned(),
+        version: version.to_owned(),
+    })
 }
 
 /// A nest child's label, for a refusal that must name what the nest points at.

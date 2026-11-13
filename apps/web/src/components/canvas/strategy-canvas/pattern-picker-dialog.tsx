@@ -14,6 +14,8 @@ export interface PatternPickerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   patterns: ListPatternsResponse['items'];
+  /** Why the listing could not be read; the picker says so instead of "no patterns". */
+  error?: string | null;
   attachNodeId: string;
   isComposing: boolean;
   onNest: (target: { attachNodeId: string; package: { id: string; version: string } }) => Promise<void>;
@@ -23,6 +25,7 @@ export function PatternPickerDialog({
   open,
   onOpenChange,
   patterns,
+  error,
   attachNodeId,
   isComposing,
   onNest,
@@ -64,7 +67,11 @@ export function PatternPickerDialog({
               </button>
             </li>
           ))}
-          {available.length === 0 ? (
+          {error ? (
+            <li data-testid="pattern-picker-error" className="text-copy-13 text-red-700">
+              {error}
+            </li>
+          ) : available.length === 0 ? (
             <li className="text-copy-13 text-gray-700">{t('strategy.picker.empty')}</li>
           ) : null}
         </ul>

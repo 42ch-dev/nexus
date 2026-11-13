@@ -143,6 +143,62 @@ describe('useStrategyCompose', () => {
     ]);
   });
 
+  it('caps the listing walk and reports the unfinished walk as a query error', async () => {
+    let pages = 0;
+    useHandlers(
+      http.get(PATTERNS_PATH, () => {
+        pages += 1;
+        return HttpResponse.json({
+          items: PATTERN_ITEMS,
+          // One page more than the cap allows: the walk must refuse, not return a short list.
+          pagination: { limit: 1, has_more: pages < 25, next_cursor: `page-${pages}` },
+        });
+      }),
+      http.get(CANDIDATE_PATH, () => HttpResponse.json(SEED)),
+    );
+
+    const { result } = renderCompose();
+
+    await waitFor(() => expect(result.current.patternsQuery.isError).toBe(true));
+    expect(result.current.patternsQuery.error?.message).toContain('20 pages');
+    expect(pages).toBe(20);
+  });
+
+  it('resolves a pinned slot from the available duplicate, not the first listing entry', async () => {
+    // Two directories declare one pin: the first is unreadable for the reader, so it declares no
+    // slots. Reading its empty declaration would hide the required slot the pin really has.
+    const brokenDuplicate = {
+      ...PATTERN_ITEMS[0],
+      package_dir: 'prompt-step-broken',
+      description: null,
+      content_hash: null,
+      slots: [],
+      available: false,
+      reason: 'manifest parsed but the fragment is missing',
+    };
+    useHandlers(
+      http.get(PATTERNS_PATH, () =>
+        HttpResponse.json({
+          items: [brokenDuplicate, PATTERN_ITEMS[0]],
+          pagination: { limit: 100, has_more: false },
+        }),
+      ),
+      http.get(CANDIDATE_PATH, () => HttpResponse.json(nestedDocument(0))),
+    );
+
+    const { result } = renderCompose();
+
+    await waitFor(() => expect(result.current.patternsQuery.data?.items).toHaveLength(2));
+    expect(result.current.unboundSlots).toEqual([
+      {
+        slotNodeId: 'prompt-step-slot',
+        patternId: 'prompt-step',
+        patternVersion: '1.0.0',
+        slots: ['topic'],
+      },
+    ]);
+  });
+
   it('nest sends the last-read revision and the interaction wires the connecting edge (T3b)', async () => {
     seedHandlers();
     const bodies: unknown[] = [];

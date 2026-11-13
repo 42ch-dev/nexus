@@ -388,15 +388,12 @@ impl CoreService {
             }
             .into_error());
         }
-        if let Some(unbound) = document_unbound_slots(&current.document, &packages)
-            .into_iter()
-            .next()
-        {
-            return Err(ApproveRefusal::from_diagnostic(unbound).into_error());
-        }
-        // The walk reports every pin it cannot confirm, through the one `verify_pin` comparison:
-        // bytes that moved, and a pin whose package is absent. An approval freezes the whole
-        // document, so the first such finding refuses it.
+        // The pins refuse before the slots. The walk reports every pin it cannot confirm through
+        // the one `verify_pin` comparison — bytes that moved, and a pin whose package is absent —
+        // and an approval freezes the whole document, so the first such finding refuses it. It goes
+        // first because an unavailable package still reports the slots its manifest declared: the
+        // slot check would then name a binding of a package the registry cannot resolve and hide
+        // the root cause behind an instruction nothing can satisfy.
         if let Some(unconfirmed) = diagnostics.into_iter().find(|finding| {
             matches!(
                 finding,
@@ -404,6 +401,12 @@ impl CoreService {
             )
         }) {
             return Err(ApproveRefusal::from_diagnostic(unconfirmed).into_error());
+        }
+        if let Some(unbound) = document_unbound_slots(&current.document, &packages)
+            .into_iter()
+            .next()
+        {
+            return Err(ApproveRefusal::from_diagnostic(unbound).into_error());
         }
 
         let recomputed = simulate_document(

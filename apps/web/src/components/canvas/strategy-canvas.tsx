@@ -475,6 +475,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         open={patternPickerOpen}
         onOpenChange={setPatternPickerOpen}
         patterns={compose.patternsQuery.data?.items ?? []}
+        error={compose.patternsQuery.isError ? compose.patternsQuery.error.message : null}
         attachNodeId={nestAttachNodeId ?? compose.workingDocument?.entry ?? presetId}
         isComposing={compose.isComposing}
         onNest={compose.nestPattern}

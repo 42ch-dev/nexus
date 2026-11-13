@@ -96,23 +96,36 @@ function freshId(base: string, taken: (id: string) => boolean): string {
 }
 
 /**
+ * How many listing pages the walk reads before giving up.
+ *
+ * shortcut: 20 pages is the whole registry for any plausible package count; raise it
+ * if a real registry outgrows 20 listing pages.
+ */
+const MAX_PATTERN_PAGES = 20;
+
+/**
  * The listing is cursor-paged, and both compose gates (the picker and the
  * unbound-slot check) need every package, so follow `next_cursor` until the
- * service says there is no more.
+ * service says there is no more. A walk that cannot finish — the cap or a failed
+ * page — is a query error the surface shows, never a short list it presents as
+ * the whole registry: a missing package reads as "no such pattern" at both gates.
  */
 async function listAllPatterns(client: NexusClient): Promise<ListPatternsResponse> {
   const items: ListPatternsResponse['items'] = [];
   let cursor: string | undefined;
-  for (;;) {
-    const page = await client.listPatterns(cursor === undefined ? undefined : { cursor });
-    items.push(...page.items);
-    const next = page.pagination.next_cursor;
+  for (let page = 0; page < MAX_PATTERN_PAGES; page += 1) {
+    const response = await client.listPatterns(cursor === undefined ? undefined : { cursor });
+    items.push(...response.items);
+    const next = response.pagination.next_cursor;
     // A repeated cursor cannot make progress; stop instead of paging forever.
-    if (!page.pagination.has_more || next === undefined || next === cursor) {
-      return { items, pagination: { limit: page.pagination.limit, has_more: false } };
+    if (!response.pagination.has_more || next === undefined || next === cursor) {
+      return { items, pagination: { limit: response.pagination.limit, has_more: false } };
     }
     cursor = next;
   }
+  throw new Error(
+    `The pattern listing did not finish within ${MAX_PATTERN_PAGES} pages.`,
+  );
 }
 
 export function useStrategyCompose(presetId: string, enabled: boolean) {
@@ -327,9 +340,13 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
     const result: UnboundSlot[] = [];
     for (const node of workingDocument.nodes) {
       if (node.kind !== 'pattern_slot') continue;
-      const summary = summaries.find(
-        (entry) => entry.id === node.pattern?.registry_id && entry.version === node.pattern?.version,
-      );
+      const pinned = (entry: ListPatternsResponse['items'][number]) =>
+        entry.id === node.pattern?.registry_id && entry.version === node.pattern?.version;
+      // Two directories can declare one pin. The available one wins whatever the listing order,
+      // mirroring the daemon's package index, so a broken duplicate cannot hide a readable package.
+      const summary =
+        summaries.find((entry) => entry.available && pinned(entry)) ??
+        summaries.find((entry) => pinned(entry));
       const unbound = (summary?.slots ?? [])
         .filter((slot) => slot.required && node.bind?.[slot.name] === undefined)
         .map((slot) => slot.name);

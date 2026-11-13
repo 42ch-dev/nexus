@@ -16,4 +16,6 @@ pub mod effect;
 pub mod structure;
 pub use canonical::{content_hash, CanonicalHashError};
 pub use effect::{document_summary, effect_summary, join};
-pub use structure::{validate, PatternBody, PatternBodyKind, Violation, MAX_NEST_DEPTH};
+pub use structure::{
+    pattern_pin, validate, PatternBody, PatternBodyKind, Violation, MAX_NEST_DEPTH,
+};
