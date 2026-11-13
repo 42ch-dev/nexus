@@ -6,6 +6,8 @@
 
 export type { ApprovedStrategySnapshot } from './approved-strategy-snapshot';
 export type { SimulationTrajectory } from './simulation-trajectory';
+export type { StrategyAppliedStatus } from './strategy-applied-status';
+export type { StrategyApplyRequest } from './strategy-apply-request';
 export type { StrategyApproveRequest } from './strategy-approve-request';
 export type { StrategyComposeRequest } from './strategy-compose-request';
 export type { StrategyComposeResponse } from './strategy-compose-response';

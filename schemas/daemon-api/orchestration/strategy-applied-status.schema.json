@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/strategy-applied-status.schema.json",
+  "schema_version": 1,
+  "title": "Nexus StrategyAppliedStatus",
+  "description": "Response of GET /v1/daemon/strategies/{strategy_id}/applied, read by both the Canvas and the intake. `current_apply` is the append-only row with no successor — the identity the schedule runs — and is null when the strategy has never been applied. `newest_approval` is the highest `candidate_revision` approval of the same strategy and is null when nothing was approved. A client compares the two `approval_id` values to answer 'is the newest approval the running one'; it never derives newness from `applied_at` or `approved_at`.",
+  "type": "object",
+  "required": ["current_apply", "newest_approval"],
+  "additionalProperties": false,
+  "properties": {
+    "current_apply": {
+      "oneOf": [
+        { "$ref": "#/definitions/AppliedStrategy" },
+        { "type": "null" }
+      ],
+      "description": "The strategy's running identity, or null when no apply exists yet."
+    },
+    "newest_approval": {
+      "oneOf": [
+        { "$ref": "#/definitions/NewestApproval" },
+        { "type": "null" }
+      ],
+      "description": "The approval with the highest `candidate_revision` for this strategy, or null when none exists. `approved_at` and `approval_id` order an otherwise tied query and never define newness."
+    }
+  },
+  "definitions": {
+    "AppliedStrategy": {
+      "title": "AppliedStrategy",
+      "description": "One immutable apply row, also returned by POST /v1/daemon/strategies/{strategy_id}/apply. There is no update or delete path: a rollback is a new row that supersedes this one.",
+      "type": "object",
+      "required": [
+        "apply_id",
+        "approval_id",
+        "content_hash",
+        "applied_at",
+        "supersedes_apply_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "apply_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Apply identity, assigned by the daemon when the row was written."
+        },
+        "approval_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The approval this row installed. Pinned to this strategy's own approval."
+        },
+        "content_hash": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Canonical content hash recomputed from the approval's frozen document at apply time."
+        },
+        "applied_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "RFC 3339 UTC timestamp of the apply."
+        },
+        "supersedes_apply_id": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ],
+          "description": "The row that was current when this one was written, or null for a strategy's first apply. Together with the absence of a successor it is what makes this row current."
+        }
+      }
+    },
+    "NewestApproval": {
+      "title": "NewestApproval",
+      "description": "The strategy's newest approval, reduced to the keys a client needs to compare it with the current apply.",
+      "type": "object",
+      "required": ["approval_id", "content_hash", "candidate_revision", "approved_at"],
+      "additionalProperties": false,
+      "properties": {
+        "approval_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Approval identity to compare with the current apply's `approval_id`."
+        },
+        "content_hash": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The content hash applying this approval would install."
+        },
+        "candidate_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Candidate revision the approval froze. This key, not either timestamp, defines approval newness."
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "RFC 3339 UTC timestamp of the approval; it orders tied revisions only."
+        }
+      }
+    }
+  }
+}

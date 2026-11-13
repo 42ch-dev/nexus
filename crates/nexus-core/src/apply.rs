@@ -15,6 +15,10 @@
 //! statement that writes, so two concurrent applies cannot both believe they are first and no
 //! writer can supersede a row it did not see. Nothing here updates or deletes a row, and
 //! `strategy_approvals` is only ever read.
+//!
+//! [`CoreService::strategy_applied`] is the read side of the same shape: it answers the current
+//! apply (that same no-successor row) together with the strategy's newest approval, so the Canvas
+//! and the intake ask one question and both get the same answer.
 
 use nexus_workflow_ir::{content_hash, WorkflowDocument};
 use serde_json::Value;
@@ -196,7 +200,91 @@ pub struct AppliedStrategy {
     pub supersedes_apply_id: Option<String>,
 }
 
+/// One approval of the strategy, reduced to what the status read reports.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NewestApproval {
+    pub approval_id: String,
+    pub content_hash: String,
+    pub candidate_revision: i64,
+    pub approved_at: String,
+}
+
+/// The strategy's applied identity and the newest approval it could move to.
+///
+/// `candidate_revision` defines approval newness (compass D11); `approved_at` and `approval_id`
+/// only make a tied query deterministic. A client compares `newest_approval.approval_id` with
+/// `current_apply.approval_id` and never derives newness from either timestamp.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StrategyAppliedStatus {
+    pub current_apply: Option<AppliedStrategy>,
+    pub newest_approval: Option<NewestApproval>,
+}
+
 impl CoreService {
+    /// The applied identity of `strategy_id` and its newest approval, both read from the
+    /// append-only rows: the current apply is the one with no successor.
+    ///
+    /// # Errors
+    ///
+    /// The principal and store errors. A strategy with no apply reports `current_apply: null`
+    /// and a strategy with no approval reports `newest_approval: null`; neither is a refusal.
+    pub async fn strategy_applied(
+        &self,
+        principal: &Principal,
+        strategy_id: &str,
+    ) -> CoreResult<StrategyAppliedStatus> {
+        self.verify_principal(principal)?;
+
+        let current_apply = sqlx::query_as::<_, (String, String, String, String, Option<String>)>(
+            "SELECT cur.apply_id, cur.approval_id, cur.content_hash, cur.applied_at, \
+                    cur.supersedes_apply_id \
+               FROM strategy_applies cur \
+              WHERE cur.strategy_id = ? \
+                AND NOT EXISTS (SELECT 1 FROM strategy_applies later \
+                                 WHERE later.supersedes_apply_id = cur.apply_id)",
+        )
+        .bind(strategy_id)
+        .fetch_optional(&self.inner.pool)
+        .await
+        .map_err(|error| crate::error::local_db_err(error.into()))?
+        .map(
+            |(apply_id, approval_id, content_hash, applied_at, supersedes_apply_id)| {
+                AppliedStrategy {
+                    apply_id,
+                    approval_id,
+                    content_hash,
+                    applied_at,
+                    supersedes_apply_id,
+                }
+            },
+        );
+
+        let newest_approval = sqlx::query_as::<_, (String, String, i64, String)>(
+            "SELECT approval_id, content_hash, candidate_revision, approved_at \
+               FROM strategy_approvals \
+              WHERE strategy_id = ? \
+              ORDER BY candidate_revision DESC, approved_at DESC, approval_id DESC \
+              LIMIT 1",
+        )
+        .bind(strategy_id)
+        .fetch_optional(&self.inner.pool)
+        .await
+        .map_err(|error| crate::error::local_db_err(error.into()))?
+        .map(
+            |(approval_id, content_hash, candidate_revision, approved_at)| NewestApproval {
+                approval_id,
+                content_hash,
+                candidate_revision,
+                approved_at,
+            },
+        );
+
+        Ok(StrategyAppliedStatus {
+            current_apply,
+            newest_approval,
+        })
+    }
+
     /// Apply the approval `approval_content_hash` names, recording it as the strategy's current
     /// applied identity.
     ///

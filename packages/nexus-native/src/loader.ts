@@ -379,6 +379,12 @@ export interface NativeCoreBinding {
   ): Promise<Uint8Array>;
   strategyWorkflowIr(principal: string, strategyId: string): Promise<Uint8Array>;
   strategyCandidate(principal: string, strategyId: string): Promise<Uint8Array>;
+  applyStrategy(
+    principal: string,
+    strategyId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  strategyApplied(principal: string, strategyId: string): Promise<Uint8Array>;
   addSchedule(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   signalSchedule(principal: string, scheduleId: string, requestJson: Uint8Array): Promise<Uint8Array>;
   listSchedules(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;

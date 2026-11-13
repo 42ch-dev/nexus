@@ -16,6 +16,8 @@ import type {
   ScaffoldPresetResponse,
   SimulationTrajectory,
   StrategyApproveRequest,
+  StrategyAppliedStatus,
+  StrategyApplyRequest,
   StrategyComposeRequest,
   StrategyComposeResponse,
   StrategyPatchPromptTemplateRequest,
@@ -217,6 +219,38 @@ export function approveStrategy(
   );
 }
 
+/**
+ * `POST /v1/daemon/strategies/{strategy_id}/apply`.
+ *
+ * Install an approved snapshot as the strategy's running identity. The body names the approval
+ * by content hash only; the core recomputes the frozen document's hash, refuses an unknown or
+ * foreign approval, changed bytes and a strategy with no schedule, and refuses a repeat apply of
+ * the approval that is already current. Those are the core's refusals — this handler renders the
+ * reason envelope verbatim and maps `already_applied` / `approval_hash_changed` to 409.
+ */
+export function applyStrategy(
+  service: ServiceCore,
+  strategyId: string,
+  request: StrategyApplyRequest,
+): Promise<NonNullable<StrategyAppliedStatus['current_apply']>> {
+  return withPrincipal(service, (principal) =>
+    service.core.applyStrategy(principal, strategyId, request),
+  );
+}
+
+/**
+ * `GET /v1/daemon/strategies/{strategy_id}/applied` — the status read.
+ *
+ * Answers both the Canvas' and the intake's question from the append-only rows: the current
+ * apply and the highest-`candidate_revision` approval, each null when the strategy has none.
+ */
+export function strategyApplied(
+  service: ServiceCore,
+  strategyId: string,
+): Promise<StrategyAppliedStatus> {
+  return withPrincipal(service, (principal) => service.core.strategyApplied(principal, strategyId));
+}
+
 /** Exact path/verb/tier identities this family owns (composer input). */
 export const PRESET_ROUTES: readonly DomainRoute[] = [
   {
@@ -386,5 +420,25 @@ export const PRESET_ROUTES: readonly DomainRoute[] = [
         wirePayload<StrategyApproveRequest>(body, 'request'),
       ),
     }),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/v1\/daemon\/strategies\/([^/]+)\/apply$/,
+    tier: 'tier2',
+    family: 'presets',
+    handle: async (service, params, _search, body) => ({
+      body: await applyStrategy(
+        service,
+        params[0],
+        wirePayload<StrategyApplyRequest>(body, 'request'),
+      ),
+    }),
+  },
+  {
+    method: 'GET',
+    pattern: /^\/v1\/daemon\/strategies\/([^/]+)\/applied$/,
+    tier: 'tier2',
+    family: 'presets',
+    handle: async (service, params) => ({ body: await strategyApplied(service, params[0]) }),
   },
 ];

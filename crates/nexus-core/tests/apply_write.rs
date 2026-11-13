@@ -91,6 +91,38 @@ async fn seed_approval(
     (approval_id, hash, document)
 }
 
+/// Freeze one approval at an explicit candidate revision and approval time, so the status read's
+/// ordering can be proven against timestamps that disagree with the revision order.
+async fn seed_revision_approval(setup: &Setup, revision: u64, approved_at: &str) -> (String, String) {
+    let base = setup
+        .core
+        .read_strategy_candidate(&setup.principal, STRATEGY)
+        .await
+        .unwrap()
+        .document;
+    let mut document = with_version(&base, revision);
+    document.revision = revision;
+    let hash = nexus_workflow_ir::content_hash(&document).unwrap();
+    let approval_id = format!("apr_rev{revision}");
+    sqlx::query(
+        "INSERT INTO strategy_approvals \
+         (approval_id, strategy_id, content_hash, candidate_revision, document_json, \
+          trajectory_json, pins_json, approver, approved_at) \
+         VALUES (?, ?, ?, ?, ?, ?, '[]', 'test_creator', ?)",
+    )
+    .bind(&approval_id)
+    .bind(STRATEGY)
+    .bind(&hash)
+    .bind(revision as i64)
+    .bind(serde_json::to_string(&document).unwrap())
+    .bind(serde_json::json!({"ir_content_hash": hash}).to_string())
+    .bind(approved_at)
+    .execute(setup.core.pool())
+    .await
+    .unwrap();
+    (approval_id, hash)
+}
+
 /// The schedule whose `preset_id` is the strategy identity the apply admits against (plan D10).
 async fn seed_schedule(pool: &SqlitePool, strategy_id: &str) {
     sqlx::query(
@@ -332,5 +364,69 @@ async fn two_concurrent_applies_of_one_approval_leave_exactly_one_current_row() 
     let current = current_rows(setup.core.pool()).await;
     assert_eq!(current.len(), 1);
     assert_eq!(current[0].1, approval_id);
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn the_status_read_reports_the_current_apply_and_the_highest_candidate_revision() {
+    let setup = setup().await;
+    // Revision 5 is the newer approval even though revision 2 was approved LATER: `approved_at`
+    // must not decide newness (compass D11).
+    let (older_approval, older_hash) =
+        seed_revision_approval(&setup, 2, "2026-02-01T00:00:00+00:00").await;
+    let (newer_approval, _) =
+        seed_revision_approval(&setup, 5, "2026-01-01T00:00:00+00:00").await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+
+    let applied = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &older_hash)
+        .await
+        .unwrap();
+    let status = setup
+        .core
+        .strategy_applied(&setup.principal, STRATEGY)
+        .await
+        .unwrap();
+
+    let current = status.current_apply.expect("the applied row is current");
+    assert_eq!(current.apply_id, applied.apply_id);
+    assert_eq!(current.approval_id, older_approval);
+    assert_eq!(current.content_hash, older_hash);
+    assert!(current.supersedes_apply_id.is_none());
+
+    let newest = status.newest_approval.expect("the strategy has approvals");
+    assert_eq!(newest.approval_id, newer_approval);
+    assert_eq!(newest.candidate_revision, 5);
+
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
+    let setup = setup().await;
+    let (approval_id, _) =
+        seed_revision_approval(&setup, 1, "2026-01-01T00:00:00+00:00").await;
+
+    // An approval exists, so the newest side is present while nothing is applied yet.
+    let approved_only = setup
+        .core
+        .strategy_applied(&setup.principal, STRATEGY)
+        .await
+        .unwrap();
+    assert!(approved_only.current_apply.is_none());
+    assert_eq!(
+        approved_only.newest_approval.map(|newest| newest.approval_id),
+        Some(approval_id)
+    );
+
+    // No approval and no apply: both sides are null, not a refusal.
+    let empty = setup
+        .core
+        .strategy_applied(&setup.principal, "strategy-with-nothing")
+        .await
+        .unwrap();
+    assert!(empty.current_apply.is_none());
+    assert!(empty.newest_approval.is_none());
     setup.core.close().await.unwrap();
 }
