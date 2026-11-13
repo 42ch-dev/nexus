@@ -10,7 +10,8 @@
   "properties": {
     "name": {
       "type": "string",
-      "description": "Slot name. Unique within one package manifest; non-empty."
+      "minLength": 1,
+      "description": "Slot name. Non-empty; unique within one package manifest."
     },
     "kind": {
       "type": "string",

@@ -9,7 +9,7 @@
  */
 export interface PatternSlot {
   /**
-   * Slot name. Unique within one package manifest; non-empty.
+   * Slot name. Non-empty; unique within one package manifest.
    */
   name: string;
   /**

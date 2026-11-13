@@ -56,10 +56,15 @@ impl From<&PatternPackage> for PatternSummary {
             id: manifest.map(|manifest| manifest.id.as_str().to_owned()),
             package_dir: package.package_dir.clone(),
             reason: package.reason.clone(),
-            requires_capabilities: manifest
-                .map_or_else(Vec::new, |manifest| manifest.requires_capabilities.clone()),
+            requires_capabilities: manifest.map_or_else(Vec::new, |manifest| {
+                manifest
+                    .requires_capabilities
+                    .iter()
+                    .map(|capability| capability.as_str().to_owned())
+                    .collect()
+            }),
             slots: manifest.map_or_else(Vec::new, summary_slots),
-            version: manifest.map(|manifest| manifest.version.clone()),
+            version: manifest.map(|manifest| manifest.version.as_str().to_owned()),
         }
     }
 }
@@ -150,8 +155,8 @@ fn check_manifest(
             package_dir: package_dir.to_owned(),
         });
     }
-    semver::Version::parse(&manifest.version)
-        .map_err(|_| Unavailable::Version(manifest.version.clone()))?;
+    semver::Version::parse(manifest.version.as_str())
+        .map_err(|_| Unavailable::Version(manifest.version.to_string()))?;
 
     let (min, max) = (manifest.ir_compat.min, manifest.ir_compat.max);
     if min > max {
@@ -171,7 +176,7 @@ fn check_manifest(
             return Err(Unavailable::EmptySlotName);
         }
         if !slot_names.insert(slot.name.as_str()) {
-            return Err(Unavailable::DuplicateSlot(slot.name.clone()));
+            return Err(Unavailable::DuplicateSlot(slot.name.to_string()));
         }
     }
     let mut capabilities = HashSet::new();
@@ -180,7 +185,7 @@ fn check_manifest(
             return Err(Unavailable::EmptyCapability);
         }
         if !capabilities.insert(capability.as_str()) {
-            return Err(Unavailable::DuplicateCapability(capability.clone()));
+            return Err(Unavailable::DuplicateCapability(capability.to_string()));
         }
     }
     Ok(())
@@ -214,7 +219,12 @@ fn summary_slots(manifest: &PatternManifest) -> Vec<SummarySlot> {
         .slots
         .iter()
         .map(|slot| SummarySlot {
-            name: slot.name.clone(),
+            // Both DTOs validate the name as non-empty only; re-parse into the summary's newtype.
+            name: slot
+                .name
+                .as_str()
+                .parse()
+                .expect("non-empty slot name is a valid summary slot name"),
             kind: summary_slot_kind(slot.kind),
             required: slot.required,
         })

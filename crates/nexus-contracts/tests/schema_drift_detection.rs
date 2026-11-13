@@ -1830,6 +1830,11 @@ fn make_dummy_string(prop_def: &Value) -> Value {
     // Handle pattern constraints — Nexus patterns look like `^prefix_[a-zA-Z0-9]+$`.
     // Extract the literal prefix and append a valid suffix.
     if let Some(pattern) = prop_def.get("pattern").and_then(|p| p.as_str()) {
+        // SemVer 2.0.0 (`pattern-manifest` `version`): alternation-heavy, so the
+        // generic prefix extraction below cannot build a conforming value.
+        if pattern.contains("(0|[1-9]") {
+            return Value::String("1.0.0".to_string());
+        }
         let inner = pattern.trim_start_matches('^').trim_end_matches('$');
         if !inner.is_empty()
             && !inner.chars().any(|c| {

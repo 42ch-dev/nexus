@@ -13,7 +13,7 @@ export interface PatternManifest {
    */
   id: string;
   /**
-   * SemVer 2.0.0 version label. It is a human version selector, never the content identity: the pin is the canonical content hash of the package's IR fragment, so two packages may declare the same version with different bytes.
+   * SemVer 2.0.0 version label, matched by this schema and re-checked by the registry reader with the `semver` crate. It is a human version selector, never the content identity: the pin is the canonical content hash of the package's IR fragment, so two packages may declare the same version with different bytes.
    */
   version: string;
   ir_compat: PatternIrCompat;
@@ -22,7 +22,7 @@ export interface PatternManifest {
    */
   description: string;
   /**
-   * Worst-case effect this package declares for its fragment. The reader compares it with its own rollup of the fragment; a disagreement makes the package unavailable and neither value is rewritten.
+   * Worst-case effect this package declares for its fragment. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (the rollup the reader compares against), so a vocabulary change there is a change here. The reader compares the declaration with its own rollup of the fragment; a disagreement makes the package unavailable and neither value is rewritten.
    */
   effect_class: "pure" | "read" | "write_candidate" | "external";
   /**
@@ -52,7 +52,7 @@ export interface PatternIrCompat {
  */
 export interface NexusPatternSlot {
   /**
-   * Slot name. Unique within one package manifest; non-empty.
+   * Slot name. Non-empty; unique within one package manifest.
    */
   name: string;
   /**

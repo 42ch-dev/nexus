@@ -42,7 +42,7 @@
     "effect_class": {
       "type": ["string", "null"],
       "enum": ["pure", "read", "write_candidate", "external", null],
-      "description": "Declared effect class, which must equal the reader's rollup of the fragment; null when unavailable."
+      "description": "Declared effect class, which must equal the reader's rollup of the fragment; null when unavailable. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (that rollup), so a vocabulary change there is a change here."
     },
     "slots": {
       "type": "array",

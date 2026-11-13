@@ -8,8 +8,8 @@
 pub struct PatternSlot {
     ///What a binding supplies for this slot: a string value, an asset id, or a capability id.
     pub kind: PatternSlotKind,
-    ///Slot name. Unique within one package manifest; non-empty.
-    pub name: ::std::string::String,
+    ///Slot name. Non-empty; unique within one package manifest.
+    pub name: PatternSlotName,
     ///Whether compose must bind this slot before the package can be used.
     pub required: bool,
 }
@@ -77,12 +77,66 @@ impl ::std::convert::TryFrom<::std::string::String> for PatternSlotKind {
         value.parse()
     }
 }
+///Slot name. Non-empty; unique within one package manifest.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct PatternSlotName(::std::string::String);
+impl ::std::ops::Deref for PatternSlotName {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<PatternSlotName> for ::std::string::String {
+    fn from(value: PatternSlotName) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for PatternSlotName {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<&str> for PatternSlotName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for PatternSlotName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for PatternSlotName {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::string::String::deserialize(deserializer)?
+            .parse()
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
 /// Types for composing complex structures.
 pub mod builder {
     #[derive(Clone, Debug)]
     pub struct PatternSlot {
         kind: ::std::result::Result<super::PatternSlotKind, ::std::string::String>,
-        name: ::std::result::Result<::std::string::String, ::std::string::String>,
+        name: ::std::result::Result<super::PatternSlotName, ::std::string::String>,
         required: ::std::result::Result<bool, ::std::string::String>,
     }
     impl ::std::default::Default for PatternSlot {
@@ -107,7 +161,7 @@ pub mod builder {
         }
         pub fn name<T>(mut self, value: T) -> Self
         where
-            T: ::std::convert::TryInto<::std::string::String>,
+            T: ::std::convert::TryInto<super::PatternSlotName>,
             T::Error: ::std::fmt::Display,
         {
             self.name = value

@@ -29,7 +29,7 @@ export interface PatternSummary {
    */
   content_hash: string | null;
   /**
-   * Declared effect class, which must equal the reader's rollup of the fragment; null when unavailable.
+   * Declared effect class, which must equal the reader's rollup of the fragment; null when unavailable. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (that rollup), so a vocabulary change there is a change here.
    */
   effect_class: "pure" | "read" | "write_candidate" | "external" | null;
   /**
@@ -54,7 +54,7 @@ export interface PatternSummary {
  */
 export interface NexusPatternSlot {
   /**
-   * Slot name. Unique within one package manifest; non-empty.
+   * Slot name. Non-empty; unique within one package manifest.
    */
   name: string;
   /**

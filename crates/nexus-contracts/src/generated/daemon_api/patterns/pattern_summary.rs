@@ -8,8 +8,8 @@
 pub struct NexusPatternSlot {
     ///What a binding supplies for this slot: a string value, an asset id, or a capability id.
     pub kind: NexusPatternSlotKind,
-    ///Slot name. Unique within one package manifest; non-empty.
-    pub name: ::std::string::String,
+    ///Slot name. Non-empty; unique within one package manifest.
+    pub name: NexusPatternSlotName,
     ///Whether compose must bind this slot before the package can be used.
     pub required: bool,
 }
@@ -77,6 +77,60 @@ impl ::std::convert::TryFrom<::std::string::String> for NexusPatternSlotKind {
         value.parse()
     }
 }
+///Slot name. Non-empty; unique within one package manifest.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct NexusPatternSlotName(::std::string::String);
+impl ::std::ops::Deref for NexusPatternSlotName {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<NexusPatternSlotName> for ::std::string::String {
+    fn from(value: NexusPatternSlotName) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for NexusPatternSlotName {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<&str> for NexusPatternSlotName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for NexusPatternSlotName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for NexusPatternSlotName {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::string::String::deserialize(deserializer)?
+            .parse()
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
 ///One pattern package as reported by the read-only pattern registry listing. `available` and `reason` are runtime observations made while reading the package directory; they are never publication, provenance or trust signals, and a listed package is not thereby endorsed.
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
@@ -89,7 +143,7 @@ pub struct PatternSummary {
     ///Declared human label; null when the manifest is unreadable or invalid.
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub description: ::std::option::Option<::std::string::String>,
-    ///Declared effect class, which must equal the reader's rollup of the fragment; null when unavailable.
+    ///Declared effect class, which must equal the reader's rollup of the fragment; null when unavailable. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (that rollup), so a vocabulary change there is a change here.
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub effect_class: ::std::option::Option<PatternSummaryEffectClass>,
     ///Declared package id; null when the manifest is unreadable or invalid.
@@ -113,7 +167,7 @@ impl PatternSummary {
         Default::default()
     }
 }
-///Declared effect class, which must equal the reader's rollup of the fragment; null when unavailable.
+///Declared effect class, which must equal the reader's rollup of the fragment; null when unavailable. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (that rollup), so a vocabulary change there is a change here.
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,
@@ -181,7 +235,7 @@ pub mod builder {
     #[derive(Clone, Debug)]
     pub struct NexusPatternSlot {
         kind: ::std::result::Result<super::NexusPatternSlotKind, ::std::string::String>,
-        name: ::std::result::Result<::std::string::String, ::std::string::String>,
+        name: ::std::result::Result<super::NexusPatternSlotName, ::std::string::String>,
         required: ::std::result::Result<bool, ::std::string::String>,
     }
     impl ::std::default::Default for NexusPatternSlot {
@@ -206,7 +260,7 @@ pub mod builder {
         }
         pub fn name<T>(mut self, value: T) -> Self
         where
-            T: ::std::convert::TryInto<::std::string::String>,
+            T: ::std::convert::TryInto<super::NexusPatternSlotName>,
             T::Error: ::std::fmt::Display,
         {
             self.name = value

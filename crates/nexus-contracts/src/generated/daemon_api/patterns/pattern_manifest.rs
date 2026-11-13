@@ -8,8 +8,8 @@
 pub struct NexusPatternSlot {
     ///What a binding supplies for this slot: a string value, an asset id, or a capability id.
     pub kind: NexusPatternSlotKind,
-    ///Slot name. Unique within one package manifest; non-empty.
-    pub name: ::std::string::String,
+    ///Slot name. Non-empty; unique within one package manifest.
+    pub name: NexusPatternSlotName,
     ///Whether compose must bind this slot before the package can be used.
     pub required: bool,
 }
@@ -77,6 +77,60 @@ impl ::std::convert::TryFrom<::std::string::String> for NexusPatternSlotKind {
         value.parse()
     }
 }
+///Slot name. Non-empty; unique within one package manifest.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct NexusPatternSlotName(::std::string::String);
+impl ::std::ops::Deref for NexusPatternSlotName {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<NexusPatternSlotName> for ::std::string::String {
+    fn from(value: NexusPatternSlotName) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for NexusPatternSlotName {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<&str> for NexusPatternSlotName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for NexusPatternSlotName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for NexusPatternSlotName {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::string::String::deserialize(deserializer)?
+            .parse()
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
 ///Inclusive range of workflow IR versions this package supports. A package whose range excludes the daemon's current `ir_version` is unavailable.
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
@@ -97,17 +151,17 @@ impl PatternIrCompat {
 pub struct PatternManifest {
     ///Non-empty human label shown wherever the package is listed.
     pub description: PatternManifestDescription,
-    ///Worst-case effect this package declares for its fragment. The reader compares it with its own rollup of the fragment; a disagreement makes the package unavailable and neither value is rewritten.
+    ///Worst-case effect this package declares for its fragment. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (the rollup the reader compares against), so a vocabulary change there is a change here. The reader compares the declaration with its own rollup of the fragment; a disagreement makes the package unavailable and neither value is rewritten.
     pub effect_class: PatternManifestEffectClass,
     ///Package id. It MUST equal the package directory name; a mismatch is an unavailable package, never an alias.
     pub id: PatternManifestId,
     pub ir_compat: PatternIrCompat,
     ///Non-empty unique capability ids the package requires; instantiation unions them into the parent. Capability presence is checked by shared semantic validation, not by this manifest.
-    pub requires_capabilities: ::std::vec::Vec<::std::string::String>,
+    pub requires_capabilities: ::std::vec::Vec<PatternManifestRequiresCapabilitiesItem>,
     ///Named slot declarations, possibly empty. Slot names are unique within the manifest.
     pub slots: ::std::vec::Vec<NexusPatternSlot>,
-    ///SemVer 2.0.0 version label. It is a human version selector, never the content identity: the pin is the canonical content hash of the package's IR fragment, so two packages may declare the same version with different bytes.
-    pub version: ::std::string::String,
+    ///SemVer 2.0.0 version label, matched by this schema and re-checked by the registry reader with the `semver` crate. It is a human version selector, never the content identity: the pin is the canonical content hash of the package's IR fragment, so two packages may declare the same version with different bytes.
+    pub version: PatternManifestVersion,
 }
 impl PatternManifest {
     pub fn builder() -> builder::PatternManifest {
@@ -168,7 +222,7 @@ impl<'de> ::serde::Deserialize<'de> for PatternManifestDescription {
             })
     }
 }
-///Worst-case effect this package declares for its fragment. The reader compares it with its own rollup of the fragment; a disagreement makes the package unavailable and neither value is rewritten.
+///Worst-case effect this package declares for its fragment. The vocabulary is the IR document's node `effect_class` set, owned by `nexus_workflow_ir::effect` (the rollup the reader compares against), so a vocabulary change there is a change here. The reader compares the declaration with its own rollup of the fragment; a disagreement makes the package unavailable and neither value is rewritten.
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,
@@ -287,12 +341,132 @@ impl<'de> ::serde::Deserialize<'de> for PatternManifestId {
             })
     }
 }
+///`PatternManifestRequiresCapabilitiesItem`
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct PatternManifestRequiresCapabilitiesItem(::std::string::String);
+impl ::std::ops::Deref for PatternManifestRequiresCapabilitiesItem {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<PatternManifestRequiresCapabilitiesItem>
+for ::std::string::String {
+    fn from(value: PatternManifestRequiresCapabilitiesItem) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for PatternManifestRequiresCapabilitiesItem {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<&str> for PatternManifestRequiresCapabilitiesItem {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for PatternManifestRequiresCapabilitiesItem {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for PatternManifestRequiresCapabilitiesItem {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::string::String::deserialize(deserializer)?
+            .parse()
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///SemVer 2.0.0 version label, matched by this schema and re-checked by the registry reader with the `semver` crate. It is a human version selector, never the content identity: the pin is the canonical content hash of the package's IR fragment, so two packages may declare the same version with different bytes.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct PatternManifestVersion(::std::string::String);
+impl ::std::ops::Deref for PatternManifestVersion {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<PatternManifestVersion> for ::std::string::String {
+    fn from(value: PatternManifestVersion) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for PatternManifestVersion {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        {
+            ::regress::Regex::new(
+                    "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+                )
+                .unwrap()
+        });
+        if PATTERN.find(value).is_none() {
+            return Err(
+                "doesn't match pattern \"^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$\""
+                    .into(),
+            );
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<&str> for PatternManifestVersion {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for PatternManifestVersion {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for PatternManifestVersion {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::string::String::deserialize(deserializer)?
+            .parse()
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
 /// Types for composing complex structures.
 pub mod builder {
     #[derive(Clone, Debug)]
     pub struct NexusPatternSlot {
         kind: ::std::result::Result<super::NexusPatternSlotKind, ::std::string::String>,
-        name: ::std::result::Result<::std::string::String, ::std::string::String>,
+        name: ::std::result::Result<super::NexusPatternSlotName, ::std::string::String>,
         required: ::std::result::Result<bool, ::std::string::String>,
     }
     impl ::std::default::Default for NexusPatternSlot {
@@ -317,7 +491,7 @@ pub mod builder {
         }
         pub fn name<T>(mut self, value: T) -> Self
         where
-            T: ::std::convert::TryInto<::std::string::String>,
+            T: ::std::convert::TryInto<super::NexusPatternSlotName>,
             T::Error: ::std::fmt::Display,
         {
             self.name = value
@@ -426,14 +600,17 @@ pub mod builder {
         id: ::std::result::Result<super::PatternManifestId, ::std::string::String>,
         ir_compat: ::std::result::Result<super::PatternIrCompat, ::std::string::String>,
         requires_capabilities: ::std::result::Result<
-            ::std::vec::Vec<::std::string::String>,
+            ::std::vec::Vec<super::PatternManifestRequiresCapabilitiesItem>,
             ::std::string::String,
         >,
         slots: ::std::result::Result<
             ::std::vec::Vec<super::NexusPatternSlot>,
             ::std::string::String,
         >,
-        version: ::std::result::Result<::std::string::String, ::std::string::String>,
+        version: ::std::result::Result<
+            super::PatternManifestVersion,
+            ::std::string::String,
+        >,
     }
     impl ::std::default::Default for PatternManifest {
         fn default() -> Self {
@@ -499,7 +676,9 @@ pub mod builder {
         }
         pub fn requires_capabilities<T>(mut self, value: T) -> Self
         where
-            T: ::std::convert::TryInto<::std::vec::Vec<::std::string::String>>,
+            T: ::std::convert::TryInto<
+                ::std::vec::Vec<super::PatternManifestRequiresCapabilitiesItem>,
+            >,
             T::Error: ::std::fmt::Display,
         {
             self.requires_capabilities = value
@@ -523,7 +702,7 @@ pub mod builder {
         }
         pub fn version<T>(mut self, value: T) -> Self
         where
-            T: ::std::convert::TryInto<::std::string::String>,
+            T: ::std::convert::TryInto<super::PatternManifestVersion>,
             T::Error: ::std::fmt::Display,
         {
             self.version = value

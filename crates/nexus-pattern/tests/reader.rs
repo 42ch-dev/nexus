@@ -107,12 +107,19 @@ fn two_valid_packages_are_available() {
     assert_eq!(alpha.package_dir, "alpha");
     let manifest = alpha.manifest.as_ref().expect("manifest parsed from disk");
     assert_eq!(manifest.id.as_str(), "alpha");
-    assert_eq!(manifest.version, "1.0.0");
+    assert_eq!(manifest.version.as_str(), "1.0.0");
     assert_eq!(
         manifest.description.as_str(),
         "Ground a topic in source material"
     );
-    assert_eq!(manifest.requires_capabilities, ["search"]);
+    assert_eq!(
+        manifest
+            .requires_capabilities
+            .iter()
+            .map(|id| id.as_str())
+            .collect::<Vec<_>>(),
+        ["search"]
+    );
     assert_eq!(manifest.slots.len(), 1);
     assert!(alpha.fragment.is_some());
 
@@ -128,7 +135,7 @@ fn two_valid_packages_are_available() {
     assert_eq!(summary.effect_class, Some(PatternSummaryEffectClass::Read));
     assert_eq!(summary.requires_capabilities, ["search"]);
     assert_eq!(summary.slots.len(), 1);
-    assert_eq!(summary.slots[0].name, "topic");
+    assert_eq!(summary.slots[0].name.as_str(), "topic");
     assert_eq!(summary.slots[0].kind, NexusPatternSlotKind::String);
     assert!(summary.slots[0].required);
     assert_eq!(summary.content_hash, None);
@@ -263,7 +270,12 @@ fn manifest_rules_are_enforced() {
     assert!(packages.iter().all(|package| !package.available()));
 
     assert!(reason(&packages, "id-mismatch").contains("does not match package directory"));
-    assert!(reason(&packages, "not-semver").contains("not SemVer 2.0.0"));
+    // The manifest schema now carries the SemVer 2.0.0 pattern, so a bad version is rejected while
+    // parsing `pattern.toml`; the reader's own `semver` check stays as the second layer.
+    assert!(
+        reason(&packages, "not-semver").contains("doesn't match pattern"),
+        "a non-SemVer version is rejected by the manifest schema"
+    );
     assert!(reason(&packages, "inverted").contains("is inverted"));
     assert!(reason(&packages, "unknown-field").contains("unknown field"));
     assert!(reason(&packages, "duplicate-slot").contains("slot `topic` more than once"));
