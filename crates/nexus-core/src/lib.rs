@@ -5,6 +5,8 @@ mod actor_knowledge;
 #[cfg(feature = "provider-host")]
 pub mod actor_sessions;
 mod actors;
+#[cfg(feature = "execution")]
+mod approve;
 mod changes;
 mod chronology;
 // `connect-host` is the Connect-host product cohort (WS accept loop +
@@ -98,8 +100,8 @@ pub use content::{resolve_guarded_path, resolve_guarded_path_async, CoreChapterC
 pub use context::{LocalDirectiveStore, ReadOnlyDirectiveStore};
 pub use creators::CREATOR_INTERNAL_CODES;
 pub use error::{
-    CoreError, CoreResult, MemoryProviderRefusal, StrategyCandidateConflictError,
-    MEMORY_INTERNAL_CODES,
+    CoreError, CoreResult, MemoryProviderRefusal, StrategyAlreadyApprovedError,
+    StrategyCandidateConflictError, MEMORY_INTERNAL_CODES,
 };
 #[cfg(feature = "execution")]
 pub use execution::{

@@ -23,6 +23,8 @@
 //! Nest policy and effect rollup are the shared `nexus-workflow-ir` walk and lattice: this module
 //! resolves pins into [`PatternBody`]s and never re-derives depth, cycles or the enum order.
 
+#[cfg(feature = "execution")]
+use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
@@ -515,7 +517,7 @@ impl CoreService {
 
     /// Every package under `<nexus_home>/patterns`, unavailable ones included: compose resolves
     /// pins against the same registry the listing serves.
-    fn compose_packages(&self) -> CoreResult<Vec<PatternPackage>> {
+    pub(crate) fn compose_packages(&self) -> CoreResult<Vec<PatternPackage>> {
         let patterns_dir = self.inner.nexus_home.join("patterns");
         nexus_pattern::scan_pattern_packages(&patterns_dir, IR_VERSION).map_err(|error| {
             CoreError::Internal {
@@ -782,6 +784,99 @@ fn verify_body_pins(
         }
     }
     Ok(())
+}
+
+/// Approve's strict pin check: a compose operation only reads the region it addresses, while an
+/// approval freezes the whole document, so a changed pin anywhere the walk reaches refuses. The
+/// hash comparison itself is [`verify_pin`]'s — there is no second one.
+#[cfg(feature = "execution")]
+pub fn verify_document_pins(
+    document: &WorkflowDocument,
+    packages: &[PatternPackage],
+) -> Result<(), ComposeRefusal> {
+    verify_body_pins(document, &PackageIndex::new(packages), &mut HashSet::new())
+}
+
+/// The resolved pattern bodies the shared walk follows, plus the stale-pin diagnostics it reports,
+/// for a caller that validates without writing (Approve). Same index and same walk as compose.
+#[cfg(feature = "execution")]
+pub fn document_bodies<'a>(
+    document: &'a WorkflowDocument,
+    packages: &'a [PatternPackage],
+) -> (Vec<PatternBody<'a>>, Vec<ComposeDiagnostic>) {
+    let mut diagnostics = Vec::new();
+    let bodies = PackageIndex::new(packages).bodies(document, &mut diagnostics);
+    (bodies, diagnostics)
+}
+
+/// The unbound required slots of a whole document, for a caller that does not run a compose
+/// operation. Same declaration rule as [`unbound_required_slots`].
+#[cfg(feature = "execution")]
+pub fn document_unbound_slots(
+    document: &WorkflowDocument,
+    packages: &[PatternPackage],
+) -> Vec<ComposeDiagnostic> {
+    unbound_required_slots(document, &PackageIndex::new(packages))
+}
+
+/// One `{id, version, content_hash}` pin an approval freezes.
+#[cfg(feature = "execution")]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ResolvedPatternPin {
+    pub id: String,
+    pub version: String,
+    pub content_hash: String,
+}
+
+/// Every resolved pattern pin reachable from `document`, deduped and sorted by id, version and
+/// hash so the frozen snapshot has deterministic bytes. A carrier without a recorded hash is an
+/// unresolved pin (a deferred nest) and contributes none of its own; the resolved pins its
+/// fragment records still travel, because that body will be consumed at Apply.
+#[cfg(feature = "execution")]
+pub fn resolved_pins(
+    document: &WorkflowDocument,
+    packages: &[PatternPackage],
+) -> Vec<ResolvedPatternPin> {
+    let mut pins = BTreeSet::new();
+    collect_resolved_pins(
+        document,
+        &PackageIndex::new(packages),
+        &mut HashSet::new(),
+        &mut pins,
+    );
+    pins.into_iter()
+        .map(|(id, version, content_hash)| ResolvedPatternPin {
+            id,
+            version,
+            content_hash,
+        })
+        .collect()
+}
+
+#[cfg(feature = "execution")]
+fn collect_resolved_pins(
+    document: &WorkflowDocument,
+    packages: &PackageIndex<'_>,
+    seen: &mut HashSet<String>,
+    pins: &mut BTreeSet<(String, String, String)>,
+) {
+    for nest in &document.nests {
+        let Some(pin) = pinned_pattern(&nest.child) else {
+            continue;
+        };
+        if let Some(content_hash) = nest.child.content_hash.as_deref() {
+            pins.insert((pin.id.clone(), pin.version.clone(), content_hash.to_owned()));
+        }
+        if !seen.insert(pin.to_string()) {
+            continue;
+        }
+        if let Some(fragment) = packages
+            .get(&pin)
+            .and_then(nexus_pattern::PatternPackage::fragment)
+        {
+            collect_resolved_pins(fragment, packages, seen, pins);
+        }
+    }
 }
 
 /// What flattening would lose silently: body-level declarations a moved child still refers to, and

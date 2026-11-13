@@ -3,7 +3,9 @@
 
 pub mod capabilities;
 pub mod sessions;
+pub mod approved_strategy_snapshot;
 pub mod simulation_trajectory;
+pub mod strategy_approve_request;
 pub mod strategy_compose_request;
 pub mod strategy_compose_response;
 pub mod strategy_simulation_request;
@@ -11,7 +13,9 @@ pub mod workflow_document;
 
 pub use capabilities::*;
 pub use sessions::*;
+pub use approved_strategy_snapshot::*;
 pub use simulation_trajectory::*;
+pub use strategy_approve_request::*;
 pub use strategy_compose_request::*;
 pub use strategy_compose_response::StrategyComposeResponse;
 pub use strategy_simulation_request::*;

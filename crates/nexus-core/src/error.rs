@@ -44,6 +44,10 @@ pub enum CoreError {
     /// Nothing was written: the store's CAS statement matched no row.
     #[error("strategy candidate conflict")]
     StrategyCandidateConflict(StrategyCandidateConflictError),
+    /// Repeat-approve refusal (HTTP 409 at the adapter): this exact content already has a
+    /// snapshot, and one content hash approves at most once per strategy.
+    #[error("strategy already approved")]
+    StrategyAlreadyApproved(StrategyAlreadyApprovedError),
     #[error("outline validation failed")]
     OutlineValidation(OutlineValidationError),
     #[error("world kb conflict")]
@@ -186,6 +190,16 @@ pub struct StrategyCandidateConflictError {
     pub current_revision: u64,
     pub conflicting_path: String,
     pub recovery_hint: String,
+}
+
+/// Structured repeat-approve payload (HTTP 409 at the adapter): the snapshot that already froze
+/// this exact content, so the client can point at it instead of re-approving.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StrategyAlreadyApprovedError {
+    pub strategy_id: String,
+    pub content_hash: String,
+    pub approval_id: String,
+    pub candidate_revision: u64,
 }
 
 /// Structured outline-canvas validation payload (HTTP 422 at the adapter).

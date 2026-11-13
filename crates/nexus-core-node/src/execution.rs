@@ -77,11 +77,11 @@ use nexus_contracts::local::schedule::http::{
     AddScheduleRequest, AddScheduleResponse, SignalScheduleRequest, SignalScheduleResponse,
 };
 use nexus_contracts::{
-    CoreStrategyPatchResponse, GetPresetResponse, ReloadPresetResponse, ScaffoldPresetRequest,
-    SimulationTrajectory, StrategyComposeRequest, StrategyComposeResponse,
-    StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest, StrategyPatchTransitionRequest,
-    StrategySimulationRequest, UpdatePresetRequest, UpdatePresetResponse, ValidatePresetRequest,
-    ValidatePresetResponse,
+    ApprovedStrategySnapshot, CoreStrategyPatchResponse, GetPresetResponse, ReloadPresetResponse,
+    ScaffoldPresetRequest, SimulationTrajectory, StrategyApproveRequest, StrategyComposeRequest,
+    StrategyComposeResponse, StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest,
+    StrategyPatchTransitionRequest, StrategySimulationRequest, UpdatePresetRequest,
+    UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
 };
 use nexus_core::execution::ExecutionOpenError;
 use nexus_core::{ComposeDiagnostic, CoreError};
@@ -171,6 +171,23 @@ const fn replace_subtree_expansion(
             WorkflowNestBindingExpansion::ExpandInCandidate
         }
     }
+}
+
+/// Decode the approve request into the base revision plus the core's trajectory type.
+///
+/// The wire trajectory and the core's are two generated facades over one JSON shape, so the seam
+/// is the same JSON round-trip simulate uses. A `null` trajectory stays `None`: the core refuses
+/// it as missing evidence, not the adapter as a malformed body.
+fn approve_request(request: StrategyApproveRequest) -> Result<(u64, Option<SimulationTrajectory>)> {
+    let trajectory = request
+        .trajectory
+        .map(|trajectory| {
+            serde_json::to_value(trajectory)
+                .and_then(serde_json::from_value)
+                .map_err(|error| Error::from_reason(format!("invalid trajectory: {error}")))
+        })
+        .transpose()?;
+    Ok((request.base_revision, trajectory))
 }
 
 /// The committed compose result as the response contract.
@@ -1054,6 +1071,31 @@ impl NativeCore {
         self.json_call(principal_handle, async move |core, principal| {
             let response: SimulationTrajectory = core
                 .simulate_strategy(&principal, strategy_id, request)
+                .await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `POST /v1/daemon/strategies/{strategy_id}/approve`.
+    ///
+    /// The request carries the candidate revision the client read and the exact trajectory it
+    /// simulated; the core re-runs validation, pin verification and the deterministic walk, then
+    /// freezes one snapshot or refuses. A stale base is the core's 409 conflict and a repeat
+    /// approve is the core's dedicated 409 `strategy_already_approved` — the adapter renders both
+    /// envelopes verbatim.
+    #[napi]
+    pub async fn approve_strategy(
+        &self,
+        principal_handle: String,
+        strategy_id: String,
+        request_json: Buffer,
+    ) -> Result<Buffer> {
+        let request: StrategyApproveRequest = decode(request_json, "request")?;
+        let (base_revision, trajectory) = approve_request(request)?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let response: ApprovedStrategySnapshot = core
+                .approve_strategy(&principal, &strategy_id, base_revision, trajectory)
                 .await?;
             Ok(response)
         })

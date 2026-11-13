@@ -11,6 +11,7 @@ const CORE_ERROR_CODES = new Set<string>([
   'outline_conflict',
   'outline_validation_failed',
   'strategy_candidate_conflict',
+  'strategy_already_approved',
   'workspace_conflict',
   'writer_fenced',
   'owner_busy',
