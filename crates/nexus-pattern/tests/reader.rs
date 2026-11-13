@@ -7,7 +7,7 @@ use std::path::Path;
 use nexus_contracts::generated::daemon_api::patterns::pattern_summary::{
     NexusPatternSlotKind, PatternSummary, PatternSummaryEffectClass,
 };
-use nexus_pattern::{scan_pattern_packages, PatternPackage};
+use nexus_pattern::{scan_pattern_packages, PatternPackage, MAX_MEMBER_BYTES};
 
 const IR_VERSION: u64 = 0;
 
@@ -294,8 +294,8 @@ fn manifest_rules_are_enforced() {
     assert!(packages.iter().all(|package| !package.available()));
 
     assert!(reason(&packages, "id-mismatch").contains("does not match package directory"));
-    // The manifest schema now carries the SemVer 2.0.0 pattern, so a bad version is rejected while
-    // parsing `pattern.toml`; the reader's own `semver` check stays as the second layer.
+    // The manifest schema carries the SemVer 2.0.0 pattern and is the only validator of the label,
+    // so a bad version is rejected while parsing `pattern.toml`.
     assert!(
         reason(&packages, "not-semver").contains("doesn't match pattern"),
         "a non-SemVer version is rejected by the manifest schema"
@@ -392,4 +392,90 @@ fn a_missing_registry_root_is_an_empty_listing() {
         !missing.exists(),
         "the scan never creates the registry root"
     );
+}
+
+#[test]
+fn the_version_label_is_owned_by_the_manifest_schema() {
+    let root = tempfile::tempdir().expect("temp root");
+    // SemVer 2.0.0 puts no ceiling on a numeric identifier, and the schema pattern is the only
+    // authority over the label, so the value a `u64`-backed parser would reject is accepted.
+    write_package(
+        root.path(),
+        "wide-version",
+        &manifest("wide-version", "pure").replace(
+            "version = \"1.0.0\"",
+            "version = \"18446744073709551616.0.0\"",
+        ),
+        Some(&fragment("pure", "pure")),
+    );
+
+    let packages = scan_pattern_packages(root.path(), IR_VERSION).expect("scan");
+    let package = &packages[0];
+    assert!(package.available(), "{:?}", package.reason);
+    assert_eq!(
+        package
+            .manifest
+            .as_ref()
+            .expect("manifest parsed")
+            .version
+            .as_str(),
+        "18446744073709551616.0.0"
+    );
+}
+
+/// A FIFO member must be refused without being opened. The scan runs on its own thread, so a
+/// regression fails this test after a short wait instead of hanging the suite.
+#[cfg(unix)]
+#[test]
+fn a_fifo_member_is_unavailable_without_stalling_the_scan() {
+    use std::time::Duration;
+
+    let root = tempfile::tempdir().expect("temp root");
+    valid_package(root.path(), "peer", "pure");
+    let stalled = root.path().join("fifo-manifest");
+    fs::create_dir(&stalled).expect("package directory");
+    let created = std::process::Command::new("mkfifo")
+        .arg(stalled.join("pattern.toml"))
+        .status()
+        .expect("mkfifo is available");
+    assert!(created.success(), "mkfifo failed: {created}");
+
+    let scanned = root.path().to_path_buf();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(scan_pattern_packages(&scanned, IR_VERSION));
+    });
+    let packages = receiver
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the scan must refuse a FIFO member instead of blocking on it")
+        .expect("scan");
+
+    assert_eq!(packages.len(), 2);
+    assert_eq!(
+        reason(&packages, "fifo-manifest"),
+        "`pattern.toml` is not a regular file"
+    );
+    assert!(packages
+        .iter()
+        .any(|package| package.package_dir == "peer" && package.available()));
+}
+
+#[test]
+fn an_oversized_member_is_unavailable_without_being_read() {
+    let root = tempfile::tempdir().expect("temp root");
+    valid_package(root.path(), "peer", "pure");
+    let oversized = root.path().join("oversized");
+    fs::create_dir(&oversized).expect("package directory");
+    let manifest = fs::File::create(oversized.join("pattern.toml")).expect("manifest created");
+    manifest
+        .set_len(MAX_MEMBER_BYTES + 1)
+        .expect("manifest widened");
+
+    let packages = scan_pattern_packages(root.path(), IR_VERSION).expect("scan");
+    assert_eq!(packages.len(), 2);
+    let oversized_reason = reason(&packages, "oversized");
+    assert!(oversized_reason.contains("above the"), "{oversized_reason}");
+    assert!(packages
+        .iter()
+        .any(|package| package.package_dir == "peer" && package.available()));
 }

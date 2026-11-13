@@ -6,13 +6,20 @@
 //! local readability fact, never publication, provenance or trust.
 //!
 //! Symlinked package directories are followed; entries that are not directories, broken symlinks
-//! included, are skipped. A directory name that is not UTF-8 is reported as unavailable instead of
-//! being loaded under a lossy name. Availability means the manifest was readable and valid, the
-//! fragment parsed and its content hash was computed; it does not mean the fragment is structurally
-//! valid, which is the validate and compose stage's check.
+//! included, are skipped. `package_dir` is a directory name's cursor identity, not its lossy
+//! rendering: valid UTF-8 is kept verbatim and `%` and every byte outside valid UTF-8 are
+//! percent-escaped, so two distinct directories never share one identity and every entry stays
+//! addressable by its own cursor. A name that is not UTF-8 is reported as unavailable instead of
+//! being loaded. Availability means the manifest was readable and valid, the fragment parsed and its
+//! content hash was computed; it does not mean the fragment is structurally valid, which is the
+//! validate and compose stage's check.
+//!
+//! Only a regular `pattern.toml` and `workflow.ir.json` no larger than [`MAX_MEMBER_BYTES`] are
+//! read, so a FIFO, a device node or an oversized member is reported as one unavailable package
+//! instead of stalling or exhausting the scan.
 
 use std::collections::HashSet;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
 use nexus_contracts::generated::daemon_api::patterns::pattern_manifest::{
@@ -30,11 +37,17 @@ use nexus_workflow_ir::{
 pub const MANIFEST_FILE: &str = "pattern.toml";
 /// IR fragment file every package directory carries.
 pub const FRAGMENT_FILE: &str = "workflow.ir.json";
+/// Largest member file the reader loads.
+///
+/// A manifest is a few hundred bytes and a fragment a few kilobytes; the ceiling is what keeps a
+/// device member or a runaway file from exhausting the daemon while it lists.
+pub const MAX_MEMBER_BYTES: u64 = 1 << 20;
 
 /// One discovered package directory.
 #[derive(Debug, Clone)]
 pub struct PatternPackage {
-    /// Directory basename; never an absolute path.
+    /// Directory name as a cursor identity: valid UTF-8 verbatim, with `%` and every byte outside
+    /// valid UTF-8 percent-escaped; never an absolute path.
     pub package_dir: String,
     /// Manifest parsed from `pattern.toml`; absent only when the manifest itself could not be read
     /// or parsed, so an unavailable package can still be named by id and version.
@@ -83,9 +96,10 @@ impl From<&PatternPackage> for PatternSummary {
 
 /// Read every package under `patterns_dir`.
 ///
-/// Entries are ordered by `package_dir`. Hidden and `_`-prefixed directories are skipped, matching
-/// the preset scan convention; a missing root directory is an empty listing. `ir_version` is the
-/// daemon's current workflow IR version, checked against each manifest's `ir_compat` range.
+/// Entries are ordered by `package_dir` ascending as UTF-8 bytes. Hidden and `_`-prefixed
+/// directories are skipped, matching the preset scan convention; a missing root directory is an
+/// empty listing. `ir_version` is the daemon's current workflow IR version, checked against each
+/// manifest's `ir_compat` range.
 ///
 /// # Errors
 ///
@@ -119,13 +133,14 @@ pub fn scan_pattern_packages(
 /// Classify one scanned directory entry; `None` when the discovery convention skips it.
 fn package_entry(directory: &Path, file_name: OsString, ir_version: u64) -> Option<PatternPackage> {
     // Lossy conversion preserves a leading ASCII byte, so the skip prefix is judged on it either way.
-    let package_dir = file_name.to_string_lossy().into_owned();
-    if package_dir.starts_with('.') || package_dir.starts_with('_') {
+    let lossy = file_name.to_string_lossy();
+    if lossy.starts_with('.') || lossy.starts_with('_') {
         return None;
     }
+    let package_dir = package_dir_name(&file_name);
     if file_name.to_str().is_none() {
-        // A lossy name is not an identity: two distinct names can collapse to one `package_dir`, so
-        // the escaped name in the reason is what keeps the entries apart.
+        // The directory cannot be loaded under a name that is not UTF-8; its escaped identity keeps
+        // it addressable instead of colliding with a sibling that renders the same way.
         return Some(PatternPackage {
             package_dir,
             manifest: None,
@@ -135,6 +150,27 @@ fn package_entry(directory: &Path, file_name: OsString, ir_version: u64) -> Opti
         });
     }
     Some(read_package(directory, package_dir, ir_version))
+}
+
+/// Cursor identity of one directory name: valid UTF-8 verbatim, with `%` and every byte outside
+/// valid UTF-8 percent-escaped.
+///
+/// A lossy rendering is not an identity — distinct names collapse to the same replacement characters,
+/// so a cursor keyed on it cannot separate them. Escaping `%` as well keeps the mapping injective
+/// across both branches: a directory literally named `a%FF` and one holding the byte `0xFF` stay
+/// distinct.
+fn package_dir_name(file_name: &OsStr) -> String {
+    use std::fmt::Write as _;
+
+    let bytes = file_name.as_encoded_bytes();
+    let mut identity = String::with_capacity(bytes.len());
+    for chunk in bytes.utf8_chunks() {
+        identity.push_str(&chunk.valid().replace('%', "%25"));
+        for byte in chunk.invalid() {
+            write!(identity, "%{byte:02X}").expect("writing to a String cannot fail");
+        }
+    }
+    identity
 }
 
 fn read_package(directory: &Path, package_dir: String, ir_version: u64) -> PatternPackage {
@@ -195,8 +231,9 @@ fn load(
     Ok((fragment, content_hash))
 }
 
-/// Manifest rules the generated type cannot express: cross-field identity, the reader's own
-/// `SemVer` and compatibility checks, and per-package uniqueness.
+/// Manifest rules the generated type cannot express: cross-field identity, IR compatibility and
+/// per-package uniqueness. The manifest schema's `version` pattern is the single authority over the
+/// `SemVer` 2.0.0 label; no second parser narrows it here.
 fn check_manifest(
     manifest: &PatternManifest,
     package_dir: &str,
@@ -208,8 +245,6 @@ fn check_manifest(
             package_dir: package_dir.to_owned(),
         });
     }
-    semver::Version::parse(manifest.version.as_str())
-        .map_err(|_| Unavailable::Version(manifest.version.to_string()))?;
 
     let (min, max) = (manifest.ir_compat.min, manifest.ir_compat.max);
     if min > max {
@@ -245,8 +280,25 @@ fn check_manifest(
 }
 
 fn read_text(directory: &Path, file: &'static str) -> Result<String, Unavailable> {
-    std::fs::read_to_string(directory.join(file))
-        .map_err(|source| Unavailable::Read { file, source })
+    let path = directory.join(file);
+    // Metadata is taken through symlinks, so a link to a FIFO or a device node is refused here too.
+    // The gate is what keeps this synchronous scan from blocking on a member that never reaches EOF
+    // or from loading a runaway file. A writer that swaps the member between this call and the open
+    // below can still stall it; who may write the registry is undefined in P3, so the gate guards
+    // the accidental member a scan actually meets, not a hostile one.
+    let metadata = std::fs::metadata(&path).map_err(|source| Unavailable::Read { file, source })?;
+    if !metadata.is_file() {
+        return Err(Unavailable::NotRegularFile { file });
+    }
+    let bytes = metadata.len();
+    if bytes > MAX_MEMBER_BYTES {
+        return Err(Unavailable::Oversized {
+            file,
+            bytes,
+            limit: MAX_MEMBER_BYTES,
+        });
+    }
+    std::fs::read_to_string(&path).map_err(|source| Unavailable::Read { file, source })
 }
 
 const fn document_effect(class: PatternManifestEffectClass) -> WorkflowDocumentEffectSummary {
@@ -300,6 +352,14 @@ enum Unavailable {
         file: &'static str,
         source: std::io::Error,
     },
+    #[error("`{file}` is not a regular file")]
+    NotRegularFile { file: &'static str },
+    #[error("`{file}` is {bytes} bytes, above the {limit}-byte member ceiling")]
+    Oversized {
+        file: &'static str,
+        bytes: u64,
+        limit: u64,
+    },
     #[error("`pattern.toml` is malformed: {0}")]
     Manifest(toml::de::Error),
     #[error("package directory name {0:?} is not UTF-8")]
@@ -310,8 +370,6 @@ enum Unavailable {
     Hash(CanonicalHashError),
     #[error("manifest id `{id}` does not match package directory `{package_dir}`")]
     IdMismatch { id: String, package_dir: String },
-    #[error("manifest version `{0}` is not SemVer 2.0.0")]
-    Version(String),
     #[error("manifest ir_compat range {min}..={max} is inverted")]
     InvertedCompat { min: u64, max: u64 },
     #[error("manifest ir_compat {min}..={max} excludes the daemon ir_version {ir_version}")]
@@ -350,7 +408,8 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(entries[0].package_dir, entries[1].package_dir);
+        assert_eq!(entries[0].package_dir, "lossy-%FF");
+        assert_eq!(entries[1].package_dir, "lossy-%FE");
         for entry in &entries {
             assert!(!entry.available());
             assert!(entry.manifest.is_none());
@@ -361,6 +420,19 @@ mod tests {
             );
         }
         assert_ne!(entries[0].reason, entries[1].reason);
+    }
+
+    #[test]
+    fn a_literal_percent_name_does_not_collide_with_an_escaped_one() {
+        let literal = OsString::from("lossy-%FF");
+        let escaped = OsString::from_vec(b"lossy-\xFF".to_vec());
+
+        let literal = package_entry(Path::new("unused"), literal, 0).expect("a name is reported");
+        let escaped = package_entry(Path::new("unused"), escaped, 0).expect("a name is reported");
+
+        assert_eq!(literal.package_dir, "lossy-%25FF");
+        assert_eq!(escaped.package_dir, "lossy-%FF");
+        assert_ne!(literal.package_dir, escaped.package_dir);
     }
 
     #[test]
