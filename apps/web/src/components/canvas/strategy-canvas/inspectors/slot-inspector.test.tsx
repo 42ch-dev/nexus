@@ -81,6 +81,24 @@ describe('SlotInspector', () => {
     await waitFor(() => expect(onUnnest).toHaveBeenCalledWith('collect-region'));
   });
 
+  it('consumes a refused op instead of rethrowing it at the event boundary', async () => {
+    // The hook has already presented the refusal; a rethrown rejection here
+    // would surface as an unhandled rejection and fail this file.
+    const refused = vi.fn(() => Promise.reject(new Error('409 conflict')));
+    renderInspector({ onBindSlot: refused, onReplaceSubtree: refused, onUnnest: refused });
+
+    fireEvent.change(screen.getByTestId('slot-input-topic'), { target: { value: 'water policy' } });
+    fireEvent.click(screen.getByTestId('slot-bind-topic'));
+    fireEvent.change(screen.getByTestId('slot-replace'), {
+      target: { value: JSON.stringify({ id: 'judge-step', version: '2.0.0' }) },
+    });
+    fireEvent.click(screen.getByTestId('slot-replace-commit'));
+    fireEvent.click(screen.getByTestId('slot-unnest'));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(refused).toHaveBeenCalledTimes(3);
+  });
+
   it('renders nothing without a nest id', () => {
     const { container } = renderInspector({ node: { ...NODE, nestId: undefined } });
     expect(container).toBeEmptyDOMElement();

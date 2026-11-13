@@ -86,7 +86,11 @@ export function PatternPickerDialog({
               void onNest({
                 attachNodeId,
                 package: { id: chosen.id, version: chosen.version },
-              }).then(() => onOpenChange(false));
+              })
+                .then(() => onOpenChange(false))
+                // A refused nest is already presented by the hook's conflict/refusal
+                // state; the picker only stays open for the retry.
+                .catch(() => {});
             }}
           >
             {t('strategy.picker.nest')}
