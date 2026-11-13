@@ -374,7 +374,7 @@ function pushSlotSubtree(
   for (const [childId, parentId] of containment) {
     if (parentId !== slot.id) continue;
     const child = byId.get(childId);
-    if (!child || child.kind !== 'pattern_slot') continue;
+    if (child?.kind !== 'pattern_slot') continue;
     const rows = slotRowsFor(child, patterns);
     children.push({
       id: childId,

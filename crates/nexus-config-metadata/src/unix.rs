@@ -294,10 +294,13 @@ fn is_unsupported(error: &io::Error) -> bool {
         return true;
     }
     #[cfg(target_os = "macos")]
-    if code == Some(libc::EOPNOTSUPP) {
-        return true;
+    {
+        code == Some(libc::EOPNOTSUPP)
     }
-    false
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
 }
 
 #[cfg(target_os = "linux")]
