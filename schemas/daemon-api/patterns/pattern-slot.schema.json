@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/patterns/pattern-slot.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PatternSlot",
+  "description": "One named slot a pattern package declares for compose-time binding. The declaration is data: binding a slot, and checking that every required slot is bound, are runtime compose steps.",
+  "type": "object",
+  "required": ["name", "kind", "required"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Slot name. Unique within one package manifest; non-empty."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["string", "asset", "capability"],
+      "description": "What a binding supplies for this slot: a string value, an asset id, or a capability id."
+    },
+    "required": {
+      "type": "boolean",
+      "description": "Whether compose must bind this slot before the package can be used."
+    }
+  }
+}

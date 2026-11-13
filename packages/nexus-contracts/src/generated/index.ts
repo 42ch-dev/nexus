@@ -30,6 +30,7 @@ export * from './daemon-api/memory';
 export * from './daemon-api/orchestration';
 export * from './daemon-api/orchestration/capabilities';
 export * from './daemon-api/orchestration/sessions';
+export * from './daemon-api/patterns';
 export * from './daemon-api/preset-management';
 export * from './daemon-api/reading';
 export * from './daemon-api/runtime';
@@ -297,6 +298,11 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   SimulationTrajectory: 1,
   StrategySimulationRequest: 1,
   WorkflowDocument: 1,
+  ListPatternsQuery: 1,
+  ListPatternsResponse: 1,
+  PatternManifest: 1,
+  PatternSlot: 1,
+  PatternSummary: 1,
   GetPresetResponse: 1,
   ListPresetsResponse: 1,
   PresetSummary: 1,

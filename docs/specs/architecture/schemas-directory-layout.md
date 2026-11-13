@@ -48,6 +48,7 @@ schemas/
     ├── kb/                 # work-scope KB entry contracts
     ├── memory/             # memory contracts
     ├── orchestration/      # orchestration session and capability contracts
+    ├── patterns/           # pattern package manifest + registry listing contracts
     ├── preset-management/  # preset management contracts
     ├── reading/            # reading-surface contracts
     ├── runtime/            # runtime trust contracts (currently certificate fingerprint)
@@ -89,6 +90,7 @@ schemas/
 | **`daemon-api/workspace/`** | Daemon API — workspace management CRUD | Web UI / desktop shell | `nexus-core` workspace/home services (`src/home.rs` consumes the generated types); no dedicated TS route family today | **Yes** |
 | **`daemon-api/creators/`** | Daemon API — creator management CRUD | Web UI / desktop shell | `apps/nexus-service` `actors.ts` creators routes | **Yes** |
 | **`daemon-api/orchestration/`** | Daemon API — orchestration engine READ | Web UI / desktop shell | `apps/nexus-service` `execution.ts` + `workflow-observation.ts` families | **Yes** |
+| **`daemon-api/patterns/`** | Daemon API — pattern package registry READ | Web UI / desktop shell | `apps/nexus-service` pattern route over the `nexus-core` package reader | **Yes** |
 | **`daemon-api/preset-management/`** | Daemon API — preset management full surface | Web UI / desktop shell | `apps/nexus-service` `presets.ts` family | **Yes** |
 | **`daemon-api/agent-host/`** | Daemon API — provider discovery and sessions | Web UI / desktop shell | `apps/nexus-service` agent-host routes (`routes.ts` + `provider.ts`/`discovery.ts`) over `nexus-core` `provider-host` | **Yes** |
 | **`daemon-api/{canvas,check,inspector,reading}/`** | Daemon API — authoring and diagnostics | Web UI / desktop shell | `apps/nexus-service` `content.ts` / `context.ts` / `knowledge.ts` families | **Yes** |
@@ -224,6 +226,7 @@ hand-maintained aggregate count. `schemas/README.md` and
 | `daemon-api/workspace/` | Current disk inventory | Workspace management contracts |
 | `daemon-api/creators/` | Current disk inventory | Creator management contracts |
 | `daemon-api/orchestration/` | Current disk inventory | Sessions and capability contracts |
+| `daemon-api/patterns/` | Current disk inventory | Pattern package manifest and registry listing contracts |
 | `daemon-api/preset-management/` | Current disk inventory | Preset management contracts |
 | `daemon-api/agent-host/` | Current disk inventory | Provider scan and agent-host contracts |
 | `daemon-api/{canvas,check,inspector,reading}/` | Current disk inventory | Authoring and diagnostic surfaces |

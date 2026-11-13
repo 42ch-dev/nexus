@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/patterns/pattern-summary.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PatternSummary",
+  "description": "One pattern package as reported by the read-only pattern registry listing. `available` and `reason` are runtime observations made while reading the package directory; they are never publication, provenance or trust signals, and a listed package is not thereby endorsed.",
+  "type": "object",
+  "required": [
+    "package_dir",
+    "id",
+    "version",
+    "description",
+    "content_hash",
+    "effect_class",
+    "slots",
+    "requires_capabilities",
+    "available",
+    "reason"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "package_dir": {
+      "type": "string",
+      "description": "Package directory basename, never an absolute path."
+    },
+    "id": {
+      "type": ["string", "null"],
+      "description": "Declared package id; null when the manifest is unreadable or invalid."
+    },
+    "version": {
+      "type": ["string", "null"],
+      "description": "Declared version label; null when the manifest is unreadable or invalid."
+    },
+    "description": {
+      "type": ["string", "null"],
+      "description": "Declared human label; null when the manifest is unreadable or invalid."
+    },
+    "content_hash": {
+      "type": ["string", "null"],
+      "description": "Canonical content hash of the package's IR fragment; null when it could not be computed."
+    },
+    "effect_class": {
+      "type": ["string", "null"],
+      "enum": ["pure", "read", "write_candidate", "external", null],
+      "description": "Declared effect class, which must equal the reader's rollup of the fragment; null when unavailable."
+    },
+    "slots": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/daemon-api/patterns/pattern-slot.schema.json"
+      },
+      "description": "Declared slots; empty when the package is unavailable."
+    },
+    "requires_capabilities": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Declared capability ids; empty when the package is unavailable."
+    },
+    "available": {
+      "type": "boolean",
+      "description": "True only when the manifest parsed, every enforced field was valid, the fragment hash was computed and the declared effect class agreed with the rollup. It never means published or trusted."
+    },
+    "reason": {
+      "type": ["string", "null"],
+      "description": "Null when available; otherwise an actionable reason naming what made the package unavailable."
+    }
+  }
+}
