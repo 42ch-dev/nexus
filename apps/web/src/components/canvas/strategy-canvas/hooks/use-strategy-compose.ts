@@ -192,15 +192,26 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
    * current bytes instead of the revision they no longer have.
    */
   const reload = useCallback(async () => {
-    const document = await client.getStrategyCandidate(presetId);
-    // A compose that committed while this read was in flight already holds the
-    // newer bytes; installing the older response would seed a fresh 409.
-    setCommitted((prev) =>
-      prev && prev.document.revision > document.revision
-        ? prev
-        : { document, diagnostics: [] },
-    );
-    setConflict(null);
+    try {
+      const document = await client.getStrategyCandidate(presetId);
+      // A compose that committed while this read was in flight already holds the
+      // newer bytes; installing the older response would seed a fresh 409.
+      setCommitted((prev) =>
+        prev && prev.document.revision > document.revision
+          ? prev
+          : { document, diagnostics: [] },
+      );
+      setConflict(null);
+      setRefusal(null);
+    } catch (error) {
+      // The recovery read failed: keep the conflict and the held document, and
+      // name the failure in the dialog instead of rejecting into a void click.
+      setRefusal({
+        reason: 'reload_failed',
+        message: error instanceof Error ? error.message : 'Reload failed.',
+        details: {},
+      });
+    }
   }, [client, presetId]);
 
   /**

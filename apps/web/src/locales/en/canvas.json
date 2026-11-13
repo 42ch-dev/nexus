@@ -389,7 +389,8 @@
         "saved": "Saved",
         "saveFailed": "Save failed",
         "saving": "Saving…",
-        "updated": "Transition updated"
+        "updated": "Transition updated",
+        "composeDisabled": "Transitions are authored in the candidate while composing; this YAML editor is disabled."
       },
       "prompt": {
         "title": "Prompt",

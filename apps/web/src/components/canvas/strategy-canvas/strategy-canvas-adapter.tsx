@@ -283,6 +283,9 @@ export function createStrategyCanvasAdapter(
               saveStatus={ctx.saveStatuses.transition}
               onSaveStatus={(s) => ctx.onSaveStatus('transition', s)}
               onConflict={ctx.handleConflict}
+              // Compose path: the candidate document is the structural authority;
+              // the YAML transition patch stays visible, disabled, with its reason.
+              structuralWritesDisabled={Boolean(ctx.compose)}
             />
           </div>
           {ctx.promptTemplateRef ? (

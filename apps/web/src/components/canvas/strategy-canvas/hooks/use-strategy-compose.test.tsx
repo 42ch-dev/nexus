@@ -272,6 +272,57 @@ describe('useStrategyCompose', () => {
     expect(result.current.workingDocument?.revision).toBe(1);
   });
 
+  it('a failing recovery read surfaces a refusal and keeps the conflict (T4)', async () => {
+    let candidateReads = 0;
+    useHandlers(
+      http.get(PATTERNS_PATH, () =>
+        HttpResponse.json({ items: PATTERN_ITEMS, pagination: { limit: 100, has_more: false } }),
+      ),
+      http.get(CANDIDATE_PATH, () => {
+        candidateReads += 1;
+        return candidateReads === 1
+          ? HttpResponse.json(SEED)
+          : HttpResponse.json(
+              { error: { code: 'internal_error', message: 'candidate read failed' } },
+              { status: 500 },
+            );
+      }),
+      http.post(COMPOSE_PATH, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'strategy_candidate_conflict',
+              message: 'Candidate changed before this edit. Reload revision 1 and reapply the change.',
+              details: { strategy_id: STRATEGY_ID, base_revision: 0, current_revision: 1 },
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    const { result } = renderCompose();
+    await waitFor(() => expect(result.current.workingDocument?.id).toBe(STRATEGY_ID));
+
+    await act(async () => {
+      await expect(
+        result.current.nestPattern({ attachNodeId: 'draft', package: { id: 'prompt-step', version: '1.0.0' } }),
+      ).rejects.toThrow();
+    });
+
+    // The failing GET is reported in the dialog, not rejected into the void.
+    await act(async () => {
+      await result.current.reload();
+    });
+    expect(result.current.refusal).toEqual({
+      reason: 'reload_failed',
+      message: 'candidate read failed',
+      details: {},
+    });
+    expect(result.current.conflict?.currentRevision).toBe(1);
+    expect(result.current.workingDocument?.revision).toBe(0);
+  });
+
   it('a named 422 refusal leaves the candidate and revision unchanged', async () => {
     seedHandlers();
     useHandlers(

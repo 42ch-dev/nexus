@@ -69,6 +69,11 @@ interface EdgeInspectorProps {
   saveStatus: SaveStatus | undefined;
   onSaveStatus: (status: SaveStatus | undefined) => void;
   onConflict: (currentRevision: number, section: Section) => void;
+  /**
+   * Compose path: the candidate document is the only structural authority, so
+   * this YAML transition patch is shown with its reason but cannot be issued.
+   */
+  structuralWritesDisabled?: boolean;
 }
 
 export function EdgeInspector({
@@ -81,6 +86,7 @@ export function EdgeInspector({
   saveStatus,
   onSaveStatus,
   onConflict,
+  structuralWritesDisabled = false,
 }: EdgeInspectorProps) {
   const { t } = useTranslation('canvas');
   const patch = usePatchStrategyTransition();
@@ -89,7 +95,9 @@ export function EdgeInspector({
   const lastHandledTriggerRef = useRef(0);
 
   const handleSave = useCallback(async () => {
-    if (!dirty || patch.isPending || typeof selectedState.next !== 'string') return;
+    if (structuralWritesDisabled || !dirty || patch.isPending || typeof selectedState.next !== 'string') {
+      return;
+    }
     onSaveStatus(undefined);
 
     try {
@@ -115,7 +123,7 @@ export function EdgeInspector({
         onSaveStatus({ type: 'error', message });
       }
     }
-  }, [dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict, t]);
+  }, [structuralWritesDisabled, dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict, t]);
 
   // Keep a fresh callback reference for the keyboard shortcut effect so the
   // effect itself does not need to depend on the callback (R-V172P1-QC1-001).
@@ -138,7 +146,7 @@ export function EdgeInspector({
         <button
           type="button"
           onClick={handleSave}
-          disabled={!dirty || patch.isPending}
+          disabled={structuralWritesDisabled || !dirty || patch.isPending}
           className="rounded-control border border-gray-alpha-400 px-2 py-1 text-button-12 text-gray-900 hover:bg-gray-alpha-100 disabled:text-gray-500"
         >
           {patch.isPending ? t('strategy.inspector.transition.saving') : t('strategy.inspector.transition.save')}
@@ -150,10 +158,15 @@ export function EdgeInspector({
           type="text"
           value={form.nextTarget}
           onChange={(e) => onChange('nextTarget', e.target.value)}
+          disabled={structuralWritesDisabled}
           className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
         />
       </label>
-      {saveStatus ? (
+      {structuralWritesDisabled ? (
+        <p data-testid="transition-structural-disabled" className="text-copy-12 text-gray-700">
+          {t('strategy.inspector.transition.composeDisabled')}
+        </p>
+      ) : saveStatus ? (
         <p
           className={
             saveStatus.type === 'success'

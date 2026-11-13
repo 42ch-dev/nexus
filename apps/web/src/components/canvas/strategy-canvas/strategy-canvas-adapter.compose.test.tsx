@@ -6,11 +6,15 @@
  * simulation overlay names the slot. With the flag off (no `document`
  * payload) the YAML projection runs untouched.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, screen, within } from '@testing-library/react';
 import type { MutableRefObject } from 'react';
 
 import type { WorkflowDocument } from '@42ch/nexus-contracts';
 
+import type { NexusClient } from '@/lib/nexus';
+import type { PresetState } from '@/lib/canvas/preset-yaml';
+import { renderInApp } from '@/test/test-providers';
 import type { StrategyCanvasAdapterContext } from './strategy-canvas-adapter';
 import { createStrategyCanvasAdapter } from './strategy-canvas-adapter';
 import { candidateDocument, simulationTrajectory } from '@/test/simulation-fixture';
@@ -102,6 +106,33 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
     const slot = nodes.find((node) => node.id === 'collect-sources');
     (slot?.data.onToggleExpand as () => void)();
     expect(toggled).toEqual(['collect-sources']);
+  });
+
+  it('disables the YAML transition patch while a candidate document is the authority', () => {
+    const client = { strategyPatchTransition: vi.fn() } as unknown as NexusClient;
+    const adapter = createStrategyCanvasAdapter(
+      ctxRef({
+        selectedState: { id: 'draft', next: 'done' } as PresetState,
+        form: { label: '', description: '', nextTarget: 'revise', promptBody: '' },
+        compose: {
+          isComposing: false,
+          onToggleSlotExpanded: () => {},
+          onBindSlot: () => Promise.resolve(),
+          onReplaceSubtree: () => Promise.resolve(),
+          onUnnest: () => Promise.resolve(),
+        },
+      }),
+    );
+
+    renderInApp(<>{adapter.renderInspector?.(null as never)}</>, { client });
+
+    const section = screen.getByRole('region', { name: 'Transition inspector' });
+    // Kept visible with its reason, not silently hidden.
+    expect(within(section).getByTestId('transition-structural-disabled')).toBeInTheDocument();
+    const save = within(section).getByRole('button', { name: 'Save' });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(client.strategyPatchTransition).not.toHaveBeenCalled();
   });
 
   it('never merges a local draft edge into the compose projection', () => {
