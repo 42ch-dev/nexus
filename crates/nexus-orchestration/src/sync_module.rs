@@ -110,8 +110,7 @@ pub fn discover_works(workspace_dir: &Path) -> Vec<DiscoveredWork> {
             }
             let name = path
                 .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
+                .map_or_default(|n| n.to_string_lossy().to_string());
 
             // Skip hidden dirs
             if name.starts_with('.') {

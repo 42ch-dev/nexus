@@ -50,13 +50,12 @@ fn json_object_to_map(value: &serde_json::Value) -> serde_json::Map<String, serd
 fn schema_fragment_maps_to_detail(
     src: Option<&HashMap<String, serde_json::Value>>,
 ) -> HashMap<String, serde_json::Map<String, serde_json::Value>> {
-    src.map(|fragments| {
+    src.map_or_default(|fragments| {
         fragments
             .iter()
             .map(|(k, v)| (k.clone(), json_object_to_map(v)))
             .collect()
     })
-    .unwrap_or_default()
 }
 
 fn module_schemas_to_detail(schemas: &ModuleSchemas) -> ModuleDetailSchemas {
@@ -66,13 +65,11 @@ fn module_schemas_to_detail(schemas: &ModuleSchemas) -> ModuleDetailSchemas {
         invocation: schemas
             .invocation
             .as_ref()
-            .map(json_object_to_map)
-            .unwrap_or_default(),
+            .map_or_default(json_object_to_map),
         battle_report: schemas
             .battle_report
             .as_ref()
-            .map(json_object_to_map)
-            .unwrap_or_default(),
+            .map_or_default(json_object_to_map),
     }
 }
 

@@ -290,14 +290,17 @@ fn checked_len(length: libc::ssize_t, what: &str) -> io::Result<usize> {
 /// Whether the filesystem does not support extended attributes at all.
 fn is_unsupported(error: &io::Error) -> bool {
     let code = error.raw_os_error();
-    if code == Some(libc::ENOTSUP) {
-        return true;
-    }
+    // Written as one expression per platform: clippy 1.100 rejects an
+    // early-return `if` followed by a bool tail, and on Linux the macOS-only
+    // branch below is compiled away, exposing exactly that shape.
     #[cfg(target_os = "macos")]
-    if code == Some(libc::EOPNOTSUPP) {
-        return true;
+    {
+        code == Some(libc::ENOTSUP) || code == Some(libc::EOPNOTSUPP)
     }
-    false
+    #[cfg(not(target_os = "macos"))]
+    {
+        code == Some(libc::ENOTSUP)
+    }
 }
 
 #[cfg(target_os = "linux")]

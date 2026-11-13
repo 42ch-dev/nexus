@@ -1065,8 +1065,7 @@ fn rule_update(body: Value) -> WorldRuleUpdateRequest {
 fn rule_presence(body: &Value) -> RulePatchPresence {
     let supplied: Vec<&str> = body
         .as_object()
-        .map(|members| members.keys().map(String::as_str).collect())
-        .unwrap_or_default();
+        .map_or_default(|members| members.keys().map(String::as_str).collect());
     RulePatchPresence::from_supplied_keys(&supplied)
 }
 

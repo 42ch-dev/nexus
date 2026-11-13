@@ -1551,8 +1551,7 @@ impl ExecutionHandle {
             work_id,
             workspace_root: self
                 .workspace_root()
-                .map(std::path::Path::to_path_buf)
-                .unwrap_or_default(),
+                .map_or_default(std::path::Path::to_path_buf),
             preset_id: request.preset_id.clone(),
             preset_version: 1,
             source,

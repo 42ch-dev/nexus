@@ -278,10 +278,9 @@ impl Capability for NarrativeCompute {
                 serde_json::from_value(narrative_state)
                     .expect("narrative_state round-trips to ComputeInputNarrativeState"),
             ),
-            invocation: parsed
-                .invocation_params
-                .map(|v| serde_json::from_value(v).expect("invocation round-trips to Map"))
-                .unwrap_or_default(),
+            invocation: parsed.invocation_params.map_or_default(|v| {
+                serde_json::from_value(v).expect("invocation round-trips to Map")
+            }),
         };
 
         // Resolve the compiled module + manifest from the daemon-wide cache

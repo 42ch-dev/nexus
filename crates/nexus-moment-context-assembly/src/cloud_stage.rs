@@ -134,8 +134,7 @@ impl TwoStageAssembly {
                     .map(|item| {
                         let score = item
                             .relevance_score
-                            .map(|s| format!(" [relevance: {s:.2}]"))
-                            .unwrap_or_default();
+                            .map_or_default(|s| format!(" [relevance: {s:.2}]"));
                         format!(
                             "- {} ({}): {}{score}",
                             item.memory_id, item.memory_id, item.content_summary

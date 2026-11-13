@@ -202,14 +202,12 @@ fn probe_request(cwd: &Path, timeout_ms: u64) -> ProbeRequest {
 }
 
 fn read_log(path: &Path) -> Vec<serde_json::Value> {
-    std::fs::read_to_string(path)
-        .map(|content| {
-            content
-                .lines()
-                .filter_map(|line| serde_json::from_str(line).ok())
-                .collect()
-        })
-        .unwrap_or_default()
+    std::fs::read_to_string(path).map_or_default(|content| {
+        content
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    })
 }
 
 fn spawn_records(log: &[serde_json::Value]) -> Vec<&serde_json::Value> {

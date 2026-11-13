@@ -1260,9 +1260,7 @@ fn list_rows(
                 || {
                     // Platform display metadata: the core owner's projection
                     // first, the CLI cache as the per-field fallback.
-                    let core = core_home
-                        .map(|home| core_identity(home, &id))
-                        .unwrap_or_default();
+                    let core = core_home.map_or_default(|home| core_identity(home, &id));
                     let entry = creator_identity::get_creator_identity(cache, &id);
                     (
                         core.handle.or_else(|| entry.and_then(|e| e.handle.clone())),

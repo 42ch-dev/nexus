@@ -245,7 +245,7 @@ impl CodexNativeProvider {
                     .map_err(|e| {
                         HostError::protocol_error("codex thread start failed", Some(e.to_string()))
                     })?;
-                let thread_id = response.thread.id.clone();
+                let thread_id = response.thread.id;
                 guard.thread_id = Some(thread_id.clone());
                 tracing::info!(
                     session_id = %session_id,

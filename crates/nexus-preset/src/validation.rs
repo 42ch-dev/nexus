@@ -1086,12 +1086,11 @@ fn check_any_of_semantics(
         let alt_required: HashSet<String> = alt
             .get("required")
             .and_then(|r| r.as_array())
-            .map(|arr| {
+            .map_or_default(|arr| {
                 arr.iter()
                     .filter_map(|v| v.as_str().map(String::from))
                     .collect()
-            })
-            .unwrap_or_default();
+            });
         if alt_required.is_empty() {
             continue;
         }
@@ -1107,14 +1106,11 @@ fn check_any_of_semantics(
             .iter()
             .filter_map(|alt| {
                 alt.get("required").and_then(|r| {
-                    let keys: Vec<String> = r
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_str().map(String::from))
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    let keys: Vec<String> = r.as_array().map_or_default(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    });
                     if keys.is_empty() {
                         None
                     } else {

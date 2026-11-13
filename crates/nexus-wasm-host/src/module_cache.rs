@@ -88,8 +88,7 @@ impl std::fmt::Debug for ModuleCache {
         let ids: Vec<String> = self
             .entries
             .read()
-            .map(|g| g.keys().cloned().collect())
-            .unwrap_or_default();
+            .map_or_default(|g| g.keys().cloned().collect());
         f.debug_struct("ModuleCache")
             .field("len", &ids.len())
             .field("ids", &ids)

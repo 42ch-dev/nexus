@@ -1545,7 +1545,6 @@ async fn retained_character_pending_lifecycle_scope_delete_and_offset_pages() {
         let next = page
             .pagination
             .next_cursor
-            .clone()
             .expect("has_more without next_cursor");
         assert_eq!(
             next,
