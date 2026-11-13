@@ -15,6 +15,7 @@ import enSchedule from '../../locales/en/schedule.json';
 import enSessions from '../../locales/en/sessions.json';
 import enStrategies from '../../locales/en/strategies.json';
 import enCapabilities from '../../locales/en/capabilities.json';
+import enCharacters from '../../locales/en/characters.json';
 import enModules from '../../locales/en/modules.json';
 import enWorlds from '../../locales/en/worlds.json';
 import enInspector from '../../locales/en/inspector.json';
@@ -36,6 +37,7 @@ import zhSchedule from '../../locales/zh-CN/schedule.json';
 import zhSessions from '../../locales/zh-CN/sessions.json';
 import zhStrategies from '../../locales/zh-CN/strategies.json';
 import zhCapabilities from '../../locales/zh-CN/capabilities.json';
+import zhCharacters from '../../locales/zh-CN/characters.json';
 import zhModules from '../../locales/zh-CN/modules.json';
 import zhWorlds from '../../locales/zh-CN/worlds.json';
 import zhInspector from '../../locales/zh-CN/inspector.json';
@@ -94,6 +96,7 @@ export const namespaces = [
   'sessions',
   'strategies',
   'capabilities',
+  'characters',
   'modules',
   'worlds',
   'inspector',
@@ -128,6 +131,7 @@ i18next
         sessions: enSessions,
         strategies: enStrategies,
         capabilities: enCapabilities,
+        characters: enCharacters,
         modules: enModules,
         worlds: enWorlds,
         inspector: enInspector,
@@ -150,6 +154,7 @@ i18next
         sessions: zhSessions,
         strategies: zhStrategies,
         capabilities: zhCapabilities,
+        characters: zhCharacters,
         modules: zhModules,
         worlds: zhWorlds,
         inspector: zhInspector,

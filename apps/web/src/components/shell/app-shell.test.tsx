@@ -118,7 +118,7 @@ describe('AppShell', () => {
   it('renders the developer rail with hub-first apps and no locks', () => {
     useShellHandlers();
     renderShell('developer');
-    for (const id of ['hub', 'harness', 'modules', 'caps', 'session']) {
+    for (const id of ['hub', 'harness', 'modules', 'caps', 'characters', 'session']) {
       expect(screen.getByTestId(`rail-item-${id}`)).not.toHaveAttribute('aria-disabled');
     }
   });

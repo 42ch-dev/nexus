@@ -1173,3 +1173,698 @@ describe('BrowserClient access bootstrap (v1.219 access spec §3.1)', () => {
     window.removeEventListener(UNAUTHORIZED_EVENT, unauthorized);
   });
 });
+
+describe('BrowserClient character family (v240 actor web surfaces, I-000126)', () => {
+  const character = {
+    schema_version: 1,
+    character_id: 'chr_0123456789abcdef0123456789abcdef',
+    owner_creator_id: 'creator-1',
+    display_name: 'Mira',
+    status: 'active',
+    persona: { traits: ['guarded'] },
+    revision: 3,
+    created_at: '2026-11-01T00:00:00Z',
+    updated_at: '2026-11-02T00:00:00Z',
+  };
+
+  const binding = {
+    schema_version: 1,
+    binding_id: 'awb_0123456789abcdef0123456789abcdef',
+    character_id: character.character_id,
+    world_id: 'wld_0123456789abcdef0123456789abcdef',
+    status: 'active',
+    revision: 1,
+    created_at: '2026-11-01T00:00:00Z',
+    updated_at: '2026-11-01T00:00:00Z',
+  };
+
+  const characterPath = `/v1/daemon/characters/${character.character_id}`;
+  const bindingPath = `${characterPath}/bindings/${binding.binding_id}`;
+
+  it('lists characters with { items, pagination } and threads limit/cursor as query params', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get('/v1/daemon/characters', ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({
+          items: [character],
+          pagination: { limit: 10, has_more: true, next_cursor: 'cur-2' },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listCharacters({ limit: 10, cursor: 'cur-1' });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe('/v1/daemon/characters');
+    expect(url.searchParams.get('limit')).toBe('10');
+    expect(url.searchParams.get('cursor')).toBe('cur-1');
+    expect(res.items[0]!.character_id).toBe(character.character_id);
+    expect(res.pagination.next_cursor).toBe('cur-2');
+  });
+
+  it('creates a character and maps { character, binding } from POST /characters', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post('/v1/daemon/characters', async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ character, binding }, { status: 201 });
+      }),
+    );
+
+    const res = await new BrowserClient().createCharacter({
+      display_name: 'Mira',
+      world_id: binding.world_id,
+    });
+
+    expect(sent).toEqual({ display_name: 'Mira', world_id: binding.world_id });
+    expect(res.character.display_name).toBe('Mira');
+    expect(res.binding.binding_id).toBe(binding.binding_id);
+  });
+
+  it('reads one character by id from GET /characters/:id', async () => {
+    useHandlers(http.get(characterPath, () => HttpResponse.json({ character })));
+
+    const res = await new BrowserClient().getCharacter(character.character_id);
+
+    expect(res.character.status).toBe('active');
+    expect(res.character.revision).toBe(3);
+  });
+
+  it('patches tri-state fields, sending an explicit null and omitting absent keys', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.patch(characterPath, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ character: { ...character, image_uri: undefined } });
+      }),
+    );
+
+    const res = await new BrowserClient().patchCharacter(character.character_id, {
+      expected_revision: 3,
+      image_uri: null,
+    });
+
+    // `image_uri: null` clears; `persona`/`display_name` are absent (keep).
+    expect(sent).toEqual({ expected_revision: 3, image_uri: null });
+    expect(res.character.image_uri).toBeUndefined();
+  });
+
+  it('archives a character with expected_revision', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post(`${characterPath}/archive`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ character: { ...character, status: 'archived', revision: 4 } });
+      }),
+    );
+
+    const res = await new BrowserClient().archiveCharacter(character.character_id, {
+      expected_revision: 3,
+    });
+
+    expect(sent).toEqual({ expected_revision: 3 });
+    expect(res.character.status).toBe('archived');
+  });
+
+  it('restores a character with expected_revision', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post(`${characterPath}/restore`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ character: { ...character, revision: 5 } });
+      }),
+    );
+
+    const res = await new BrowserClient().restoreCharacter(character.character_id, {
+      expected_revision: 4,
+    });
+
+    expect(sent).toEqual({ expected_revision: 4 });
+    expect(res.character.status).toBe('active');
+    expect(res.character.revision).toBe(5);
+  });
+
+  it('adds a binding from POST /characters/:id/bindings', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post(`${characterPath}/bindings`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ binding }, { status: 201 });
+      }),
+    );
+
+    const res = await new BrowserClient().addCharacterBinding(character.character_id, {
+      world_id: binding.world_id,
+    });
+
+    expect(sent).toEqual({ world_id: binding.world_id });
+    expect(res.binding.world_id).toBe(binding.world_id);
+  });
+
+  it('lists bindings with { items, pagination } and cursor params', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get(`${characterPath}/bindings`, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({
+          items: [binding],
+          pagination: { limit: 5, has_more: false },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listCharacterBindings(character.character_id, {
+      limit: 5,
+      cursor: 'cur-9',
+    });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(`${characterPath}/bindings`);
+    expect(url.searchParams.get('cursor')).toBe('cur-9');
+    expect(res.items).toHaveLength(1);
+    expect(res.pagination.has_more).toBe(false);
+  });
+
+  it('reads one binding by id from GET /characters/:id/bindings/:binding_id', async () => {
+    useHandlers(http.get(bindingPath, () => HttpResponse.json({ binding })));
+
+    const res = await new BrowserClient().getCharacterBinding(
+      character.character_id,
+      binding.binding_id,
+    );
+
+    expect(res.binding.binding_id).toBe(binding.binding_id);
+    expect(res.binding.revision).toBe(1);
+  });
+
+  it('patches a binding, sending an explicit null to unlink the world sheet', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.patch(bindingPath, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ binding: { ...binding, revision: 2 } });
+      }),
+    );
+
+    const res = await new BrowserClient().patchCharacterBinding(
+      character.character_id,
+      binding.binding_id,
+      { expected_revision: 1, world_sheet_entry_id: null },
+    );
+
+    expect(sent).toEqual({ expected_revision: 1, world_sheet_entry_id: null });
+    expect(res.binding.revision).toBe(2);
+  });
+
+  it('removes a binding and resolves void on 204 No Content', async () => {
+    let seenMethod = '';
+    useHandlers(
+      http.delete(bindingPath, ({ request }) => {
+        seenMethod = request.method;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    await expect(
+      new BrowserClient().removeCharacterBinding(character.character_id, binding.binding_id),
+    ).resolves.toBeUndefined();
+    expect(seenMethod).toBe('DELETE');
+  });
+});
+
+describe('BrowserClient per-character memory family (v240 actor web surfaces, I-000127)', () => {
+  const characterId = 'chr_0123456789abcdef0123456789abcdef';
+  const bindingId = 'awb_0123456789abcdef0123456789abcdef';
+  const worldId = 'wld_0123456789abcdef0123456789abcdef';
+  const characterPath = `/v1/daemon/characters/${characterId}`;
+
+  const pending = {
+    pending_id: 'cpr_0123456789abcdef0123456789abcdef',
+    session_id: 'ses_1',
+    character_id: characterId,
+    binding_id: bindingId,
+    task_kind: 'chapter',
+    raw_digest: 'drafted the harbor scene',
+    created_at: '2026-11-03T00:00:00Z',
+    source_operation_id: null,
+  };
+
+  const fragment = {
+    fragment_id: 'cmf_0123456789abcdef0123456789abcdef',
+    session_id: 'ses_1',
+    character_id: characterId,
+    binding_id: bindingId,
+    summary: 'harbor scene',
+    keywords: ['harbor'],
+    created_at: '2026-11-03T00:00:00Z',
+    revision: 2,
+  };
+
+  const tomItem = {
+    carrier_entry_id: 'kne_0123456789abcdef0123456789abcdef',
+    row_ordinal: 0,
+    holder: characterId,
+    proposition: 'the harbor is closed',
+    order: 1,
+    truth: 'Unknown',
+  };
+
+  it('captures a pending review from POST /characters/:id/memory/pending-review', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post(`${characterPath}/memory/pending-review`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json(
+          { success: true, pending_id: pending.pending_id },
+          { status: 201 },
+        );
+      }),
+    );
+
+    const res = await new BrowserClient().captureCharacterPendingReview(characterId, {
+      pending_id: pending.pending_id,
+      session_id: pending.session_id,
+      raw_digest: pending.raw_digest,
+    });
+
+    expect(sent).toEqual({
+      pending_id: pending.pending_id,
+      session_id: pending.session_id,
+      raw_digest: pending.raw_digest,
+    });
+    expect(res.success).toBe(true);
+    expect(res.pending_id).toBe(pending.pending_id);
+  });
+
+  it('lists character pending reviews with cursor params and no creator_id', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get(`${characterPath}/memory/pending-review`, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({
+          items: [pending],
+          pagination: { limit: 10, has_more: true, next_cursor: 'cur-2' },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listCharacterPendingReviews(characterId, {
+      binding_id: bindingId,
+      limit: 10,
+      cursor: 'cur-1',
+    });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(`${characterPath}/memory/pending-review`);
+    expect(url.searchParams.get('binding_id')).toBe(bindingId);
+    expect(url.searchParams.get('limit')).toBe('10');
+    expect(url.searchParams.get('cursor')).toBe('cur-1');
+    // Character scope is the path, never the creator query member.
+    expect(url.searchParams.has('creator_id')).toBe(false);
+    expect(res.items[0]!.pending_id).toBe(pending.pending_id);
+    expect(res.pagination.next_cursor).toBe('cur-2');
+  });
+
+  it('counts character pending reviews from the /count route', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get(`${characterPath}/memory/pending-review/count`, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({ count: 3 });
+      }),
+    );
+
+    const res = await new BrowserClient().countCharacterPendingReviews(characterId, {
+      binding_id: bindingId,
+    });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(`${characterPath}/memory/pending-review/count`);
+    expect(url.searchParams.get('binding_id')).toBe(bindingId);
+    expect(res.count).toBe(3);
+  });
+
+  it('deletes a character pending review and resolves the { success, pending_id } body', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.delete(`${characterPath}/memory/pending-review/${pending.pending_id}`, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({ success: true, pending_id: pending.pending_id });
+      }),
+    );
+
+    const res = await new BrowserClient().deleteCharacterPendingReview(
+      characterId,
+      pending.pending_id,
+    );
+
+    expect(new URL(seenUrl).pathname).toBe(
+      `${characterPath}/memory/pending-review/${pending.pending_id}`,
+    );
+    expect(res).toEqual({ success: true, pending_id: pending.pending_id });
+  });
+
+  it('drains a character review batch from POST /characters/:id/memory/review', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post(`${characterPath}/memory/review`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({
+          promoted: 2,
+          fragmented: 1,
+          dropped: 0,
+          has_more: true,
+          processed: 3,
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().reviewCharacterMemory(characterId, {
+      binding_id: bindingId,
+    });
+
+    expect(sent).toEqual({ binding_id: bindingId });
+    expect(res).toMatchObject({ promoted: 2, fragmented: 1, has_more: true });
+  });
+
+  it('lists character memory fragments under the fragments key', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get(`${characterPath}/memory/fragments`, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({
+          fragments: [fragment],
+          pagination: { limit: 5, has_more: false },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listCharacterMemoryFragments(characterId, {
+      binding_id: bindingId,
+      limit: 5,
+    });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(`${characterPath}/memory/fragments`);
+    expect(url.searchParams.get('limit')).toBe('5');
+    expect(res.fragments[0]!.fragment_id).toBe(fragment.fragment_id);
+    expect(res.fragments[0]!.revision).toBe(2);
+  });
+
+  it('promotes a character fragment via the :promote verb with expected_revision', async () => {
+    let sent: unknown;
+    let seenUrl = '';
+    useHandlers(
+      http.post(
+        new RegExp(`/characters/${characterId}/memory/fragments/[^/]+:promote$`),
+        async ({ request }) => {
+          seenUrl = request.url;
+          sent = await request.json();
+          return HttpResponse.json({
+            fragment: { ...fragment, binding_id: undefined, revision: 3 },
+          });
+        },
+      ),
+    );
+
+    const res = await new BrowserClient().promoteCharacterFragment(
+      characterId,
+      fragment.fragment_id,
+      { expected_revision: 2 },
+    );
+
+    expect(new URL(seenUrl).pathname).toBe(
+      `${characterPath}/memory/fragments/${fragment.fragment_id}:promote`,
+    );
+    expect(sent).toEqual({ expected_revision: 2 });
+    // Promotion clears binding-local provenance and bumps the revision.
+    expect(res.fragment.revision).toBe(3);
+    expect(res.fragment.binding_id).toBeUndefined();
+  });
+
+  it('reads or regenerates the character SOUL narrative from /soul/reflect', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post(`${characterPath}/soul/reflect`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({
+          character_id: characterId,
+          state: 'current',
+          narrative: 'Mira keeps her distance until trust is earned.',
+          stale: false,
+          current_fragment_count: 12,
+          current_distinct_keyword_count: 21,
+          min_fragment_count: 10,
+          min_distinct_keyword_count: 20,
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().reflectCharacterSoul(characterId, {
+      force_regenerate: true,
+    });
+
+    expect(sent).toEqual({ force_regenerate: true });
+    expect(res.character_id).toBe(characterId);
+    expect(res.state).toBe('current');
+  });
+
+  it('lists character ToM beliefs with the required binding_id + world_id query', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get(`${characterPath}/tom`, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({
+          items: [tomItem],
+          pagination: { limit: 50, has_more: false },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listCharacterTom(characterId, {
+      binding_id: bindingId,
+      world_id: worldId,
+      cursor: 'cur-3',
+    });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(`${characterPath}/tom`);
+    expect(url.searchParams.get('binding_id')).toBe(bindingId);
+    expect(url.searchParams.get('world_id')).toBe(worldId);
+    expect(url.searchParams.get('cursor')).toBe('cur-3');
+    expect(res.items[0]!.holder).toBe(characterId);
+    expect(res.items[0]!.order).toBe(1);
+  });
+
+  it('records a ToM belief with POST /characters/:id/tom and maps the CAS revision', async () => {
+    let sent: unknown;
+    let seenMethod = '';
+    useHandlers(
+      http.post(`${characterPath}/tom`, async ({ request }) => {
+        seenMethod = request.method;
+        sent = await request.json();
+        return HttpResponse.json({
+          carrier_entry_id: tomItem.carrier_entry_id,
+          revision: 5,
+          mind_state_id: 'mst_0123456789abcdef0123456789abcdef',
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().recordCharacterTom(characterId, {
+      world_id: worldId,
+      binding_id: bindingId,
+      carrier_entry_id: tomItem.carrier_entry_id,
+      expected_revision: 4,
+      holder: characterId,
+      proposition: tomItem.proposition,
+      order: 1,
+    });
+
+    expect(seenMethod).toBe('POST');
+    expect(sent).toMatchObject({
+      world_id: worldId,
+      binding_id: bindingId,
+      carrier_entry_id: tomItem.carrier_entry_id,
+      expected_revision: 4,
+      holder: characterId,
+      order: 1,
+    });
+    expect(res.revision).toBe(5);
+  });
+});
+
+describe('BrowserClient actor-knowledge family (v240 actor web surfaces, I-000128)', () => {
+  const characterId = 'chr_0123456789abcdef0123456789abcdef';
+  const bindingId = 'awb_0123456789abcdef0123456789abcdef';
+  const worldId = 'wld_0123456789abcdef0123456789abcdef';
+  const entryId = 'kne_0123456789abcdef0123456789abcdef';
+  const characterPath = `/v1/daemon/characters/${characterId}`;
+  const knowledgePath = `${characterPath}/knowledge`;
+
+  const item = {
+    entry_id: entryId,
+    owner: { kind: 'character', id: characterId },
+    holder_entry_id: 'hld_0123456789abcdef0123456789abcdef',
+    disclosure: 'owner-private',
+    block_type: 'character',
+    canonical_name: 'Mira',
+    status: 'confirmed',
+    revision: 3,
+    created_at: '2026-11-03T00:00:00Z',
+  };
+
+  it('lists character-scoped knowledge from GET /characters/:id/knowledge with cursor params', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get(knowledgePath, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({
+          items: [item],
+          pagination: { limit: 25, has_more: true, next_cursor: 'cur-2' },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listCharacterKnowledge(characterId, {
+      limit: 25,
+      cursor: 'cur-1',
+    });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(knowledgePath);
+    expect(url.searchParams.get('limit')).toBe('25');
+    expect(url.searchParams.get('cursor')).toBe('cur-1');
+    expect(res.items[0]!.entry_id).toBe(entryId);
+    expect(res.items[0]!.owner).toEqual({ kind: 'character', id: characterId });
+    expect(res.pagination.next_cursor).toBe('cur-2');
+  });
+
+  it('reads one character-scoped entry from GET /characters/:id/knowledge/:entry_id', async () => {
+    let seenMethod = '';
+    useHandlers(
+      http.get(`${knowledgePath}/${entryId}`, ({ request }) => {
+        seenMethod = request.method;
+        return HttpResponse.json({ item, summary: 'the harbor pilot' });
+      }),
+    );
+
+    const res = await new BrowserClient().getCharacterKnowledge(characterId, entryId);
+
+    expect(seenMethod).toBe('GET');
+    expect(res.item.entry_id).toBe(entryId);
+    expect(res.summary).toBe('the harbor pilot');
+  });
+
+  it('patches a character-scoped entry with canonical_name, summary and audience under CAS', async () => {
+    let sent: unknown;
+    let seenMethod = '';
+    useHandlers(
+      http.patch(`${knowledgePath}/${entryId}`, async ({ request }) => {
+        seenMethod = request.method;
+        sent = await request.json();
+        return HttpResponse.json({ item: { ...item, revision: 4 }, summary: null });
+      }),
+    );
+
+    const res = await new BrowserClient().patchCharacterKnowledge(characterId, entryId, {
+      expected_revision: 3,
+      canonical_name: 'Mira Vell',
+      summary: null,
+      audience: { kind: 'shared' },
+    });
+
+    expect(seenMethod).toBe('PATCH');
+    expect(sent).toEqual({
+      expected_revision: 3,
+      canonical_name: 'Mira Vell',
+      summary: null,
+      audience: { kind: 'shared' },
+    });
+    expect(res.item.revision).toBe(4);
+    expect(res.summary).toBeNull();
+  });
+
+  it('deletes a character-scoped entry with expected_revision as a query member', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.delete(`${knowledgePath}/${entryId}`, ({ request }) => {
+        seenUrl = request.url;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    await expect(
+      new BrowserClient().deleteCharacterKnowledge(characterId, entryId, { expected_revision: 4 }),
+    ).resolves.toBeUndefined();
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(`${knowledgePath}/${entryId}`);
+    expect(url.searchParams.get('expected_revision')).toBe('4');
+  });
+
+  it('reads the admitted-principal view from POST /actor-knowledge/view', async () => {
+    let sent: unknown;
+    let seenUrl = '';
+    useHandlers(
+      http.post('/v1/daemon/actor-knowledge/view', async ({ request }) => {
+        seenUrl = request.url;
+        sent = await request.json();
+        return HttpResponse.json({
+          items: [item],
+          pagination: { limit: 10, has_more: false },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().viewActorKnowledge({
+      actor_ref: { actor_kind: 'character', character_id: characterId },
+      world_id: worldId,
+      binding_id: bindingId,
+      limit: 10,
+    });
+
+    expect(new URL(seenUrl).pathname).toBe('/v1/daemon/actor-knowledge/view');
+    // Scope is the body's admitted actor ref; the path carries no character id.
+    expect(sent).toEqual({
+      actor_ref: { actor_kind: 'character', character_id: characterId },
+      world_id: worldId,
+      binding_id: bindingId,
+      limit: 10,
+    });
+    expect(res.items[0]!.entry_id).toBe(entryId);
+    expect(res.pagination.has_more).toBe(false);
+  });
+
+  it('creates an entry through the admitted-principal route, not the character path', async () => {
+    let sent: unknown;
+    let seenUrl = '';
+    useHandlers(
+      http.post('/v1/daemon/actor-knowledge/entries', async ({ request }) => {
+        seenUrl = request.url;
+        sent = await request.json();
+        return HttpResponse.json({ item }, { status: 201 });
+      }),
+    );
+
+    const res = await new BrowserClient().createActorKnowledgeEntry({
+      owner_kind: 'character',
+      character_id: characterId,
+      block_type: 'character',
+      canonical_name: 'Mira',
+      audience: { kind: 'author-only' },
+    });
+
+    // Creation addresses the principal, never `…/characters/{id}/knowledge`.
+    expect(new URL(seenUrl).pathname).toBe('/v1/daemon/actor-knowledge/entries');
+    expect(sent).toEqual({
+      owner_kind: 'character',
+      character_id: characterId,
+      block_type: 'character',
+      canonical_name: 'Mira',
+      audience: { kind: 'author-only' },
+    });
+    expect(res.item.entry_id).toBe(entryId);
+  });
+});

@@ -333,7 +333,8 @@
     "hub": "Hub",
     "harness": "Harness",
     "modules": "Modules",
-    "caps": "Capabilities"
+    "caps": "Capabilities",
+    "characters": "Characters"
   },
   "topnav": {
     "searchDisabled": "Search (coming soon)",

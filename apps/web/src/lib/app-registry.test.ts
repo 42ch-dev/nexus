@@ -12,7 +12,7 @@ import {
 } from '@/lib/app-registry';
 
 const CREATOR_IDS = ['world', 'work', 'session', 'memory'] as const;
-const DEVELOPER_IDS = ['hub', 'harness', 'modules', 'caps', 'session'] as const;
+const DEVELOPER_IDS = ['hub', 'harness', 'modules', 'caps', 'characters', 'session'] as const;
 
 describe('appsForEntrance', () => {
   it('scopes the creator rail to 世界/作品/会话/记忆', () => {
