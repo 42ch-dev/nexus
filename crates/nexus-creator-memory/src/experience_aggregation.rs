@@ -163,7 +163,7 @@ fn collect_experience_entries(
                 memory_kind: memory.frontmatter.memory_kind.clone(),
                 slug: memory.slug(),
                 body: memory.body.clone(),
-                updated_at: memory.frontmatter.updated_at.clone(),
+                updated_at: memory.frontmatter.updated_at,
             });
         }
     }

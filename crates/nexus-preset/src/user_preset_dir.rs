@@ -126,7 +126,7 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &dyn CapabilityCatalog) -> Use
         let preset_yaml_path = path.join("preset.yaml");
         if !preset_yaml_path.exists() {
             result.warnings.push(UserPresetWarning {
-                dir_name: dir_name.clone(),
+                dir_name,
                 message: "missing preset.yaml".to_string(),
             });
             continue;

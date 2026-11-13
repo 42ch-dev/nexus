@@ -443,8 +443,7 @@ impl CliConfig {
             "workspace_path" => Ok(self
                 .workspace_path
                 .as_ref()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default()),
+                .map_or_default(|p| p.to_string_lossy().to_string())),
             "active_creator_id" => Ok(self.active_creator_id.clone().unwrap_or_default()),
             "platform_url" => Ok(if self.platform_url.is_empty() {
                 default_platform_url()
@@ -457,10 +456,7 @@ impl CliConfig {
                 self.daemon_url.clone()
             }),
             "runtime_mode" => Ok(self.runtime_mode.to_string()),
-            "setup_completed" => Ok(self
-                .setup_completed
-                .map(|v| v.to_string())
-                .unwrap_or_default()),
+            "setup_completed" => Ok(self.setup_completed.map_or_default(|v| v.to_string())),
             _ => Err(anyhow::anyhow!("Unsupported config key: {key}")),
         }
     }
@@ -1012,8 +1008,7 @@ mod tests {
     fn migration_converts_json_to_toml() {
         let _home = crate::testutil::isolated_home();
         let nexus_dir = std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default()
+            .map_or_default(std::path::PathBuf::from)
             .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
@@ -1059,8 +1054,7 @@ mod tests {
     fn migration_with_empty_json_returns_default() {
         let _home = crate::testutil::isolated_home();
         let nexus_dir = std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default()
+            .map_or_default(std::path::PathBuf::from)
             .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
@@ -1080,8 +1074,7 @@ mod tests {
     fn load_reads_toml_when_present() {
         let _home = crate::testutil::isolated_home();
         let nexus_dir = std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default()
+            .map_or_default(std::path::PathBuf::from)
             .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
@@ -1104,8 +1097,7 @@ platform_url = "https://direct.api.io"
     fn load_corrupt_toml_reports_and_leaves_the_file_untouched() {
         let _home = crate::testutil::isolated_home();
         let nexus_dir = std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default()
+            .map_or_default(std::path::PathBuf::from)
             .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
@@ -1178,8 +1170,7 @@ platform_url = "https://direct.api.io"
     fn isolated_nexus_dir() -> (crate::testutil::IsolatedHome, std::path::PathBuf) {
         let home = crate::testutil::isolated_home();
         let nexus_dir = std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default()
+            .map_or_default(std::path::PathBuf::from)
             .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
         (home, nexus_dir)

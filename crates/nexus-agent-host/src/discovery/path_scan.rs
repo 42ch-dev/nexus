@@ -327,9 +327,7 @@ fn find_command(path_dirs: &[PathBuf], command: &str) -> Option<PathBuf> {
     // Fallback: manual scan of the provided dirs, then the process PATH,
     // for environments where `which` may not find a command that exists.
     let search_dirs: Vec<PathBuf> = if path_dirs.is_empty() {
-        std::env::var_os("PATH")
-            .map(|p| std::env::split_paths(&p).collect())
-            .unwrap_or_default()
+        std::env::var_os("PATH").map_or_default(|p| std::env::split_paths(&p).collect())
     } else {
         path_dirs.to_vec()
     };

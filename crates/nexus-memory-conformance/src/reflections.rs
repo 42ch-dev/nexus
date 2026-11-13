@@ -430,13 +430,12 @@ fn target_from_value(selection: &Value) -> Result<ReflectionTarget, SpokeReject>
             let ids: Vec<String> = selection
                 .get("context_ids")
                 .and_then(Value::as_array)
-                .map(|ids| {
+                .map_or_default(|ids| {
                     ids.iter()
                         .filter_map(Value::as_str)
                         .map(str::to_owned)
                         .collect()
-                })
-                .unwrap_or_default();
+                });
             let reads_shared = selection
                 .get("include_shared")
                 .and_then(Value::as_bool)
@@ -512,13 +511,12 @@ fn pinned_source_ids(basis: &Value) -> Vec<String> {
     basis
         .get(PINNED_SOURCE_IDS_KEY)
         .and_then(Value::as_array)
-        .map(|ids| {
+        .map_or_default(|ids| {
             ids.iter()
                 .filter_map(Value::as_str)
                 .map(str::to_owned)
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 /// C-077: a reflection whose *whole* pinned source set has been tombstoned is

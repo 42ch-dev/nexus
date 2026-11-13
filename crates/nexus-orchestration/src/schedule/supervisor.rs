@@ -388,7 +388,7 @@ impl ScheduleSupervisor {
                     running_by_creator
                         .entry(schedule.creator_id.clone())
                         .or_default()
-                        .insert(schedule.id.clone());
+                        .insert(schedule.id);
                 }
                 ScheduleStatus::Pending => {
                     // V1.5 WS-D: filter by scheduled_at for clock-triggered tick

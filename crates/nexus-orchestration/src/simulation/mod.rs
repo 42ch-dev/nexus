@@ -104,7 +104,7 @@ pub fn simulate_document(
             });
         }
 
-        let outgoing = outgoing.get(id).map(Vec::as_slice).unwrap_or_default();
+        let outgoing = outgoing.get(id).map_or_default(Vec::as_slice);
         let judged = node
             .exit_when
             .as_ref()

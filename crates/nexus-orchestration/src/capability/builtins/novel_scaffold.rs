@@ -761,8 +761,7 @@ impl Capability for NovelProjectScaffold {
             .iter()
             .map(|p| {
                 p.strip_prefix(&root)
-                    .map(|rel| rel.to_string_lossy().to_string())
-                    .unwrap_or_default()
+                    .map_or_default(|rel| rel.to_string_lossy().to_string())
             })
             .collect();
         txn.commit();

@@ -492,7 +492,7 @@ async fn monitor_session(
     // admitted subset (T2 granularity preserved for eviction bookkeeping).
     let admitted_ids: Vec<String> = responder
         .remote_manifest()
-        .map(|manifest| {
+        .map_or_default(|manifest| {
             // Negotiation (AR-69 #1): the daemon hello `capabilities[]` is
             // the negotiated-membership set (baseline ∪ operator-allowlisted
             // tool ids) — derived from THIS connection's generation (DF-92):
@@ -520,8 +520,7 @@ async fn monitor_session(
                     Vec::new()
                 }
             }
-        })
-        .unwrap_or_default();
+        });
     let event_session_id = uuid::Uuid::new_v4().to_string();
     crate::connect::events::connect_event_registry().open_session(&event_session_id);
     observed.bind_session(&event_session_id);

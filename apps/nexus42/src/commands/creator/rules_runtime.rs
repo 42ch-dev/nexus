@@ -573,10 +573,9 @@ async fn handle_rules_reset(
     let scaffold = nexus_orchestration::rules_layers::render_default_agents_md(work_ref);
     let would_change = current.as_deref().is_none_or(|c| c != scaffold);
     let diff = if would_change {
-        current
-            .as_deref()
-            .map(|c| nexus_orchestration::rules_layers::diff_agents_md_vs_scaffold(c, work_ref))
-            .unwrap_or_default()
+        current.as_deref().map_or_default(|c| {
+            nexus_orchestration::rules_layers::diff_agents_md_vs_scaffold(c, work_ref)
+        })
     } else {
         String::new()
     };
