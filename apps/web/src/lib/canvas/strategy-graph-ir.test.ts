@@ -136,6 +136,76 @@ describe('buildStrategyGraphFromIr', () => {
     expect(byId.get('collect/judge')?.data.patternId).toBe('judge-step');
   });
 
+  it('gives a nested slot its own nest id so it stays editable (T3 regression)', () => {
+    const document = composedDocument();
+    document.nodes.push({
+      id: 'collect/judge',
+      kind: 'pattern_slot',
+      effect_class: 'read',
+      pattern: { registry_id: 'judge-step', version: '2.0.0' },
+    });
+    document.nests.push({
+      id: 'judge-region',
+      parent_node: 'collect/judge',
+      expansion: 'expand_in_candidate',
+      pin_policy: 'exact',
+      child: { kind: 'pattern', registry_id: 'judge-step', version: '2.0.0' },
+    });
+
+    const graph = buildStrategyGraphFromIr(document, {
+      expandedSlots: new Set(['collect']),
+      patterns: PATTERNS,
+      containment: new Map([['collect/judge', 'collect']]),
+    });
+
+    // Without a nest id the slot inspector returns null and the region cannot be bound at all.
+    expect(graph.nodes.find((node) => node.id === 'collect/judge')?.data.nestId).toBe(
+      'judge-region',
+    );
+  });
+
+  it('keeps both endpoints of every edge while a containing slot is collapsed, and restores the children on expand', () => {
+    const document = composedDocument();
+    document.nodes.push({
+      id: 'collect/judge',
+      kind: 'pattern_slot',
+      effect_class: 'read',
+      pattern: { registry_id: 'judge-step', version: '2.0.0' },
+    });
+    document.edges.push({
+      id: 'collect/judge->done',
+      from: 'collect/judge',
+      to: 'done',
+      kind: 'linear',
+    });
+    const chrome = {
+      patterns: PATTERNS,
+      containment: new Map([['collect/judge', 'collect']]),
+    };
+
+    const endpointsResolve = (nodes: { id: string }[], edges: { source: string; target: string }[]) => {
+      const ids = new Set(nodes.map((node) => node.id));
+      return edges.every((edge) => ids.has(edge.source) && ids.has(edge.target));
+    };
+
+    // Collapsed parent: the child stays in the node set as a hidden node, so the
+    // edge that names it keeps a source.
+    const collapsed = buildStrategyGraphFromIr(document, chrome);
+    const hiddenChild = collapsed.nodes.find((node) => node.id === 'collect/judge');
+    expect(hiddenChild?.hidden).toBe(true);
+    expect(endpointsResolve(collapsed.nodes, collapsed.edges)).toBe(true);
+
+    // Expanded parent: the parent emits the child, and the endpoints still resolve.
+    const expanded = buildStrategyGraphFromIr(document, {
+      ...chrome,
+      expandedSlots: new Set(['collect']),
+    });
+    const child = expanded.nodes.find((node) => node.id === 'collect/judge');
+    expect(child?.hidden).toBeUndefined();
+    expect(child?.parentId).toBe('collect');
+    expect(endpointsResolve(expanded.nodes, expanded.edges)).toBe(true);
+  });
+
   it('carries the pin and the binding diagnostic on the collapsed slot node (T2 data)', () => {
     const graph = buildStrategyGraphFromIr(composedDocument(), { patterns: PATTERNS });
     const slot = graph.nodes.find((node) => node.id === 'collect');

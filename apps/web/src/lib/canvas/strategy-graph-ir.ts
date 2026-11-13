@@ -181,17 +181,32 @@ export function buildStrategyGraphFromIr(
   const slotNestId = new Map<string, string>(); // slot node id → nest id
   for (const nest of document.nests) slotNestId.set(nest.parent_node, nest.id);
 
+  /**
+   * A contained slot is hidden exactly while no expanded ancestor emits it: a
+   * collapsed parent must keep it in the node set (hidden) so the edges naming
+   * it keep both endpoints, and an expanded parent emits it as its own child.
+   */
+  const hiddenSlot = (id: string, seen: Set<string> = new Set()): boolean => {
+    const parent = containment.get(id);
+    if (parent === undefined) return false;
+    if (seen.has(id)) return false; // chrome cycle: treat as top level rather than hide both
+    seen.add(id);
+    return !(expandedSlots?.has(parent) === true && !hiddenSlot(parent, seen));
+  };
+
   for (const node of nodes) {
     if (node.kind === 'inner_step') continue;
-    // A slot nested inside another slot's region is emitted by the parent's
-    // expansion (parents-first), not as a top-level node.
-    if (node.kind === 'pattern_slot' && containment.has(node.id)) continue;
+    const contained = node.kind === 'pattern_slot' && containment.has(node.id);
+    // An expanded parent emits this slot as its child (parents-first); otherwise
+    // it stays here as a hidden node rather than dropping out of the graph.
+    const hidden = contained && hiddenSlot(node.id);
+    if (contained && !hidden) continue;
     const layer = layerOf.get(node.id) ?? 0;
     const position = { x: xOf.get(node.id) ?? 0, y: layer * LAYER_HEIGHT };
     const isInitial = node.id === document.entry;
     const isTerminal = node.kind === 'terminal' || document.terminal.includes(node.id);
     const isSlot = node.kind === 'pattern_slot';
-    const expanded = isSlot && expandedSlots?.has(node.id) === true;
+    const expanded = isSlot && !hidden && expandedSlots?.has(node.id) === true;
 
     const data: StrategyNodeData = {
       stateId: node.id,
@@ -231,6 +246,7 @@ export function buildStrategyGraphFromIr(
               : 'strategy-state',
       position,
       data,
+      ...(hidden ? { hidden: true } : {}),
       draggable: true,
       selectable: true,
       focusable: true,
@@ -242,7 +258,7 @@ export function buildStrategyGraphFromIr(
     if (isSlot && expanded) {
       const parent = rfNodes[rfNodes.length - 1];
       parent.data = { ...parent.data, isGroup: true, expanded: true };
-      pushSlotSubtree(rfNodes, node, options, byId, 1);
+      pushSlotSubtree(rfNodes, node, options, byId, slotNestId, 1);
     }
   }
 
@@ -334,6 +350,7 @@ function pushSlotSubtree(
   slot: IrNode,
   options: StrategyIrProjectionOptions,
   byId: Map<string, IrNode>,
+  slotNestId: ReadonlyMap<string, string>,
   depth: number,
 ): void {
   const { patterns = [], containment = new Map(), expandedSlots } = options;
@@ -373,6 +390,9 @@ function pushSlotSubtree(
         patternId: child.pattern?.registry_id ?? '',
         patternVersion: child.pattern?.version ?? '',
         patternEffectClass: child.effect_class,
+        // The nested slot is editable exactly like a top-level one: its binding
+        // op addresses the nest whose `parent_node` names it.
+        nestId: slotNestId.get(child.id),
         slotRows: rows,
         unboundRequired: rows.filter((row) => row.required && row.value === undefined).map((row) => row.name),
         expanded: false,
@@ -398,7 +418,7 @@ function pushSlotSubtree(
         ...rfNodes[rfNodes.length - 1],
         data: { ...rfNodes[rfNodes.length - 1].data, isGroup: true, expanded: true },
       };
-      pushSlotSubtree(rfNodes, childIr, options, byId, depth + 1);
+      pushSlotSubtree(rfNodes, childIr, options, byId, slotNestId, depth + 1);
     }
   });
 }
