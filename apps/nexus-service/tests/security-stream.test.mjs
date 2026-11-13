@@ -1268,11 +1268,10 @@ describe('security-stream (P4-T2)', () => {
         assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(body)}`);
         assert.equal(res.payload.error.code, 'invalid_input');
       }
-      // A well-formed set_model branch is a valid shape -> explicit not_migrated.
-      const setModel = await exec({ kind: 'set_model', model: 'm' });
-      assert.equal(setModel.status, 501);
-      assert.equal(setModel.payload.error.code, 'route_not_migrated');
-      // No malformed or unsupported request may reach the adapter.
+      // A well-formed `set_model` answered 501 `route_not_migrated` here until
+      // ea75345d4 migrated it to provider dispatch, so there is no unsupported
+      // well-formed branch left to pin; the malformed bodies above stay the
+      // only requests that must not reach the adapter.
       assert.equal(readFixtureLog(home.log).length, logAfterValidCreate, 'malformed bodies must not mutate the fixture');
     } finally { await closeServiceBounded(local); await startSharedService(homeCtx.home, 0); }
   });

@@ -1179,7 +1179,7 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(afterShutdown.payload.error.code, 'not_found');
   });
 
-  test('the provider-only lane and the unsupported model/mode refusals are unchanged', async () => {
+  test('the provider-only lane and its generic operation shape are unchanged', async () => {
     // A legacy create omits both actor_ref and viewpoint: unchanged lane.
     const created = await jsonFetch('/v1/daemon/agent-host/sessions', {
       method: 'POST',
@@ -1202,14 +1202,11 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(stream.status, 200);
     assert.ok(stream.frames.some((frame) => frame.data?.MessageDelta?.text?.includes('transformed:legacy prompt')));
 
-    for (const body of [{ kind: 'set_model', model: 'm' }, { kind: 'set_mode', mode: 'x' }]) {
-      const refused = await jsonFetch(`/v1/daemon/agent-host/sessions/${created.payload.session_id}/operations`, {
-        method: 'POST',
-        body,
-      });
-      assert.equal(refused.status, 501, refused.text);
-      assert.equal(refused.payload.error.code, 'route_not_migrated');
-    }
+    // `set_model`/`set_mode` answered 501 `route_not_migrated` here until
+    // ea75345d4 migrated both to provider dispatch; the lane has no refusal of
+    // its own to pin now, and the provider's answer is not this surface's
+    // contract. Residual: an unmapped provider error reply still surfaces as
+    // 500 `internal` (I-000428).
   });
 
   /**

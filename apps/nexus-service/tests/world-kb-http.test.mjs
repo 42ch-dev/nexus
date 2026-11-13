@@ -465,9 +465,11 @@ describe('world-kb-http uninitialized profile (P4-T1)', () => {
     assert.equal(patch.status, 409);
     assert.equal(patch.payload.error.code, 'uninitialized');
 
+    // I-000123: tier1 host readiness degrades on the uninitialized shell
+    // (same body as an absent host) instead of deadlocking first-run setup.
     const host = await jsonFetch(`${service.url}/v1/daemon/agent-host/health`);
-    assert.equal(host.status, 409);
-    assert.equal(host.payload.error.code, 'uninitialized');
+    assert.equal(host.status, 200);
+    assert.equal(host.payload.running, false);
 
     const sessions = await jsonFetch(`${service.url}/v1/daemon/agent-host/sessions`);
     assert.equal(sessions.status, 409);
@@ -500,8 +502,8 @@ describe('world-kb-http uninitialized profile (P4-T1)', () => {
       assert.deepEqual(daemon.payload.degraded.subsystems, ['db', 'engine']);
 
       const host = await jsonFetch(`${local.url}/v1/daemon/agent-host/health`);
-      assert.equal(host.status, 409);
-      assert.equal(host.payload.error.code, 'uninitialized');
+      assert.equal(host.status, 200);
+      assert.equal(host.payload.running, false);
     } finally {
       const report = await local.close();
       assert.equal(report.state, 'closed');
