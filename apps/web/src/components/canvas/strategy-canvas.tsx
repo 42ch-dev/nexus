@@ -68,10 +68,12 @@ export interface StrategyCanvasProps {
 
 export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: StrategyCanvasProps) {
   const { t } = useTranslation('canvas');
-  const strategyState = useStrategyCanvas(presetId);
   // v239-p3-canvas-compose-ui: per-surface flag (compass D14/D18). Off → the
   // canvas renders exactly as today (YAML projection, disabled Approve).
   const composeEnabled = useStrategyCanvasComposeFlag();
+  // With the flag on the candidate is the one structural authority, so a draft
+  // authored while it was off cannot commit through the YAML path.
+  const strategyState = useStrategyCanvas(presetId, composeEnabled);
   const compose = useStrategyCompose(presetId, composeEnabled);
   const approval = useApproveStrategy(presetId);
   // The compose path simulates the working candidate it holds in hand; the
@@ -436,6 +438,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
                 isCommitting={strategyState.isCommittingDraft}
                 onCommit={strategyState.commitDraft}
                 onCancel={strategyState.cancelDraft}
+                structuralWritesDisabled={composeEnabled}
               />
             </aside>
           ) : null}

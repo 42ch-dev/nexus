@@ -206,6 +206,12 @@ export interface DraftEdgeInspectorProps {
   onCommit: (args: DraftCommitArgs) => void;
   /** Discard the draft edge without a daemon call. */
   onCancel: () => void;
+  /**
+   * Compose path: the candidate document is the only structural authority, so a
+   * draft authored on the flag-off surface is shown with its reason but cannot
+   * be committed through this YAML path.
+   */
+  structuralWritesDisabled?: boolean;
 }
 
 /**
@@ -223,11 +229,13 @@ export function DraftEdgeInspector({
   isCommitting,
   onCommit,
   onCancel,
+  structuralWritesDisabled = false,
 }: DraftEdgeInspectorProps) {
   const { t } = useTranslation('canvas');
   const [condition, setCondition] = useState('');
 
   function handleCommit() {
+    if (structuralWritesDisabled) return;
     const args: DraftCommitArgs = {};
     if (condition.trim()) args.condition = condition.trim();
     onCommit(args);
@@ -249,7 +257,7 @@ export function DraftEdgeInspector({
           <button
             type="button"
             onClick={handleCommit}
-            disabled={isCommitting}
+            disabled={isCommitting || structuralWritesDisabled}
             className="rounded-control bg-purple-700 px-2 py-1 text-button-12 text-white hover:bg-purple-800 disabled:opacity-disabled"
           >
             {isCommitting ? t('strategy.edgeCreate.creating') : t('strategy.edgeCreate.submit')}
@@ -273,6 +281,11 @@ export function DraftEdgeInspector({
           className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
         />
       </label>
+      {structuralWritesDisabled ? (
+        <p data-testid="draft-transition-structural-disabled" className="text-copy-12 text-gray-700">
+          {t('strategy.inspector.transition.composeDisabled')}
+        </p>
+      ) : null}
     </section>
   );
 }

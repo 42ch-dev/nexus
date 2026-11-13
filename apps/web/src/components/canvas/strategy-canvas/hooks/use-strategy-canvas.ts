@@ -47,7 +47,7 @@ export interface ConflictInfo {
   retry?: () => void;
 }
 
-export function useStrategyCanvas(presetId: string) {
+export function useStrategyCanvas(presetId: string, structuralWritesDisabled = false) {
   const { t } = useTranslation('canvas');
   const graphQuery = usePresetGraph(presetId);
   const activeSession = useActiveSession(presetId);
@@ -180,6 +180,9 @@ export function useStrategyCanvas(presetId: string) {
   const commitDraftMutation = useMutation({
     mutationFn: async (args: { condition?: string }) => {
       if (!selectedDraftEdge) throw new Error('No draft transition to commit');
+      // A draft authored while the flag was off keeps its edge, but the YAML
+      // authority is closed once the candidate document is the one writer.
+      if (structuralWritesDisabled) throw new Error('Draft transitions are authored in the candidate while composing.');
       return nexusClient.strategyPatchTransition(presetId, {
         strategy_id: presetId,
         base_revision: workingRevisionRef.current,

@@ -281,6 +281,32 @@ describe('useStrategyCanvas draft transition commit (FB-SE-002)', () => {
     expect(result.current.selectedDraftEdge).not.toBeNull();
   });
 
+  it('cannot issue the YAML create for a draft authored with the flag off once compose takes authority (Y3)', async () => {
+    const patch = vi.fn().mockResolvedValue({ new_revision: 2 });
+    const client = makeClient(patch);
+    const { result, rerender } = renderHook(
+      ({ structuralWritesDisabled }: { structuralWritesDisabled: boolean }) =>
+        useStrategyCanvas('preset-1', structuralWritesDisabled),
+      { wrapper: makeCommitWrapper(client), initialProps: { structuralWritesDisabled: false } },
+    );
+
+    // Flag off: the spatial gesture authors a local draft.
+    act(() => {
+      result.current.onConnect({ source: 's1', target: 's2', sourceHandle: null, targetHandle: null });
+    });
+    expect(result.current.selectedDraftEdge).not.toBeNull();
+
+    // Flag on: the candidate document is the one structural authority.
+    rerender({ structuralWritesDisabled: true });
+    await act(async () => {
+      result.current.commitDraft({});
+    });
+
+    // The author keeps the edge they can still see, and no structural patch was issued.
+    expect(patch).not.toHaveBeenCalled();
+    expect(result.current.selectedDraftEdge).not.toBeNull();
+  });
+
   it('cancelDraft removes the draft edge without a daemon call', () => {
     const patch = vi.fn();
     const client = makeClient(patch as () => Promise<unknown>);

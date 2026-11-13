@@ -364,6 +364,52 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     // Nothing auto-retried the refused op.
     expect(composeCalls).toBe(1);
   });
+
+  it('renders the refusal alert when the 409 recovery read fails', async () => {
+    let candidateReads = 0;
+    useHandlers(
+      http.get(CANDIDATE_PATH, () => {
+        candidateReads += 1;
+        return candidateReads === 1
+          ? HttpResponse.json(SEED)
+          : HttpResponse.json(
+              { error: { code: 'internal_error', message: 'candidate read failed' } },
+              { status: 500 },
+            );
+      }),
+      http.get(PATTERNS_PATH, () =>
+        HttpResponse.json({ items: patternItems(true), pagination: { limit: 100, has_more: false } }),
+      ),
+      http.post(COMPOSE_PATH, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'strategy_candidate_conflict',
+              message: 'Candidate changed before this edit. Reload revision 7 and reapply the change.',
+              details: { strategy_id: STRATEGY_ID, base_revision: 0, current_revision: 7 },
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    renderCanvas();
+    fireEvent.click(await screen.findByTestId('strategy-add-pattern'));
+    fireEvent.click(await screen.findByTestId('pattern-option-prompt-step'));
+    fireEvent.click(screen.getByTestId('pattern-nest'));
+
+    await waitFor(() => expect(screen.getByTestId('compose-conflict')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('compose-conflict-reload'));
+
+    // The failed recovery is named in the dialog instead of a rejected void click.
+    const refusal = await screen.findByTestId('compose-refusal');
+    expect(refusal).toHaveAttribute('role', 'alert');
+    expect(refusal).toHaveTextContent('candidate read failed');
+    // The conflict it could not clear is still on screen.
+    expect(screen.getByTestId('compose-conflict')).toBeInTheDocument();
+    expect(candidateReads).toBe(2);
+  });
 });
 
 describe('StrategyCanvas — flag-off parity (T7)', () => {
