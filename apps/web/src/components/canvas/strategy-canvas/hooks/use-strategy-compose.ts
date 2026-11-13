@@ -193,7 +193,13 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
    */
   const reload = useCallback(async () => {
     const document = await client.getStrategyCandidate(presetId);
-    setCommitted({ document, diagnostics: [] });
+    // A compose that committed while this read was in flight already holds the
+    // newer bytes; installing the older response would seed a fresh 409.
+    setCommitted((prev) =>
+      prev && prev.document.revision > document.revision
+        ? prev
+        : { document, diagnostics: [] },
+    );
     setConflict(null);
   }, [client, presetId]);
 

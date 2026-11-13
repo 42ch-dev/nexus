@@ -6,7 +6,7 @@
  * unchanged, never auto-retries, and the 409 recovery reloads the canonical
  * candidate at the revision the daemon holds (T4).
  */
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, act, waitFor, fireEvent, screen } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { PropsWithChildren } from 'react';
@@ -17,7 +17,9 @@ import type { WorkflowDocument } from '@42ch/nexus-contracts';
 import { BrowserClient } from '@/lib/nexus';
 import { ClientProvider } from '@/lib/client-context';
 import { useStrategyCompose } from '@/components/canvas/strategy-canvas/hooks/use-strategy-compose';
-import { makeQueryClient } from '@/test/test-providers';
+import { SlotInspector } from '@/components/canvas/strategy-canvas/inspectors/slot-inspector';
+import { buildStrategyGraphFromIr } from '@/lib/canvas/strategy-graph-ir';
+import { makeQueryClient, renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { candidateDocument, servedIrDocument } from '@/test/simulation-fixture';
 
@@ -305,6 +307,161 @@ describe('useStrategyCompose', () => {
     expect(result.current.refusal?.reason).toBe('nest_cycle');
     expect(result.current.workingDocument).toBe(before);
     expect(result.current.revision).toBe(0);
+  });
+
+  it('binds a nested slot selected from its expanded parent and commits the binding', async () => {
+    const patterns = [
+      {
+        package_dir: 'judge-step',
+        id: 'judge-step',
+        version: '2.0.0',
+        description: 'Judge step',
+        content_hash: 'abc',
+        effect_class: 'read',
+        slots: [{ name: 'tone', kind: 'string', required: true }],
+        requires_capabilities: [],
+        available: true,
+        reason: null,
+      },
+      ...PATTERN_ITEMS,
+    ];
+    const seeded: WorkflowDocument = {
+      ...nestedDocument(0),
+      nodes: [
+        ...nestedDocument(0).nodes,
+        {
+          id: 'prompt-step/judge',
+          kind: 'pattern_slot',
+          effect_class: 'read',
+          pattern: { registry_id: 'judge-step', version: '2.0.0' },
+        },
+      ],
+      nests: [
+        ...nestedDocument(0).nests,
+        {
+          id: 'judge-region',
+          parent_node: 'prompt-step/judge',
+          expansion: 'expand_in_candidate',
+          pin_policy: 'exact',
+          child: { kind: 'pattern', registry_id: 'judge-step', version: '2.0.0' },
+        },
+      ],
+    };
+    const bindBodies: unknown[] = [];
+    useHandlers(
+      http.get(PATTERNS_PATH, () =>
+        HttpResponse.json({ items: patterns, pagination: { limit: 100, has_more: false } }),
+      ),
+      http.get(CANDIDATE_PATH, () => HttpResponse.json(seeded)),
+      http.post(COMPOSE_PATH, async ({ request }) => {
+        bindBodies.push(await request.json());
+        return HttpResponse.json({
+          new_revision: 1,
+          document: {
+            ...seeded,
+            revision: 1,
+            nodes: seeded.nodes.map((node) =>
+              node.id === 'prompt-step/judge' ? { ...node, bind: { tone: 'wry' } } : node,
+            ),
+          },
+          validation_summary: [],
+        });
+      }),
+    );
+
+    const { result } = renderCompose();
+    await waitFor(() => expect(result.current.workingDocument?.id).toBe(STRATEGY_ID));
+
+    // The canvas renders the expanded parent, which emits the nested slot as its child.
+    const graph = buildStrategyGraphFromIr(result.current.workingDocument!, {
+      expandedSlots: new Set(['prompt-step-slot']),
+      patterns,
+      containment: new Map([['prompt-step/judge', 'prompt-step-slot']]),
+    });
+    const nested = graph.nodes.find((node) => node.id === 'prompt-step/judge');
+    expect(nested?.parentId).toBe('prompt-step-slot');
+    expect(nested?.data.nestId).toBe('judge-region');
+
+    // Selecting it reaches the slot inspector, which binds through the hook.
+    renderInApp(
+      <SlotInspector
+        node={nested!.data}
+        patterns={patterns}
+        isComposing={false}
+        onBindSlot={result.current.bindSlot}
+        onReplaceSubtree={result.current.replaceSubtree}
+        onUnnest={result.current.unnest}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('slot-input-tone'), { target: { value: 'wry' } });
+    fireEvent.click(screen.getByTestId('slot-bind-tone'));
+
+    await waitFor(() =>
+      expect(
+        result.current.workingDocument?.nodes.find((node) => node.id === 'prompt-step/judge')?.bind
+          ?.tone,
+      ).toBe('wry'),
+    );
+    expect(bindBodies[0]).toMatchObject({
+      op: 'bind_slot',
+      payload: { nest_id: 'judge-region', slot: 'tone', value: 'wry' },
+    });
+  });
+
+  it('reload keeps the document it already holds when the recovery read returns older bytes (T4 in-flight guard)', async () => {
+    let candidateReads = 0;
+    let releaseStale: () => void = () => {};
+    const staleRead = new Promise<void>((resolve) => {
+      releaseStale = resolve;
+    });
+    let composeCalls = 0;
+    useHandlers(
+      http.get(PATTERNS_PATH, () =>
+        HttpResponse.json({ items: PATTERN_ITEMS, pagination: { limit: 100, has_more: false } }),
+      ),
+      http.get(CANDIDATE_PATH, async () => {
+        candidateReads += 1;
+        if (candidateReads === 1) return HttpResponse.json(SEED);
+        // The recovery read answers with revision 1 after a newer compose landed.
+        await staleRead;
+        return HttpResponse.json(nestedDocument(1));
+      }),
+      http.post(COMPOSE_PATH, () => {
+        composeCalls += 1;
+        return HttpResponse.json({
+          new_revision: composeCalls === 1 ? 1 : 2,
+          document: nestedDocument(composeCalls === 1 ? 1 : 2, { topic: 'water policy' }),
+          validation_summary: [],
+        });
+      }),
+    );
+
+    const { result } = renderCompose();
+    await waitFor(() => expect(result.current.workingDocument?.id).toBe(STRATEGY_ID));
+
+    // A compose commits while the recovery GET is still in flight.
+    let reloaded: Promise<void> = Promise.resolve();
+    await act(async () => {
+      reloaded = result.current.reload();
+      await result.current.nestPattern({
+        attachNodeId: 'draft',
+        package: { id: 'prompt-step', version: '1.0.0' },
+      });
+      await result.current.bindSlot('prompt-step', 'topic', 'water policy');
+    });
+    expect(result.current.revision).toBe(2);
+
+    releaseStale();
+    await act(async () => {
+      await reloaded;
+    });
+
+    // Revision 1 never overwrites the revision-2 bytes the compose committed.
+    expect(result.current.workingDocument?.revision).toBe(2);
+    expect(
+      result.current.workingDocument?.nodes.find((node) => node.id === 'prompt-step-slot')?.bind
+        ?.topic,
+    ).toBe('water policy');
   });
 
   it('does nothing while disabled (flag off) — no reads, no mutations', () => {
