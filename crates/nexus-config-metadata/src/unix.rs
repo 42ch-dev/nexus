@@ -290,16 +290,13 @@ fn checked_len(length: libc::ssize_t, what: &str) -> io::Result<usize> {
 /// Whether the filesystem does not support extended attributes at all.
 fn is_unsupported(error: &io::Error) -> bool {
     let code = error.raw_os_error();
-    if code == Some(libc::ENOTSUP) {
-        return true;
-    }
     #[cfg(target_os = "macos")]
     {
-        code == Some(libc::EOPNOTSUPP)
+        matches!(code, Some(libc::ENOTSUP | libc::EOPNOTSUPP))
     }
     #[cfg(not(target_os = "macos"))]
     {
-        false
+        code == Some(libc::ENOTSUP)
     }
 }
 
