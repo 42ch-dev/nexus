@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/strategy-compose-response.schema.json",
+  "schema_version": 1,
+  "title": "NexusStrategyComposeResponse",
+  "description": "Body of a committed compose operation (HTTP 200). `document` is the complete committed candidate at `new_revision`, resolved pins included, so the client replaces its candidate with this document instead of predicting server normalization.",
+  "type": "object",
+  "required": ["new_revision", "document", "validation_summary"],
+  "additionalProperties": false,
+  "properties": {
+    "new_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Revision the operation committed; always the request's `base_revision` plus one."
+    },
+    "document": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/workflow-document.schema.json"
+    },
+    "validation_summary": {
+      "type": "array",
+      "description": "Committed validator diagnostics, even when empty. A diagnostic is reported, never defaulted away.",
+      "items": {
+        "title": "StrategyComposeDiagnostic",
+        "type": "object",
+        "required": ["code", "nest_id", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": ["unbound_required_slot"],
+            "description": "Diagnostic family."
+          },
+          "nest_id": {
+            "type": "string",
+            "description": "The nest that pins the package."
+          },
+          "package_id": {
+            "type": "string",
+            "description": "The pinned package (present for `unbound_required_slot`)."
+          },
+          "package_version": {
+            "type": "string",
+            "description": "The pinned package version (present for `unbound_required_slot`)."
+          },
+          "slot": {
+            "type": "string",
+            "description": "The unbound slot name (present for `unbound_required_slot`)."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable diagnostic safe for UI display."
+          }
+        }
+      }
+    }
+  }
+}

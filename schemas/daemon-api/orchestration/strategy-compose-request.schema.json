@@ -1,0 +1,181 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/strategy-compose-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus StrategyComposeRequest",
+  "description": "Body of POST /v1/daemon/strategies/{strategy_id}/compose. Exactly one composition operation, guarded by the candidate revision the client last read. The path `strategy_id` is authoritative: raw document bytes and multi-operation blobs are not accepted.",
+  "type": "object",
+  "oneOf": [
+    {
+      "title": "NestCompose",
+      "description": "Pin one library package as a new collapsed slot under `parent_node`.",
+      "type": "object",
+      "required": ["base_revision", "op", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Candidate revision the client last read. The write commits `base_revision + 1`, or is refused as `strategy_candidate_conflict` with no write."
+        },
+        "op": { "type": "string", "enum": ["nest"] },
+        "payload": {
+          "title": "NestPayload",
+          "type": "object",
+          "required": ["nest_id", "parent_node", "package", "expansion"],
+          "additionalProperties": false,
+          "properties": {
+            "nest_id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Stable nest id; the region address for `unnest`, `replace_subtree` and `bind_slot`."
+            },
+            "parent_node": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Id of the collapsed `pattern_slot` node this operation inserts."
+            },
+            "package": {
+              "title": "NestPackage",
+              "type": "object",
+              "required": ["id", "version"],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Pattern registry id, which is also the package directory name."
+                },
+                "version": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Exact version label from the package manifest. The daemon resolves the content hash; the caller never supplies one."
+                }
+              }
+            },
+            "expansion": {
+              "type": "string",
+              "enum": ["defer_until_apply", "expand_in_candidate"],
+              "description": "When the region expands into concrete nodes and edges."
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "UnnestCompose",
+      "description": "Flatten the region at `nest_id` out of the candidate.",
+      "type": "object",
+      "required": ["base_revision", "op", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Candidate revision the client last read. The write commits `base_revision + 1`, or is refused as `strategy_candidate_conflict` with no write."
+        },
+        "op": { "type": "string", "enum": ["unnest"] },
+        "payload": {
+          "title": "UnnestPayload",
+          "type": "object",
+          "required": ["nest_id"],
+          "additionalProperties": false,
+          "properties": {
+            "nest_id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Nest id of the region to flatten."
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "ReplaceSubtreeCompose",
+      "description": "Re-pin the region at `nest_id` to another exact package, in place.",
+      "type": "object",
+      "required": ["base_revision", "op", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Candidate revision the client last read. The write commits `base_revision + 1`, or is refused as `strategy_candidate_conflict` with no write."
+        },
+        "op": { "type": "string", "enum": ["replace_subtree"] },
+        "payload": {
+          "title": "ReplaceSubtreePayload",
+          "type": "object",
+          "required": ["nest_id", "package", "expansion"],
+          "additionalProperties": false,
+          "properties": {
+            "nest_id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Nest id of the region to re-pin; the region keeps its slot node, bindings and graph position."
+            },
+            "package": {
+              "title": "ReplaceSubtreePackage",
+              "type": "object",
+              "required": ["id", "version"],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Pattern registry id, which is also the package directory name."
+                },
+                "version": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Exact version label from the package manifest. The daemon resolves the content hash; the caller never supplies one."
+                }
+              }
+            },
+            "expansion": {
+              "type": "string",
+              "enum": ["defer_until_apply", "expand_in_candidate"],
+              "description": "When the re-pinned region expands into concrete nodes and edges."
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "BindSlotCompose",
+      "description": "Bind one slot of the pattern pinned at `nest_id`.",
+      "type": "object",
+      "required": ["base_revision", "op", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Candidate revision the client last read. The write commits `base_revision + 1`, or is refused as `strategy_candidate_conflict` with no write."
+        },
+        "op": { "type": "string", "enum": ["bind_slot"] },
+        "payload": {
+          "title": "BindSlotPayload",
+          "type": "object",
+          "required": ["nest_id", "slot", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "nest_id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Nest id whose pinned pattern declares the slot."
+            },
+            "slot": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Slot name from the pinned package manifest."
+            },
+            "value": {
+              "description": "Bound value. The manifest's slot declaration decides its kind (string, asset id or capability id); the daemon refuses a mismatch with a named 422."
+            }
+          }
+        }
+      }
+    }
+  ]
+}

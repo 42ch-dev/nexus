@@ -5,5 +5,7 @@
  */
 
 export type { SimulationTrajectory } from './simulation-trajectory';
+export type { StrategyComposeRequest } from './strategy-compose-request';
+export type { StrategyComposeResponse } from './strategy-compose-response';
 export type { StrategySimulationRequest } from './strategy-simulation-request';
 export type { WorkflowDocument } from './workflow-document';

@@ -190,6 +190,8 @@ import type {
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
   StrategyPatchPromptTemplateRequest,
+  StrategyComposeRequest,
+  StrategyComposeResponse,
   StrategySimulationRequest,
   SimulationTrajectory,
   WorkflowDocument,
@@ -786,6 +788,11 @@ export interface NativeCore {
     strategyId: string,
     request: StrategySimulationRequest,
   ): Promise<SimulationTrajectory>;
+  composeStrategy(
+    principal: PrincipalHandle,
+    strategyId: string,
+    request: StrategyComposeRequest,
+  ): Promise<StrategyComposeResponse>;
   strategyWorkflowIr(
     principal: PrincipalHandle,
     strategyId: string,
@@ -1118,6 +1125,7 @@ type DomainSurface = Pick<
   | 'patchStrategyTransition'
   | 'patchStrategyPromptTemplate'
   | 'simulateStrategy'
+  | 'composeStrategy'
   | 'strategyWorkflowIr'
   | 'addSchedule'
   | 'signalSchedule'
@@ -1606,6 +1614,11 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     async simulateStrategy(principal, strategyId, request) {
       return json(
         await inner.simulateStrategy(principal, strategyId, wire(request, 'request')),
+      );
+    },
+    async composeStrategy(principal, strategyId, request) {
+      return json(
+        await inner.composeStrategy(principal, strategyId, wire(request, 'request')),
       );
     },
     async strategyWorkflowIr(principal, strategyId) {

@@ -61,6 +61,13 @@ use nexus_contracts::generated::daemon_api::compute::run_response::RunResponse;
 use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_query::ListSessionsQuery;
 use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_response::ListSessionsResponse;
 use nexus_contracts::generated::daemon_api::orchestration::sessions::session_detail_response::SessionDetailResponse;
+use nexus_contracts::generated::daemon_api::orchestration::strategy_compose_request::{
+    NestPayloadExpansion, ReplaceSubtreePayloadExpansion,
+};
+use nexus_contracts::generated::daemon_api::orchestration::strategy_compose_response::{
+    StrategyComposeDiagnostic, StrategyComposeDiagnosticCode,
+};
+use nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowNestBindingExpansion;
 use nexus_contracts::generated::daemon_api::schedule::edit_core_context_request::EditCoreContextRequest;
 use nexus_contracts::generated::daemon_api::schedule::edit_core_context_response::EditCoreContextResponse;
 use nexus_contracts::generated::daemon_api::schedule::inspect_schedule_response::InspectScheduleResponse;
@@ -71,12 +78,13 @@ use nexus_contracts::local::schedule::http::{
 };
 use nexus_contracts::{
     CoreStrategyPatchResponse, GetPresetResponse, ReloadPresetResponse, ScaffoldPresetRequest,
-    SimulationTrajectory, StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest,
-    StrategyPatchTransitionRequest, StrategySimulationRequest, UpdatePresetRequest,
-    UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
+    SimulationTrajectory, StrategyComposeRequest, StrategyComposeResponse,
+    StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest, StrategyPatchTransitionRequest,
+    StrategySimulationRequest, UpdatePresetRequest, UpdatePresetResponse, ValidatePresetRequest,
+    ValidatePresetResponse,
 };
 use nexus_core::execution::ExecutionOpenError;
-use nexus_core::CoreError;
+use nexus_core::{ComposeDiagnostic, CoreError};
 
 use crate::core_error;
 use crate::NativeCore;
@@ -84,6 +92,120 @@ use crate::NativeCore;
 fn decode<T: serde::de::DeserializeOwned>(payload: Buffer, label: &str) -> Result<T> {
     serde_json::from_slice(payload.as_ref())
         .map_err(|error| Error::from_reason(format!("invalid {label}: {error}")))
+}
+
+/// Decode the wire compose union into the core's typed operation plus the base it guards.
+///
+/// The union is the wire contract (`{base_revision, op, payload}`); the core owns the op
+/// semantics, so this is the only place the two enum spellings meet. A variant the core cannot
+/// represent is not possible: the generated union has exactly the four ops.
+fn compose_op(request: StrategyComposeRequest) -> (u64, nexus_core::ComposeOp) {
+    match request {
+        StrategyComposeRequest::Nest {
+            base_revision,
+            payload,
+        } => (
+            base_revision,
+            nexus_core::ComposeOp::Nest(nexus_core::NestOp {
+                nest_id: payload.nest_id.into(),
+                parent_node: payload.parent_node.into(),
+                package: nexus_core::PatternPackageRef {
+                    id: payload.package.id.into(),
+                    version: payload.package.version.into(),
+                },
+                expansion: nest_expansion(payload.expansion),
+            }),
+        ),
+        StrategyComposeRequest::Unnest {
+            base_revision,
+            payload,
+        } => (
+            base_revision,
+            nexus_core::ComposeOp::Unnest(nexus_core::UnnestOp {
+                nest_id: payload.nest_id.into(),
+            }),
+        ),
+        StrategyComposeRequest::ReplaceSubtree {
+            base_revision,
+            payload,
+        } => (
+            base_revision,
+            nexus_core::ComposeOp::ReplaceSubtree(nexus_core::ReplaceSubtreeOp {
+                nest_id: payload.nest_id.into(),
+                package: nexus_core::PatternPackageRef {
+                    id: payload.package.id.into(),
+                    version: payload.package.version.into(),
+                },
+                expansion: replace_subtree_expansion(payload.expansion),
+            }),
+        ),
+        StrategyComposeRequest::BindSlot {
+            base_revision,
+            payload,
+        } => (
+            base_revision,
+            nexus_core::ComposeOp::BindSlot(nexus_core::BindSlotOp {
+                nest_id: payload.nest_id.into(),
+                slot: payload.slot.into(),
+                value: payload.value,
+            }),
+        ),
+    }
+}
+
+const fn nest_expansion(value: NestPayloadExpansion) -> WorkflowNestBindingExpansion {
+    match value {
+        NestPayloadExpansion::DeferUntilApply => WorkflowNestBindingExpansion::DeferUntilApply,
+        NestPayloadExpansion::ExpandInCandidate => WorkflowNestBindingExpansion::ExpandInCandidate,
+    }
+}
+
+const fn replace_subtree_expansion(
+    value: ReplaceSubtreePayloadExpansion,
+) -> WorkflowNestBindingExpansion {
+    match value {
+        ReplaceSubtreePayloadExpansion::DeferUntilApply => {
+            WorkflowNestBindingExpansion::DeferUntilApply
+        }
+        ReplaceSubtreePayloadExpansion::ExpandInCandidate => {
+            WorkflowNestBindingExpansion::ExpandInCandidate
+        }
+    }
+}
+
+/// The committed compose result as the response contract.
+fn compose_response(
+    outcome: nexus_core::ComposeOutcome,
+) -> std::result::Result<StrategyComposeResponse, nexus_core::CoreError> {
+    // The IR document and this contract's inlined copy are two generated facades over one JSON
+    // shape, so the boundary joins them the same way simulate does.
+    let document = serde_json::to_value(&outcome.candidate.document)
+        .and_then(serde_json::from_value)
+        .map_err(|error| nexus_core::CoreError::Internal {
+            category: format!("compose document wire: {error}"),
+        })?;
+    Ok(StrategyComposeResponse {
+        new_revision: outcome.candidate.revision,
+        document,
+        validation_summary: outcome.diagnostics.iter().map(compose_diagnostic).collect(),
+    })
+}
+
+fn compose_diagnostic(diagnostic: &ComposeDiagnostic) -> StrategyComposeDiagnostic {
+    match diagnostic {
+        ComposeDiagnostic::UnboundRequiredSlot {
+            nest_id,
+            package,
+            slot,
+        } => StrategyComposeDiagnostic {
+            code: StrategyComposeDiagnosticCode::UnboundRequiredSlot,
+            message: diagnostic.to_string(),
+            nest_id: nest_id.clone(),
+            package_id: Some(package.id.clone()),
+            package_version: Some(package.version.clone()),
+            slot: Some(slot.clone()),
+        },
+    }
 }
 
 /// Whether every provider this host configuration SELECTS is available.
@@ -874,6 +996,30 @@ impl NativeCore {
                 .patch_strategy_prompt_template(&principal, strategy_id, state_id, request)
                 .await?;
             Ok(response)
+        })
+        .await
+    }
+
+    /// `POST /v1/daemon/strategies/{strategy_id}/compose`.
+    ///
+    /// One typed operation per request: the generated discriminated union is decoded here, the
+    /// four ops cross the seam as the core's own `ComposeOp`, and the committed candidate travels
+    /// back as the generated `StrategyComposeResponse`. A stale base is the core's conflict; the
+    /// adapter renders the plan's 409 envelope.
+    #[napi]
+    pub async fn compose_strategy(
+        &self,
+        principal_handle: String,
+        strategy_id: String,
+        request_json: Buffer,
+    ) -> Result<Buffer> {
+        let request: StrategyComposeRequest = decode(request_json, "request")?;
+        let (base_revision, op) = compose_op(request);
+        self.json_call(principal_handle, async move |core, principal| {
+            let outcome = core
+                .compose_strategy_candidate(&principal, &strategy_id, base_revision, op)
+                .await?;
+            compose_response(outcome)
         })
         .await
     }

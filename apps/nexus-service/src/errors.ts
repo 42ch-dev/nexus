@@ -50,6 +50,9 @@ const STATUS_BY_CODE: Record<CoreError['code'], number> = {
   compute_module_error: 422,
   outline_conflict: 409,
   outline_validation_failed: 422,
+  // A stale compose base is a compare-and-swap conflict, never a validation failure: the
+  // client reloads the candidate and reapplies the operation.
+  strategy_candidate_conflict: 409,
   workspace_conflict: 409,
   internal: 500,
 };
