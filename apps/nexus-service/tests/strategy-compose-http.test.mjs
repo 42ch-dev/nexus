@@ -282,7 +282,7 @@ describe('compose route (v1.239 P3-T7)', () => {
     assert.deepEqual(replaced.document.edges, bound.document.edges);
   });
 
-  test('unnest flattens the region back out of the candidate', async () => {
+  test('unnest flattens the pinned body and names the binding it dropped', async () => {
     const response = await compose({
       base_revision: revision,
       op: 'unnest',
@@ -293,7 +293,22 @@ describe('compose route (v1.239 P3-T7)', () => {
     assert.equal(node(response.document, 'swap-slot'), undefined);
     assert.ok(binding(response.document, 'source-research'), 'the untouched region stays');
     assert.ok(node(response.document, 'collect-sources'));
-    assert.deepEqual(response.validation_summary, []);
+    // The swapped package's body is a candidate node at this level now, so the slot bindings the
+    // collapsed node carried are dropped and named rather than defaulted away.
+    assert.equal(
+      response.document.nodes.filter((entry) => entry.kind === 'pattern_slot').length,
+      2,
+      JSON.stringify(response.document.nodes),
+    );
+    assert.deepEqual(response.validation_summary, [
+      {
+        code: 'slot_binding_dropped',
+        nest_id: 'swap',
+        slot: 'topic',
+        message:
+          'nest `swap`: flattening dropped slot binding `topic`, which the flattened fragment does not address',
+      },
+    ]);
   });
 
   test('a stale base is the typed conflict, writes nothing and names the current revision', async () => {

@@ -27,8 +27,8 @@
         "properties": {
           "code": {
             "type": "string",
-            "enum": ["unbound_required_slot"],
-            "description": "Diagnostic family."
+            "enum": ["unbound_required_slot", "slot_binding_dropped"],
+            "description": "Diagnostic family: an unbound required slot, or a slot binding flattening had to drop."
           },
           "nest_id": {
             "type": "string",
@@ -44,7 +44,7 @@
           },
           "slot": {
             "type": "string",
-            "description": "The unbound slot name (present for `unbound_required_slot`)."
+            "description": "The slot name: unbound for `unbound_required_slot`, dropped for `slot_binding_dropped`."
           },
           "message": {
             "type": "string",

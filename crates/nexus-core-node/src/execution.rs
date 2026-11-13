@@ -205,6 +205,14 @@ fn compose_diagnostic(diagnostic: &ComposeDiagnostic) -> StrategyComposeDiagnost
             package_version: Some(package.version.clone()),
             slot: Some(slot.clone()),
         },
+        ComposeDiagnostic::DroppedSlotBinding { nest_id, slot } => StrategyComposeDiagnostic {
+            code: StrategyComposeDiagnosticCode::SlotBindingDropped,
+            message: diagnostic.to_string(),
+            nest_id: nest_id.clone(),
+            package_id: None,
+            package_version: None,
+            slot: Some(slot.clone()),
+        },
     }
 }
 

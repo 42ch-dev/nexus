@@ -9,12 +9,14 @@
 //!
 //! `nest` inserts one collapsed `pattern_slot` node carrying the exact pin plus one
 //! `WorkflowNestBinding`; the daemon resolves `{id, version}` against `nexus-pattern` and records
-//! the fragment's current `content_hash`, so a package cannot change under an unchanged version.
-//! `unnest` removes exactly what `nest` inserted, and the document is byte-equal to the one before
-//! the matching nest when nothing else was edited. `replace_subtree` re-pins the region in place
-//! and leaves every other node, edge, binding and nest untouched. `bind_slot` writes one slot
-//! binding on the slot node and validates the value against the manifest's slot declaration; an
-//! unbound required slot stays a named diagnostic, never a default.
+//! the fragment's current `content_hash`. Every later operation re-resolves the pins the document
+//! already carries and refuses a package whose bytes no longer hash to the recorded value, so a
+//! package that changed under an unchanged version fails closed. `replace_subtree` is the only
+//! operation allowed to establish a new pin, and it says so by re-pinning exactly one region.
+//! `unnest` flattens the pinned fragment's body into the parent level and reports every slot
+//! binding it had to drop. `bind_slot` writes one slot binding on the slot node and validates the
+//! value against the manifest's slot declaration; an unbound required slot stays a named
+//! diagnostic, never a default.
 //!
 //! Nest policy and effect rollup are the shared `nexus-workflow-ir` walk and lattice: this module
 //! resolves pins into [`PatternBody`]s and never re-derives depth, cycles or the enum order.
@@ -36,6 +38,7 @@ use nexus_workflow_ir::{
 };
 use serde_json::Value;
 
+use crate::strategy_candidates::conflict;
 use crate::{CoreError, CoreResult, CoreService, Principal, StrategyCandidate};
 
 /// One library package a creator asked to compose: an exact `{id, version}` reference. The daemon
@@ -67,10 +70,10 @@ pub struct NestOp {
     pub expansion: WorkflowNestBindingExpansion,
 }
 
-/// `unnest`: remove the collapsed slot at `nest_id`.
+/// `unnest`: flatten the collapsed region at `nest_id` into the parent level.
 #[derive(Debug, Clone)]
 pub struct UnnestOp {
-    /// Nest id of the region to remove.
+    /// Nest id of the region to flatten.
     pub nest_id: String,
 }
 
@@ -101,7 +104,7 @@ pub struct BindSlotOp {
 pub enum ComposeOp {
     /// Add a library pattern as a collapsed slot.
     Nest(NestOp),
-    /// Flatten a slot out of the candidate.
+    /// Flatten a pinned region into the parent level.
     Unnest(UnnestOp),
     /// Swap the nested region at a nest id.
     ReplaceSubtree(ReplaceSubtreeOp),
@@ -190,14 +193,25 @@ pub enum ComposeRefusal {
         /// What the slot declaration accepts.
         expected: String,
     },
-    /// The slot node is still referenced by the graph, so removing it would dangle.
-    WiredSlot {
+    /// The package on disk no longer hashes to the pin the document recorded, so the operation
+    /// would read different bytes than the document identifies.
+    PinMismatch {
         /// The requested nest id.
         nest_id: String,
-        /// The slot node that is still referenced.
-        parent_node: String,
-        /// What still references it.
-        referrers: Vec<String>,
+        /// The pinned package.
+        package: PatternPackageRef,
+        /// The hash the document recorded.
+        recorded_hash: String,
+        /// The hash the registry now serves.
+        scanned_hash: String,
+    },
+    /// The nest has no fragment body to move into the parent level, so flattening would delete
+    /// content rather than preserve it.
+    Unflattenable {
+        /// The requested nest id.
+        nest_id: String,
+        /// Why the child's body cannot be inlined.
+        reason: String,
     },
 }
 
@@ -215,7 +229,8 @@ impl ComposeRefusal {
             Self::InvalidDocument { .. } => "invalid_document",
             Self::SlotNotDeclared { .. } => "slot_not_declared",
             Self::SlotKindMismatch { .. } => "slot_kind_mismatch",
-            Self::WiredSlot { .. } => "slot_still_wired",
+            Self::PinMismatch { .. } => "pin_mismatch",
+            Self::Unflattenable { .. } => "nest_unflattenable",
         }
     }
 
@@ -230,7 +245,8 @@ impl ComposeRefusal {
             | Self::InvalidDocument { nest_id, .. }
             | Self::SlotNotDeclared { nest_id, .. }
             | Self::SlotKindMismatch { nest_id, .. }
-            | Self::WiredSlot { nest_id, .. } => nest_id,
+            | Self::PinMismatch { nest_id, .. }
+            | Self::Unflattenable { nest_id, .. } => nest_id,
         }
     }
 
@@ -254,14 +270,6 @@ impl ComposeRefusal {
             Self::OccupiedParent { parent_node, .. } => {
                 details.insert("parent_node".to_string(), Value::from(parent_node.clone()));
             }
-            Self::WiredSlot {
-                parent_node,
-                referrers,
-                ..
-            } => {
-                details.insert("parent_node".to_string(), Value::from(parent_node.clone()));
-                details.insert("referrers".to_string(), Value::from(referrers.clone()));
-            }
             Self::NestCycle { path, .. } => {
                 details.insert("path".to_string(), Value::from(path.clone()));
             }
@@ -279,7 +287,27 @@ impl ComposeRefusal {
                 details.insert("slot".to_string(), Value::from(slot.clone()));
                 details.insert("expected".to_string(), Value::from(expected.clone()));
             }
-            Self::UnknownNest { .. } | Self::DuplicateNest { .. } => {}
+            Self::PinMismatch {
+                package,
+                recorded_hash,
+                scanned_hash,
+                ..
+            } => {
+                details.insert("package_id".to_string(), Value::from(package.id.clone()));
+                details.insert(
+                    "package_version".to_string(),
+                    Value::from(package.version.clone()),
+                );
+                details.insert(
+                    "recorded_content_hash".to_string(),
+                    Value::from(recorded_hash.clone()),
+                );
+                details.insert(
+                    "scanned_content_hash".to_string(),
+                    Value::from(scanned_hash.clone()),
+                );
+            }
+            Self::UnknownNest { .. } | Self::DuplicateNest { .. } | Self::Unflattenable { .. } => {}
         }
         Value::Object(details)
     }
@@ -348,15 +376,19 @@ impl std::fmt::Display for ComposeRefusal {
                 slot,
                 expected,
             } => write!(f, "slot `{slot}` of nest `{nest_id}` expects {expected}"),
-            Self::WiredSlot {
+            Self::PinMismatch {
                 nest_id,
-                parent_node,
-                referrers,
+                package,
+                recorded_hash,
+                scanned_hash,
             } => write!(
                 f,
-                "nest `{nest_id}` slot `{parent_node}` is still referenced by {}",
-                referrers.join(", ")
+                "nest `{nest_id}` pinned `{package}` at content hash `{recorded_hash}`, but the \
+                 registry now serves `{scanned_hash}`: the package changed under the same version"
             ),
+            Self::Unflattenable { nest_id, reason } => {
+                write!(f, "nest `{nest_id}` cannot be flattened: {reason}")
+            }
         }
     }
 }
@@ -383,6 +415,13 @@ pub enum ComposeDiagnostic {
         /// The unbound slot name.
         slot: String,
     },
+    /// Flattening removed the slot node, so the binding it carried has no slot to address.
+    DroppedSlotBinding {
+        /// The nest that was flattened.
+        nest_id: String,
+        /// The bound slot name that had to be dropped.
+        slot: String,
+    },
 }
 
 impl std::fmt::Display for ComposeDiagnostic {
@@ -395,6 +434,11 @@ impl std::fmt::Display for ComposeDiagnostic {
             } => write!(
                 f,
                 "nest `{nest_id}`: pattern `{package}` requires slot `{slot}`, which is unbound"
+            ),
+            Self::DroppedSlotBinding { nest_id, slot } => write!(
+                f,
+                "nest `{nest_id}`: flattening dropped slot binding `{slot}`, which the flattened \
+                 fragment does not address"
             ),
         }
     }
@@ -420,14 +464,24 @@ impl CoreService {
         op: ComposeOp,
     ) -> CoreResult<ComposeOutcome> {
         self.verify_principal(principal)?;
+        // The conflict class multiplies under contention, so a stale base is refused from the row
+        // alone: never after scanning the whole pattern registry for pins it will not use.
+        let current = self.read_strategy_candidate(principal, strategy_id).await?;
+        if current.revision != base_revision {
+            return Err(conflict(strategy_id, base_revision, current.revision));
+        }
         let packages = self.compose_packages()?;
         let index = PackageIndex::new(&packages);
+        let mut diagnostics = Vec::new();
         let candidate = self
             .commit_strategy_candidate(principal, strategy_id, base_revision, |document| {
-                apply_compose(document, &op, &index).map_err(ComposeRefusal::into_error)
+                let (next, findings) =
+                    apply_compose(document, &op, &index).map_err(ComposeRefusal::into_error)?;
+                diagnostics = findings;
+                Ok(next)
             })
             .await?;
-        let diagnostics = unbound_required_slots(&candidate.document, &index);
+        diagnostics.extend(unbound_required_slots(&candidate.document, &index));
         Ok(ComposeOutcome {
             candidate,
             diagnostics,
@@ -448,20 +502,71 @@ impl CoreService {
 
 /// Apply one operation to a copy of `document`, then hold the result to the shared nest rules and
 /// the effect rollup.
+///
+/// Pins the document already carries are verified before the operation runs, so a changed package
+/// refuses the write instead of being reinterpreted. The operation's own diagnostics travel back
+/// with the document.
 fn apply_compose(
     document: &WorkflowDocument,
     op: &ComposeOp,
     packages: &PackageIndex<'_>,
-) -> Result<WorkflowDocument, ComposeRefusal> {
+) -> Result<(WorkflowDocument, Vec<ComposeDiagnostic>), ComposeRefusal> {
+    verify_pins(document, op, packages)?;
     let mut next = document.clone();
+    let mut diagnostics = Vec::new();
     match op {
         ComposeOp::Nest(payload) => nest_pattern(&mut next, payload, packages)?,
-        ComposeOp::Unnest(payload) => unnest_slot(&mut next, payload)?,
+        ComposeOp::Unnest(payload) => diagnostics = unnest_slot(&mut next, payload, packages)?,
         ComposeOp::ReplaceSubtree(payload) => replace_subtree(&mut next, payload, packages)?,
         ComposeOp::BindSlot(payload) => bind_slot(&mut next, payload, packages)?,
     }
     settle(&mut next, op.nest_id(), packages)?;
-    Ok(next)
+    Ok((next, diagnostics))
+}
+
+/// Every pin the document already carries must still resolve to the hash it recorded.
+///
+/// `replace_subtree` is the only operation allowed to establish a new pin, so the region it
+/// re-pins is exempt; every other operation refuses when the registry's bytes changed under the
+/// same version, naming both hashes before any write.
+fn verify_pins(
+    document: &WorkflowDocument,
+    op: &ComposeOp,
+    packages: &PackageIndex<'_>,
+) -> Result<(), ComposeRefusal> {
+    for nest in &document.nests {
+        let Some(pin) = pinned_pattern(&nest.child) else {
+            continue;
+        };
+        if matches!(op, ComposeOp::ReplaceSubtree(replaced) if replaced.nest_id == nest.id) {
+            continue;
+        }
+        verify_pin(&nest.id, &pin, nest.child.content_hash.as_deref(), packages)?;
+    }
+    Ok(())
+}
+
+/// Resolve one pin and compare the scanned hash with the hash the document recorded. A pin the
+/// document left unresolved has nothing to compare and is not this check's business.
+fn verify_pin(
+    nest_id: &str,
+    pin: &PatternPackageRef,
+    recorded: Option<&str>,
+    packages: &PackageIndex<'_>,
+) -> Result<(), ComposeRefusal> {
+    let Some(recorded) = recorded else {
+        return Ok(());
+    };
+    let (_, _, scanned) = resolve(packages, nest_id, pin)?;
+    if scanned == recorded {
+        return Ok(());
+    }
+    Err(ComposeRefusal::PinMismatch {
+        nest_id: nest_id.to_owned(),
+        package: pin.clone(),
+        recorded_hash: recorded.to_owned(),
+        scanned_hash: scanned.to_owned(),
+    })
 }
 
 /// Recompute the nest policy and the effect rollup on every operation.
@@ -474,7 +579,7 @@ fn settle(
     nest_id: &str,
     packages: &PackageIndex<'_>,
 ) -> Result<(), ComposeRefusal> {
-    let bodies = packages.bodies(document);
+    let bodies = packages.bodies(document)?;
     let violations: Vec<Violation> = validate(&[document], &bodies)
         .err()
         .unwrap_or_default()
@@ -546,13 +651,22 @@ fn nest_pattern(
     Ok(())
 }
 
-/// Remove the collapsed region at `nest_id`.
+/// Flatten the collapsed region at `nest_id` into the parent level.
 ///
-/// The slot's children live in the pinned fragment, never in the candidate, so flattening moves
-/// nothing: the operation removes the binding and the slot node `nest` inserted, together with that
-/// node's own slot bindings and pin. A slot node another nest still owns is kept. A slot the graph
-/// still references is refused instead, because removing it would dangle an authored edge.
-fn unnest_slot(document: &mut WorkflowDocument, op: &UnnestOp) -> Result<(), ComposeRefusal> {
+/// The slot's children live in the pinned fragment, never in the candidate, so flattening loads
+/// that fragment and moves its nodes, edges and its own nests into this level under fresh ids. A
+/// graph reference the slot node owned is retargeted — incoming edges, dependencies and timeouts
+/// to the fragment's entry, outgoing edges and terminal membership from its terminals — so an
+/// authored edge survives the flatten. The slot node and its nest binding are removed with it.
+///
+/// The slot bindings the node carried are dropped: the flattened body declares no slot the parent
+/// level could address them by, and inventing a default is what this module refuses to do. Every
+/// dropped binding is reported so the editor can rebind it on the flattened body.
+fn unnest_slot(
+    document: &mut WorkflowDocument,
+    op: &UnnestOp,
+    packages: &PackageIndex<'_>,
+) -> Result<Vec<ComposeDiagnostic>, ComposeRefusal> {
     let position = document
         .nests
         .iter()
@@ -561,41 +675,282 @@ fn unnest_slot(document: &mut WorkflowDocument, op: &UnnestOp) -> Result<(), Com
             nest_id: op.nest_id.clone(),
         })?;
     let parent_node = document.nests[position].parent_node.clone();
+    let Some(pin) = pinned_pattern(&document.nests[position].child) else {
+        return Err(unflattenable(
+            &op.nest_id,
+            format!(
+                "child `{}` is a workflow, so its body cannot be inlined",
+                child_label(&document.nests[position].child)
+            ),
+        ));
+    };
+    let (package, _, _) = resolve(packages, &op.nest_id, &pin)?;
+    let Some(body) = package.fragment() else {
+        return Err(unflattenable(
+            &op.nest_id,
+            format!("package `{pin}` has no fragment body to move"),
+        ));
+    };
 
-    let referrers = slot_referrers(document, &parent_node);
-    if !referrers.is_empty() {
-        return Err(ComposeRefusal::WiredSlot {
-            nest_id: op.nest_id.clone(),
-            parent_node,
-            referrers,
-        });
+    let (node_ids, entry, terminals) = remap_body_ids(document, &op.nest_id, body, &pin)?;
+    let outgoing = document.terminal.iter().any(|id| id == &parent_node)
+        || document.edges.iter().any(|edge| edge.from == parent_node);
+    if outgoing && terminals.is_empty() {
+        return Err(unflattenable(
+            &op.nest_id,
+            format!("package `{pin}` declares no terminal node to keep the slot's outgoing wiring"),
+        ));
     }
+
+    move_body(document, body, &node_ids);
+    let diagnostics = dropped_bindings(document, &parent_node, &op.nest_id);
+    retarget_wiring(document, &parent_node, &entry, &terminals);
 
     document.nests.remove(position);
-    if !document
-        .nests
-        .iter()
-        .any(|nest| nest.parent_node == parent_node)
-    {
-        document.nodes.retain(|node| node.id != parent_node);
-    }
-    Ok(())
+    document.nodes.retain(|node| node.id != parent_node);
+    Ok(diagnostics)
 }
 
+fn unflattenable(nest_id: &str, reason: String) -> ComposeRefusal {
+    ComposeRefusal::Unflattenable {
+        nest_id: nest_id.to_owned(),
+        reason,
+    }
+}
+
+/// A flattened body's node ids remapped to this level, plus the entry and terminals they answer
+/// to.
+type LevelIds = (HashMap<String, String>, String, Vec<String>);
+
+/// Remap the body's node ids into this level, keeping its entry and terminals addressable.
+///
+/// Fragment ids are this level's ids, so every one must survive a collision with what is here. The
+/// removed slot's own ids stay reserved: reusing them would silently alias a new node to a
+/// reference the editor still holds.
+fn remap_body_ids(
+    document: &WorkflowDocument,
+    nest_id: &str,
+    body: &WorkflowDocument,
+    pin: &PatternPackageRef,
+) -> Result<LevelIds, ComposeRefusal> {
+    let mut taken: HashSet<String> = document.nodes.iter().map(|node| node.id.clone()).collect();
+    let mut node_ids = HashMap::new();
+    for node in &body.nodes {
+        let fresh = fresh_id(&node.id, &mut taken);
+        node_ids.insert(node.id.clone(), fresh);
+    }
+    let Some(entry) = node_ids.get(body.entry.as_str()).cloned() else {
+        return Err(unflattenable(
+            nest_id,
+            format!("package `{pin}` declares no entry node to receive the slot's wiring"),
+        ));
+    };
+    let terminals = body
+        .terminal
+        .iter()
+        .filter_map(|id| node_ids.get(id).cloned())
+        .collect();
+    Ok((node_ids, entry, terminals))
+}
+
+/// Move the pinned body's nodes, edges and nests into the candidate level.
+fn move_body(
+    document: &mut WorkflowDocument,
+    body: &WorkflowDocument,
+    node_ids: &HashMap<String, String>,
+) {
+    let mut taken_edges: HashSet<String> =
+        document.edges.iter().map(|edge| edge.id.clone()).collect();
+    let mut taken_nests: HashSet<String> =
+        document.nests.iter().map(|nest| nest.id.clone()).collect();
+
+    for node in &body.nodes {
+        let mut moved = node.clone();
+        if let Some(id) = node_ids.get(&node.id) {
+            moved.id.clone_from(id);
+        }
+        // A reference that names no fragment node cannot survive the move: repointing it would
+        // wire a stranger's id, so it is dropped.
+        moved.depends_on = node
+            .depends_on
+            .iter()
+            .filter_map(|dependency| node_ids.get(dependency).cloned())
+            .collect();
+        moved.on_timeout = node
+            .on_timeout
+            .as_deref()
+            .and_then(|timeout| node_ids.get(timeout).cloned());
+        document.nodes.push(moved);
+    }
+    for edge in &body.edges {
+        let (Some(from), Some(to)) = (node_ids.get(&edge.from), node_ids.get(&edge.to)) else {
+            continue;
+        };
+        let mut moved = edge.clone();
+        moved.id = fresh_id(&edge.id, &mut taken_edges);
+        moved.from.clone_from(from);
+        moved.to.clone_from(to);
+        document.edges.push(moved);
+    }
+    for nest in &body.nests {
+        let Some(parent) = node_ids.get(&nest.parent_node) else {
+            continue;
+        };
+        let mut moved = nest.clone();
+        moved.id = fresh_id(&nest.id, &mut taken_nests);
+        moved.parent_node.clone_from(parent);
+        document.nests.push(moved);
+    }
+}
+
+/// The slot bindings flattening has to drop, named one by one.
+fn dropped_bindings(
+    document: &WorkflowDocument,
+    parent_node: &str,
+    nest_id: &str,
+) -> Vec<ComposeDiagnostic> {
+    document
+        .nodes
+        .iter()
+        .find(|node| node.id == parent_node)
+        .map(|node| {
+            node.bind
+                .keys()
+                .map(|slot| ComposeDiagnostic::DroppedSlotBinding {
+                    nest_id: nest_id.to_owned(),
+                    slot: slot.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Point everything that referenced the slot node at the flattened body's boundary nodes.
+fn retarget_wiring(
+    document: &mut WorkflowDocument,
+    parent_node: &str,
+    entry: &str,
+    terminals: &[String],
+) {
+    if document.entry == parent_node {
+        entry.clone_into(&mut document.entry);
+    }
+    let mut taken_edges: HashSet<String> =
+        document.edges.iter().map(|edge| edge.id.clone()).collect();
+    let mut retargeted = Vec::with_capacity(document.edges.len());
+    for edge in std::mem::take(&mut document.edges) {
+        let from_slot = edge.from == parent_node;
+        let to_slot = edge.to == parent_node;
+        if !from_slot && !to_slot {
+            retargeted.push(edge);
+            continue;
+        }
+        let froms = if from_slot {
+            terminals.to_vec()
+        } else {
+            vec![edge.from.clone()]
+        };
+        let to = if to_slot {
+            entry.to_owned()
+        } else {
+            edge.to.clone()
+        };
+        for (index, from) in froms.iter().enumerate() {
+            let mut copy = edge.clone();
+            copy.from.clone_from(from);
+            copy.to.clone_from(&to);
+            if index > 0 {
+                copy.id = fresh_id(&edge.id, &mut taken_edges);
+            }
+            retargeted.push(copy);
+        }
+    }
+    document.edges = retargeted;
+
+    let mut terminals_at_this_level = Vec::with_capacity(document.terminal.len());
+    for id in std::mem::take(&mut document.terminal) {
+        if id == parent_node {
+            terminals_at_this_level.extend(terminals.iter().cloned());
+        } else {
+            terminals_at_this_level.push(id);
+        }
+    }
+    document.terminal = terminals_at_this_level;
+
+    for node in &mut document.nodes {
+        if node.id == parent_node {
+            continue;
+        }
+        node.depends_on = node
+            .depends_on
+            .iter()
+            .map(|dependency| {
+                if dependency == parent_node {
+                    entry.to_owned()
+                } else {
+                    dependency.clone()
+                }
+            })
+            .collect();
+        if node.on_timeout.as_deref() == Some(parent_node) {
+            node.on_timeout = Some(entry.to_owned());
+        }
+    }
+}
+
+/// An id that names nothing already taken at this level: the fragment's own id when it is free,
+/// otherwise its first free `~n` successor. Deterministic, so a replay produces the same graph.
+fn fresh_id(base: &str, taken: &mut HashSet<String>) -> String {
+    if taken.insert(base.to_owned()) {
+        return base.to_owned();
+    }
+    let mut index = 2;
+    loop {
+        let candidate = format!("{base}~{index}");
+        if taken.insert(candidate.clone()) {
+            return candidate;
+        }
+        index += 1;
+    }
+}
+
+/// Re-pin the region at `nest_id` to another exact package.
+///
+/// This is the only operation allowed to establish a new pin: the region's recorded hash is
+/// rewritten from the registry's current bytes, which is why [`verify_pins`] exempts it. Every
+/// binding the region already carries is retained and re-validated against the replacement
+/// pattern's declarations, so the retention can never say something `bind_slot` would refuse.
 fn replace_subtree(
     document: &mut WorkflowDocument,
     op: &ReplaceSubtreeOp,
     packages: &PackageIndex<'_>,
 ) -> Result<(), ComposeRefusal> {
     let (_, manifest, content_hash) = resolve(packages, &op.nest_id, &op.package)?;
-    let Some(nest) = document.nests.iter_mut().find(|nest| nest.id == op.nest_id) else {
+    let Some(nest) = document.nests.iter().find(|nest| nest.id == op.nest_id) else {
         return Err(ComposeRefusal::UnknownNest {
             nest_id: op.nest_id.clone(),
         });
     };
     let parent_node = nest.parent_node.clone();
-    nest.child = pattern_child(&op.package, content_hash);
-    nest.expansion = op.expansion;
+
+    // One manifest-binding rule for explicit binding and for what a replacement retains.
+    if let Some(node) = document.nodes.iter().find(|node| node.id == parent_node) {
+        for (slot, value) in &node.bind {
+            check_binding(
+                &document.assets,
+                manifest,
+                &op.nest_id,
+                &op.package,
+                slot,
+                value,
+            )?;
+        }
+    }
+
+    if let Some(nest) = document.nests.iter_mut().find(|nest| nest.id == op.nest_id) {
+        nest.child = pattern_child(&op.package, content_hash);
+        nest.expansion = op.expansion;
+    }
 
     // The region keeps its nest id and every other authored edit: only the pin changes, in place.
     if let Some(node) = document
@@ -629,24 +984,14 @@ fn bind_slot(
     let parent_node = nest.parent_node.clone();
     let (_, manifest, _) = resolve(packages, &op.nest_id, &package)?;
 
-    let Some(slot) = manifest
-        .slots
-        .iter()
-        .find(|slot| slot.name.as_str() == op.slot)
-    else {
-        return Err(ComposeRefusal::SlotNotDeclared {
-            nest_id: op.nest_id.clone(),
-            pattern: package.to_string(),
-            slot: op.slot.clone(),
-        });
-    };
-    check_slot_value(&document.assets, slot.kind, &op.value).map_err(|expected| {
-        ComposeRefusal::SlotKindMismatch {
-            nest_id: op.nest_id.clone(),
-            slot: op.slot.clone(),
-            expected: expected.to_owned(),
-        }
-    })?;
+    check_binding(
+        &document.assets,
+        manifest,
+        &op.nest_id,
+        &package,
+        &op.slot,
+        &op.value,
+    )?;
 
     let Some(node) = document
         .nodes
@@ -663,6 +1008,36 @@ fn bind_slot(
     };
     node.bind.insert(op.slot.clone(), op.value.clone());
     Ok(())
+}
+
+/// The one manifest-binding rule: the slot must be declared, and the value must satisfy the
+/// declaration. `bind_slot` and the bindings `replace_subtree` retains are held to it alike.
+fn check_binding(
+    assets: &[WorkflowAssetRef],
+    manifest: &PatternManifest,
+    nest_id: &str,
+    pin: &PatternPackageRef,
+    slot: &str,
+    value: &Value,
+) -> Result<(), ComposeRefusal> {
+    let Some(declared) = manifest
+        .slots
+        .iter()
+        .find(|declared| declared.name.as_str() == slot)
+    else {
+        return Err(ComposeRefusal::SlotNotDeclared {
+            nest_id: nest_id.to_owned(),
+            pattern: pin.to_string(),
+            slot: slot.to_owned(),
+        });
+    };
+    check_slot_value(assets, declared.kind, value).map_err(|expected| {
+        ComposeRefusal::SlotKindMismatch {
+            nest_id: nest_id.to_owned(),
+            slot: slot.to_owned(),
+            expected: expected.to_owned(),
+        }
+    })
 }
 
 /// What the manifest's slot kind accepts, checked on the bound value.
@@ -687,34 +1062,6 @@ const fn kind_expectation(kind: NexusPatternSlotKind) -> &'static str {
         NexusPatternSlotKind::Asset => "an asset id present in document.assets",
         NexusPatternSlotKind::Capability => "a non-empty capability id",
     }
-}
-
-/// What still references `node_id`, in document order.
-fn slot_referrers(document: &WorkflowDocument, node_id: &str) -> Vec<String> {
-    let mut referrers = Vec::new();
-    if document.entry == node_id {
-        referrers.push("entry".to_owned());
-    }
-    if document.terminal.iter().any(|id| id == node_id) {
-        referrers.push("terminal".to_owned());
-    }
-    for edge in &document.edges {
-        if edge.from == node_id || edge.to == node_id {
-            referrers.push(format!("edge `{}`", edge.id));
-        }
-    }
-    for node in &document.nodes {
-        if node.id == node_id {
-            continue;
-        }
-        if node.depends_on.iter().any(|id| id == node_id) {
-            referrers.push(format!("node `{}` depends_on", node.id));
-        }
-        if node.on_timeout.as_deref() == Some(node_id) {
-            referrers.push(format!("node `{}` on_timeout", node.id));
-        }
-    }
-    referrers
 }
 
 /// Every required slot of every pinned package that carries no binding, in document order.
@@ -778,12 +1125,13 @@ impl<'a> PackageIndex<'a> {
     }
 
     /// The pattern bodies reachable from `document`, so the shared walk follows resolved fragments
-    /// instead of treating every pattern pin as a leaf.
-    fn bodies(&self, document: &WorkflowDocument) -> Vec<PatternBody<'a>> {
+    /// instead of treating every pattern pin as a leaf. Every pin the walk follows is checked
+    /// against the hash its carrier recorded, so a fragment's own pins fail closed too.
+    fn bodies(&self, document: &WorkflowDocument) -> Result<Vec<PatternBody<'a>>, ComposeRefusal> {
         let mut bodies = Vec::new();
         let mut seen = HashSet::new();
-        self.collect_bodies(document, &mut bodies, &mut seen);
-        bodies
+        self.collect_bodies(document, &mut bodies, &mut seen)?;
+        Ok(bodies)
     }
 
     fn collect_bodies(
@@ -791,7 +1139,7 @@ impl<'a> PackageIndex<'a> {
         document: &WorkflowDocument,
         bodies: &mut Vec<PatternBody<'a>>,
         seen: &mut HashSet<String>,
-    ) {
+    ) -> Result<(), ComposeRefusal> {
         for nest in &document.nests {
             let Some(pin) = pinned_pattern(&nest.child) else {
                 continue;
@@ -805,6 +1153,7 @@ impl<'a> PackageIndex<'a> {
             let Some(manifest) = found.manifest() else {
                 continue;
             };
+            verify_pin(&nest.id, &pin, nest.child.content_hash.as_deref(), self)?;
             let (registry_id, version) = (manifest.id.as_str(), manifest.version.as_str());
             match found.fragment() {
                 Some(fragment) => {
@@ -813,7 +1162,7 @@ impl<'a> PackageIndex<'a> {
                         version,
                         body: PatternBodyKind::Fragment(fragment),
                     });
-                    self.collect_bodies(fragment, bodies, seen);
+                    self.collect_bodies(fragment, bodies, seen)?;
                 }
                 None => bodies.push(PatternBody {
                     registry_id,
@@ -822,6 +1171,7 @@ impl<'a> PackageIndex<'a> {
                 }),
             }
         }
+        Ok(())
     }
 }
 
@@ -851,15 +1201,20 @@ fn resolve<'a>(
     }
 }
 
-/// The exact pattern pin a nest child carries, when it is a pattern child.
+/// The exact pattern pin a nest child carries, when it is a resolved pattern child.
+///
+/// A pin is resolved only with both halves of `{id, version}`: an empty or absent half names no
+/// package, so treating it as resolved would mislabel what the nest points at.
 fn pinned_pattern(child: &WorkflowNestChild) -> Option<PatternPackageRef> {
     if child.kind != WorkflowNestChildKind::Pattern {
         return None;
     }
-    Some(PatternPackageRef {
-        id: child.registry_id.clone()?,
-        version: child.version.clone()?,
-    })
+    let id = child.registry_id.clone().filter(|id| !id.is_empty())?;
+    let version = child
+        .version
+        .clone()
+        .filter(|version| !version.is_empty())?;
+    Some(PatternPackageRef { id, version })
 }
 
 /// A nest child's label, for a refusal that must name what the nest points at.
@@ -937,5 +1292,57 @@ const fn class_of(class: PatternManifestEffectClass) -> WorkflowNodeEffectClass 
         PatternManifestEffectClass::Read => WorkflowNodeEffectClass::Read,
         PatternManifestEffectClass::WriteCandidate => WorkflowNodeEffectClass::WriteCandidate,
         PatternManifestEffectClass::External => WorkflowNodeEffectClass::External,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn child(registry_id: Option<&str>, version: Option<&str>) -> WorkflowNestChild {
+        WorkflowNestChild {
+            content_hash: None,
+            kind: WorkflowNestChildKind::Pattern,
+            registry_id: registry_id.map(ToOwned::to_owned),
+            version: version.map(ToOwned::to_owned),
+            workflow_id: None,
+            workflow_revision: None,
+        }
+    }
+
+    #[test]
+    fn a_pattern_pin_is_resolved_only_with_both_halves() {
+        let pin = PatternPackageRef {
+            id: "research-loop".to_owned(),
+            version: "1.0.0".to_owned(),
+        };
+        assert_eq!(
+            pinned_pattern(&child(Some("research-loop"), Some("1.0.0"))),
+            Some(pin)
+        );
+        // A pin missing or emptying either half names no package, so the resolved test compares
+        // the version too instead of falling through on a non-empty id.
+        assert_eq!(pinned_pattern(&child(Some("research-loop"), None)), None);
+        assert_eq!(
+            pinned_pattern(&child(Some("research-loop"), Some(""))),
+            None
+        );
+        assert_eq!(pinned_pattern(&child(None, Some("1.0.0"))), None);
+        assert_eq!(pinned_pattern(&child(Some(""), Some("1.0.0"))), None);
+        assert_eq!(
+            pinned_pattern(&WorkflowNestChild {
+                kind: WorkflowNestChildKind::Workflow,
+                ..child(Some("research-loop"), Some("1.0.0"))
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn a_flattened_id_stays_unique_at_its_level() {
+        let mut taken: HashSet<String> = ["a".to_owned(), "a~2".to_owned()].into();
+        assert_eq!(fresh_id("b", &mut taken), "b");
+        assert_eq!(fresh_id("a", &mut taken), "a~3");
+        assert_eq!(fresh_id("a", &mut taken), "a~4");
     }
 }

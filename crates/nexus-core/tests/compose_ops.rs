@@ -11,7 +11,7 @@ use nexus_core::{
     NestOp, PatternPackageRef, Principal, ReplaceSubtreeOp, UnnestOp,
 };
 use nexus_workflow_ir::{
-    WorkflowDocument, WorkflowDocumentEffectSummary, WorkflowNestBindingExpansion,
+    WorkflowDocument, WorkflowDocumentEffectSummary, WorkflowNestBindingExpansion, WorkflowNodeKind,
 };
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
@@ -197,6 +197,106 @@ fn write_chain(home: &Path, id: &str, next: Option<&str>) {
     write_package(home, id, "pure", "", &body);
 }
 
+/// A fragment with two wired nodes, so flattening has to move a body, not one node. Every
+/// package reuses the ids `a`/`b`, which is what forces the second flatten to remap them.
+fn flow_fragment(id: &str, next: Option<&str>) -> Value {
+    let nests = next.map_or_else(
+        || json!([]),
+        |next| {
+            json!([{
+                "id": format!("{id}-nest"),
+                "parent_node": "b",
+                "expansion": "defer_until_apply",
+                "pin_policy": "exact",
+                "child": { "kind": "pattern", "registry_id": next, "version": "1.0.0" }
+            }])
+        },
+    );
+    json!({
+        "ir_version": 0,
+        "id": id,
+        "version": 1,
+        "revision": 0,
+        "state": "candidate",
+        "meta": {
+            "description": format!("compose fixture {id}"),
+            "kind": "creator",
+            "run_intents": [],
+            "requires_capabilities": []
+        },
+        "entry": "a",
+        "terminal": ["b"],
+        "nodes": [
+            { "id": "a", "kind": "inner_step", "effect_class": "pure", "step_kind": "acp_prompt" },
+            { "id": "b", "kind": "pattern_slot", "effect_class": "pure" }
+        ],
+        "edges": [{ "id": "a->b", "from": "a", "to": "b", "kind": "linear" }],
+        "nests": nests,
+        "assets": [],
+        "signals": [],
+        "roles": [],
+        "effect_summary": "pure",
+        "provenance": { "source": "compose" }
+    })
+}
+
+fn write_flow(home: &Path, id: &str, next: Option<&str>) {
+    write_package(home, id, "pure", "", &flow_fragment(id, next));
+}
+
+/// Nest then flatten, returning the committed documents of both operations.
+async fn nest_then_unnest(
+    setup: &Setup,
+    base: u64,
+    nest_id: &str,
+    parent_node: &str,
+    package_id: &str,
+) -> (nexus_core::StrategyCandidate, nexus_core::StrategyCandidate) {
+    let nested = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            base,
+            nest(nest_id, parent_node, package_id, "1.0.0"),
+        )
+        .await
+        .unwrap();
+    let flat = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            nested.candidate.revision,
+            nest_id_op(nest_id),
+        )
+        .await
+        .unwrap();
+    (nested.candidate, flat.candidate)
+}
+
+fn node_kind(document: &WorkflowDocument, id: &str) -> WorkflowNodeKind {
+    document
+        .nodes
+        .iter()
+        .find(|node| node.id == id)
+        .unwrap_or_else(|| panic!("node `{id}` is in the document"))
+        .kind
+}
+
+/// The two-node body moved by a flatten, with its own edge.
+fn assert_two_node_body(document: &WorkflowDocument, entry: &str, terminal: &str) {
+    assert_eq!(node_kind(document, entry), WorkflowNodeKind::InnerStep);
+    assert_eq!(node_kind(document, terminal), WorkflowNodeKind::PatternSlot);
+    assert!(
+        document
+            .edges
+            .iter()
+            .any(|edge| edge.from == entry && edge.to == terminal),
+        "the body's own edge moved with it"
+    );
+}
+
 /// The registry a compose test reads: one external pattern with a required string slot, one
 /// `write_candidate` pattern, and one `read` pattern with a required string and an optional asset
 /// slot.
@@ -238,6 +338,19 @@ fn write_registry(home: &Path) {
             &json!([]),
         ),
     );
+    // `topic` as an asset, so a value a string slot accepted cannot survive the swap.
+    write_package(
+        home,
+        "asset-topic-step",
+        "read",
+        "[[slots]]\nname = \"topic\"\nkind = \"asset\"\nrequired = true\n",
+        &fragment(
+            "asset-topic-step",
+            "read",
+            &json!([fragment_node("read")]),
+            &json!([]),
+        ),
+    );
 }
 
 type StoredRow = (String, String, i64, String, String);
@@ -267,13 +380,6 @@ async fn current(setup: &Setup) -> nexus_core::StrategyCandidate {
         .read_strategy_candidate(&setup.principal, STRATEGY)
         .await
         .unwrap()
-}
-
-/// A document rendered with a fixed revision, so a round trip can be compared byte for byte.
-fn normalized(document: &WorkflowDocument, revision: u64) -> String {
-    let mut document = document.clone();
-    document.revision = revision;
-    serde_json::to_string(&document).unwrap()
 }
 
 /// One node as JSON, so the assertions read the committed bytes rather than a Rust projection.
@@ -561,10 +667,16 @@ async fn a_nest_that_exceeds_depth_three_is_refused_at_the_offending_nest() {
 }
 
 #[tokio::test]
-async fn unnest_restores_the_document_it_started_from() {
+async fn unnest_flattens_the_pinned_body_and_reports_the_dropped_binding() {
     let setup = setup().await;
     write_registry(&setup.home);
     let before = current(&setup).await;
+    let before_ids: Vec<String> = before
+        .document
+        .nodes
+        .iter()
+        .map(|node| node.id.clone())
+        .collect();
 
     let nested = setup
         .core
@@ -576,8 +688,6 @@ async fn unnest_restores_the_document_it_started_from() {
         )
         .await
         .unwrap();
-
-    // The slot's own binding lives on the slot node, so flattening drops it with the slot.
     let bound = setup
         .core
         .compose_strategy_candidate(
@@ -588,11 +698,6 @@ async fn unnest_restores_the_document_it_started_from() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        slot_node(&bound.candidate.document, "collect-sources")["bind"]["topic"],
-        "climate migration"
-    );
-    assert_eq!(bound.diagnostics, []);
 
     let flattened = setup
         .core
@@ -606,86 +711,191 @@ async fn unnest_restores_the_document_it_started_from() {
         .unwrap();
 
     assert_eq!(flattened.candidate.revision, 3);
-    assert!(
-        flattened
-            .candidate
-            .document
-            .nests
-            .iter()
-            .all(|nest| nest.id != "source-research"),
-        "the binding is gone"
-    );
-    assert!(
-        flattened
-            .candidate
-            .document
-            .nodes
-            .iter()
-            .all(|node| node.id != "collect-sources"),
-        "the slot node, and the binding it carried, is gone"
-    );
-    assert_eq!(flattened.diagnostics, []);
 
-    // The slot was the last edit, so nest/unnest is the identity on the document.
+    // The collapsed slot is gone and the body it pinned is a candidate node at this level.
+    let document = &flattened.candidate.document;
+    assert!(document
+        .nests
+        .iter()
+        .all(|nest| nest.id != "source-research"));
+    assert!(document
+        .nodes
+        .iter()
+        .all(|node| node.id != "collect-sources"));
+    let moved: Vec<&str> = document
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .filter(|id| !before_ids.iter().any(|before| before == id))
+        .collect();
     assert_eq!(
-        normalized(&flattened.candidate.document, 0),
-        normalized(&before.document, 0)
+        moved.len(),
+        1,
+        "the fragment's one node is a candidate node now"
+    );
+    assert!(
+        moved[0] == "work" || moved[0] == "work~2",
+        "the body's own id when it is free: {moved:?}"
+    );
+    assert_eq!(
+        slot_node(document, moved[0])["effect_class"],
+        "external",
+        "the flattened body keeps its declared class"
+    );
+
+    // The binding the slot carried has no slot at this level: dropped, and named.
+    assert_eq!(
+        flattened.diagnostics,
+        vec![ComposeDiagnostic::DroppedSlotBinding {
+            nest_id: "source-research".to_owned(),
+            slot: "topic".to_owned(),
+        }]
     );
 
     setup.core.close().await.unwrap();
 }
 
 #[tokio::test]
-async fn unnest_removes_a_two_level_and_a_three_level_region_whole() {
+async fn unnest_flattens_a_two_level_and_a_three_level_body_into_the_parent_level() {
     let setup = setup().await;
     write_registry(&setup.home);
-    write_chain(&setup.home, "two-level", None);
-    write_chain(&setup.home, "three-level", Some("three-inner"));
-    write_chain(&setup.home, "three-inner", None);
+    write_flow(&setup.home, "outer-two", Some("inner-two"));
+    write_flow(&setup.home, "inner-two", None);
+    write_flow(&setup.home, "outer-three", Some("middle-three"));
+    write_flow(&setup.home, "middle-three", Some("leaf-three"));
+    write_flow(&setup.home, "leaf-three", None);
     let before = current(&setup).await;
+    assert!(
+        before.document.nests.is_empty(),
+        "the import projection carries no nest"
+    );
 
-    for (index, (nest_id, package_id)) in [("two", "two-level"), ("three", "three-level")]
-        .into_iter()
-        .enumerate()
-    {
-        let base = before.revision + index as u64 * 2;
-        let nested = setup
-            .core
-            .compose_strategy_candidate(
-                &setup.principal,
-                STRATEGY,
-                base,
-                nest(nest_id, &format!("{nest_id}-slot"), package_id, "1.0.0"),
-            )
-            .await
-            .unwrap();
-        assert_eq!(nested.candidate.revision, base + 1);
+    // Two levels: flattening the outer nest materializes its body and leaves the nest it carried.
+    let (nested, flat) = nest_then_unnest(&setup, 0, "two", "two-slot", "outer-two").await;
+    assert_eq!(nested.document.nests.len(), 1);
+    assert_eq!(
+        flat.document.nests.len(),
+        1,
+        "the body's own nest is a candidate nest now"
+    );
+    assert_two_node_body(&flat.document, "a", "b");
+    let carried = &flat.document.nests[0];
+    assert_eq!(carried.child.registry_id.as_deref(), Some("inner-two"));
+    assert_eq!(carried.parent_node, "b");
+    assert_eq!(
+        node_kind(&flat.document, "b"),
+        WorkflowNodeKind::PatternSlot
+    );
 
-        let flattened = setup
-            .core
-            .compose_strategy_candidate(
-                &setup.principal,
-                STRATEGY,
-                nested.candidate.revision,
-                nest_id_op(nest_id),
-            )
-            .await
-            .unwrap();
+    // Flattening again keeps the second body's ids unique and retargets the edge that pointed at
+    // its slot: the outer `a -> b` now enters the inner body at `a~2`.
+    let inner = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            flat.revision,
+            nest_id_op(&carried.id),
+        )
+        .await
+        .unwrap();
+    let document = &inner.candidate.document;
+    assert!(document.nests.is_empty());
+    assert_two_node_body(document, "a~2", "b~2");
+    assert!(
+        document
+            .edges
+            .iter()
+            .any(|edge| edge.from == "a" && edge.to == "a~2"),
+        "the outer edge now enters the flattened body"
+    );
+
+    // Three levels: every flatten moves one level up and leaves the next pin behind.
+    let (_, flat) = nest_then_unnest(
+        &setup,
+        inner.candidate.revision,
+        "three",
+        "three-slot",
+        "outer-three",
+    )
+    .await;
+    let mut document = flat.document;
+    for expected in ["middle-three", "leaf-three"] {
+        assert_eq!(document.nests.len(), 1);
         assert_eq!(
-            normalized(&flattened.candidate.document, 0),
-            normalized(&before.document, 0),
-            "the `{package_id}` region flattens back to the parent level byte for byte"
+            document.nests[0].child.registry_id.as_deref(),
+            Some(expected)
         );
+        let nest_id = document.nests[0].id.clone();
+        document = setup
+            .core
+            .compose_strategy_candidate(
+                &setup.principal,
+                STRATEGY,
+                document.revision,
+                nest_id_op(&nest_id),
+            )
+            .await
+            .unwrap()
+            .candidate
+            .document;
     }
+    assert!(
+        document.nests.is_empty(),
+        "every level of the three-level tree is flattened"
+    );
 
     setup.core.close().await.unwrap();
 }
 
+/// Wire the slot node as the document's entry and terminal, with one edge on each side.
+async fn wire_the_slot(
+    setup: &Setup,
+    base: u64,
+    from: &str,
+    to: &str,
+) -> nexus_core::StrategyCandidate {
+    setup
+        .core
+        .commit_strategy_candidate(&setup.principal, STRATEGY, base, |document| {
+            let mut next = document.clone();
+            let slot_node = "wired-slot".to_owned();
+            next.entry.clone_from(&slot_node);
+            next.terminal = vec![slot_node.clone()];
+            for (id, edge_from, edge_to) in [
+                ("into-slot", from, "wired-slot"),
+                ("out-of-slot", "wired-slot", to),
+            ] {
+                next.edges.push(
+                    serde_json::from_value(json!({
+                        "id": id,
+                        "from": edge_from,
+                        "to": edge_to,
+                        "kind": "linear"
+                    }))
+                    .unwrap(),
+                );
+            }
+            Ok(next)
+        })
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
-async fn unnest_refuses_a_slot_the_graph_still_references() {
+async fn unnest_retargets_the_wiring_the_slot_owned() {
     let setup = setup().await;
     write_registry(&setup.home);
+    write_flow(&setup.home, "flow-step", None);
     let before = current(&setup).await;
+    let from = before.document.entry.clone();
+    let to = before
+        .document
+        .nodes
+        .iter()
+        .map(|node| node.id.clone())
+        .find(|id| id != &from)
+        .expect("the projection has a second node");
 
     let nested = setup
         .core
@@ -693,57 +903,82 @@ async fn unnest_refuses_a_slot_the_graph_still_references() {
             &setup.principal,
             STRATEGY,
             before.revision,
-            nest("source-research", "collect-sources", "prompt-step", "1.0.0"),
+            nest("wired", "wired-slot", "flow-step", "1.0.0"),
         )
         .await
         .unwrap();
+    let wired = wire_the_slot(&setup, nested.candidate.revision, &from, &to).await;
 
-    // A later edit wires the slot into the graph: removing it would dangle that edge.
-    let wired = setup
-        .core
-        .commit_strategy_candidate(
-            &setup.principal,
-            STRATEGY,
-            nested.candidate.revision,
-            |document| {
-                let mut next = document.clone();
-                let from = next.entry.clone();
-                next.edges.push(
-                    serde_json::from_value(json!({
-                        "id": "entry->collect-sources",
-                        "from": from,
-                        "to": "collect-sources",
-                        "kind": "linear"
-                    }))
-                    .unwrap(),
-                );
-                Ok(next)
-            },
-        )
-        .await
-        .unwrap();
-    let stored = stored_row(setup.core.pool(), STRATEGY).await;
-
-    let error = setup
+    let flattened = setup
         .core
         .compose_strategy_candidate(
             &setup.principal,
             STRATEGY,
             wired.revision,
-            nest_id_op("source-research"),
+            nest_id_op("wired"),
         )
         .await
-        .unwrap_err();
+        .unwrap();
+    let document = &flattened.candidate.document;
+    assert!(document.nodes.iter().all(|node| node.id != "wired-slot"));
+    assert_eq!(flattened.diagnostics, []);
 
-    let details = refusal(error);
-    assert_eq!(details["reason"], "slot_still_wired");
-    assert_eq!(details["nest_id"], "source-research");
-    assert_eq!(details["parent_node"], "collect-sources");
+    // The wiring the slot owned now lands on the fragment's boundary nodes: the body's own edge
+    // names them, because both ends are nodes this flatten moved.
+    let before_ids: Vec<&str> = before
+        .document
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect();
+    let moved: Vec<&str> = document
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .filter(|id| !before_ids.contains(id))
+        .collect();
     assert_eq!(
-        details["referrers"],
-        json!(["edge `entry->collect-sources`"])
+        moved.len(),
+        2,
+        "the fragment's two nodes are candidate nodes now"
     );
-    assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);
+    let body_edge = document
+        .edges
+        .iter()
+        .find(|edge| moved.contains(&edge.from.as_str()) && moved.contains(&edge.to.as_str()))
+        .expect("the body's own edge moved with it");
+    let (entry_node, terminal_node) = (body_edge.from.clone(), body_edge.to.clone());
+    assert_eq!(
+        node_kind(document, &entry_node),
+        WorkflowNodeKind::InnerStep
+    );
+    assert_eq!(
+        node_kind(document, &terminal_node),
+        WorkflowNodeKind::PatternSlot
+    );
+    assert_eq!(
+        document.entry, entry_node,
+        "the entry follows the body's entry"
+    );
+    assert_eq!(
+        document.terminal,
+        vec![terminal_node.clone()],
+        "the terminal follows the body's terminal"
+    );
+    assert!(
+        document
+            .edges
+            .iter()
+            .any(|edge| edge.from == from && edge.to == entry_node),
+        "the incoming edge now enters the body"
+    );
+    assert!(
+        document
+            .edges
+            .iter()
+            .any(|edge| edge.from == terminal_node && edge.to == to),
+        "the outgoing edge now leaves the body"
+    );
 
     setup.core.close().await.unwrap();
 }
@@ -1058,6 +1293,252 @@ async fn a_stale_base_is_the_store_conflict_and_consumes_no_revision() {
         other => panic!("expected the candidate conflict, got {other:?}"),
     }
     assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);
+
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_package_that_changed_under_its_version_fails_closed() {
+    let setup = setup().await;
+    write_registry(&setup.home);
+    let before = current(&setup).await;
+    let nested = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            nest("pinned", "pinned-slot", "prompt-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    let recorded = slot_node(&nested.candidate.document, "pinned-slot")["pattern"]["content_hash"]
+        .as_str()
+        .expect("the pin records the resolved hash")
+        .to_owned();
+
+    // The package is edited in place under the same id and version: new bytes, new hash.
+    let mut reworked = fragment(
+        "prompt-step",
+        "external",
+        &json!([fragment_node("external")]),
+        &json!([]),
+    );
+    reworked["meta"]["description"] = json!("compose fixture prompt-step, reworked");
+    write_package(
+        &setup.home,
+        "prompt-step",
+        "external",
+        "[[slots]]\nname = \"topic\"\nkind = \"string\"\nrequired = true\n",
+        &reworked,
+    );
+    let stored = stored_row(setup.core.pool(), STRATEGY).await;
+
+    // A bind would validate against the new bytes while the document still identifies the old
+    // ones, so it is refused and names both hashes.
+    let error = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            nested.candidate.revision,
+            bind("pinned", "topic", json!("water policy")),
+        )
+        .await
+        .unwrap_err();
+    let details = refusal(error);
+    assert_eq!(details["reason"], "pin_mismatch");
+    assert_eq!(details["nest_id"], "pinned");
+    assert_eq!(details["package_id"], "prompt-step");
+    assert_eq!(details["package_version"], "1.0.0");
+    assert_eq!(details["recorded_content_hash"], recorded.as_str());
+    let scanned = details["scanned_content_hash"]
+        .as_str()
+        .expect("the refusal names the scanned hash")
+        .to_owned();
+    assert_ne!(scanned, recorded);
+    let message = details["message"].as_str().unwrap();
+    assert!(
+        message.contains(&recorded) && message.contains(&scanned),
+        "the refusal names both hashes: {message}"
+    );
+    assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);
+
+    // `replace_subtree` is the one op allowed to establish a new pin: it adopts the new bytes.
+    let replaced = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            nested.candidate.revision,
+            replace("pinned", "prompt-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        slot_node(&replaced.candidate.document, "pinned-slot")["pattern"]["content_hash"],
+        scanned.as_str()
+    );
+    assert_eq!(replaced.candidate.revision, 2);
+
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn replace_subtree_refuses_a_retained_binding_its_pattern_no_longer_declares() {
+    let setup = setup().await;
+    write_registry(&setup.home);
+    let before = current(&setup).await;
+    let with_asset = setup
+        .core
+        .commit_strategy_candidate(&setup.principal, STRATEGY, before.revision, |document| {
+            let mut next = document.clone();
+            next.assets.push(
+                serde_json::from_value(json!({
+                    "id": "brief.md",
+                    "path": "brief.md",
+                    "kind": "template",
+                    "content_hash": "ab"
+                }))
+                .unwrap(),
+            );
+            Ok(next)
+        })
+        .await
+        .unwrap();
+    let nested = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            with_asset.revision,
+            nest("swap", "swap-slot", "asset-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    let bound = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            nested.candidate.revision,
+            bind("swap", "rubric", json!("brief.md")),
+        )
+        .await
+        .unwrap();
+    let stored = stored_row(setup.core.pool(), STRATEGY).await;
+
+    // `prompt-step` declares no `rubric`, so the retained binding would be a dangling slot.
+    let error = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            bound.candidate.revision,
+            replace("swap", "prompt-step", "1.0.0"),
+        )
+        .await
+        .unwrap_err();
+    let details = refusal(error);
+    assert_eq!(details["reason"], "slot_not_declared");
+    assert_eq!(details["nest_id"], "swap");
+    assert_eq!(details["pattern"], "prompt-step@1.0.0");
+    assert_eq!(details["slot"], "rubric");
+    assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);
+
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn replace_subtree_refuses_a_retained_binding_whose_kind_the_pattern_changed() {
+    let setup = setup().await;
+    write_registry(&setup.home);
+    let before = current(&setup).await;
+    let nested = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            nest("swap", "swap-slot", "asset-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    let bound = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            nested.candidate.revision,
+            bind("swap", "topic", json!("water policy")),
+        )
+        .await
+        .unwrap();
+    let stored = stored_row(setup.core.pool(), STRATEGY).await;
+
+    // The replacement declares `topic` as an asset; the retained string is what `bind_slot`
+    // would refuse for the identical value.
+    let error = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            bound.candidate.revision,
+            replace("swap", "asset-topic-step", "1.0.0"),
+        )
+        .await
+        .unwrap_err();
+    let details = refusal(error);
+    assert_eq!(details["reason"], "slot_kind_mismatch");
+    assert_eq!(details["nest_id"], "swap");
+    assert_eq!(details["slot"], "topic");
+    assert_eq!(
+        details["expected"],
+        "an asset id present in document.assets"
+    );
+    assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);
+
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_stale_base_is_refused_before_the_registry_is_scanned() {
+    let setup = setup().await;
+    write_registry(&setup.home);
+    let before = current(&setup).await;
+    let first = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            nest("first", "first-slot", "prompt-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+
+    // An unreadable registry would surface as an internal error; a stale base must not reach it.
+    let patterns = setup.home.join("patterns");
+    std::fs::remove_dir_all(&patterns).unwrap();
+    std::fs::write(&patterns, b"not a directory").unwrap();
+
+    let error = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            nest("second", "second-slot", "prompt-step", "1.0.0"),
+        )
+        .await
+        .unwrap_err();
+    match error {
+        CoreError::StrategyCandidateConflict(conflict) => {
+            assert_eq!(conflict.base_revision, 0);
+            assert_eq!(conflict.current_revision, first.candidate.revision);
+        }
+        other => panic!("expected the candidate conflict before any registry scan, got {other:?}"),
+    }
 
     setup.core.close().await.unwrap();
 }

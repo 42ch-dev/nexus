@@ -26,9 +26,21 @@ CREATE TABLE IF NOT EXISTS strategy_candidates (
     revision INTEGER NOT NULL CHECK (revision >= 0),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    CHECK (json_extract(document_json, '$.revision') = revision),
-    CHECK (json_extract(document_json, '$.id') = strategy_id),
-    CHECK (json_extract(document_json, '$.state') = 'candidate')
+    -- SQLite passes a CHECK whose expression is NULL, so the type conjunction is what makes a
+    -- missing or null member rejectable: `json_extract` alone would accept `revision: null`.
+    -- `json_type` reports a JSON string as 'text' and a missing member as NULL, hence COALESCE.
+    CHECK (
+        COALESCE(json_type(document_json, '$.revision'), 'absent') = 'integer'
+        AND json_extract(document_json, '$.revision') = revision
+    ),
+    CHECK (
+        COALESCE(json_type(document_json, '$.id'), 'absent') = 'text'
+        AND json_extract(document_json, '$.id') = strategy_id
+    ),
+    CHECK (
+        COALESCE(json_type(document_json, '$.state'), 'absent') = 'text'
+        AND json_extract(document_json, '$.state') = 'candidate'
+    )
 ) WITHOUT ROWID;
 
 -- ── Writer-protocol guards: strategy_candidates ──

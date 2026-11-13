@@ -78,7 +78,7 @@ fn storage_error(error: sqlx::Error) -> CoreError {
 }
 
 /// The typed stale-base refusal of §Q2. Nothing has been written when it returns.
-fn conflict(strategy_id: &str, base_revision: u64, current_revision: u64) -> CoreError {
+pub fn conflict(strategy_id: &str, base_revision: u64, current_revision: u64) -> CoreError {
     CoreError::StrategyCandidateConflict(StrategyCandidateConflictError {
         strategy_id: strategy_id.to_string(),
         base_revision,

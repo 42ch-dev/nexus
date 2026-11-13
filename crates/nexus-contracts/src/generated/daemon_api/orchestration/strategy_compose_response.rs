@@ -230,7 +230,7 @@ impl ::std::convert::TryFrom<::std::string::String> for NexusWorkflowDocumentSta
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct StrategyComposeDiagnostic {
-    ///Diagnostic family.
+    ///Diagnostic family: an unbound required slot, or a slot binding flattening had to drop.
     pub code: StrategyComposeDiagnosticCode,
     ///Human-readable diagnostic safe for UI display.
     pub message: ::std::string::String,
@@ -242,7 +242,7 @@ pub struct StrategyComposeDiagnostic {
     ///The pinned package version (present for `unbound_required_slot`).
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub package_version: ::std::option::Option<::std::string::String>,
-    ///The unbound slot name (present for `unbound_required_slot`).
+    ///The slot name: unbound for `unbound_required_slot`, dropped for `slot_binding_dropped`.
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub slot: ::std::option::Option<::std::string::String>,
 }
@@ -251,7 +251,7 @@ impl StrategyComposeDiagnostic {
         Default::default()
     }
 }
-///Diagnostic family.
+///Diagnostic family: an unbound required slot, or a slot binding flattening had to drop.
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,
@@ -267,11 +267,14 @@ impl StrategyComposeDiagnostic {
 pub enum StrategyComposeDiagnosticCode {
     #[serde(rename = "unbound_required_slot")]
     UnboundRequiredSlot,
+    #[serde(rename = "slot_binding_dropped")]
+    SlotBindingDropped,
 }
 impl ::std::fmt::Display for StrategyComposeDiagnosticCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
             Self::UnboundRequiredSlot => f.write_str("unbound_required_slot"),
+            Self::SlotBindingDropped => f.write_str("slot_binding_dropped"),
         }
     }
 }
@@ -282,6 +285,7 @@ impl ::std::str::FromStr for StrategyComposeDiagnosticCode {
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "unbound_required_slot" => Ok(Self::UnboundRequiredSlot),
+            "slot_binding_dropped" => Ok(Self::SlotBindingDropped),
             _ => Err("invalid value".into()),
         }
     }
