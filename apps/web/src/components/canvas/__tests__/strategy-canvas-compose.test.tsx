@@ -15,13 +15,14 @@
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { QueryClient } from '@tanstack/react-query';
 
 import { StrategyCanvas } from '@/components/canvas/strategy-canvas';
 import { BrowserClient } from '@/lib/nexus';
 import { COMPOSE_FLAG_STORAGE_KEY } from '@/lib/canvas/strategy-compose-flag';
 import { useHandlers } from '@/test/msw-server';
 import { servedIrDocument, simulationTrajectory } from '@/test/simulation-fixture';
-import { renderInApp } from '@/test/test-providers';
+import { makeQueryClient, renderInApp } from '@/test/test-providers';
 
 const shellProps = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
 
@@ -174,8 +175,11 @@ function nestedResponse(bind: Record<string, unknown> = {}) {
   };
 }
 
-function renderCanvas() {
-  renderInApp(<StrategyCanvas presetId={STRATEGY_ID} />, { client: new BrowserClient() });
+function renderCanvas(queryClient?: QueryClient) {
+  renderInApp(<StrategyCanvas presetId={STRATEGY_ID} />, {
+    client: new BrowserClient(),
+    queryClient,
+  });
 }
 
 beforeEach(() => {
@@ -452,6 +456,41 @@ describe('StrategyCanvas — compose path (flag on)', () => {
       'The pattern listing is unreadable: registry read failed.',
     );
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
+  });
+
+  it('keeps Approve enabled when a background refetch of the listing fails with items retained', async () => {
+    let patternReads = 0;
+    useHandlers(
+      // The slot is bound, so the first read's items prove the candidate complete.
+      http.get(CANDIDATE_PATH, () => HttpResponse.json(nestedResponse({ topic: 'x' }).document)),
+      http.get(PATTERNS_PATH, () => {
+        patternReads += 1;
+        return patternReads === 1
+          ? HttpResponse.json({
+              items: patternItems(true),
+              pagination: { limit: 100, has_more: false },
+            })
+          : HttpResponse.json(
+              { error: { code: 'internal', message: 'registry reread failed' } },
+              { status: 500 },
+            );
+      }),
+      http.post(SIMULATE_PATH, () => HttpResponse.json(simulationTrajectory())),
+    );
+
+    const queryClient = makeQueryClient();
+    renderCanvas(queryClient);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Simulate…' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+
+    // The refetch fails, yet the last read's items are still in hand: the slots
+    // are known, so the gate must not claim them unknown.
+    await queryClient.refetchQueries({ queryKey: ['canvas', 'strategy-compose', 'patterns'] });
+    await waitFor(() => expect(patternReads).toBe(2));
+
+    expect(screen.queryByTestId('approve-gate')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
   });
 });
 

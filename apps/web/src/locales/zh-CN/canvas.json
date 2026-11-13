@@ -306,6 +306,7 @@
       "candidateRevision": "候选版本",
       "slotUnbound": "请先绑定 {{pattern}} 上的槽位 {{slot}}，然后再批准。",
       "listingUnreadable": "模式列表读取失败：{{message}}。无法确定必需槽位是否未绑定，因此暂不可批准。",
+      "listingPending": "模式列表尚未加载完成。无法确定必需槽位是否未绑定，因此暂不可批准。",
       "pinChanged": "模式 {{id}}@{{version}} 已更改：记录哈希 {{recorded}}，当前哈希 {{current}}。请重新组合并再次模拟后再批准。"
     },
     "draftTransitionEditor": "草稿转换编辑器",

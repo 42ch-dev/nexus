@@ -234,25 +234,30 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
 
   /**
    * Approve stays disabled while a required slot is unbound (named per pattern).
-   * An unreadable listing yields no unbound slots, so the gate names that
-   * failure instead of claiming nothing needs binding.
+   * Only a listing with no data at all gates (a pending or failed first load),
+   * because that is when `unboundSlots` cannot see the slots. A failed
+   * background refetch keeps the last read's items, so it stays ungated.
    */
-  const approveGateReason = composeEnabled
-    ? compose.patternsQuery.isError
-      ? i18n.t('strategy.approve.listingUnreadable', {
-          ns: 'canvas',
-          message: compose.patternsQuery.error.message,
-        })
-      : compose.unboundSlots
-          .map((unbound) =>
-            i18n.t('strategy.approve.slotUnbound', {
-              ns: 'canvas',
-              slot: unbound.slots.join(', '),
-              pattern: unbound.patternId,
-            }),
-          )
-          .join(' ')
-    : null;
+  const approveGateReason = !composeEnabled
+    ? null
+    : compose.patternsQuery.data === undefined
+      ? compose.patternsQuery.error
+        ? i18n.t('strategy.approve.listingUnreadable', {
+            ns: 'canvas',
+            message: compose.patternsQuery.error.message,
+          })
+        : i18n.t('strategy.approve.listingPending', { ns: 'canvas' })
+      : compose.unboundSlots.length > 0
+        ? compose.unboundSlots
+            .map((unbound) =>
+              i18n.t('strategy.approve.slotUnbound', {
+                ns: 'canvas',
+                slot: unbound.slots.join(', '),
+                pattern: unbound.patternId,
+              }),
+            )
+            .join(' ')
+        : null;
 
   /** Nest attaches at the selected node, else the candidate entry. */
   const nestAttachNodeId =
