@@ -14,6 +14,8 @@ import type {
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   SimulationTrajectory,
+  StrategyComposeRequest,
+  StrategyComposeResponse,
   StrategyPatchPromptTemplateRequest,
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
@@ -158,6 +160,24 @@ export function strategyWorkflowIr(
   );
 }
 
+/**
+ * `POST /v1/daemon/strategies/{strategy_id}/compose`.
+ *
+ * One typed operation per request, guarded by the `base_revision` the client last read. The
+ * response carries the complete committed document, so the client replaces its candidate with
+ * the server's copy rather than predicting normalization or resolved pins. A stale base is the
+ * core's 409 `strategy_candidate_conflict`; a refused op is a 422 that names the nest or slot.
+ */
+export function composeStrategy(
+  service: ServiceCore,
+  strategyId: string,
+  request: StrategyComposeRequest,
+): Promise<StrategyComposeResponse> {
+  return withPrincipal(service, (principal) =>
+    service.core.composeStrategy(principal, strategyId, request),
+  );
+}
+
 /** Exact path/verb/tier identities this family owns (composer input). */
 export const PRESET_ROUTES: readonly DomainRoute[] = [
   {
@@ -281,6 +301,19 @@ export const PRESET_ROUTES: readonly DomainRoute[] = [
     tier: 'tier2',
     family: 'presets',
     handle: async (service, params) => ({ body: await strategyWorkflowIr(service, params[0]) }),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/v1\/daemon\/strategies\/([^/]+)\/compose$/,
+    tier: 'tier2',
+    family: 'presets',
+    handle: async (service, params, _search, body) => ({
+      body: await composeStrategy(
+        service,
+        params[0],
+        wirePayload<StrategyComposeRequest>(body, 'request'),
+      ),
+    }),
   },
   {
     method: 'POST',

@@ -40,6 +40,10 @@ pub enum CoreError {
     Preset(#[from] crate::presets::PresetError),
     #[error("outline conflict")]
     OutlineConflict(OutlineConflictError),
+    /// Stale-base refusal of a candidate compose write (HTTP 409 at the adapter).
+    /// Nothing was written: the store's CAS statement matched no row.
+    #[error("strategy candidate conflict")]
+    StrategyCandidateConflict(StrategyCandidateConflictError),
     #[error("outline validation failed")]
     OutlineValidation(OutlineValidationError),
     #[error("world kb conflict")]
@@ -169,6 +173,17 @@ pub enum MemoryProviderRefusal {
 pub struct OutlineConflictError {
     pub current_revision: u64,
     pub node_id: String,
+    pub conflicting_path: String,
+    pub recovery_hint: String,
+}
+
+/// Structured stale-base payload of a candidate compose write (HTTP 409 at the
+/// adapter), carrying exactly the plan's `strategy_candidate_conflict` details.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StrategyCandidateConflictError {
+    pub strategy_id: String,
+    pub base_revision: u64,
+    pub current_revision: u64,
     pub conflicting_path: String,
     pub recovery_hint: String,
 }

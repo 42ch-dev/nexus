@@ -35,6 +35,7 @@ export interface CoreError {
     | "compute_module_error"
     | "outline_conflict"
     | "outline_validation_failed"
+    | "strategy_candidate_conflict"
     | "workspace_conflict"
     | "internal";
   message: string;

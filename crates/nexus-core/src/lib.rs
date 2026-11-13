@@ -13,6 +13,7 @@ mod chronology;
 // `memory-remote` additionally compiles it for the one WS transport the remote
 // memory client dials through (n3-provider-binding.md §6); the accept/session/
 // peer-control submodules stay behind the two Connect cohorts.
+mod compose;
 mod config_lock;
 #[cfg(any(
     feature = "connect-client",
@@ -62,6 +63,7 @@ mod service;
 mod simulate;
 mod soul;
 mod storage_status;
+mod strategy_candidates;
 mod sync;
 mod timeline;
 mod works;
@@ -95,7 +97,10 @@ pub use config_lock::with_config_lock;
 pub use content::{resolve_guarded_path, resolve_guarded_path_async, CoreChapterContentQuery};
 pub use context::{LocalDirectiveStore, ReadOnlyDirectiveStore};
 pub use creators::CREATOR_INTERNAL_CODES;
-pub use error::{CoreError, CoreResult, MemoryProviderRefusal, MEMORY_INTERNAL_CODES};
+pub use error::{
+    CoreError, CoreResult, MemoryProviderRefusal, StrategyCandidateConflictError,
+    MEMORY_INTERNAL_CODES,
+};
 #[cfg(feature = "execution")]
 pub use execution::{
     CancelOutcome, DriveDisposition, ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError,
@@ -127,10 +132,15 @@ pub use principal::Principal;
 // Provider-owned memory contract objects (spoke §6): the E1/E2 direct-core
 // callers name the Creator record and SOUL profile documents through
 // `nexus_core` instead of a second DTO set.
+pub use compose::{
+    BindSlotOp, ComposeDiagnostic, ComposeOp, ComposeOutcome, ComposeRefusal, NestOp,
+    PatternPackageRef, ReplaceSubtreeOp, UnnestOp,
+};
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 pub use soul::CoreCharacterMind;
 pub use spoke_operations::spoke_schemas::{ProfileDocument, RetainedRecord};
 pub use storage_status::{CoreStorageStatus, CoreStorageVersions};
+pub use strategy_candidates::StrategyCandidate;
 pub use timeline::{CoreTimelineEventsQuery, CoreTimelineOverviewQuery};
 pub use works::{
     AddInspirationRequest, AddInspirationResponse, ArchiveInspirationRequest, ArchivePoolRequest,
