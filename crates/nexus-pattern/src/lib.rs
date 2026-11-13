@@ -7,9 +7,9 @@
 //!
 //! Symlinked package directories are followed; entries that are not directories, broken symlinks
 //! included, are skipped. A directory name that is not UTF-8 is reported as unavailable instead of
-//! being loaded under a lossy name. Availability means the manifest was readable and valid and the
-//! fragment parsed; it does not mean the fragment is structurally valid, which is the validate and
-//! compose stage's check.
+//! being loaded under a lossy name. Availability means the manifest was readable and valid, the
+//! fragment parsed and its content hash was computed; it does not mean the fragment is structurally
+//! valid, which is the validate and compose stage's check.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -22,7 +22,9 @@ use nexus_contracts::generated::daemon_api::patterns::pattern_summary::{
     NexusPatternSlot as SummarySlot, NexusPatternSlotKind as SummarySlotKind, PatternSummary,
     PatternSummaryEffectClass,
 };
-use nexus_workflow_ir::{effect_summary, WorkflowDocument, WorkflowDocumentEffectSummary};
+use nexus_workflow_ir::{
+    effect_summary, CanonicalHashError, WorkflowDocument, WorkflowDocumentEffectSummary,
+};
 
 /// Manifest file every package directory carries.
 pub const MANIFEST_FILE: &str = "pattern.toml";
@@ -39,6 +41,9 @@ pub struct PatternPackage {
     pub manifest: Option<PatternManifest>,
     /// Fragment parsed from `workflow.ir.json`; present only when the package is available.
     pub fragment: Option<WorkflowDocument>,
+    /// Canonical content hash of the fragment document — the pin staging approval compares.
+    /// Manifest metadata is not part of it. Present only when the package is available.
+    pub content_hash: Option<String>,
     /// Why the package did not load; `None` only when the package is available.
     pub reason: Option<String>,
 }
@@ -56,9 +61,8 @@ impl From<&PatternPackage> for PatternSummary {
         let manifest = package.manifest.as_ref();
         Self {
             available: package.available(),
-            // A fragment pin is content identity; this reader performs no hashing, so an available
-            // package carries no pin here.
-            content_hash: None,
+            // The fragment's canonical hash: content identity, so a manifest-only edit keeps it.
+            content_hash: package.content_hash.clone(),
             description: manifest.map(|manifest| manifest.description.as_str().to_owned()),
             effect_class: manifest.map(|manifest| summary_effect(manifest.effect_class)),
             id: manifest.map(|manifest| manifest.id.as_str().to_owned()),
@@ -126,6 +130,7 @@ fn package_entry(directory: &Path, file_name: OsString, ir_version: u64) -> Opti
             package_dir,
             manifest: None,
             fragment: None,
+            content_hash: None,
             reason: Some(Unavailable::NotUtf8Name(file_name).to_string()),
         });
     }
@@ -142,22 +147,25 @@ fn read_package(directory: &Path, package_dir: String, ir_version: u64) -> Patte
                 package_dir,
                 manifest: None,
                 fragment: None,
+                content_hash: None,
                 reason: Some(reason.to_string()),
             };
         }
     };
 
     match load(directory, &manifest, &package_dir, ir_version) {
-        Ok(fragment) => PatternPackage {
+        Ok((fragment, content_hash)) => PatternPackage {
             package_dir,
             manifest: Some(manifest),
             fragment: Some(fragment),
+            content_hash: Some(content_hash),
             reason: None,
         },
         Err(reason) => PatternPackage {
             package_dir,
             manifest: Some(manifest),
             fragment: None,
+            content_hash: None,
             reason: Some(reason.to_string()),
         },
     }
@@ -168,7 +176,7 @@ fn load(
     manifest: &PatternManifest,
     package_dir: &str,
     ir_version: u64,
-) -> Result<WorkflowDocument, Unavailable> {
+) -> Result<(WorkflowDocument, String), Unavailable> {
     check_manifest(manifest, package_dir, ir_version)?;
 
     let fragment: WorkflowDocument = serde_json::from_str(&read_text(directory, FRAGMENT_FILE)?)
@@ -181,7 +189,10 @@ fn load(
             rollup,
         });
     }
-    Ok(fragment)
+    // The pin is the fragment document's own canonical hash, never the preset import path's
+    // `content_hash` field (which is a constant `None` there).
+    let content_hash = nexus_workflow_ir::content_hash(&fragment).map_err(Unavailable::Hash)?;
+    Ok((fragment, content_hash))
 }
 
 /// Manifest rules the generated type cannot express: cross-field identity, the reader's own
@@ -295,6 +306,8 @@ enum Unavailable {
     NotUtf8Name(OsString),
     #[error("`workflow.ir.json` is malformed: {0}")]
     Fragment(serde_json::Error),
+    #[error("cannot compute the fragment content hash: {0}")]
+    Hash(CanonicalHashError),
     #[error("manifest id `{id}` does not match package directory `{package_dir}`")]
     IdMismatch { id: String, package_dir: String },
     #[error("manifest version `{0}` is not SemVer 2.0.0")]

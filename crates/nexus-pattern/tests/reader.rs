@@ -138,7 +138,14 @@ fn two_valid_packages_are_available() {
     assert_eq!(summary.slots[0].name.as_str(), "topic");
     assert_eq!(summary.slots[0].kind, NexusPatternSlotKind::String);
     assert!(summary.slots[0].required);
-    assert_eq!(summary.content_hash, None);
+    assert!(
+        summary
+            .content_hash
+            .as_deref()
+            .is_some_and(|pin| pin.len() == 64),
+        "an available package carries its 64-character BLAKE3 pin: {:?}",
+        summary.content_hash
+    );
 }
 
 #[test]
@@ -298,5 +305,91 @@ fn manifest_rules_are_enforced() {
     assert!(reason(&packages, "duplicate-slot").contains("slot `topic` more than once"));
     assert!(
         reason(&packages, "duplicate-capability").contains("capability `search` more than once")
+    );
+}
+
+/// Render the package's own pin for a directory, panicking when the package is unavailable.
+fn pin(packages: &[PatternPackage], package_dir: &str) -> String {
+    packages
+        .iter()
+        .find(|package| package.package_dir == package_dir)
+        .unwrap_or_else(|| panic!("{package_dir} discovered"))
+        .content_hash
+        .clone()
+        .unwrap_or_else(|| panic!("{package_dir} carries a pin"))
+}
+
+#[test]
+fn content_hash_pins_the_fragment_not_the_manifest() {
+    let root = tempfile::tempdir().expect("temp root");
+    let bytes = fragment("read", "read");
+    valid_package(root.path(), "alpha", "read");
+    // Same fragment bytes, different manifest version: the pin is content, not metadata.
+    write_package(
+        root.path(),
+        "beta",
+        &manifest("beta", "read").replace("version = \"1.0.0\"", "version = \"2.0.0\""),
+        Some(&bytes),
+    );
+
+    let first = scan_pattern_packages(root.path(), IR_VERSION).expect("scan");
+    assert_eq!(pin(&first, "alpha"), pin(&first, "beta"));
+
+    let rescan = scan_pattern_packages(root.path(), IR_VERSION).expect("rescan");
+    assert_eq!(
+        pin(&rescan, "alpha"),
+        pin(&first, "alpha"),
+        "same bytes, same pin"
+    );
+
+    // One changed byte of the fragment moves the pin; the untouched peer keeps its own.
+    fs::write(
+        root.path().join("alpha").join("workflow.ir.json"),
+        bytes.replace("\"id\": \"probe\"", "\"id\": \"probe2\""),
+    )
+    .expect("fragment rewritten");
+    let changed = scan_pattern_packages(root.path(), IR_VERSION).expect("rescan");
+    assert_ne!(pin(&changed, "alpha"), pin(&first, "alpha"));
+    assert_eq!(pin(&changed, "beta"), pin(&first, "beta"));
+}
+
+#[test]
+fn a_fragment_whose_pin_cannot_be_computed_is_unavailable() {
+    let root = tempfile::tempdir().expect("temp root");
+    // A resolved asset without its own hash leaves the pin incomplete; that is a reason, never an
+    // available package with a null pin.
+    let unpinned_asset = fragment("pure", "pure").replace(
+        "\"assets\": []",
+        "\"assets\": [{\"id\": \"tpl\", \"path\": \"tpl.md\", \"kind\": \"template\"}]",
+    );
+    write_package(
+        root.path(),
+        "unpinned",
+        &manifest("unpinned", "pure"),
+        Some(&unpinned_asset),
+    );
+
+    let packages = scan_pattern_packages(root.path(), IR_VERSION).expect("scan");
+    let package = &packages[0];
+    assert!(!package.available());
+    assert_eq!(package.content_hash, None);
+    assert_eq!(PatternSummary::from(package).content_hash, None);
+    let reason = package.reason.as_deref().expect("reason");
+    assert!(
+        reason.contains("content hash") && reason.contains("assets[tpl]"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn a_missing_registry_root_is_an_empty_listing() {
+    let root = tempfile::tempdir().expect("temp root");
+    let missing = root.path().join("patterns");
+
+    let packages = scan_pattern_packages(&missing, IR_VERSION).expect("a missing root scans");
+    assert!(packages.is_empty());
+    assert!(
+        !missing.exists(),
+        "the scan never creates the registry root"
     );
 }

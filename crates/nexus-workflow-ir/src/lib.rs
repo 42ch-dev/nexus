@@ -8,6 +8,9 @@
 
 pub use nexus_contracts::generated::daemon_api::orchestration::workflow_document::*;
 
+/// The workflow IR version this build composes, validates and resolves pattern packages against.
+pub const IR_VERSION: u64 = 0;
+
 pub mod canonical;
 pub mod effect;
 pub mod structure;

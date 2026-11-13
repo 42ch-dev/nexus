@@ -50,7 +50,7 @@ use std::path::Path;
 use thiserror::Error;
 
 // IR version emitted by this adapter; v0 stays 0 until P1 parity.
-const IR_VERSION: u64 = 0;
+const IR_VERSION: u64 = nexus_workflow_ir::IR_VERSION;
 
 /// Adapter failure. Every refusal names the carrier it could not project.
 #[derive(Debug, Error)]
