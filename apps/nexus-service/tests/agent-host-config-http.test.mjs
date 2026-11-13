@@ -325,6 +325,42 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
     assert.deepEqual(accepted.body.providers, [enabledProvider, disabled]);
   });
 
+  test('a stored enabled entry without a command is replaceable', async () => {
+    // A saved document that already contains an unlaunchable enabled entry must
+    // not lock the user out: the replacement transform disables every entry but
+    // the one being saved, so the launchability rule has to read its result.
+    const broken = { id: 'broken-acp', protocol: 'acp', command: null, enabled: true };
+    const replacement = {
+      id: 'claude-acp',
+      protocol: 'acp',
+      command: 'claude-agent-acp',
+      enabled: true,
+    };
+
+    for (const submitted of [
+      // The client re-sends the stored document (the entry still enabled) plus
+      // the provider it wants: the transform disables the stored entry.
+      [broken, replacement],
+      // The client also disables the stored entry itself.
+      [{ ...broken, enabled: false }, replacement],
+    ]) {
+      const { service, saves } = storeService({ ...DEFAULT_CONFIG, providers: [broken] });
+
+      const response = await handle('PUT', service, { ...DEFAULT_CONFIG, providers: submitted });
+
+      const expected = [{ ...broken, enabled: false }, replacement];
+      assert.deepEqual(response.body.providers, expected, JSON.stringify(submitted));
+      assert.deepEqual(saves[0].providers, expected);
+      assert.deepEqual(
+        response.body.providers
+          .filter((provider) => provider.enabled !== false)
+          .map(({ id }) => id),
+        ['claude-acp'],
+        'exactly one enabled provider after the save',
+      );
+    }
+  });
+
   test('validation key sets match the registered schema properties', async () => {
     const schema = JSON.parse(
       readFileSync(

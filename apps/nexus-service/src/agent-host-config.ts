@@ -161,13 +161,30 @@ function parseAgentHostConfig(body: unknown): AgentHostConfig {
     if (enabled !== undefined && typeof enabled !== 'boolean') {
       throw invalidInput(`${path}.enabled must be a boolean`);
     }
-    // `enabled` defaults to true: without a command the entry would save and
-    // then never launch, so refuse it before the replacement is written.
-    if (enabled !== false && (typeof command !== 'string' || command.trim() === '')) {
-      throw invalidInput(`${path}.command is required when provider '${id}' is enabled`);
-    }
   }
   return body as AgentHostConfig;
+}
+
+/**
+ * An enabled entry without a command would save and then never launch.
+ *
+ * Checked on the document the native save actually writes — i.e. after the
+ * replacement transform, which disables the entries it replaced. Validating
+ * the submitted set instead would let a stored bad entry block forever the
+ * save that disables it.
+ */
+function assertLaunchableProviders(config: AgentHostConfig): void {
+  for (const [index, provider] of config.providers.entries()) {
+    // `enabled` defaults to true.
+    if (
+      provider.enabled !== false &&
+      (typeof provider.command !== 'string' || provider.command.trim() === '')
+    ) {
+      throw invalidInput(
+        `providers[${index}].command is required when provider '${provider.id}' is enabled`,
+      );
+    }
+  }
 }
 
 export async function getAgentHostConfig(service: ServiceCore): Promise<AgentHostConfig> {
@@ -223,6 +240,7 @@ export function putAgentHostConfig(
     // Upsert after validation, inside the lock: the entry the user just saved
     // owns readiness and the entries it replaced are disabled.
     const next = withReplacementSelected(config);
+    assertLaunchableProviders(next);
     try {
       await service.core.saveAgentHostConfig(next);
     } catch (error) {
