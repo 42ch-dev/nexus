@@ -140,6 +140,50 @@ import type {
   WorldRuleResponse,
   WorldRuleUpdateRequest,
   WorldRulesListResponse,
+  // ── Actor family: Character identity + bindings (`schemas/daemon-api/characters/…`) ──
+  AddCharacterBindingRequest,
+  AddCharacterBindingResponse,
+  CharacterBindingDetail,
+  CharacterDetail,
+  CharacterLifecycleRequest,
+  CreateCharacterRequest,
+  CreateCharacterResponse,
+  ListCharacterBindingsQuery,
+  ListCharacterBindingsResponse,
+  ListCharactersQuery,
+  ListCharactersResponse,
+  UpdateCharacterBindingRequest,
+  UpdateCharacterRequest,
+  // ── Actor family: per-character memory / SOUL / ToM (`schemas/daemon-api/characters/{memory,soul,tom}`) ──
+  CaptureCharacterPendingReviewRequest,
+  CaptureCharacterPendingReviewResponse,
+  CharacterSoulNarrativeRequest,
+  CharacterSoulNarrativeResponse,
+  CountCharacterPendingReviewsQuery,
+  CountCharacterPendingReviewsResponse,
+  DeleteCharacterPendingReviewResponse,
+  ListCharacterMemoryFragmentsQuery,
+  ListCharacterMemoryFragmentsResponse,
+  ListCharacterPendingReviewsQuery,
+  ListCharacterPendingReviewsResponse,
+  ListCharacterTomQuery,
+  ListCharacterTomResponse,
+  PromoteCharacterFragmentRequest,
+  PromoteCharacterFragmentResponse,
+  RecordCharacterTomRequest,
+  RecordCharacterTomResponse,
+  ReviewCharacterMemoryRequest,
+  ReviewCharacterMemoryResponse,
+  // ── Actor family: actor knowledge (`schemas/daemon-api/actor-knowledge/*`) ──
+  AddKnowledgeEntryRequest,
+  AddKnowledgeEntryResponse,
+  DeleteKnowledgeEntryQuery,
+  KnowledgeEntryDetail,
+  ListCharacterKnowledgeQuery,
+  ListCharacterKnowledgeResponse,
+  UpdateKnowledgeEntryRequest,
+  ViewRequest,
+  ViewResponse,
   // ── P5-T1 World/Work/content/knowledge family DTOs (`schemas/core/*` +
   // `schemas/daemon-api/*` producers) ────────────────────────────────────────
   NarrativeWorldsListResponse,
@@ -300,6 +344,223 @@ export class BrowserClient implements NexusClient {
   }
   getActiveCreator(): Promise<ActiveCreatorResponse> {
     return this.get<ActiveCreatorResponse>('/v1/daemon/creators/active');
+  }
+
+  // ── Character identity + bindings (plan v240; I-000126) ────────────────────
+  listCharacters(query?: ListCharactersQuery): Promise<ListCharactersResponse> {
+    return this.get<ListCharactersResponse>('/v1/daemon/characters', query);
+  }
+  createCharacter(request: CreateCharacterRequest): Promise<CreateCharacterResponse> {
+    return this.post<CreateCharacterResponse>('/v1/daemon/characters', request);
+  }
+  getCharacter(characterId: string): Promise<CharacterDetail> {
+    return this.get<CharacterDetail>(`/v1/daemon/characters/${encodeURIComponent(characterId)}`);
+  }
+  patchCharacter(characterId: string, request: UpdateCharacterRequest): Promise<CharacterDetail> {
+    return this.patch<CharacterDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}`,
+      request,
+    );
+  }
+  archiveCharacter(
+    characterId: string,
+    request: CharacterLifecycleRequest,
+  ): Promise<CharacterDetail> {
+    return this.post<CharacterDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/archive`,
+      request,
+    );
+  }
+  restoreCharacter(
+    characterId: string,
+    request: CharacterLifecycleRequest,
+  ): Promise<CharacterDetail> {
+    return this.post<CharacterDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/restore`,
+      request,
+    );
+  }
+  addCharacterBinding(
+    characterId: string,
+    request: AddCharacterBindingRequest,
+  ): Promise<AddCharacterBindingResponse> {
+    return this.post<AddCharacterBindingResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/bindings`,
+      request,
+    );
+  }
+  listCharacterBindings(
+    characterId: string,
+    query?: ListCharacterBindingsQuery,
+  ): Promise<ListCharacterBindingsResponse> {
+    return this.get<ListCharacterBindingsResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/bindings`,
+      query,
+    );
+  }
+  getCharacterBinding(
+    characterId: string,
+    bindingId: string,
+  ): Promise<CharacterBindingDetail> {
+    return this.get<CharacterBindingDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/bindings/${encodeURIComponent(bindingId)}`,
+    );
+  }
+  patchCharacterBinding(
+    characterId: string,
+    bindingId: string,
+    request: UpdateCharacterBindingRequest,
+  ): Promise<CharacterBindingDetail> {
+    return this.patch<CharacterBindingDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/bindings/${encodeURIComponent(bindingId)}`,
+      request,
+    );
+  }
+  removeCharacterBinding(characterId: string, bindingId: string): Promise<void> {
+    return this.delete<void>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/bindings/${encodeURIComponent(bindingId)}`,
+    );
+  }
+
+  // ── Per-character memory / SOUL / ToM (plan v240; I-000127) ────────────────
+  // Creator-scoped siblings live further down (`listPendingReviews` etc.); these
+  // carry the character id and never fall back to creator scope.
+  captureCharacterPendingReview(
+    characterId: string,
+    request: CaptureCharacterPendingReviewRequest,
+  ): Promise<CaptureCharacterPendingReviewResponse> {
+    return this.post<CaptureCharacterPendingReviewResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/pending-review`,
+      request,
+    );
+  }
+  listCharacterPendingReviews(
+    characterId: string,
+    query?: ListCharacterPendingReviewsQuery,
+  ): Promise<ListCharacterPendingReviewsResponse> {
+    return this.get<ListCharacterPendingReviewsResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/pending-review`,
+      query,
+    );
+  }
+  countCharacterPendingReviews(
+    characterId: string,
+    query?: CountCharacterPendingReviewsQuery,
+  ): Promise<CountCharacterPendingReviewsResponse> {
+    return this.get<CountCharacterPendingReviewsResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/pending-review/count`,
+      query,
+    );
+  }
+  deleteCharacterPendingReview(
+    characterId: string,
+    pendingId: string,
+  ): Promise<DeleteCharacterPendingReviewResponse> {
+    return this.delete<DeleteCharacterPendingReviewResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/pending-review/${encodeURIComponent(pendingId)}`,
+    );
+  }
+  reviewCharacterMemory(
+    characterId: string,
+    request: ReviewCharacterMemoryRequest,
+  ): Promise<ReviewCharacterMemoryResponse> {
+    return this.post<ReviewCharacterMemoryResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/review`,
+      request,
+    );
+  }
+  listCharacterMemoryFragments(
+    characterId: string,
+    query?: ListCharacterMemoryFragmentsQuery,
+  ): Promise<ListCharacterMemoryFragmentsResponse> {
+    return this.get<ListCharacterMemoryFragmentsResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/fragments`,
+      query,
+    );
+  }
+  promoteCharacterFragment(
+    characterId: string,
+    fragmentId: string,
+    request: PromoteCharacterFragmentRequest,
+  ): Promise<PromoteCharacterFragmentResponse> {
+    return this.post<PromoteCharacterFragmentResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/fragments/${encodeURIComponent(fragmentId)}:promote`,
+      request,
+    );
+  }
+  reflectCharacterSoul(
+    characterId: string,
+    request: CharacterSoulNarrativeRequest,
+  ): Promise<CharacterSoulNarrativeResponse> {
+    return this.post<CharacterSoulNarrativeResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/soul/reflect`,
+      request,
+    );
+  }
+  listCharacterTom(
+    characterId: string,
+    query: ListCharacterTomQuery,
+  ): Promise<ListCharacterTomResponse> {
+    return this.get<ListCharacterTomResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/tom`,
+      query,
+    );
+  }
+  recordCharacterTom(
+    characterId: string,
+    request: RecordCharacterTomRequest,
+  ): Promise<RecordCharacterTomResponse> {
+    return this.post<RecordCharacterTomResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/tom`,
+      request,
+    );
+  }
+
+  // ── Actor knowledge (plan v240; I-000128) ──────────────────────────────────
+  // Character-scoped knowledge lives under the character path; view and create
+  // live under the admitted-principal path. The split is the point: the
+  // character path has no create.
+  listCharacterKnowledge(
+    characterId: string,
+    query?: ListCharacterKnowledgeQuery,
+  ): Promise<ListCharacterKnowledgeResponse> {
+    return this.get<ListCharacterKnowledgeResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/knowledge`,
+      query,
+    );
+  }
+  getCharacterKnowledge(characterId: string, entryId: string): Promise<KnowledgeEntryDetail> {
+    return this.get<KnowledgeEntryDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/knowledge/${encodeURIComponent(entryId)}`,
+    );
+  }
+  patchCharacterKnowledge(
+    characterId: string,
+    entryId: string,
+    request: UpdateKnowledgeEntryRequest,
+  ): Promise<KnowledgeEntryDetail> {
+    return this.patch<KnowledgeEntryDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/knowledge/${encodeURIComponent(entryId)}`,
+      request,
+    );
+  }
+  deleteCharacterKnowledge(
+    characterId: string,
+    entryId: string,
+    query: DeleteKnowledgeEntryQuery,
+  ): Promise<void> {
+    return this.delete<void>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/knowledge/${encodeURIComponent(entryId)}`,
+      query,
+    );
+  }
+  viewActorKnowledge(request: ViewRequest): Promise<ViewResponse> {
+    return this.post<ViewResponse>('/v1/daemon/actor-knowledge/view', request);
+  }
+  createActorKnowledgeEntry(
+    request: AddKnowledgeEntryRequest,
+  ): Promise<AddKnowledgeEntryResponse> {
+    return this.post<AddKnowledgeEntryResponse>('/v1/daemon/actor-knowledge/entries', request);
   }
 
   // ── Workspaces (plan v1219 T3; create added by v1220 T3) ──────────────────

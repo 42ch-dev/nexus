@@ -24,8 +24,11 @@ const REPLAY_MESSAGE = '访问链接已被使用。请回到服务终端复制�
 const EXPIRED_MESSAGE = '访问链接已过期。请回到服务终端复制最新打印的访问链接。';
 
 const tempDirs = [];
+/** Every listener a case opened; `after` closes whatever a failed assertion left running. */
+const openServers = new Set();
 
-after(() => {
+after(async () => {
+  for (const close of openServers) await close();
   for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -94,14 +97,16 @@ async function startServer({ keyed = false, clock } = {}) {
     }), sessions);
     const endpoint = await listenServer(created.server, config);
     server = created.server;
+    const close = () =>
+      new Promise((resolveClose) => {
+        server.closeAllConnections();
+        server.close(() => resolveClose());
+      });
+    openServers.add(close);
     return {
       url: endpoint.url,
       sessions,
-      close: () =>
-        new Promise((resolveClose) => {
-          server.closeAllConnections();
-          server.close(() => resolveClose());
-        }),
+      close,
     };
   } finally {
     if (previousKey === undefined) delete process.env.NEXUS42_DAEMON_API_KEY;
@@ -178,8 +183,9 @@ test('bootstrap replay and expiry answer the §6.2 bodies verbatim', async () =>
   assert.equal(replay.status, 401);
   assert.equal(replay.text, REPLAY_MESSAGE);
 
+  const { TOKEN_TTL_MS } = await import(join(serviceRoot, 'dist/auth-session.js'));
   const expiring = server.sessions.mintToken();
-  now += 300_001;
+  now += TOKEN_TTL_MS + 1;
   const expired = await request(`${server.url}/__bootstrap?token=${expiring}`);
   assert.equal(expired.status, 401);
   assert.equal(expired.text, EXPIRED_MESSAGE);

@@ -165,12 +165,62 @@ function parseAgentHostConfig(body: unknown): AgentHostConfig {
   return body as AgentHostConfig;
 }
 
+/**
+ * An enabled entry without a command would save and then never launch.
+ *
+ * Checked on the document the native save actually writes — i.e. after the
+ * replacement transform, which disables the entries it replaced. Validating
+ * the submitted set instead would let a stored bad entry block forever the
+ * save that disables it.
+ */
+function assertLaunchableProviders(config: AgentHostConfig): void {
+  for (const [index, provider] of config.providers.entries()) {
+    // `enabled` defaults to true.
+    if (
+      provider.enabled !== false &&
+      (typeof provider.command !== 'string' || provider.command.trim() === '')
+    ) {
+      throw invalidInput(
+        `providers[${index}].command is required when provider '${provider.id}' is enabled`,
+      );
+    }
+  }
+}
+
 export async function getAgentHostConfig(service: ServiceCore): Promise<AgentHostConfig> {
   try {
     return (await service.core.getAgentHostConfig()) as AgentHostConfig;
   } catch (error) {
     throw mapNativeError(error);
   }
+}
+
+/**
+ * Replacement upsert: the saved document's LAST enabled entry becomes the ONE
+ * selected provider — readiness reads only enabled entries, so leaving a
+ * replaced provider enabled would keep claiming an owner the user retired. A
+ * document that already selects exactly that provider is returned untouched, so
+ * a no-op save disables nothing.
+ */
+function withReplacementSelected(config: AgentHostConfig): AgentHostConfig {
+  const selected = config.providers.findLastIndex((provider) => provider.enabled !== false);
+  if (selected < 0) {
+    return config;
+  }
+  const changes = config.providers.some(
+    (provider, index) => (provider.enabled !== false) !== (index === selected),
+  );
+  if (!changes) {
+    return config;
+  }
+  return {
+    ...config,
+    providers: config.providers.map((provider, index) =>
+      index === selected
+        ? { ...provider, enabled: true }
+        : { ...provider, enabled: false },
+    ),
+  };
 }
 
 /** The owner facts the restart publishes; the same shape the boot start returns. */
@@ -187,8 +237,12 @@ export function putAgentHostConfig(
   // The ONE owner-lifecycle lock (shared with selectWorkspace): a provider
   // save+restart must never interleave with a first-run selection.
   return withSelectionLock(service, async () => {
+    // Upsert after validation, inside the lock: the entry the user just saved
+    // owns readiness and the entries it replaced are disabled.
+    const next = withReplacementSelected(config);
+    assertLaunchableProviders(next);
     try {
-      await service.core.saveAgentHostConfig(config);
+      await service.core.saveAgentHostConfig(next);
     } catch (error) {
       throw mapNativeError(error);
     }

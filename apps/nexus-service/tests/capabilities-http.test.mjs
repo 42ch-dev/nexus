@@ -94,9 +94,22 @@ describe('capabilities route (CAP-001 / I-000125)', () => {
     );
   });
 
-  test('domain_only profiles answer a typed 501, not route_not_migrated', async () => {
+  test('domain_only profiles answer a typed 501 and never probe the provider-less registry', async () => {
+    let probed = 0;
+    const service = {
+      domainOnly: true,
+      core: {
+        // A profile with no execution owner refuses the registry probe with a
+        // bare reason; the transport folds that into a generic 500 `internal`.
+        listCapabilities: async () => {
+          probed += 1;
+          throw new Error('execution owner not started');
+        },
+      },
+    };
+
     await assert.rejects(
-      () => routeFor().handle({ domainOnly: true }, [], new URLSearchParams()),
+      () => routes.handleRoute(service, 'GET', PATH, new URLSearchParams(), undefined, {}),
       (error) => {
         assert.equal(error.status, 501);
         assert.equal(error.code, 'not_supported');
@@ -104,6 +117,7 @@ describe('capabilities route (CAP-001 / I-000125)', () => {
         return true;
       },
     );
+    assert.equal(probed, 0, 'a domain_only profile must not reach the core registry probe');
   });
 
   test('rejects an unsupported sort key', async () => {

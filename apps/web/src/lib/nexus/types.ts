@@ -165,6 +165,50 @@ import type {
   WorldRuleResponse,
   WorldRuleUpdateRequest,
   WorldRulesListResponse,
+  // Actor family — Character identity + bindings (plan v240; `schemas/daemon-api/characters/…`).
+  AddCharacterBindingRequest,
+  AddCharacterBindingResponse,
+  CharacterBindingDetail,
+  CharacterDetail,
+  CharacterLifecycleRequest,
+  CreateCharacterRequest,
+  CreateCharacterResponse,
+  ListCharacterBindingsQuery,
+  ListCharacterBindingsResponse,
+  ListCharactersQuery,
+  ListCharactersResponse,
+  UpdateCharacterBindingRequest,
+  UpdateCharacterRequest,
+  // Actor family — per-character memory / SOUL / ToM (plan v240; I-000127).
+  CaptureCharacterPendingReviewRequest,
+  CaptureCharacterPendingReviewResponse,
+  CharacterSoulNarrativeRequest,
+  CharacterSoulNarrativeResponse,
+  CountCharacterPendingReviewsQuery,
+  CountCharacterPendingReviewsResponse,
+  DeleteCharacterPendingReviewResponse,
+  ListCharacterMemoryFragmentsQuery,
+  ListCharacterMemoryFragmentsResponse,
+  ListCharacterPendingReviewsQuery,
+  ListCharacterPendingReviewsResponse,
+  ListCharacterTomQuery,
+  ListCharacterTomResponse,
+  PromoteCharacterFragmentRequest,
+  PromoteCharacterFragmentResponse,
+  RecordCharacterTomRequest,
+  RecordCharacterTomResponse,
+  ReviewCharacterMemoryRequest,
+  ReviewCharacterMemoryResponse,
+  // Actor family — actor knowledge (plan v240; I-000128; `schemas/daemon-api/actor-knowledge/…`).
+  AddKnowledgeEntryRequest,
+  AddKnowledgeEntryResponse,
+  DeleteKnowledgeEntryQuery,
+  KnowledgeEntryDetail,
+  ListCharacterKnowledgeQuery,
+  ListCharacterKnowledgeResponse,
+  UpdateKnowledgeEntryRequest,
+  ViewRequest,
+  ViewResponse,
   CoreSliceClient,
 } from '@42ch/nexus-contracts';
 
@@ -355,6 +399,200 @@ export interface NexusClient extends CoreSliceClient {
   getActiveCreator(): Promise<ActiveCreatorResponse>;
   /** `PUT /v1/daemon/creators/active` — switch the daemon's active creator. */
   setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse>;
+
+  // ── Character identity + bindings (plan v240; I-000126) ────────────────────
+  // Characters are addressed by `character_id` and belong to the active Creator;
+  // the daemon rejects a foreign Character with 404. These are the management
+  // surface (lifecycle + World bindings), distinct from the creator-scoped
+  // memory/soul methods further down and from the per-character memory family.
+  /**
+   * `GET /v1/daemon/characters` — cursor list of the active Creator's
+   * Characters (daemon default 50, max 100).
+   */
+  listCharacters(query?: ListCharactersQuery): Promise<ListCharactersResponse>;
+  /**
+   * `POST /v1/daemon/characters` — 201. Creates the Character plus its initial
+   * active ActorWorldBinding; `world_id` must be an owned World.
+   */
+  createCharacter(request: CreateCharacterRequest): Promise<CreateCharacterResponse>;
+  /** `GET /v1/daemon/characters/{character_id}` — one Character. */
+  getCharacter(characterId: string): Promise<CharacterDetail>;
+  /**
+   * `PATCH /v1/daemon/characters/{character_id}` — tri-state patch, native
+   * semantics: `undefined` keeps, `null` clears (`image_uri` / `persona`),
+   * a value replaces. `expected_revision` mismatch is the native 409.
+   */
+  patchCharacter(characterId: string, request: UpdateCharacterRequest): Promise<CharacterDetail>;
+  /** `POST /v1/daemon/characters/{character_id}/archive` — CAS on `expected_revision`. */
+  archiveCharacter(
+    characterId: string,
+    request: CharacterLifecycleRequest,
+  ): Promise<CharacterDetail>;
+  /** `POST /v1/daemon/characters/{character_id}/restore` — CAS on `expected_revision`. */
+  restoreCharacter(
+    characterId: string,
+    request: CharacterLifecycleRequest,
+  ): Promise<CharacterDetail>;
+  /**
+   * `POST /v1/daemon/characters/{character_id}/bindings` — 201. Binds the
+   * Character to a World; `owner_creator_id` is never sent.
+   */
+  addCharacterBinding(
+    characterId: string,
+    request: AddCharacterBindingRequest,
+  ): Promise<AddCharacterBindingResponse>;
+  /** `GET /v1/daemon/characters/{character_id}/bindings` — cursor list. */
+  listCharacterBindings(
+    characterId: string,
+    query?: ListCharacterBindingsQuery,
+  ): Promise<ListCharacterBindingsResponse>;
+  /** `GET /v1/daemon/characters/{character_id}/bindings/{binding_id}`. */
+  getCharacterBinding(characterId: string, bindingId: string): Promise<CharacterBindingDetail>;
+  /**
+   * `PATCH /v1/daemon/characters/{character_id}/bindings/{binding_id}` — only
+   * `world_sheet_entry_id` is mutable (`null` unlinks, omission keeps); a stale
+   * `expected_revision` is the native 409.
+   */
+  patchCharacterBinding(
+    characterId: string,
+    bindingId: string,
+    request: UpdateCharacterBindingRequest,
+  ): Promise<CharacterBindingDetail>;
+  /** `DELETE /v1/daemon/characters/{character_id}/bindings/{binding_id}` — 204. */
+  removeCharacterBinding(characterId: string, bindingId: string): Promise<void>;
+
+  // ── Per-character memory / SOUL / ToM (plan v240; I-000127) ────────────────
+  // The same artifact kinds exist creator-scoped (`/v1/daemon/memory/…`, further
+  // down) and per-character (here). They stay separate methods on purpose: the
+  // call site states which actor it means, so no method silently picks a scope.
+  // ToM is GET + POST (no PUT); pending review is capture/list/count/delete
+  // (no get/accept/reject).
+  /**
+   * `POST /v1/daemon/characters/{character_id}/memory/pending-review` — 201.
+   * Captures one session-end digest into the Character review queue;
+   * `binding_id` marks binding-local provenance, omitted means shared scope.
+   */
+  captureCharacterPendingReview(
+    characterId: string,
+    request: CaptureCharacterPendingReviewRequest,
+  ): Promise<CaptureCharacterPendingReviewResponse>;
+  /** `GET /v1/daemon/characters/{character_id}/memory/pending-review` — cursor list. */
+  listCharacterPendingReviews(
+    characterId: string,
+    query?: ListCharacterPendingReviewsQuery,
+  ): Promise<ListCharacterPendingReviewsResponse>;
+  /**
+   * `GET /v1/daemon/characters/{character_id}/memory/pending-review/count` —
+   * `binding_id` scopes the count to one binding-local queue.
+   */
+  countCharacterPendingReviews(
+    characterId: string,
+    query?: CountCharacterPendingReviewsQuery,
+  ): Promise<CountCharacterPendingReviewsResponse>;
+  /** `DELETE /v1/daemon/characters/{character_id}/memory/pending-review/{pending_id}`. */
+  deleteCharacterPendingReview(
+    characterId: string,
+    pendingId: string,
+  ): Promise<DeleteCharacterPendingReviewResponse>;
+  /**
+   * `POST /v1/daemon/characters/{character_id}/memory/review` — drains one
+   * bounded batch (≤ 50 rows) through the shared review pipeline; `has_more`
+   * means re-issue to drain the remainder.
+   */
+  reviewCharacterMemory(
+    characterId: string,
+    request: ReviewCharacterMemoryRequest,
+  ): Promise<ReviewCharacterMemoryResponse>;
+  /** `GET /v1/daemon/characters/{character_id}/memory/fragments` — cursor list. */
+  listCharacterMemoryFragments(
+    characterId: string,
+    query?: ListCharacterMemoryFragmentsQuery,
+  ): Promise<ListCharacterMemoryFragmentsResponse>;
+  /**
+   * `POST /v1/daemon/characters/{character_id}/memory/fragments/{fragment_id}:promote`
+   * — explicit, revision-checked promotion of one binding-local fragment to
+   * shared Character memory (stale `expected_revision` → 409).
+   */
+  promoteCharacterFragment(
+    characterId: string,
+    fragmentId: string,
+    request: PromoteCharacterFragmentRequest,
+  ): Promise<PromoteCharacterFragmentResponse>;
+  /**
+   * `POST /v1/daemon/characters/{character_id}/soul/reflect` — reads or
+   * regenerates the cached whole-Character SOUL narrative. Synthesis is
+   * explicit: it runs only with `force_regenerate: true` and a passing
+   * insufficient-data gate.
+   */
+  reflectCharacterSoul(
+    characterId: string,
+    request: CharacterSoulNarrativeRequest,
+  ): Promise<CharacterSoulNarrativeResponse>;
+  /**
+   * `GET /v1/daemon/characters/{character_id}/tom` — keyset page of the
+   * Character's ToM belief rows. `binding_id` and `world_id` are required wire
+   * members; rows are read only through authorized carriers.
+   */
+  listCharacterTom(
+    characterId: string,
+    query: ListCharacterTomQuery,
+  ): Promise<ListCharacterTomResponse>;
+  /**
+   * `POST /v1/daemon/characters/{character_id}/tom` — records one belief into
+   * a carrier entry under that carrier's OCC revision. Scope is admitted from
+   * stored rows, never from the payload.
+   */
+  recordCharacterTom(
+    characterId: string,
+    request: RecordCharacterTomRequest,
+  ): Promise<RecordCharacterTomResponse>;
+
+  // ── Actor knowledge (plan v240; I-000128) ──────────────────────────────────
+  // Knowledge is addressed two ways and the method names say which: by
+  // character (list/get/patch/delete under `…/characters/{character_id}/knowledge`)
+  // and by admitted principal (`/v1/daemon/actor-knowledge/{view,entries}`).
+  // Creation exists only on the admitted-principal route — the character path
+  // has no create.
+  /** `GET /v1/daemon/characters/{character_id}/knowledge` — character-scoped cursor list. */
+  listCharacterKnowledge(
+    characterId: string,
+    query?: ListCharacterKnowledgeQuery,
+  ): Promise<ListCharacterKnowledgeResponse>;
+  /** `GET /v1/daemon/characters/{character_id}/knowledge/{entry_id}` — character-scoped read. */
+  getCharacterKnowledge(characterId: string, entryId: string): Promise<KnowledgeEntryDetail>;
+  /**
+   * `PATCH /v1/daemon/characters/{character_id}/knowledge/{entry_id}` —
+   * character-scoped update of `canonical_name`/`summary`/`audience` under an
+   * `expected_revision` CAS.
+   */
+  patchCharacterKnowledge(
+    characterId: string,
+    entryId: string,
+    request: UpdateKnowledgeEntryRequest,
+  ): Promise<KnowledgeEntryDetail>;
+  /**
+   * `DELETE /v1/daemon/characters/{character_id}/knowledge/{entry_id}` — 204.
+   * `expected_revision` travels as a query member, not a body.
+   */
+  deleteCharacterKnowledge(
+    characterId: string,
+    entryId: string,
+    query: DeleteKnowledgeEntryQuery,
+  ): Promise<void>;
+  /**
+   * `POST /v1/daemon/actor-knowledge/view` — admitted-principal page. The read
+   * policy is server-chosen from the admitted context; the payload carries no
+   * policy, holder or viewpoint.
+   */
+  viewActorKnowledge(request: ViewRequest): Promise<ViewResponse>;
+  /**
+   * `POST /v1/daemon/actor-knowledge/entries` — 201. Admitted-principal
+   * creation is the only create: the owner is resolved from stored rows and
+   * `audience` is the sole governance input.
+   */
+  createActorKnowledgeEntry(
+    request: AddKnowledgeEntryRequest,
+  ): Promise<AddKnowledgeEntryResponse>;
 
   // ── Workspaces (plan v1219 T3 + v1220 T3 create) ──────────────────────────
   /** `GET /v1/daemon/workspaces` — cursor list of the creator's workspaces. */

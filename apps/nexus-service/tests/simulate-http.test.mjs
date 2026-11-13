@@ -86,6 +86,7 @@ function routeFor() {
 function serviceWith(calls) {
   return {
     core: {
+      activePrincipal: async () => 'principal',
       simulateStrategy: async (principal, strategyId, request) => {
         calls.push({ principal, strategyId, request });
         return TRAJECTORY;
@@ -121,7 +122,12 @@ describe('simulate route (POST /v1/daemon/strategies/{id}/simulate)', () => {
       status: 400,
       code: 'invalid_input',
     });
-    const service = { core: { simulateStrategy: async () => Promise.reject(refusal) } };
+    const service = {
+      core: {
+        activePrincipal: async () => 'principal',
+        simulateStrategy: async () => Promise.reject(refusal),
+      },
+    };
 
     await assert.rejects(
       () =>

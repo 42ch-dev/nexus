@@ -315,6 +315,9 @@ function AppRoutes() {
             (`landRoute`). Read-only status aggregation over existing daemon
             endpoints; the lazy boundary lives in `lib/app-registry.ts`. */}
         <Route path="developer" element={<AppModuleRoute appId="hub" />} />
+        {/* v240-actor-web-surfaces T6 — 角色 (Characters): creator-facing
+            character list/create/bind surface behind the developer rail. */}
+        <Route path="characters" element={<AppModuleRoute appId="characters" />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

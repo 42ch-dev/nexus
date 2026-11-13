@@ -20,6 +20,7 @@ import {
   Layers,
   LayoutDashboard,
   Play,
+  Users,
   Workflow,
 } from 'lucide-react';
 
@@ -33,7 +34,8 @@ export type AppId =
   | 'hub'
   | 'harness'
   | 'modules'
-  | 'caps';
+  | 'caps'
+  | 'characters';
 
 export interface AppDef {
   id: AppId;
@@ -129,6 +131,16 @@ const DEVELOPER_APPS: readonly AppDef[] = [
     load: () =>
       import('@/components/developer/capabilities-page').then((m) => ({
         default: m.CapabilitiesPage,
+      })),
+  },
+  {
+    id: 'characters',
+    label: 'rail.characters',
+    icon: Users,
+    route: '/characters',
+    load: () =>
+      import('@/components/developer/characters-page').then((m) => ({
+        default: m.CharactersPage,
       })),
   },
   {
