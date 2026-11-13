@@ -165,6 +165,20 @@ import type {
   WorldRuleResponse,
   WorldRuleUpdateRequest,
   WorldRulesListResponse,
+  // Actor family — Character identity + bindings (plan v240; `schemas/daemon-api/characters/…`).
+  AddCharacterBindingRequest,
+  AddCharacterBindingResponse,
+  CharacterBindingDetail,
+  CharacterDetail,
+  CharacterLifecycleRequest,
+  CreateCharacterRequest,
+  CreateCharacterResponse,
+  ListCharacterBindingsQuery,
+  ListCharacterBindingsResponse,
+  ListCharactersQuery,
+  ListCharactersResponse,
+  UpdateCharacterBindingRequest,
+  UpdateCharacterRequest,
   CoreSliceClient,
 } from '@42ch/nexus-contracts';
 
@@ -355,6 +369,67 @@ export interface NexusClient extends CoreSliceClient {
   getActiveCreator(): Promise<ActiveCreatorResponse>;
   /** `PUT /v1/daemon/creators/active` — switch the daemon's active creator. */
   setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse>;
+
+  // ── Character identity + bindings (plan v240; I-000126) ────────────────────
+  // Characters are addressed by `character_id` and belong to the active Creator;
+  // the daemon rejects a foreign Character with 404. These are the management
+  // surface (lifecycle + World bindings), distinct from the creator-scoped
+  // memory/soul methods further down and from the per-character memory family.
+  /**
+   * `GET /v1/daemon/characters` — cursor list of the active Creator's
+   * Characters (daemon default 50, max 100).
+   */
+  listCharacters(query?: ListCharactersQuery): Promise<ListCharactersResponse>;
+  /**
+   * `POST /v1/daemon/characters` — 201. Creates the Character plus its initial
+   * active ActorWorldBinding; `world_id` must be an owned World.
+   */
+  createCharacter(request: CreateCharacterRequest): Promise<CreateCharacterResponse>;
+  /** `GET /v1/daemon/characters/{character_id}` — one Character. */
+  getCharacter(characterId: string): Promise<CharacterDetail>;
+  /**
+   * `PATCH /v1/daemon/characters/{character_id}` — tri-state patch, native
+   * semantics: `undefined` keeps, `null` clears (`image_uri` / `persona`),
+   * a value replaces. `expected_revision` mismatch is the native 409.
+   */
+  patchCharacter(characterId: string, request: UpdateCharacterRequest): Promise<CharacterDetail>;
+  /** `POST /v1/daemon/characters/{character_id}/archive` — CAS on `expected_revision`. */
+  archiveCharacter(
+    characterId: string,
+    request: CharacterLifecycleRequest,
+  ): Promise<CharacterDetail>;
+  /** `POST /v1/daemon/characters/{character_id}/restore` — CAS on `expected_revision`. */
+  restoreCharacter(
+    characterId: string,
+    request: CharacterLifecycleRequest,
+  ): Promise<CharacterDetail>;
+  /**
+   * `POST /v1/daemon/characters/{character_id}/bindings` — 201. Binds the
+   * Character to a World; `owner_creator_id` is never sent.
+   */
+  addCharacterBinding(
+    characterId: string,
+    request: AddCharacterBindingRequest,
+  ): Promise<AddCharacterBindingResponse>;
+  /** `GET /v1/daemon/characters/{character_id}/bindings` — cursor list. */
+  listCharacterBindings(
+    characterId: string,
+    query?: ListCharacterBindingsQuery,
+  ): Promise<ListCharacterBindingsResponse>;
+  /** `GET /v1/daemon/characters/{character_id}/bindings/{binding_id}`. */
+  getCharacterBinding(characterId: string, bindingId: string): Promise<CharacterBindingDetail>;
+  /**
+   * `PATCH /v1/daemon/characters/{character_id}/bindings/{binding_id}` — only
+   * `world_sheet_entry_id` is mutable (`null` unlinks, omission keeps); a stale
+   * `expected_revision` is the native 409.
+   */
+  patchCharacterBinding(
+    characterId: string,
+    bindingId: string,
+    request: UpdateCharacterBindingRequest,
+  ): Promise<CharacterBindingDetail>;
+  /** `DELETE /v1/daemon/characters/{character_id}/bindings/{binding_id}` — 204. */
+  removeCharacterBinding(characterId: string, bindingId: string): Promise<void>;
 
   // ── Workspaces (plan v1219 T3 + v1220 T3 create) ──────────────────────────
   /** `GET /v1/daemon/workspaces` — cursor list of the creator's workspaces. */

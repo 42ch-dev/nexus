@@ -1173,3 +1173,222 @@ describe('BrowserClient access bootstrap (v1.219 access spec §3.1)', () => {
     window.removeEventListener(UNAUTHORIZED_EVENT, unauthorized);
   });
 });
+
+describe('BrowserClient character family (v240 actor web surfaces, I-000126)', () => {
+  const character = {
+    schema_version: 1,
+    character_id: 'chr_0123456789abcdef0123456789abcdef',
+    owner_creator_id: 'creator-1',
+    display_name: 'Mira',
+    status: 'active',
+    persona: { traits: ['guarded'] },
+    revision: 3,
+    created_at: '2026-11-01T00:00:00Z',
+    updated_at: '2026-11-02T00:00:00Z',
+  };
+
+  const binding = {
+    schema_version: 1,
+    binding_id: 'awb_0123456789abcdef0123456789abcdef',
+    character_id: character.character_id,
+    world_id: 'wld_0123456789abcdef0123456789abcdef',
+    status: 'active',
+    revision: 1,
+    created_at: '2026-11-01T00:00:00Z',
+    updated_at: '2026-11-01T00:00:00Z',
+  };
+
+  const characterPath = `/v1/daemon/characters/${character.character_id}`;
+  const bindingPath = `${characterPath}/bindings/${binding.binding_id}`;
+
+  it('lists characters with { items, pagination } and threads limit/cursor as query params', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get('/v1/daemon/characters', ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({
+          items: [character],
+          pagination: { limit: 10, has_more: true, next_cursor: 'cur-2' },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listCharacters({ limit: 10, cursor: 'cur-1' });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe('/v1/daemon/characters');
+    expect(url.searchParams.get('limit')).toBe('10');
+    expect(url.searchParams.get('cursor')).toBe('cur-1');
+    expect(res.items[0]!.character_id).toBe(character.character_id);
+    expect(res.pagination.next_cursor).toBe('cur-2');
+  });
+
+  it('creates a character and maps { character, binding } from POST /characters', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post('/v1/daemon/characters', async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ character, binding }, { status: 201 });
+      }),
+    );
+
+    const res = await new BrowserClient().createCharacter({
+      display_name: 'Mira',
+      world_id: binding.world_id,
+    });
+
+    expect(sent).toEqual({ display_name: 'Mira', world_id: binding.world_id });
+    expect(res.character.display_name).toBe('Mira');
+    expect(res.binding.binding_id).toBe(binding.binding_id);
+  });
+
+  it('reads one character by id from GET /characters/:id', async () => {
+    useHandlers(http.get(characterPath, () => HttpResponse.json({ character })));
+
+    const res = await new BrowserClient().getCharacter(character.character_id);
+
+    expect(res.character.status).toBe('active');
+    expect(res.character.revision).toBe(3);
+  });
+
+  it('patches tri-state fields, sending an explicit null and omitting absent keys', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.patch(characterPath, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ character: { ...character, image_uri: undefined } });
+      }),
+    );
+
+    const res = await new BrowserClient().patchCharacter(character.character_id, {
+      expected_revision: 3,
+      image_uri: null,
+    });
+
+    // `image_uri: null` clears; `persona`/`display_name` are absent (keep).
+    expect(sent).toEqual({ expected_revision: 3, image_uri: null });
+    expect(res.character.image_uri).toBeUndefined();
+  });
+
+  it('archives a character with expected_revision', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post(`${characterPath}/archive`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ character: { ...character, status: 'archived', revision: 4 } });
+      }),
+    );
+
+    const res = await new BrowserClient().archiveCharacter(character.character_id, {
+      expected_revision: 3,
+    });
+
+    expect(sent).toEqual({ expected_revision: 3 });
+    expect(res.character.status).toBe('archived');
+  });
+
+  it('restores a character with expected_revision', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post(`${characterPath}/restore`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ character: { ...character, revision: 5 } });
+      }),
+    );
+
+    const res = await new BrowserClient().restoreCharacter(character.character_id, {
+      expected_revision: 4,
+    });
+
+    expect(sent).toEqual({ expected_revision: 4 });
+    expect(res.character.status).toBe('active');
+    expect(res.character.revision).toBe(5);
+  });
+
+  it('adds a binding from POST /characters/:id/bindings', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post(`${characterPath}/bindings`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ binding }, { status: 201 });
+      }),
+    );
+
+    const res = await new BrowserClient().addCharacterBinding(character.character_id, {
+      world_id: binding.world_id,
+    });
+
+    expect(sent).toEqual({ world_id: binding.world_id });
+    expect(res.binding.world_id).toBe(binding.world_id);
+  });
+
+  it('lists bindings with { items, pagination } and cursor params', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get(`${characterPath}/bindings`, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({
+          items: [binding],
+          pagination: { limit: 5, has_more: false },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listCharacterBindings(character.character_id, {
+      limit: 5,
+      cursor: 'cur-9',
+    });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(`${characterPath}/bindings`);
+    expect(url.searchParams.get('cursor')).toBe('cur-9');
+    expect(res.items).toHaveLength(1);
+    expect(res.pagination.has_more).toBe(false);
+  });
+
+  it('reads one binding by id from GET /characters/:id/bindings/:binding_id', async () => {
+    useHandlers(http.get(bindingPath, () => HttpResponse.json({ binding })));
+
+    const res = await new BrowserClient().getCharacterBinding(
+      character.character_id,
+      binding.binding_id,
+    );
+
+    expect(res.binding.binding_id).toBe(binding.binding_id);
+    expect(res.binding.revision).toBe(1);
+  });
+
+  it('patches a binding, sending an explicit null to unlink the world sheet', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.patch(bindingPath, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ binding: { ...binding, revision: 2 } });
+      }),
+    );
+
+    const res = await new BrowserClient().patchCharacterBinding(
+      character.character_id,
+      binding.binding_id,
+      { expected_revision: 1, world_sheet_entry_id: null },
+    );
+
+    expect(sent).toEqual({ expected_revision: 1, world_sheet_entry_id: null });
+    expect(res.binding.revision).toBe(2);
+  });
+
+  it('removes a binding and resolves void on 204 No Content', async () => {
+    let seenMethod = '';
+    useHandlers(
+      http.delete(bindingPath, ({ request }) => {
+        seenMethod = request.method;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    await expect(
+      new BrowserClient().removeCharacterBinding(character.character_id, binding.binding_id),
+    ).resolves.toBeUndefined();
+    expect(seenMethod).toBe('DELETE');
+  });
+});

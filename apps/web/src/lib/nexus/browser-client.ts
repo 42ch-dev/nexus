@@ -140,6 +140,20 @@ import type {
   WorldRuleResponse,
   WorldRuleUpdateRequest,
   WorldRulesListResponse,
+  // ── Actor family: Character identity + bindings (`schemas/daemon-api/characters/…`) ──
+  AddCharacterBindingRequest,
+  AddCharacterBindingResponse,
+  CharacterBindingDetail,
+  CharacterDetail,
+  CharacterLifecycleRequest,
+  CreateCharacterRequest,
+  CreateCharacterResponse,
+  ListCharacterBindingsQuery,
+  ListCharacterBindingsResponse,
+  ListCharactersQuery,
+  ListCharactersResponse,
+  UpdateCharacterBindingRequest,
+  UpdateCharacterRequest,
   // ── P5-T1 World/Work/content/knowledge family DTOs (`schemas/core/*` +
   // `schemas/daemon-api/*` producers) ────────────────────────────────────────
   NarrativeWorldsListResponse,
@@ -300,6 +314,82 @@ export class BrowserClient implements NexusClient {
   }
   getActiveCreator(): Promise<ActiveCreatorResponse> {
     return this.get<ActiveCreatorResponse>('/v1/daemon/creators/active');
+  }
+
+  // ── Character identity + bindings (plan v240; I-000126) ────────────────────
+  listCharacters(query?: ListCharactersQuery): Promise<ListCharactersResponse> {
+    return this.get<ListCharactersResponse>('/v1/daemon/characters', query);
+  }
+  createCharacter(request: CreateCharacterRequest): Promise<CreateCharacterResponse> {
+    return this.post<CreateCharacterResponse>('/v1/daemon/characters', request);
+  }
+  getCharacter(characterId: string): Promise<CharacterDetail> {
+    return this.get<CharacterDetail>(`/v1/daemon/characters/${encodeURIComponent(characterId)}`);
+  }
+  patchCharacter(characterId: string, request: UpdateCharacterRequest): Promise<CharacterDetail> {
+    return this.patch<CharacterDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}`,
+      request,
+    );
+  }
+  archiveCharacter(
+    characterId: string,
+    request: CharacterLifecycleRequest,
+  ): Promise<CharacterDetail> {
+    return this.post<CharacterDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/archive`,
+      request,
+    );
+  }
+  restoreCharacter(
+    characterId: string,
+    request: CharacterLifecycleRequest,
+  ): Promise<CharacterDetail> {
+    return this.post<CharacterDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/restore`,
+      request,
+    );
+  }
+  addCharacterBinding(
+    characterId: string,
+    request: AddCharacterBindingRequest,
+  ): Promise<AddCharacterBindingResponse> {
+    return this.post<AddCharacterBindingResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/bindings`,
+      request,
+    );
+  }
+  listCharacterBindings(
+    characterId: string,
+    query?: ListCharacterBindingsQuery,
+  ): Promise<ListCharacterBindingsResponse> {
+    return this.get<ListCharacterBindingsResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/bindings`,
+      query,
+    );
+  }
+  getCharacterBinding(
+    characterId: string,
+    bindingId: string,
+  ): Promise<CharacterBindingDetail> {
+    return this.get<CharacterBindingDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/bindings/${encodeURIComponent(bindingId)}`,
+    );
+  }
+  patchCharacterBinding(
+    characterId: string,
+    bindingId: string,
+    request: UpdateCharacterBindingRequest,
+  ): Promise<CharacterBindingDetail> {
+    return this.patch<CharacterBindingDetail>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/bindings/${encodeURIComponent(bindingId)}`,
+      request,
+    );
+  }
+  removeCharacterBinding(characterId: string, bindingId: string): Promise<void> {
+    return this.delete<void>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/bindings/${encodeURIComponent(bindingId)}`,
+    );
   }
 
   // ── Workspaces (plan v1219 T3; create added by v1220 T3) ──────────────────
