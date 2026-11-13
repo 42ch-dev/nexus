@@ -1036,10 +1036,14 @@ function KnowledgeSection({ character }: { character: CharacterDetail['character
     const data = detail.data;
     if (!data) return;
     const fields = new FormData(event.currentTarget);
-    const canonical_name = String(fields.get('canonical_name') ?? '').trim();
+    const readField = (name: string) => {
+      const value = fields.get(name);
+      return typeof value === 'string' ? value : '';
+    };
+    const canonical_name = readField('canonical_name').trim();
     if (!canonical_name) return;
-    const summary = String(fields.get('summary') ?? '').trim();
-    const audienceValue = String(fields.get('audience') ?? '');
+    const summary = readField('summary').trim();
+    const audienceValue = readField('audience');
     patch.mutate({
       // CAS against the revision the list returned for this row.
       expected_revision: data.item.revision,
