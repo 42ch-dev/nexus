@@ -4,8 +4,15 @@
 //! fragment. A scan reports every package directory with the reason it is unavailable; one broken
 //! package never hides its peers, and nothing here writes to disk. Presence in the listing is a
 //! local readability fact, never publication, provenance or trust.
+//!
+//! Symlinked package directories are followed; entries that are not directories, broken symlinks
+//! included, are skipped. A directory name that is not UTF-8 is reported as unavailable instead of
+//! being loaded under a lossy name. Availability means the manifest was readable and valid and the
+//! fragment parsed; it does not mean the fragment is structurally valid, which is the validate and
+//! compose stage's check.
 
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::path::Path;
 
 use nexus_contracts::generated::daemon_api::patterns::pattern_manifest::{
@@ -27,7 +34,8 @@ pub const FRAGMENT_FILE: &str = "workflow.ir.json";
 pub struct PatternPackage {
     /// Directory basename; never an absolute path.
     pub package_dir: String,
-    /// Manifest parsed from `pattern.toml`; present only when the package is available.
+    /// Manifest parsed from `pattern.toml`; absent only when the manifest itself could not be read
+    /// or parsed, so an unavailable package can still be named by id and version.
     pub manifest: Option<PatternManifest>,
     /// Fragment parsed from `workflow.ir.json`; present only when the package is available.
     pub fragment: Option<WorkflowDocument>,
@@ -77,8 +85,9 @@ impl From<&PatternPackage> for PatternSummary {
 ///
 /// # Errors
 ///
-/// Returns the underlying I/O error when the root directory exists but cannot be enumerated. A
-/// package that cannot be read is reported as unavailable instead.
+/// Returns the underlying I/O error when the root directory cannot be enumerated. A directory entry
+/// that fails mid-iteration is skipped, and a package that cannot be read is reported as unavailable
+/// instead.
 pub fn scan_pattern_packages(
     patterns_dir: &Path,
     ir_version: u64,
@@ -91,23 +100,55 @@ pub fn scan_pattern_packages(
 
     let mut packages = Vec::new();
     for entry in entries {
-        let entry = entry?;
+        let Ok(entry) = entry else { continue };
         if !entry.path().is_dir() {
             continue;
         }
-        let package_dir = entry.file_name().to_string_lossy().into_owned();
-        if package_dir.starts_with('.') || package_dir.starts_with('_') {
-            continue;
+        if let Some(package) = package_entry(&entry.path(), entry.file_name(), ir_version) {
+            packages.push(package);
         }
-        packages.push(read_package(&entry.path(), package_dir, ir_version));
     }
     packages.sort_by(|left, right| left.package_dir.cmp(&right.package_dir));
     Ok(packages)
 }
 
+/// Classify one scanned directory entry; `None` when the discovery convention skips it.
+fn package_entry(directory: &Path, file_name: OsString, ir_version: u64) -> Option<PatternPackage> {
+    // Lossy conversion preserves a leading ASCII byte, so the skip prefix is judged on it either way.
+    let package_dir = file_name.to_string_lossy().into_owned();
+    if package_dir.starts_with('.') || package_dir.starts_with('_') {
+        return None;
+    }
+    if file_name.to_str().is_none() {
+        // A lossy name is not an identity: two distinct names can collapse to one `package_dir`, so
+        // the escaped name in the reason is what keeps the entries apart.
+        return Some(PatternPackage {
+            package_dir,
+            manifest: None,
+            fragment: None,
+            reason: Some(Unavailable::NotUtf8Name(file_name).to_string()),
+        });
+    }
+    Some(read_package(directory, package_dir, ir_version))
+}
+
 fn read_package(directory: &Path, package_dir: String, ir_version: u64) -> PatternPackage {
-    match load(directory, &package_dir, ir_version) {
-        Ok((manifest, fragment)) => PatternPackage {
+    let manifest: PatternManifest = match read_text(directory, MANIFEST_FILE)
+        .and_then(|text| toml::from_str(&text).map_err(Unavailable::Manifest))
+    {
+        Ok(manifest) => manifest,
+        Err(reason) => {
+            return PatternPackage {
+                package_dir,
+                manifest: None,
+                fragment: None,
+                reason: Some(reason.to_string()),
+            };
+        }
+    };
+
+    match load(directory, &manifest, &package_dir, ir_version) {
+        Ok(fragment) => PatternPackage {
             package_dir,
             manifest: Some(manifest),
             fragment: Some(fragment),
@@ -115,19 +156,20 @@ fn read_package(directory: &Path, package_dir: String, ir_version: u64) -> Patte
         },
         Err(reason) => PatternPackage {
             package_dir,
-            manifest: None,
+            manifest: Some(manifest),
             fragment: None,
             reason: Some(reason.to_string()),
         },
     }
 }
 
-type Loaded = Result<(PatternManifest, WorkflowDocument), Unavailable>;
-
-fn load(directory: &Path, package_dir: &str, ir_version: u64) -> Loaded {
-    let manifest: PatternManifest =
-        toml::from_str(&read_text(directory, MANIFEST_FILE)?).map_err(Unavailable::Manifest)?;
-    check_manifest(&manifest, package_dir, ir_version)?;
+fn load(
+    directory: &Path,
+    manifest: &PatternManifest,
+    package_dir: &str,
+    ir_version: u64,
+) -> Result<WorkflowDocument, Unavailable> {
+    check_manifest(manifest, package_dir, ir_version)?;
 
     let fragment: WorkflowDocument = serde_json::from_str(&read_text(directory, FRAGMENT_FILE)?)
         .map_err(Unavailable::Fragment)?;
@@ -139,7 +181,7 @@ fn load(directory: &Path, package_dir: &str, ir_version: u64) -> Loaded {
             rollup,
         });
     }
-    Ok((manifest, fragment))
+    Ok(fragment)
 }
 
 /// Manifest rules the generated type cannot express: cross-field identity, the reader's own
@@ -249,6 +291,8 @@ enum Unavailable {
     },
     #[error("`pattern.toml` is malformed: {0}")]
     Manifest(toml::de::Error),
+    #[error("package directory name {0:?} is not UTF-8")]
+    NotUtf8Name(OsString),
     #[error("`workflow.ir.json` is malformed: {0}")]
     Fragment(serde_json::Error),
     #[error("manifest id `{id}` does not match package directory `{package_dir}`")]
@@ -272,4 +316,44 @@ enum Unavailable {
         declared: PatternManifestEffectClass,
         rollup: WorkflowDocumentEffectSummary,
     },
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    use std::path::Path;
+
+    use super::package_entry;
+
+    /// APFS rejects these names, so the classification is exercised without a filesystem.
+    #[test]
+    fn non_utf8_directory_names_stay_distinct_and_unavailable() {
+        let entries: Vec<_> = [b"lossy-\xFF".to_vec(), b"lossy-\xFE".to_vec()]
+            .into_iter()
+            .map(|bytes| {
+                package_entry(Path::new("unused"), OsString::from_vec(bytes), 0)
+                    .expect("a non-UTF-8 name is reported, not skipped")
+            })
+            .collect();
+
+        assert_eq!(entries[0].package_dir, entries[1].package_dir);
+        for entry in &entries {
+            assert!(!entry.available());
+            assert!(entry.manifest.is_none());
+            assert!(
+                matches!(entry.reason.as_deref(), Some(reason) if reason.contains("is not UTF-8")),
+                "{:?}",
+                entry.reason
+            );
+        }
+        assert_ne!(entries[0].reason, entries[1].reason);
+    }
+
+    #[test]
+    fn hidden_non_utf8_directory_names_are_skipped() {
+        for name in [b".hidden-\xFF".to_vec(), b"_hidden-\xFF".to_vec()] {
+            assert!(package_entry(Path::new("unused"), OsString::from_vec(name), 0).is_none());
+        }
+    }
 }

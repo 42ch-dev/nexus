@@ -180,9 +180,26 @@ fn broken_packages_do_not_hide_their_peers() {
         .filter(|package| !package.available())
         .collect();
     assert_eq!(unavailable.len(), 3);
-    assert!(unavailable
+    assert!(unavailable.iter().all(|package| package.fragment.is_none()));
+
+    // A manifest that parsed stays readable on an unavailable package, so a client can name it.
+    let bad_toml = packages
         .iter()
-        .all(|package| package.manifest.is_none() && package.fragment.is_none()));
+        .find(|package| package.package_dir == "bad-toml")
+        .expect("bad-toml discovered");
+    assert!(bad_toml.manifest.is_none());
+    for package_dir in ["no-fragment", "stale-ir"] {
+        let package = packages
+            .iter()
+            .find(|package| package.package_dir == package_dir)
+            .expect("package discovered");
+        assert!(package.manifest.is_some(), "{package_dir} manifest parsed");
+        let summary = PatternSummary::from(package);
+        assert!(!summary.available);
+        assert_eq!(summary.id.as_deref(), Some(package_dir));
+        assert_eq!(summary.version.as_deref(), Some("1.0.0"));
+        assert_eq!(summary.slots.len(), 1);
+    }
 
     let reasons: HashSet<&str> = unavailable
         .iter()
