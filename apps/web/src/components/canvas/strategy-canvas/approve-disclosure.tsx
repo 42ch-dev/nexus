@@ -18,6 +18,7 @@ import type { SimulationTrajectory } from '@42ch/nexus-contracts';
 
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import type { SimulationStatus } from '@/lib/canvas/use-simulation-trajectory';
+import type { ApproveRenderState } from './hooks/use-approve-strategy';
 
 export interface ApproveDisclosureProps {
   open: boolean;
@@ -36,9 +37,22 @@ export interface ApproveDisclosureProps {
   /**
    * The approval write path. Absent in builds that do not wire it (tracked as
    * I-000415): Approve then renders disabled with the reason, never as a
-   * clickable no-op.
+   * clickable no-op. Only the compose path supplies this (T6); the flag-off
+   * surface keeps the disabled disclosure.
    */
   onApprove?: () => void;
+  /**
+   * Compose-path approve outcome: the frozen snapshot, or a named refusal.
+   * Absent until the wired handler ran. The approval summary states that
+   * approval freezes a candidate and does not publish, apply or execute.
+   */
+  approval?: ApproveRenderState | null;
+  /**
+   * Compose-path gate that disables Approve with its named reason even when a
+   * current successful trajectory exists — an unbound required slot. Absent
+   * off the compose path.
+   */
+  gateReason?: string | null;
   /** Re-run the static walk for the current candidate (the stale/failed recovery). */
   onRun?: () => void;
 }
@@ -51,6 +65,8 @@ export function ApproveDisclosure({
   trajectory,
   error,
   onApprove,
+  approval = null,
+  gateReason = null,
   onRun,
 }: ApproveDisclosureProps) {
   const { t } = useTranslation('canvas');
@@ -164,6 +180,16 @@ export function ApproveDisclosure({
           {t('strategy.approve.doesNotPreviewOutput')}
         </p>
 
+        {gateReason ? (
+          <p
+            data-testid="approve-gate"
+            role="alert"
+            className="mt-2 rounded-card border border-amber-700 px-3 py-2 text-copy-13 text-gray-1000"
+          >
+            {gateReason}
+          </p>
+        ) : null}
+
         {onApprove ? null : (
           <p
             data-testid="approve-unavailable"
@@ -172,6 +198,59 @@ export function ApproveDisclosure({
             {t('strategy.approve.approvalUnavailable')}
           </p>
         )}
+
+        {approval?.kind === 'pending' ? (
+          <p data-testid="approve-pending" className="mt-2 text-copy-13 text-gray-900">
+            {t('strategy.approve.pending')}
+          </p>
+        ) : null}
+
+        {approval?.kind === 'refused' ? (
+          <p
+            data-testid="approve-refused"
+            role="alert"
+            className="mt-2 rounded-card border border-amber-700 px-3 py-2 text-copy-13 text-gray-1000"
+          >
+            {approval.message}
+          </p>
+        ) : null}
+
+        {approval?.kind === 'approved' ? (
+          <div data-testid="approve-approved" className="mt-3 flex flex-col gap-2">
+            <p className="rounded-card border border-teal-700 px-3 py-2 text-copy-13 text-gray-1000">
+              {t('strategy.approve.frozen', { approvalId: approval.snapshot.approval_id })}
+            </p>
+            <p className="text-copy-13 text-gray-900">{t('strategy.approve.noPublish')}</p>
+            <dl className="flex flex-col gap-2">
+              <div>
+                <dt className="text-label-12 text-gray-700">{t('strategy.approve.pins')}</dt>
+                <dd className="font-mono text-label-12 text-gray-1000">
+                  <ul>
+                    {approval.snapshot.pins.map((pin) => (
+                      <li key={`${pin.id}@${pin.version}`} data-testid="approve-pin">
+                        {pin.id}@{pin.version} · {pin.content_hash}
+                      </li>
+                    ))}
+                  </ul>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-label-12 text-gray-700">
+                  {t('strategy.approve.simulationIdentity')}
+                </dt>
+                <dd data-testid="approve-simulation-identity" className="font-mono text-label-12 text-gray-1000">
+                  {approval.snapshot.trajectory.ir_content_hash}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-label-12 text-gray-700">{t('strategy.approve.candidateRevision')}</dt>
+                <dd className="font-mono text-label-12 text-gray-1000">
+                  {approval.snapshot.candidate_revision}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        ) : null}
 
         <div className="mt-4 flex justify-end gap-2">
           {onRun && status !== 'ready' && status !== 'running' ? (
@@ -186,7 +265,7 @@ export function ApproveDisclosure({
           <button
             type="button"
             onClick={onApprove}
-            disabled={status !== 'ready' || !onApprove}
+            disabled={status !== 'ready' || !onApprove || Boolean(gateReason)}
             className="rounded-control bg-purple-700 px-3 py-1.5 text-button-12 text-white hover:bg-purple-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('strategy.approve.approve')}

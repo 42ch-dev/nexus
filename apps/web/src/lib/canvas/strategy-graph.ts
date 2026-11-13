@@ -29,6 +29,7 @@ import {
   type ParsedPreset,
   type PresetState,
 } from './preset-yaml';
+import type { SlotBindingRow } from './strategy-graph-ir';
 
 /** Data carried by a Strategy node (Draft §3.4 StrategyNodeData). */
 export interface StrategyNodeData extends Record<string, unknown> {
@@ -52,6 +53,27 @@ export interface StrategyNodeData extends Record<string, unknown> {
   predictedWait?: 'manual' | 'signal';
   /** Static-simulation overlay: an `llm_judge` state collapsed to its declared default branch. */
   branchNotExplored?: boolean;
+  /**
+   * `pattern_slot` nodes (compose path only): the collapsed pin the slot carries.
+   * Absent on every YAML-projected node, so the flag-off render is untouched.
+   */
+  patternId?: string;
+  patternVersion?: string;
+  patternEffectClass?: string;
+  /** Declared slots of the pinned pattern with their binding state. */
+  slotRows?: SlotBindingRow[];
+  /** Required slots with no binding — the node's binding diagnostic names them. */
+  unboundRequired?: string[];
+  /** The `nests[]` binding that owns this slot (region address for compose ops). */
+  nestId?: string;
+  /** Whether the slot is rendered expanded (group with materialised children). */
+  expanded?: boolean;
+  /** A slot-binding child row of an expanded slot. */
+  slotBindingRow?: SlotBindingRow;
+  /** Compose-path simulation overlay: the trajectory visited this node. */
+  simulated?: boolean;
+  /** Slot expand/collapse toggle, patched on by the adapter (compose path only). */
+  onToggleExpand?: () => void;
 }
 
 /** Data carried by a Strategy edge (Draft §3.4 StrategyEdgeData). */

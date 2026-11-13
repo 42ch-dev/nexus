@@ -234,7 +234,86 @@ export const StrategyInnerNode = memo(function StrategyInnerNode({
     >
       <Handle type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
+      {d.slotBindingRow ? (
+        <span
+          data-testid="slot-binding-row"
+          className="mt-0.5 inline-block rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 font-mono text-label-12 text-gray-700"
+        >
+          {d.slotBindingRow.name}
+          {d.slotBindingRow.required ? ' *' : ''} ={' '}
+          {d.slotBindingRow.value === undefined ? '∅' : JSON.stringify(d.slotBindingRow.value)}
+        </span>
+      ) : null}
       <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
+    </NodeChromeShell>
+  );
+});
+
+/**
+ * Collapsed `PatternSlot` node (compose path, v239-p3-canvas-compose-ui T2).
+ * Carries `{pattern_id, version, effect_class, slot_bindings}`; expanding
+ * materialises the fragment inline as parent/group children (the projection
+ * emits the children — parents-first, relative positions). A required slot
+ * with no binding renders its diagnostic on the node, not in a global banner.
+ */
+export const StrategyPatternSlotNode = memo(function StrategyPatternSlotNode({
+  data,
+  selected,
+  dragging,
+}: NodeProps) {
+  const d = data as StrategyNodeData;
+  const { t } = useTranslation('canvas');
+  const status = effectiveStatus(d.status);
+  const onToggleExpand = d.onToggleExpand as (() => void) | undefined;
+  return (
+    <NodeChromeShell
+      selected={!!selected}
+      status={status}
+      accent="strategy"
+      dragging={dragging}
+      className={d.expanded ? 'min-h-[180px] min-w-[280px]' : 'min-w-canvas-node-strategy-primary'}
+    >
+      <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-heading text-copy-14 font-semibold text-gray-1000">
+          {d.patternId}@{d.patternVersion}
+        </span>
+        <button
+          type="button"
+          data-testid="pattern-slot-toggle"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleExpand?.();
+          }}
+          className="rounded-control border border-gray-alpha-400 px-1.5 py-0.5 text-label-12 text-gray-700 hover:bg-gray-alpha-100"
+        >
+          {d.expanded ? t('strategy.node.slotCollapse') : t('strategy.node.slotExpand')}
+        </button>
+      </div>
+      <span
+        data-testid="pattern-slot-effect"
+        className="mt-0.5 inline-block rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 font-mono text-label-12 text-gray-700"
+      >
+        {t(`strategy.node.effect.${d.patternEffectClass ?? 'pure'}`)}
+      </span>
+      {d.simulated ? (
+        <span
+          data-testid="pattern-slot-simulated"
+          className="mt-0.5 inline-block rounded-pill bg-teal-100 px-1.5 py-0.5 text-label-12 text-gray-1000"
+        >
+          {t('strategy.node.simulated')}
+        </span>
+      ) : null}
+      {d.unboundRequired && d.unboundRequired.length > 0 ? (
+        <p
+          data-testid="pattern-slot-unbound"
+          role="alert"
+          className="mt-1 rounded-card border border-amber-700 px-1.5 py-0.5 text-label-12 text-gray-1000"
+        >
+          {t('strategy.node.unboundSlots', { slots: d.unboundRequired.join(', ') })}
+        </p>
+      ) : null}
+      <Handle type="source" position={Position.Bottom} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
     </NodeChromeShell>
   );
 });
@@ -245,4 +324,5 @@ export const strategyNodeTypes = {
   'strategy-join': StrategyJoinNode,
   'strategy-terminal': StrategyTerminalNode,
   'strategy-inner': StrategyInnerNode,
+  'strategy-pattern-slot': StrategyPatternSlotNode,
 } as const;

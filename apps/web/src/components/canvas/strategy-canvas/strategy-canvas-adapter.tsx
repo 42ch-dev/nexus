@@ -1,19 +1,21 @@
 import type { MutableRefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 
-import type { SimulationTrajectory } from '@42ch/nexus-contracts';
+import type { SimulationTrajectory, WorkflowDocument, PatternSummary } from '@42ch/nexus-contracts';
 
 import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
 import type { ConflictModalProps } from '../conflict-modal';
 import { StrategyAltView } from '../strategy-alt-view';
 import { strategyNodeTypes } from '../strategy-nodes';
 import { buildStrategyGraph } from '@/lib/canvas/strategy-graph';
+import { buildStrategyGraphFromIr } from '@/lib/canvas/strategy-graph-ir';
 import type { StrategyEdgeData, StrategyNodeData } from '@/lib/canvas/strategy-graph';
 import type { ParsedPreset, PresetState } from '@/lib/canvas/preset-yaml';
 import { isStrategyConflictError } from '@/lib/canvas/use-strategy-data';
 
 import { EdgeInspector } from './inspectors/edge-inspector';
 import { PromptInspector } from './inspectors/prompt-inspector';
+import { SlotInspector } from './inspectors/slot-inspector';
 import { StateInspector } from './inspectors/state-inspector';
 import { applyTrajectoryOverlay } from './simulation-overlay';
 import {
@@ -47,6 +49,18 @@ export interface StrategySurfaceGraph {
    * part of the graph payload so a new trajectory re-projects the nodes.
    */
   trajectory: SimulationTrajectory | null;
+  /**
+   * Compose path (flag on): the working candidate document. When present,
+   * `projectGraph` projects from IR and the YAML projection never runs — one
+   * projection per render, never both (plan risk mitigation).
+   */
+  document?: WorkflowDocument;
+  /** Pattern registry listing; supplies declared slots for slot nodes. */
+  patterns?: PatternSummary[];
+  /** Slot node ids the author expanded into groups. */
+  expandedSlots?: ReadonlySet<string>;
+  /** Authored nest-into-slot containment chrome (child slot id → parent slot id). */
+  containment?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -85,6 +99,19 @@ export interface StrategyCanvasAdapterContext {
    * without a second projection path (V1.115 T2).
    */
   localEdges: Edge<StrategyEdgeData>[];
+  /**
+   * Compose-path (flag on) slot interactions. Absent when the flag is off, so
+   * the slot inspector and expand toggle never render there.
+   */
+  compose?: {
+    isComposing: boolean;
+    onToggleSlotExpanded: (slotNodeId: string) => void;
+    onBindSlot: (nestId: string, slot: string, value: unknown) => Promise<void>;
+    onReplaceSubtree: (nestId: string, pkg: { id: string; version: string }) => Promise<void>;
+    onUnnest: (nestId: string) => Promise<void>;
+  };
+  /** Pattern registry listing for the slot inspector / projection (compose path). */
+  patterns?: PatternSummary[];
 }
 
 export type StrategyCanvasAdapter = CanvasSurfaceAdapter<StrategySurfaceGraph, StrategyNodeData, StrategyEdgeData>;
@@ -113,7 +140,16 @@ export function createStrategyCanvasAdapter(
     layoutOptions: { direction: 'TB' },
 
     projectGraph(graph) {
-      const projected = buildStrategyGraph(graph.parsed);
+      // Flag contract: the IR projection is the composition path; the YAML
+      // projection survives only as the flag-off compatibility view. Exactly
+      // one runs per render, selected by the payload the orchestrator sends.
+      const projected = graph.document
+        ? buildStrategyGraphFromIr(graph.document, {
+            expandedSlots: graph.expandedSlots,
+            patterns: graph.patterns,
+            containment: graph.containment,
+          })
+        : buildStrategyGraph(graph.parsed);
 
       // Surface the dangling-targets byproduct via ctxRef so the orchestrator
       // can feed the ValidationPanel without extending the projectGraph return
@@ -140,6 +176,30 @@ export function createStrategyCanvasAdapter(
             ? { ...n, data: { ...data, status: sessionStatus ?? '__current__' } }
             : n;
         });
+      }
+
+      // Compose-path simulation overlay (T3b/T5): the trajectory names the
+      // nodes the static walk visited — a wired pattern slot is named, and the
+      // overlay says so on the slot itself. Compose-only by construction: the
+      // `document` payload field is absent with the flag off, so today's
+      // flag-off render is untouched.
+      if (graph.document && graph.trajectory) {
+        const visited = new Set(graph.trajectory.nodes_visited);
+        nodes = nodes.map((node) =>
+          node.type === 'strategy-pattern-slot' && visited.has(node.id)
+            ? { ...node, data: { ...node.data, simulated: true } }
+            : node,
+        );
+      }
+
+      // Compose-path slot expand/collapse toggle, patched onto slot node data.
+      if (graph.document && ctxRef.current.compose) {
+        const toggle = ctxRef.current.compose.onToggleSlotExpanded;
+        nodes = nodes.map((node) =>
+          node.type === 'strategy-pattern-slot'
+            ? { ...node, data: { ...node.data, onToggleExpand: () => toggle(node.id) } }
+            : node,
+        );
       }
 
       // Merge local edge modifications (draft transition edges created by the
@@ -178,6 +238,22 @@ export function createStrategyCanvasAdapter(
 
     renderInspector(_node) {
       const ctx = ctxRef.current;
+      // Compose path: a selected pattern slot renders the slot inspector
+      // (bind / replace / unnest). Slot nodes have no PresetState, so this
+      // branch precedes the YAML-state inspector entirely.
+      const selectedNode = ctx.selectedNode;
+      if (ctx.compose && selectedNode?.type === 'strategy-pattern-slot') {
+        return (
+          <SlotInspector
+            node={selectedNode.data as StrategyNodeData}
+            patterns={ctx.patterns ?? []}
+            isComposing={ctx.compose.isComposing}
+            onBindSlot={ctx.compose.onBindSlot}
+            onReplaceSubtree={ctx.compose.onReplaceSubtree}
+            onUnnest={ctx.compose.onUnnest}
+          />
+        );
+      }
       const selectedState = ctx.selectedState;
       if (!selectedState) return null;
 
@@ -234,6 +310,11 @@ export function createStrategyCanvasAdapter(
     },
 
     summarizeGraph(graph) {
+      if (graph.document) {
+        const slots = graph.document.nodes.filter((node) => node.kind === 'pattern_slot').length;
+        const visited = graph.trajectory ? ` Simulated nodes: ${graph.trajectory.nodes_visited.join(', ')}.` : ' Not simulated.';
+        return `Strategy candidate ${graph.document.id} at revision ${graph.revision}: ${graph.document.nodes.length} nodes, ${graph.document.edges.length} edges, ${slots} pattern slots.${visited}`;
+      }
       const states = graph.parsed.manifest.states;
       const count = states.length;
       let edgeCount = 0;
