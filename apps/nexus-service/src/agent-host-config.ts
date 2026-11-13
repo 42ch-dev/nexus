@@ -161,6 +161,11 @@ function parseAgentHostConfig(body: unknown): AgentHostConfig {
     if (enabled !== undefined && typeof enabled !== 'boolean') {
       throw invalidInput(`${path}.enabled must be a boolean`);
     }
+    // `enabled` defaults to true: without a command the entry would save and
+    // then never launch, so refuse it before the replacement is written.
+    if (enabled !== false && (typeof command !== 'string' || command.trim() === '')) {
+      throw invalidInput(`${path}.command is required when provider '${id}' is enabled`);
+    }
   }
   return body as AgentHostConfig;
 }
@@ -171,6 +176,34 @@ export async function getAgentHostConfig(service: ServiceCore): Promise<AgentHos
   } catch (error) {
     throw mapNativeError(error);
   }
+}
+
+/**
+ * Replacement upsert: the saved document's LAST enabled entry becomes the ONE
+ * selected provider — readiness reads only enabled entries, so leaving a
+ * replaced provider enabled would keep claiming an owner the user retired. A
+ * document that already selects exactly that provider is returned untouched, so
+ * a no-op save disables nothing.
+ */
+function withReplacementSelected(config: AgentHostConfig): AgentHostConfig {
+  const selected = config.providers.findLastIndex((provider) => provider.enabled !== false);
+  if (selected < 0) {
+    return config;
+  }
+  const changes = config.providers.some(
+    (provider, index) => (provider.enabled !== false) !== (index === selected),
+  );
+  if (!changes) {
+    return config;
+  }
+  return {
+    ...config,
+    providers: config.providers.map((provider, index) =>
+      index === selected
+        ? { ...provider, enabled: true }
+        : { ...provider, enabled: false },
+    ),
+  };
 }
 
 /** The owner facts the restart publishes; the same shape the boot start returns. */
@@ -187,8 +220,11 @@ export function putAgentHostConfig(
   // The ONE owner-lifecycle lock (shared with selectWorkspace): a provider
   // save+restart must never interleave with a first-run selection.
   return withSelectionLock(service, async () => {
+    // Upsert after validation, inside the lock: the entry the user just saved
+    // owns readiness and the entries it replaced are disabled.
+    const next = withReplacementSelected(config);
     try {
-      await service.core.saveAgentHostConfig(config);
+      await service.core.saveAgentHostConfig(next);
     } catch (error) {
       throw mapNativeError(error);
     }
