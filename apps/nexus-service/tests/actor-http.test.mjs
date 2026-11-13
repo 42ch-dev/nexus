@@ -1206,7 +1206,7 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     // ea75345d4 migrated both to provider dispatch; the lane has no refusal of
     // its own to pin now, and the provider's answer is not this surface's
     // contract. Residual: an unmapped provider error reply still surfaces as
-    // 500 `internal` (see the task report's issue text).
+    // 500 `internal` (I-000428).
   });
 
   /**

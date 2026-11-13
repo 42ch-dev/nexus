@@ -17,7 +17,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node --test --test-concurrency=1 tests/*.test.mjs",
+    "test": "tsc -p tsconfig.json && node --test --test-concurrency=1 --test-timeout=180000 tests/*.test.mjs",
     "dev": "node --import tsx src/main.ts",
     "start": "node dist/main.js",
     "proof:open-smoke": "node src/open-smoke.mjs"
