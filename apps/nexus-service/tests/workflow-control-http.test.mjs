@@ -184,8 +184,8 @@ async function observe(service) {
 /**
  * I-000436 — the P0-T6 block is EXCLUDED on the GitHub linux runner, not absent
  * from it (I-000427), and not called flaky: the file's own process dies there
- * with signal SIGSEGV, 58.1 s in, after all nine P0-T5 cases had reported ok and
- * P0-T6's build step had passed, with no failing assertion (run 43489148101,
+ * with signal SIGSEGV, 58.1 s in, after the P0-T5 block had run to completion
+ * and P0-T6's build step had passed, with no failing assertion (run 43489148101,
  * ubuntu-latest, Node 22). The same file passes all 19 cases on darwin/arm64.
  * The runner lacks nothing — the addon, its fixture seeder and python3 all ran
  * before the crash — so the fault is inside the process rather than in this
