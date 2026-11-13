@@ -786,19 +786,9 @@ fn verify_body_pins(
     Ok(())
 }
 
-/// Approve's strict pin check: a compose operation only reads the region it addresses, while an
-/// approval freezes the whole document, so a changed pin anywhere the walk reaches refuses. The
-/// hash comparison itself is [`verify_pin`]'s — there is no second one.
-#[cfg(feature = "execution")]
-pub fn verify_document_pins(
-    document: &WorkflowDocument,
-    packages: &[PatternPackage],
-) -> Result<(), ComposeRefusal> {
-    verify_body_pins(document, &PackageIndex::new(packages), &mut HashSet::new())
-}
-
 /// The resolved pattern bodies the shared walk follows, plus the stale-pin diagnostics it reports,
-/// for a caller that validates without writing (Approve). Same index and same walk as compose.
+/// for a caller that validates without writing (Approve). Same index and same walk as compose,
+/// and the one [`verify_pin`] comparison: an approval refuses on the first `StalePin` it reports.
 #[cfg(feature = "execution")]
 pub fn document_bodies<'a>(
     document: &'a WorkflowDocument,
@@ -810,7 +800,7 @@ pub fn document_bodies<'a>(
 }
 
 /// The unbound required slots of a whole document, for a caller that does not run a compose
-/// operation. Same declaration rule as [`unbound_required_slots`].
+/// operation. Same declaration rule and same fragment walk as [`unbound_required_slots`].
 #[cfg(feature = "execution")]
 pub fn document_unbound_slots(
     document: &WorkflowDocument,
@@ -1281,12 +1271,26 @@ const fn kind_expectation(kind: NexusPatternSlotKind) -> &'static str {
     }
 }
 
-/// Every required slot of every pinned package that carries no binding, in document order.
+/// Every required slot of every pinned package that carries no binding, in document order,
+/// descending into the resolved pattern bodies the shared walk follows.
 fn unbound_required_slots(
     document: &WorkflowDocument,
     packages: &PackageIndex<'_>,
 ) -> Vec<ComposeDiagnostic> {
     let mut diagnostics = Vec::new();
+    collect_unbound_required_slots(document, packages, &mut HashSet::new(), &mut diagnostics);
+    diagnostics
+}
+
+/// One document's required-slot findings plus those of every fragment its pins reach. A nested
+/// pattern's slots live on the slot node inside that fragment, so the binding is read from the
+/// document being walked, never from the candidate root.
+fn collect_unbound_required_slots(
+    document: &WorkflowDocument,
+    packages: &PackageIndex<'_>,
+    seen: &mut HashSet<String>,
+    diagnostics: &mut Vec<ComposeDiagnostic>,
+) {
     for nest in &document.nests {
         let Some(package) = pinned_pattern(&nest.child) else {
             continue;
@@ -1312,8 +1316,13 @@ fn unbound_required_slots(
                 });
             }
         }
+        if !seen.insert(package.to_string()) {
+            continue;
+        }
+        if let Some(fragment) = found.fragment() {
+            collect_unbound_required_slots(fragment, packages, seen, diagnostics);
+        }
     }
-    diagnostics
 }
 
 /// The package registry indexed by the exact pin a compose request names.
@@ -1400,31 +1409,29 @@ impl<'a> PackageIndex<'a> {
         }
     }
 
-    /// Report one carrier whose bytes no longer hash to the pin it stores. A package that did not
-    /// load has no hash to compare, so it is not reported here.
+    /// Report one carrier whose bytes no longer hash to the pin it stores, through the one
+    /// [`verify_pin`] comparison. A package that did not load has no bytes to compare, so it is
+    /// not reported here.
     fn report_stale_pin(
         &self,
         nest: &WorkflowNestBinding,
         pin: &PatternPackageRef,
         diagnostics: &mut Vec<ComposeDiagnostic>,
     ) {
-        let Some(recorded) = nest.child.content_hash.as_deref() else {
-            return;
-        };
-        let Some(scanned) = self
-            .get(pin)
-            .and_then(nexus_pattern::PatternPackage::content_hash)
+        let Err(ComposeRefusal::PinMismatch {
+            nest_id,
+            package,
+            recorded_hash,
+            scanned_hash,
+        }) = verify_pin(&nest.id, pin, nest.child.content_hash.as_deref(), self)
         else {
             return;
         };
-        if scanned == recorded {
-            return;
-        }
         diagnostics.push(ComposeDiagnostic::StalePin {
-            nest_id: nest.id.clone(),
-            package: pin.clone(),
-            recorded_hash: recorded.to_owned(),
-            scanned_hash: scanned.to_owned(),
+            nest_id,
+            package,
+            recorded_hash,
+            scanned_hash,
         });
     }
 }

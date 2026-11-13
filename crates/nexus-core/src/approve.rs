@@ -11,8 +11,10 @@
 //! stale evidence and nothing is written.
 //!
 //! The snapshot is keyed by `(strategy_id, content_hash)`: one content approves once. A repeat
-//! approve is the typed 409 refusal, never a second row and never a mutated candidate. The snapshot
-//! freezes bytes; it does not apply, bind a schedule or execute.
+//! approve is the typed 409 refusal, never a second row and never a mutated candidate. The insert
+//! itself is the compare-and-swap — it lands only while the candidate still sits at the revision
+//! this approval verified — so a compose that commits in the window wins and approve is the typed
+//! conflict. The snapshot freezes bytes; it does not apply, bind a schedule or execute.
 
 use nexus_contracts::{ApprovedStrategySnapshot, SimulationTrajectory};
 use nexus_orchestration::{simulate_document, CapabilityRegistryHolder, SimulationOptions};
@@ -20,10 +22,9 @@ use nexus_workflow_ir::{validate, Violation, WorkflowDocument};
 use serde_json::Value;
 
 use crate::compose::{
-    document_bodies, document_unbound_slots, resolved_pins, verify_document_pins,
-    ComposeDiagnostic, ComposeRefusal, ResolvedPatternPin,
+    document_bodies, document_unbound_slots, resolved_pins, ComposeDiagnostic, ResolvedPatternPin,
 };
-use crate::strategy_candidates::conflict;
+use crate::strategy_candidates::{conflict, current_revision};
 use crate::{CoreError, CoreResult, CoreService, Principal, StrategyAlreadyApprovedError};
 
 /// Why an approval was refused. Nothing was written when one is returned.
@@ -180,10 +181,20 @@ impl ApproveRefusal {
         }
     }
 
-    /// Reuse compose's one pin comparison and validation refusals as approval refusals.
-    fn from_compose(refusal: ComposeRefusal) -> Self {
-        match refusal {
-            ComposeRefusal::PinMismatch {
+    /// Reuse compose's own findings as approval refusals: the two the walk reports as refusals to
+    /// an approval are a slot a pinned pattern requires and a pin whose bytes moved.
+    fn from_diagnostic(diagnostic: ComposeDiagnostic) -> Self {
+        match diagnostic {
+            ComposeDiagnostic::UnboundRequiredSlot {
+                nest_id,
+                package,
+                slot,
+            } => Self::SlotUnbound {
+                nest_id,
+                package: package.to_string(),
+                slot,
+            },
+            ComposeDiagnostic::StalePin {
                 nest_id,
                 package,
                 recorded_hash,
@@ -195,24 +206,7 @@ impl ApproveRefusal {
                 recorded_hash,
                 scanned_hash,
             },
-            other => Self::InvalidDocument {
-                violations: vec![other.to_string()],
-            },
-        }
-    }
-
-    fn from_unbound(diagnostic: ComposeDiagnostic) -> Self {
-        match diagnostic {
-            ComposeDiagnostic::UnboundRequiredSlot {
-                nest_id,
-                package,
-                slot,
-            } => Self::SlotUnbound {
-                nest_id,
-                package: package.to_string(),
-                slot,
-            },
-            other => Self::InvalidDocument {
+            other @ ComposeDiagnostic::DroppedSlotBinding { .. } => Self::InvalidDocument {
                 violations: vec![other.to_string()],
             },
         }
@@ -326,7 +320,7 @@ impl CoreService {
         })?;
 
         let packages = self.compose_packages()?;
-        let (bodies, _diagnostics) = document_bodies(&current.document, &packages);
+        let (bodies, diagnostics) = document_bodies(&current.document, &packages);
         let violations: Vec<Violation> = validate(&[&current.document], &bodies)
             .err()
             .unwrap_or_default()
@@ -344,10 +338,16 @@ impl CoreService {
             .into_iter()
             .next()
         {
-            return Err(ApproveRefusal::from_unbound(unbound).into_error());
+            return Err(ApproveRefusal::from_diagnostic(unbound).into_error());
         }
-        verify_document_pins(&current.document, &packages)
-            .map_err(|refusal| ApproveRefusal::from_compose(refusal).into_error())?;
+        // The walk reports every pin whose bytes moved, through the one `verify_pin` comparison.
+        // An approval freezes the whole document, so the first such finding refuses it.
+        if let Some(stale) = diagnostics
+            .into_iter()
+            .find(|finding| matches!(finding, ComposeDiagnostic::StalePin { .. }))
+        {
+            return Err(ApproveRefusal::from_diagnostic(stale).into_error());
+        }
 
         let recomputed = simulate_document(
             &current.document,
@@ -403,11 +403,15 @@ impl CoreService {
         let revision = i64::try_from(candidate.revision)
             .map_err(|_| approval_internal("revision does not fit the row column"))?;
 
+        // The insert is the CAS: the row lands only while the stored candidate still sits at the
+        // revision this approval verified (an absent row is revision 0). A compose that commits in
+        // between makes the predicate fail, so it wins and this writer gets the typed conflict.
         let written = sqlx::query(
             "INSERT INTO strategy_approvals \
              (approval_id, strategy_id, content_hash, candidate_revision, document_json, \
               trajectory_json, pins_json, approver, approved_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? \
+             WHERE COALESCE((SELECT revision FROM strategy_candidates WHERE strategy_id = ?), 0) = ? \
              ON CONFLICT(strategy_id, content_hash) DO NOTHING",
         )
         .bind(&approval_id)
@@ -419,12 +423,18 @@ impl CoreService {
         .bind(&pins_json)
         .bind(principal.creator_id())
         .bind(approved_at.to_rfc3339())
+        .bind(strategy_id)
+        .bind(revision)
         .execute(&self.inner.pool)
         .await
         .map_err(|error| crate::error::local_db_err(error.into()))?
         .rows_affected();
 
         if written == 0 {
+            let stored = current_revision(&self.inner.pool, strategy_id).await?;
+            if stored != candidate.revision {
+                return Err(conflict(strategy_id, candidate.revision, stored));
+            }
             let existing: Option<(String, i64)> = sqlx::query_as(
                 "SELECT approval_id, candidate_revision FROM strategy_approvals \
                  WHERE strategy_id = ? AND content_hash = ?",
@@ -434,13 +444,19 @@ impl CoreService {
             .fetch_optional(&self.inner.pool)
             .await
             .map_err(|error| crate::error::local_db_err(error.into()))?;
-            let (approval_id, revision) = existing.unwrap_or_default();
+            let Some((approval_id, approved_revision)) = existing else {
+                return Err(approval_internal(
+                    "the snapshot insert wrote no row and no approval holds this content",
+                ));
+            };
+            let approved_revision = u64::try_from(approved_revision)
+                .map_err(|_| approval_internal("the stored approval revision is negative"))?;
             return Err(CoreError::StrategyAlreadyApproved(
                 StrategyAlreadyApprovedError {
                     strategy_id: strategy_id.to_string(),
                     content_hash: candidate.content_hash.clone(),
                     approval_id,
-                    candidate_revision: u64::try_from(revision).unwrap_or_default(),
+                    candidate_revision: approved_revision,
                 },
             ));
         }

@@ -1017,6 +1017,7 @@ jobs:
           --test memory_provider_binding --test readonly_config_open
           --test legacy_content_migration
           --test creator_capture
+          --test compose_ops --test strategy_candidate_store
           -- --test-threads=2
 
   rust-core-host-execution:
@@ -1050,10 +1051,12 @@ jobs:
           cache-all-crates: false
           cache-on-failure: false
       - name: Execution and lifecycle owners
+        # `approve_route` is `#![cfg(feature = "execution")]`: a cargo run that does not enable
+        # the feature selects ZERO tests from it, so the target must be named here (A1).
         run: >-
           cargo test -p nexus-core --features provider-host,compute
           --test retained_execution_contracts --test execution_lifecycle
-          --test handle_ops
+          --test handle_ops --test approve_route
           -- --test-threads=2
 
   rust-core-host-state:
