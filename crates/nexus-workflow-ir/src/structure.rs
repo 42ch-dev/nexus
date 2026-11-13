@@ -3,8 +3,9 @@
 //! [`validate`] takes a document set and the pattern bodies the caller could resolve: the document
 //! under validation plus every child workflow and every resolved pattern fragment. A referenced
 //! child outside the set is a leaf, so validating one document never requires a registry. A
-//! resolved fragment is not a leaf — its own nests join the same walk, which is what makes
-//! pattern-to-pattern cycles and combined pattern/workflow depth reachable.
+//! resolved fragment is not a leaf — it is held to its own node-graph checks, and its own nests
+//! join the same walk, which is what makes pattern-to-pattern cycles and combined pattern/workflow
+//! depth reachable.
 
 use crate::{
     WorkflowDocument, WorkflowNestBinding, WorkflowNestChildKind, WorkflowNode,
@@ -181,7 +182,8 @@ impl std::error::Error for Violation {}
 /// Validate a document set against the Q2 structural rules.
 ///
 /// `patterns` carries the pattern bodies the caller resolved; a pin with no entry there is a leaf,
-/// so this never requires a registry.
+/// so this never requires a registry. A fragment body is held to its own node-graph checks by
+/// [`validate_fragment`]; its nest bindings are judged by the document walk that nests it.
 ///
 /// # Errors
 ///
@@ -201,6 +203,11 @@ pub fn validate(
     }
     for document in documents {
         validate_document(document, &mut violations);
+    }
+    for pattern in patterns {
+        if let PatternBodyKind::Fragment(fragment) = pattern.body {
+            validate_fragment(fragment, &mut violations);
+        }
     }
 
     let graph = NestGraph::new(documents, patterns);
@@ -233,6 +240,26 @@ pub fn validate(
 }
 
 fn validate_document(document: &WorkflowDocument, violations: &mut Vec<Violation>) {
+    let nodes = validate_node_graph(document, violations);
+    validate_nests(document, &nodes, violations);
+}
+
+/// A resolved pattern fragment, held to the checks its own nodes, edges and `depends_on` entries
+/// answer: duplicate node ids, edge endpoints and dependencies that name no node, and reference
+/// cycles.
+///
+/// The nest-context rules in [`validate_nests`] are deliberately skipped. A fragment is a body, not
+/// a document: its nest bindings address the fragment's own nodes and are judged by the shared nest
+/// walk of the document that nests it, so running those rules here would report one body twice and
+/// refuse fragments for defects the composing document is the right place to name.
+fn validate_fragment(fragment: &WorkflowDocument, violations: &mut Vec<Violation>) {
+    validate_node_graph(fragment, violations);
+}
+
+fn validate_node_graph<'a>(
+    document: &'a WorkflowDocument,
+    violations: &mut Vec<Violation>,
+) -> HashMap<&'a str, &'a WorkflowNode> {
     let id = document.id.as_str();
     let mut nodes: HashMap<&str, &WorkflowNode> = HashMap::new();
     let mut edges: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -286,6 +313,17 @@ fn validate_document(document: &WorkflowDocument, violations: &mut Vec<Violation
         });
     }
 
+    nodes
+}
+
+/// The nest-context rules a document's own bindings answer: stable unique ids, an addressable
+/// composable parent, and a child that pins what its kind requires.
+fn validate_nests(
+    document: &WorkflowDocument,
+    nodes: &HashMap<&str, &WorkflowNode>,
+    violations: &mut Vec<Violation>,
+) {
+    let id = document.id.as_str();
     let mut nest_ids: HashSet<&str> = HashSet::new();
     for nest in &document.nests {
         if nest.id.is_empty() {
@@ -547,6 +585,35 @@ mod tests {
             &json!([]),
             nests,
         )
+    }
+
+    #[test]
+    fn refuses_a_resolved_fragment_that_dangles_an_edge() {
+        let root = group_document(
+            "root",
+            &json!([nest("n1", "group", &pattern("broken", "1.0.0"))]),
+        );
+        let broken = document(
+            "broken",
+            &json!([node("entry", "inner_step")]),
+            &json!([{ "id": "entry->ghost", "from": "entry", "to": "ghost", "kind": "linear" }]),
+            &json!([]),
+        );
+        let bodies = [PatternBody {
+            registry_id: "broken",
+            version: "1.0.0",
+            body: PatternBodyKind::Fragment(&broken),
+        }];
+
+        let violations = validate(&[&root], &bodies).unwrap_err();
+        assert_eq!(
+            violations,
+            vec![Violation::DanglingEdge {
+                document: "broken".to_owned(),
+                edge: "entry->ghost".to_owned(),
+                node: "ghost".to_owned(),
+            }]
+        );
     }
 
     #[test]

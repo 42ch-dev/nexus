@@ -1184,6 +1184,169 @@ async fn unnest_of_an_unknown_nest_is_refused() {
 }
 
 #[tokio::test]
+async fn a_resolved_fragment_with_a_dangling_edge_is_refused_by_compose() {
+    let setup = setup().await;
+    let mut body = fragment(
+        "dangling-step",
+        "pure",
+        &json!([fragment_node("pure")]),
+        &json!([]),
+    );
+    body["edges"] = json!([
+        { "id": "work->ghost", "from": "work", "to": "ghost", "kind": "linear" }
+    ]);
+    write_package(&setup.home, "dangling-step", "pure", "", &body);
+    let before = current(&setup).await;
+
+    let error = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            nest("dangling", "dangling-slot", "dangling-step", "1.0.0"),
+        )
+        .await
+        .unwrap_err();
+
+    let details = refusal(error);
+    assert_eq!(details["reason"], "invalid_document");
+    let violations = details["violations"].as_array().unwrap();
+    assert!(
+        violations.iter().any(|violation| violation
+            .as_str()
+            .is_some_and(|text| text.contains("references unknown node `ghost`"))),
+        "the fragment's dangling edge is named: {violations:?}"
+    );
+    assert_eq!(current(&setup).await.revision, before.revision);
+
+    setup.core.close().await.unwrap();
+}
+
+/// A fragment whose node carries `role` and whose body declares it.
+fn role_fragment(id: &str, role: &str) -> Value {
+    let mut body = fragment(
+        id,
+        "pure",
+        &json!([{
+            "id": "work",
+            "kind": "inner_step",
+            "effect_class": "pure",
+            "step_kind": "acp_prompt",
+            "role": role
+        }]),
+        &json!([]),
+    );
+    body["roles"] = json!([{
+        "id": role,
+        "description": format!("fixture role {role}"),
+        "system_prompt_file": format!("prompts/{role}.md")
+    }]);
+    body
+}
+
+#[tokio::test]
+async fn unnest_carries_a_body_role_the_parent_already_declares() {
+    let setup = setup().await;
+    write_package(
+        &setup.home,
+        "writer-step",
+        "pure",
+        "",
+        &role_fragment("writer-step", "writer"),
+    );
+    let before = current(&setup).await;
+    assert!(
+        before.document.roles.iter().any(|role| role.id == "writer"),
+        "the seed document declares the role the body uses"
+    );
+
+    let nested = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            nest("writer", "writer-slot", "writer-step", "1.0.0"),
+        )
+        .await
+        .unwrap();
+    let flat = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            nested.candidate.revision,
+            nest_id_op("writer"),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(flat.candidate.revision, 2);
+    assert!(
+        flat.candidate
+            .document
+            .nodes
+            .iter()
+            .any(|node| node.role.as_deref() == Some("writer")),
+        "the moved node keeps the role the parent level declares"
+    );
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn an_available_duplicate_directory_wins_over_a_broken_one_in_either_order() {
+    let setup = setup().await;
+    let body = fragment(
+        "dup-step",
+        "pure",
+        &json!([fragment_node("pure")]),
+        &json!([]),
+    );
+    let reversed = fragment(
+        "reversed-dup",
+        "pure",
+        &json!([fragment_node("pure")]),
+        &json!([]),
+    );
+
+    // A directory symlink scanned under another name resolves the same manifest, and its own name
+    // cannot match the manifest id, so the listing reports one pin twice with the alias unavailable.
+    let patterns = setup.home.join("patterns");
+    write_package(&setup.home, "dup-step", "pure", "", &body);
+    std::os::unix::fs::symlink(patterns.join("dup-step"), patterns.join("aa-alias")).unwrap();
+    // The reverse order: the readable directory sorts first and must keep the pin.
+    write_package(&setup.home, "reversed-dup", "pure", "", &reversed);
+    std::os::unix::fs::symlink(patterns.join("reversed-dup"), patterns.join("zz-alias")).unwrap();
+
+    let first = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            0,
+            nest("dup-a", "dup-slot-a", "dup-step", "1.0.0"),
+        )
+        .await
+        .expect("the available directory resolves the pin");
+    let second = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            first.candidate.revision,
+            nest("dup-b", "dup-slot-b", "reversed-dup", "1.0.0"),
+        )
+        .await
+        .expect("a readable directory that sorts first still keeps its pin");
+
+    assert_eq!(second.candidate.revision, 2);
+    assert!(second.diagnostics.is_empty(), "{:?}", second.diagnostics);
+
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn replace_subtree_changes_only_the_pin_of_that_region() {
     let setup = setup().await;
     write_registry(&setup.home);
@@ -1995,7 +2158,8 @@ async fn a_changed_inner_pin_surfaces_before_the_shared_walk_dedupes() {
 #[tokio::test]
 async fn unnest_refuses_a_body_declaration_the_parent_level_cannot_carry() {
     let setup = setup().await;
-    // `move_body` carries nodes and edges, not the body's own role declarations.
+    // `move_body` carries nodes and edges, not the body's own role declarations. The seed document
+    // declares `writer` and `reviewer`, so the body uses a role the parent level does not declare.
     let mut body = fragment(
         "role-step",
         "read",
@@ -2004,14 +2168,14 @@ async fn unnest_refuses_a_body_declaration_the_parent_level_cannot_carry() {
             "kind": "inner_step",
             "effect_class": "read",
             "step_kind": "acp_prompt",
-            "role": "reviewer"
+            "role": "narrator"
         }]),
         &json!([]),
     );
     body["roles"] = json!([{
-        "id": "reviewer",
-        "description": "reviews the draft",
-        "system_prompt_file": "roles/reviewer.md"
+        "id": "narrator",
+        "description": "narrates the draft",
+        "system_prompt_file": "roles/narrator.md"
     }]);
     write_package(&setup.home, "role-step", "read", "", &body);
     let before = current(&setup).await;
@@ -2042,7 +2206,7 @@ async fn unnest_refuses_a_body_declaration_the_parent_level_cannot_carry() {
     assert_eq!(details["nest_id"], "role-region");
     let message = details["message"].as_str().unwrap();
     assert!(
-        message.contains("role `reviewer`"),
+        message.contains("role `narrator`"),
         "the refusal names what would be lost: {message}"
     );
     assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);

@@ -838,7 +838,7 @@ fn unnest_slot(
         ));
     }
 
-    move_body(document, body, &node_ids);
+    move_body(document, body, &node_ids, &op.nest_id)?;
     let diagnostics = dropped_bindings(document, &parent_node, &op.nest_id);
     retarget_wiring(document, &parent_node, &entry, &terminals);
 
@@ -967,6 +967,10 @@ fn collect_resolved_pins(
 /// What flattening would lose silently: body-level declarations a moved child still refers to, and
 /// the control references the removed slot node itself owns. `None` when the move carries
 /// everything the body needs.
+///
+/// A declaration the parent level already declares is carried: the id is what a node, template or
+/// signal target references, so matching on the id is enough. Definitions are not compared and not
+/// merged — the parent's declaration is the one that stays.
 fn lost_declarations(
     document: &WorkflowDocument,
     body: &WorkflowDocument,
@@ -974,11 +978,11 @@ fn lost_declarations(
 ) -> Option<String> {
     let mut lost = Vec::new();
     for role in &body.roles {
-        if body
+        let referenced = body
             .nodes
             .iter()
-            .any(|node| node.role.as_deref() == Some(role.id.as_str()))
-        {
+            .any(|node| node.role.as_deref() == Some(role.id.as_str()));
+        if referenced && !document.roles.iter().any(|declared| declared.id == role.id) {
             lost.push(format!("role `{}`", role.id));
         }
     }
@@ -990,13 +994,25 @@ fn lost_declarations(
                     .values()
                     .any(|value| value.as_str() == Some(asset.id.as_str()))
         });
-        if referenced {
+        if referenced
+            && !document
+                .assets
+                .iter()
+                .any(|declared| declared.id == asset.id)
+        {
             lost.push(format!("asset `{}`", asset.id));
         }
     }
     for signal in &body.signals {
         let target = signal.target.as_deref();
-        if target.is_some_and(|target| body.nodes.iter().any(|node| node.id == target)) {
+        let referenced =
+            target.is_some_and(|target| body.nodes.iter().any(|node| node.id == target));
+        if referenced
+            && !document
+                .signals
+                .iter()
+                .any(|declared| declared.name == signal.name)
+        {
             lost.push(format!("signal `{}`", signal.name));
         }
     }
@@ -1056,11 +1072,41 @@ fn remap_body_ids(
 }
 
 /// Move the pinned body's nodes, edges and nests into the candidate level.
+///
+/// Every reference the fragment records must land somewhere at this level. An edge endpoint or a
+/// nest parent that names no fragment node is a dangling reference the flatten cannot carry, so it
+/// refuses — naming it — before any node is moved, instead of dropping the edge or the nest.
 fn move_body(
     document: &mut WorkflowDocument,
     body: &WorkflowDocument,
     node_ids: &HashMap<String, String>,
-) {
+    nest_id: &str,
+) -> Result<(), ComposeRefusal> {
+    for edge in &body.edges {
+        for endpoint in [&edge.from, &edge.to] {
+            if !node_ids.contains_key(endpoint) {
+                return Err(unflattenable(
+                    nest_id,
+                    format!(
+                        "fragment edge `{}` references unknown node `{endpoint}`",
+                        edge.id
+                    ),
+                ));
+            }
+        }
+    }
+    for nest in &body.nests {
+        if !node_ids.contains_key(&nest.parent_node) {
+            return Err(unflattenable(
+                nest_id,
+                format!(
+                    "fragment nest `{}` references unknown parent node `{}`",
+                    nest.id, nest.parent_node
+                ),
+            ));
+        }
+    }
+
     let mut taken_edges: HashSet<String> =
         document.edges.iter().map(|edge| edge.id.clone()).collect();
     let mut taken_nests: HashSet<String> =
@@ -1103,6 +1149,7 @@ fn move_body(
         moved.parent_node.clone_from(parent);
         document.nests.push(moved);
     }
+    Ok(())
 }
 
 /// The slot bindings flattening has to drop, named one by one.
@@ -1432,9 +1479,20 @@ impl<'a> PackageIndex<'a> {
             let Some(manifest) = package.manifest() else {
                 continue;
             };
-            by_pin
-                .entry((manifest.id.as_str(), manifest.version.as_str()))
-                .or_insert(package);
+            // Two directories can declare the same pin. An available one wins regardless of scan
+            // order, so a broken duplicate cannot make a readable package unresolvable; only when
+            // none is available does the first scanned directory keep the pin, and its own reason
+            // is the one a refusal names. The listing still reports every directory.
+            match by_pin.entry((manifest.id.as_str(), manifest.version.as_str())) {
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(package);
+                }
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    if !entry.get().available() && package.available() {
+                        entry.insert(package);
+                    }
+                }
+            }
         }
         Self { by_pin }
     }
@@ -1713,5 +1771,94 @@ mod tests {
         assert_eq!(fresh_id("b", &mut taken), "b");
         assert_eq!(fresh_id("a", &mut taken), "a~3");
         assert_eq!(fresh_id("a", &mut taken), "a~4");
+    }
+
+    fn body_document(nodes: &Value, edges: &Value, nests: &Value) -> WorkflowDocument {
+        serde_json::from_value(serde_json::json!({
+            "ir_version": 0,
+            "id": "body",
+            "version": 0,
+            "revision": 1,
+            "state": "candidate",
+            "meta": {
+                "description": "flatten fixture",
+                "kind": "creator",
+                "run_intents": [],
+                "requires_capabilities": []
+            },
+            "entry": "a",
+            "terminal": ["a"],
+            "nodes": nodes,
+            "edges": edges,
+            "nests": nests,
+            "assets": [],
+            "signals": [],
+            "roles": [],
+            "effect_summary": "pure",
+            "provenance": { "source": "compose" }
+        }))
+        .expect("fixture is a valid workflow document")
+    }
+
+    #[test]
+    fn a_flatten_refuses_an_edge_whose_endpoint_the_body_does_not_hold() {
+        let body = body_document(
+            &serde_json::json!([{ "id": "a", "kind": "inner_step", "effect_class": "pure" }]),
+            &serde_json::json!([
+                { "id": "a->ghost", "from": "a", "to": "ghost", "kind": "linear" }
+            ]),
+            &serde_json::json!([]),
+        );
+        let mut document = body_document(
+            &serde_json::json!([]),
+            &serde_json::json!([]),
+            &serde_json::json!([]),
+        );
+        let node_ids = HashMap::from([("a".to_owned(), "a".to_owned())]);
+
+        let error = move_body(&mut document, &body, &node_ids, "flatten-me").unwrap_err();
+
+        assert_eq!(error.reason(), "nest_unflattenable");
+        assert!(
+            error.to_string().contains("unknown node `ghost`"),
+            "{error}"
+        );
+        assert!(
+            document.nodes.is_empty() && document.edges.is_empty(),
+            "nothing moves before the refusal"
+        );
+    }
+
+    #[test]
+    fn a_flatten_refuses_a_nest_whose_parent_the_body_does_not_hold() {
+        let body = body_document(
+            &serde_json::json!([{ "id": "a", "kind": "pattern_slot", "effect_class": "pure" }]),
+            &serde_json::json!([]),
+            &serde_json::json!([{
+                "id": "inner",
+                "parent_node": "ghost",
+                "expansion": "defer_until_apply",
+                "pin_policy": "exact",
+                "child": { "kind": "workflow", "workflow_id": "leaf" }
+            }]),
+        );
+        let mut document = body_document(
+            &serde_json::json!([]),
+            &serde_json::json!([]),
+            &serde_json::json!([]),
+        );
+        let node_ids = HashMap::from([("a".to_owned(), "a".to_owned())]);
+
+        let error = move_body(&mut document, &body, &node_ids, "flatten-me").unwrap_err();
+
+        assert_eq!(error.reason(), "nest_unflattenable");
+        assert!(
+            error.to_string().contains("unknown parent node `ghost`"),
+            "{error}"
+        );
+        assert!(
+            document.nodes.is_empty() && document.nests.is_empty(),
+            "nothing moves before the refusal"
+        );
     }
 }

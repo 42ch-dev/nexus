@@ -246,6 +246,66 @@ async fn approve_freezes_one_snapshot_bound_to_the_simulated_content() {
 }
 
 #[tokio::test]
+async fn a_resolved_fragment_with_a_dangling_edge_is_refused_by_approve() {
+    let setup = setup().await;
+    // The candidate pins `outer`; `outer` pins `inner` without recording a hash, so rewriting
+    // `inner` is not a pin mismatch — it is a fragment bytes the approval has to read.
+    write_declaring_package(
+        &setup.home,
+        "inner",
+        "",
+        &slot_fragment("inner", "inner body"),
+    );
+    write_declaring_package(&setup.home, "outer", "", &chain_fragment("outer", "inner"));
+    let composed = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            0,
+            ComposeOp::Nest(NestOp {
+                nest_id: "outer-nest".to_owned(),
+                parent_node: "outer-slot".to_owned(),
+                attach_to: None,
+                package: package("outer"),
+                expansion: WorkflowNestBindingExpansion::ExpandInCandidate,
+            }),
+        )
+        .await
+        .unwrap();
+    let revision = composed.candidate.revision;
+    let trajectory = simulate(&setup.core, &setup.principal, &composed.candidate.document).await;
+
+    let mut broken = slot_fragment("inner", "inner body");
+    broken["edges"] = serde_json::json!([
+        { "id": "slot->ghost", "from": "slot", "to": "ghost", "kind": "linear" }
+    ]);
+    write_declaring_package(&setup.home, "inner", "", &broken);
+
+    let error = setup
+        .core
+        .approve_strategy(&setup.principal, STRATEGY, revision, Some(trajectory))
+        .await
+        .unwrap_err();
+
+    let details = refusal(&error);
+    assert_eq!(details["reason"], "invalid_document");
+    let violations = details["violations"].as_array().unwrap();
+    assert!(
+        violations.iter().any(|violation| violation
+            .as_str()
+            .is_some_and(|text| text.contains("references unknown node `ghost`"))),
+        "the resolved fragment's dangling edge is named: {violations:?}"
+    );
+    assert_eq!(snapshot_count(setup.core.pool()).await, 0);
+    assert_eq!(
+        stored_revision(setup.core.pool()).await,
+        Some(i64::try_from(revision).unwrap())
+    );
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn approve_without_simulation_writes_nothing() {
     let setup = setup().await;
     let before = candidate(&setup.core, &setup.principal).await;
