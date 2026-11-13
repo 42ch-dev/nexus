@@ -333,7 +333,8 @@
     "hub": "操作台",
     "harness": "Harness",
     "modules": "模块",
-    "caps": "能力"
+    "caps": "能力",
+    "characters": "角色"
   },
   "topnav": {
     "searchDisabled": "搜索（即将推出）",

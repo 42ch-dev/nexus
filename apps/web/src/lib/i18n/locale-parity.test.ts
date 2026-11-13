@@ -28,6 +28,7 @@ import enSchedule from '../../locales/en/schedule.json';
 import enSessions from '../../locales/en/sessions.json';
 import enStrategies from '../../locales/en/strategies.json';
 import enCapabilities from '../../locales/en/capabilities.json';
+import enCharacters from '../../locales/en/characters.json';
 import enModules from '../../locales/en/modules.json';
 import enWorlds from '../../locales/en/worlds.json';
 import enInspector from '../../locales/en/inspector.json';
@@ -49,6 +50,7 @@ import zhSchedule from '../../locales/zh-CN/schedule.json';
 import zhSessions from '../../locales/zh-CN/sessions.json';
 import zhStrategies from '../../locales/zh-CN/strategies.json';
 import zhCapabilities from '../../locales/zh-CN/capabilities.json';
+import zhCharacters from '../../locales/zh-CN/characters.json';
 import zhModules from '../../locales/zh-CN/modules.json';
 import zhWorlds from '../../locales/zh-CN/worlds.json';
 import zhInspector from '../../locales/zh-CN/inspector.json';
@@ -73,6 +75,7 @@ const NAMESPACE_PAIRS: ReadonlyArray<{ name: string; en: JsonRecord; zh: JsonRec
   { name: 'sessions', en: enSessions, zh: zhSessions },
   { name: 'strategies', en: enStrategies, zh: zhStrategies },
   { name: 'capabilities', en: enCapabilities, zh: zhCapabilities },
+  { name: 'characters', en: enCharacters, zh: zhCharacters },
   { name: 'modules', en: enModules, zh: zhModules },
   { name: 'worlds', en: enWorlds, zh: zhWorlds },
   { name: 'inspector', en: enInspector, zh: zhInspector },
@@ -187,8 +190,8 @@ describe('locale key parity (en ↔ zh-CN)', () => {
     },
   );
 
-  it('keeps the 20-namespace catalog unchanged (AR-21: no new namespace)', () => {
-    expect(NAMESPACE_PAIRS).toHaveLength(20);
+  it('keeps the 21-namespace catalog unchanged (AR-21: no new namespace)', () => {
+    expect(NAMESPACE_PAIRS).toHaveLength(21);
   });
 
   it('ships no firing-cadence / next-fire promise or CLI-removal claim in the schedule copy, en and zh-CN (AR-30/PL-18)', () => {

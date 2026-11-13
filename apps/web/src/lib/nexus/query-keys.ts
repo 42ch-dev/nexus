@@ -138,6 +138,54 @@ export const queryKeys = {
     all: ['worldRules'] as const,
     list: (worldId: string) => [...queryKeys.worldRules.all, 'list', worldId] as const,
   },
+  // v240 T4 (I-000126/127/128) — character-scoped families. Every key carries
+  // the character id before any query object so two Characters never share a
+  // cache entry, and the families live under `characters` rather than the
+  // creator-scoped `memory` branch: a creator-scoped invalidation must not
+  // blank a character's data and vice versa.
+  characters: {
+    all: ['characters'] as const,
+    lists: () => [...queryKeys.characters.all, 'list'] as const,
+    list: (query?: object) => [...queryKeys.characters.lists(), query ?? {}] as const,
+    details: () => [...queryKeys.characters.all, 'detail'] as const,
+    detail: (characterId: string) => [...queryKeys.characters.details(), characterId] as const,
+    bindings: {
+      lists: () => [...queryKeys.characters.all, 'bindings', 'list'] as const,
+      list: (characterId: string, query?: object) =>
+        [...queryKeys.characters.bindings.lists(), characterId, query ?? {}] as const,
+      details: () => [...queryKeys.characters.all, 'bindings', 'detail'] as const,
+      detail: (characterId: string, bindingId: string) =>
+        [...queryKeys.characters.bindings.details(), characterId, bindingId] as const,
+    },
+    // Per-character memory mirrors the creator `memory` family names; the
+    // `characters`-first prefix keeps the two caches disjoint.
+    memory: {
+      pendingLists: () => [...queryKeys.characters.all, 'memory', 'pending', 'list'] as const,
+      pendingList: (characterId: string, query?: object) =>
+        [...queryKeys.characters.memory.pendingLists(), characterId, query ?? {}] as const,
+      count: (characterId: string, query?: object) =>
+        [...queryKeys.characters.all, 'memory', 'pending', 'count', characterId, query ?? {}] as const,
+      fragments: (characterId: string, query?: object) =>
+        [...queryKeys.characters.all, 'memory', 'fragments', characterId, query ?? {}] as const,
+    },
+    soul: {
+      narrative: (characterId: string) =>
+        [...queryKeys.characters.all, 'soul', 'narrative', characterId] as const,
+    },
+    tom: {
+      lists: () => [...queryKeys.characters.all, 'tom', 'list'] as const,
+      list: (characterId: string, query?: object) =>
+        [...queryKeys.characters.tom.lists(), characterId, query ?? {}] as const,
+    },
+    knowledge: {
+      lists: () => [...queryKeys.characters.all, 'knowledge', 'list'] as const,
+      list: (characterId: string, query?: object) =>
+        [...queryKeys.characters.knowledge.lists(), characterId, query ?? {}] as const,
+      details: () => [...queryKeys.characters.all, 'knowledge', 'detail'] as const,
+      detail: (characterId: string, entryId: string) =>
+        [...queryKeys.characters.knowledge.details(), characterId, entryId] as const,
+    },
+  },
   memory: {
     all: ['memory'] as const,
     pendingLists: () => [...queryKeys.memory.all, 'pending', 'list'] as const,
