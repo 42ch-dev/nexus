@@ -161,6 +161,11 @@ function parseAgentHostConfig(body: unknown): AgentHostConfig {
     if (enabled !== undefined && typeof enabled !== 'boolean') {
       throw invalidInput(`${path}.enabled must be a boolean`);
     }
+    // `enabled` defaults to true: without a command the entry would save and
+    // then never launch, so refuse it before the replacement is written.
+    if (enabled !== false && (typeof command !== 'string' || command.trim() === '')) {
+      throw invalidInput(`${path}.command is required when provider '${id}' is enabled`);
+    }
   }
   return body as AgentHostConfig;
 }

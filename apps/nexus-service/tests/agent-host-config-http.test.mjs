@@ -200,6 +200,55 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
     assert.equal(saves.length, 0);
   });
 
+  test('PUT refuses an enabled provider without a command and keeps the previous one enabled', async () => {
+    const enabledProvider = {
+      id: 'claude-acp',
+      protocol: 'acp',
+      command: 'claude-agent-acp',
+      enabled: true,
+    };
+    const { service, saves, restarts } = storeService({
+      ...DEFAULT_CONFIG,
+      providers: [enabledProvider],
+    });
+
+    for (const providers of [
+      [{ id: 'claude-acp', protocol: 'acp', command: null, enabled: true }],
+      [{ id: 'claude-acp', protocol: 'acp', command: '   ', enabled: true }],
+      // `enabled` defaults to true, so an omitted command is just as unlaunchable.
+      [{ id: 'claude-acp', protocol: 'acp' }],
+    ]) {
+      await assert.rejects(
+        () => handle('PUT', service, { ...DEFAULT_CONFIG, providers }),
+        (error) => {
+          assert.equal(error.status, 400);
+          assert.equal(error.code, 'invalid_input');
+          assert.match(
+            error.message,
+            /providers\[0\]\.command is required when provider 'claude-acp' is enabled/,
+          );
+          return true;
+        },
+      );
+    }
+
+    // Nothing reached the native save path or the engine, and the provider the
+    // user already had is still enabled afterwards.
+    assert.equal(saves.length, 0);
+    assert.equal(restarts.length, 0);
+    const current = await handle('GET', service);
+    assert.deepEqual(current.body.providers, [enabledProvider]);
+
+    // A disabled entry may keep its null command: the schema preserves it so a
+    // known-good provider can be re-enabled later.
+    const disabled = { id: 'codex-acp', protocol: 'acp', command: null, enabled: false };
+    const accepted = await handle('PUT', service, {
+      ...DEFAULT_CONFIG,
+      providers: [enabledProvider, disabled],
+    });
+    assert.deepEqual(accepted.body.providers, [enabledProvider, disabled]);
+  });
+
   test('validation key sets match the registered schema properties', async () => {
     const schema = JSON.parse(
       readFileSync(
