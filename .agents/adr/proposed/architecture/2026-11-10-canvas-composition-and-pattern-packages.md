@@ -7,15 +7,21 @@ Source: split from the archived Canvas + Workflow IR redesign and Dynamic Workfl
 
 ## Problem
 
-P0/P1 shipped the [Workflow IR document model](../../implemented/architecture/2026-11-10-workflow-ir-document-model.md), and P2 shipped the [strategy simulation fence](../../implemented/architecture/2026-11-10-strategy-simulation-fence.md). They do not make Canvas a composition surface, publish reusable pattern packages, load applied IR in production, or change the primary authoring path.
+P0/P1 shipped the [Workflow IR document model](../../implemented/architecture/2026-11-10-workflow-ir-document-model.md),
+P2 shipped the [strategy simulation fence](../../implemented/architecture/2026-11-10-strategy-simulation-fence.md),
+and P3 shipped composition and approval in v1.239. Canvas composes, packages are published with pinned
+identity, and a candidate can be simulated and approved. What the cutover still lacks:
 
-The remaining problems are:
-
-1. Canvas still risks being an explainability-only YAML projection with node-granular patches rather than a surface for composing patterns and Agent drafts.
-2. Reuse by copying a sample directory and renaming `preset.id` provides no versioned, pinned package identity.
-3. Production intake still needs a controlled dual-read transition before IR-primary execution can replace the YAML-only mapper.
-4. New strategy authoring, compatibility export, and retirement of the hand-authored YAML main path need explicit exit criteria so the two grammars do not evolve independently.
-5. Candidate review needs compose, simulation, approval, and application to remain one lifecycle over one IR truth.
+1. **No producer for applied IR.** Produce → validate → simulate → approve exists; Apply does not. Nothing
+   persists an approved identity, so the stage dual-read consumes has no source. This is the first problem
+   any P4 work must answer.
+2. **Production intake is still YAML-only.** A controlled dual-read transition has to exist before
+   IR-primary execution can replace the YAML-only mapper, and it has nothing to load until (1) is solved.
+3. **New strategy authoring, compatibility export, and retirement of the hand-authored YAML main path**
+   need explicit exit criteria so the two grammars do not evolve independently.
+4. **The candidate lifecycle stops at Approve.** Review needs compose, simulation, approval *and*
+   application to remain one lifecycle over one IR truth; today the last step is missing from the surface,
+   not merely unpolished.
 
 ## Proposal
 
@@ -81,7 +87,7 @@ P4–P6 replace:
 
 The retained pieces are graph-flow, `OrchestrationEngine`, SessionStorage, `WaitingForInput` / `wait_id`, capability registry, source identity freeze, integrator versus creator-host execution surfaces, and documented `preset.yaml` import/export. Outline, Timeline, World KB Canvas, Actor/Viewpoint preset IR, Work-tree artifacts, and a first-party player app are not replaced.
 
-The Canvas transition removes YAML-only projection from the hot path only after dual-read ends. Developer explainability moves to a read-only applied-IR inspector rather than YAML-first editing.
+The Canvas transition removes YAML-only projection from the hot path only after dual-read ends. Developer explainability is expected to become a read-only view of the applied document rather than YAML-first editing; no such surface ships today, and naming it here is a direction, not a claim about the codebase.
 
 ## Alternatives considered
 
