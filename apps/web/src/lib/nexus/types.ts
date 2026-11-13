@@ -179,6 +179,26 @@ import type {
   ListCharactersResponse,
   UpdateCharacterBindingRequest,
   UpdateCharacterRequest,
+  // Actor family — per-character memory / SOUL / ToM (plan v240; I-000127).
+  CaptureCharacterPendingReviewRequest,
+  CaptureCharacterPendingReviewResponse,
+  CharacterSoulNarrativeRequest,
+  CharacterSoulNarrativeResponse,
+  CountCharacterPendingReviewsQuery,
+  CountCharacterPendingReviewsResponse,
+  DeleteCharacterPendingReviewResponse,
+  ListCharacterMemoryFragmentsQuery,
+  ListCharacterMemoryFragmentsResponse,
+  ListCharacterPendingReviewsQuery,
+  ListCharacterPendingReviewsResponse,
+  ListCharacterTomQuery,
+  ListCharacterTomResponse,
+  PromoteCharacterFragmentRequest,
+  PromoteCharacterFragmentResponse,
+  RecordCharacterTomRequest,
+  RecordCharacterTomResponse,
+  ReviewCharacterMemoryRequest,
+  ReviewCharacterMemoryResponse,
   CoreSliceClient,
 } from '@42ch/nexus-contracts';
 
@@ -430,6 +450,92 @@ export interface NexusClient extends CoreSliceClient {
   ): Promise<CharacterBindingDetail>;
   /** `DELETE /v1/daemon/characters/{character_id}/bindings/{binding_id}` — 204. */
   removeCharacterBinding(characterId: string, bindingId: string): Promise<void>;
+
+  // ── Per-character memory / SOUL / ToM (plan v240; I-000127) ────────────────
+  // The same artifact kinds exist creator-scoped (`/v1/daemon/memory/…`, further
+  // down) and per-character (here). They stay separate methods on purpose: the
+  // call site states which actor it means, so no method silently picks a scope.
+  // ToM is GET + POST (no PUT); pending review is capture/list/count/delete
+  // (no get/accept/reject).
+  /**
+   * `POST /v1/daemon/characters/{character_id}/memory/pending-review` — 201.
+   * Captures one session-end digest into the Character review queue;
+   * `binding_id` marks binding-local provenance, omitted means shared scope.
+   */
+  captureCharacterPendingReview(
+    characterId: string,
+    request: CaptureCharacterPendingReviewRequest,
+  ): Promise<CaptureCharacterPendingReviewResponse>;
+  /** `GET /v1/daemon/characters/{character_id}/memory/pending-review` — cursor list. */
+  listCharacterPendingReviews(
+    characterId: string,
+    query?: ListCharacterPendingReviewsQuery,
+  ): Promise<ListCharacterPendingReviewsResponse>;
+  /**
+   * `GET /v1/daemon/characters/{character_id}/memory/pending-review/count` —
+   * `binding_id` scopes the count to one binding-local queue.
+   */
+  countCharacterPendingReviews(
+    characterId: string,
+    query?: CountCharacterPendingReviewsQuery,
+  ): Promise<CountCharacterPendingReviewsResponse>;
+  /** `DELETE /v1/daemon/characters/{character_id}/memory/pending-review/{pending_id}`. */
+  deleteCharacterPendingReview(
+    characterId: string,
+    pendingId: string,
+  ): Promise<DeleteCharacterPendingReviewResponse>;
+  /**
+   * `POST /v1/daemon/characters/{character_id}/memory/review` — drains one
+   * bounded batch (≤ 50 rows) through the shared review pipeline; `has_more`
+   * means re-issue to drain the remainder.
+   */
+  reviewCharacterMemory(
+    characterId: string,
+    request: ReviewCharacterMemoryRequest,
+  ): Promise<ReviewCharacterMemoryResponse>;
+  /** `GET /v1/daemon/characters/{character_id}/memory/fragments` — cursor list. */
+  listCharacterMemoryFragments(
+    characterId: string,
+    query?: ListCharacterMemoryFragmentsQuery,
+  ): Promise<ListCharacterMemoryFragmentsResponse>;
+  /**
+   * `POST /v1/daemon/characters/{character_id}/memory/fragments/{fragment_id}:promote`
+   * — explicit, revision-checked promotion of one binding-local fragment to
+   * shared Character memory (stale `expected_revision` → 409).
+   */
+  promoteCharacterFragment(
+    characterId: string,
+    fragmentId: string,
+    request: PromoteCharacterFragmentRequest,
+  ): Promise<PromoteCharacterFragmentResponse>;
+  /**
+   * `POST /v1/daemon/characters/{character_id}/soul/reflect` — reads or
+   * regenerates the cached whole-Character SOUL narrative. Synthesis is
+   * explicit: it runs only with `force_regenerate: true` and a passing
+   * insufficient-data gate.
+   */
+  reflectCharacterSoul(
+    characterId: string,
+    request: CharacterSoulNarrativeRequest,
+  ): Promise<CharacterSoulNarrativeResponse>;
+  /**
+   * `GET /v1/daemon/characters/{character_id}/tom` — keyset page of the
+   * Character's ToM belief rows. `binding_id` and `world_id` are required wire
+   * members; rows are read only through authorized carriers.
+   */
+  listCharacterTom(
+    characterId: string,
+    query: ListCharacterTomQuery,
+  ): Promise<ListCharacterTomResponse>;
+  /**
+   * `POST /v1/daemon/characters/{character_id}/tom` — records one belief into
+   * a carrier entry under that carrier's OCC revision. Scope is admitted from
+   * stored rows, never from the payload.
+   */
+  recordCharacterTom(
+    characterId: string,
+    request: RecordCharacterTomRequest,
+  ): Promise<RecordCharacterTomResponse>;
 
   // ── Workspaces (plan v1219 T3 + v1220 T3 create) ──────────────────────────
   /** `GET /v1/daemon/workspaces` — cursor list of the creator's workspaces. */

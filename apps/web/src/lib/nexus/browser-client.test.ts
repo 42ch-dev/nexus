@@ -1392,3 +1392,305 @@ describe('BrowserClient character family (v240 actor web surfaces, I-000126)', (
     expect(seenMethod).toBe('DELETE');
   });
 });
+
+describe('BrowserClient per-character memory family (v240 actor web surfaces, I-000127)', () => {
+  const characterId = 'chr_0123456789abcdef0123456789abcdef';
+  const bindingId = 'awb_0123456789abcdef0123456789abcdef';
+  const worldId = 'wld_0123456789abcdef0123456789abcdef';
+  const characterPath = `/v1/daemon/characters/${characterId}`;
+
+  const pending = {
+    pending_id: 'cpr_0123456789abcdef0123456789abcdef',
+    session_id: 'ses_1',
+    character_id: characterId,
+    binding_id: bindingId,
+    task_kind: 'chapter',
+    raw_digest: 'drafted the harbor scene',
+    created_at: '2026-11-03T00:00:00Z',
+    source_operation_id: null,
+  };
+
+  const fragment = {
+    fragment_id: 'cmf_0123456789abcdef0123456789abcdef',
+    session_id: 'ses_1',
+    character_id: characterId,
+    binding_id: bindingId,
+    summary: 'harbor scene',
+    keywords: ['harbor'],
+    created_at: '2026-11-03T00:00:00Z',
+    revision: 2,
+  };
+
+  const tomItem = {
+    carrier_entry_id: 'kne_0123456789abcdef0123456789abcdef',
+    row_ordinal: 0,
+    holder: characterId,
+    proposition: 'the harbor is closed',
+    order: 1,
+    truth: 'Unknown',
+  };
+
+  it('captures a pending review from POST /characters/:id/memory/pending-review', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post(`${characterPath}/memory/pending-review`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json(
+          { success: true, pending_id: pending.pending_id },
+          { status: 201 },
+        );
+      }),
+    );
+
+    const res = await new BrowserClient().captureCharacterPendingReview(characterId, {
+      pending_id: pending.pending_id,
+      session_id: pending.session_id,
+      raw_digest: pending.raw_digest,
+    });
+
+    expect(sent).toEqual({
+      pending_id: pending.pending_id,
+      session_id: pending.session_id,
+      raw_digest: pending.raw_digest,
+    });
+    expect(res.success).toBe(true);
+    expect(res.pending_id).toBe(pending.pending_id);
+  });
+
+  it('lists character pending reviews with cursor params and no creator_id', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get(`${characterPath}/memory/pending-review`, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({
+          items: [pending],
+          pagination: { limit: 10, has_more: true, next_cursor: 'cur-2' },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listCharacterPendingReviews(characterId, {
+      binding_id: bindingId,
+      limit: 10,
+      cursor: 'cur-1',
+    });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(`${characterPath}/memory/pending-review`);
+    expect(url.searchParams.get('binding_id')).toBe(bindingId);
+    expect(url.searchParams.get('limit')).toBe('10');
+    expect(url.searchParams.get('cursor')).toBe('cur-1');
+    // Character scope is the path, never the creator query member.
+    expect(url.searchParams.has('creator_id')).toBe(false);
+    expect(res.items[0]!.pending_id).toBe(pending.pending_id);
+    expect(res.pagination.next_cursor).toBe('cur-2');
+  });
+
+  it('counts character pending reviews from the /count route', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get(`${characterPath}/memory/pending-review/count`, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({ count: 3 });
+      }),
+    );
+
+    const res = await new BrowserClient().countCharacterPendingReviews(characterId, {
+      binding_id: bindingId,
+    });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(`${characterPath}/memory/pending-review/count`);
+    expect(url.searchParams.get('binding_id')).toBe(bindingId);
+    expect(res.count).toBe(3);
+  });
+
+  it('deletes a character pending review and resolves the { success, pending_id } body', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.delete(`${characterPath}/memory/pending-review/${pending.pending_id}`, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({ success: true, pending_id: pending.pending_id });
+      }),
+    );
+
+    const res = await new BrowserClient().deleteCharacterPendingReview(
+      characterId,
+      pending.pending_id,
+    );
+
+    expect(new URL(seenUrl).pathname).toBe(
+      `${characterPath}/memory/pending-review/${pending.pending_id}`,
+    );
+    expect(res).toEqual({ success: true, pending_id: pending.pending_id });
+  });
+
+  it('drains a character review batch from POST /characters/:id/memory/review', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post(`${characterPath}/memory/review`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({
+          promoted: 2,
+          fragmented: 1,
+          dropped: 0,
+          has_more: true,
+          processed: 3,
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().reviewCharacterMemory(characterId, {
+      binding_id: bindingId,
+    });
+
+    expect(sent).toEqual({ binding_id: bindingId });
+    expect(res).toMatchObject({ promoted: 2, fragmented: 1, has_more: true });
+  });
+
+  it('lists character memory fragments under the fragments key', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get(`${characterPath}/memory/fragments`, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({
+          fragments: [fragment],
+          pagination: { limit: 5, has_more: false },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listCharacterMemoryFragments(characterId, {
+      binding_id: bindingId,
+      limit: 5,
+    });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(`${characterPath}/memory/fragments`);
+    expect(url.searchParams.get('limit')).toBe('5');
+    expect(res.fragments[0]!.fragment_id).toBe(fragment.fragment_id);
+    expect(res.fragments[0]!.revision).toBe(2);
+  });
+
+  it('promotes a character fragment via the :promote verb with expected_revision', async () => {
+    let sent: unknown;
+    let seenUrl = '';
+    useHandlers(
+      http.post(
+        new RegExp(`/characters/${characterId}/memory/fragments/[^/]+:promote$`),
+        async ({ request }) => {
+          seenUrl = request.url;
+          sent = await request.json();
+          return HttpResponse.json({
+            fragment: { ...fragment, binding_id: undefined, revision: 3 },
+          });
+        },
+      ),
+    );
+
+    const res = await new BrowserClient().promoteCharacterFragment(
+      characterId,
+      fragment.fragment_id,
+      { expected_revision: 2 },
+    );
+
+    expect(new URL(seenUrl).pathname).toBe(
+      `${characterPath}/memory/fragments/${fragment.fragment_id}:promote`,
+    );
+    expect(sent).toEqual({ expected_revision: 2 });
+    // Promotion clears binding-local provenance and bumps the revision.
+    expect(res.fragment.revision).toBe(3);
+    expect(res.fragment.binding_id).toBeUndefined();
+  });
+
+  it('reads or regenerates the character SOUL narrative from /soul/reflect', async () => {
+    let sent: unknown;
+    useHandlers(
+      http.post(`${characterPath}/soul/reflect`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({
+          character_id: characterId,
+          state: 'current',
+          narrative: 'Mira keeps her distance until trust is earned.',
+          stale: false,
+          current_fragment_count: 12,
+          current_distinct_keyword_count: 21,
+          min_fragment_count: 10,
+          min_distinct_keyword_count: 20,
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().reflectCharacterSoul(characterId, {
+      force_regenerate: true,
+    });
+
+    expect(sent).toEqual({ force_regenerate: true });
+    expect(res.character_id).toBe(characterId);
+    expect(res.state).toBe('current');
+  });
+
+  it('lists character ToM beliefs with the required binding_id + world_id query', async () => {
+    let seenUrl = '';
+    useHandlers(
+      http.get(`${characterPath}/tom`, ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({
+          items: [tomItem],
+          pagination: { limit: 50, has_more: false },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listCharacterTom(characterId, {
+      binding_id: bindingId,
+      world_id: worldId,
+      cursor: 'cur-3',
+    });
+
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe(`${characterPath}/tom`);
+    expect(url.searchParams.get('binding_id')).toBe(bindingId);
+    expect(url.searchParams.get('world_id')).toBe(worldId);
+    expect(url.searchParams.get('cursor')).toBe('cur-3');
+    expect(res.items[0]!.holder).toBe(characterId);
+    expect(res.items[0]!.order).toBe(1);
+  });
+
+  it('records a ToM belief with POST /characters/:id/tom and maps the CAS revision', async () => {
+    let sent: unknown;
+    let seenMethod = '';
+    useHandlers(
+      http.post(`${characterPath}/tom`, async ({ request }) => {
+        seenMethod = request.method;
+        sent = await request.json();
+        return HttpResponse.json({
+          carrier_entry_id: tomItem.carrier_entry_id,
+          revision: 5,
+          mind_state_id: 'mst_0123456789abcdef0123456789abcdef',
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().recordCharacterTom(characterId, {
+      world_id: worldId,
+      binding_id: bindingId,
+      carrier_entry_id: tomItem.carrier_entry_id,
+      expected_revision: 4,
+      holder: characterId,
+      proposition: tomItem.proposition,
+      order: 1,
+    });
+
+    expect(seenMethod).toBe('POST');
+    expect(sent).toMatchObject({
+      world_id: worldId,
+      binding_id: bindingId,
+      carrier_entry_id: tomItem.carrier_entry_id,
+      expected_revision: 4,
+      holder: characterId,
+      order: 1,
+    });
+    expect(res.revision).toBe(5);
+  });
+});

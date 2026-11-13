@@ -154,6 +154,26 @@ import type {
   ListCharactersResponse,
   UpdateCharacterBindingRequest,
   UpdateCharacterRequest,
+  // ── Actor family: per-character memory / SOUL / ToM (`schemas/daemon-api/characters/{memory,soul,tom}`) ──
+  CaptureCharacterPendingReviewRequest,
+  CaptureCharacterPendingReviewResponse,
+  CharacterSoulNarrativeRequest,
+  CharacterSoulNarrativeResponse,
+  CountCharacterPendingReviewsQuery,
+  CountCharacterPendingReviewsResponse,
+  DeleteCharacterPendingReviewResponse,
+  ListCharacterMemoryFragmentsQuery,
+  ListCharacterMemoryFragmentsResponse,
+  ListCharacterPendingReviewsQuery,
+  ListCharacterPendingReviewsResponse,
+  ListCharacterTomQuery,
+  ListCharacterTomResponse,
+  PromoteCharacterFragmentRequest,
+  PromoteCharacterFragmentResponse,
+  RecordCharacterTomRequest,
+  RecordCharacterTomResponse,
+  ReviewCharacterMemoryRequest,
+  ReviewCharacterMemoryResponse,
   // ── P5-T1 World/Work/content/knowledge family DTOs (`schemas/core/*` +
   // `schemas/daemon-api/*` producers) ────────────────────────────────────────
   NarrativeWorldsListResponse,
@@ -389,6 +409,100 @@ export class BrowserClient implements NexusClient {
   removeCharacterBinding(characterId: string, bindingId: string): Promise<void> {
     return this.delete<void>(
       `/v1/daemon/characters/${encodeURIComponent(characterId)}/bindings/${encodeURIComponent(bindingId)}`,
+    );
+  }
+
+  // ── Per-character memory / SOUL / ToM (plan v240; I-000127) ────────────────
+  // Creator-scoped siblings live further down (`listPendingReviews` etc.); these
+  // carry the character id and never fall back to creator scope.
+  captureCharacterPendingReview(
+    characterId: string,
+    request: CaptureCharacterPendingReviewRequest,
+  ): Promise<CaptureCharacterPendingReviewResponse> {
+    return this.post<CaptureCharacterPendingReviewResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/pending-review`,
+      request,
+    );
+  }
+  listCharacterPendingReviews(
+    characterId: string,
+    query?: ListCharacterPendingReviewsQuery,
+  ): Promise<ListCharacterPendingReviewsResponse> {
+    return this.get<ListCharacterPendingReviewsResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/pending-review`,
+      query,
+    );
+  }
+  countCharacterPendingReviews(
+    characterId: string,
+    query?: CountCharacterPendingReviewsQuery,
+  ): Promise<CountCharacterPendingReviewsResponse> {
+    return this.get<CountCharacterPendingReviewsResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/pending-review/count`,
+      query,
+    );
+  }
+  deleteCharacterPendingReview(
+    characterId: string,
+    pendingId: string,
+  ): Promise<DeleteCharacterPendingReviewResponse> {
+    return this.delete<DeleteCharacterPendingReviewResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/pending-review/${encodeURIComponent(pendingId)}`,
+    );
+  }
+  reviewCharacterMemory(
+    characterId: string,
+    request: ReviewCharacterMemoryRequest,
+  ): Promise<ReviewCharacterMemoryResponse> {
+    return this.post<ReviewCharacterMemoryResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/review`,
+      request,
+    );
+  }
+  listCharacterMemoryFragments(
+    characterId: string,
+    query?: ListCharacterMemoryFragmentsQuery,
+  ): Promise<ListCharacterMemoryFragmentsResponse> {
+    return this.get<ListCharacterMemoryFragmentsResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/fragments`,
+      query,
+    );
+  }
+  promoteCharacterFragment(
+    characterId: string,
+    fragmentId: string,
+    request: PromoteCharacterFragmentRequest,
+  ): Promise<PromoteCharacterFragmentResponse> {
+    return this.post<PromoteCharacterFragmentResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/memory/fragments/${encodeURIComponent(fragmentId)}:promote`,
+      request,
+    );
+  }
+  reflectCharacterSoul(
+    characterId: string,
+    request: CharacterSoulNarrativeRequest,
+  ): Promise<CharacterSoulNarrativeResponse> {
+    return this.post<CharacterSoulNarrativeResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/soul/reflect`,
+      request,
+    );
+  }
+  listCharacterTom(
+    characterId: string,
+    query: ListCharacterTomQuery,
+  ): Promise<ListCharacterTomResponse> {
+    return this.get<ListCharacterTomResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/tom`,
+      query,
+    );
+  }
+  recordCharacterTom(
+    characterId: string,
+    request: RecordCharacterTomRequest,
+  ): Promise<RecordCharacterTomResponse> {
+    return this.post<RecordCharacterTomResponse>(
+      `/v1/daemon/characters/${encodeURIComponent(characterId)}/tom`,
+      request,
     );
   }
 
