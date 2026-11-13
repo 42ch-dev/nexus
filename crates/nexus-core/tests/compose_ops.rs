@@ -582,16 +582,52 @@ async fn an_attach_target_that_names_no_node_is_refused_and_writes_nothing() {
         .unwrap_err();
 
     let details = refusal(error);
-    assert_eq!(details["reason"], "invalid_document");
-    assert!(
-        details["violations"][0]
-            .as_str()
-            .unwrap_or_default()
-            .contains("no-such-node"),
-        "the dangling edge names the target it cannot reach: {details}"
+    assert_eq!(details["reason"], "unknown_attach_target");
+    assert_eq!(
+        details["attach_to"], "no-such-node",
+        "the refusal names the target no node carries: {details}"
     );
     assert!(stored_row(setup.core.pool(), STRATEGY).await.is_none());
     assert_eq!(current(&setup).await.revision, 0);
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn an_attach_target_that_names_the_new_slot_is_refused_before_any_write() {
+    let setup = setup().await;
+    write_registry(&setup.home);
+    let before = current(&setup).await;
+
+    let error = setup
+        .core
+        .compose_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            before.revision,
+            wired_nest(
+                "self-loop",
+                "self-loop-slot",
+                Some("self-loop-slot"),
+                "prompt-step",
+                "1.0.0",
+            ),
+        )
+        .await
+        .unwrap_err();
+
+    let details = refusal(error);
+    assert_eq!(details["reason"], "self_attach");
+    assert_eq!(details["attach_to"], "self-loop-slot");
+    // Refused before the write: the slot and its loop edge never reach the candidate.
+    assert!(stored_row(setup.core.pool(), STRATEGY).await.is_none());
+    let after = current(&setup).await;
+    assert_eq!(after.revision, 0);
+    assert!(after
+        .document
+        .nodes
+        .iter()
+        .all(|node| node.id != "self-loop-slot"));
+    assert!(after.document.edges.iter().all(|edge| edge.from != edge.to));
     setup.core.close().await.unwrap();
 }
 
