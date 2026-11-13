@@ -659,4 +659,129 @@ describe('CharactersPage', () => {
       });
     });
   });
+
+  describe('cross-character isolation (F-001/F-002 regression guard)', () => {
+    const charA = 'chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const charB = 'chr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const entryA = {
+      entry_id: 'kne_11111111111111111111111111111111',
+      owner: { kind: 'character', id: charA },
+      holder_entry_id: 'hld_11111111111111111111111111111111',
+      disclosure: 'owner-private',
+      block_type: 'character',
+      canonical_name: 'Mira',
+      status: 'confirmed',
+      revision: 3,
+      created_at: '2026-11-10T00:00:00Z',
+    };
+    const SOUL = (character_id: string) => ({
+      character_id,
+      stale: false,
+      state: 'ungenerated',
+      current_fragment_count: 0,
+      current_distinct_keyword_count: 0,
+      min_fragment_count: 10,
+      min_distinct_keyword_count: 20,
+    });
+
+    it('drops per-character panel state and never reads the cross pair', async () => {
+      // Every knowledge detail read issued for character B. Without the panel
+      // remount key, switching A → B carries `editingId` over and fires a
+      // detail read for (B, A's entry) — the cross pair this test pins down.
+      const bDetailReads: string[] = [];
+      useHandlers(
+        http.get('/v1/daemon/characters', () =>
+          HttpResponse.json({
+            items: [
+              character({ character_id: charA, display_name: 'Aria' }),
+              character({ character_id: charB, display_name: 'Bex' }),
+            ],
+            pagination: PAGINATION,
+          }),
+        ),
+        http.get(`/v1/daemon/characters/${charA}/bindings`, () =>
+          HttpResponse.json({ items: [], pagination: PAGINATION }),
+        ),
+        http.get(`/v1/daemon/characters/${charB}/bindings`, () =>
+          HttpResponse.json({ items: [], pagination: PAGINATION }),
+        ),
+        http.get(`/v1/daemon/characters/${charA}/memory/pending-review`, () =>
+          HttpResponse.json({ items: [], pagination: PAGINATION }),
+        ),
+        http.get(`/v1/daemon/characters/${charA}/memory/pending-review/count`, () =>
+          HttpResponse.json({ count: 0 }),
+        ),
+        http.get(`/v1/daemon/characters/${charB}/memory/pending-review`, () =>
+          HttpResponse.json({ items: [], pagination: PAGINATION }),
+        ),
+        http.get(`/v1/daemon/characters/${charB}/memory/pending-review/count`, () =>
+          HttpResponse.json({ count: 0 }),
+        ),
+        http.get(`/v1/daemon/characters/${charA}/memory/fragments`, () =>
+          HttpResponse.json({ fragments: [], pagination: PAGINATION }),
+        ),
+        http.get(`/v1/daemon/characters/${charB}/memory/fragments`, () =>
+          HttpResponse.json({ fragments: [], pagination: PAGINATION }),
+        ),
+        http.get(`/v1/daemon/characters/${charA}/knowledge`, () =>
+          HttpResponse.json({ items: [entryA], pagination: PAGINATION }),
+        ),
+        http.get(`/v1/daemon/characters/${charB}/knowledge`, () =>
+          HttpResponse.json({ items: [], pagination: PAGINATION }),
+        ),
+        http.get(`/v1/daemon/characters/${charA}/knowledge/${entryA.entry_id}`, () =>
+          HttpResponse.json({ item: entryA, summary: 'the harbor pilot' }),
+        ),
+        http.get(`/v1/daemon/characters/${charB}/knowledge/:entryId`, ({ params }) => {
+          bDetailReads.push(String(params.entryId));
+          return HttpResponse.json({ item: entryA, summary: '' });
+        }),
+        http.post(`/v1/daemon/characters/${charA}/soul/reflect`, () =>
+          HttpResponse.json(SOUL(charA)),
+        ),
+        http.post(`/v1/daemon/characters/${charB}/soul/reflect`, () =>
+          HttpResponse.json(SOUL(charB)),
+        ),
+      );
+
+      const user = userEvent.setup();
+      renderPage();
+
+      const ariaRow = (await screen.findByText('Aria')).closest('li') as HTMLElement | null;
+      const bexRow = screen.getByText('Bex').closest('li') as HTMLElement | null;
+      if (!ariaRow || !bexRow) throw new Error('character rows missing');
+
+      // Bindings panel for A: leave a draft in the form.
+      await user.click(within(ariaRow).getByRole('button', { name: 'Bindings' }));
+      await screen.findByText('World bindings — Aria');
+      await user.type(screen.getByLabelText('World ID'), 'wld-from-aria');
+
+      // Artifacts panel for A: leave a pending digest draft and open the
+      // knowledge edit form (selects A's entry).
+      await user.click(within(ariaRow).getByRole('button', { name: 'Artifacts' }));
+      await screen.findByText('Pending review — Aria');
+      await user.type(screen.getByLabelText('Raw digest'), 'digest-from-aria');
+      await screen.findByText('Mira');
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
+      const editForm = await screen.findByRole('form', { name: 'Edit entry' });
+      await within(editForm).findByDisplayValue('Mira');
+
+      // Switch both panels to B.
+      await user.click(within(bexRow).getByRole('button', { name: 'Bindings' }));
+      await screen.findByText('World bindings — Bex');
+      // The bindings draft must not survive the switch.
+      expect(screen.getByLabelText('World ID')).toHaveValue('');
+      await user.click(within(bexRow).getByRole('button', { name: 'Artifacts' }));
+      await screen.findByText('Pending review — Bex');
+
+      // Nothing from A carries over: no draft, no open edit form, no entry.
+      expect(screen.getByLabelText('Raw digest')).toHaveValue('');
+      expect(screen.queryByRole('form', { name: 'Edit entry' })).toBeNull();
+      expect(screen.queryByText('Mira')).toBeNull();
+      await screen.findByText('No knowledge entries yet.');
+      // B's knowledge list resolving means B's panel queries have settled; by
+      // then a cross-pair detail read (the F-001 leak) would have been issued.
+      await waitFor(() => expect(bDetailReads).toEqual([]));
+    });
+  });
 });

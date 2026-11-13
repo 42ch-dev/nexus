@@ -198,7 +198,11 @@ export function CharactersPage() {
         (() => {
           const selected = items.find((c) => c.character_id === selectedId);
           return selected ? (
-            <BindingsPanel character={selected} onClose={() => setSelectedId(null)} />
+            <BindingsPanel
+              key={`bindings:${selected.character_id}`}
+              character={selected}
+              onClose={() => setSelectedId(null)}
+            />
           ) : null;
         })()}
 
@@ -206,7 +210,10 @@ export function CharactersPage() {
         (() => {
           const selected = items.find((c) => c.character_id === artifactId);
           return selected ? (
-            <CharacterArtifactsPanel character={selected} />
+            <CharacterArtifactsPanel
+              key={`artifacts:${selected.character_id}`}
+              character={selected}
+            />
           ) : null;
         })()}
     </div>
@@ -958,6 +965,11 @@ function KnowledgeSection({ character }: { character: CharacterDetail['character
     mutationFn: (request: UpdateKnowledgeEntryRequest) =>
       client.patchCharacterKnowledge(characterId, editingId!, request),
     onSuccess: () => {
+      // Drop the cached detail (stale text) alongside the list, so a reopen
+      // refetches instead of replaying pre-edit values.
+      void qc.invalidateQueries({
+        queryKey: queryKeys.characters.knowledge.detail(characterId, editingId ?? ''),
+      });
       setEditingId(null);
       void qc.invalidateQueries({ queryKey: queryKeys.characters.knowledge.lists() });
     },
@@ -967,7 +979,11 @@ function KnowledgeSection({ character }: { character: CharacterDetail['character
       client.deleteCharacterKnowledge(characterId, entry.entry_id, {
         expected_revision: entry.revision,
       }),
-    onSuccess: () => {
+    onSuccess: (_data, entry) => {
+      setEditingId((current) => (current === entry.entry_id ? null : current));
+      void qc.invalidateQueries({
+        queryKey: queryKeys.characters.knowledge.detail(characterId, entry.entry_id),
+      });
       void qc.invalidateQueries({ queryKey: queryKeys.characters.knowledge.lists() });
     },
   });
@@ -1102,8 +1118,10 @@ function KnowledgeSection({ character }: { character: CharacterDetail['character
           ) : !detail.data ? (
             <LoadingState label={t('knowledge.editLoading')} />
           ) : (
+            // Uncontrolled inputs keep DOM state; a revision bump after a
+            // successful patch must remount the form to drop stale text.
             <form
-              key={detail.data.item.entry_id}
+              key={`${detail.data.item.entry_id}:${detail.data.item.revision}`}
               onSubmit={submitEdit}
               className="flex flex-col gap-3"
               aria-label={t('knowledge.editTitle')}
