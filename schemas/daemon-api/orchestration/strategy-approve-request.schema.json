@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/strategy-approve-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus StrategyApproveRequest",
+  "description": "Body of POST /v1/daemon/strategies/{strategy_id}/approve. Approve freezes the candidate at `base_revision` only when the supplied trajectory equals the deterministic simulation of those exact bytes: the daemon recomputes validation and simulation over the stored candidate and refuses a missing or stale trajectory without writing a snapshot. The path `strategy_id` is authoritative.",
+  "type": "object",
+  "required": ["base_revision", "trajectory"],
+  "additionalProperties": false,
+  "properties": {
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Candidate revision the client last read and simulated. A different stored revision is refused as `strategy_candidate_conflict` before any snapshot write."
+    },
+    "trajectory": {
+      "oneOf": [
+        {
+          "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/simulation-trajectory.schema.json"
+        },
+        { "type": "null" }
+      ],
+      "description": "The complete `SimulationTrajectory` returned by Simulate for this candidate content, or null when no simulation exists. The daemon requires byte equality with the trajectory it recomputes over the same document; a different `ir_content_hash` is a stale-simulation refusal naming both hashes."
+    }
+  }
+}

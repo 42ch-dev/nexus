@@ -203,6 +203,7 @@ describe('route-inventory (P5-T5)', () => {
   ['POST', '/v1/daemon/presets:validate', 'tier2', 'presets'],
   ['POST', '/v1/daemon/reading/annotations', 'tier2', 'knowledge'],
   ['POST', '/v1/daemon/strategies/([^/]+)/compose', 'tier2', 'presets'],
+  ['POST', '/v1/daemon/strategies/([^/]+)/approve', 'tier2', 'presets'],
   ['POST', '/v1/daemon/strategies/([^/]+)/simulate', 'tier2', 'presets'],
   ['POST', '/v1/daemon/strategies/([^/]+)/states/([^/]+)/patch', 'tier2', 'presets'],
   ['POST', '/v1/daemon/strategies/([^/]+)/states/([^/]+)/prompt/patch', 'tier2', 'presets'],

@@ -23,6 +23,8 @@
 //! Nest policy and effect rollup are the shared `nexus-workflow-ir` walk and lattice: this module
 //! resolves pins into [`PatternBody`]s and never re-derives depth, cycles or the enum order.
 
+#[cfg(feature = "execution")]
+use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
@@ -437,6 +439,19 @@ pub enum ComposeDiagnostic {
         /// The hash the registry now serves.
         scanned_hash: String,
     },
+    /// A recorded pin whose package the registry does not resolve, so there are no bytes to
+    /// compare. Reported for the same reason a changed pin is: the pin cannot be confirmed today,
+    /// and an approval that freezes it would claim bytes nobody can check.
+    PinUnavailable {
+        /// The nest that records the pin.
+        nest_id: String,
+        /// The pinned package.
+        package: PatternPackageRef,
+        /// The hash the document recorded.
+        recorded_hash: String,
+        /// Why resolution failed: no directory declares the pin, or the package did not load.
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for ComposeDiagnostic {
@@ -464,6 +479,17 @@ impl std::fmt::Display for ComposeDiagnostic {
                 f,
                 "nest `{nest_id}` pinned `{package}` at content hash `{recorded_hash}`, but the \
                  registry now serves `{scanned_hash}`: replace this region to adopt the new bytes"
+            ),
+            Self::PinUnavailable {
+                nest_id,
+                package,
+                recorded_hash,
+                reason,
+            } => write!(
+                f,
+                "nest `{nest_id}` pinned `{package}` at content hash `{recorded_hash}`, but the \
+                 package is unavailable ({reason}): restore it before approving or consuming this \
+                 region"
             ),
         }
     }
@@ -515,7 +541,7 @@ impl CoreService {
 
     /// Every package under `<nexus_home>/patterns`, unavailable ones included: compose resolves
     /// pins against the same registry the listing serves.
-    fn compose_packages(&self) -> CoreResult<Vec<PatternPackage>> {
+    pub(crate) fn compose_packages(&self) -> CoreResult<Vec<PatternPackage>> {
         let patterns_dir = self.inner.nexus_home.join("patterns");
         nexus_pattern::scan_pattern_packages(&patterns_dir, IR_VERSION).map_err(|error| {
             CoreError::Internal {
@@ -782,6 +808,91 @@ fn verify_body_pins(
         }
     }
     Ok(())
+}
+
+/// The resolved pattern bodies the shared walk follows, plus the pin findings it reports.
+///
+/// For a caller that validates without writing (Approve): same index and same walk as compose,
+/// and the one [`verify_pin`] comparison: an approval refuses on the first pin it cannot confirm.
+#[cfg(feature = "execution")]
+#[must_use]
+pub fn document_bodies<'a>(
+    document: &'a WorkflowDocument,
+    packages: &'a [PatternPackage],
+) -> (Vec<PatternBody<'a>>, Vec<ComposeDiagnostic>) {
+    let mut diagnostics = Vec::new();
+    let bodies = PackageIndex::new(packages).bodies(document, &mut diagnostics);
+    (bodies, diagnostics)
+}
+
+/// The unbound required slots of a whole document, for a caller that does not run a compose
+/// operation. Same declaration rule and same fragment walk as [`unbound_required_slots`].
+#[cfg(feature = "execution")]
+pub fn document_unbound_slots(
+    document: &WorkflowDocument,
+    packages: &[PatternPackage],
+) -> Vec<ComposeDiagnostic> {
+    unbound_required_slots(document, &PackageIndex::new(packages))
+}
+
+/// One `{id, version, content_hash}` pin an approval freezes.
+#[cfg(feature = "execution")]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ResolvedPatternPin {
+    pub id: String,
+    pub version: String,
+    pub content_hash: String,
+}
+
+/// Every resolved pattern pin reachable from `document`, deduped and sorted by id, version and
+/// hash so the frozen snapshot has deterministic bytes. A carrier without a recorded hash is an
+/// unresolved pin (a deferred nest) and contributes none of its own; the resolved pins its
+/// fragment records still travel, because that body will be consumed at Apply.
+#[cfg(feature = "execution")]
+pub fn resolved_pins(
+    document: &WorkflowDocument,
+    packages: &[PatternPackage],
+) -> Vec<ResolvedPatternPin> {
+    let mut pins = BTreeSet::new();
+    collect_resolved_pins(
+        document,
+        &PackageIndex::new(packages),
+        &mut HashSet::new(),
+        &mut pins,
+    );
+    pins.into_iter()
+        .map(|(id, version, content_hash)| ResolvedPatternPin {
+            id,
+            version,
+            content_hash,
+        })
+        .collect()
+}
+
+#[cfg(feature = "execution")]
+fn collect_resolved_pins(
+    document: &WorkflowDocument,
+    packages: &PackageIndex<'_>,
+    seen: &mut HashSet<String>,
+    pins: &mut BTreeSet<(String, String, String)>,
+) {
+    for nest in &document.nests {
+        let Some(pin) = pinned_pattern(&nest.child) else {
+            continue;
+        };
+        if let Some(content_hash) = nest.child.content_hash.as_deref() {
+            pins.insert((pin.id.clone(), pin.version.clone(), content_hash.to_owned()));
+        }
+        if !seen.insert(pin.to_string()) {
+            continue;
+        }
+        if let Some(fragment) = packages
+            .get(&pin)
+            .and_then(nexus_pattern::PatternPackage::fragment)
+        {
+            collect_resolved_pins(fragment, packages, seen, pins);
+        }
+    }
 }
 
 /// What flattening would lose silently: body-level declarations a moved child still refers to, and
@@ -1186,12 +1297,26 @@ const fn kind_expectation(kind: NexusPatternSlotKind) -> &'static str {
     }
 }
 
-/// Every required slot of every pinned package that carries no binding, in document order.
+/// Every required slot of every pinned package that carries no binding, in document order,
+/// descending into the resolved pattern bodies the shared walk follows.
 fn unbound_required_slots(
     document: &WorkflowDocument,
     packages: &PackageIndex<'_>,
 ) -> Vec<ComposeDiagnostic> {
     let mut diagnostics = Vec::new();
+    collect_unbound_required_slots(document, packages, &mut HashSet::new(), &mut diagnostics);
+    diagnostics
+}
+
+/// One document's required-slot findings plus those of every fragment its pins reach. A nested
+/// pattern's slots live on the slot node inside that fragment, so the binding is read from the
+/// document being walked, never from the candidate root.
+fn collect_unbound_required_slots(
+    document: &WorkflowDocument,
+    packages: &PackageIndex<'_>,
+    seen: &mut HashSet<String>,
+    diagnostics: &mut Vec<ComposeDiagnostic>,
+) {
     for nest in &document.nests {
         let Some(package) = pinned_pattern(&nest.child) else {
             continue;
@@ -1217,8 +1342,13 @@ fn unbound_required_slots(
                 });
             }
         }
+        if !seen.insert(package.to_string()) {
+            continue;
+        }
+        if let Some(fragment) = found.fragment() {
+            collect_unbound_required_slots(fragment, packages, seen, diagnostics);
+        }
     }
-    diagnostics
 }
 
 /// The package registry indexed by the exact pin a compose request names.
@@ -1249,9 +1379,10 @@ impl<'a> PackageIndex<'a> {
     /// The pattern bodies reachable from `document`, so the shared walk follows resolved fragments
     /// instead of treating every pattern pin as a leaf.
     ///
-    /// Every carrier of a recorded pin is reported as a [`ComposeDiagnostic::StalePin`] when the
-    /// registry's bytes changed — the operation's own region included, so a successful write never
-    /// leaves a pin it read silently unverified.
+    /// Every carrier of a recorded pin is reported when the pin cannot be confirmed — a
+    /// [`ComposeDiagnostic::StalePin`] for changed bytes, a [`ComposeDiagnostic::PinUnavailable`]
+    /// for a package the registry no longer resolves — the operation's own region included, so a
+    /// successful write never leaves a pin it read silently unverified.
     fn bodies(
         &self,
         document: &WorkflowDocument,
@@ -1275,8 +1406,9 @@ impl<'a> PackageIndex<'a> {
                 continue;
             };
             // The recorded hash is checked before this walk de-dupes the pin and before a package
-            // that failed to load is skipped, so a carrier whose bytes changed is always reported.
-            self.report_stale_pin(nest, &pin, diagnostics);
+            // that failed to load is skipped, so a carrier whose bytes changed or whose package is
+            // gone is always reported.
+            self.report_unusable_pin(nest, &pin, diagnostics);
             if !seen.insert(pin.to_string()) {
                 continue;
             }
@@ -1305,32 +1437,41 @@ impl<'a> PackageIndex<'a> {
         }
     }
 
-    /// Report one carrier whose bytes no longer hash to the pin it stores. A package that did not
-    /// load has no hash to compare, so it is not reported here.
-    fn report_stale_pin(
+    /// Report one carrier whose recorded pin cannot be confirmed against the registry, through the
+    /// one [`verify_pin`] comparison: bytes that changed are a [`ComposeDiagnostic::StalePin`], and
+    /// a pin whose package does not resolve is a [`ComposeDiagnostic::PinUnavailable`]. A carrier
+    /// with no recorded hash names nothing to confirm and is not reported.
+    fn report_unusable_pin(
         &self,
         nest: &WorkflowNestBinding,
         pin: &PatternPackageRef,
         diagnostics: &mut Vec<ComposeDiagnostic>,
     ) {
-        let Some(recorded) = nest.child.content_hash.as_deref() else {
+        let Some(recorded_hash) = nest.child.content_hash.as_deref() else {
             return;
         };
-        let Some(scanned) = self
-            .get(pin)
-            .and_then(nexus_pattern::PatternPackage::content_hash)
-        else {
-            return;
-        };
-        if scanned == recorded {
-            return;
+        match verify_pin(&nest.id, pin, Some(recorded_hash), self) {
+            Err(ComposeRefusal::PinMismatch {
+                package,
+                recorded_hash,
+                scanned_hash,
+                ..
+            }) => diagnostics.push(ComposeDiagnostic::StalePin {
+                nest_id: nest.id.clone(),
+                package,
+                recorded_hash,
+                scanned_hash,
+            }),
+            Err(ComposeRefusal::PackageUnavailable {
+                package, reason, ..
+            }) => diagnostics.push(ComposeDiagnostic::PinUnavailable {
+                nest_id: nest.id.clone(),
+                package,
+                recorded_hash: recorded_hash.to_owned(),
+                reason,
+            }),
+            Ok(()) | Err(_) => {}
         }
-        diagnostics.push(ComposeDiagnostic::StalePin {
-            nest_id: nest.id.clone(),
-            package: pin.clone(),
-            recorded_hash: recorded.to_owned(),
-            scanned_hash: scanned.to_owned(),
-        });
     }
 }
 

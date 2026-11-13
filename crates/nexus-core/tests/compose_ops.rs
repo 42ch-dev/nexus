@@ -1543,6 +1543,70 @@ async fn a_stale_base_is_refused_before_the_registry_is_scanned() {
     setup.core.close().await.unwrap();
 }
 
+/// The shared walk reports a recorded pin whose package is absent instead of swallowing the
+/// resolution error: nothing is consumed, and the carrier is named with the hash it recorded.
+#[cfg(feature = "execution")]
+#[test]
+fn a_pin_whose_package_is_absent_is_reported_by_the_walk() {
+    let recorded = "a".repeat(64);
+    let document: WorkflowDocument = serde_json::from_value(json!({
+        "ir_version": 0,
+        "id": "approve-walk",
+        "version": 1,
+        "revision": 0,
+        "state": "candidate",
+        "meta": {
+            "description": "walk fixture",
+            "kind": "creator",
+            "run_intents": [],
+            "requires_capabilities": []
+        },
+        "entry": "slot",
+        "terminal": ["slot"],
+        "nodes": [{ "id": "slot", "kind": "pattern_slot", "effect_class": "pure" }],
+        "edges": [],
+        "nests": [{
+            "id": "gone-nest",
+            "parent_node": "slot",
+            "expansion": "defer_until_apply",
+            "pin_policy": "exact",
+            "child": {
+                "kind": "pattern",
+                "registry_id": "removed-step",
+                "version": "1.0.0",
+                "content_hash": recorded
+            }
+        }],
+        "assets": [],
+        "signals": [],
+        "roles": [],
+        "effect_summary": "pure",
+        "provenance": { "source": "compose" }
+    }))
+    .unwrap();
+
+    let (bodies, diagnostics) = nexus_core::document_bodies(&document, &[]);
+
+    assert!(
+        bodies.is_empty(),
+        "an absent package contributes no body to the walk"
+    );
+    assert!(
+        matches!(
+            diagnostics.as_slice(),
+            [ComposeDiagnostic::PinUnavailable {
+                nest_id,
+                package: pinned,
+                recorded_hash,
+                ..
+            }] if nest_id == "gone-nest"
+                && *pinned == package("removed-step", "1.0.0")
+                && recorded_hash == &recorded
+        ),
+        "the walk names the absent package and the recorded hash: {diagnostics:?}"
+    );
+}
+
 /// Every stale-pin diagnostic of one outcome, in document order.
 fn stale_pins(outcome: &ComposeOutcome) -> Vec<ComposeDiagnostic> {
     outcome

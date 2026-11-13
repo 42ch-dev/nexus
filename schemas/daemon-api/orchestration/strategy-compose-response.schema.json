@@ -27,8 +27,13 @@
         "properties": {
           "code": {
             "type": "string",
-            "enum": ["unbound_required_slot", "slot_binding_dropped", "stale_pin"],
-            "description": "Diagnostic family: an unbound required slot, a slot binding flattening had to drop, or a pin outside the operation's reach whose bytes changed."
+            "enum": [
+              "unbound_required_slot",
+              "slot_binding_dropped",
+              "stale_pin",
+              "pin_unavailable"
+            ],
+            "description": "Diagnostic family: an unbound required slot, a slot binding flattening had to drop, a pin outside the operation's reach whose bytes changed, or a recorded pin whose package the registry no longer resolves."
           },
           "nest_id": {
             "type": "string",
@@ -36,11 +41,11 @@
           },
           "package_id": {
             "type": "string",
-            "description": "The pinned package (present for `unbound_required_slot` and `stale_pin`)."
+            "description": "The pinned package (present for `unbound_required_slot`, `stale_pin` and `pin_unavailable`)."
           },
           "package_version": {
             "type": "string",
-            "description": "The pinned package version (present for `unbound_required_slot` and `stale_pin`)."
+            "description": "The pinned package version (present for `unbound_required_slot`, `stale_pin` and `pin_unavailable`)."
           },
           "slot": {
             "type": "string",

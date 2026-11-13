@@ -97,7 +97,7 @@ async fn load_stored(pool: &SqlitePool, strategy_id: &str) -> CoreResult<Option<
         .map_err(storage_error)
 }
 
-async fn current_revision(pool: &SqlitePool, strategy_id: &str) -> CoreResult<u64> {
+pub async fn current_revision(pool: &SqlitePool, strategy_id: &str) -> CoreResult<u64> {
     let revision: Option<i64> =
         sqlx::query_scalar("SELECT revision FROM strategy_candidates WHERE strategy_id = ?")
             .bind(strategy_id)

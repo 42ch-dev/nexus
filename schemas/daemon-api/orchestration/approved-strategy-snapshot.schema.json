@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/approved-strategy-snapshot.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ApprovedStrategySnapshot",
+  "description": "Immutable approval of one candidate document content, returned by POST /v1/daemon/strategies/{strategy_id}/approve. The snapshot freezes the validated and simulated candidate bytes: the document, its canonical content hash, the candidate revision the approver read, the exact simulation trajectory the approval rests on, every resolved pattern pin, the approver and the approval time. It is never mutated; a later edit produces a new candidate revision and needs a new approval. Approve does not apply, schedule or execute.",
+  "type": "object",
+  "required": [
+    "approval_id",
+    "strategy_id",
+    "candidate_revision",
+    "document",
+    "content_hash",
+    "trajectory",
+    "pins",
+    "approver",
+    "approved_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "approval_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Snapshot identity, assigned by the daemon. One content hash approves at most once per strategy."
+    },
+    "strategy_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Strategy the approved candidate belongs to (the request path id)."
+    },
+    "candidate_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Candidate revision the approver read and the request guarded with `base_revision`."
+    },
+    "document": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/workflow-document.schema.json"
+    },
+    "content_hash": {
+      "type": "string",
+      "minLength": 1,
+      "description": "BLAKE3 canonical content hash recomputed from the frozen document through `nexus-workflow-ir`. It equals the recorded simulation's `ir_content_hash`, so the approval is bound to the bytes that passed validation and simulation."
+    },
+    "trajectory": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/simulation-trajectory.schema.json"
+    },
+    "pins": {
+      "type": "array",
+      "description": "Every resolved pattern pin the frozen document reaches, sorted by id, version and hash. Apply verifies these hashes and fails closed when a package changed under the same id and version.",
+      "items": {
+        "title": "StrategyPatternPin",
+        "description": "One resolved pattern reference: the exact `{id, version}` pin and the content hash the approval froze.",
+        "type": "object",
+        "required": ["id", "version", "content_hash"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Pattern registry id."
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact version label from the package manifest."
+          },
+          "content_hash": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Content hash the document recorded and the registry still serves."
+          }
+        }
+      }
+    },
+    "approver": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Creator principal that approved the candidate."
+    },
+    "approved_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC timestamp of the approval."
+    }
+  }
+}
