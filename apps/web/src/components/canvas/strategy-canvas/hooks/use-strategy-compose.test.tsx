@@ -113,6 +113,36 @@ describe('useStrategyCompose', () => {
     expect(result.current.patternsQuery.data?.items).toHaveLength(1);
   });
 
+  it('follows the listing cursor so a package on a later page is visible', async () => {
+    const laterPage = {
+      ...PATTERN_ITEMS[0],
+      package_dir: 'second-page-step',
+      id: 'second-page-step',
+      description: 'Prompt step on page two',
+    };
+    useHandlers(
+      http.get(PATTERNS_PATH, ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get('cursor');
+        if (cursor === 'page-2') {
+          return HttpResponse.json({ items: [laterPage], pagination: { limit: 1, has_more: false } });
+        }
+        return HttpResponse.json({
+          items: PATTERN_ITEMS,
+          pagination: { limit: 1, has_more: true, next_cursor: 'page-2' },
+        });
+      }),
+      http.get(CANDIDATE_PATH, () => HttpResponse.json(SEED)),
+    );
+
+    const { result } = renderCompose();
+
+    await waitFor(() => expect(result.current.patternsQuery.data?.items).toHaveLength(2));
+    expect(result.current.patternsQuery.data?.items.map((pattern) => pattern.id)).toEqual([
+      'prompt-step',
+      'second-page-step',
+    ]);
+  });
+
   it('nest sends the last-read revision and the interaction wires the connecting edge (T3b)', async () => {
     seedHandlers();
     const bodies: unknown[] = [];

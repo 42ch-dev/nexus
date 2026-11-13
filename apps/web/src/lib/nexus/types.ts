@@ -120,6 +120,7 @@ import type {
   StrategyComposeRequest,
   StrategyComposeResponse,
   ApprovedStrategySnapshot,
+  ListPatternsQuery,
   ListPatternsResponse,
   SimulationTrajectory,
   WorkflowDocument,
@@ -589,8 +590,12 @@ export interface NexusClient extends CoreSliceClient {
     strategyId: string,
     request: StrategyApproveRequest,
   ): Promise<ApprovedStrategySnapshot>;
-  /** `GET /v1/daemon/patterns` — the read-only pattern registry listing. */
-  listPatterns(): Promise<ListPatternsResponse>;
+  /**
+   * `GET /v1/daemon/patterns` — one page of the read-only pattern registry listing.
+   * `cursor`/`limit` select the page; a caller that needs every package follows
+   * `pagination.next_cursor`.
+   */
+  listPatterns(query?: ListPatternsQuery): Promise<ListPatternsResponse>;
 
   // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────
   /** `GET /v1/daemon/works/{work_id}/chapters` — cursor list (F-P3 `items` key). */

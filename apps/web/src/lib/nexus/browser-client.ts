@@ -113,6 +113,7 @@ import type {
   StrategyComposeRequest,
   StrategyComposeResponse,
   ApprovedStrategySnapshot,
+  ListPatternsQuery,
   ListPatternsResponse,
   SimulationTrajectory,
   WorkflowDocument,
@@ -692,8 +693,8 @@ export class BrowserClient implements NexusClient {
       request,
     );
   }
-  listPatterns(): Promise<ListPatternsResponse> {
-    return this.get<ListPatternsResponse>('/v1/daemon/patterns');
+  listPatterns(query?: ListPatternsQuery): Promise<ListPatternsResponse> {
+    return this.get<ListPatternsResponse>('/v1/daemon/patterns', query);
   }
 
   // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────

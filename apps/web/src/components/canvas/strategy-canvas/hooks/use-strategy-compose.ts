@@ -27,7 +27,7 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import { useNexusClient } from '@/lib/client-context';
-import { NexusClientError } from '@/lib/nexus';
+import { NexusClientError, type NexusClient } from '@/lib/nexus';
 
 export interface ComposeConflict {
   /** The daemon's message: "Candidate changed before this edit. Reload revision N and reapply the change." */
@@ -95,12 +95,32 @@ function freshId(base: string, taken: (id: string) => boolean): string {
   return id;
 }
 
+/**
+ * The listing is cursor-paged, and both compose gates (the picker and the
+ * unbound-slot check) need every package, so follow `next_cursor` until the
+ * service says there is no more.
+ */
+async function listAllPatterns(client: NexusClient): Promise<ListPatternsResponse> {
+  const items: ListPatternsResponse['items'] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await client.listPatterns(cursor === undefined ? undefined : { cursor });
+    items.push(...page.items);
+    const next = page.pagination.next_cursor;
+    // A repeated cursor cannot make progress; stop instead of paging forever.
+    if (!page.pagination.has_more || next === undefined || next === cursor) {
+      return { items, pagination: { limit: page.pagination.limit, has_more: false } };
+    }
+    cursor = next;
+  }
+}
+
 export function useStrategyCompose(presetId: string, enabled: boolean) {
   const client = useNexusClient();
 
   const patternsQuery = useQuery<ListPatternsResponse>({
     queryKey: ['canvas', 'strategy-compose', 'patterns'],
-    queryFn: () => client.listPatterns(),
+    queryFn: () => listAllPatterns(client),
     enabled,
     staleTime: 30_000,
   });
