@@ -4060,6 +4060,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-pattern"
+version = "0.1.0"
+dependencies = [
+ "nexus-contracts",
+ "nexus-workflow-ir",
+ "semver",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml",
+]
+
+[[package]]
 name = "nexus-preset"
 version = "0.1.0"
 dependencies = [

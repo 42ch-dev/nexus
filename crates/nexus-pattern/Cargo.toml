@@ -1,0 +1,23 @@
+[package]
+name = "nexus-pattern"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Read-only pattern package registry: strict `pattern.toml` manifest plus `workflow.ir.json` fragment"
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-contracts = { path = "../nexus-contracts" }
+nexus-workflow-ir = { path = "../nexus-workflow-ir" }
+# SemVer 2.0.0 manifest validation; the workspace has no other SemVer parser.
+semver = "1"
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
