@@ -2,7 +2,7 @@
 
 Status: proposed — P4–P6 not implemented; P3 shipped in v1.239 (#515) and is governed by the composition spec, not by this record
 Date: 2026-11-10
-Scope: The still-unshipped part of the cutover — the dual-read loader, IR-primary authoring, and retirement of the hand-authored YAML main path while retaining `preset.yaml` import/export. The Canvas composition surface, the compose operations, the pattern packages and the candidate lifecycle shipped in v1.239 and are owned by the composition spec.
+Scope: The still-unshipped part of the cutover — the dual-read loader, IR-primary authoring, and retirement of the hand-authored YAML main path while retaining `preset.yaml` import/export. The Canvas composition surface, the compose operations, the pattern packages and the candidate lifecycle **up to Approve** shipped in v1.239 and are owned by the composition spec.
 Source: split from the archived Canvas + Workflow IR redesign and Dynamic Workflow Generation and Orchestration Simulation records
 
 ## Problem
@@ -25,8 +25,11 @@ The composition surface, the nest/compose operations, the pattern-package contra
 lifecycle **up to Approve** shipped in v1.239 (#515). **Canvas Apply and Execute did not**, and this
 record does not assign them to a phase: P6's fourth acceptance item ("compose and generate candidates pass
 validate, simulate, approve, and apply") and §6's rollback-by-new-Apply both assume a stage that does not
-exist yet, so whichever plan takes P6 must place Apply first. Nothing in P4 or P5 needs it. Their current contract — manifest fields, the content-hash pin,
-the four operations and their CAS, the approval freeze, the flag and its per-audience default — lives in
+exist yet. Apply must therefore come **before P4**, not before P6: dual-read has nothing to load until a
+candidate can be applied, so the plan that takes P4 owns placing Apply first.
+
+The shipped contract — manifest fields, the content-hash pin, the four operations and their CAS, the
+approval freeze, the flag and its per-audience default — lives in
 [the composition spec](../../../../docs/specs/orchestration/strategy-composition.md). This record keeps
 only the reasoning for what is still unshipped.
 
