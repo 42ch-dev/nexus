@@ -287,6 +287,17 @@ pub fn map_core_error(err: CoreError) -> CliError {
         CoreError::OutlineValidation(v) => {
             map_validation_refusal("outline_validation_failed", &v.errors)
         }
+        CoreError::StrategyCandidateConflict(conflict) => CliError::Api {
+            status: 409,
+            message: format!(
+                "[strategy_candidate_conflict] strategy {}, base_revision {}, current_revision {}, conflicting_path {}, recovery_hint {}",
+                conflict.strategy_id,
+                conflict.base_revision,
+                conflict.current_revision,
+                conflict.conflicting_path,
+                conflict.recovery_hint
+            ),
+        },
         CoreError::OwnerBusy | CoreError::Busy => CliError::Locked {
             holder_pid: 0,
             holder_name: "workspace writer".to_string(),

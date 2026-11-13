@@ -10,8 +10,6 @@ use nexus_contracts::{
     WorkflowDocument as WireWorkflowDocument,
 };
 use nexus_orchestration::{simulate_document, CapabilityRegistryHolder, SimulationOptions};
-use nexus_preset::capability_catalog::BuiltinCapabilityCatalog;
-use nexus_preset::workflow_ir::{import_preset_bundle, import_preset_manifest};
 use nexus_workflow_ir::WorkflowDocument;
 
 impl CoreService {
@@ -34,26 +32,8 @@ impl CoreService {
         strategy_id: String,
     ) -> CoreResult<WireWorkflowDocument> {
         self.verify_principal(principal)?;
-        let home = &self.inner.nexus_home;
-        let caps = BuiltinCapabilityCatalog;
-        let (_, bundle_dir) =
-            crate::presets::locate_preset(home, &strategy_id).map_err(CoreError::from)?;
-        let loaded = match nexus_preset::lookup_preset_by_id(&strategy_id, home, &caps) {
-            Some(loaded) => loaded,
-            None => nexus_preset::resolve_preset(&strategy_id, home, &caps).map_err(|error| {
-                PresetError::NotFound(format!("preset '{strategy_id}' not found: {error}"))
-            })?,
-        };
-        let document = match bundle_dir {
-            Some(dir) => {
-                import_preset_bundle(&loaded.manifest, &dir).map(|imported| imported.document)
-            }
-            None => import_preset_manifest(&loaded.manifest),
-        }
-        .map_err(|error| CoreError::InvalidInput {
-            field: "strategy".into(),
-            reason: error.to_string(),
-        })?;
+        let document =
+            crate::strategy_candidates::imported_strategy_document(&self.inner.nexus_home, &strategy_id)?;
         serde_json::to_value(&document)
             .and_then(serde_json::from_value)
             .map_err(|error| CoreError::Internal {

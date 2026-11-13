@@ -459,6 +459,42 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             details: serde_json::Map::from_iter([("conflict_code".into(), Value::String(code))]),
             http_status: Some(409),
         },
+        // A stale candidate compose base: 409 with the plan's
+        // `strategy_candidate_conflict` details. The generated vocabulary has
+        // no dedicated code yet, so the conflict rides `owner_busy` with the
+        // wire code and every detail field explicit (the `ActorConflict`
+        // precedent).
+        DomainError::StrategyCandidateConflict(conflict) => CoreError {
+            code: CoreErrorCode::OwnerBusy,
+            message: "strategy candidate conflict".into(),
+            details: serde_json::Map::from_iter([
+                (
+                    "conflict_code".into(),
+                    Value::String("strategy_candidate_conflict".into()),
+                ),
+                (
+                    "strategy_id".into(),
+                    Value::String(conflict.strategy_id),
+                ),
+                (
+                    "base_revision".into(),
+                    serde_json::Number::from(conflict.base_revision).into(),
+                ),
+                (
+                    "current_revision".into(),
+                    serde_json::Number::from(conflict.current_revision).into(),
+                ),
+                (
+                    "conflicting_path".into(),
+                    Value::String(conflict.conflicting_path),
+                ),
+                (
+                    "recovery_hint".into(),
+                    Value::String(conflict.recovery_hint),
+                ),
+            ]),
+            http_status: Some(409),
+        },
         DomainError::Internal { category } => CoreError {
             code: CoreErrorCode::Internal,
             message: "internal error".into(),
