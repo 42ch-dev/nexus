@@ -1,6 +1,7 @@
 # ADR: Canvas Composition and Pattern Packages — Strategy Orchestration Cutover
 
-Status: proposed — P3–P6 not implemented
+Status: proposed — P3 shipped in v1.239 (#515, `34d348fe2`) and is governed by
+[docs/specs/orchestration/strategy-composition.md](../../../../docs/specs/orchestration/strategy-composition.md); P4–P6 not implemented
 Date: 2026-11-10
 Scope: The unshipped Canvas composition surface, nest/compose operations, pattern packages with pinned content hashes, candidate lifecycle UX, dual-read loader, IR-primary authoring, and retirement of the hand-authored YAML main path while retaining `preset.yaml` import/export.
 Source: split from the archived Canvas + Workflow IR redesign and Dynamic Workflow Generation and Orchestration Simulation records
@@ -109,11 +110,15 @@ Permission layering is:
 
 ### 5. P3–P6 ladder
 
-P0/P1/P2 are shipped and are governed by their implemented records. The remaining ladder is:
+P0/P1/P2 are shipped and are governed by their implemented records. **P3 also shipped**, in v1.239
+(#515): pattern packages with content pins, the four compose operations with candidate revision CAS, the
+approval freeze, and the flagged Canvas compose surface. Its current contract lives in
+[docs/specs/orchestration/strategy-composition.md](../../../../docs/specs/orchestration/strategy-composition.md);
+this record keeps only the unshipped ladder.
 
 | Phase | Change | Exit criteria |
 | --- | --- | --- |
-| **P3 Canvas compose MVP** | Flagged IR projection, nest pattern, and Approve UI | A creator composes two patterns into a candidate, simulates, and approves in staging |
+| ~~**P3 Canvas compose MVP**~~ | **Shipped in v1.239** — see the composition spec | Met: a creator composes two patterns into a candidate, simulates, and approves in staging |
 | **P4 Dual-read loader** | Engine loads applied IR or a preset bundle | Existing YAML-preset schedules remain unbroken; IR→Graph mapping matches orchestration-engine §8.2 |
 | **P5 IR-primary authoring** | Documentation and samples are authored as IR; YAML export remains compatibility output | New repository strategies land as IR |
 | **P6 Retire hand-authored YAML main path** | Hand-edit and YAML patch cease to be the default authoring/intake path; import/export remains | Retirement acceptance below passes; the legacy YAML mapper defaults off in new installs and the import tool remains |
