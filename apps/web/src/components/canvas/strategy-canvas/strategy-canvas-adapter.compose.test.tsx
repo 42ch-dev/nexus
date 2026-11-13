@@ -104,6 +104,29 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
     expect(toggled).toEqual(['collect-sources']);
   });
 
+  it('never merges a local draft edge into the compose projection', () => {
+    const draft = {
+      id: 'draft-edge',
+      source: 'draft',
+      target: 'done',
+      type: 'strategy-edge',
+      data: { transitionKind: 'next' as const, isDraft: true },
+    };
+    const adapter = createStrategyCanvasAdapter(ctxRef({ localEdges: [draft] }));
+    const payload = {
+      revision: 0,
+      parsed: { manifest: { preset: { id: 'user/demo' }, states: [] }, problems: [] },
+      activeSession: null,
+      trajectory: null,
+    };
+
+    // Compose path: the candidate is the only structural authority.
+    expect(adapter.projectGraph({ ...payload, document: composedCandidate() }).edges.map((e) => e.id))
+      .not.toContain('draft-edge');
+    // Flag off: today's behaviour is untouched.
+    expect(adapter.projectGraph(payload).edges.map((e) => e.id)).toContain('draft-edge');
+  });
+
   it('keeps the YAML projection when no candidate document is present (flag off)', () => {
     const adapter = createStrategyCanvasAdapter(ctxRef());
     const { nodes } = adapter.projectGraph({

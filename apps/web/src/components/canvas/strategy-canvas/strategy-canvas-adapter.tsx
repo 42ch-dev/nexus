@@ -204,8 +204,10 @@ export function createStrategyCanvasAdapter(
 
       // Merge local edge modifications (draft transition edges created by the
       // author via onConnect) that are not yet persisted to the daemon graph.
-      // Drafts have no matching projected edge id, so we append them.
-      const localEdges = ctxRef.current.localEdges;
+      // Drafts have no matching projected edge id, so we append them. On the
+      // compose path the candidate is the only structural authority: a draft
+      // would display a transition the simulated and approved document lacks.
+      const localEdges = graph.document ? [] : ctxRef.current.localEdges;
       const baseIds = new Set(projected.edges.map((e) => e.id));
       const drafts = localEdges.filter((e) => !baseIds.has(e.id));
 

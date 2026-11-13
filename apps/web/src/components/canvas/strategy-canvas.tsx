@@ -322,6 +322,9 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       'strategy.create-transition.keywords.link-states',
     ],
     handler: () => setCreateDialogOpen(true),
+    // Compose path: the candidate is the one structural authority, so the YAML
+    // transition author stays out of the palette (D: one writer per path).
+    available: () => !composeEnabled,
   });
 
   useEffect(() => {
@@ -389,7 +392,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         activeSession={strategyState.activeSession}
         showAlt={surface.showAlt}
         setShowAlt={surface.setShowAlt}
-        onOpenCreateTransition={() => setCreateDialogOpen(true)}
+        onOpenCreateTransition={composeEnabled ? undefined : () => setCreateDialogOpen(true)}
         onSimulate={handleSimulate}
         staging={composeEnabled}
         onAddPattern={composeEnabled ? () => setPatternPickerOpen(true) : undefined}
@@ -403,8 +406,10 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
           edges={surface.edges}
           nodeTypes={surface.nodeTypes}
           onNodesChange={surface.onNodesChange}
-          onConnect={onConnect}
-          onReconnect={strategyState.onReconnect}
+          // Compose path: a displayed edge is never authored through the YAML
+          // authority — connect/reconnect write the preset, not the candidate.
+          onConnect={composeEnabled ? undefined : onConnect}
+          onReconnect={composeEnabled ? undefined : strategyState.onReconnect}
           summaryText={surface.summaryText}
           ariaLabel={t('strategy.graphAriaLabel')}
           relayout={surface.relayout}

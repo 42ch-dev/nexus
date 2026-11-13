@@ -206,6 +206,8 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     renderCanvas();
     expect(await screen.findByTestId('strategy-staging')).toBeInTheDocument();
     expect(screen.getByTestId('strategy-add-pattern')).toBeInTheDocument();
+    // One structural authority: the YAML transition author is gone on the compose path.
+    expect(screen.queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
 
     // Nest: pick the pattern and commit.
     fireEvent.click(screen.getByTestId('strategy-add-pattern'));
@@ -386,6 +388,9 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
     // The compose seed/patterns reads never fire with the flag off.
     expect(irReads).toBe(0);
     expect(patternReads).toBe(0);
+
+    // The legacy transition author stays exactly where it was.
+    expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
 
     // Today's Simulate behaviour: resolve the installed preset IR and walk it.
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
