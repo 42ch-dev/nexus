@@ -1,8 +1,8 @@
 # ADR: Canvas Composition and Pattern Packages — Strategy Orchestration Cutover
 
-Status: proposed — P4–P6 not implemented; P3 shipped in v1.239 (#515) and is governed by the composition spec, not by this record
+Status: proposed — P3.5 Apply and P4–P6 not implemented; P3 shipped in v1.239 (#515) and is governed by the composition spec, not by this record
 Date: 2026-11-10
-Scope: The still-unshipped part of the cutover — the dual-read loader, IR-primary authoring, and retirement of the hand-authored YAML main path while retaining `preset.yaml` import/export. The Canvas composition surface, the compose operations, the pattern packages and the candidate lifecycle **up to Approve** shipped in v1.239 and are owned by the composition spec.
+Scope: The still-unshipped part of the cutover — Apply/Execute from a candidate, the dual-read loader, IR-primary authoring, and retirement of the hand-authored YAML main path while retaining `preset.yaml` import/export. The Canvas composition surface, the compose operations, the pattern packages and the candidate lifecycle **up to Approve** shipped in v1.239 and are owned by the composition spec.
 Source: split from the archived Canvas + Workflow IR redesign and Dynamic Workflow Generation and Orchestration Simulation records
 
 ## Problem
@@ -12,9 +12,9 @@ P2 shipped the [strategy simulation fence](../../implemented/architecture/2026-1
 and P3 shipped composition and approval in v1.239. Canvas composes, packages are published with pinned
 identity, and a candidate can be simulated and approved. What the cutover still lacks:
 
-1. **No producer for applied IR.** Produce → validate → simulate → approve exists; Apply does not. Nothing
-   persists an approved identity, so the stage dual-read consumes has no source. This is the first problem
-   any P4 work must answer.
+1. **Approved identity is persisted but never applied.** Approve writes an immutable snapshot carrying the
+   document, its content hash and its pins; nothing turns that snapshot into the identity production intake
+   reads. Apply is the missing stage, and it is what makes "applied IR" mean something.
 2. **Production intake is still YAML-only.** A controlled dual-read transition has to exist before
    IR-primary execution can replace the YAML-only mapper, and it has nothing to load until (1) is solved.
 3. **New strategy authoring, compatibility export, and retirement of the hand-authored YAML main path**
@@ -31,8 +31,10 @@ The composition surface, the nest/compose operations, the pattern-package contra
 lifecycle **up to Approve** shipped in v1.239 (#515). **Canvas Apply and Execute did not**, and this
 record does not assign them to a phase: P6's fourth acceptance item ("compose and generate candidates pass
 validate, simulate, approve, and apply") and §6's rollback-by-new-Apply both assume a stage that does not
-exist yet. Apply must therefore come **before P4**, not before P6: dual-read has nothing to load until a
-candidate can be applied, so the plan that takes P4 owns placing Apply first.
+exist yet. Apply is therefore its own stage — **P3.5 Apply** below — and it precedes P4 in practice: dual-read
+can begin by loading imported preset bundles (the intake that exists today) to prove the IR→Graph mapping,
+but it cannot load an *applied* IR identity until Apply produces one. The plan that takes P4 owns placing
+Apply first.
 
 The shipped contract — manifest fields, the content-hash pin, the four operations and their CAS, the
 approval freeze, the flag and its per-audience default — lives in
@@ -48,13 +50,14 @@ contract details:
   receive.** `unnest` refuses rather than dropping a body's role/asset/signal declarations or the removed
   slot's own control references.
 
-### 5. P4–P6 ladder
+### 5. P3.5–P6 ladder
 
 P0/P1/P2 shipped and are governed by their implemented records. P3 shipped in v1.239 and is governed by
 the composition spec. What remains:
 
 | Phase | Change | Exit criteria |
 | --- | --- | --- |
+| **P3.5 Apply/Execute** | Turn an approved snapshot into the identity production intake reads; Execute continues to run graph-flow | An approved candidate is applied and an existing schedule runs from that applied identity; a rollback installs the previous snapshot through a new Apply |
 | **P4 Dual-read loader** | Engine loads applied IR or a preset bundle | Existing YAML-preset schedules remain unbroken; IR→Graph mapping matches orchestration-engine §8.2 |
 | **P5 IR-primary authoring** | Documentation and samples are authored as IR; YAML export remains compatibility output | New repository strategies land as IR |
 | **P6 Retire hand-authored YAML main path** | Hand-edit and YAML patch cease to be the default authoring/intake path; import/export remains | Retirement acceptance below passes; the legacy YAML mapper defaults off in new installs and the import tool remains |
@@ -77,7 +80,7 @@ Rollback of a bad Apply installs the previous approved snapshot through a new Ap
 
 ### 7. Retirement scope
 
-P4–P6 replace:
+P3.5–P6 add, and P4–P6 replace:
 
 - Hand-authored `preset.yaml` as the primary authoring path.
 - TypeScript `parsePresetYaml` + `buildStrategyGraph` as the sole Canvas source.
@@ -98,7 +101,7 @@ The Canvas transition removes YAML-only projection from the hot path only after 
 - **Allow hot update under an unchanged approved version.** Rejected: source identity would change silently; a new Approve/Apply is required.
 - **Delete `preset.yaml` import/export at P6.** Rejected: partner/integrator bundles remain a public compatibility format; only the hand-authored main path retires.
 - **Maintain YAML and IR as independent grammars.** Rejected: YAML becomes import/projection through the shared semantic core.
-- **Big-bang intake replacement.** Rejected: P4–P6 preserve existing schedules, emergency YAML re-enable, mixed workspaces, and previous-snapshot rollback.
+- **Big-bang intake replacement.** Rejected: P3.5–P6 preserve existing schedules, emergency YAML re-enable, mixed workspaces, and previous-snapshot rollback.
 - **Replace graph-flow, add a first-party player, or absorb Work Artifact IR.** Rejected as separate or explicitly excluded responsibilities.
 
 ## Acceptance criteria
