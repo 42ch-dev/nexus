@@ -32,8 +32,10 @@ impl CoreService {
         strategy_id: String,
     ) -> CoreResult<WireWorkflowDocument> {
         self.verify_principal(principal)?;
-        let document =
-            crate::strategy_candidates::imported_strategy_document(&self.inner.nexus_home, &strategy_id)?;
+        let document = crate::strategy_candidates::imported_strategy_document(
+            &self.inner.nexus_home,
+            &strategy_id,
+        )?;
         serde_json::to_value(&document)
             .and_then(serde_json::from_value)
             .map_err(|error| CoreError::Internal {

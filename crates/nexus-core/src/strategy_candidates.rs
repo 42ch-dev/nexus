@@ -44,7 +44,7 @@ pub struct StrategyCandidate {
 ///
 /// Returns the preset-family errors when the id does not resolve or cannot be
 /// projected into an IR document.
-pub(crate) fn imported_strategy_document(
+pub fn imported_strategy_document(
     nexus_home: &Path,
     strategy_id: &str,
 ) -> CoreResult<WorkflowDocument> {
@@ -84,22 +84,17 @@ fn conflict(strategy_id: &str, base_revision: u64, current_revision: u64) -> Cor
         base_revision,
         current_revision,
         conflicting_path: "$".to_string(),
-        recovery_hint:
-            "Reload the current candidate and explicitly reapply the compose operation.".to_string(),
+        recovery_hint: "Reload the current candidate and explicitly reapply the compose operation."
+            .to_string(),
     })
 }
 
-async fn load_stored(
-    pool: &SqlitePool,
-    strategy_id: &str,
-) -> CoreResult<Option<(String, i64)>> {
-    sqlx::query_as(
-        "SELECT document_json, revision FROM strategy_candidates WHERE strategy_id = ?",
-    )
-    .bind(strategy_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(storage_error)
+async fn load_stored(pool: &SqlitePool, strategy_id: &str) -> CoreResult<Option<(String, i64)>> {
+    sqlx::query_as("SELECT document_json, revision FROM strategy_candidates WHERE strategy_id = ?")
+        .bind(strategy_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(storage_error)
 }
 
 async fn current_revision(pool: &SqlitePool, strategy_id: &str) -> CoreResult<u64> {
@@ -158,9 +153,7 @@ impl CoreService {
     ) -> CoreResult<StrategyCandidate> {
         self.verify_principal(principal)?;
         match load_stored(&self.inner.pool, strategy_id).await? {
-            Some((document_json, revision)) => {
-                decode_stored(strategy_id, &document_json, revision)
-            }
+            Some((document_json, revision)) => decode_stored(strategy_id, &document_json, revision),
             None => self.imported_candidate(strategy_id),
         }
     }
@@ -190,7 +183,9 @@ impl CoreService {
         self.verify_principal(principal)?;
         let stored = load_stored(&self.inner.pool, strategy_id).await?;
         let current = match &stored {
-            Some((document_json, revision)) => decode_stored(strategy_id, document_json, *revision)?,
+            Some((document_json, revision)) => {
+                decode_stored(strategy_id, document_json, *revision)?
+            }
             None => self.imported_candidate(strategy_id)?,
         };
         if current.revision != base_revision {
@@ -198,12 +193,12 @@ impl CoreService {
         }
 
         let mut document = apply(&current.document)?;
-        let new_revision = base_revision.checked_add(1).ok_or_else(|| {
-            CoreError::InvalidInput {
+        let new_revision = base_revision
+            .checked_add(1)
+            .ok_or_else(|| CoreError::InvalidInput {
                 field: "base_revision".into(),
                 reason: "revision is exhausted".into(),
-            }
-        })?;
+            })?;
         if document.id.as_str() != strategy_id {
             return Err(CoreError::InvalidInput {
                 field: "document.id".into(),
@@ -216,7 +211,10 @@ impl CoreService {
         if document.state != WorkflowDocumentState::Candidate {
             return Err(CoreError::InvalidInput {
                 field: "document.state".into(),
-                reason: format!("a candidate must stay in state `candidate`, got `{}`", document.state),
+                reason: format!(
+                    "a candidate must stay in state `candidate`, got `{}`",
+                    document.state
+                ),
             });
         }
         document.revision = new_revision;

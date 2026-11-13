@@ -4,8 +4,7 @@
 //! typed conflict for a stale base.
 
 use nexus_core::{
-    CoreAccess, CoreError, CoreOpenOptions, CoreService, Principal,
-    StrategyCandidateConflictError,
+    CoreAccess, CoreError, CoreOpenOptions, CoreService, Principal, StrategyCandidateConflictError,
 };
 use nexus_workflow_ir::WorkflowDocument;
 use sqlx::SqlitePool;
@@ -66,7 +65,7 @@ async fn an_unstored_strategy_reads_the_revision_zero_import_and_persists_nothin
     assert_eq!(candidate.document.revision, 0);
     assert_eq!(candidate.document.state.to_string(), "candidate");
     assert_eq!(candidate.document.id.as_str(), "novel-writing");
-    assert!(!candidate.content_hash.is_empty());
+    assert_ne!(candidate.content_hash, "");
 
     assert!(
         stored_row(core.pool(), "novel-writing").await.is_none(),
@@ -151,9 +150,8 @@ async fn two_sequential_writes_bump_the_revision_once_each() {
         assert_eq!(committed.document.revision, expected);
     }
 
-    let (_, document_json, revision, _, _) = stored_row(core.pool(), "novel-writing")
-        .await
-        .unwrap();
+    let (_, document_json, revision, _, _) =
+        stored_row(core.pool(), "novel-writing").await.unwrap();
     assert_eq!(revision, 2);
     let stored: WorkflowDocument = serde_json::from_str(&document_json).unwrap();
     assert_eq!(stored.revision, 2);
@@ -182,7 +180,7 @@ async fn a_second_writer_at_the_pre_bump_revision_is_refused_not_merged() {
     stale.meta.description = "writer a".to_string();
     let conflict = conflict_of(
         core.commit_strategy_candidate(&principal, "novel-writing", read.revision, move |_| {
-            Ok(stale.clone())
+            Ok(stale)
         })
         .await
         .unwrap_err(),
