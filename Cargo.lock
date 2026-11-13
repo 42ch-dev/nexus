@@ -48,9 +48,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol"
-version = "5.0.0"
+version = "5.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80ce60ce096020c2d0aa10445bc27b8856109e288abaf564ab517031ae819d69"
+checksum = "c60cfd8cddbb23d9e30f51dca5316b4cea769ba55900db1fa8951dca4f28d02d"
 dependencies = [
  "agent-client-protocol-derive",
  "agent-client-protocol-schema",
@@ -66,9 +66,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-derive"
-version = "5.0.0"
+version = "5.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a12951a4e9a163a9384dec4e5681bd774c0fdb3871c5ed1deb7b44bc630df17a"
+checksum = "b296716e42d77d38aef7f645cbe0765287b0e0a84722cb9f8ac39e6cdcecdb2a"
 dependencies = [
  "quote",
  "syn 3.0.6",
@@ -76,9 +76,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-schema"
-version = "1.15.1"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b2316d2cd561917bc2c16e3c64771c77e24363b56d40b58fdad091d02059992"
+checksum = "e20d2c4af6eb08f6a4f562520bdd939a4af803255fec461dd523638c22f5b265"
 dependencies = [
  "anyhow",
  "derive_more",
@@ -695,9 +695,9 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.319"
+version = "2.1.323"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f77b7a27b5605ed56a9521a31af8b77cf89bfdd4a64f9584a3214200a5bb9ed4"
+checksum = "bba5cc008fc52dd10e37982a7ede769026ef25ee2617ad6dd5f64dc6d85527cb"
 dependencies = [
  "anyhow",
  "chrono",
@@ -736,9 +736,9 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.167.0"
+version = "0.167.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5117394af341c5aa65f56d3ab915e360b39fdc9e59266fc58b589040041d0295"
+checksum = "36829077ce6f65303188a089ea06cfdbfbc4e3a5ee66aa2997e31c96ad3f029c"
 dependencies = [
  "log",
  "serde",
@@ -6765,9 +6765,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.29.1"
+version = "1.29.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a06f08a856b009bc7bbaf7d3e79808595d032dd19074c0c2ef26e49e03e6bdc"
+checksum = "bed99139f7dac9b5cfe5f17be4d66dc7079a34dee1d74bcc77217119240e267c"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
