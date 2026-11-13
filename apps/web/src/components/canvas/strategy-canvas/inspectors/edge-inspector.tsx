@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 
-import { useNexusClient } from '@/lib/client-context';
+import { useStrategyYamlAuthority } from '@/lib/canvas/strategy-yaml-authority';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useToast } from '@/lib/use-toast';
 import type { StrategyPatchResponse, StrategyPatchTransitionRequest } from '@42ch/nexus-contracts';
@@ -27,18 +27,16 @@ export interface PatchStrategyTransitionArgs {
   transitionKind?: StrategyPatchTransitionRequest['transition_kind'];
 }
 
-export function usePatchStrategyTransition(): UseMutationResult<
-  StrategyPatchResponse,
-  unknown,
-  PatchStrategyTransitionArgs
-> {
-  const client = useNexusClient();
+export function usePatchStrategyTransition(
+  structuralWritesDisabled = false,
+): UseMutationResult<StrategyPatchResponse, unknown, PatchStrategyTransitionArgs> {
+  const yaml = useStrategyYamlAuthority(structuralWritesDisabled);
   const qc = useQueryClient();
   const { t } = useTranslation('canvas');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (args: PatchStrategyTransitionArgs) =>
-      client.strategyPatchTransition(args.strategyId, {
+      yaml.patchTransition(args.strategyId, {
         strategy_id: args.strategyId,
         base_revision: args.baseRevision,
         source_state_id: args.sourceStateId,
@@ -89,13 +87,13 @@ export function EdgeInspector({
   structuralWritesDisabled = false,
 }: EdgeInspectorProps) {
   const { t } = useTranslation('canvas');
-  const patch = usePatchStrategyTransition();
+  const patch = usePatchStrategyTransition(structuralWritesDisabled);
   const original = originalFormOf(selectedState);
   const dirty = isSectionDirty('transition', form, original);
   const lastHandledTriggerRef = useRef(0);
 
   const handleSave = useCallback(async () => {
-    if (structuralWritesDisabled || !dirty || patch.isPending || typeof selectedState.next !== 'string') {
+    if (!dirty || patch.isPending || typeof selectedState.next !== 'string') {
       return;
     }
     onSaveStatus(undefined);
@@ -123,7 +121,7 @@ export function EdgeInspector({
         onSaveStatus({ type: 'error', message });
       }
     }
-  }, [structuralWritesDisabled, dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict, t]);
+  }, [dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict, t]);
 
   // Keep a fresh callback reference for the keyboard shortcut effect so the
   // effect itself does not need to depend on the callback (R-V172P1-QC1-001).
@@ -235,7 +233,6 @@ export function DraftEdgeInspector({
   const [condition, setCondition] = useState('');
 
   function handleCommit() {
-    if (structuralWritesDisabled) return;
     const args: DraftCommitArgs = {};
     if (condition.trim()) args.condition = condition.trim();
     onCommit(args);

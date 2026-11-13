@@ -590,3 +590,38 @@ describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
     expect(patch).not.toHaveBeenCalled();
   });
 });
+
+describe('useStrategyCanvas structural write authority', () => {
+  function makeClient(patch: () => Promise<unknown>): NexusClient {
+    return {
+      strategyPatchState: vi.fn(),
+      strategyPatchTransition: vi.fn(patch),
+      strategyPatchPromptTemplate: vi.fn(),
+    } as unknown as NexusClient;
+  }
+
+  it('refuses every structural channel while the candidate owns the document', async () => {
+    const patch = vi.fn().mockResolvedValue({ new_revision: 2 });
+    const client = makeClient(patch);
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', true), {
+      wrapper: makeCommitWrapper(client),
+    });
+
+    await act(async () => {
+      // Spatial connect authors only a local draft; its commit is a YAML write.
+      result.current.onConnect({ source: 's1', target: 's2', sourceHandle: null, targetHandle: null });
+    });
+    await act(async () => {
+      result.current.commitDraft({});
+    });
+    await act(async () => {
+      result.current.commitKeyboardCreate({ sourceStateId: 's1', targetStateId: 's2' });
+      result.current.onReconnect(
+        { id: 'edge-1', source: 's1', target: 's2', data: { transitionKind: 'next' } },
+        { source: 's1', target: 's3', sourceHandle: null, targetHandle: null },
+      );
+    });
+
+    expect(patch).not.toHaveBeenCalled();
+  });
+});

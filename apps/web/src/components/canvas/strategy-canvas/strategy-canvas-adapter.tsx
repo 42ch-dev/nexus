@@ -271,6 +271,8 @@ export function createStrategyCanvasAdapter(
             saveStatus={ctx.saveStatuses.state}
             onSaveStatus={(s) => ctx.onSaveStatus('state', s)}
             onConflict={ctx.handleConflict}
+            // Compose path: node writes belong to the candidate document.
+            structuralWritesDisabled={Boolean(ctx.compose)}
           />
           <div onFocusCapture={() => ctx.setActiveSection('transition')}>
             <EdgeInspector

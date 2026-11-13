@@ -379,7 +379,8 @@
         "saved": "Saved",
         "saveFailed": "Save failed",
         "saving": "Saving…",
-        "updated": "State updated"
+        "updated": "State updated",
+        "composeDisabled": "States are authored in the candidate while composing; this YAML editor is disabled."
       },
       "transition": {
         "title": "Transition",

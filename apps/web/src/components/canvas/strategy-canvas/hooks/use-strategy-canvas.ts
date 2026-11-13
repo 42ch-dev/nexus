@@ -21,7 +21,7 @@ import {
   usePresetGraph,
   usePresetSchedules,
 } from '@/lib/canvas/use-strategy-data';
-import { useNexusClient } from '@/lib/client-context';
+import { useStrategyYamlAuthority } from '@/lib/canvas/strategy-yaml-authority';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useToast } from '@/lib/use-toast';
 
@@ -161,7 +161,7 @@ export function useStrategyCanvas(presetId: string, structuralWritesDisabled = f
     return states?.find((s) => s.id === selectedDraftEdge.source);
   }, [selectedDraftEdge, states]);
 
-  const nexusClient = useNexusClient();
+  const yaml = useStrategyYamlAuthority(structuralWritesDisabled);
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -180,10 +180,7 @@ export function useStrategyCanvas(presetId: string, structuralWritesDisabled = f
   const commitDraftMutation = useMutation({
     mutationFn: async (args: { condition?: string }) => {
       if (!selectedDraftEdge) throw new Error('No draft transition to commit');
-      // A draft authored while the flag was off keeps its edge, but the YAML
-      // authority is closed once the candidate document is the one writer.
-      if (structuralWritesDisabled) throw new Error('Draft transitions are authored in the candidate while composing.');
-      return nexusClient.strategyPatchTransition(presetId, {
+      return yaml.patchTransition(presetId, {
         strategy_id: presetId,
         base_revision: workingRevisionRef.current,
         source_state_id: selectedDraftEdge.source,
@@ -244,7 +241,7 @@ export function useStrategyCanvas(presetId: string, structuralWritesDisabled = f
       transitionKind?: 'next' | 'branch' | 'default';
       condition?: string;
     }) => {
-      return nexusClient.strategyPatchTransition(presetId, {
+      return yaml.patchTransition(presetId, {
         strategy_id: presetId,
         base_revision: workingRevisionRef.current,
         source_state_id: args.sourceStateId,
@@ -302,7 +299,7 @@ export function useStrategyCanvas(presetId: string, structuralWritesDisabled = f
       const { oldEdge, newConnection } = args;
       if (!newConnection.target) throw new Error('Reconnect is missing a new target');
       const data = oldEdge.data as { transitionKind?: string; condition?: string } | undefined;
-      return nexusClient.strategyPatchTransition(presetId, {
+      return yaml.patchTransition(presetId, {
         strategy_id: presetId,
         base_revision: workingRevisionRef.current,
         source_state_id: oldEdge.source,

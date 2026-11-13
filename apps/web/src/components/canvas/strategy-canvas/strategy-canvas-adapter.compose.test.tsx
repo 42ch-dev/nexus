@@ -135,6 +135,33 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
     expect(client.strategyPatchTransition).not.toHaveBeenCalled();
   });
 
+  it('disables the YAML state patch while a candidate document is the authority', () => {
+    const client = { strategyPatchState: vi.fn() } as unknown as NexusClient;
+    const adapter = createStrategyCanvasAdapter(
+      ctxRef({
+        selectedState: { id: 'draft', next: 'done' } as PresetState,
+        form: { label: 'Draft (renamed)', description: '', nextTarget: 'done', promptBody: '' },
+        compose: {
+          isComposing: false,
+          onToggleSlotExpanded: () => {},
+          onBindSlot: () => Promise.resolve(),
+          onReplaceSubtree: () => Promise.resolve(),
+          onUnnest: () => Promise.resolve(),
+        },
+      }),
+    );
+
+    renderInApp(<>{adapter.renderInspector?.(null as never)}</>, { client });
+
+    const section = screen.getByRole('region', { name: 'State inspector' });
+    // Kept visible with its reason, not silently hidden.
+    expect(within(section).getByTestId('state-structural-disabled')).toBeInTheDocument();
+    const save = within(section).getByRole('button', { name: 'Save' });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(client.strategyPatchState).not.toHaveBeenCalled();
+  });
+
   it('never merges a local draft edge into the compose projection', () => {
     const draft = {
       id: 'draft-edge',

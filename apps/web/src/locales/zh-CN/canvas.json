@@ -372,7 +372,8 @@
         "saved": "已保存",
         "saveFailed": "保存失败",
         "saving": "保存中…",
-        "updated": "状态已更新"
+        "updated": "状态已更新",
+        "composeDisabled": "组合期间状态由候选文档写入，此 YAML 编辑器已禁用。"
       },
       "transition": {
         "title": "转换",
