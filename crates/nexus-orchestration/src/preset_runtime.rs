@@ -5,7 +5,7 @@ use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
     WorkflowDocument, WorkflowNodeKind,
 };
 use nexus_preset::loader::{extract_output_bindings, incoming_labeled_edge_counts};
-use nexus_preset::manifest::{NextTarget, PresetManifest};
+use nexus_preset::manifest::{ExitWhen, NextTarget, PresetManifest};
 use nexus_preset::{load_embedded_preset, required_prompt_roles, LoadedPreset};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -337,16 +337,18 @@ pub enum IrOuterGraphError {
         /// Where it sits: a node id or a document path.
         location: String,
     },
-    /// An inner-step template resolves to nothing, so its task would prompt the
-    /// Host with zero instructions.
+    /// An instruction template (an inner step's prompt or an
+    /// `exit_when.llm_judge` judge prompt) resolves to nothing, so its task
+    /// would run without instructions.
     #[error(
-        "ir_unresolved_template: inner-step node {node} template {template:?} resolves to \
-         no content in the preset's embedded bundle; the step must render a non-empty prompt"
+        "ir_unresolved_template: node {node} template {template:?} resolves to no content in the \
+         preset's embedded bundle; the task must carry non-empty instructions"
     )]
     UnresolvedTemplate {
-        /// The `<inner_graph>/<step>` node id, as the document spells it.
+        /// The node carrying the template: an outer state id, or an inner step
+        /// spelled `<inner_graph>/<step>`.
         node: String,
-        /// The bundle-relative template path the step names, if any.
+        /// The bundle-relative template path the node names, if any.
         template: Option<String>,
     },
     /// The adapter refused a payload the outer mapping carries but cannot read
@@ -400,28 +402,50 @@ fn refuse_unmappable(document: &WorkflowDocument) -> Result<(), IrOuterGraphErro
     }
 }
 
-/// Refuse an inner-step template that resolves to no content.
+/// Refuse an instruction template that resolves to no content.
 ///
-/// A document carries no bundle root, so [`build_inner_graphs`] resolves every
-/// `template` against the embedded bundle keyed by document id. A missing or
-/// empty path would reach the Host as a zero-instruction prompt via
-/// `unwrap_or_default()`, so it is refused here, by node and path, before any
-/// task is built. The YAML intake needs no such check: its loader validates
-/// assets against the bundle root at load time.
+/// A document carries no bundle root, so every `template` resolves against the
+/// embedded bundle keyed by document id: an inner step's prompt through
+/// [`build_inner_graphs`] (`unwrap_or_default()` would reach the Host as a
+/// zero-instruction prompt) and an `exit_when.llm_judge` prompt through
+/// [`StateCompositeTask::with_resolved_template`] (an unresolved bundle path
+/// would reach the judge as its instructions). Both are refused here, by node
+/// and path, before any task is built. The YAML intake needs no such check for
+/// inner steps: its loader validates those assets against the bundle root at
+/// load time.
 fn refuse_unresolved_templates(
     manifest: &PresetManifest,
     preset_id: &str,
 ) -> Result<(), IrOuterGraphError> {
+    let resolves = |template: Option<&str>| {
+        template
+            .and_then(|path| nexus_preset::read_embedded_template(preset_id, path))
+            .is_some_and(|content| !content.trim().is_empty())
+    };
+
+    for state in &manifest.states {
+        let Some(ExitWhen::LlmJudge {
+            template_file, ..
+        }) = &state.exit_when
+        else {
+            continue;
+        };
+        let template = template_file.as_deref();
+        if !resolves(template) {
+            return Err(IrOuterGraphError::UnresolvedTemplate {
+                node: state.id.clone(),
+                template: template.map(std::string::ToString::to_string),
+            });
+        }
+    }
+
     let Some(graphs) = &manifest.inner_graphs else {
         return Ok(());
     };
     for (name, graph) in graphs {
         for step in &graph.nodes {
             let template = step.template_file.as_deref();
-            let resolved = template
-                .and_then(|path| nexus_preset::read_embedded_template(preset_id, path))
-                .is_some_and(|content| !content.trim().is_empty());
-            if !resolved {
+            if !resolves(template) {
                 return Err(IrOuterGraphError::UnresolvedTemplate {
                     // The document spells inner-step ids `<inner_graph>/<step>`.
                     node: format!("{name}/{}", step.id),
@@ -456,13 +480,18 @@ fn refuse_unresolved_templates(
 /// embedded bundle keyed by document id is the only resolvable template source;
 /// a step whose template resolves to nothing is refused
 /// ([`IrOuterGraphError::UnresolvedTemplate`]) instead of prompting the Host
-/// with zero instructions.
+/// with zero instructions. `exit_when.llm_judge` follows the same convention:
+/// the composite task resolves `template_file` to its content through
+/// `with_resolved_template`, exactly as the wired YAML builder does, and an
+/// unresolvable judge prompt is refused for the same reason — otherwise the
+/// judge would be invoked with the bundle path as its instructions.
 ///
 /// # Errors
 /// `Unmappable` / `Unprojected` when the document uses a concept this adapter
 /// cannot project (named, with its node id or document path), before any task is
-/// built; `UnresolvedTemplate` when an inner-step template resolves to no
-/// content; `Projection` when a payload the mapping does carry cannot be read;
+/// built; `UnresolvedTemplate` when an instruction template (inner step or
+/// `exit_when.llm_judge`) resolves to no content; `Projection` when a payload
+/// the mapping does carry cannot be read;
 /// `Graph` when the wired topology is invalid (an `entry` naming no outer task,
 /// or an edge to a task the projection never produced) or an inner graph fails
 /// to build.
@@ -483,9 +512,10 @@ pub fn build_wired_outer_graph_from_ir(
 
     let mut manifest = nexus_preset::export_preset(document)?;
 
-    // I-000440: a template that resolves to nothing would build a graph whose
-    // inner tasks prompt the Host with zero instructions. Refuse it here, by
-    // node and path, before any task exists.
+    // I-000440 / F-004: a template that resolves to nothing would build a graph
+    // whose inner tasks prompt the Host with zero instructions and whose judge
+    // would receive a bundle path as its instructions. Refuse it here, by node
+    // and path, before any task exists.
     refuse_unresolved_templates(&manifest, document.id.as_str())?;
 
     // §8.2.1 `terminal[]`: a declared terminal state ends the run even when its
@@ -517,6 +547,7 @@ pub fn build_wired_outer_graph_from_ir(
             .cloned()
             .unwrap_or_default();
         let mut task = StateCompositeTask::from_manifest(state)
+            .with_resolved_template(document.id.as_str())
             .with_expected_incoming(incoming)
             .with_converge_predecessors(preds)
             .with_engine(engine.clone())
@@ -1195,6 +1226,38 @@ states:
         "provenance": {"source": "compose"}
     }"#;
 
+    /// An `exit_when.llm_judge` whose template is not in the document's bundle.
+    const IR_JUDGE_UNRESOLVED: &str = r#"{
+        "ir_version": 0,
+        "id": "ir-judge-unresolved",
+        "version": 1,
+        "revision": 0,
+        "state": "candidate",
+        "meta": {
+            "description": "judge template with no resolvable content",
+            "kind": "creator",
+            "run_intents": [],
+            "requires_capabilities": []
+        },
+        "entry": "assess",
+        "terminal": ["done"],
+        "nodes": [
+            {"id": "assess", "kind": "outer_state", "effect_class": "external",
+             "exit_when": {"kind": "llm_judge", "template": "prompts/missing-judge.md",
+                           "judge_capability": "narrative.compute"}},
+            {"id": "done", "kind": "terminal", "effect_class": "pure"}
+        ],
+        "edges": [
+            {"id": "assess->done", "from": "assess", "to": "done", "kind": "linear"}
+        ],
+        "nests": [],
+        "assets": [],
+        "signals": [],
+        "roles": [],
+        "effect_summary": "external",
+        "provenance": {"source": "compose"}
+    }"#;
+
     /// `terminal[]` names an `outer_state` node: the declaration, not the node
     /// kind, is what makes the task end the run.
     const IR_TERMINAL_DECLARATION: &str = r#"{
@@ -1700,6 +1763,38 @@ states:
         assert_eq!(template, None, "no template path is reported as absent");
     }
 
+    /// F-004: an `exit_when.llm_judge` template that resolves to nothing refuses
+    /// at build time, so no task can hand the judge a bundle path.
+    #[test]
+    fn ir_refuses_an_unresolved_judge_template_before_building() {
+        let caps = Arc::new(test_capability_registry());
+        let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
+        let Err(error) = build_wired_outer_graph_from_ir(
+            &ir_document(IR_JUDGE_UNRESOLVED),
+            &engine,
+            &caps,
+            None,
+            None,
+            no_cancels(),
+        ) else {
+            panic!("a judge template that resolves to nothing is refused, not built");
+        };
+        match &error {
+            IrOuterGraphError::UnresolvedTemplate { node, template } => {
+                assert_eq!(node, "assess", "the outer state is named");
+                assert_eq!(
+                    template.as_deref(),
+                    Some("prompts/missing-judge.md"),
+                    "the judge template path is named"
+                );
+            }
+            other => panic!("refusal must be typed ir_unresolved_template: {other}"),
+        }
+        let message = error.to_string();
+        assert!(message.contains("assess"), "{message}");
+        assert!(message.contains("prompts/missing-judge.md"), "{message}");
+    }
+
     #[tokio::test]
     async fn ir_exit_when_manual_waits_and_terminal_declaration_ends() {
         let fixup = ir_outer_graph(&ir_document(IR_LINEAR))
@@ -1961,9 +2056,13 @@ states:
         }"#;
 
         /// judge exit with go/nogo edges. `parity.judge` is scripted per run.
+        /// The graph id and template path name the embedded `novel-brainstorm`
+        /// bundle, so the judge prompt resolves to content on both intakes —
+        /// a fixture path the bundle lacks would leave the raw path in place and
+        /// hide whether either intake resolved it.
         const YAML_JUDGE: &str = r"
 preset:
-  id: parity-judge
+  id: novel-brainstorm
   version: 1
   kind: creator
   description: parity judge fixture
@@ -1974,7 +2073,7 @@ states:
   - id: assess
     exit_when:
       kind: llm_judge
-      template_file: prompts/parity-judge.md
+      template_file: prompts/gather-exit.md
       judge_capability: parity.judge
     next:
       go: pass
@@ -1991,7 +2090,7 @@ states:
 
         const IR_JUDGE: &str = r#"{
             "ir_version": 0,
-            "id": "parity-judge",
+            "id": "novel-brainstorm",
             "version": 1,
             "revision": 0,
             "state": "candidate",
@@ -2000,7 +2099,7 @@ states:
             "terminal": ["done"],
             "nodes": [
                 {"id": "assess", "kind": "outer_state", "effect_class": "external",
-                 "exit_when": {"kind": "llm_judge", "template": "prompts/parity-judge.md", "judge_capability": "parity.judge"}},
+                 "exit_when": {"kind": "llm_judge", "template": "prompts/gather-exit.md", "judge_capability": "parity.judge"}},
                 {"id": "pass", "kind": "outer_state", "effect_class": "pure", "exit_when": {"kind": "rule"}},
                 {"id": "revise", "kind": "outer_state", "effect_class": "pure", "exit_when": {"kind": "rule"}},
                 {"id": "done", "kind": "terminal", "effect_class": "pure"}
@@ -2275,10 +2374,12 @@ states:
             "provenance": {"source": "compose"}
         }"#;
 
-        /// join gate: merge + converge + bounded timeout on one state.
+        /// join gate: merge + converge + bounded timeout on one state. The judge
+        /// carrier resolves the embedded `novel-brainstorm` prompt, like the
+        /// judge fixture, so the IR side can build.
         const YAML_JOIN: &str = r"
 preset:
-  id: parity-join
+  id: novel-brainstorm
   version: 1
   kind: creator
   description: parity join fixture
@@ -2289,7 +2390,7 @@ states:
   - id: assess
     exit_when:
       kind: llm_judge
-      template_file: prompts/parity-judge.md
+      template_file: prompts/gather-exit.md
       judge_capability: parity.judge
     next:
       - label: go
@@ -2309,7 +2410,7 @@ states:
 
         const IR_JOIN: &str = r#"{
             "ir_version": 0,
-            "id": "parity-join",
+            "id": "novel-brainstorm",
             "version": 1,
             "revision": 0,
             "state": "candidate",
@@ -2318,7 +2419,7 @@ states:
             "terminal": ["done"],
             "nodes": [
                 {"id": "assess", "kind": "outer_state", "effect_class": "external",
-                 "exit_when": {"kind": "llm_judge", "template": "prompts/parity-judge.md", "judge_capability": "parity.judge"}},
+                 "exit_when": {"kind": "llm_judge", "template": "prompts/gather-exit.md", "judge_capability": "parity.judge"}},
                 {"id": "gate", "kind": "outer_state", "effect_class": "pure",
                  "merge": {"kind": "all"},
                  "converge": {"strategy": "wait_for_all"},
@@ -2708,6 +2809,29 @@ states:
                 yaml.projection.inner_graphs, ir.projection.inner_graphs,
                 "§8.2/§8.2.1 inner graphs: nodes, templates, roles, depends_on edges, output binding"
             );
+        }
+
+        /// The instruction text a scripted run handed the `exit_when.llm_judge`
+        /// capability. The projection cannot show this: it is built from the
+        /// manifest, which carries the bundle-relative `template_file` path
+        /// whatever the builder resolved it to, so the dispatch is the only
+        /// observable that separates content from path.
+        fn dispatched_judge_prompt(recorded: &Recorded) -> String {
+            recorded
+                .capabilities
+                .iter()
+                .find(|(name, _)| name == "parity.judge")
+                .and_then(|(_, input)| input.get("prompt"))
+                .and_then(serde_json::Value::as_str)
+                .expect("the judge capability is invoked with a prompt")
+                .to_string()
+        }
+
+        /// The judge template body the fixtures name, read from the embedded
+        /// bundle both intakes resolve against.
+        fn judge_template_body() -> String {
+            nexus_preset::read_embedded_template("novel-brainstorm", "prompts/gather-exit.md")
+                .expect("the judge fixture's template is in the embedded bundle")
         }
 
         #[derive(Debug, PartialEq)]
@@ -3213,7 +3337,7 @@ states:
                 "parity.judge",
                 serde_json::json!({"result": true, "reason": "parity go"}),
             )]);
-            let (_, go_ir) = go
+            let (go_yaml, go_ir) = go
                 .compare(
                     YAML_JUDGE,
                     IR_JUDGE,
@@ -3232,9 +3356,26 @@ states:
                     .exit_when,
                 Some(serde_json::json!({
                     "kind": "llm_judge",
-                    "template_file": "prompts/parity-judge.md",
+                    "template_file": "prompts/gather-exit.md",
                     "judge_capability": "parity.judge",
-                }))
+                })),
+                "the projected carrier keeps the bundle path — resolution is not \
+                 visible in the manifest, so the dispatch assertions below own it"
+            );
+            // F-004: the judge must receive the template body, not its bundle
+            // path. Both intakes resolve `template_file` through
+            // `with_resolved_template`; dropping that chain from the IR builder
+            // dispatches `prompts/gather-exit.md` and fails here.
+            let body = judge_template_body();
+            assert_eq!(
+                dispatched_judge_prompt(&go_yaml.recorded),
+                body,
+                "the YAML judge receives the resolved template body"
+            );
+            assert_eq!(
+                dispatched_judge_prompt(&go_ir.recorded),
+                body,
+                "the IR judge receives the resolved template body, not the bundle path"
             );
             assert_eq!(
                 go_ir.trace.steps,
