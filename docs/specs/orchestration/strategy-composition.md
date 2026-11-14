@@ -1,4 +1,4 @@
-# Strategy composition — pattern packages, compose ops, approval freeze
+# Strategy composition — pattern packages, compose ops, approval and apply
 
 ## Scope
 
@@ -130,9 +130,13 @@ run.
 with the YAML descriptor, so a daemon restart during an in-flight run rebuilds the *preset* graph, and
 `validate_agent_bindings` still derives its role sets from the preset, so a prompt role that exists only in
 the applied document is not provider-checked and the run fails at the prompt executor after admission
-(I-000443). A second limit is adjacent: apply validates the bytes it installs, not whether intake can build
-a graph from them, so an applied document whose templates cannot resolve installs and then refuses at
-admission (I-000448).
+(I-000443). A second limit is adjacent and wider than "the templates could not be resolved": apply
+validates the bytes it installs, not whether intake can build a graph from them, so an applied document
+installs and then refuses at admission (I-000448). The applied path carries no bundle root — serving a
+template would mean reading another package's bytes — so the §8.2.1 template refusal is unconditional
+there rather than conditional on a bad path: **any state whose `exit_when` is `llm_judge` is refused, and
+so is every inner step of every inner graph**, whether or not it names a template — the schema allows an
+inner graph with no steps, which is the only inner-graph shape the applied path admits (I-000449).
 
 ### 6. Why one structural authority
 

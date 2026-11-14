@@ -19,13 +19,21 @@ What a strategy simulation reports, what it refuses to claim, and where the disc
 
 `simulation_level` is an open string. `reachability` is the only level produced today:
 
-- `llm_judge` nodes follow their single declared `default` edge and are listed in `stubbed_judges`.
-  A judge with zero, several, or a dangling default edge is a deterministic error, never a successful
-  trajectory.
+- A node whose `exit_when` is `llm_judge` follows its single declared `default` edge and is listed in
+  `stubbed_judges`. The walk counts only `default` edges whose target is a declared node, and that
+  count must be exactly one: zero or more than one is a deterministic error, never a successful
+  trajectory. An extra `default` edge to an undeclared node is discarded by the walk rather than
+  refused, so it fails the count only when it is the sole such edge.
 - No provider is called. A trajectory carries no cost, no latency and no output.
-- Waits are derived from the reachable set: a `manual_wait` or a reachable `exit_when: manual` yields
-  `reason: manual` with the node id; a document-global `signals[].action: pause` yields
-  `reason: signal` with the signal name. Predicted waits over-report; they never under-report.
+- Waits are derived from the visited set: a visited `manual_wait` node, or a visited state whose
+  `exit_when` is `manual`, yields `reason: manual` with the node id. **A wait is reported when its
+  node is visited, and the walk leaves such a node only along its single `default` edge**, so a wait
+  reachable only through the other branches of an `llm_judge` node is never predicted — an
+  under-report in that case,
+  by construction, not an omission to fix. Within the visited set the list over-reports instead: a
+  wait the run would never reach is still named.
+- A document-global signal is not bounded by the walk at all: `signals[].action: pause` yields a
+  `reason: signal` wait for the document, whichever nodes the walk visits.
 
 Consumers MUST treat an unknown `simulation_level` as a newer, unsupported level rather than assuming
 `reachability`.
@@ -34,8 +42,8 @@ Consumers MUST treat an unknown `simulation_level` as a newer, unsupported level
 
 Any surface offering an approve decision from a simulation MUST show, for the document hash being
 approved: the level in words, the stubbed-judge count with ids, the fence reading, the static label on
-predicted waits, and a statement that a passed simulation does not preview output. A bare "simulated"
-badge is a defect.
+predicted waits, a statement that a passed simulation does not preview output, and — whenever a judge
+is stubbed — that the wait list covers only the default path. A bare "simulated" badge is a defect.
 
 ### Upgrade path
 
@@ -53,7 +61,10 @@ this document.
   and nested children under the total order `pure < read < write_candidate < external`, taken from the
   generated enum's `Ord`. A deferred (`defer_until_apply`) nest contributes its declared class and its
   body is not walked. An effect that only happens on a collapsed branch is still reported.
-- **Predicted waits over-report; they never under-report.**
+- **The wait list is not exhaustive.** Because judges are stubbed to their `default` edge, a wait
+  behind any other branch is never predicted. §Disclosure therefore requires the surface to say so
+  whenever a judge is stubbed; an invariant that only pointed at a disclosure obligation would be
+  assuming the obligation it needs.
 
 ## Where it lives
 
