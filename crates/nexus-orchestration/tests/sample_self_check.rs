@@ -24,9 +24,10 @@
 //!    has to trust a comment. The I-000476 case is asserted by the target that
 //!    survives the fix, not by the collapsed spelling, so correcting the exporter
 //!    keeps it green while a retargeted edge still fails.
-//! 5. Each sample's hand-edited `workflow.json` loads back into a document whose `assets[]` names
-//!    exactly the templates its carriers reference, hashed over the bytes on disk, and that exports
-//!    the same manifest as its committed `preset.yaml`.
+//! 5. Each sample's hand-edited `workflow.json` loads back into a document whose `assets[]`
+//!    declares exactly the templates its carriers reference — one entry per `path`, each `id`
+//!    naming the file that path hashes — and that exports the same manifest as its committed
+//!    `preset.yaml`.
 //!
 //! The bundles live at the repo root; this crate resolves them via
 //! `CARGO_MANIFEST_DIR` so the test passes regardless of the invoking working
@@ -399,9 +400,10 @@ fn first_workflow_committed_yaml_round_trips() {
     assert_bundle_round_trips("examples/first-workflow");
 }
 
-/// Load one hand-edited `workflow.json`, check that `assets[]` names exactly the templates the
-/// carriers reference, refuses any asset path that leaves the bundle, hashes each of them over the
-/// bytes it names, then assert the manifest it exports equals the committed `preset.yaml`.
+/// Load one hand-edited `workflow.json`, check that `assets[]` declares exactly the templates the
+/// carriers reference and that each `id` names the file it hashes, refuses any asset path that
+/// leaves the bundle, hashes each of them over the bytes it names, then assert the manifest it
+/// exports equals the committed `preset.yaml`.
 ///
 /// The JSON is the authoring source, so the manifest equality — not the file's existence — is the
 /// acceptance for everything `export_preset` projects: a member dropped by hand changes the export
@@ -424,16 +426,26 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
     let mut declared: Vec<String> = document
         .assets
         .iter()
-        .map(|asset| asset.id.clone())
+        .map(|asset| asset.path.clone())
         .collect();
     declared.sort();
     assert_eq!(
         referenced, declared,
-        "{bundle}/workflow.json: `assets[]` must name exactly the templates its carriers \
-         reference (left: referenced by a carrier, right: declared in `assets`)"
+        "{bundle}/workflow.json: `assets[]` must declare exactly the templates its carriers \
+         reference, one entry per `path` (left: referenced by a carrier, right: the `path` each \
+         asset declares)"
     );
 
     for asset in &document.assets {
+        // The carrier references an asset by this same string, and `import_preset_bundle`
+        // registers every asset as `id == path`: an id that names a different file than `path`
+        // keeps the name set above intact and still hashes a template no carrier uses.
+        assert_eq!(
+            asset.id, asset.path,
+            "{bundle}/workflow.json: asset id `{}` does not name the file it hashes (`path` \
+             `{}`) — re-import the bundle instead of editing `path` alone",
+            asset.id, asset.path
+        );
         // `assets[].path` is document-controlled and this loop is the only reader of it, so the
         // loader's path-safety predicate (the one `validate_path_safety` applies to carrier
         // references) runs here: an escaping path is refused, not hashed.
