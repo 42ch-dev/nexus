@@ -93,7 +93,11 @@ async fn seed_approval(
 
 /// Freeze one approval at an explicit candidate revision and approval time, so the status read's
 /// ordering can be proven against timestamps that disagree with the revision order.
-async fn seed_revision_approval(setup: &Setup, revision: u64, approved_at: &str) -> (String, String) {
+async fn seed_revision_approval(
+    setup: &Setup,
+    revision: u64,
+    approved_at: &str,
+) -> (String, String) {
     let base = setup
         .core
         .read_strategy_candidate(&setup.principal, STRATEGY)
@@ -374,8 +378,7 @@ async fn the_status_read_reports_the_current_apply_and_the_highest_candidate_rev
     // must not decide newness (compass D11).
     let (older_approval, older_hash) =
         seed_revision_approval(&setup, 2, "2026-02-01T00:00:00+00:00").await;
-    let (newer_approval, _) =
-        seed_revision_approval(&setup, 5, "2026-01-01T00:00:00+00:00").await;
+    let (newer_approval, _) = seed_revision_approval(&setup, 5, "2026-01-01T00:00:00+00:00").await;
     seed_schedule(setup.core.pool(), STRATEGY).await;
 
     let applied = setup
@@ -422,8 +425,7 @@ async fn the_status_read_reports_the_current_apply_and_the_highest_candidate_rev
 #[tokio::test]
 async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
     let setup = setup().await;
-    let (approval_id, _) =
-        seed_revision_approval(&setup, 1, "2026-01-01T00:00:00+00:00").await;
+    let (approval_id, _) = seed_revision_approval(&setup, 1, "2026-01-01T00:00:00+00:00").await;
 
     // An approval exists, so the newest side is present while nothing is applied yet.
     let approved_only = setup
@@ -433,7 +435,9 @@ async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
         .unwrap();
     assert!(approved_only.current_apply.is_none());
     assert_eq!(
-        approved_only.newest_approval.map(|newest| newest.approval_id),
+        approved_only
+            .newest_approval
+            .map(|newest| newest.approval_id),
         Some(approval_id)
     );
 

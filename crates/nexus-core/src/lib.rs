@@ -99,7 +99,7 @@ pub use actors::{
     CoreActorAdmission, CHARACTER_WIRE_INVALID_PREFIX,
 };
 #[cfg(feature = "execution")]
-pub use apply::{AppliedStrategy, StrategyApproval, StrategyAppliedStatus, StrategyApprovals};
+pub use apply::{AppliedStrategy, StrategyAppliedStatus, StrategyApproval, StrategyApprovals};
 pub use chronology::CoreWorkChronology;
 pub use config_lock::with_config_lock;
 pub use content::{resolve_guarded_path, resolve_guarded_path_async, CoreChapterContentQuery};

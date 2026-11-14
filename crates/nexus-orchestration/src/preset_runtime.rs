@@ -374,9 +374,7 @@ pub enum IrOuterGraphError {
 fn refuse_unmappable(document: &WorkflowDocument) -> Result<(), IrOuterGraphError> {
     for node in &document.nodes {
         let adapter_gap = match node.kind {
-            WorkflowNodeKind::Judge
-            | WorkflowNodeKind::ManualWait
-            | WorkflowNodeKind::Join => true,
+            WorkflowNodeKind::Judge | WorkflowNodeKind::ManualWait | WorkflowNodeKind::Join => true,
             WorkflowNodeKind::PatternSlot | WorkflowNodeKind::NestGroup => false,
             WorkflowNodeKind::OuterState
             | WorkflowNodeKind::InnerStep
@@ -424,10 +422,7 @@ fn refuse_unresolved_templates(
     };
 
     for state in &manifest.states {
-        let Some(ExitWhen::LlmJudge {
-            template_file, ..
-        }) = &state.exit_when
-        else {
+        let Some(ExitWhen::LlmJudge { template_file, .. }) = &state.exit_when else {
             continue;
         };
         let template = template_file.as_deref();
@@ -1680,7 +1675,11 @@ states:
 
     #[test]
     fn ir_refuses_manual_wait_node_kind_as_an_adapter_gap() {
-        assert_unprojected(&ir_with_node_kind(1, "manual_wait"), "manual_wait", "review");
+        assert_unprojected(
+            &ir_with_node_kind(1, "manual_wait"),
+            "manual_wait",
+            "review",
+        );
     }
 
     #[test]
@@ -1690,7 +1689,11 @@ states:
 
     #[test]
     fn ir_refuses_pattern_slot_node_kind_by_name() {
-        assert_unmappable(&ir_with_node_kind(1, "pattern_slot"), "pattern_slot", "review");
+        assert_unmappable(
+            &ir_with_node_kind(1, "pattern_slot"),
+            "pattern_slot",
+            "review",
+        );
     }
 
     #[test]

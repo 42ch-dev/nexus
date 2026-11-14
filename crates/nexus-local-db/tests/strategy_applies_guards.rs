@@ -85,9 +85,19 @@ async fn an_apply_naming_another_strategys_approval_is_rejected() {
 
     for (label, strategy, approval_id, content_hash) in [
         // B's approval under A's strategy.
-        ("another strategy's approval", STRATEGY_A, "approval-b", "hash-b"),
+        (
+            "another strategy's approval",
+            STRATEGY_A,
+            "approval-b",
+            "hash-b",
+        ),
         // A's own approval labelled with a hash it does not carry.
-        ("a hash the approval does not have", STRATEGY_A, "approval-a", "hash-b"),
+        (
+            "a hash the approval does not have",
+            STRATEGY_A,
+            "approval-a",
+            "hash-b",
+        ),
     ] {
         let error = insert_apply(&pool, "apply-1", strategy, approval_id, content_hash, None)
             .await

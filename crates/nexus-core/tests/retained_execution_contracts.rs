@@ -7385,8 +7385,17 @@ const INTAKE_PROMPT: &str = "Summarize the intake topic: {{preset.input.topic}}\
 /// A user preset bundle's YAML: open the fixture's `notes` scope, commit one
 /// marker file, then optionally run one inner prompt (whose template the
 /// caller writes into the bundle).
-fn intake_preset_yaml(preset_id: &str, marker: &str, marker_b64: &str, with_prompt: bool) -> String {
-    let prompt_capability = if with_prompt { "    - acp.prompt\n" } else { "" };
+fn intake_preset_yaml(
+    preset_id: &str,
+    marker: &str,
+    marker_b64: &str,
+    with_prompt: bool,
+) -> String {
+    let prompt_capability = if with_prompt {
+        "    - acp.prompt\n"
+    } else {
+        ""
+    };
     let (next_after_commit, prompt_state, prompt_graphs) = if with_prompt {
         (
             "generate",
@@ -7453,7 +7462,9 @@ states:
 /// The approved snapshot these tests freeze: the preset's own import candidate
 /// with its single commit redirected to the applied marker, so which graph ran
 /// is visible on disk instead of only inside the branch.
-fn applied_side_document(base: &nexus_workflow_ir::WorkflowDocument) -> nexus_workflow_ir::WorkflowDocument {
+fn applied_side_document(
+    base: &nexus_workflow_ir::WorkflowDocument,
+) -> nexus_workflow_ir::WorkflowDocument {
     let mut document = base.clone();
     for node in &mut document.nodes {
         for action in &mut node.enter {
@@ -7533,7 +7544,8 @@ async fn add_intake_schedule(
 /// The marker file a run committed inside the fixture's `notes` scope.
 fn read_marker(root: &Path, marker: &str) -> Option<Vec<u8>> {
     let path = root.join("notes").join(marker);
-    path.exists().then(|| std::fs::read(path).expect("marker bytes"))
+    path.exists()
+        .then(|| std::fs::read(path).expect("marker bytes"))
 }
 
 /// T4: a schedule whose strategy has NO apply runs the YAML graph, and that
@@ -7832,7 +7844,9 @@ async fn a_user_bundle_shadowing_an_embedded_id_keeps_its_apply() {
           current_core_context_version, created_at, updated_at) \
          VALUES (?, ?, ?, 1, 'pending', 'serial', 0, 0, 0)",
     )
-    .bind(format!("SCH-precondition-shadow-{SHADOWED_EMBEDDED_PRESET}"))
+    .bind(format!(
+        "SCH-precondition-shadow-{SHADOWED_EMBEDDED_PRESET}"
+    ))
     .bind(CREATOR)
     .bind(SHADOWED_EMBEDDED_PRESET)
     .execute(pool.as_ref())
