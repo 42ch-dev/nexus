@@ -1,7 +1,7 @@
 //! Execution-only preset graph construction and provider binding creation.
 
 use crate::capability::CapabilityRegistry;
-use nexus_preset::loader::incoming_labeled_edge_counts;
+use nexus_preset::loader::{extract_output_bindings, incoming_labeled_edge_counts};
 use nexus_preset::manifest::{NextTarget, PresetManifest};
 use nexus_preset::{load_embedded_preset, required_prompt_roles, LoadedPreset};
 use std::collections::HashMap;
@@ -330,20 +330,31 @@ pub enum IrOuterGraphError {
 /// The document is projected onto the manifest's state carriers by
 /// [`nexus_preset::export_preset`], so both intakes reach the same
 /// [`crate::tasks::StateCompositeTask`] constructor: no second task type and no
-/// second validation pass. Inner graphs and output bindings are not wired here
-/// (P35 Task 2) — a state whose enter action launches one builds, and that
-/// action fails closed at run time until the graph is attached.
+/// second validation pass.
+///
+/// `inner_graphs.<name>` reaches the composite tasks through the same
+/// `build_inner_graphs` chain the YAML path uses (`AcpPromptTask` nodes,
+/// `depends_on` edges, the sink `end` task, the production prompt executor and
+/// per-run cancellation tokens), and `output_binding` through the same
+/// [`extract_output_bindings`] derivation. The document names its
+/// templates as bundle-relative asset paths and carries no bundle root, so the
+/// embedded bundle keyed by document id is the only resolvable template source.
 ///
 /// # Errors
 /// `Projection` when the document carries a concept the outer graph cannot
 /// express; `Graph` when the wired topology is invalid (an `entry` naming no
-/// outer task, or an edge to a task the projection never produced).
-#[allow(clippy::needless_pass_by_value)] // dispatch is cloned into each task, mirroring build_wired_outer_graph
+/// outer task, or an edge to a task the projection never produced) or an inner
+/// graph fails to build.
+#[allow(clippy::needless_pass_by_value, clippy::implicit_hasher)] // dispatch is cloned into each task and the cancel map is the engine's own, mirroring build_wired_outer_graph
 pub fn build_wired_outer_graph_from_ir(
     document: &nexus_contracts::generated::daemon_api::orchestration::WorkflowDocument,
     engine: &Arc<dyn crate::engine::OrchestrationEngine>,
     caps: &Arc<CapabilityRegistry>,
     daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
+    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
 ) -> Result<graph_flow::Graph, IrOuterGraphError> {
     use crate::tasks::StateCompositeTask;
 
@@ -354,6 +365,15 @@ pub fn build_wired_outer_graph_from_ir(
     for state in &mut manifest.states {
         state.terminal |= document.terminal.iter().any(|id| id == &state.id);
     }
+
+    let inner_graphs = build_inner_graphs(
+        &manifest,
+        document.id.as_str(),
+        None,
+        prompt_executor,
+        session_cancels,
+    )?;
+    let output_bindings = extract_output_bindings(&manifest);
 
     let mut builder = graph_flow::GraphBuilder::new(&manifest.preset.id);
 
@@ -372,6 +392,8 @@ pub fn build_wired_outer_graph_from_ir(
             .with_expected_incoming(incoming)
             .with_converge_predecessors(preds)
             .with_engine(engine.clone())
+            .with_inner_graphs(inner_graphs.clone())
+            .with_output_bindings(output_bindings.clone())
             .with_registry(caps.clone());
 
         if let Some(provider) = engine.workspace_state_provider() {
@@ -478,6 +500,36 @@ pub struct OuterGraphProjection {
     pub edges: Vec<ProjectedEdge>,
     /// Tasks that end the run: `terminal[]` and `nodes[kind=terminal]`.
     pub terminals: Vec<String>,
+    /// Inner graphs in name order (§8.2.1 `inner_graphs.<name>`).
+    pub inner_graphs: Vec<ProjectedInnerGraph>,
+}
+
+/// One inner graph in an [`OuterGraphProjection`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectedInnerGraph {
+    /// `inner_graphs.<name>`.
+    pub name: String,
+    /// Node whose output is exported as the parent state's output.
+    pub output_binding: Option<String>,
+    /// Nodes in declared order.
+    pub nodes: Vec<ProjectedInnerNode>,
+    /// `depends_on` edges in node order.
+    pub edges: Vec<ProjectedEdge>,
+}
+
+/// One inner-graph node in a [`ProjectedInnerGraph`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectedInnerNode {
+    /// Node id within its graph.
+    pub id: String,
+    /// `"acp_prompt"`.
+    pub kind: &'static str,
+    /// Template path the node renders (resolved against the bundle at build time).
+    pub template_file: Option<String>,
+    /// Tool policy string as declared.
+    pub tool_policy: Option<String>,
+    /// Role id the node runs as.
+    pub agent: Option<String>,
 }
 
 /// One outer task in an [`OuterGraphProjection`].
@@ -512,6 +564,12 @@ pub struct ProjectedEdge {
 
 /// Project a built outer graph plus the states it was built from into the
 /// normalized shape parity tests compare.
+///
+/// Inner graphs are projected from `manifest.inner_graphs` — the carrier both
+/// intakes build them from — because a built `graph_flow::Graph` exposes no
+/// child-graph accessor. That the composite tasks actually hold the handles is
+/// what a scripted trace asserts, not this projection (a handle that was never
+/// attached fails the run).
 ///
 /// # Panics
 /// Panics when the graph is missing a task for a projected state — the builder
@@ -601,7 +659,49 @@ pub fn outer_graph_projection(
         tasks,
         edges,
         terminals,
+        inner_graphs: project_inner_graphs(manifest),
     }
+}
+
+/// Inner-graph shape of a manifest, in name order.
+fn project_inner_graphs(manifest: &PresetManifest) -> Vec<ProjectedInnerGraph> {
+    manifest
+        .inner_graphs
+        .as_ref()
+        .map_or_else(Vec::new, |graphs| {
+            graphs
+                .iter()
+                .map(|(name, inner)| ProjectedInnerGraph {
+                    name: name.clone(),
+                    output_binding: inner.output_binding.clone(),
+                    nodes: inner
+                        .nodes
+                        .iter()
+                        .map(|node| ProjectedInnerNode {
+                            id: node.id.clone(),
+                            kind: match node.kind {
+                                nexus_preset::manifest::GraphNodeKind::AcpPrompt => "acp_prompt",
+                            },
+                            template_file: node.template_file.clone(),
+                            tool_policy: node.tool_policy.clone(),
+                            agent: node.agent.clone(),
+                        })
+                        .collect(),
+                    edges: inner
+                        .nodes
+                        .iter()
+                        .flat_map(|node| {
+                            node.depends_on.iter().map(|dependency| ProjectedEdge {
+                                from: dependency.clone(),
+                                to: node.id.clone(),
+                                kind: "depends_on",
+                                detail: None,
+                            })
+                        })
+                        .collect(),
+                })
+                .collect()
+        })
 }
 
 /// Wire shape of a manifest carrier (plain data, so serialization cannot fail).
@@ -991,14 +1091,266 @@ states:
         "provenance": {"source": "compose"}
     }"#;
 
+    /// An IR document with one inner graph: `generate` launches it,
+    /// `generate_with_context → refine` run as `acp_prompt` nodes, and
+    /// `refine` carries the `output_binding`. The graph id and template paths
+    /// name the embedded `memory-augmented` bundle, so templates resolve
+    /// without a caller-supplied bundle root.
+    const IR_INNER_GRAPH: &str = r#"{
+        "ir_version": 0,
+        "id": "memory-augmented",
+        "version": 1,
+        "revision": 0,
+        "state": "candidate",
+        "meta": {
+            "description": "IR inner graph fixture",
+            "kind": "creator",
+            "run_intents": [],
+            "requires_capabilities": []
+        },
+        "entry": "generate",
+        "terminal": ["done"],
+        "nodes": [
+            {"id": "generate", "kind": "outer_state", "effect_class": "external",
+             "enter": [{"kind": "inner_graph", "name": "generate_graph"}],
+             "exit_when": {"kind": "rule"}},
+            {"id": "generate_graph/generate_with_context", "kind": "inner_step",
+             "effect_class": "external", "step_kind": "acp_prompt",
+             "template": "prompts/generate-with-memory.md",
+             "tool_policy": "auto_grant_read_only"},
+            {"id": "generate_graph/refine", "kind": "inner_step",
+             "effect_class": "external", "step_kind": "acp_prompt",
+             "depends_on": ["generate_graph/generate_with_context"],
+             "template": "prompts/recall-memory.md",
+             "tool_policy": "auto_grant_read_only",
+             "output_binding": "refine.text"},
+            {"id": "done", "kind": "terminal", "effect_class": "pure"}
+        ],
+        "edges": [
+            {"id": "generate->done", "from": "generate", "to": "done", "kind": "linear"}
+        ],
+        "nests": [],
+        "assets": [],
+        "signals": [],
+        "roles": [],
+        "effect_summary": "external",
+        "provenance": {"source": "compose"}
+    }"#;
+
+    /// Records every inner-node prompt in dispatch order.
+    #[derive(Default)]
+    struct RecordingExecutor {
+        calls: std::sync::Mutex<Vec<(String, String)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::capability::PromptExecutor for RecordingExecutor {
+        async fn execute(
+            &self,
+            request: crate::capability::PromptRequest,
+        ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError> {
+            self.calls
+                .lock()
+                .expect("recording executor lock")
+                .push((request.task_id.clone(), request.prompt.clone()));
+            Ok(crate::capability::PromptResult {
+                full_text: format!("{} output", request.task_id),
+                host_session_id: format!("host:{}", request.run_id),
+                operation_id: "op-1".to_string(),
+            })
+        }
+    }
+
+    /// Engine stub for the inner-graph trace: a spawned child really runs its
+    /// inner graph through `graph_flow`, so the recorded prompts prove the
+    /// built graph carried the inner tasks and their `depends_on` edges.
+    struct ChildRunningEngine {
+        children: tokio::sync::Mutex<
+            std::collections::HashMap<String, (Arc<graph_flow::Graph>, graph_flow::Session)>,
+        >,
+        session_cancels: Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        >,
+    }
+
+    #[async_trait::async_trait]
+    // The child registry guard legitimately spans the step: a session is
+    // mutated in place, so it cannot be released before `execute_session`.
+    #[allow(clippy::significant_drop_tightening)]
+    impl crate::engine::OrchestrationEngine for ChildRunningEngine {
+        async fn run_step(
+            &self,
+            session_id: &crate::engine::SessionId,
+        ) -> Result<crate::engine::StepOutcome, crate::engine::EngineError> {
+            let result = {
+                let mut children = self.children.lock().await;
+                let (graph, session) = children
+                    .get_mut(&session_id.0)
+                    .expect("child session is registered");
+                graph
+                    .execute_session(session)
+                    .await
+                    .map_err(crate::engine::EngineError::GraphFlow)?
+            };
+            Ok(match result.status {
+                graph_flow::ExecutionStatus::Completed => crate::engine::StepOutcome::Completed {
+                    response: result.response,
+                },
+                graph_flow::ExecutionStatus::WaitingForInput => {
+                    crate::engine::StepOutcome::WaitingForInput {
+                        response: result.response,
+                    }
+                }
+                graph_flow::ExecutionStatus::Paused {
+                    next_task_id,
+                    reason,
+                } => crate::engine::StepOutcome::Paused {
+                    next_task_id,
+                    reason,
+                },
+            })
+        }
+
+        async fn spawn_child_session(
+            &self,
+            params: crate::engine::ChildSessionParams,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            let id = {
+                let children = self.children.lock().await;
+                format!("{}:child:{}", params.parent_session_id, children.len() + 1)
+            };
+            let start = params
+                .inner_graph
+                .start_task_id()
+                .unwrap_or_default()
+                .to_string();
+            let mut session = graph_flow::Session::new_from_task(id.clone(), &start);
+            session.context = params.initial_context;
+            // Production seeds the trusted child run identity at admission
+            // (`spawn_child_session_internal`); every inner node resolves it.
+            session
+                .context
+                .set("_session_id", id.clone())
+                .map_err(crate::engine::EngineError::GraphFlow)?;
+            self.session_cancels
+                .write()
+                .expect("session cancels lock")
+                .insert(id.clone(), tokio_util::sync::CancellationToken::new());
+            self.children
+                .lock()
+                .await
+                .insert(id.clone(), (params.inner_graph, session));
+            Ok(crate::engine::SessionId(id))
+        }
+
+        async fn attach_existing_child_session(
+            &self,
+            _: &str,
+            _: Arc<graph_flow::Graph>,
+        ) -> Result<Option<crate::engine::SessionId>, crate::engine::EngineError> {
+            Ok(None)
+        }
+
+        async fn get_status(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<crate::engine::SessionStatus, crate::engine::EngineError> {
+            Ok(crate::engine::SessionStatus::Running)
+        }
+
+        async fn get_context(
+            &self,
+            session_id: &crate::engine::SessionId,
+        ) -> Result<graph_flow::Context, crate::engine::EngineError> {
+            Ok(self
+                .children
+                .lock()
+                .await
+                .get(&session_id.0)
+                .expect("child session is registered")
+                .1
+                .context
+                .clone())
+        }
+
+        async fn new_session(
+            &self,
+            _: crate::engine::SessionKey,
+            _: crate::engine::Context,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!("inner-graph trace does not drive the outer engine")
+        }
+        async fn start_session_with_graph(
+            &self,
+            _: &str,
+            _: Arc<graph_flow::Graph>,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!("inner-graph trace does not drive the outer engine")
+        }
+        async fn signal(
+            &self,
+            _: &crate::engine::SessionId,
+            _: crate::engine::EngineSignal,
+        ) -> Result<(), crate::engine::EngineError> {
+            // `InnerGraphTask` resumes a paused child; the scripted child graph
+            // holds no pause state, so the resume is a no-op here.
+            Ok(())
+        }
+        async fn list_active(
+            &self,
+            _: crate::engine::SessionFilter,
+        ) -> Result<Vec<crate::engine::SessionSummary>, crate::engine::EngineError> {
+            unimplemented!("inner-graph trace does not drive the outer engine")
+        }
+        async fn get_current_task_id(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<Option<String>, crate::engine::EngineError> {
+            unimplemented!("inner-graph trace does not query child cursors")
+        }
+        async fn has_runner(&self, _: &crate::engine::SessionId) -> bool {
+            unimplemented!("inner-graph trace does not query runner existence")
+        }
+        async fn recover_sessions(&self, _: Vec<crate::engine::SessionSummary>) {
+            unimplemented!("inner-graph trace does not recover sessions")
+        }
+        async fn ensure_recovered_runner(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<(), crate::engine::EngineError> {
+            unimplemented!("inner-graph trace does not reattach runners")
+        }
+        async fn start_session_with_preset(
+            &self,
+            _: &LoadedPreset,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!("inner-graph trace does not start presets")
+        }
+        async fn start_session_with_preset_for_creator(
+            &self,
+            _: &LoadedPreset,
+            _: &str,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!("inner-graph trace does not start presets")
+        }
+    }
+
     fn ir_document(text: &str) -> WorkflowDocument {
         serde_json::from_str(text).expect("fixture is a valid workflow document")
+    }
+
+    fn no_cancels() -> Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    > {
+        Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()))
     }
 
     fn ir_outer_graph(document: &WorkflowDocument) -> graph_flow::Graph {
         let caps = Arc::new(test_capability_registry());
         let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
-        build_wired_outer_graph_from_ir(document, &engine, &caps, None)
+        build_wired_outer_graph_from_ir(document, &engine, &caps, None, None, no_cancels())
             .expect("IR outer graph builds")
     }
 
@@ -1085,6 +1437,94 @@ states:
                 .next_action,
             graph_flow::NextAction::End,
             "§8.2.1 terminal[] makes an outer_state return End"
+        );
+    }
+
+    #[tokio::test]
+    async fn ir_inner_graph_runs_nodes_and_writes_the_output_binding() {
+        let document = ir_document(IR_INNER_GRAPH);
+        let caps = Arc::new(test_capability_registry());
+        let session_cancels = no_cancels();
+        let engine = Arc::new(ChildRunningEngine {
+            children: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            session_cancels: session_cancels.clone(),
+        });
+        let executor = Arc::new(RecordingExecutor::default());
+        let engine_ref: Arc<dyn crate::engine::OrchestrationEngine> = engine.clone();
+        let graph = build_wired_outer_graph_from_ir(
+            &document,
+            &engine_ref,
+            &caps,
+            None,
+            Some(executor.clone()),
+            session_cancels,
+        )
+        .expect("IR graph with an inner graph builds");
+
+        // The projection carries the inner shape the parity tests compare.
+        let manifest =
+            nexus_preset::export_preset(&document).expect("document projects onto states");
+        let projection = outer_graph_projection(&graph, &manifest);
+        assert_eq!(projection.inner_graphs.len(), 1, "one inner graph declared");
+        let inner = &projection.inner_graphs[0];
+        assert_eq!(inner.name, "generate_graph");
+        assert_eq!(inner.output_binding.as_deref(), Some("refine.text"));
+        assert_eq!(
+            inner
+                .nodes
+                .iter()
+                .map(|node| (node.id.as_str(), node.kind))
+                .collect::<Vec<_>>(),
+            [
+                ("generate_with_context", "acp_prompt"),
+                ("refine", "acp_prompt")
+            ]
+        );
+        assert_eq!(
+            inner
+                .edges
+                .iter()
+                .map(|edge| (edge.from.as_str(), edge.to.as_str(), edge.kind))
+                .collect::<Vec<_>>(),
+            [("generate_with_context", "refine", "depends_on")]
+        );
+
+        // Scripted trace: the state's enter action launches the attached graph.
+        let task = graph.get_task("generate").expect("state task is wired");
+        let context = graph_flow::Context::new();
+        context
+            .set("_session_id", "run:1")
+            .expect("parent run identity");
+        let result = task.run(context.clone()).await.expect("inner graph runs");
+
+        assert_eq!(result.next_action, graph_flow::NextAction::Continue);
+        let calls = executor
+            .calls
+            .lock()
+            .expect("recording executor lock")
+            .clone();
+        assert_eq!(
+            calls
+                .iter()
+                .map(|(task_id, _)| task_id.as_str())
+                .collect::<Vec<_>>(),
+            ["generate_with_context", "refine"],
+            "the depends_on edge runs the sink node after its dependency"
+        );
+        assert!(
+            calls[0].1.contains("Generate with Memory Context"),
+            "template resolves from the node's asset path; got: {}",
+            calls[0].1
+        );
+        assert!(
+            calls[1].1.contains("Recall Memories"),
+            "template resolves from the node's asset path; got: {}",
+            calls[1].1
+        );
+        assert_eq!(
+            context.get::<String>("state.generate.output").as_deref(),
+            Some("refine output"),
+            "output_binding `refine.text` writes the bound node's output"
         );
     }
 }

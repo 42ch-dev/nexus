@@ -1110,7 +1110,11 @@ pub fn incoming_labeled_edge_counts(manifest: &PresetManifest) -> HashMap<&str, 
 }
 
 /// Extract output bindings from the manifest's `inner_graphs`.
-fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, String> {
+///
+/// The one derivation both intakes use: the loader for `LoadedPreset`, and the
+/// IR outer-graph builder for a manifest it projected itself.
+#[must_use]
+pub fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, String> {
     let mut bindings = HashMap::new();
     if let Some(ref inner_graphs) = manifest.inner_graphs {
         for (name, ig) in inner_graphs {
