@@ -223,10 +223,10 @@ fn unbuildable_documents(base: &nexus_workflow_ir::WorkflowDocument) -> [Unbuild
         Unbuildable {
             tag: "unprojected",
             document: with_draft_kind(base, nexus_workflow_ir::WorkflowNodeKind::Judge),
-            builder_reason: IrOuterGraphError::Unprojected {
-                concept: "node kind judge".to_string(),
-                location: "node draft".to_string(),
-            },
+            builder_reason: IrOuterGraphError::standalone_node_kind(
+                nexus_workflow_ir::WorkflowNodeKind::Judge,
+                "draft",
+            ),
         },
         // Passes the concept refusal (an inner step is a projected kind) and only the exporter
         // refuses it: the id is not `<inner_graph>/<step>`.
@@ -766,5 +766,137 @@ async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
         .await
         .unwrap();
     assert!(no_approvals.items.is_empty());
+    setup.core.close().await.unwrap();
+}
+
+/// One apply row written straight to the store — no guard consulted, no prior row superseded — as
+/// only an admitted non-core writer can leave a strategy with two current applies.
+async fn insert_successorless_row(
+    setup: &Setup,
+    apply_id: &str,
+    approval_id: &str,
+    content_hash: &str,
+    applied_at: &str,
+) {
+    sqlx::query(
+        "INSERT INTO strategy_applies \
+         (apply_id, strategy_id, approval_id, content_hash, applied_at, applied_by, \
+          supersedes_apply_id) \
+         VALUES (?, ?, ?, ?, ?, 'non_core_writer', NULL)",
+    )
+    .bind(apply_id)
+    .bind(STRATEGY)
+    .bind(approval_id)
+    .bind(content_hash)
+    .bind(applied_at)
+    .execute(setup.core.pool())
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn two_successorless_rows_resolve_to_the_same_row_on_every_read() {
+    let setup = setup().await;
+    let (approval_id, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
+    let (_, next_hash, _) = seed_approval(&setup, STRATEGY, 2).await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+    insert_successorless_row(
+        &setup,
+        "apl_dup_older",
+        &approval_id,
+        &hash,
+        "2026-01-01T00:00:00+00:00",
+    )
+    .await;
+    insert_successorless_row(
+        &setup,
+        "apl_dup_newer",
+        &approval_id,
+        &hash,
+        "2026-01-02T00:00:00+00:00",
+    )
+    .await;
+
+    // Read 1, the status route the Canvas and the intake share.
+    let status = setup
+        .core
+        .strategy_applied(&setup.principal, STRATEGY)
+        .await
+        .unwrap();
+    let winner = status
+        .current_apply
+        .expect("a successor-less row is the current apply")
+        .apply_id;
+    assert_eq!(
+        winner, "apl_dup_newer",
+        "`applied_at DESC, apply_id DESC` names the winner"
+    );
+
+    // Read 2, `refuse_apply`'s probe, reached through a repeat apply of the current approval.
+    let repeat = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap_err();
+    assert_eq!(reason(&repeat), "already_applied");
+    assert_eq!(
+        refusal(&repeat)["apply_id"],
+        winner.as_str(),
+        "the conflict names the row the status read reports"
+    );
+
+    // Read 3, the insert's own supersede-link pick.
+    let moved = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &next_hash)
+        .await
+        .unwrap();
+    assert_eq!(
+        moved.supersedes_apply_id.as_deref(),
+        Some(winner.as_str()),
+        "a new apply supersedes the row the status read reports"
+    );
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_repeat_apply_names_its_own_row_and_never_becomes_an_internal_fault() {
+    let setup = setup().await;
+    let (approval_id, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
+    let (other_approval, other_hash, _) = seed_approval(&setup, STRATEGY, 2).await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+    // Two current applies carrying DIFFERENT approvals: the newer one wins every "current apply"
+    // read, while the guard refuses on the older one because it is still successor-less.
+    insert_successorless_row(
+        &setup,
+        "apl_older_approval",
+        &approval_id,
+        &hash,
+        "2026-01-01T00:00:00+00:00",
+    )
+    .await;
+    insert_successorless_row(
+        &setup,
+        "apl_newer_approval",
+        &other_approval,
+        &other_hash,
+        "2026-01-02T00:00:00+00:00",
+    )
+    .await;
+
+    let repeat = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        reason(&repeat),
+        "already_applied",
+        "the refusal stays typed, never an internal fault"
+    );
+    assert_eq!(refusal(&repeat)["apply_id"], "apl_older_approval");
+    assert_eq!(refusal(&repeat)["approval_id"], approval_id.as_str());
+    assert_ne!(approval_id, other_approval);
     setup.core.close().await.unwrap();
 }

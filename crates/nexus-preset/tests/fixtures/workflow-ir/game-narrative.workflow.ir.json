@@ -60,7 +60,7 @@
     {
       "from": "scheduled_sweep",
       "id": "scheduled_sweep->sweep_extract",
-      "kind": "linear",
+      "kind": "default",
       "to": "sweep_extract"
     },
     {

@@ -394,13 +394,15 @@ impl CoreService {
         }
 
         // The approval lookup prefers this strategy's own row: two strategies approving the same
-        // content is legal, and the request names the strategy it applies to.
+        // content is legal, and the request names the strategy it applies to. `approval_id`
+        // breaks the tie so a hash only foreign strategies carry names the same strategy on every
+        // read: `UNIQUE (strategy_id, content_hash)` already rules out a tie inside one strategy.
         let Some((approval_id, approval_strategy_id, stored_hash, document_json)) =
             sqlx::query_as::<_, (String, String, String, String)>(
                 "SELECT approval_id, strategy_id, content_hash, document_json \
                  FROM strategy_approvals \
                  WHERE content_hash = ? \
-                 ORDER BY (strategy_id = ?) DESC",
+                 ORDER BY (strategy_id = ?) DESC, approval_id DESC",
             )
             .bind(approval_content_hash)
             .bind(strategy_id)
@@ -459,6 +461,10 @@ impl CoreService {
         // any successor-less row naming this approval, and the schedule precondition rides in the
         // same statement so an apply cannot land for a strategy that lost its schedule. A
         // superseded approval passes the guard, which is what makes rollback a normal apply.
+        //
+        // Both current-row picks order by `applied_at DESC, apply_id DESC` — the same total order
+        // [`current_apply`] reports — so a strategy holding two successor-less rows (only an
+        // admitted non-core writer can create that) still names one defined row everywhere.
         let written = sqlx::query_as::<_, (String, Option<String>)>(
             "INSERT INTO strategy_applies \
                (apply_id, strategy_id, approval_id, content_hash, applied_at, applied_by, \
@@ -468,6 +474,7 @@ impl CoreService {
                       WHERE cur.strategy_id = ? \
                         AND NOT EXISTS (SELECT 1 FROM strategy_applies later \
                                          WHERE later.supersedes_apply_id = cur.apply_id) \
+                      ORDER BY cur.applied_at DESC, cur.apply_id DESC \
                       LIMIT 1) \
              WHERE NOT EXISTS (SELECT 1 FROM strategy_applies cur \
                                 WHERE cur.strategy_id = ? \
@@ -506,7 +513,11 @@ impl CoreService {
 
     /// Name why the apply statement wrote no row. The schedule is checked first because it is the
     /// only precondition that lives outside the apply table; with it in place the sole remaining
-    /// predicate is the already-current guard, so a missing row means this approval is current.
+    /// predicate is the already-current guard, so this probe repeats that guard's own condition —
+    /// a successor-less row of this strategy naming this approval, in the same total order
+    /// [`current_apply`] uses. A probe that asked only for "the current row" would name a different
+    /// apply whenever a non-core writer left two successor-less rows, turning the typed conflict
+    /// into an internal fault.
     async fn refuse_apply(&self, strategy_id: &str, approval_id: &str) -> CoreError {
         let scheduled: i64 = match sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM creator_schedules WHERE preset_id = ?)",
@@ -526,13 +537,17 @@ impl CoreService {
             }
             .into_error();
         }
-        let current: Option<(String, String)> = match sqlx::query_as(
-            "SELECT cur.apply_id, cur.approval_id FROM strategy_applies cur \
+        let current: Option<String> = match sqlx::query_scalar(
+            "SELECT cur.apply_id FROM strategy_applies cur \
               WHERE cur.strategy_id = ? \
+                AND cur.approval_id = ? \
                 AND NOT EXISTS (SELECT 1 FROM strategy_applies later \
-                                 WHERE later.supersedes_apply_id = cur.apply_id)",
+                                 WHERE later.supersedes_apply_id = cur.apply_id) \
+              ORDER BY cur.applied_at DESC, cur.apply_id DESC \
+              LIMIT 1",
         )
         .bind(strategy_id)
+        .bind(approval_id)
         .fetch_optional(&self.inner.pool)
         .await
         {
@@ -540,14 +555,12 @@ impl CoreService {
             Err(error) => return apply_internal(format!("current apply probe: {error}")),
         };
         match current {
-            Some((apply_id, current_approval_id)) if current_approval_id == approval_id => {
-                ApplyRefusal::AlreadyApplied {
-                    apply_id,
-                    approval_id: approval_id.to_owned(),
-                }
-                .into_error()
+            Some(apply_id) => ApplyRefusal::AlreadyApplied {
+                apply_id,
+                approval_id: approval_id.to_owned(),
             }
-            _ => apply_internal("the apply insert wrote no row and no refusal explains it"),
+            .into_error(),
+            None => apply_internal("the apply insert wrote no row and no refusal explains it"),
         }
     }
 }

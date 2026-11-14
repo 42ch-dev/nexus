@@ -391,6 +391,28 @@ mod tests {
     }
 
     #[test]
+    fn every_embedded_preset_projects_its_catalog_id() {
+        let caps = BuiltinCapabilityCatalog;
+        for id in list_embedded_presets() {
+            let loaded = load_embedded_preset(&id, &caps).expect("embedded preset loads");
+            assert_eq!(
+                loaded.manifest.preset.id, id,
+                "`{id}` declares another id than its catalog name"
+            );
+
+            // A document's id is what the fence resolves its bundle by; a name nobody can load
+            // (`essay` declaring `essay-init`) would leave its templates unresolvable.
+            let document = workflow_ir::import_preset_manifest(&loaded.manifest)
+                .expect("embedded preset projects into IR");
+            assert_eq!(
+                document.id.as_str(),
+                id,
+                "`{id}` projects a document id that does not resolve back to its bundle"
+            );
+        }
+    }
+
+    #[test]
     fn embedded_novel_writing_excludes_deprecated_prompt_archive() {
         assert!(
             EMBEDDED_PRESETS
