@@ -96,7 +96,7 @@ fn the_essay_preset_ids_round_trip_and_simulate() {
             "summarizing"
         ]
     );
-    assert!(trajectory.stubbed_judges.is_empty());
+    assert_eq!(trajectory.stubbed_judges, Vec::<String>::new());
 
     // The bundle answers for the id the document projects; a manufactured id could not.
     validate_ir_buildability(&document, IrTemplateSource::Embedded)

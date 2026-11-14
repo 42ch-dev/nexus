@@ -1958,21 +1958,18 @@ states:
         document
     }
 
-    /// The predicate apply consults and the builder the run uses answer alike on
-    /// the same document: apply refuses iff the builder refuses, and a refusal
-    /// carries the builder's own reason. One row per refusal kind — the
-    /// projection refusals and the `Graph` refusals the builder raises after the
-    /// projection — plus the documents that do build.
-    #[test]
-    fn ir_buildability_predicate_refuses_iff_the_builder_refuses() {
-        struct Case {
-            name: &'static str,
-            document: WorkflowDocument,
-            source: IrTemplateSource,
-            /// The prefix of the builder's reason; `None` where it builds.
-            refusal: Option<&'static str>,
-        }
-        let cases = [
+    /// One row of [`ir_buildability_predicate_refuses_iff_the_builder_refuses`].
+    struct Case {
+        name: &'static str,
+        document: WorkflowDocument,
+        source: IrTemplateSource,
+        /// The prefix of the builder's reason; `None` where it builds.
+        refusal: Option<&'static str>,
+    }
+
+    /// The rows that test walks: one per refusal kind, plus the documents that do build.
+    fn ir_buildability_cases() -> [Case; 8] {
+        [
             Case {
                 name: "builds/embedded",
                 document: ir_document(IR_LINEAR),
@@ -2021,7 +2018,17 @@ states:
                 source: IrTemplateSource::OwnSource,
                 refusal: Some("ir_unresolved_template"),
             },
-        ];
+        ]
+    }
+
+    /// The predicate apply consults and the builder the run uses answer alike on
+    /// the same document: apply refuses iff the builder refuses, and a refusal
+    /// carries the builder's own reason. One row per refusal kind — the
+    /// projection refusals and the `Graph` refusals the builder raises after the
+    /// projection — plus the documents that do build.
+    #[test]
+    fn ir_buildability_predicate_refuses_iff_the_builder_refuses() {
+        let cases = ir_buildability_cases();
 
         let caps = Arc::new(test_capability_registry());
         let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
