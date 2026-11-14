@@ -771,6 +771,60 @@ applies the world-aware CAS rules when committing. The sample README and
 templates document these obligations — YAML alone does not provide a global
 idempotency ledger.
 
+### Round-trip normalisations (`preset.yaml` ↔ `WorkflowDocument`)
+
+`preset.yaml` and a `WorkflowDocument` (the IR document a sample ships as
+`workflow.json`) are two spellings of one manifest; `import_preset_bundle` /
+`export_preset` in `nexus-preset` are the bridge. Three committed manifests are
+round-tripped by `crates/nexus-orchestration/tests/sample_self_check.rs`:
+
+- `strategy-samples/game-narrative/preset.yaml`
+- `strategy-samples/react-trpg-turn/preset.yaml`
+- `examples/first-workflow/preset.yaml`
+
+All three currently re-export with **no data difference at all**. The test
+applies no normalisation: it requires the committed YAML and the export to
+deserialise to the same `serde_yaml::Value`, and reports the first divergent
+YAML path when they do not. The two lists below are therefore split by what
+that comparison can see.
+
+#### Invisible to the comparison (bytes only)
+
+| Input shape | Output shape | Why it is not a difference |
+| --- | --- | --- |
+| `#` comment lines anywhere in the file | dropped | `serde_yaml` writes values, never comments |
+| `description: "text"` (double-quoted, or a block scalar) | `description: 'text'` | scalar style only, same string value |
+| flow style (`{kind: llm_judge}`), sequences indented under their key | block style, sequence dashes at the parent indent | emitter defaults |
+| `preset:` keys, `inner_graphs:` keys in author order | schema order for `preset:`, alphabetical for `inner_graphs:` | `PresetHeader` field order, `BTreeMap` |
+
+#### Value rewrites (the test reports these — use the canonical spelling)
+
+| Input shape | Output shape | Meaning |
+| --- | --- | --- |
+| an empty value written out: `run_intents: []`, `enter: []`, `terminal: false` | key omitted | same manifest; the field's `skip_serializing_if` drops it |
+| a defaulted field left out: `preset.requires_capabilities`, `cli_args[].required`, a `previous_preset` gate's `scope`, `context_update.op.body` | the default written out: `requires_capabilities: []`, `required: false`, `scope: work`, `body: ''` | same manifest; those fields carry `#[serde(default)]` and no `skip_serializing_if` |
+| legacy `next: {kind: conditional, rules: [...]}` | `next: {branches: [...], default: ...}` | same rules, current spelling (documented `shortcut:` in `workflow_ir.rs`) |
+| judged state (`exit_when: llm_judge`) with `next: {branches: [], default: B}` | `next: B` | same meaning — a zero-rule branch always falls through to `default` — but the bytes move (I-000476); the IR cannot tell a zero-rule branch from a bare `next` on a judged node |
+
+So a manifest that spells a row of the second table does not round-trip: write
+the canonical spelling instead. Neither bundled sample uses one, and
+`examples/first-workflow`'s `walked` state is not affected — a **non**-judged
+zero-rule branch keeps its `next: {branches: [], default: B}` shape untouched.
+
+Two facts are worth knowing when authoring either spelling:
+
+- A judged state's unconditional advance (`exit_when: llm_judge` + `next: B`)
+  becomes the node's **`default`** edge in the IR — the only edge a static walk
+  may follow out of a judged node — and re-exports as the same `next: B`. Both
+  bundled samples rely on this.
+- Only the judged zero-rule branch collapses; the non-judged one is preserved.
+
+A difference that is on neither list means the exporter is wrong for that
+manifest: report it instead of editing YAML to match. A difference that is
+**semantic** — two spellings that mean different manifests — is never a
+normalisation; it blocks authoring the sample from `workflow.json`, and neither
+this list nor the test may be taught to accept it.
+
 ---
 
 ## 7. References
