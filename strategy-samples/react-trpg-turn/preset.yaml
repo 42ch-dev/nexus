@@ -1,3 +1,7 @@
+# GENERATED FROM workflow.json — the JSON is the authoring source, this manifest
+# is its export. CI (`crates/nexus-orchestration/tests/sample_self_check.rs`)
+# fails when the two disagree. Canvas is not required to author this sample.
+#
 # React TRPG Turn Strategies Preset — mechanical-op + natural-language-turn lanes
 #
 # This is a FORKABLE sample for partners who orchestrate a turn-based TRPG

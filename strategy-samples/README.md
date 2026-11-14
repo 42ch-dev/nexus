@@ -711,15 +711,17 @@ cp -R strategy-samples/react-trpg-turn my-strategy
 
 **One invariant:** the validator enforces that the bundle directory name
 equals `preset.id` in the manifest (`check_bundle_id_vs_directory`). Either
-keep the directory named `react-trpg-turn`, or edit `preset.id:
-my-strategy` (and the `description`) in `my-strategy/preset.yaml` after
-copying — validation fails otherwise.
+keep the directory named `react-trpg-turn`, or change `id` (and
+`meta.description`) in `my-strategy/workflow.json` and the `preset.id` /
+`description` it exports to in `my-strategy/preset.yaml` — validation fails
+otherwise.
 
-The bundle is the standard preset format (`preset.yaml` + `templates/`). Edit
-prompts, triggers, and cadence freely; keep the manifest schema shape intact
-so the validator stays green. The authoritative authoring reference — manifest
-format, trigger/scheduled lanes, prompt templates, validator semantics, fork
-flow — is [`docs/strategy-authoring.md`](../docs/strategy-authoring.md).
+The bundle is `workflow.json` (the source) plus `preset.yaml` (its export) and
+`templates/`. Edit `workflow.json` — prompts, triggers, cadence and structure —
+and keep the exported manifest in step so the validator stays green. The
+authoritative authoring reference — manifest format, trigger/scheduled lanes,
+prompt templates, validator semantics, fork flow — is
+[`docs/strategy-authoring.md`](../docs/strategy-authoring.md).
 
 ### Validate
 
@@ -770,6 +772,48 @@ ids, persists raw input + receipts + final output in its own turn ledger, and
 applies the world-aware CAS rules when committing. The sample README and
 templates document these obligations — YAML alone does not provide a global
 idempotency ledger.
+
+### Authoring source: `workflow.json`
+
+Both bundled samples are IR-primary: `workflow.json` holds a `WorkflowDocument`
+and is the hand-edited source, `preset.yaml` is its export. A sample author
+edits the JSON directly — Canvas is not required for repository sample
+authoring, and `preset.yaml` is not the file to edit.
+
+CI arbitrates the pair. `sample_self_check` loads each `workflow.json`, checks
+`assets[]` against the templates its carriers name, re-exports it, and fails at
+the divergent YAML path when the committed `preset.yaml` is not that export:
+
+```bash
+cargo test -p nexus-orchestration --test sample_self_check
+```
+
+There is no committed generator: nothing rewrites `preset.yaml` from the JSON
+(no `cargo` subcommand, no `nexus42` verb), so a change that projects into the
+manifest also lands in `preset.yaml` — the failing path names the member to
+update. The JSON stays the authority: write it first, then make the export
+match.
+
+`examples/first-workflow` and the embedded presets stay YAML-primary: their
+`preset.yaml` is the source, and they are the live evidence that a
+hand-authored YAML bundle still imports and exports. Do not convert them.
+
+### Refreshing `assets[].content_hash`
+
+`assets[]` is not projected by the export, so it is hand-maintained in
+`workflow.json`: one entry per template a carrier references, each
+`content_hash` the BLAKE3 hex digest over that file's bytes. Nothing recomputes
+it — there is no committed generator and no `nexus42` leaf for it, and
+`sample_self_check` hashes the file on disk, so a stale digest fails CI.
+Recompute one entry from the repository root:
+
+```bash
+python3 -c 'import blake3,sys;print(blake3.blake3(open(sys.argv[1],"rb").read()).hexdigest())' \
+  strategy-samples/react-trpg-turn/templates/lane-route.md
+```
+
+Any BLAKE3 implementation prints the same digest (`b3sum <file>` when the
+`blake3` CLI is installed). Paste the value into that asset's `content_hash`.
 
 ### Round-trip normalisations (`preset.yaml` ↔ `WorkflowDocument`)
 

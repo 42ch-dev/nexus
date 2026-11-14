@@ -1,3 +1,7 @@
+# GENERATED FROM workflow.json — the JSON is the authoring source, this manifest
+# is its export. CI (`crates/nexus-orchestration/tests/sample_self_check.rs`)
+# fails when the two disagree. Canvas is not required to author this sample.
+#
 # Game Narrative Preset — sample strategy for AI-narrative game orchestration
 #
 # This is a FORKABLE sample for partners who orchestrate Nexus from their own
