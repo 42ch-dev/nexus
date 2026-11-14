@@ -62,20 +62,28 @@ const STATUS_BY_CODE: Record<CoreError['code'], number> = {
 const PUBLIC_INTERNAL_MESSAGE = 'Internal server error';
 
 /**
- * The apply refusals that are conflicts, not client errors: a repeat apply of the approval that
- * is already current, and an approval whose frozen bytes no longer hash to its identity. Both
- * mirror `strategy_already_approved` — retrying the same request cannot succeed, so the client
- * reloads the applied status instead of fixing the request. The remaining apply refusals
- * (unknown hash, foreign approval, no schedule) keep the core's client-error status.
+ * The apply refusals the stored state has already answered, published as 409 under a code that
+ * names the conflict (their reason) so the envelope matches its status, mirroring
+ * `strategy_already_approved`.
+ *
+ * 409 follows one rule, not a bare list: the request is well-formed and the approval it names
+ * exists, but the state that approval recorded has moved, so retrying this exact request cannot
+ * succeed — it is already the current apply, or its frozen bytes no longer hash to the identity
+ * the approval recorded. The client reloads the applied status or re-approves. Every other refusal
+ * needs a *different* request (another approval, a user preset, a schedule, an approval whose
+ * document builds), so it keeps the core's client-error status; that includes
+ * `document_unbuildable`, whose remedy is a new approval, not a retry.
  */
 const APPLY_CONFLICT_REASONS: Readonly<Record<string, true>> = {
   already_applied: true,
   approval_hash_changed: true,
 };
 
-function applyConflictStatus(details: Record<string, unknown> | undefined): number | undefined {
+/** The envelope code of a conflict-shaped apply refusal, or `undefined` for a client error. */
+function applyConflictCode(details: Record<string, unknown> | undefined): string | undefined {
   if (details?.code !== 'apply_refused') return undefined;
-  return APPLY_CONFLICT_REASONS[String(details.reason)] ? 409 : undefined;
+  const reason = String(details.reason);
+  return APPLY_CONFLICT_REASONS[reason] ? reason : undefined;
 }
 
 export function statusForCode(code: string): number {
@@ -117,9 +125,10 @@ export function mapNativeError(error: unknown): HttpError {
       wire.details && typeof wire.details === 'object'
         ? (wire.details as Record<string, unknown>)
         : undefined;
+    const conflictCode = applyConflictCode(details);
     return new HttpError(
-      applyConflictStatus(details) ?? wire.http_status ?? statusForCode(wire.code),
-      wire.code,
+      conflictCode ? 409 : wire.http_status ?? statusForCode(wire.code),
+      conflictCode ?? wire.code,
       wire.message,
       details,
     );

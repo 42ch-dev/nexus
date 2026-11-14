@@ -286,7 +286,10 @@ describe('route-inventory (P5-T5)', () => {
 
     // Apply checks its user-preset guard before any read, so the probe needs a
     // real user preset to reach the approval lookup: the scaffold surface writes
-    // that bundle, and the unknown hash is then the handler's own refusal.
+    // that bundle, and the unknown hash is then the handler's own refusal. An
+    // unknown hash needs a different request, so it is a client error and keeps
+    // `invalid_input`; only the already-applied / changed-bytes refusals publish
+    // a conflict code under 409.
     const scaffolded = await jsonFetch(`${baseUrl}/v1/daemon/presets`, {
       method: 'POST',
       body: { name: 'route-inventory-apply' },

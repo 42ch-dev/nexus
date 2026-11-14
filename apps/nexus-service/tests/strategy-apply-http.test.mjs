@@ -15,8 +15,9 @@ const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
  * real store in `crates/nexus-core/tests/apply_write.rs`; this target proves the HTTP contract —
  * path id, tier, payload passthrough, the applied identity read back through the status route, the
  * null `current_apply` case, the approvals list passthrough (the rollback target read), and the
- * refusal status mapping (`already_applied` and `approval_hash_changed` are conflicts, mirroring
- * `strategy_already_approved`; the other three refusals keep the core's client-error status).
+ * refusal status mapping: `already_applied` and `approval_hash_changed` answer 409 under a code
+ * naming the conflict (their reason), mirroring `strategy_already_approved`; every other refusal
+ * keeps the core's client-error status and `invalid_input` code.
  */
 
 let routes;
@@ -153,46 +154,34 @@ describe('apply transport (POST /v1/daemon/strategies/{id}/apply)', () => {
     assert.deepEqual(status.body.newest_approval, NEWEST);
   });
 
-  test('a repeat apply is the mapped conflict, not a 500', async () => {
-    await assert.rejects(
-      () =>
-        routeFor('POST', APPLY_PATH).handle(
-          refusingService('already_applied'),
-          [STRATEGY],
-          new URLSearchParams(),
-          BODY,
-        ),
-      (error) => {
-        assert.equal(error.status, 409);
-        assert.equal(error.code, 'invalid_input');
-        assert.equal(error.details.reason, 'already_applied');
-        return true;
-      },
-    );
+  test('the two state conflicts publish 409 under a conflict-naming code', async () => {
+    for (const reason of ['already_applied', 'approval_hash_changed']) {
+      await assert.rejects(
+        () =>
+          routeFor('POST', APPLY_PATH).handle(
+            refusingService(reason),
+            [STRATEGY],
+            new URLSearchParams(),
+            BODY,
+          ),
+        (error) => {
+          assert.equal(error.status, 409, reason);
+          assert.equal(error.code, reason, reason);
+          assert.equal(error.details.code, 'apply_refused', reason);
+          assert.equal(error.details.reason, reason, reason);
+          return true;
+        },
+      );
+    }
   });
 
-  test('changed approval bytes are the mapped conflict', async () => {
-    await assert.rejects(
-      () =>
-        routeFor('POST', APPLY_PATH).handle(
-          refusingService('approval_hash_changed'),
-          [STRATEGY],
-          new URLSearchParams(),
-          BODY,
-        ),
-      (error) => {
-        assert.equal(error.status, 409);
-        assert.equal(error.details.reason, 'approval_hash_changed');
-        return true;
-      },
-    );
-  });
-
-  test('the remaining refusals keep the core client-error status', async () => {
+  test('every other refusal keeps the core client-error status and code', async () => {
     for (const reason of [
       'approval_not_found',
       'approval_strategy_mismatch',
+      'strategy_not_user_preset',
       'strategy_has_no_schedule',
+      'document_unbuildable',
     ]) {
       await assert.rejects(
         () =>
@@ -204,6 +193,7 @@ describe('apply transport (POST /v1/daemon/strategies/{id}/apply)', () => {
           ),
         (error) => {
           assert.equal(error.status, 422, reason);
+          assert.equal(error.code, 'invalid_input', reason);
           assert.equal(error.details.reason, reason);
           return true;
         },
