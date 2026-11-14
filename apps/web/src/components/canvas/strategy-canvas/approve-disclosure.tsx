@@ -19,6 +19,7 @@ import type { SimulationTrajectory } from '@42ch/nexus-contracts';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import type { SimulationStatus } from '@/lib/canvas/use-simulation-trajectory';
 import type { ApproveRenderState } from './hooks/use-approve-strategy';
+import type { ApplyRenderState } from './hooks/use-apply-strategy';
 
 export interface ApproveDisclosureProps {
   open: boolean;
@@ -53,6 +54,16 @@ export interface ApproveDisclosureProps {
    * off the compose path.
    */
   gateReason?: string | null;
+  /**
+   * The apply write path, supplied only once an approval exists: apply installs
+   * that frozen snapshot as the running identity. Absent → no Apply control.
+   */
+  onApply?: () => void;
+  /**
+   * Compose-path apply outcome: the appended apply row, or the refusal's own
+   * typed code. Absent until the wired handler ran.
+   */
+  application?: ApplyRenderState | null;
   /** Re-run the static walk for the current candidate (the stale/failed recovery). */
   onRun?: () => void;
 }
@@ -67,6 +78,8 @@ export function ApproveDisclosure({
   onApprove,
   approval = null,
   gateReason = null,
+  onApply,
+  application = null,
   onRun,
 }: ApproveDisclosureProps) {
   const { t } = useTranslation('canvas');
@@ -249,6 +262,70 @@ export function ApproveDisclosure({
                 </dd>
               </div>
             </dl>
+
+            {application?.kind === 'pending' ? (
+              <p data-testid="apply-pending" className="text-copy-13 text-gray-900">
+                {t('strategy.apply.pending')}
+              </p>
+            ) : null}
+
+            {application?.kind === 'refused' ? (
+              <p
+                data-testid="apply-refused"
+                role="alert"
+                className="rounded-card border border-amber-700 px-3 py-2 text-copy-13 text-gray-1000"
+              >
+                {application.message}
+              </p>
+            ) : null}
+
+            {application?.kind === 'applied' ? (
+              <div data-testid="apply-applied" className="flex flex-col gap-2">
+                <p className="rounded-card border border-teal-700 px-3 py-2 text-copy-13 text-gray-1000">
+                  {t('strategy.apply.applied', {
+                    applyId: application.applied.apply_id,
+                    appliedAt: application.applied.applied_at,
+                  })}
+                </p>
+                <dl className="flex flex-col gap-2">
+                  <div>
+                    <dt className="text-label-12 text-gray-700">
+                      {t('strategy.apply.approval')}
+                    </dt>
+                    <dd
+                      data-testid="apply-approval"
+                      className="font-mono text-label-12 text-gray-1000"
+                    >
+                      {application.applied.approval_id}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-label-12 text-gray-700">
+                      {t('strategy.apply.contentHash')}
+                    </dt>
+                    <dd
+                      data-testid="apply-content-hash"
+                      className="font-mono text-label-12 text-gray-1000"
+                    >
+                      {application.applied.content_hash}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            ) : null}
+
+            {onApply ? (
+              <div>
+                <button
+                  type="button"
+                  onClick={onApply}
+                  disabled={application?.kind === 'pending'}
+                  className="rounded-control bg-purple-700 px-3 py-1.5 text-button-12 text-white hover:bg-purple-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t('strategy.apply.action')}
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
 

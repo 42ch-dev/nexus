@@ -30,6 +30,7 @@ import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/ca
 import { useStrategyCanvas } from '@/components/canvas/strategy-canvas/hooks/use-strategy-canvas';
 import { useStrategyCompose } from '@/components/canvas/strategy-canvas/hooks/use-strategy-compose';
 import { useApproveStrategy } from '@/components/canvas/strategy-canvas/hooks/use-approve-strategy';
+import { useApplyStrategy } from '@/components/canvas/strategy-canvas/hooks/use-apply-strategy';
 import { useStrategyCanvasComposeFlag } from '@/lib/canvas/strategy-compose-flag';
 import { i18n } from '@/lib/i18n/config';
 import { CanvasFooter, CanvasHeader } from './strategy-canvas/canvas-layout';
@@ -76,6 +77,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   const strategyState = useStrategyCanvas(presetId, composeEnabled);
   const compose = useStrategyCompose(presetId, composeEnabled);
   const approval = useApproveStrategy(presetId);
+  const application = useApplyStrategy(presetId);
   // The compose path simulates the working candidate it holds in hand; the
   // flag-off path keeps the shipped preset/candidate behaviour.
   const simulationCandidate = composeEnabled
@@ -230,6 +232,19 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       .catch(() => {
         // The refusal renders from `approval.approval`; no toast duplication.
       });
+  }
+
+  /**
+   * v241 P3.5 T2 — apply the frozen snapshot the approve response carries. The
+   * request names the approval by content hash only; the applied identity comes
+   * back from the response, so the surface never reloads to show it.
+   */
+  function handleApply() {
+    const approved = approval.approval;
+    if (!approved || approved.kind !== 'approved') return;
+    void application.apply(approved.snapshot).catch(() => {
+      // The refusal renders from `application.application`; no toast duplication.
+    });
   }
 
   /**
@@ -471,6 +486,8 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         onApprove={composeEnabled ? handleApprove : onApproveCandidate}
         approval={composeEnabled ? approval.approval : null}
         gateReason={composeEnabled ? approveGateReason : null}
+        onApply={composeEnabled ? handleApply : undefined}
+        application={composeEnabled ? application.application : null}
       />
 
       <ComposeConflictDialog
