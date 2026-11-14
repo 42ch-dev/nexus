@@ -5,7 +5,8 @@
  * the newest approval. The surface compares the two `approval_id`s — never
  * timestamps — to decide whether the live apply is behind the newest
  * approval. This query is the first mounted reader of
- * `queryKeys.strategies.applied`; a successful apply invalidates that key.
+ * `queryKeys.strategies.applied`; a successful apply or approve invalidates
+ * that key.
  */
 import { useQuery } from '@tanstack/react-query';
 

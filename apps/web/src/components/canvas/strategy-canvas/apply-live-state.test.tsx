@@ -167,4 +167,61 @@ describe('ApproveDisclosure — live apply state (compose path)', () => {
     expect(screen.getByTestId('apply-live')).toBeInTheDocument();
     expect(screen.queryByTestId('apply-newer-available')).toBeNull();
   });
+
+  it('the dialog holds the live approval: applying is an already_applied refusal, so no rollback note', () => {
+    renderDisclosure({
+      // Shown approval IS the live one; a newer approval also exists, which
+      // the pre-fix newest_approval comparison mistook for a rollback.
+      approval: { kind: 'approved', snapshot: snapshot('apr_123', 3) },
+      onApply: vi.fn(),
+      appliedStatus: appliedStatus({
+        newest_approval: {
+          approval_id: 'apr_456',
+          content_hash: 'hash-4',
+          candidate_revision: 4,
+          approved_at: '2026-11-14T00:00:00Z',
+        },
+      }),
+    });
+
+    expect(screen.getByTestId('apply-live')).toHaveTextContent('apr_123');
+    expect(screen.queryByTestId('apply-rollback-note')).toBeNull();
+  });
+
+  it('a newer approval chosen over an older live one is a deliberate rollback and keeps the note', () => {
+    renderDisclosure({
+      // Shown approval is the newest; the live one is older. Applying would
+      // actually move production — rollback copy, not an error (D9 mirror).
+      approval: { kind: 'approved', snapshot: snapshot('apr_456', 4) },
+      onApply: vi.fn(),
+      appliedStatus: appliedStatus(),
+    });
+
+    expect(screen.getByTestId('apply-rollback-note')).toHaveTextContent('append-only');
+  });
+
+  it('a pending live read says so instead of silently rendering "no apply yet"', () => {
+    renderDisclosure({
+      approval: { kind: 'approved', snapshot: snapshot() },
+      onApply: vi.fn(),
+      appliedStatus: null,
+      appliedStatusPending: true,
+    });
+
+    expect(screen.getByTestId('apply-live-pending')).toBeInTheDocument();
+    expect(screen.queryByTestId('apply-live')).toBeNull();
+    expect(screen.queryByTestId('apply-newer-available')).toBeNull();
+  });
+
+  it('a failed live read names the failure instead of silently rendering "no apply yet"', () => {
+    renderDisclosure({
+      approval: { kind: 'approved', snapshot: snapshot() },
+      onApply: vi.fn(),
+      appliedStatus: null,
+      appliedStatusError: 'daemon unreachable',
+    });
+
+    expect(screen.getByTestId('apply-live-error')).toHaveTextContent('daemon unreachable');
+    expect(screen.queryByTestId('apply-live')).toBeNull();
+  });
 });

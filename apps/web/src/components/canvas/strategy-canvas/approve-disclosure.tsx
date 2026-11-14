@@ -72,6 +72,10 @@ export interface ApproveDisclosureProps {
    * no live block and no badge. The badge compares `approval_id`s only.
    */
   appliedStatus?: StrategyAppliedStatus | null;
+  /** The live read has not returned its first row yet (no `appliedStatus` data). */
+  appliedStatusPending?: boolean;
+  /** The live read failed; its message names the failure instead of a silent "no apply". */
+  appliedStatusError?: string | null;
 }
 
 export function ApproveDisclosure({
@@ -88,6 +92,8 @@ export function ApproveDisclosure({
   application = null,
   onRun,
   appliedStatus = null,
+  appliedStatusPending = false,
+  appliedStatusError = null,
 }: ApproveDisclosureProps) {
   const { t } = useTranslation('canvas');
   // `status` owns the banner; `isStale` only re-adds it while a newer fact
@@ -235,6 +241,20 @@ export function ApproveDisclosure({
           </p>
         ) : null}
 
+        {appliedStatusError ? (
+          <p
+            data-testid="apply-live-error"
+            role="alert"
+            className="rounded-card border border-amber-700 px-3 py-2 text-copy-13 text-gray-1000"
+          >
+            {t('strategy.apply.liveUnreadable', { message: appliedStatusError })}
+          </p>
+        ) : appliedStatusPending && !appliedStatus ? (
+          <p data-testid="apply-live-pending" className="text-copy-13 text-gray-900">
+            {t('strategy.apply.livePending')}
+          </p>
+        ) : null}
+
         {appliedStatus?.current_apply ? (
           <div data-testid="apply-live" className="mt-3 flex flex-col gap-2">
             <p className="rounded-card border border-teal-700 px-3 py-2 text-copy-13 text-gray-1000">
@@ -355,10 +375,13 @@ export function ApproveDisclosure({
                   {t('strategy.apply.action')}
                 </button>
                 {/* Rollback is this same control aimed at a superseded approval:
-                    history is append-only, so the copy never implies deletion. */}
-                {appliedStatus?.newest_approval &&
+                    history is append-only, so the copy never implies deletion.
+                    The note keys on the LIVE apply: when the shown approval is
+                    the live one, applying is an `already_applied` refusal, not
+                    a rollback (the mirror of D9). */}
+                {appliedStatus?.current_apply &&
                 approval.snapshot.approval_id !==
-                  appliedStatus.newest_approval.approval_id ? (
+                  appliedStatus.current_apply.approval_id ? (
                   <p data-testid="apply-rollback-note" className="text-copy-13 text-gray-900">
                     {t('strategy.apply.rollbackNote')}
                   </p>

@@ -227,6 +227,8 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
    * refusal renders verbatim with its recovery copy; nothing auto-retries.
    */
   function handleApprove() {
+    // A newer approval supersedes the previous apply block; never render both.
+    application.dismissApplication();
     void approval
       .approve({
         baseRevision: compose.revision,
@@ -492,6 +494,8 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         onApply={composeEnabled ? handleApply : undefined}
         application={composeEnabled ? application.application : null}
         appliedStatus={composeEnabled ? (appliedStatus.data ?? null) : null}
+        appliedStatusPending={composeEnabled ? appliedStatus.isPending : false}
+        appliedStatusError={composeEnabled ? (appliedStatus.error?.message ?? null) : null}
       />
 
       <ComposeConflictDialog
