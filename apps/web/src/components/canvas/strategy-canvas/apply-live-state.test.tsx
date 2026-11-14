@@ -259,7 +259,7 @@ describe('ApproveDisclosure — live apply state (compose path)', () => {
     expect(screen.queryByTestId('apply-live')).toBeNull();
   });
 
-  it('a failed approvals read names the failure instead of dropping the Apply control', () => {
+  it('a failed approvals read names the failure and drops the Apply control, which lists no target', () => {
     renderDisclosure({
       onApply: vi.fn(),
       approvals: null,
@@ -267,6 +267,9 @@ describe('ApproveDisclosure — live apply state (compose path)', () => {
       appliedStatus: appliedStatus(),
     });
 
+    // Intended: one Apply control, and it lives inside the target list (QC S4). With no approvals
+    // there is no target to aim it at, so a failed read removes the control — naming the failure
+    // is the whole answer rather than offering an apply that cannot name an approval.
     expect(screen.getByTestId('apply-targets-error')).toHaveTextContent('daemon unreachable');
     expect(screen.queryByRole('button', { name: 'Apply snapshot' })).toBeNull();
   });

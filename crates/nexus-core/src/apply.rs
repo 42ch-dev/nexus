@@ -5,8 +5,9 @@
 //! Apply is the only place an approval becomes the running identity, so each refusal here is a
 //! safety property and every one of them happens before a row exists: the requested content hash
 //! must name an approval of this strategy, the approval's frozen `document_json` must still hash
-//! to the `content_hash` the approval recorded, the strategy must own a schedule (nothing would
-//! run otherwise), and the approval must not already be the current apply.
+//! to the `content_hash` the approval recorded, the strategy must resolve to a user bundle (the
+//! only source the intake ever reads an apply from), the strategy must own a schedule (nothing
+//! would run otherwise), and the approval must not already be the current apply.
 //!
 //! `strategy_applies` is append-only and carries no current pointer: the current apply of a
 //! strategy is the row with no successor, and a superseded approval is a legal rollback (a new
@@ -23,7 +24,9 @@
 //! [`current_apply`] is that one answer shared as a function, and [`verified_apply_document`] is
 //! its load-side counterpart: the schedule intake re-runs the same recomputation before it builds
 //! a graph, so bytes edited after apply are a typed refusal instead of a reinterpreted run
-//! (v1.241 P3.5, `.mstar/plans/v241-p35-intake-branch.md`).
+//! (v1.241 P3.5, `.mstar/plans/v241-p35-intake-branch.md`). [`is_user_preset`] is that pairing on
+//! the other side: the intake consults [`current_apply`] for a user bundle only, so apply refuses
+//! any other source rather than record a row nothing reads.
 
 use nexus_workflow_ir::{content_hash, WorkflowDocument};
 use serde_json::Value;
@@ -58,6 +61,12 @@ pub enum ApplyRefusal {
         /// The canonical hash of the stored `document_json`.
         recomputed_hash: String,
     },
+    /// The strategy does not resolve to a user bundle, so the schedule intake would never read
+    /// the apply this request would record.
+    StrategyNotUserPreset {
+        /// The strategy the request named.
+        strategy_id: String,
+    },
     /// The strategy owns no schedule, so an applied identity would record nothing that runs.
     StrategyHasNoSchedule {
         /// The strategy the request named.
@@ -81,6 +90,7 @@ impl ApplyRefusal {
             Self::ApprovalNotFound { .. } => "approval_not_found",
             Self::ApprovalStrategyMismatch { .. } => "approval_strategy_mismatch",
             Self::ApprovalHashChanged { .. } => "approval_hash_changed",
+            Self::StrategyNotUserPreset { .. } => "strategy_not_user_preset",
             Self::StrategyHasNoSchedule { .. } => "strategy_has_no_schedule",
             Self::AlreadyApplied { .. } => "already_applied",
         }
@@ -124,7 +134,8 @@ impl ApplyRefusal {
                     Value::from(recomputed_hash.clone()),
                 );
             }
-            Self::StrategyHasNoSchedule { strategy_id } => {
+            Self::StrategyNotUserPreset { strategy_id }
+            | Self::StrategyHasNoSchedule { strategy_id } => {
                 details.insert("strategy_id".into(), Value::from(strategy_id.clone()));
             }
             Self::AlreadyApplied {
@@ -173,6 +184,12 @@ impl std::fmt::Display for ApplyRefusal {
                 "approval `{approval_id}` records content hash `{stored_hash}`, but its frozen \
                  document now hashes to `{recomputed_hash}`: the approval bytes changed after \
                  approval"
+            ),
+            Self::StrategyNotUserPreset { strategy_id } => write!(
+                f,
+                "strategy `{strategy_id}` is not a user preset: the schedule intake reads an \
+                 applied identity only for a user bundle, so this apply would record nothing that \
+                 runs"
             ),
             Self::StrategyHasNoSchedule { strategy_id } => write!(
                 f,
@@ -327,9 +344,10 @@ impl CoreService {
     /// # Errors
     ///
     /// Returns [`CoreError::InputValidation`] carrying an [`ApplyRefusal::details`] envelope for
-    /// an unknown content hash, another strategy's approval, an approval whose document no longer
-    /// hashes to its identity, a strategy with no schedule, or an approval that is already
-    /// current; the principal and store errors otherwise. A refusal writes nothing.
+    /// a strategy that does not resolve to a user bundle, an unknown content hash, another
+    /// strategy's approval, an approval whose document no longer hashes to its identity, a
+    /// strategy with no schedule, or an approval that is already current; the principal and
+    /// store errors otherwise. A refusal writes nothing.
     pub async fn apply_strategy(
         &self,
         principal: &Principal,
@@ -337,6 +355,25 @@ impl CoreService {
         approval_content_hash: &str,
     ) -> CoreResult<AppliedStrategy> {
         self.verify_principal(principal)?;
+
+        // The intake reads an apply only for a user preset (`is_user_preset`), so an apply
+        // naming an embedded or system id records a row nothing ever reads — a successful apply
+        // that changes nothing. The source is the LOADER's answer through the resolver the intake
+        // shares; a preset that does not resolve at all is equally not a user bundle. Validation
+        // uses the builtin catalog, the one every other Canvas strategy read validates against
+        // (`imported_strategy_document`, approve, simulate).
+        let user_preset = nexus_preset::resolve_preset(
+            strategy_id,
+            self.nexus_home(),
+            &nexus_preset::capability_catalog::BuiltinCapabilityCatalog,
+        )
+        .is_ok_and(|loaded| is_user_preset(strategy_id, &loaded));
+        if !user_preset {
+            return Err(ApplyRefusal::StrategyNotUserPreset {
+                strategy_id: strategy_id.to_owned(),
+            }
+            .into_error());
+        }
 
         // The approval lookup prefers this strategy's own row: two strategies approving the same
         // content is legal, and the request names the strategy it applies to.
@@ -489,6 +526,26 @@ impl CoreService {
 // ---------------------------------------------------------------------------
 // Load-side replay: which apply is live, and whether it still replays.
 // ---------------------------------------------------------------------------
+
+/// Whether `strategy_id` resolved to a user bundle — the only source the schedule intake reads an
+/// apply from.
+///
+/// This is the ONE classification both sides of the apply gate use, so the two cannot disagree
+/// about which strategies have an applied identity. Callers pass the id and the preset
+/// [`nexus_preset::resolve_preset`] returned for it — never a second classifier: `locate_preset`
+/// is embedded-first, so a user bundle that shadows an embedded id reads as `embedded` there.
+///
+/// A `_system.` id is not a user preset even though its bundle is on disk too (a system bundle
+/// resolves to the same `Directory` source); no admitted writer gives one a schedule, and a
+/// `_system.` id names no strategy.
+#[must_use]
+pub fn is_user_preset(strategy_id: &str, loaded: &nexus_preset::LoadedPreset) -> bool {
+    !strategy_id.starts_with("_system.")
+        && matches!(
+            loaded.source_identity,
+            Some(nexus_preset::source_identity::PresetSourceIdentity::Directory { .. })
+        )
+}
 
 /// The apply that is live for `strategy_id`: the append-only row with no successor.
 ///

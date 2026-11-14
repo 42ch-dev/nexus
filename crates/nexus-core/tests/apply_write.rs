@@ -1,8 +1,9 @@
 //! The apply write, executed through a real `CoreService`: one approval becomes one immutable
-//! apply row; an unknown content hash, another strategy's approval, an approval whose frozen
-//! document no longer hashes to its identity, a strategy with no schedule and a repeat apply of
-//! the current approval are typed refusals that write nothing; a superseded approval applies
-//! again (that is rollback), and two concurrent applies of one approval leave exactly one row.
+//! apply row; a strategy that is not a user bundle, an unknown content hash, another strategy's
+//! approval, an approval whose frozen document no longer hashes to its identity, a strategy with
+//! no schedule and a repeat apply of the current approval are typed refusals that write nothing; a
+//! superseded approval applies again (that is rollback), and two concurrent applies of one
+//! approval leave exactly one row.
 //!
 //! Plan: `.mstar/plans/v241-p35-applied-identity.md` T2.
 
@@ -12,8 +13,16 @@ use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, Principal}
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
-/// An embedded preset the candidate read resolves without any home preset directory.
-const STRATEGY: &str = "novel-writing";
+/// The user preset every apply here names: a user bundle is the only source the schedule intake
+/// reads an applied identity from, so it is the only source an apply may write for.
+const STRATEGY: &str = "apply-fixture";
+
+/// A second user preset, so the foreign-approval refusal trips on the pairing, not on the source.
+const OTHER_STRATEGY: &str = "other-strategy";
+
+/// An embedded preset: no user bundle exists for it, so the schedule intake would never read an
+/// apply recorded against this id.
+const EMBEDDED_PRESET: &str = "novel-writing";
 
 struct Setup {
     _tmp: TempDir,
@@ -21,10 +30,42 @@ struct Setup {
     principal: Principal,
 }
 
+/// Write a minimal user preset bundle at `<nexus_home>/presets/<id>/preset.yaml` — the layout the
+/// core resolves as a user (Canvas) strategy.
+fn seed_user_preset(nexus_home: &std::path::Path, id: &str) {
+    let bundle = nexus_home.join("presets").join(id);
+    std::fs::create_dir_all(&bundle).expect("preset bundle dir");
+    std::fs::write(
+        bundle.join("preset.yaml"),
+        format!(
+            r#"
+preset:
+  id: {id}
+  version: 1
+  kind: creator
+  description: "apply write fixture"
+  requires_capabilities: []
+  initial: draft
+  terminal: done
+states:
+  - id: draft
+    enter: []
+    exit_when: {{ kind: rule }}
+    next: done
+  - id: done
+    terminal: true
+"#
+        ),
+    )
+    .expect("preset yaml");
+}
+
 async fn setup() -> Setup {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path().join(".nexus42");
     std::fs::create_dir_all(&home).unwrap();
+    seed_user_preset(&home, STRATEGY);
+    seed_user_preset(&home, OTHER_STRATEGY);
     std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
         tmp.path(),
         "test_creator",
@@ -63,11 +104,12 @@ fn with_version(
 /// Freeze one approval row exactly as the approve path would, keyed by its recomputed hash.
 async fn seed_approval(
     setup: &Setup,
+    strategy_id: &str,
     version: u64,
 ) -> (String, String, nexus_workflow_ir::WorkflowDocument) {
     let base = setup
         .core
-        .read_strategy_candidate(&setup.principal, STRATEGY)
+        .read_strategy_candidate(&setup.principal, strategy_id)
         .await
         .unwrap()
         .document;
@@ -81,7 +123,7 @@ async fn seed_approval(
          VALUES (?, ?, ?, 0, ?, ?, '[]', 'test_creator', '2026-01-01T00:00:00+00:00')",
     )
     .bind(&approval_id)
-    .bind(STRATEGY)
+    .bind(strategy_id)
     .bind(&hash)
     .bind(serde_json::to_string(&document).unwrap())
     .bind(serde_json::json!({"ir_content_hash": hash}).to_string())
@@ -95,12 +137,13 @@ async fn seed_approval(
 /// ordering can be proven against timestamps that disagree with the revision order.
 async fn seed_revision_approval(
     setup: &Setup,
+    strategy_id: &str,
     revision: u64,
     approved_at: &str,
 ) -> (String, String) {
     let base = setup
         .core
-        .read_strategy_candidate(&setup.principal, STRATEGY)
+        .read_strategy_candidate(&setup.principal, strategy_id)
         .await
         .unwrap()
         .document;
@@ -115,7 +158,7 @@ async fn seed_revision_approval(
          VALUES (?, ?, ?, ?, ?, ?, '[]', 'test_creator', ?)",
     )
     .bind(&approval_id)
-    .bind(STRATEGY)
+    .bind(strategy_id)
     .bind(&hash)
     .bind(i64::try_from(revision).expect("the fixture revision fits an i64"))
     .bind(serde_json::to_string(&document).unwrap())
@@ -192,21 +235,42 @@ async fn an_unknown_content_hash_is_the_typed_not_found_and_writes_nothing() {
 }
 
 #[tokio::test]
-async fn another_strategys_approval_is_the_typed_mismatch_and_writes_nothing() {
+async fn an_embedded_preset_is_the_typed_refusal_and_writes_nothing() {
     let setup = setup().await;
-    let (_, hash, _) = seed_approval(&setup, 1).await;
-    // Both strategies are scheduled, so the mismatch is the only thing this apply trips on.
-    seed_schedule(setup.core.pool(), STRATEGY).await;
-    seed_schedule(setup.core.pool(), "other-strategy").await;
+    // Everything else an apply needs is in place: a valid approval of this strategy's own frozen
+    // document and a schedule. Only the source is wrong, so without the guard this apply would
+    // succeed and record a row the schedule intake never reads.
+    let (_, hash, _) = seed_approval(&setup, EMBEDDED_PRESET, 1).await;
+    seed_schedule(setup.core.pool(), EMBEDDED_PRESET).await;
 
     let error = setup
         .core
-        .apply_strategy(&setup.principal, "other-strategy", &hash)
+        .apply_strategy(&setup.principal, EMBEDDED_PRESET, &hash)
+        .await
+        .unwrap_err();
+
+    assert_eq!(reason(&error), "strategy_not_user_preset");
+    assert_eq!(refusal(&error)["strategy_id"], EMBEDDED_PRESET);
+    assert_eq!(apply_rows(setup.core.pool()).await, 0);
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn another_strategys_approval_is_the_typed_mismatch_and_writes_nothing() {
+    let setup = setup().await;
+    let (_, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
+    // Both strategies are scheduled, so the mismatch is the only thing this apply trips on.
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+    seed_schedule(setup.core.pool(), OTHER_STRATEGY).await;
+
+    let error = setup
+        .core
+        .apply_strategy(&setup.principal, OTHER_STRATEGY, &hash)
         .await
         .unwrap_err();
 
     assert_eq!(reason(&error), "approval_strategy_mismatch");
-    assert_eq!(refusal(&error)["strategy_id"], "other-strategy");
+    assert_eq!(refusal(&error)["strategy_id"], OTHER_STRATEGY);
     assert_eq!(refusal(&error)["approval_strategy_id"], STRATEGY);
     assert_eq!(apply_rows(setup.core.pool()).await, 0);
     setup.core.close().await.unwrap();
@@ -215,7 +279,7 @@ async fn another_strategys_approval_is_the_typed_mismatch_and_writes_nothing() {
 #[tokio::test]
 async fn a_document_edited_after_approval_is_the_typed_hash_change_and_writes_nothing() {
     let setup = setup().await;
-    let (approval_id, stored_hash, document) = seed_approval(&setup, 1).await;
+    let (approval_id, stored_hash, document) = seed_approval(&setup, STRATEGY, 1).await;
     seed_schedule(setup.core.pool(), STRATEGY).await;
 
     // Edit the frozen bytes behind the approval's back; the row still passes every CHECK, so the
@@ -253,7 +317,7 @@ async fn a_document_edited_after_approval_is_the_typed_hash_change_and_writes_no
 #[tokio::test]
 async fn a_strategy_without_a_schedule_is_the_typed_refusal_and_writes_nothing() {
     let setup = setup().await;
-    let (_, hash, _) = seed_approval(&setup, 1).await;
+    let (_, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
 
     let error = setup
         .core
@@ -270,7 +334,7 @@ async fn a_strategy_without_a_schedule_is_the_typed_refusal_and_writes_nothing()
 #[tokio::test]
 async fn applying_an_approval_and_applying_it_again_is_the_typed_conflict() {
     let setup = setup().await;
-    let (approval_id, hash, _) = seed_approval(&setup, 1).await;
+    let (approval_id, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
     seed_schedule(setup.core.pool(), STRATEGY).await;
 
     let applied = setup
@@ -303,8 +367,8 @@ async fn applying_an_approval_and_applying_it_again_is_the_typed_conflict() {
 #[tokio::test]
 async fn a_superseded_approval_is_not_already_applied() {
     let setup = setup().await;
-    let (first_approval, first_hash, _) = seed_approval(&setup, 1).await;
-    let (second_approval, second_hash, _) = seed_approval(&setup, 2).await;
+    let (first_approval, first_hash, _) = seed_approval(&setup, STRATEGY, 1).await;
+    let (second_approval, second_hash, _) = seed_approval(&setup, STRATEGY, 2).await;
     seed_schedule(setup.core.pool(), STRATEGY).await;
 
     let first = setup
@@ -346,7 +410,7 @@ async fn a_superseded_approval_is_not_already_applied() {
 #[tokio::test]
 async fn two_concurrent_applies_of_one_approval_leave_exactly_one_current_row() {
     let setup = setup().await;
-    let (approval_id, hash, _) = seed_approval(&setup, 1).await;
+    let (approval_id, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
     seed_schedule(setup.core.pool(), STRATEGY).await;
 
     let (first, second) = tokio::join!(
@@ -377,8 +441,9 @@ async fn the_status_read_reports_the_current_apply_and_the_highest_candidate_rev
     // Revision 5 is the newer approval even though revision 2 was approved LATER: `approved_at`
     // must not decide newness (compass D11).
     let (older_approval, older_hash) =
-        seed_revision_approval(&setup, 2, "2026-02-01T00:00:00+00:00").await;
-    let (newer_approval, _) = seed_revision_approval(&setup, 5, "2026-01-01T00:00:00+00:00").await;
+        seed_revision_approval(&setup, STRATEGY, 2, "2026-02-01T00:00:00+00:00").await;
+    let (newer_approval, _) =
+        seed_revision_approval(&setup, STRATEGY, 5, "2026-01-01T00:00:00+00:00").await;
     seed_schedule(setup.core.pool(), STRATEGY).await;
 
     let applied = setup
@@ -425,7 +490,8 @@ async fn the_status_read_reports_the_current_apply_and_the_highest_candidate_rev
 #[tokio::test]
 async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
     let setup = setup().await;
-    let (approval_id, _) = seed_revision_approval(&setup, 1, "2026-01-01T00:00:00+00:00").await;
+    let (approval_id, _) =
+        seed_revision_approval(&setup, STRATEGY, 1, "2026-01-01T00:00:00+00:00").await;
 
     // An approval exists, so the newest side is present while nothing is applied yet.
     let approved_only = setup
