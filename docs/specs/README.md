@@ -119,6 +119,8 @@ The corpus is organized by subject area under `docs/specs/<class>/`. Every page 
 | [`orchestration/llm-extract.md`](orchestration/llm-extract.md) | Nexus LLM Extract Capability |
 | [`orchestration/orchestration-engine.md`](orchestration/orchestration-engine.md) | Orchestration Engine — Design Specification |
 | [`orchestration/preset-conditional-routing.md`](orchestration/preset-conditional-routing.md) | Preset Conditional Routing — Specification |
+| [`orchestration/strategy-composition.md`](orchestration/strategy-composition.md) | Strategy Composition — Pattern Packages, Compose Ops, Approval and Apply |
+| [`orchestration/strategy-simulation.md`](orchestration/strategy-simulation.md) | Strategy Simulation — Capability Boundary |
 
 ### `runtime/`
 

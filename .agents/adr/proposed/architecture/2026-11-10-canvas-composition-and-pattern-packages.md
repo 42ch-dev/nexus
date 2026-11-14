@@ -1,41 +1,47 @@
 # ADR: Canvas Composition and Pattern Packages — Strategy Orchestration Cutover
 
-Status: proposed — P3.5 Apply and P4–P6 not implemented; P3 shipped in v1.239 (#515) and is governed by the composition spec, not by this record
+Status: proposed — P4–P6 not implemented. P3 shipped in v1.239 (#515) and P3.5 Apply/Execute in v1.241 (#520); both are governed by the composition spec, not by this record, and P3.5 carries the two limits recorded there (source freeze within one process lifetime, I-000443; apply installs what intake may refuse to build, I-000448)
 Date: 2026-11-10
-Scope: The still-unshipped part of the cutover — Apply/Execute from a candidate, the dual-read loader, IR-primary authoring, and retirement of the hand-authored YAML main path while retaining `preset.yaml` import/export. The Canvas composition surface, the compose operations, the pattern packages and the candidate lifecycle **up to Approve** shipped in v1.239 and are owned by the composition spec.
+Scope: The still-unshipped part of the cutover — the dual-read loader, IR-primary authoring, and retirement of the hand-authored YAML main path while retaining `preset.yaml` import/export. The Canvas composition surface, the compose operations, the pattern packages, the candidate lifecycle **up to Approve** (v1.239) and **Apply/Execute** (v1.241) shipped and are owned by the composition spec.
 Source: split from the archived Canvas + Workflow IR redesign and Dynamic Workflow Generation and Orchestration Simulation records
 
 ## Problem
 
 P0/P1 shipped the [Workflow IR document model](../../implemented/architecture/2026-11-10-workflow-ir-document-model.md),
 P2 shipped the [strategy simulation fence](../../implemented/architecture/2026-11-10-strategy-simulation-fence.md),
-and P3 shipped composition and approval in v1.239. Canvas composes, packages are published with pinned
-identity, and a candidate can be simulated and approved. What the cutover still lacks:
+P3 shipped composition and approval in v1.239, and P3.5 shipped Apply/Execute in v1.241. Canvas
+composes, packages are published with pinned identity, a candidate can be simulated and approved,
+and an approved snapshot now becomes the identity production intake reads. What the cutover still
+lacks:
 
-1. **Approved identity is persisted but never applied.** Approve writes an immutable snapshot carrying the
-   document, its content hash and its pins; nothing turns that snapshot into the identity production intake
-   reads. Apply is the missing stage, and it is what makes "applied IR" mean something.
-2. **Production intake is still YAML-only.** A controlled dual-read transition has to exist before
-   IR-primary execution can replace the YAML-only mapper. It can begin on imported preset bundles — today's
-   intake — but loading an *applied* IR identity waits on (1).
-3. **New strategy authoring, compatibility export, and retirement of the hand-authored YAML main path**
+Two stakes that drove this record are closed and are kept only because they explain why the
+remaining stages are shaped as they are: approved identity is no longer persisted-but-never-applied,
+and the candidate lifecycle no longer stops at Approve. Both closed with a limit rather than
+cleanly — the applied identity is not durable across a daemon restart, and a document can be
+applied that intake later refuses to build (I-000443, I-000448) — so the decision of what a
+persisted apply must carry for recovery is still open.
+
+1. **Production intake is still YAML-first.** A controlled dual-read transition has to exist before
+   IR-primary execution can replace the YAML-only mapper. It can begin on imported preset bundles —
+   today's intake — but the applied path now exists, so dual-read is a loader decision rather than
+   a missing stage.
+2. **New strategy authoring, compatibility export, and retirement of the hand-authored YAML main path**
    need explicit exit criteria so the two grammars do not evolve independently.
-4. **The candidate lifecycle stops at Approve.** Review needs compose, simulation, approval *and*
-   application to remain one lifecycle over one IR truth; today the last step is missing from the surface,
-   not merely unpolished.
 
 ## Proposal
 
 ### 1–4. Shipped surface — read the spec, not this record
 
 The composition surface, the nest/compose operations, the pattern-package contract and the candidate
-lifecycle **up to Approve** shipped in v1.239 (#515). **Canvas Apply and Execute did not**, and P6's fourth
-acceptance item ("compose and generate candidates pass validate, simulate, approve, and apply") together
-with §6's rollback-by-new-Apply both assume a stage that does not exist yet.
+lifecycle **up to Approve** shipped in v1.239 (#515). **Apply/Execute followed in v1.241 (#520)** as
+its own stage, which is what P6's fourth acceptance item ("compose and generate candidates pass
+validate, simulate, approve, and apply") and §6's rollback-by-new-Apply both assume.
 
-Apply is therefore its own stage — **P3.5 Apply** below — and it precedes P4 in practice: dual-read can
-begin by loading imported preset bundles (today's intake) to prove the IR→Graph mapping, but it cannot load
-an *applied* IR identity until Apply produces one. The plan that takes P4 owns placing Apply first.
+That stage precedes P4 in practice, as predicted here: dual-read can begin by loading imported preset
+bundles (today's intake) to prove the IR→Graph mapping, and an *applied* IR identity now exists to
+load. What P3.5 did not settle is durability — the applied identity answers admission and recovery
+from the YAML descriptor, so a restart reverts to the preset graph (I-000443) — which makes that
+question P4's opening problem rather than its follow-up.
 
 The shipped contract — manifest fields, the content-hash pin, the four operations and their CAS, the
 approval freeze, the flag and its per-audience default — lives in
@@ -51,15 +57,22 @@ contract details:
   receive.** `unnest` refuses rather than dropping a body's role/asset/signal declarations or the removed
   slot's own control references.
 
-### 5. P3.5–P6 ladder
+### 5. P4–P6 ladder
 
-P0/P1/P2 shipped and are governed by their implemented records. P3 shipped in v1.239 and is governed by
-the composition spec. What remains:
+P0/P1/P2 shipped and are governed by their implemented records. P3 shipped in v1.239 and P3.5 in
+v1.241, both governed by the composition spec. What remains:
+
+P3.5's own exit criteria were met as stated — an approved candidate is applied and an existing
+schedule runs from that applied identity, and a rollback installs the previous snapshot through a
+new Apply — with one qualification that belongs in the record rather than in a footnote: **the
+applied identity is authoritative within one process lifetime only.** The decision P4 inherits is
+therefore not "how does a schedule run from an applied identity" but "what must a persisted apply
+carry so that admission and recovery stop consulting the YAML descriptor" (I-000443), together with
+the buildability question apply leaves to intake (I-000448).
 
 | Phase | Change | Exit criteria |
 | --- | --- | --- |
-| **P3.5 Apply/Execute** | Turn an approved snapshot into the identity production intake reads; Execute continues to run graph-flow | An approved candidate is applied and an existing schedule runs from that applied identity; a rollback installs the previous snapshot through a new Apply |
-| **P4 Dual-read loader** | Engine loads applied IR or a preset bundle | Existing YAML-preset schedules remain unbroken; IR→Graph mapping matches the IR→Task table in orchestration-engine §8.2.1 |
+| **P4 Dual-read loader** | Engine loads applied IR or a preset bundle, and applied IR survives admission and recovery | Existing YAML-preset schedules remain unbroken; an applied identity is authoritative across a daemon restart, not only within one process; IR→Graph mapping matches the IR→Task table in orchestration-engine §8.2.1 |
 | **P5 IR-primary authoring** | Documentation and samples are authored as IR; YAML export remains compatibility output | New repository strategies land as IR |
 | **P6 Retire hand-authored YAML main path** | Hand-edit and YAML patch cease to be the default authoring/intake path; import/export remains | Retirement acceptance below passes; the legacy YAML mapper defaults off in new installs and the import tool remains |
 
@@ -77,7 +90,7 @@ the full retirement evidence and documented kill-switch below.
 
 The dual-read window allows emergency re-enable of YAML intake by configuration. YAML-only bundles and mixed workspaces remain supported until P6. YAML and IR never become independently evolving grammars: `nexus-preset` becomes the import/compat loader, retains `PresetSourceIdentity` hash semantics, and shares semantic validation with IR.
 
-Rollback of a bad Apply installs the previous approved snapshot through a new Apply; it never rewrites a hash silently. Execute continues refusing missing or changed source bytes. Pattern and asset hashes recorded at Approve participate in source freeze.
+Rollback of a bad Apply installs the previous approved snapshot through a new Apply; it never rewrites a hash silently. Execute continues refusing missing or changed source bytes. **Both shipped in v1.241:** rollback is an append naming a superseded approval, and intake refuses bytes that no longer hash to the recorded identity (`applied_document_changed`) or cannot be read at all (`applied_document_unverifiable`). Pattern and asset hashes recorded at Approve participate in source freeze.
 
 ### 7. Retirement scope
 

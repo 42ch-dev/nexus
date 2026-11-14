@@ -1,11 +1,12 @@
 # Strategy simulation — capability boundary
 
-**Scope.** What a strategy simulation reports, what it refuses to claim, and where the disclosure must
-appear. The trajectory contract lives in
-`schemas/daemon-api/orchestration/simulation-trajectory.schema.json`; the walk lives in
-`crates/nexus-orchestration/src/simulation/` behind the `simulate` feature.
+## Scope
 
-## What simulation answers
+What a strategy simulation reports, what it refuses to claim, and where the disclosure must appear.
+
+## Current state
+
+### What simulation answers
 
 | Answers | Does not answer |
 |---|---|
@@ -14,7 +15,7 @@ appear. The trajectory contract lives in
 | The worst effect class that can escape, rolled up across nests | What a real judge branch would decide |
 | Whether two runs of the same document produce identical bytes | Whether the graph is useful |
 
-## Levels
+### Levels
 
 `simulation_level` is an open string. `reachability` is the only level produced today:
 
@@ -29,29 +30,38 @@ appear. The trajectory contract lives in
 Consumers MUST treat an unknown `simulation_level` as a newer, unsupported level rather than assuming
 `reachability`.
 
-## Effects
-
-`effect_summary` is the maximum over visited nodes and nested children under the total order
-`pure < read < write_candidate < external`, taken from the generated enum's `Ord`. A deferred
-(`defer_until_apply`) nest contributes its declared class and its body is not walked. It is a
-**fence**, not a forecast: an effect that only happens on a collapsed branch is still reported.
-
-## Nothing executes
-
-The walk builds no graph and resolves no capability. `write_candidate` and `external` reach no port.
-A simulator that ever needs to dispatch must do it through a registry that is fresh per call; a shared
-registry would make the isolation claim untestable (see
-`.agents/knowledge/architecture-patterns/isolation-tests-need-observable-difference.md`).
-
-## Disclosure
+### Disclosure
 
 Any surface offering an approve decision from a simulation MUST show, for the document hash being
 approved: the level in words, the stubbed-judge count with ids, the fence reading, the static label on
 predicted waits, and a statement that a passed simulation does not preview output. A bare "simulated"
 badge is a defect.
 
-## Upgrade path
+### Upgrade path
 
 Deeper levels are tracked, not promised: judge-branch exploration (I-000416), a budgeted model-call
 mode (I-000417), and signal-conditioned waits (I-000418). Each carries its trigger; none is implied by
 this document.
+
+## Invariants
+
+- **Nothing executes.** The walk builds no graph and resolves no capability. `write_candidate` and
+  `external` reach no port. A simulator that ever needs to dispatch must do it through a registry that
+  is fresh per call; a shared registry would make the isolation claim untestable (see
+  `.agents/knowledge/architecture-patterns/isolation-tests-need-observable-difference.md`).
+- **The effect rollup is a fence, not a forecast.** `effect_summary` is the maximum over visited nodes
+  and nested children under the total order `pure < read < write_candidate < external`, taken from the
+  generated enum's `Ord`. A deferred (`defer_until_apply`) nest contributes its declared class and its
+  body is not walked. An effect that only happens on a collapsed branch is still reported.
+- **Predicted waits over-report; they never under-report.**
+
+## Where it lives
+
+- Trajectory contract: `schemas/daemon-api/orchestration/simulation-trajectory.schema.json`.
+- Walk: `crates/nexus-orchestration/src/simulation/`, behind the `simulate` feature.
+
+## Change obligations
+
+A change to what a level answers, to the effect order, or to the disclosure set updates this page in
+the same change and the trajectory schema with it. A new level is added here only once it produces a
+trajectory, not when its issue is filed.

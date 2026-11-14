@@ -122,7 +122,7 @@ The existing `nexus42 preset validate` command owns the entry point; an alias or
 
 Canonical content identity covers the executable IR document and referenced assets. Approved identity is bound to the exact content that was validated and simulated. Patches after either step require a new hash and fresh validation/simulation before approval. Applied source identity preserves imported preset provenance where applicable and refuses silent source replacement during recovery.
 
-Pattern/asset hash locking at Approve and hash verification at Apply belong to the unshipped pattern-package decision; P0/P1 do not claim that pinned pattern packages have shipped.
+Pattern/asset hash locking at Approve and hash verification at Apply belong to the pattern-package decision; P0/P1 do not claim that pinned pattern packages have shipped. Both stages shipped later — approval freeze in v1.239, Apply in v1.241 — and [the composition spec](../../../../docs/specs/orchestration/strategy-composition.md) owns them.
 
 ## Alternatives considered
 
