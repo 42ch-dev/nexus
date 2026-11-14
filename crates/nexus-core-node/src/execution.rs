@@ -78,11 +78,10 @@ use nexus_contracts::local::schedule::http::{
 };
 use nexus_contracts::{
     ApprovedStrategySnapshot, CoreStrategyPatchResponse, GetPresetResponse, ReloadPresetResponse,
-    ScaffoldPresetRequest, SimulationTrajectory, StrategyApproveRequest, StrategyApplyRequest,
-    StrategyComposeRequest,
-    StrategyComposeResponse, StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest,
-    StrategyPatchTransitionRequest, StrategySimulationRequest, UpdatePresetRequest,
-    UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
+    ScaffoldPresetRequest, SimulationTrajectory, StrategyApplyRequest, StrategyApproveRequest,
+    StrategyComposeRequest, StrategyComposeResponse, StrategyPatchPromptTemplateRequest,
+    StrategyPatchStateRequest, StrategyPatchTransitionRequest, StrategySimulationRequest,
+    UpdatePresetRequest, UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
 };
 use nexus_core::execution::ExecutionOpenError;
 use nexus_core::{ComposeDiagnostic, CoreError};
@@ -1183,9 +1182,8 @@ impl NativeCore {
         strategy_id: String,
     ) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
-            let status: nexus_core::StrategyAppliedStatus = core
-                .strategy_applied(&principal, &strategy_id)
-                .await?;
+            let status: nexus_core::StrategyAppliedStatus =
+                core.strategy_applied(&principal, &strategy_id).await?;
             Ok(status)
         })
         .await
@@ -1203,9 +1201,8 @@ impl NativeCore {
         strategy_id: String,
     ) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
-            let approvals: nexus_core::StrategyApprovals = core
-                .strategy_approvals(&principal, &strategy_id)
-                .await?;
+            let approvals: nexus_core::StrategyApprovals =
+                core.strategy_approvals(&principal, &strategy_id).await?;
             Ok(approvals)
         })
         .await
