@@ -267,6 +267,23 @@ describe('route-inventory (P5-T5)', () => {
     assert.equal(probeMissing.status, 404, probeMissing.text);
     assert.notEqual(probeMissing.payload.error.code, 'route_not_migrated');
 
+    // The v1.241 apply pair is the only place `strategyApplied` / `applyStrategy`
+    // are crossed from the composed route through `wrapDomainSurface` into the
+    // napi export. A drifted export name is a TypeError at handler time (a 500),
+    // so these two probes — and not a suite that replaces `service.core` — are
+    // what falsifies the name.
+    const missingStrategy = '/v1/daemon/strategies/strategy_missing';
+    const appliedStatus = await jsonFetch(`${baseUrl}${missingStrategy}/applied`);
+    assert.equal(appliedStatus.status, 200, appliedStatus.text);
+    assert.deepEqual(appliedStatus.payload, { current_apply: null, newest_approval: null });
+
+    const applyRefusal = await jsonFetch(`${baseUrl}${missingStrategy}/apply`, {
+      method: 'POST',
+      body: { approval_content_hash: 'sha256:no-such-approval' },
+    });
+    assert.equal(applyRefusal.status, 422, applyRefusal.text);
+    assert.equal(applyRefusal.payload.error.details.reason, 'approval_not_found');
+
     // No duplicate mounted identities, and mounted == authoritative inventory.
     assert.equal(mountedKeys.size, mounted.length, 'duplicate mounted route identity');
     const missingFromMounted = [...liveKeys].filter((k) => !mountedKeys.has(k));

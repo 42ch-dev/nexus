@@ -222,7 +222,9 @@ pub struct StrategyAppliedStatus {
 
 impl CoreService {
     /// The applied identity of `strategy_id` and its newest approval, both read from the
-    /// append-only rows: the current apply is the one with no successor.
+    /// append-only rows: the current apply is the one with no successor. A second successor-less
+    /// row is only reachable by an admitted non-core writer; `applied_at` then `apply_id` order
+    /// the read so that case still has a defined winner.
     ///
     /// # Errors
     ///
@@ -241,7 +243,9 @@ impl CoreService {
                FROM strategy_applies cur \
               WHERE cur.strategy_id = ? \
                 AND NOT EXISTS (SELECT 1 FROM strategy_applies later \
-                                 WHERE later.supersedes_apply_id = cur.apply_id)",
+                                 WHERE later.supersedes_apply_id = cur.apply_id) \
+              ORDER BY cur.applied_at DESC, cur.apply_id DESC \
+              LIMIT 1",
         )
         .bind(strategy_id)
         .fetch_optional(&self.inner.pool)

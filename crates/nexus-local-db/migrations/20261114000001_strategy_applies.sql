@@ -20,7 +20,10 @@
 -- approval that is already current is a typed conflict, but a repeat apply of a superseded
 -- approval is legitimate (that is rollback), so no uniqueness here can express it. The insert
 -- reads the current row and inserts in one statement; nothing in this table can make two current
--- rows visible without a second successor-less row being written.
+-- rows visible without a second successor-less row being written. If an admitted non-core writer
+-- inserts that second row anyway, the strategy has two current applies and the status read
+-- resolves the newest `applied_at` (then the largest `apply_id`) — a defined winner, not an
+-- invariant this schema enforces.
 --
 -- Writer admission: cooperative core table — the same guard trio and outbox shape as the other
 -- cooperative core tables. A raw/unregistered pool is fenced with `WRITER_FENCED`, and every
