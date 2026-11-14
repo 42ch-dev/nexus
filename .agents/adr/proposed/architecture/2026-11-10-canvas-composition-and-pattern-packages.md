@@ -1,6 +1,6 @@
 # ADR: Canvas Composition and Pattern Packages — Strategy Orchestration Cutover
 
-Status: proposed — P4–P6 not implemented. P3 shipped in v1.239 (#515) and P3.5 Apply/Execute in v1.241 (#520); both are governed by the composition spec, not by this record, and P3.5 carries the two limits recorded there (source freeze within one process lifetime, I-000443; apply installs what intake may refuse to build, I-000448)
+Status: proposed — P4–P6 not implemented. P3 shipped in v1.239 (#515) and P3.5 Apply/Execute in v1.241 (#520); both are governed by the composition spec, not by this record, and P3.5 carries the three limits recorded there (source freeze within one process lifetime, I-000443; apply installs what intake may refuse to build, I-000448; the applied path refuses any `llm_judge` exit condition and any inner step, I-000449)
 Date: 2026-11-10
 Scope: The still-unshipped part of the cutover — the dual-read loader, IR-primary authoring, and retirement of the hand-authored YAML main path while retaining `preset.yaml` import/export. The Canvas composition surface, the compose operations, the pattern packages, the candidate lifecycle **up to Approve** (v1.239) and **Apply/Execute** (v1.241) shipped and are owned by the composition spec.
 Source: split from the archived Canvas + Workflow IR redesign and Dynamic Workflow Generation and Orchestration Simulation records

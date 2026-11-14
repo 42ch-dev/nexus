@@ -27,11 +27,10 @@ What a strategy simulation reports, what it refuses to claim, and where the disc
 - No provider is called. A trajectory carries no cost, no latency and no output.
 - Waits are derived from the visited set: a visited `manual_wait` node, or a visited state whose
   `exit_when` is `manual`, yields `reason: manual` with the node id. **A wait is reported when its
-  node is visited, and the walk leaves such a node only along its single `default` edge**, so a wait
-  reachable only through the other branches of an `llm_judge` node is never predicted — an
-  under-report in that case,
-  by construction, not an omission to fix. Within the visited set the list over-reports instead: a
-  wait the run would never reach is still named.
+  node is visited, and a node whose `exit_when` is `llm_judge` is left only along its single
+  `default` edge**, so a wait reachable only through that node's other branches is never predicted —
+  an under-report by construction, not an omission to fix. Within the visited set the list
+  over-reports instead: a wait the run would never reach is still named.
 - A document-global signal is not bounded by the walk at all: `signals[].action: pause` yields a
   `reason: signal` wait for the document, whichever nodes the walk visits.
 
@@ -42,8 +41,13 @@ Consumers MUST treat an unknown `simulation_level` as a newer, unsupported level
 
 Any surface offering an approve decision from a simulation MUST show, for the document hash being
 approved: the level in words, the stubbed-judge count with ids, the fence reading, the static label on
-predicted waits, a statement that a passed simulation does not preview output, and — whenever a judge
-is stubbed — that the wait list covers only the default path. A bare "simulated" badge is a defect.
+predicted waits, and a statement that a passed simulation does not preview output. A bare "simulated"
+badge is a defect.
+
+These five elements are what the shipped surface renders
+(`apps/web/src/components/canvas/strategy-canvas/approve-disclosure.tsx`). **They do not yet say that
+a stubbed judge bounds the wait list**: a reader who sees predicted waits and a stubbed-judge count
+still has to know the §Levels rule to know the list is partial (I-000450).
 
 ### Upgrade path
 
@@ -61,10 +65,11 @@ this document.
   and nested children under the total order `pure < read < write_candidate < external`, taken from the
   generated enum's `Ord`. A deferred (`defer_until_apply`) nest contributes its declared class and its
   body is not walked. An effect that only happens on a collapsed branch is still reported.
-- **The wait list is not exhaustive.** Because judges are stubbed to their `default` edge, a wait
-  behind any other branch is never predicted. §Disclosure therefore requires the surface to say so
-  whenever a judge is stubbed; an invariant that only pointed at a disclosure obligation would be
-  assuming the obligation it needs.
+- **The wait list is not exhaustive.** Because a node whose `exit_when` is `llm_judge` is left only
+  along its `default` edge, a wait behind any other branch of that node is never predicted. Neither
+  the trajectory nor the shipped disclosure marks the list as partial (I-000450), so a consumer
+  applies the §Levels rule rather than reading the list as complete — an obligation on the consumer,
+  not a claim that the surface states it.
 
 ## Where it lives
 
