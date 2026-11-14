@@ -486,6 +486,91 @@ fn refuse_unresolved_templates(
     Ok(())
 }
 
+/// Project a document onto the manifest the outer builder consumes, refusing
+/// what this adapter cannot express and what `template_source` cannot resolve.
+///
+/// The single refusal sequence behind both [`validate_ir_buildability`] and
+/// [`build_wired_outer_graph_from_ir`], so a caller that only needs the verdict
+/// and the builder that needs the manifest cannot drift apart.
+fn project_buildable_manifest(
+    document: &WorkflowDocument,
+    template_source: IrTemplateSource,
+) -> Result<PresetManifest, IrOuterGraphError> {
+    refuse_unmappable(document)?;
+    let manifest = nexus_preset::export_preset(document)?;
+    // I-000440 / F-004: a template that resolves to nothing would build a graph
+    // whose inner tasks prompt the Host with zero instructions and whose judge
+    // would receive a bundle path as its instructions. Refuse it here, by node
+    // and path, before any task exists.
+    refuse_unresolved_templates(&manifest, document.id.as_str(), template_source)?;
+    Ok(manifest)
+}
+
+/// Refuse a document [`build_wired_outer_graph_from_ir`] could not build.
+///
+/// Returns the same [`IrOuterGraphError`] the builder would, in the same order
+/// (`Unmappable` / `Unprojected`, then `Projection`, then `UnresolvedTemplate`,
+/// then `Graph`), without constructing a runnable graph.
+///
+/// # Errors
+/// Whatever [`project_buildable_manifest`] or [`validate_wired_topology`] refuses.
+pub fn validate_ir_buildability(
+    document: &WorkflowDocument,
+    template_source: IrTemplateSource,
+) -> Result<(), IrOuterGraphError> {
+    let manifest = project_buildable_manifest(document, template_source)?;
+    validate_wired_topology(document, &manifest)
+}
+
+/// Stands in for a state's real task while only the graph's ids and edges are
+/// judged: `GraphBuilder::build` reads the registered task ids and never calls
+/// `run`.
+struct IdOnlyTask(String);
+
+#[async_trait::async_trait]
+impl graph_flow::Task for IdOnlyTask {
+    fn id(&self) -> &str {
+        &self.0
+    }
+
+    async fn run(
+        &self,
+        _context: graph_flow::Context,
+    ) -> graph_flow::Result<graph_flow::TaskResult> {
+        Ok(graph_flow::TaskResult::new(
+            None,
+            graph_flow::NextAction::End,
+        ))
+    }
+}
+
+/// The `Graph` refusals the builder raises after the projection.
+///
+/// Runs the builder's own inner-graph build and its own wiring over id-only
+/// tasks, so graph-flow answers with the message the run would fail with: a
+/// dangling `entry` — `document.entry` naming no projected outer state — is
+/// refused here instead of at the first run (I-000448), as is an edge to a task
+/// the projection never produced. The run still runs its own `build`, so a
+/// topology this accepts is never installed unbuilt.
+fn validate_wired_topology(
+    document: &WorkflowDocument,
+    manifest: &PresetManifest,
+) -> Result<(), IrOuterGraphError> {
+    build_inner_graphs(
+        manifest,
+        document.id.as_str(),
+        None,
+        None,
+        Arc::new(std::sync::RwLock::new(HashMap::new())),
+    )?;
+    let mut builder = graph_flow::GraphBuilder::new(&manifest.preset.id);
+    for state in &manifest.states {
+        builder = builder.add_task(Arc::new(IdOnlyTask(state.id.clone())));
+    }
+    wire_outer_topology(builder, manifest, &document.entry).build()?;
+    Ok(())
+}
+
 /// Build the wired outer graph from a Workflow IR document (§8.2.1).
 ///
 /// Rows this builder covers: `entry`, `nodes[kind=outer_state|terminal]` and
@@ -541,15 +626,7 @@ pub fn build_wired_outer_graph_from_ir(
 ) -> Result<graph_flow::Graph, IrOuterGraphError> {
     use crate::tasks::StateCompositeTask;
 
-    refuse_unmappable(document)?;
-
-    let mut manifest = nexus_preset::export_preset(document)?;
-
-    // I-000440 / F-004: a template that resolves to nothing would build a graph
-    // whose inner tasks prompt the Host with zero instructions and whose judge
-    // would receive a bundle path as its instructions. Refuse it here, by node
-    // and path, before any task exists.
-    refuse_unresolved_templates(&manifest, document.id.as_str(), template_source)?;
+    let mut manifest = project_buildable_manifest(document, template_source)?;
 
     // §8.2.1 `terminal[]`: a declared terminal state ends the run even when its
     // node kind is `outer_state`; the composite task overrides with `End`.
@@ -600,11 +677,26 @@ pub fn build_wired_outer_graph_from_ir(
         builder = builder.add_task(std::sync::Arc::new(task));
     }
 
-    // §8.2.1 `entry`: the declared entry node is the initial outer task.
-    builder = builder.set_start_task(&document.entry);
+    // §8.2.1 `entry` and the transitions: one definition of the outer topology,
+    // shared with the buildability predicate so the two cannot disagree about
+    // which edges exist. The parity projection below fails if the YAML builders
+    // ever diverge from it.
+    Ok(wire_outer_topology(builder, &manifest, &document.entry).build()?)
+}
 
-    // Transitions — the same wiring as `build_wired_outer_graph`; the parity
-    // projection below fails if the two ever diverge.
+/// Start `builder` at `entry` and wire every projected transition onto it.
+///
+/// The single definition of the outer topology: [`build_wired_outer_graph_from_ir`]
+/// wires the real tasks with it and [`validate_wired_topology`] wires id-only
+/// tasks with it, so what the run builds and what apply accepts cannot drift.
+fn wire_outer_topology(
+    mut builder: graph_flow::GraphBuilder,
+    manifest: &PresetManifest,
+    entry: &str,
+) -> graph_flow::GraphBuilder {
+    // §8.2.1 `entry`: the declared entry node is the initial outer task.
+    builder = builder.set_start_task(entry);
+
     for state in &manifest.states {
         match &state.next {
             Some(NextTarget::Linear(next_id)) => {
@@ -626,8 +718,7 @@ pub fn build_wired_outer_graph_from_ir(
             Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) | None => {}
         }
     }
-
-    Ok(builder.build()?)
+    builder
 }
 
 /// Converge-predecessor sets for §8.2.1's join gate.
@@ -1767,6 +1858,153 @@ states:
             "terminal",
             "2 entries",
         );
+    }
+
+    /// The buildability predicate states the builder's refusal text verbatim;
+    /// apply relies on it not drifting from what the builder says.
+    #[test]
+    fn ir_buildability_predicate_keeps_the_builder_refusal_texts() {
+        let unprojected =
+            validate_ir_buildability(&ir_with_node_kind(1, "judge"), IrTemplateSource::Embedded)
+                .expect_err("a judge node kind has no projection");
+        assert_eq!(
+            unprojected.to_string(),
+            "ir_unprojected: node kind judge at node review has no preset projection in the IR \
+             adapter (nexus-preset project_nodes), although §8.2.1 defines its execution \
+             counterpart"
+        );
+
+        let unresolved = validate_ir_buildability(
+            &ir_with_inner_template(2, serde_json::json!("prompts/missing.md")),
+            IrTemplateSource::Embedded,
+        )
+        .expect_err("a template the bundle lacks does not resolve");
+        assert_eq!(
+            unresolved.to_string(),
+            "ir_unresolved_template: node generate_graph/refine template \
+             Some(\"prompts/missing.md\") resolves to no content in the preset's embedded \
+             bundle; the task must carry non-empty instructions"
+        );
+    }
+
+    /// A copy of [`IR_LINEAR`] declaring another `entry`.
+    fn ir_with_entry(entry: &str) -> WorkflowDocument {
+        let mut document = ir_document(IR_LINEAR);
+        document.entry = entry.to_string();
+        document
+    }
+
+    /// The predicate apply consults and the builder the run uses answer alike on
+    /// the same document: apply refuses iff the builder refuses, and a refusal
+    /// carries the builder's own reason. One row per refusal kind — the
+    /// projection refusals and the `Graph` refusals the builder raises after the
+    /// projection — plus the documents that do build.
+    #[test]
+    fn ir_buildability_predicate_refuses_iff_the_builder_refuses() {
+        struct Case {
+            name: &'static str,
+            document: WorkflowDocument,
+            source: IrTemplateSource,
+            /// The prefix of the builder's reason; `None` where it builds.
+            refusal: Option<&'static str>,
+        }
+        let cases = [
+            Case {
+                name: "builds/embedded",
+                document: ir_document(IR_LINEAR),
+                source: IrTemplateSource::Embedded,
+                refusal: None,
+            },
+            Case {
+                name: "graph/dangling_entry",
+                document: ir_with_entry("nowhere"),
+                source: IrTemplateSource::Embedded,
+                refusal: Some("Task not found"),
+            },
+            Case {
+                name: "unprojected/node_kind",
+                document: ir_with_node_kind(1, "judge"),
+                source: IrTemplateSource::Embedded,
+                refusal: Some("ir_unprojected"),
+            },
+            Case {
+                name: "unprojected/terminals",
+                document: ir_with_terminals(&["done", "review"]),
+                source: IrTemplateSource::Embedded,
+                refusal: Some("ir_unprojected"),
+            },
+            Case {
+                name: "unmappable/node_kind",
+                document: ir_with_node_kind(1, "pattern_slot"),
+                source: IrTemplateSource::Embedded,
+                refusal: Some("ir_unmappable"),
+            },
+            Case {
+                name: "unresolved_template/inner_step",
+                document: ir_with_inner_template(2, serde_json::json!("prompts/missing.md")),
+                source: IrTemplateSource::Embedded,
+                refusal: Some("ir_unresolved_template"),
+            },
+            Case {
+                name: "unresolved_template/judge",
+                document: ir_document(IR_JUDGE_UNRESOLVED),
+                source: IrTemplateSource::Embedded,
+                refusal: Some("ir_unresolved_template"),
+            },
+            Case {
+                name: "unresolved_template/applied",
+                document: ir_document(IR_INNER_GRAPH),
+                source: IrTemplateSource::OwnSource,
+                refusal: Some("ir_unresolved_template"),
+            },
+        ];
+
+        let caps = Arc::new(test_capability_registry());
+        let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
+        for Case {
+            name,
+            document,
+            source,
+            refusal,
+        } in cases
+        {
+            let predicate = validate_ir_buildability(&document, source);
+            let built = build_wired_outer_graph_from_ir(
+                &document,
+                source,
+                &engine,
+                &caps,
+                None,
+                None,
+                no_cancels(),
+            );
+            match (predicate, built) {
+                (Ok(()), Ok(_)) => assert!(
+                    refusal.is_none(),
+                    "{name}: the builder builds, so the row's refusal kind is wrong"
+                ),
+                (Err(predicate_reason), Err(builder_reason)) => {
+                    let Some(expected) = refusal else {
+                        panic!("{name}: apply would refuse a document the builder builds");
+                    };
+                    assert!(
+                        predicate_reason.to_string().starts_with(expected),
+                        "{name}: refusal is not `{expected}`: {predicate_reason}"
+                    );
+                    assert_eq!(
+                        predicate_reason.to_string(),
+                        builder_reason.to_string(),
+                        "{name}: apply must carry the reason the run would fail with"
+                    );
+                }
+                (Ok(()), Err(builder_reason)) => {
+                    panic!("{name}: apply would install what the builder refuses: {builder_reason}")
+                }
+                (Err(predicate_reason), Ok(_)) => {
+                    panic!("{name}: apply refuses what the builder builds: {predicate_reason}")
+                }
+            }
+        }
     }
 
     /// A copy of [`IR_INNER_GRAPH`] with one inner step's `template` replaced.
