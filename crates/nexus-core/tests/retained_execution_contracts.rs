@@ -7357,16 +7357,18 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
 
 /// The user preset T4 schedules. It carries ONE prompt whose template exists
 /// only in this on-disk bundle: the YAML builder resolves it from the frozen
-/// source identity, while the applied-IR builder resolves templates solely from
-/// the embedded bundle keyed by document id — so a no-apply schedule cannot
-/// silently start running through the IR path and still reach its prompt.
+/// source identity, while the applied-IR builder resolves no template at all
+/// (a document carries no bundle root, and the embedded bundle is never read for
+/// it) — so a no-apply schedule cannot silently start running through the IR
+/// path and still reach its prompt.
 const NO_APPLY_PRESET: &str = "intake-no-apply";
 
 /// The user preset T5 applies over. Capability-only: a user document has no
-/// embedded bundle, so an applied document that names an instruction template
-/// is refused at load (`ir_unresolved_template`). The applied path is proven
-/// here with a template-free document; templates on the applied path are out of
-/// this plan's scope.
+/// bundle root, so an applied document that names an instruction template is
+/// refused at load (`ir_unresolved_template`), never resolved from an embedded
+/// bundle whose id it may collide with. The applied path is proven here with a
+/// template-free document; templates on the applied path are out of this plan's
+/// scope.
 const APPLIED_PRESET: &str = "intake-applied";
 
 /// The marker each side commits, and its bytes (base64 is the commit wire
@@ -7564,9 +7566,9 @@ fn read_marker(root: &Path, marker: &str) -> Option<Vec<u8>> {
 ///
 /// Mutations this fails on:
 /// - the `None` arm builds through `build_wired_outer_graph_from_ir` (from the
-///   import candidate): the prompt template is not in the embedded bundle, so
-///   admission refuses `ir_unresolved_template`, no run exists and no prompt is
-///   ever reached;
+///   import candidate): the prompt template cannot be resolved for the
+///   document's own source, so admission refuses `ir_unresolved_template`, no
+///   run exists and no prompt is ever reached;
 /// - the no-apply arm falls back to the strategy's newest approval: the run
 ///   commits `applied-side.txt` instead of the reference marker.
 #[tokio::test]

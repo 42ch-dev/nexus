@@ -2965,6 +2965,9 @@ impl WorkflowRunCoordinator {
                     };
                 nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
                     &document,
+                    // An applied user document's id is not a bundle id: reading
+                    // the embedded bundle could serve a colliding preset's bytes.
+                    nexus_orchestration::preset_runtime::IrTemplateSource::OwnSource,
                     &engine_proxy,
                     &registry,
                     daemon_tool_dispatch,

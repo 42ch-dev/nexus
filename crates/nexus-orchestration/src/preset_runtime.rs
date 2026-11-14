@@ -310,6 +310,32 @@ pub fn build_wired_outer_graph(
     builder.build()
 }
 
+/// Where an IR document's instruction templates may resolve from.
+///
+/// A document names its templates as bundle-relative asset paths and carries no
+/// bundle root, so the caller states which bundle may answer for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IrTemplateSource {
+    /// The compiled-in bundle keyed by the document id.
+    Embedded,
+    /// The document's own source only. An applied user document carries no
+    /// bundle root, and the embedded bundle keyed by a colliding id belongs to
+    /// a different package, so no template resolves and none is read from it.
+    OwnSource,
+}
+
+impl std::fmt::Display for IrTemplateSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Embedded => "resolves to no content in the preset's embedded bundle",
+            Self::OwnSource => {
+                "cannot be resolved from this document's own source (an applied document \
+                 carries no bundle root, so the embedded bundle is never read)"
+            }
+        })
+    }
+}
+
 /// Why an IR document cannot become an outer graph.
 #[derive(Debug, thiserror::Error)]
 pub enum IrOuterGraphError {
@@ -341,8 +367,8 @@ pub enum IrOuterGraphError {
     /// `exit_when.llm_judge` judge prompt) resolves to nothing, so its task
     /// would run without instructions.
     #[error(
-        "ir_unresolved_template: node {node} template {template:?} resolves to no content in the \
-         preset's embedded bundle; the task must carry non-empty instructions"
+        "ir_unresolved_template: node {node} template {template:?} {template_source}; the task must \
+         carry non-empty instructions"
     )]
     UnresolvedTemplate {
         /// The node carrying the template: an outer state id, or an inner step
@@ -350,6 +376,8 @@ pub enum IrOuterGraphError {
         node: String,
         /// The bundle-relative template path the node names, if any.
         template: Option<String>,
+        /// Which bundle was allowed to answer for the template.
+        template_source: IrTemplateSource,
     },
     /// The adapter refused a payload the outer mapping carries but cannot read
     /// (a malformed edge family or inner-step id), with no §8.2.1 concept named.
@@ -400,25 +428,29 @@ fn refuse_unmappable(document: &WorkflowDocument) -> Result<(), IrOuterGraphErro
     }
 }
 
-/// Refuse an instruction template that resolves to no content.
+/// Refuse an instruction template the declared source cannot resolve.
 ///
-/// A document carries no bundle root, so every `template` resolves against the
-/// embedded bundle keyed by document id: an inner step's prompt through
+/// A document carries no bundle root, so `template_source` decides what may
+/// answer for its `template` paths: an inner step's prompt through
 /// [`build_inner_graphs`] (`unwrap_or_default()` would reach the Host as a
 /// zero-instruction prompt) and an `exit_when.llm_judge` prompt through
 /// [`StateCompositeTask::with_resolved_template`] (an unresolved bundle path
 /// would reach the judge as its instructions). Both are refused here, by node
-/// and path, before any task is built. The YAML intake needs no such check for
-/// inner steps: its loader validates those assets against the bundle root at
-/// load time.
+/// and path, before any task is built. `IrTemplateSource::OwnSource` resolves
+/// nothing, so an applied user document that names a template is refused rather
+/// than served another package's bytes from a colliding embedded id. The YAML
+/// intake needs no such check for inner steps: its loader validates those assets
+/// against the bundle root at load time.
 fn refuse_unresolved_templates(
     manifest: &PresetManifest,
     preset_id: &str,
+    template_source: IrTemplateSource,
 ) -> Result<(), IrOuterGraphError> {
     let resolves = |template: Option<&str>| {
-        template
-            .and_then(|path| nexus_preset::read_embedded_template(preset_id, path))
-            .is_some_and(|content| !content.trim().is_empty())
+        template_source == IrTemplateSource::Embedded
+            && template
+                .and_then(|path| nexus_preset::read_embedded_template(preset_id, path))
+                .is_some_and(|content| !content.trim().is_empty())
     };
 
     for state in &manifest.states {
@@ -430,6 +462,7 @@ fn refuse_unresolved_templates(
             return Err(IrOuterGraphError::UnresolvedTemplate {
                 node: state.id.clone(),
                 template: template.map(std::string::ToString::to_string),
+                template_source,
             });
         }
     }
@@ -445,6 +478,7 @@ fn refuse_unresolved_templates(
                     // The document spells inner-step ids `<inner_graph>/<step>`.
                     node: format!("{name}/{}", step.id),
                     template: template.map(std::string::ToString::to_string),
+                    template_source,
                 });
             }
         }
@@ -470,29 +504,33 @@ fn refuse_unresolved_templates(
 /// `build_inner_graphs` chain the YAML path uses (`AcpPromptTask` nodes,
 /// `depends_on` edges, the sink `end` task, the production prompt executor and
 /// per-run cancellation tokens), and `output_binding` through the same
-/// [`extract_output_bindings`] derivation. The document names its
-/// templates as bundle-relative asset paths and carries no bundle root, so the
-/// embedded bundle keyed by document id is the only resolvable template source;
-/// a step whose template resolves to nothing is refused
-/// ([`IrOuterGraphError::UnresolvedTemplate`]) instead of prompting the Host
-/// with zero instructions. `exit_when.llm_judge` follows the same convention:
-/// the composite task resolves `template_file` to its content through
-/// `with_resolved_template`, exactly as the wired YAML builder does, and an
-/// unresolvable judge prompt is refused for the same reason — otherwise the
+/// [`extract_output_bindings`] derivation. The document names its templates as
+/// bundle-relative asset paths and carries no bundle root, so `template_source`
+/// states what may answer for them. `IrTemplateSource::Embedded` (the mapper's
+/// own intake) reads the compiled-in bundle keyed by document id.
+/// `IrTemplateSource::OwnSource` (an applied user document) resolves nothing:
+/// its id is not a bundle id, and a collision with one would otherwise serve a
+/// different package's bytes. Either way a step whose template does not resolve
+/// is refused ([`IrOuterGraphError::UnresolvedTemplate`]) instead of prompting
+/// the Host with zero instructions. `exit_when.llm_judge` follows the same
+/// convention: the composite task resolves `template_file` to its content
+/// through `with_resolved_template`, exactly as the wired YAML builder does, and
+/// an unresolvable judge prompt is refused for the same reason — otherwise the
 /// judge would be invoked with the bundle path as its instructions.
 ///
 /// # Errors
 /// `Unmappable` / `Unprojected` when the document uses a concept this adapter
 /// cannot project (named, with its node id or document path), before any task is
 /// built; `UnresolvedTemplate` when an instruction template (inner step or
-/// `exit_when.llm_judge`) resolves to no content; `Projection` when a payload
-/// the mapping does carry cannot be read;
+/// `exit_when.llm_judge`) does not resolve from `template_source`; `Projection`
+/// when a payload the mapping does carry cannot be read;
 /// `Graph` when the wired topology is invalid (an `entry` naming no outer task,
 /// or an edge to a task the projection never produced) or an inner graph fails
 /// to build.
 #[allow(clippy::needless_pass_by_value, clippy::implicit_hasher)] // dispatch is cloned into each task and the cancel map is the engine's own, mirroring build_wired_outer_graph
 pub fn build_wired_outer_graph_from_ir(
     document: &WorkflowDocument,
+    template_source: IrTemplateSource,
     engine: &Arc<dyn crate::engine::OrchestrationEngine>,
     caps: &Arc<CapabilityRegistry>,
     daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
@@ -511,7 +549,7 @@ pub fn build_wired_outer_graph_from_ir(
     // whose inner tasks prompt the Host with zero instructions and whose judge
     // would receive a bundle path as its instructions. Refuse it here, by node
     // and path, before any task exists.
-    refuse_unresolved_templates(&manifest, document.id.as_str())?;
+    refuse_unresolved_templates(&manifest, document.id.as_str(), template_source)?;
 
     // §8.2.1 `terminal[]`: a declared terminal state ends the run even when its
     // node kind is `outer_state`; the composite task overrides with `End`.
@@ -519,6 +557,8 @@ pub fn build_wired_outer_graph_from_ir(
         state.terminal |= document.terminal.iter().any(|id| id == &state.id);
     }
 
+    // `OwnSource` refuses every template above, so only a template-free manifest
+    // reaches this build and the None arm's embedded fallback is never taken.
     let inner_graphs = build_inner_graphs(
         &manifest,
         document.id.as_str(),
@@ -1538,8 +1578,16 @@ states:
     fn ir_outer_graph(document: &WorkflowDocument) -> graph_flow::Graph {
         let caps = Arc::new(test_capability_registry());
         let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
-        build_wired_outer_graph_from_ir(document, &engine, &caps, None, None, no_cancels())
-            .expect("IR outer graph builds")
+        build_wired_outer_graph_from_ir(
+            document,
+            IrTemplateSource::Embedded,
+            &engine,
+            &caps,
+            None,
+            None,
+            no_cancels(),
+        )
+        .expect("IR outer graph builds")
     }
 
     #[test]
@@ -1621,9 +1669,15 @@ states:
     fn assert_refused(document: &WorkflowDocument, concept: &str) -> IrOuterGraphError {
         let caps = Arc::new(test_capability_registry());
         let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
-        let Err(error) =
-            build_wired_outer_graph_from_ir(document, &engine, &caps, None, None, no_cancels())
-        else {
+        let Err(error) = build_wired_outer_graph_from_ir(
+            document,
+            IrTemplateSource::Embedded,
+            &engine,
+            &caps,
+            None,
+            None,
+            no_cancels(),
+        ) else {
             panic!("unmappable document is refused, not partially built");
         };
         let message = error.to_string();
@@ -1730,13 +1784,19 @@ states:
         let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
         // `generate_graph/refine` names a path the document's bundle lacks.
         let document = ir_with_inner_template(2, serde_json::json!("prompts/missing.md"));
-        let Err(error) =
-            build_wired_outer_graph_from_ir(&document, &engine, &caps, None, None, no_cancels())
-        else {
+        let Err(error) = build_wired_outer_graph_from_ir(
+            &document,
+            IrTemplateSource::Embedded,
+            &engine,
+            &caps,
+            None,
+            None,
+            no_cancels(),
+        ) else {
             panic!("a document whose template resolves to nothing is refused, not built");
         };
         match &error {
-            IrOuterGraphError::UnresolvedTemplate { node, template } => {
+            IrOuterGraphError::UnresolvedTemplate { node, template, .. } => {
                 assert_eq!(node, "generate_graph/refine", "the node is named");
                 assert_eq!(
                     template.as_deref(),
@@ -1757,8 +1817,16 @@ states:
         let caps = Arc::new(test_capability_registry());
         let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
         let document = ir_with_inner_template(2, serde_json::Value::Null);
-        let Err(IrOuterGraphError::UnresolvedTemplate { node, template }) =
-            build_wired_outer_graph_from_ir(&document, &engine, &caps, None, None, no_cancels())
+        let Err(IrOuterGraphError::UnresolvedTemplate { node, template, .. }) =
+            build_wired_outer_graph_from_ir(
+                &document,
+                IrTemplateSource::Embedded,
+                &engine,
+                &caps,
+                None,
+                None,
+                no_cancels(),
+            )
         else {
             panic!("an inner step with no template is refused, not built");
         };
@@ -1774,6 +1842,7 @@ states:
         let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
         let Err(error) = build_wired_outer_graph_from_ir(
             &ir_document(IR_JUDGE_UNRESOLVED),
+            IrTemplateSource::Embedded,
             &engine,
             &caps,
             None,
@@ -1783,7 +1852,7 @@ states:
             panic!("a judge template that resolves to nothing is refused, not built");
         };
         match &error {
-            IrOuterGraphError::UnresolvedTemplate { node, template } => {
+            IrOuterGraphError::UnresolvedTemplate { node, template, .. } => {
                 assert_eq!(node, "assess", "the outer state is named");
                 assert_eq!(
                     template.as_deref(),
@@ -1796,6 +1865,76 @@ states:
         let message = error.to_string();
         assert!(message.contains("assess"), "{message}");
         assert!(message.contains("prompts/missing-judge.md"), "{message}");
+    }
+
+    /// The applied path (`IrTemplateSource::OwnSource`) resolves no template:
+    /// a document whose id collides with an embedded preset id, carrying a
+    /// template that bundle really holds, must refuse instead of building with
+    /// that other package's bytes.
+    #[test]
+    fn ir_applied_path_refuses_a_colliding_embedded_bundle_template() {
+        let caps = Arc::new(test_capability_registry());
+        let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
+        // `IR_INNER_GRAPH`'s id IS an embedded preset id and its first step's
+        // template exists in that bundle, so a restored embedded fallback would
+        // resolve it and build the graph.
+        let document = ir_document(IR_INNER_GRAPH);
+        let colliding = "prompts/generate-with-memory.md";
+        assert!(
+            nexus_preset::read_embedded_template(document.id.as_str(), colliding).is_some(),
+            "fixture premise: the colliding id and its template exist in the embedded bundle"
+        );
+
+        let Err(error) = build_wired_outer_graph_from_ir(
+            &document,
+            IrTemplateSource::OwnSource,
+            &engine,
+            &caps,
+            None,
+            None,
+            no_cancels(),
+        ) else {
+            panic!("an applied document must not be built from another package's bundle");
+        };
+        match &error {
+            IrOuterGraphError::UnresolvedTemplate {
+                node,
+                template,
+                template_source,
+            } => {
+                assert_eq!(node, "generate_graph/generate_with_context");
+                assert_eq!(template.as_deref(), Some(colliding));
+                assert_eq!(*template_source, IrTemplateSource::OwnSource);
+            }
+            other => panic!("refusal must be typed ir_unresolved_template: {other}"),
+        }
+        let message = error.to_string();
+        assert!(
+            message.contains("cannot be resolved from this document's own source"),
+            "the refusal names the document's own source, not a bundle gap: {message}"
+        );
+    }
+
+    /// A template-free applied document still builds: the refusal is about
+    /// templates, not about the applied path.
+    #[test]
+    fn ir_applied_path_builds_a_template_free_document() {
+        let caps = Arc::new(test_capability_registry());
+        let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
+        let graph = build_wired_outer_graph_from_ir(
+            &ir_document(IR_LINEAR),
+            IrTemplateSource::OwnSource,
+            &engine,
+            &caps,
+            None,
+            None,
+            no_cancels(),
+        )
+        .expect("an applied document without templates builds");
+        assert!(
+            graph.get_task("plan").is_some(),
+            "the document's tasks are wired"
+        );
     }
 
     #[tokio::test]
@@ -1839,6 +1978,7 @@ states:
         let engine_ref: Arc<dyn crate::engine::OrchestrationEngine> = engine.clone();
         let graph = build_wired_outer_graph_from_ir(
             &document,
+            IrTemplateSource::Embedded,
             &engine_ref,
             &caps,
             None,
@@ -1946,7 +2086,7 @@ states:
     mod parity {
         use super::super::{
             build_wired_outer_graph, build_wired_outer_graph_from_ir, outer_graph_projection, wire,
-            OuterGraphProjection, ProjectedEdge, ProjectedTask,
+            IrTemplateSource, OuterGraphProjection, ProjectedEdge, ProjectedTask,
         };
         use super::{ir_document, no_cancels, ChildRunningEngine, UnreachableEngine};
         use crate::capability::{
@@ -2696,6 +2836,7 @@ states:
                 let document = ir_document(ir);
                 let graph = build_wired_outer_graph_from_ir(
                     &document,
+                    IrTemplateSource::Embedded,
                     &self.engine,
                     &self.caps,
                     self.dispatch.clone(),
