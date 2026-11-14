@@ -1,7 +1,7 @@
 # ADR: Durability adjudication — I-000009 / I-000010 (v1.217)
 
 Status: implemented — adjudicated keep-defer in v1.217, then overtaken: v1.224 fixed both residuals and I-000009 / I-000010 closed resolved on 2026-10-25T11:24Z
-Archived: 2026-11-15 — the fixes landed on 2026-10-25 (`7abd9d599`, `f8b8b62c4`), before this record was migrated from the retired corpus; the code facts and line references it reasons from no longer exist (I-000452)
+Archived: 2026-11-15 — archived on this date rather than on `Date:`, which records the 2026-11-10 migration into this corpus and not the v1.217 adjudication; the fixes landed 2026-10-25 (`7abd9d599`, `f8b8b62c4`), before that migration, so the code facts it reasons from no longer exist (I-000452)
 Date: 2026-11-10
 Scope: process — public-first workflow durability and budget residuals
 Source: migrated from the retired iteration-package adjudication record
