@@ -348,6 +348,11 @@ fn inner_step_node(graph_name: &str, graph: &InnerGraph, step: &GraphNode) -> Wo
     }
 }
 
+/// Whether this state's gate is an `llm_judge`: the preset's only judged exit kind.
+fn is_judged(state: &StateDefinition) -> bool {
+    matches!(state.exit_when, Some(ExitWhen::LlmJudge { .. }))
+}
+
 fn push_next_edges(
     state: &StateDefinition,
     edges: &mut Vec<WorkflowEdge>,
@@ -357,7 +362,16 @@ fn push_next_edges(
     match &state.next {
         None => {}
         Some(NextTarget::Linear(to)) => {
-            push_edge(edges, used, from, to, WorkflowEdgeKind::Linear, None, None);
+            // A judged state's unconditional advance is the branch a run takes when its judge
+            // passes, which is what the IR calls that node's `default` edge (and the only edge a
+            // static walk may follow out of an `llm_judge` node). A `linear` edge here would
+            // leave the judge with no branch to follow.
+            let kind = if is_judged(state) {
+                WorkflowEdgeKind::Default
+            } else {
+                WorkflowEdgeKind::Linear
+            };
+            push_edge(edges, used, from, to, kind, None, None);
         }
         Some(NextTarget::GoNogo(next)) => {
             push_edge(
@@ -927,7 +941,7 @@ fn state_from_node(
             .map(enter_action_preset)
             .collect::<Result<Vec<_>, _>>()?,
         exit_when: node.exit_when.as_ref().map(exit_when_preset),
-        next: next_from_edges(&node.id, edges)?,
+        next: next_from_edges(&node.id, edges, is_judged_node(node))?,
         terminal: matches!(&node.kind, WorkflowNodeKind::Terminal),
         context_update: node
             .context_update
@@ -949,13 +963,28 @@ fn state_from_node(
     })
 }
 
+/// Whether this document node's gate is an `llm_judge` — the inverse side of [`is_judged`].
+fn is_judged_node(node: &WorkflowNode) -> bool {
+    node.exit_when
+        .as_ref()
+        .is_some_and(|exit| exit.kind == WorkflowExitWhenKind::LlmJudge)
+}
+
 fn next_from_edges(
     node_id: &str,
     edges: &[&WorkflowEdge],
+    judged: bool,
 ) -> Result<Option<NextTarget>, WorkflowIrError> {
     let Some(first) = edges.first() else {
         return Ok(None);
     };
+
+    // A judged node's single `default` edge is the import projection of the preset's `linear`
+    // next; projecting it back as [`NextTarget::Linear`] keeps the round trip byte-identical and
+    // keeps the builder's outer topology on the same edge it had before.
+    if judged && edges.len() == 1 && matches!(first.kind, WorkflowEdgeKind::Default) {
+        return Ok(Some(NextTarget::Linear(first.to.clone())));
+    }
 
     if let Some(go) = edges
         .iter()
@@ -1401,6 +1430,49 @@ roles:
         );
 
         let exported = export_preset(document).expect("export");
+        assert_eq!(
+            serde_json::to_value(&exported).expect("exported json"),
+            serde_json::to_value(&manifest).expect("manifest json")
+        );
+    }
+
+    #[test]
+    fn judged_next_projects_to_the_default_branch_and_round_trips() {
+        let manifest: PresetManifest = serde_yaml::from_str(
+            r#"
+preset:
+  id: judged-linear
+  version: 1
+  kind: creator
+  description: "judged state advancing unconditionally"
+  requires_capabilities: []
+  initial: review
+  terminal: done
+states:
+  - id: review
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/judge.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: done
+  - id: done
+    terminal: true
+"#,
+        )
+        .expect("manifest parses");
+        let document = import_preset_manifest(&manifest).expect("import");
+
+        assert_eq!(document.edges.len(), 1);
+        assert_eq!(
+            document.edges[0].kind,
+            WorkflowEdgeKind::Default,
+            "a judged state's unconditional advance is the branch a run takes: its default edge"
+        );
+
+        // The inverse projection restores the preset's `linear` next. Without it the lone default
+        // edge would project as branches-with-no-rules, which wires no outer edge at all.
+        let exported = export_preset(&document).expect("export");
         assert_eq!(
             serde_json::to_value(&exported).expect("exported json"),
             serde_json::to_value(&manifest).expect("manifest json")
