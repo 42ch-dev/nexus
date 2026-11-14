@@ -24,13 +24,13 @@ What a strategy simulation reports, what it refuses to claim, and where the disc
   trajectory.
 - No provider is called. A trajectory carries no cost, no latency and no output.
 - Waits are derived from the visited set: a visited `manual_wait` node, or a visited state whose
-  `exit_when` is `manual`, yields `reason: manual` with the node id; a document-global
-  `signals[].action: pause` yields `reason: signal` with the signal name. **A wait is reported when
-  its node is visited, and the walk visits only a judge's single `default` edge**, so a wait
-  reachable only through a judge's go or no-go branch is never predicted — an under-report in the
-  judge case, by construction, not an omission to fix. Within the visited set the list over-reports
-  instead: a wait the run would never reach is still named, and a pause signal is named whatever the
-  graph does with it.
+  `exit_when` is `manual`, yields `reason: manual` with the node id. **A wait is reported when its
+  node is visited, and the walk visits only a judge's single `default` edge**, so a wait reachable
+  only through a judge's go or no-go branch is never predicted — an under-report in the judge case,
+  by construction, not an omission to fix. Within the visited set the list over-reports instead: a
+  wait the run would never reach is still named.
+- A document-global signal is not bounded by the walk at all: `signals[].action: pause` yields a
+  `reason: signal` wait for the document, whichever nodes the walk visits.
 
 Consumers MUST treat an unknown `simulation_level` as a newer, unsupported level rather than assuming
 `reachability`.
@@ -39,8 +39,8 @@ Consumers MUST treat an unknown `simulation_level` as a newer, unsupported level
 
 Any surface offering an approve decision from a simulation MUST show, for the document hash being
 approved: the level in words, the stubbed-judge count with ids, the fence reading, the static label on
-predicted waits, and a statement that a passed simulation does not preview output. A bare "simulated"
-badge is a defect.
+predicted waits, a statement that a passed simulation does not preview output, and — whenever a judge
+is stubbed — that the wait list covers only the default path. A bare "simulated" badge is a defect.
 
 ### Upgrade path
 
@@ -59,8 +59,9 @@ this document.
   generated enum's `Ord`. A deferred (`defer_until_apply`) nest contributes its declared class and its
   body is not walked. An effect that only happens on a collapsed branch is still reported.
 - **The wait list is not exhaustive.** Because judges are stubbed to their `default` edge, a wait
-  behind any other branch is never predicted; no surface may present the list as complete, and the
-  disclosure obligation in §Disclosure is what keeps that visible.
+  behind any other branch is never predicted. §Disclosure therefore requires the surface to say so
+  whenever a judge is stubbed; an invariant that only pointed at a disclosure obligation would be
+  assuming the obligation it needs.
 
 ## Where it lives
 

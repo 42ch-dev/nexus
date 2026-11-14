@@ -133,9 +133,10 @@ the applied document is not provider-checked and the run fails at the prompt exe
 (I-000443). A second limit is adjacent and wider than "the templates could not be resolved": apply
 validates the bytes it installs, not whether intake can build a graph from them, so an applied document
 installs and then refuses at admission (I-000448). The applied path carries no bundle root — serving a
-template would mean reading another package's bytes — so **every applied document that names a template is
-refused, and so is every `exit_when.llm_judge`**, the §8.2.1 refusal being unconditional there rather than
-conditional on a bad path (I-000449).
+template would mean reading another package's bytes — so the §8.2.1 template refusal is unconditional
+there rather than conditional on a bad path: **any state whose `exit_when` is `llm_judge` is refused, and
+so is any document carrying an inner graph**, because every inner step is checked whether or not it names
+a template (I-000449).
 
 ### 6. Why one structural authority
 
