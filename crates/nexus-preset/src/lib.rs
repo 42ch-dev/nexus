@@ -22,8 +22,9 @@ pub use loader::{
     PresetLoadError, ValidationProblem, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
 };
 pub use validation::{
-    validate_assets_in_bundle, validate_path_safety, validate_preset_semantic, DiagnosticCategory,
-    DiagnosticSeverity, ValidationDiagnostic, ValidationResult,
+    collect_ir_asset_references, validate_assets_in_bundle, validate_path_safety,
+    validate_preset_semantic, DiagnosticCategory, DiagnosticSeverity, ValidationDiagnostic,
+    ValidationResult,
 };
 pub use workflow_ir::{export_preset, import_preset_bundle, PresetIrImport, WorkflowIrError};
 
@@ -111,7 +112,7 @@ pub fn embedded_source_identity(
         .and_then(|loaded| loaded.source_identity)
 }
 
-/// Derive the complete effective prompt-role set for a loaded preset
+/// Derive the complete effective prompt-role set from a preset manifest
 /// (N-4b/N-9).
 ///
 /// Every `llm_judge` exit resolves the `default` role (the judge capability
@@ -119,15 +120,21 @@ pub fn embedded_source_identity(
 /// node resolves its `agent` field (or `default` when absent). A preset with
 /// NO prompt path yields an empty set — an empty binding map is then valid.
 ///
+/// The input is the manifest, not a `LoadedPreset`: a run admitted from an
+/// applied `WorkflowDocument` has no descriptor, and admission and graph
+/// construction must derive roles from the same manifest.
+///
 /// This is the single source of truth for both the admission
 /// binding-completeness validator and the daemon's internal binding
 /// builder (auto-chain/cron/review-master), so the two can never drift.
 #[must_use]
-pub fn required_prompt_roles(loaded: &LoadedPreset) -> std::collections::HashSet<String> {
+pub fn required_prompt_roles(
+    manifest: &crate::manifest::PresetManifest,
+) -> std::collections::HashSet<String> {
     use nexus_contracts::local::orchestration::preset::{EnterAction, ExitWhen, GraphNodeKind};
 
     let mut required: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for state in &loaded.manifest.states {
+    for state in &manifest.states {
         if let Some(exit_when) = &state.exit_when {
             if matches!(exit_when, ExitWhen::LlmJudge { .. }) {
                 // The judge capability (`judge.llm`) resolves the `default`
@@ -139,12 +146,7 @@ pub fn required_prompt_roles(loaded: &LoadedPreset) -> std::collections::HashSet
             if let EnterAction::InnerGraph { name } = action {
                 // The manifest's node list is the source of truth for
                 // agent references; the built graph mirrors it.
-                if let Some(ig) = loaded
-                    .manifest
-                    .inner_graphs
-                    .as_ref()
-                    .and_then(|igs| igs.get(name))
-                {
+                if let Some(ig) = manifest.inner_graphs.as_ref().and_then(|igs| igs.get(name)) {
                     for node in &ig.nodes {
                         if matches!(node.kind, GraphNodeKind::AcpPrompt) {
                             match &node.agent {
@@ -387,6 +389,28 @@ mod tests {
             presets.iter().any(|p| p == "novel-writing"),
             "expected 'novel-writing' in embedded presets: {presets:?}"
         );
+    }
+
+    #[test]
+    fn every_embedded_preset_projects_its_catalog_id() {
+        let caps = BuiltinCapabilityCatalog;
+        for id in list_embedded_presets() {
+            let loaded = load_embedded_preset(&id, &caps).expect("embedded preset loads");
+            assert_eq!(
+                loaded.manifest.preset.id, id,
+                "`{id}` declares another id than its catalog name"
+            );
+
+            // A document's id is what the fence resolves its bundle by; a name nobody can load
+            // (`essay` declaring `essay-init`) would leave its templates unresolvable.
+            let document = workflow_ir::import_preset_manifest(&loaded.manifest)
+                .expect("embedded preset projects into IR");
+            assert_eq!(
+                document.id.as_str(),
+                id,
+                "`{id}` projects a document id that does not resolve back to its bundle"
+            );
+        }
     }
 
     #[test]

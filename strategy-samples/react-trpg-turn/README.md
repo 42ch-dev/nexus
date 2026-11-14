@@ -22,7 +22,8 @@ embed or ship a rules module.
 
 ```
 react-trpg-turn/
-├── preset.yaml            # one bundle, two named lanes (routed by trigger_type)
+├── workflow.json          # the authoring source: a WorkflowDocument (edit this)
+├── preset.yaml            # generated from workflow.json — not the source; two named lanes
 ├── templates/
 │   ├── lane-route.md               # lane selector judge (GO = mechanical, NOGO = natural language)
 │   ├── natural-language-intent.md  # intent parse — derived structure, raw input preserved
@@ -31,6 +32,32 @@ react-trpg-turn/
 │   └── receipt-narration.md        # narrate confirmed results only, stop at player response
 └── README.md              # this file: browse guard + idempotency/completion contract
 ```
+
+## Authoring
+
+**Edit `workflow.json`.** It is the source of truth for the sample;
+`preset.yaml` is its export and is not the file to author. CI re-exports
+`workflow.json` and fails with the divergent YAML path when the two disagree:
+
+```bash
+cargo test -p nexus-orchestration --test sample_self_check
+```
+
+Canvas is not required for repository sample authoring — the JSON is edited
+directly.
+
+`assets[]` is the one hand-maintained part: the export does not project it, so
+each template a carrier references needs exactly one entry whose `content_hash`
+is the BLAKE3 hex digest of that file's bytes. Recompute it with:
+
+```bash
+python3 -c 'import blake3,sys;print(blake3.blake3(open(sys.argv[1],"rb").read()).hexdigest())' \
+  strategy-samples/react-trpg-turn/templates/lane-route.md
+```
+
+Run that per template from the repository root and paste the digest into the
+entry. The fuller authoring notes, including the round-trip normalisations, are
+in [`../README.md` §6](../README.md#6-fork-the-strategy-samples-and-validate).
 
 ## Run payload (`preset.input`)
 

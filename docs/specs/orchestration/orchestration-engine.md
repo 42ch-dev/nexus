@@ -833,15 +833,26 @@ bundle that happens to share its id — and refuses rather than building a parti
 | Refusal | When |
 | --- | --- |
 | `ir_unmappable` | A concept with no execution counterpart in this table: `pattern_slot`, `nest_group`. |
-| `ir_unprojected` | A concept this table does map, but `export_preset` cannot project: `judge`, `manual_wait` and `join` nodes, and a `terminal` array that is not exactly one entry. |
+| `ir_unprojected` | A concept whose execution counterpart exists in this table but which `export_preset` cannot project, and never will: the standalone `judge`, `manual_wait` and `join` node kinds, and a `terminal` array that is not exactly one entry. |
 | `ir_unresolved_template` | An instruction (an inner step's prompt, or the judge prompt of an `exit_when.llm_judge`) would reach its task without content. **`IrTemplateSource::OwnSource` resolves nothing**, so on the applied path this refusal is unconditional: every state whose `exit_when` is `llm_judge` is refused whether it names a template or not, and so is **every** inner step of **every** inner graph — naming a template changes nothing, and the check is not a path check. Only `Embedded` can resolve, and production never passes it. |
 
 The three rows are distinct facts and a client should not fold them: the first says the document
-uses something the model does not execute, the second says the concept executes but this adapter
-has no projection yet, the third says the document would run an empty prompt. The third is also
-where the applied path is narrowest today: it carries no bundle root, so the only way to serve a
-template is to read another package's bytes, which it refuses to do. The applied-identity contract
-and the three limits it carries (source freeze, buildability, and this unconditional refusal) are
+uses something the model does not execute, the second says the concept executes but has no projected
+preset representation and never will, the third says the document would run an empty prompt. The
+second is a permanent restriction on the standalone spelling, not deferred mapping work: the three
+node kinds are authored through `nodes[kind=outer_state]` carriers, and the refusal names the
+carrier to use —
+
+| Refused standalone kind | Carrier that executes and projects |
+| --- | --- |
+| `nodes[kind=judge]` | `nodes[kind=outer_state]` carrying `exit_when.kind=llm_judge`, plus its `go` / `nogo` branch edges. |
+| `nodes[kind=manual_wait]` | `nodes[kind=outer_state]` carrying `exit_when.kind=manual`. |
+| `nodes[kind=join]` | `nodes[kind=outer_state]` carrying `merge`, `converge`, `timeout_ms` and `on_timeout`. |
+
+The `ir_unresolved_template` row is also where the applied path is narrowest today: it carries no
+bundle root, so the only way to serve a template is to read another package's bytes, which it
+refuses to do. The applied-identity precedence rule and the limits that remain on that path — the
+one above, buildability, and the prompt-role and recovery limits — are
 [strategy-composition.md §5.1](strategy-composition.md).
 
 | IR document concept | Task / graph-flow execution counterpart |
@@ -853,11 +864,11 @@ and the three limits it carries (source freeze, buildability, and this unconditi
 | `outer_state.enter[kind=inner_graph]` | `InnerGraphTask`, launching the referenced inner graph in a child session. |
 | `nodes[kind=inner_step]` with `step_kind=acp_prompt` | `AcpPromptTask` in the inner graph. |
 | `exit_when.kind=rule` | `RuleCheckTask` semantics within the outer state lifecycle. |
-| `exit_when.kind=manual` or `nodes[kind=manual_wait]` | `ManualWaitTask`, returning `NextAction::WaitForInput`. |
-| `exit_when.kind=llm_judge` or `nodes[kind=judge]` | `JudgeTask` semantics after enter actions; go continues and no-go waits. |
+| `nodes[kind=outer_state]` carrying `exit_when.kind=manual` | `ManualWaitTask`, returning `NextAction::WaitForInput`. |
+| `nodes[kind=outer_state]` carrying `exit_when.kind=llm_judge` | `JudgeTask` semantics after enter actions; go continues and no-go waits. |
 | `exit_when.kind=graph_complete` | `InnerGraphTask` completion lets the outer task return `NextAction::Continue`. |
 | `exit_when.kind=timer` | `TimerWaitTask`, returning `WaitForInput` and scheduling a clock signal (optional, DR-12). |
-| `nodes[kind=join]`, `merge`, `converge`, `timeout_ms`, `on_timeout` | The `StateCompositeTask` join gate, including arrival tracking and bounded-timeout handling. |
+| `nodes[kind=outer_state]` carrying `merge`, `converge`, `timeout_ms`, `on_timeout` | The `StateCompositeTask` join gate, including arrival tracking and bounded-timeout handling. |
 | `terminal[]` or `nodes[kind=terminal]` | The terminal `StateCompositeTask` returns `NextAction::End`. |
 | `edges[kind=linear|go|nogo|default]` | Outer-graph edges and the source task's corresponding `NextAction` routing. |
 | `edges[kind=conditional]` | `add_conditional_edge` and the runtime conditional-edge evaluator; the source task supplies `_state_result` but does not evaluate the edge. |
@@ -873,6 +884,11 @@ and the three limits it carries (source freeze, buildability, and this unconditi
 `pattern_slot`, `nest_group`, and `nests[]` are composition concepts, not executable tasks. They
 require deterministic expansion into the concrete nodes and edges above before intake can construct
 a graph, and a document carrying them today is refused `ir_unmappable`.
+
+The standalone `nodes[kind=judge]`, `nodes[kind=manual_wait]` and `nodes[kind=join]` spellings have
+no row in this table and never will: their semantics are carried by `nodes[kind=outer_state]`, so a
+document using the kind spelling is refused `ir_unprojected` permanently and the refusal names the
+carrier above to author instead.
 
 #### 8.3 Caching and reloading
 

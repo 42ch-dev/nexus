@@ -93,9 +93,16 @@ the rows, never supplied.
 another strategy, so no row could pair it with this one), `approval_hash_changed` (the frozen document no
 longer hashes to the identity the approval recorded — installing it would install a changed hash),
 `strategy_not_user_preset` (the intake only consults an apply for a user bundle, so an apply on any other
-source records a row nothing reads), `strategy_has_no_schedule` (nothing would run) and `already_applied`
-(the named approval is already current). `already_applied` and `approval_hash_changed` return 409; the rest
-are refusals on the same envelope.
+source records a row nothing reads), `document_unbuildable` (the approved document cannot become an outer
+graph, so applying it would install an identity intake refuses to build — the payload carries the builder's
+own reason), `strategy_has_no_schedule` (nothing would run) and `already_applied` (the named approval is
+already current). `already_applied` and `approval_hash_changed` return 409; the rest are refusals on the
+same envelope. Buildability is checked before both the schedule guard and the already-current guard, so two
+orderings follow: a strategy that is both unscheduled and unbuildable reports `document_unbuildable` (the fix
+is a re-approval, not a schedule), and a repeat apply of an approval that is already current but whose
+document no longer builds reports `document_unbuildable` rather than 409 `already_applied` (the identity is
+not usable, so idempotent success would be a lie; this is the one status change a client treating 409 as
+success sees).
 
 **The table is append-only and carries no current pointer.** The current apply of a strategy is the row with
 no successor; a superseded approval is a legal rollback, expressed as a new apply naming it. There is no
@@ -115,28 +122,74 @@ listed row appends an apply and leaves the list untouched.
 
 #### 5.1 What intake does with an applied identity
 
-For a **user bundle with a current apply**, admission rebuilds the graph from the applied document through
-the [§8.2.1 mapping](orchestration-engine.md#821-ir--task-mapping) and runs that; every other strategy keeps the YAML loader of
-[§8.1](orchestration-engine.md). The discriminator is the source identity the loader recorded, never a
-preset lookup — the embedded-first lookup would hand an applied user bundle the embedded preset's graph when
-the ids collide.
+**Precedence.** Admission and recovery choose a strategy's document in exactly three cases:
 
-Admission re-runs the same recomputation before it builds: an apply whose `document_json` no longer hashes
+| Strategy the loader resolved | Document the run is built from |
+| --- | --- |
+| a user bundle with a current apply | the applied `WorkflowDocument`, through the [§8.2.1 mapping](orchestration-engine.md#821-ir--task-mapping) |
+| an embedded or `_system.` preset | the YAML descriptor — the apply branch is never entered |
+| a user bundle with no current apply | the YAML descriptor of [§8.1](orchestration-engine.md) |
+
+The apply branch is entered only for a user bundle: `is_user_preset` requires the source identity the
+loader recorded to be a directory bundle and refuses every `_system.` id, so an embedded or system preset
+never names a strategy and is never looked up. The discriminator is that loader classification, never a
+preset lookup — the embedded-first lookup would hand an applied user bundle the embedded preset's graph
+when the ids collide. A user bundle whose apply rows have no successor-less row is on the YAML path too:
+`current_apply` returning `None` is an answer, not a refusal.
+
+Admission resolves that document **before** the binding gate, and the applied arm's role set comes from
+`export_preset(&document)` — the same normalisation the IR graph builder consumes — while the YAML arm
+passes the loaded manifest; the graph is then built from the document those roles were read from.
+
+Recovery re-enters through the same route instead of a second reader (`AppliedDocumentSource` →
+`is_user_preset` → `current_apply` → `verified_apply_document`), and a strategy with no apply recovers its
+descriptor graph exactly as before.
+
+Recovery compares that resolution with the run's own record **before** it builds: the run descriptor freezes
+the `apply_id` and `content_hash` admitted with the run, and a restart refuses
+(`reconstruction_unavailable`, non-replayable) when the strategy's current apply is any other row — whether a
+re-apply superseded it or it was rolled back. A run admitted with no apply records no identity — and
+neither does any run persisted before the descriptor carried one — so its descriptor serializes byte for
+byte as before and recovery resolves it the way it always has.
+
+Both sides re-run the same recomputation before building: an apply whose `document_json` no longer hashes
 to its recorded `content_hash` is `applied_document_changed`, and one that cannot be read is
 `applied_document_unverifiable`. Bytes edited after apply are therefore a typed refusal, not a reinterpreted
 run.
 
-**Known limit — source freeze holds within one process lifetime.** An applied run is admitted and recovered
-with the YAML descriptor, so a daemon restart during an in-flight run rebuilds the *preset* graph, and
-`validate_agent_bindings` still derives its role sets from the preset, so a prompt role that exists only in
-the applied document is not provider-checked and the run fails at the prompt executor after admission
-(I-000443). A second limit is adjacent and wider than "the templates could not be resolved": apply
-validates the bytes it installs, not whether intake can build a graph from them, so an applied document
-installs and then refuses at admission (I-000448). The applied path carries no bundle root — serving a
-template would mean reading another package's bytes — so the §8.2.1 template refusal is unconditional
-there rather than conditional on a bad path: **any state whose `exit_when` is `llm_judge` is refused, and
-so is every inner step of every inner graph**, whether or not it names a template — the schema allows an
-inner graph with no steps, which is the only inner-graph shape the applied path admits (I-000449).
+**Known limits on the applied path.** Each bounds what an applied run can do; none of them turns the
+applied document back into a hint.
+
+- **Every applied prompt runs under the `default` role.** The prompt capability sends `agent_ref: None`, so
+  a prompt role declared only in the applied document passes admission and never drives a prompt (I-000462).
+- **`required_prompt_roles` scans `llm_judge` exits and inner-graph `acp_prompt` nodes only.** A document
+  that prompts through a capability enter action contributes no required role, so a run can be admitted
+  without the `default` binding and fail at the prompt instead of at admission (I-000463).
+- **A run whose descriptor records no applied identity still resolves against the current apply.** Rows
+  persisted before the descriptor carried one, and runs whose descriptor is built outside admission, hold
+  no identity, so a re-apply before a restart reinterprets that run's persisted position. Admission
+  freezes the identity on every descriptor it writes, so the admitted path is closed; the reachability of
+  those out-of-admission construction sites is I-000467.
+- **Reconstruction validates inner descendants against the descriptor manifest** while it builds the graph
+  from the applied document (I-000465). The applied path admits one inner shape — a declared inner graph
+  with no steps (see below) — and that shape is built and enterable: `project_inner_graphs` keeps it,
+  `build_inner_graphs` inserts it, and `EnterAction::InnerGraph` spawns a child session for it. On restart
+  the child's `graph_name` is checked against the descriptor manifest's `valid_inner` before the terminal
+  short-circuit, so an inner graph only the applied document declares already makes the run
+  non-replayable.
+- **Apply validates the bytes it installs, not whether intake can build a graph from them**, so an applied
+  document installs and then refuses at admission (I-000448). The applied path carries no bundle root —
+  serving a template would mean reading another package's bytes — so the §8.2.1 template refusal is
+  unconditional there rather than conditional on a bad path: **any state whose `exit_when` is `llm_judge`
+  is refused, and so is every inner step of every inner graph**, whether or not it names a template — the
+  schema allows an inner graph with no steps, which is the only inner-graph shape the applied path admits
+  (I-000449).
+- **A standalone `judge`, `manual_wait` or `join` node has no projected preset representation and never
+  will**, so a build from such a document refuses it `ir_unprojected` permanently
+  ([§8.2.1](orchestration-engine.md#821-ir--task-mapping)). The authoring form is the `outer_state`
+  carrier: `exit_when.kind=llm_judge` plus its branch edges for a judgment, `exit_when.kind=manual` for a
+  wait, and `merge` / `converge` / `timeout_ms` / `on_timeout` for a join. No direct projection of the
+  kind spelling is planned (COMPASS D10).
 
 ### 6. Why one structural authority
 
@@ -151,11 +204,28 @@ default off, an explicit selection wins. Flag-off renders exactly the pre-compos
 
 ### 7. Boundaries
 
-Compose, approve and apply ship. The dual-read loader, IR-primary authoring and retirement of the
+Compose, approve and apply ship. IR-primary authoring for the daemon surfaces and retirement of the
 hand-authored YAML path do not: intake still prefers the YAML loader for every strategy without a current
 apply, and YAML remains the authoring path. Who may write the pattern registry is not defined here: local
 presence is not a trust claim, and a publishing channel needs its own policy (I-000422). A followed symlink
 target and the member check/open window are the trust-boundary work that policy owns.
+
+#### 7.1 Repository samples
+
+Every bundle under `strategy-samples/` is IR-primary: `workflow.json` is a `WorkflowDocument` with
+`state: candidate` and is the hand-edited authoring source, and `preset.yaml` is that document's export,
+not a file an author edits. Authoring is direct JSON editing — no candidate row, compose op, approve or
+apply is involved, and Canvas is not required for repository sample authoring. CI closes the pair: it
+imports each committed `preset.yaml`, re-exports the sample's `workflow.json` through
+`nexus_preset::export_preset` (`crates/nexus-preset/src/workflow_ir.rs`), and fails at the divergent YAML
+path when the committed manifest is not that export. `assets[]` is the one member the export does not
+project, so it stays hand-maintained: one entry per carrier-named template, each `content_hash` a BLAKE3
+digest over the template's bytes.
+
+Two surfaces stay YAML-primary and this page's boundary holds for them: `examples/first-workflow` and the
+embedded presets keep `preset.yaml` as their source, and they are the live evidence that a hand-authored
+YAML bundle still imports and exports. Nothing in the sample switch touches the intake precedence of
+§5.1, the legacy YAML write path of §6, or the pattern registry policy above.
 
 ## Invariants
 

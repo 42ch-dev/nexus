@@ -1,3 +1,8 @@
+# The manifest members below are generated from `workflow.json`, the sample's authoring source:
+# edit the JSON, not this file, and CI (`crates/nexus-orchestration/tests/sample_self_check.rs`)
+# fails when the exported manifest disagrees with it. These comments are hand-maintained prose and
+# are not part of that comparison — an export drops them.
+#
 # Game Narrative Preset — sample strategy for AI-narrative game orchestration
 #
 # This is a FORKABLE sample for partners who orchestrate Nexus from their own

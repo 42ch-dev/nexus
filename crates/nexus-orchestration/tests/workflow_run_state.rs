@@ -69,6 +69,7 @@ fn test_descriptor(_session_id: &str) -> RunDescriptorV1 {
         agent_bindings,
         parent_session_id: None,
         graph_name: None,
+        applied: None,
     }
 }
 
@@ -500,6 +501,44 @@ async fn descriptor_and_child_identity_preserved() {
         .expect("child session present")
         .expect("child row");
     assert_eq!(child_row.current_task_id, "child_task");
+}
+
+/// The applied identity is frozen on the descriptor, and a run with no apply
+/// keeps writing exactly the bytes it always did.
+#[test]
+fn descriptor_serializes_the_applied_identity_only_when_present() {
+    let no_apply_descriptor = test_descriptor("sess");
+    let no_apply = serde_json::to_value(&no_apply_descriptor).expect("descriptor serializes");
+    assert!(
+        no_apply.get("applied").is_none(),
+        "a no-apply descriptor must not gain a key: {no_apply}"
+    );
+    // Byte-for-byte: the appended, skipped field must leave these bytes alone.
+    assert_eq!(
+        serde_json::to_string(&no_apply_descriptor).expect("descriptor serializes"),
+        concat!(
+            r#"{"creator_id":"ctr_test","work_id":"work-1","workspace_root":"/tmp/ws","#,
+            r#""preset_id":"test-preset","preset_version":3,"#,
+            r#""source":{"Embedded":{"preset_id":"test-preset","content_hash":"#,
+            "[7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7]}},",
+            r#""input":{"topic":"durable"},"#,
+            r#""agent_bindings":{"default":{"provider_id":"test-provider","model":"test-model"}},"#,
+            r#""parent_session_id":null,"graph_name":null}"#,
+        )
+    );
+
+    let mut applied = test_descriptor("sess");
+    applied.applied = Some(nexus_orchestration::run_state::AppliedRunIdentity {
+        apply_id: "apl_1".to_string(),
+        content_hash: "blake3:abc".to_string(),
+    });
+    let value = serde_json::to_value(&applied).expect("descriptor serializes");
+    assert_eq!(
+        value["applied"]["content_hash"],
+        serde_json::json!("blake3:abc")
+    );
+    let back: RunDescriptorV1 = serde_json::from_value(value).expect("descriptor decodes");
+    assert_eq!(back.applied, applied.applied);
 }
 
 // ---------------------------------------------------------------------------

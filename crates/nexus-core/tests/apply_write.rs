@@ -1,15 +1,17 @@
 //! The apply write, executed through a real `CoreService`: one approval becomes one immutable
 //! apply row; a strategy that is not a user bundle, an unknown content hash, another strategy's
-//! approval, an approval whose frozen document no longer hashes to its identity, a strategy with
-//! no schedule and a repeat apply of the current approval are typed refusals that write nothing; a
-//! superseded approval applies again (that is rollback), and two concurrent applies of one
-//! approval leave exactly one row.
+//! approval, an approval whose frozen document no longer hashes to its identity, an approved
+//! document the builder refuses, a strategy with no schedule and a repeat apply of the current
+//! approval are typed refusals that write nothing; a superseded approval applies again (that is
+//! rollback), and two concurrent applies of one approval leave exactly one row.
 //!
-//! Plan: `.mstar/plans/v241-p35-applied-identity.md` T2.
+//! Plan: `.mstar/plans/v241-p35-applied-identity.md` T2; the buildability refusal is
+//! `.mstar/plans/p4b-shared-buildability.md` T2 (I-000448).
 
 #![cfg(feature = "execution")]
 
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, Principal};
+use nexus_orchestration::preset_runtime::{IrOuterGraphError, IrTemplateSource};
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
@@ -185,8 +187,161 @@ async fn seed_schedule(pool: &SqlitePool, strategy_id: &str) {
     .unwrap();
 }
 
+/// The template the unbuildable fixture's judge gate names. The applied path builds with
+/// `IrTemplateSource::OwnSource`, which resolves nothing, so naming any template is enough
+/// (I-000449).
+const JUDGE_TEMPLATE: &str = "prompts/judge.md";
+
+/// The `entry` the dangling-entry fixture declares: no node carries this id, so the wiring
+/// names a task the projection never produced.
+const DANGLING_ENTRY: &str = "nowhere";
+
+/// A document the builder refuses, together with the reason it refuses it: an apply of it must
+/// carry that text unchanged.
+struct Unbuildable {
+    /// Distinguishes the fixture's approval row.
+    tag: &'static str,
+    /// The approved document.
+    document: nexus_workflow_ir::WorkflowDocument,
+    /// What `build_wired_outer_graph_from_ir` answers for `document`.
+    builder_reason: IrOuterGraphError,
+}
+
+/// One refused document per builder refusal kind, each frozen from the strategy's own candidate so
+/// only the refused part differs. The last row is the `Graph` kind: the document projects cleanly
+/// and only its wiring is invalid, which is the I-000448 state apply used to install.
+fn unbuildable_documents(base: &nexus_workflow_ir::WorkflowDocument) -> [Unbuildable; 5] {
+    [
+        Unbuildable {
+            tag: "unmappable",
+            document: with_draft_kind(base, nexus_workflow_ir::WorkflowNodeKind::PatternSlot),
+            builder_reason: IrOuterGraphError::Unmappable {
+                concept: "node kind pattern_slot".to_string(),
+                location: "node draft".to_string(),
+            },
+        },
+        Unbuildable {
+            tag: "unprojected",
+            document: with_draft_kind(base, nexus_workflow_ir::WorkflowNodeKind::Judge),
+            builder_reason: IrOuterGraphError::standalone_node_kind(
+                nexus_workflow_ir::WorkflowNodeKind::Judge,
+                "draft",
+            ),
+        },
+        // Passes the concept refusal (an inner step is a projected kind) and only the exporter
+        // refuses it: the id is not `<inner_graph>/<step>`.
+        Unbuildable {
+            tag: "unprojectable",
+            document: with_draft_kind(base, nexus_workflow_ir::WorkflowNodeKind::InnerStep),
+            builder_reason: IrOuterGraphError::Projection(
+                nexus_preset::WorkflowIrError::NotProjectable {
+                    reason: "inner step `draft` is not `<inner_graph>/<node_id>`".to_string(),
+                },
+            ),
+        },
+        Unbuildable {
+            tag: "unresolved_template",
+            document: with_judge_template(base),
+            builder_reason: IrOuterGraphError::UnresolvedTemplate {
+                node: "draft".to_string(),
+                template: Some(JUDGE_TEMPLATE.to_string()),
+                template_source: IrTemplateSource::OwnSource,
+            },
+        },
+        Unbuildable {
+            tag: "dangling_entry",
+            document: with_entry(base, DANGLING_ENTRY),
+            builder_reason: IrOuterGraphError::Graph(graph_flow::GraphError::TaskNotFound(
+                format!(
+                    "Start task '{DANGLING_ENTRY}' was not added to graph '{}'",
+                    base.id.as_str()
+                ),
+            )),
+        },
+    ]
+}
+
+/// The candidate declaring another `entry`.
+fn with_entry(
+    base: &nexus_workflow_ir::WorkflowDocument,
+    entry: &str,
+) -> nexus_workflow_ir::WorkflowDocument {
+    let mut document = base.clone();
+    document.entry = entry.to_string();
+    document
+}
+
+/// The candidate's `draft` node carrying another kind: the shape of the builder's node-kind
+/// refusals.
+fn with_draft_kind(
+    base: &nexus_workflow_ir::WorkflowDocument,
+    kind: nexus_workflow_ir::WorkflowNodeKind,
+) -> nexus_workflow_ir::WorkflowDocument {
+    let mut document = base.clone();
+    document
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "draft")
+        .expect("the fixture has a draft state")
+        .kind = kind;
+    document
+}
+
+/// The candidate whose `draft` exits on an `llm_judge` naming [`JUDGE_TEMPLATE`].
+fn with_judge_template(
+    base: &nexus_workflow_ir::WorkflowDocument,
+) -> nexus_workflow_ir::WorkflowDocument {
+    let mut document = base.clone();
+    let state = document
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "draft")
+        .expect("the fixture has a draft state");
+    state.exit_when = Some(nexus_workflow_ir::WorkflowExitWhen {
+        kind: nexus_workflow_ir::WorkflowExitWhenKind::LlmJudge,
+        template: Some(JUDGE_TEMPLATE.to_string()),
+        judge_capability: None,
+        min_interval: None,
+        duration: None,
+    });
+    document
+}
+
+/// Freeze one approval of `document`, keyed by its recomputed hash.
+async fn seed_document_approval(
+    setup: &Setup,
+    strategy_id: &str,
+    tag: &str,
+    document: &nexus_workflow_ir::WorkflowDocument,
+) -> (String, String) {
+    let hash = nexus_workflow_ir::content_hash(document).unwrap();
+    let approval_id = format!("apr_{tag}");
+    sqlx::query(
+        "INSERT INTO strategy_approvals \
+         (approval_id, strategy_id, content_hash, candidate_revision, document_json, \
+          trajectory_json, pins_json, approver, approved_at) \
+         VALUES (?, ?, ?, 0, ?, ?, '[]', 'test_creator', '2026-01-01T00:00:00+00:00')",
+    )
+    .bind(&approval_id)
+    .bind(strategy_id)
+    .bind(&hash)
+    .bind(serde_json::to_string(document).unwrap())
+    .bind(serde_json::json!({"ir_content_hash": hash}).to_string())
+    .execute(setup.core.pool())
+    .await
+    .unwrap();
+    (approval_id, hash)
+}
+
 async fn apply_rows(pool: &SqlitePool) -> i64 {
     sqlx::query_scalar("SELECT COUNT(*) FROM strategy_applies")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn schedule_rows(pool: &SqlitePool) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules")
         .fetch_one(pool)
         .await
         .unwrap()
@@ -310,6 +465,94 @@ async fn a_document_edited_after_approval_is_the_typed_hash_change_and_writes_no
         apply_rows(setup.core.pool()).await,
         0,
         "the hash refusal must happen before the insert"
+    );
+    setup.core.close().await.unwrap();
+}
+
+/// Every kind the builder refuses — the projection refusals and the `Graph` refusals after them —
+/// is the same typed apply refusal, carrying the builder's own reason and writing nothing: apply
+/// installs exactly what the run can build (I-000448).
+#[tokio::test]
+async fn every_document_the_builder_refuses_is_the_typed_refusal_and_writes_nothing() {
+    let setup = setup().await;
+    // The strategy is a user bundle and owns a schedule, so each document's buildability is the
+    // only thing its apply can trip on — exactly the applies that used to land and fail at their
+    // first run.
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+    let base = setup
+        .core
+        .read_strategy_candidate(&setup.principal, STRATEGY)
+        .await
+        .unwrap()
+        .document;
+
+    for Unbuildable {
+        tag,
+        document,
+        builder_reason,
+    } in unbuildable_documents(&base)
+    {
+        let (_, hash) = seed_document_approval(&setup, STRATEGY, tag, &document).await;
+
+        let error = setup
+            .core
+            .apply_strategy(&setup.principal, STRATEGY, &hash)
+            .await
+            .unwrap_err();
+
+        assert_eq!(reason(&error), "document_unbuildable", "{tag}: {error:?}");
+        // The reason the RUN would have failed with, verbatim: the builder refuses this same
+        // document with the same `IrOuterGraphError`, and apply carries its text through.
+        let carried = refusal(&error)["builder_reason"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{tag}: the refusal carries no builder_reason: {error:?}"));
+        assert_eq!(
+            carried,
+            builder_reason.to_string(),
+            "{tag}: the refusal must carry the builder's own reason"
+        );
+        assert_eq!(
+            apply_rows(setup.core.pool()).await,
+            0,
+            "{tag}: the buildability refusal must happen before the insert"
+        );
+    }
+    setup.core.close().await.unwrap();
+}
+
+/// Buildability is checked before the schedule guard, so a strategy that is both unscheduled and
+/// unbuildable reports the document: the client's fix is re-approval, not a schedule.
+#[tokio::test]
+async fn an_unbuildable_document_outranks_the_missing_schedule() {
+    let setup = setup().await;
+    let base = setup
+        .core
+        .read_strategy_candidate(&setup.principal, STRATEGY)
+        .await
+        .unwrap()
+        .document;
+    let [Unbuildable { tag, document, .. }, ..] = unbuildable_documents(&base);
+    // No schedule at all: both guards would refuse this apply, and the document is the one that
+    // wins. The premise is asserted so a fixture that grows a schedule reddens here instead of
+    // silently testing nothing.
+    assert_eq!(
+        schedule_rows(setup.core.pool()).await,
+        0,
+        "the ordering test needs a strategy with no schedule"
+    );
+    let (_, hash) = seed_document_approval(&setup, STRATEGY, tag, &document).await;
+
+    let error = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap_err();
+
+    assert_eq!(reason(&error), "document_unbuildable");
+    assert_eq!(
+        apply_rows(setup.core.pool()).await,
+        0,
+        "the buildability refusal must happen before the insert"
     );
     setup.core.close().await.unwrap();
 }
@@ -523,5 +766,137 @@ async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
         .await
         .unwrap();
     assert!(no_approvals.items.is_empty());
+    setup.core.close().await.unwrap();
+}
+
+/// One apply row written straight to the store — no guard consulted, no prior row superseded — as
+/// only an admitted non-core writer can leave a strategy with two current applies.
+async fn insert_successorless_row(
+    setup: &Setup,
+    apply_id: &str,
+    approval_id: &str,
+    content_hash: &str,
+    applied_at: &str,
+) {
+    sqlx::query(
+        "INSERT INTO strategy_applies \
+         (apply_id, strategy_id, approval_id, content_hash, applied_at, applied_by, \
+          supersedes_apply_id) \
+         VALUES (?, ?, ?, ?, ?, 'non_core_writer', NULL)",
+    )
+    .bind(apply_id)
+    .bind(STRATEGY)
+    .bind(approval_id)
+    .bind(content_hash)
+    .bind(applied_at)
+    .execute(setup.core.pool())
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn two_successorless_rows_resolve_to_the_same_row_on_every_read() {
+    let setup = setup().await;
+    let (approval_id, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
+    let (_, next_hash, _) = seed_approval(&setup, STRATEGY, 2).await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+    insert_successorless_row(
+        &setup,
+        "apl_dup_older",
+        &approval_id,
+        &hash,
+        "2026-01-01T00:00:00+00:00",
+    )
+    .await;
+    insert_successorless_row(
+        &setup,
+        "apl_dup_newer",
+        &approval_id,
+        &hash,
+        "2026-01-02T00:00:00+00:00",
+    )
+    .await;
+
+    // Read 1, the status route the Canvas and the intake share.
+    let status = setup
+        .core
+        .strategy_applied(&setup.principal, STRATEGY)
+        .await
+        .unwrap();
+    let winner = status
+        .current_apply
+        .expect("a successor-less row is the current apply")
+        .apply_id;
+    assert_eq!(
+        winner, "apl_dup_newer",
+        "`applied_at DESC, apply_id DESC` names the winner"
+    );
+
+    // Read 2, `refuse_apply`'s probe, reached through a repeat apply of the current approval.
+    let repeat = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap_err();
+    assert_eq!(reason(&repeat), "already_applied");
+    assert_eq!(
+        refusal(&repeat)["apply_id"],
+        winner.as_str(),
+        "the conflict names the row the status read reports"
+    );
+
+    // Read 3, the insert's own supersede-link pick.
+    let moved = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &next_hash)
+        .await
+        .unwrap();
+    assert_eq!(
+        moved.supersedes_apply_id.as_deref(),
+        Some(winner.as_str()),
+        "a new apply supersedes the row the status read reports"
+    );
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_repeat_apply_names_its_own_row_and_never_becomes_an_internal_fault() {
+    let setup = setup().await;
+    let (approval_id, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
+    let (other_approval, other_hash, _) = seed_approval(&setup, STRATEGY, 2).await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+    // Two current applies carrying DIFFERENT approvals: the newer one wins every "current apply"
+    // read, while the guard refuses on the older one because it is still successor-less.
+    insert_successorless_row(
+        &setup,
+        "apl_older_approval",
+        &approval_id,
+        &hash,
+        "2026-01-01T00:00:00+00:00",
+    )
+    .await;
+    insert_successorless_row(
+        &setup,
+        "apl_newer_approval",
+        &other_approval,
+        &other_hash,
+        "2026-01-02T00:00:00+00:00",
+    )
+    .await;
+
+    let repeat = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        reason(&repeat),
+        "already_applied",
+        "the refusal stays typed, never an internal fault"
+    );
+    assert_eq!(refusal(&repeat)["apply_id"], "apl_older_approval");
+    assert_eq!(refusal(&repeat)["approval_id"], approval_id.as_str());
+    assert_ne!(approval_id, other_approval);
     setup.core.close().await.unwrap();
 }

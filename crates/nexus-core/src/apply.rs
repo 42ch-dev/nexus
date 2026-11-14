@@ -5,9 +5,11 @@
 //! Apply is the only place an approval becomes the running identity, so each refusal here is a
 //! safety property and every one of them happens before a row exists: the requested content hash
 //! must name an approval of this strategy, the approval's frozen `document_json` must still hash
-//! to the `content_hash` the approval recorded, the strategy must resolve to a user bundle (the
-//! only source the intake ever reads an apply from), the strategy must own a schedule (nothing
-//! would run otherwise), and the approval must not already be the current apply.
+//! to the `content_hash` the approval recorded, the document must build into an outer graph (the
+//! same predicate the schedule intake uses, so an unbuildable identity is refused here instead of
+//! at its first run), the strategy must resolve to a user bundle (the only source the intake ever
+//! reads an apply from), the strategy must own a schedule (nothing would run otherwise), and the
+//! approval must not already be the current apply.
 //!
 //! `strategy_applies` is append-only and carries no current pointer: the current apply of a
 //! strategy is the row with no successor, and a superseded approval is a legal rollback (a new
@@ -28,6 +30,7 @@
 //! the other side: the intake consults [`current_apply`] for a user bundle only, so apply refuses
 //! any other source rather than record a row nothing reads.
 
+use nexus_orchestration::preset_runtime::{validate_ir_buildability, IrTemplateSource};
 use nexus_workflow_ir::{content_hash, WorkflowDocument};
 use serde_json::Value;
 
@@ -80,6 +83,12 @@ pub enum ApplyRefusal {
         /// The approval that is already current.
         approval_id: String,
     },
+    /// The approval's document cannot become an outer graph, so applying it would install an
+    /// identity the schedule intake refuses to build: the run would fail at its first build.
+    DocumentUnbuildable {
+        /// The builder's own refusal, verbatim: `IrOuterGraphError::to_string()`.
+        builder_reason: String,
+    },
 }
 
 impl ApplyRefusal {
@@ -93,6 +102,7 @@ impl ApplyRefusal {
             Self::StrategyNotUserPreset { .. } => "strategy_not_user_preset",
             Self::StrategyHasNoSchedule { .. } => "strategy_has_no_schedule",
             Self::AlreadyApplied { .. } => "already_applied",
+            Self::DocumentUnbuildable { .. } => "document_unbuildable",
         }
     }
 
@@ -144,6 +154,9 @@ impl ApplyRefusal {
             } => {
                 details.insert("apply_id".into(), Value::from(apply_id.clone()));
                 details.insert("approval_id".into(), Value::from(approval_id.clone()));
+            }
+            Self::DocumentUnbuildable { builder_reason } => {
+                details.insert("builder_reason".into(), Value::from(builder_reason.clone()));
             }
         }
         Value::Object(details)
@@ -201,6 +214,11 @@ impl std::fmt::Display for ApplyRefusal {
             } => write!(
                 f,
                 "approval `{approval_id}` is already the current apply (`{apply_id}`)"
+            ),
+            Self::DocumentUnbuildable { builder_reason } => write!(
+                f,
+                "the approved document cannot be built into a run, so this apply would install \
+                 an identity the schedule intake refuses: {builder_reason}"
             ),
         }
     }
@@ -345,9 +363,9 @@ impl CoreService {
     ///
     /// Returns [`CoreError::InputValidation`] carrying an [`ApplyRefusal::details`] envelope for
     /// a strategy that does not resolve to a user bundle, an unknown content hash, another
-    /// strategy's approval, an approval whose document no longer hashes to its identity, a
-    /// strategy with no schedule, or an approval that is already current; the principal and
-    /// store errors otherwise. A refusal writes nothing.
+    /// strategy's approval, an approval whose document no longer hashes to its identity, an
+    /// approved document the builder refuses, a strategy with no schedule, or an approval that is
+    /// already current; the principal and store errors otherwise. A refusal writes nothing.
     pub async fn apply_strategy(
         &self,
         principal: &Principal,
@@ -375,14 +393,92 @@ impl CoreService {
             .into_error());
         }
 
+        let (approval_id, stored_hash) = self
+            .verified_approval_identity(strategy_id, approval_content_hash)
+            .await?;
+
+        let apply_id = format!("apl_{}", uuid::Uuid::new_v4());
+        let applied_at = chrono::Utc::now().to_rfc3339();
+
+        // One statement owns every guard that depends on the apply table: the supersede link is
+        // the current row as this statement sees it, the already-current refusal is the absence of
+        // any successor-less row naming this approval, and the schedule precondition rides in the
+        // same statement so an apply cannot land for a strategy that lost its schedule. A
+        // superseded approval passes the guard, which is what makes rollback a normal apply.
+        //
+        // Both current-row picks order by `applied_at DESC, apply_id DESC` — the same total order
+        // [`current_apply`] reports — so a strategy holding two successor-less rows (only an
+        // admitted non-core writer can create that) still names one defined row everywhere.
+        let written = sqlx::query_as::<_, (String, Option<String>)>(
+            "INSERT INTO strategy_applies \
+               (apply_id, strategy_id, approval_id, content_hash, applied_at, applied_by, \
+                supersedes_apply_id) \
+             SELECT ?, ?, ?, ?, ?, ?, \
+                    (SELECT cur.apply_id FROM strategy_applies cur \
+                      WHERE cur.strategy_id = ? \
+                        AND NOT EXISTS (SELECT 1 FROM strategy_applies later \
+                                         WHERE later.supersedes_apply_id = cur.apply_id) \
+                      ORDER BY cur.applied_at DESC, cur.apply_id DESC \
+                      LIMIT 1) \
+             WHERE NOT EXISTS (SELECT 1 FROM strategy_applies cur \
+                                WHERE cur.strategy_id = ? \
+                                  AND cur.approval_id = ? \
+                                  AND NOT EXISTS (SELECT 1 FROM strategy_applies later \
+                                                   WHERE later.supersedes_apply_id = cur.apply_id)) \
+               AND EXISTS (SELECT 1 FROM creator_schedules WHERE preset_id = ?) \
+             RETURNING apply_id, supersedes_apply_id",
+        )
+        .bind(&apply_id)
+        .bind(strategy_id)
+        .bind(&approval_id)
+        .bind(&stored_hash)
+        .bind(&applied_at)
+        .bind(principal.creator_id())
+        .bind(strategy_id)
+        .bind(strategy_id)
+        .bind(&approval_id)
+        .bind(strategy_id)
+        .fetch_optional(&self.inner.pool)
+        .await
+        .map_err(|error| crate::error::local_db_err(error.into()))?;
+
+        let Some((apply_id, supersedes_apply_id)) = written else {
+            return Err(self.refuse_apply(strategy_id, &approval_id).await);
+        };
+
+        Ok(AppliedStrategy {
+            apply_id,
+            approval_id,
+            content_hash: stored_hash,
+            applied_at,
+            supersedes_apply_id,
+        })
+    }
+
+    /// Resolve the approval `approval_content_hash` names for `strategy_id` and prove the identity
+    /// it promises, returning the approval id and the hash the apply row records.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::InputValidation`] carrying an [`ApplyRefusal::details`] envelope for an
+    /// unknown content hash, another strategy's approval, an approval whose document no longer
+    /// hashes to its identity, or an approved document the builder refuses; the store errors
+    /// otherwise.
+    async fn verified_approval_identity(
+        &self,
+        strategy_id: &str,
+        approval_content_hash: &str,
+    ) -> CoreResult<(String, String)> {
         // The approval lookup prefers this strategy's own row: two strategies approving the same
-        // content is legal, and the request names the strategy it applies to.
+        // content is legal, and the request names the strategy it applies to. `approval_id`
+        // breaks the tie so a hash only foreign strategies carry names the same strategy on every
+        // read: `UNIQUE (strategy_id, content_hash)` already rules out a tie inside one strategy.
         let Some((approval_id, approval_strategy_id, stored_hash, document_json)) =
             sqlx::query_as::<_, (String, String, String, String)>(
                 "SELECT approval_id, strategy_id, content_hash, document_json \
                  FROM strategy_approvals \
                  WHERE content_hash = ? \
-                 ORDER BY (strategy_id = ?) DESC",
+                 ORDER BY (strategy_id = ?) DESC, approval_id DESC",
             )
             .bind(approval_content_hash)
             .bind(strategy_id)
@@ -422,62 +518,27 @@ impl CoreService {
             .into_error());
         }
 
-        let apply_id = format!("apl_{}", uuid::Uuid::new_v4());
-        let applied_at = chrono::Utc::now().to_rfc3339();
+        // The applied identity must be one the intake can build. The schedule intake builds this
+        // same document with `IrTemplateSource::OwnSource`, so a document the builder refuses
+        // would apply, report itself applied, and then fail at its first build (I-000448). Same
+        // predicate, same reason, before the row exists.
+        if let Err(reason) = validate_ir_buildability(&document, IrTemplateSource::OwnSource) {
+            return Err(ApplyRefusal::DocumentUnbuildable {
+                builder_reason: reason.to_string(),
+            }
+            .into_error());
+        }
 
-        // One statement owns every guard that depends on the apply table: the supersede link is
-        // the current row as this statement sees it, the already-current refusal is the absence of
-        // any successor-less row naming this approval, and the schedule precondition rides in the
-        // same statement so an apply cannot land for a strategy that lost its schedule. A
-        // superseded approval passes the guard, which is what makes rollback a normal apply.
-        let written = sqlx::query_as::<_, (String, Option<String>)>(
-            "INSERT INTO strategy_applies \
-               (apply_id, strategy_id, approval_id, content_hash, applied_at, applied_by, \
-                supersedes_apply_id) \
-             SELECT ?, ?, ?, ?, ?, ?, \
-                    (SELECT cur.apply_id FROM strategy_applies cur \
-                      WHERE cur.strategy_id = ? \
-                        AND NOT EXISTS (SELECT 1 FROM strategy_applies later \
-                                         WHERE later.supersedes_apply_id = cur.apply_id) \
-                      LIMIT 1) \
-             WHERE NOT EXISTS (SELECT 1 FROM strategy_applies cur \
-                                WHERE cur.strategy_id = ? \
-                                  AND cur.approval_id = ? \
-                                  AND NOT EXISTS (SELECT 1 FROM strategy_applies later \
-                                                   WHERE later.supersedes_apply_id = cur.apply_id)) \
-               AND EXISTS (SELECT 1 FROM creator_schedules WHERE preset_id = ?) \
-             RETURNING apply_id, supersedes_apply_id",
-        )
-        .bind(&apply_id)
-        .bind(strategy_id)
-        .bind(&approval_id)
-        .bind(&stored_hash)
-        .bind(&applied_at)
-        .bind(principal.creator_id())
-        .bind(strategy_id)
-        .bind(strategy_id)
-        .bind(&approval_id)
-        .bind(strategy_id)
-        .fetch_optional(&self.inner.pool)
-        .await
-        .map_err(|error| crate::error::local_db_err(error.into()))?;
-
-        let Some((apply_id, supersedes_apply_id)) = written else {
-            return Err(self.refuse_apply(strategy_id, &approval_id).await);
-        };
-
-        Ok(AppliedStrategy {
-            apply_id,
-            approval_id,
-            content_hash: stored_hash,
-            applied_at,
-            supersedes_apply_id,
-        })
+        Ok((approval_id, stored_hash))
     }
 
     /// Name why the apply statement wrote no row. The schedule is checked first because it is the
     /// only precondition that lives outside the apply table; with it in place the sole remaining
-    /// predicate is the already-current guard, so a missing row means this approval is current.
+    /// predicate is the already-current guard, so this probe repeats that guard's own condition —
+    /// a successor-less row of this strategy naming this approval, in the same total order
+    /// [`current_apply`] uses. A probe that asked only for "the current row" would name a different
+    /// apply whenever a non-core writer left two successor-less rows, turning the typed conflict
+    /// into an internal fault.
     async fn refuse_apply(&self, strategy_id: &str, approval_id: &str) -> CoreError {
         let scheduled: i64 = match sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM creator_schedules WHERE preset_id = ?)",
@@ -497,29 +558,33 @@ impl CoreService {
             }
             .into_error();
         }
-        let current: Option<(String, String)> = match sqlx::query_as(
-            "SELECT cur.apply_id, cur.approval_id FROM strategy_applies cur \
+        let current: Option<String> = match sqlx::query_scalar(
+            "SELECT cur.apply_id FROM strategy_applies cur \
               WHERE cur.strategy_id = ? \
+                AND cur.approval_id = ? \
                 AND NOT EXISTS (SELECT 1 FROM strategy_applies later \
-                                 WHERE later.supersedes_apply_id = cur.apply_id)",
+                                 WHERE later.supersedes_apply_id = cur.apply_id) \
+              ORDER BY cur.applied_at DESC, cur.apply_id DESC \
+              LIMIT 1",
         )
         .bind(strategy_id)
+        .bind(approval_id)
         .fetch_optional(&self.inner.pool)
         .await
         {
             Ok(current) => current,
             Err(error) => return apply_internal(format!("current apply probe: {error}")),
         };
-        match current {
-            Some((apply_id, current_approval_id)) if current_approval_id == approval_id => {
+        current.map_or_else(
+            || apply_internal("the apply insert wrote no row and no refusal explains it"),
+            |apply_id| {
                 ApplyRefusal::AlreadyApplied {
                     apply_id,
                     approval_id: approval_id.to_owned(),
                 }
                 .into_error()
-            }
-            _ => apply_internal("the apply insert wrote no row and no refusal explains it"),
-        }
+            },
+        )
     }
 }
 

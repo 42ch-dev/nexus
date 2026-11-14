@@ -151,6 +151,7 @@ fn run_descriptor(preset_id: &str) -> Vec<u8> {
         agent_bindings: HashMap::new(),
         parent_session_id: None,
         graph_name: None,
+        applied: None,
     })
     .expect("serialize descriptor")
 }

@@ -39,6 +39,7 @@
 //! duplicate `start_execution` refuses or returns the same established owner
 //! and never builds a second engine.
 
+pub mod applied_documents;
 pub mod authority;
 pub mod bounds;
 // Capability dispatch, compute and the protocol-neutral peer registry
