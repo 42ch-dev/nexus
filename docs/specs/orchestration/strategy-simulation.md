@@ -19,14 +19,17 @@ What a strategy simulation reports, what it refuses to claim, and where the disc
 
 `simulation_level` is an open string. `reachability` is the only level produced today:
 
-- `llm_judge` nodes follow their single declared `default` edge and are listed in `stubbed_judges`.
-  A judge with zero, several, or a dangling default edge is a deterministic error, never a successful
-  trajectory.
+- A node whose `exit_when` is `llm_judge` follows its single declared `default` edge and is listed in
+  `stubbed_judges`. The walk counts only `default` edges whose target is a declared node, and that
+  count must be exactly one: zero or more than one is a deterministic error, never a successful
+  trajectory. An extra `default` edge to an undeclared node is discarded by the walk rather than
+  refused, so it fails the count only when it is the sole such edge.
 - No provider is called. A trajectory carries no cost, no latency and no output.
 - Waits are derived from the visited set: a visited `manual_wait` node, or a visited state whose
   `exit_when` is `manual`, yields `reason: manual` with the node id. **A wait is reported when its
-  node is visited, and the walk visits only a judge's single `default` edge**, so a wait reachable
-  only through a judge's go or no-go branch is never predicted — an under-report in the judge case,
+  node is visited, and the walk leaves such a node only along its single `default` edge**, so a wait
+  reachable only through the other branches of an `llm_judge` node is never predicted — an
+  under-report in that case,
   by construction, not an omission to fix. Within the visited set the list over-reports instead: a
   wait the run would never reach is still named.
 - A document-global signal is not bounded by the walk at all: `signals[].action: pause` yields a
