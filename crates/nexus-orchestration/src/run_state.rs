@@ -43,6 +43,25 @@ pub struct RunDescriptorV1 {
     pub parent_session_id: Option<SessionId>,
     /// Named inner graph this run executes (child runs).
     pub graph_name: Option<String>,
+    /// Applied identity the run was admitted under, `None` for a
+    /// descriptor-path run (`.mstar/plans/p4a-applied-identity.md` Task 4).
+    ///
+    /// Frozen here for the same reason `preset_version`/`source` are: recovery
+    /// resolves the strategy's **current** apply, so without this a re-apply
+    /// between admission and a restart would rebuild the run from a document
+    /// it never ran (I-000464). Skipped when absent so a no-apply descriptor
+    /// serializes byte for byte as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied: Option<AppliedRunIdentity>,
+}
+
+/// The applied identity a run was admitted under (P4 Task 4).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AppliedRunIdentity {
+    /// The `strategy_applies.apply_id` that was current at admission.
+    pub apply_id: String,
+    /// The `content_hash` that apply pinned.
+    pub content_hash: String,
 }
 
 /// Role → provider binding (A1).

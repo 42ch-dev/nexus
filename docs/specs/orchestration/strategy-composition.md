@@ -138,6 +138,12 @@ Recovery re-enters through the same route instead of a second reader (`AppliedDo
 `is_user_preset` → `current_apply` → `verified_apply_document`), and a strategy with no apply recovers its
 descriptor graph exactly as before.
 
+Recovery compares that resolution with the run's own record **before** it builds: the run descriptor freezes
+the `apply_id` and `content_hash` admitted with the run, and a restart refuses
+(`reconstruction_unavailable`, non-replayable) when the strategy's current apply is any other row — whether a
+re-apply superseded it or it was rolled back. A run admitted with no apply records no identity, so its
+descriptor serializes byte for byte as before and recovery resolves it the way it always has.
+
 Both sides re-run the same recomputation before building: an apply whose `document_json` no longer hashes
 to its recorded `content_hash` is `applied_document_changed`, and one that cannot be read is
 `applied_document_unverifiable`. Bytes edited after apply are therefore a typed refusal, not a reinterpreted

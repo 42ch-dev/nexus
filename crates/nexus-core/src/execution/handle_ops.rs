@@ -1559,6 +1559,9 @@ impl ExecutionHandle {
             agent_bindings,
             parent_session_id: None,
             graph_name: None,
+            // Insertion never resolves an apply; admission freezes the apply it
+            // admits under on the run's own descriptor.
+            applied: None,
         };
         serde_json::to_vec(&descriptor)
             .map(Some)

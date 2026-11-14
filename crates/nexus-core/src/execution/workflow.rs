@@ -2575,6 +2575,9 @@ impl WorkflowRunCoordinator {
             agent_bindings,
             parent_session_id: None,
             graph_name: None,
+            // Admission resolves the apply it admits under and freezes it on the
+            // RUN descriptor; this insertion-time row resolves none.
+            applied: None,
         };
         let descriptor_bytes = serde_json::to_vec(&descriptor).map_err(|e| {
             RunControlError::Admission(format!("descriptor serialization failed: {e}"))
@@ -2936,7 +2939,9 @@ impl WorkflowRunCoordinator {
         // sides cannot disagree about which schedules have an applied identity.
         //
         // Resolved BEFORE the binding gate so the roles validated are the roles the run will
-        // execute, not the descriptor's.
+        // execute, not the descriptor's. The resolved identity is also carried into the run's
+        // frozen descriptor (P4 Task 4), so a restart can tell whether the strategy's current
+        // apply is still the one this run was admitted under.
         let applied = if crate::apply::is_user_preset(&row.preset_id, &loaded) {
             let current = crate::apply::current_apply(pool, &row.preset_id)
                 .await
@@ -2955,7 +2960,13 @@ impl WorkflowRunCoordinator {
                                 ));
                             }
                         };
-                    Some(document)
+                    Some(nexus_orchestration::capability::AppliedDocument {
+                        identity: nexus_orchestration::run_state::AppliedRunIdentity {
+                            apply_id: apply.apply_id,
+                            content_hash: apply.content_hash,
+                        },
+                        document,
+                    })
                 }
                 None => None,
             }
@@ -2971,7 +2982,7 @@ impl WorkflowRunCoordinator {
         // uses.
         let applied_manifest = applied
             .as_ref()
-            .map(nexus_preset::export_preset)
+            .map(|applied| nexus_preset::export_preset(&applied.document))
             .transpose()
             .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
         validate_agent_bindings(
@@ -2988,9 +2999,9 @@ impl WorkflowRunCoordinator {
         // dispatch + cancellation tokens) — mirrors boot.rs.
         let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
         let wired = match &applied {
-            Some(document) => {
+            Some(applied) => {
                 nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
-                    document,
+                    &applied.document,
                     // An applied user document's id is not a bundle id: reading
                     // the embedded bundle could serve a colliding preset's bytes.
                     nexus_orchestration::preset_runtime::IrTemplateSource::OwnSource,
@@ -3031,6 +3042,7 @@ impl WorkflowRunCoordinator {
                 core_context_version,
                 agent_bindings,
                 frozen_source,
+                applied.as_ref().map(|applied| applied.identity.clone()),
                 Some(admission_gate),
                 Arc::new(wired),
             )

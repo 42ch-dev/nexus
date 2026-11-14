@@ -2165,6 +2165,7 @@ async fn seed_prompt_run(
         agent_bindings: bindings,
         parent_session_id: None,
         graph_name: None,
+        applied: None,
     };
     let root = graph_flow::Session::new_from_task(session_id.to_string(), "recall");
     root.context

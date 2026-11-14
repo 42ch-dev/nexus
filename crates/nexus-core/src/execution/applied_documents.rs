@@ -16,8 +16,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument;
-use nexus_orchestration::capability::AppliedDocumentSource;
+use nexus_orchestration::capability::{AppliedDocument, AppliedDocumentSource};
 use nexus_preset::LoadedPreset;
 
 /// Reads the current apply of a strategy out of the Creator DB.
@@ -39,7 +38,7 @@ impl AppliedDocumentSource for CreatorAppliedDocuments {
         &self,
         preset_id: &str,
         loaded: &LoadedPreset,
-    ) -> Result<Option<WorkflowDocument>, String> {
+    ) -> Result<Option<AppliedDocument>, String> {
         // The loader's own classification, exactly as admission reads it: only
         // a user bundle with a current apply has an applied identity.
         if !crate::apply::is_user_preset(preset_id, loaded) {
@@ -55,7 +54,13 @@ impl AppliedDocumentSource for CreatorAppliedDocuments {
             .await
             .map_err(|error| error.to_string())?
         {
-            Ok(document) => Ok(Some(document)),
+            Ok(document) => Ok(Some(AppliedDocument {
+                identity: nexus_orchestration::run_state::AppliedRunIdentity {
+                    apply_id: apply.apply_id,
+                    content_hash: apply.content_hash,
+                },
+                document,
+            })),
             Err(refusal) => Err(refusal.to_string()),
         }
     }

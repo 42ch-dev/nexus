@@ -3390,6 +3390,7 @@ mod tests_t9 {
             agent_bindings: std::collections::HashMap::new(),
             parent_session_id: None,
             graph_name: None,
+            applied: None,
         })
         .expect("descriptor json");
         sqlx::query(

@@ -322,8 +322,13 @@ pub trait WorkspaceStateProvider: Send + Sync {
 /// current apply", the common case.
 #[async_trait]
 pub trait AppliedDocumentSource: Send + Sync {
-    /// The verified applied document for `preset_id`, or `None` when the
-    /// strategy has no current apply.
+    /// The current apply of `preset_id` — its frozen identity plus the verified
+    /// document that identity pins — or `None` when the strategy has no current
+    /// apply.
+    ///
+    /// The identity travels with the document because recovery must compare it
+    /// against the identity frozen on the run's descriptor before building: the
+    /// current apply may have moved past the one the run was admitted under.
     ///
     /// # Errors
     /// The refusal or store failure that makes the applied identity
@@ -332,10 +337,20 @@ pub trait AppliedDocumentSource: Send + Sync {
         &self,
         preset_id: &str,
         loaded: &nexus_preset::LoadedPreset,
-    ) -> Result<
-        Option<nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument>,
-        String,
-    >;
+    ) -> Result<Option<AppliedDocument>, String>;
+}
+
+/// A strategy's current apply: the identity it installed and the document it pinned.
+///
+/// Built only after the document's frozen bytes re-verified against
+/// `identity.content_hash`, so holding one means the pair is consistent.
+#[derive(Debug, Clone)]
+pub struct AppliedDocument {
+    /// The apply row that is current for the strategy.
+    pub identity: crate::run_state::AppliedRunIdentity,
+    /// The verified document those bytes decode to.
+    pub document:
+        nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument,
 }
 
 /// Runtime dependencies injected through `CapabilityRegistry::with_runtime_deps`.
