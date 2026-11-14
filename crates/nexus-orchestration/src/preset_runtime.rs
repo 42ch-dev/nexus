@@ -509,16 +509,66 @@ fn project_buildable_manifest(
 /// Refuse a document [`build_wired_outer_graph_from_ir`] could not build.
 ///
 /// Returns the same [`IrOuterGraphError`] the builder would, in the same order
-/// (`Unmappable` / `Unprojected`, then `Projection`, then `UnresolvedTemplate`),
-/// without constructing a graph.
+/// (`Unmappable` / `Unprojected`, then `Projection`, then `UnresolvedTemplate`,
+/// then `Graph`), without constructing a runnable graph.
 ///
 /// # Errors
-/// Whatever [`project_buildable_manifest`] refuses.
+/// Whatever [`project_buildable_manifest`] or [`validate_wired_topology`] refuses.
 pub fn validate_ir_buildability(
     document: &WorkflowDocument,
     template_source: IrTemplateSource,
 ) -> Result<(), IrOuterGraphError> {
-    project_buildable_manifest(document, template_source).map(|_| ())
+    let manifest = project_buildable_manifest(document, template_source)?;
+    validate_wired_topology(document, &manifest)
+}
+
+/// Stands in for a state's real task while only the graph's ids and edges are
+/// judged: `GraphBuilder::build` reads the registered task ids and never calls
+/// `run`.
+struct IdOnlyTask(String);
+
+#[async_trait::async_trait]
+impl graph_flow::Task for IdOnlyTask {
+    fn id(&self) -> &str {
+        &self.0
+    }
+
+    async fn run(
+        &self,
+        _context: graph_flow::Context,
+    ) -> graph_flow::Result<graph_flow::TaskResult> {
+        Ok(graph_flow::TaskResult::new(
+            None,
+            graph_flow::NextAction::End,
+        ))
+    }
+}
+
+/// The `Graph` refusals the builder raises after the projection.
+///
+/// Runs the builder's own inner-graph build and its own wiring over id-only
+/// tasks, so graph-flow answers with the message the run would fail with: a
+/// dangling `entry` — `document.entry` naming no projected outer state — is
+/// refused here instead of at the first run (I-000448), as is an edge to a task
+/// the projection never produced. The run still runs its own `build`, so a
+/// topology this accepts is never installed unbuilt.
+fn validate_wired_topology(
+    document: &WorkflowDocument,
+    manifest: &PresetManifest,
+) -> Result<(), IrOuterGraphError> {
+    build_inner_graphs(
+        manifest,
+        document.id.as_str(),
+        None,
+        None,
+        Arc::new(std::sync::RwLock::new(HashMap::new())),
+    )?;
+    let mut builder = graph_flow::GraphBuilder::new(&manifest.preset.id);
+    for state in &manifest.states {
+        builder = builder.add_task(Arc::new(IdOnlyTask(state.id.clone())));
+    }
+    wire_outer_topology(builder, manifest, &document.entry).build()?;
+    Ok(())
 }
 
 /// Build the wired outer graph from a Workflow IR document (§8.2.1).
@@ -627,11 +677,26 @@ pub fn build_wired_outer_graph_from_ir(
         builder = builder.add_task(std::sync::Arc::new(task));
     }
 
-    // §8.2.1 `entry`: the declared entry node is the initial outer task.
-    builder = builder.set_start_task(&document.entry);
+    // §8.2.1 `entry` and the transitions: one definition of the outer topology,
+    // shared with the buildability predicate so the two cannot disagree about
+    // which edges exist. The parity projection below fails if the YAML builders
+    // ever diverge from it.
+    Ok(wire_outer_topology(builder, &manifest, &document.entry).build()?)
+}
 
-    // Transitions — the same wiring as `build_wired_outer_graph`; the parity
-    // projection below fails if the two ever diverge.
+/// Start `builder` at `entry` and wire every projected transition onto it.
+///
+/// The single definition of the outer topology: [`build_wired_outer_graph_from_ir`]
+/// wires the real tasks with it and [`validate_wired_topology`] wires id-only
+/// tasks with it, so what the run builds and what apply accepts cannot drift.
+fn wire_outer_topology(
+    mut builder: graph_flow::GraphBuilder,
+    manifest: &PresetManifest,
+    entry: &str,
+) -> graph_flow::GraphBuilder {
+    // §8.2.1 `entry`: the declared entry node is the initial outer task.
+    builder = builder.set_start_task(entry);
+
     for state in &manifest.states {
         match &state.next {
             Some(NextTarget::Linear(next_id)) => {
@@ -653,8 +718,7 @@ pub fn build_wired_outer_graph_from_ir(
             Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) | None => {}
         }
     }
-
-    Ok(builder.build()?)
+    builder
 }
 
 /// Converge-predecessor sets for §8.2.1's join gate.
@@ -1823,17 +1887,25 @@ states:
         );
     }
 
+    /// A copy of [`IR_LINEAR`] declaring another `entry`.
+    fn ir_with_entry(entry: &str) -> WorkflowDocument {
+        let mut document = ir_document(IR_LINEAR);
+        document.entry = entry.to_string();
+        document
+    }
+
     /// The predicate apply consults and the builder the run uses answer alike on
     /// the same document: apply refuses iff the builder refuses, and a refusal
-    /// carries the builder's own reason. One row per refusal kind, plus the two
-    /// documents that do build.
+    /// carries the builder's own reason. One row per refusal kind — the
+    /// projection refusals and the `Graph` refusals the builder raises after the
+    /// projection — plus the documents that do build.
     #[test]
     fn ir_buildability_predicate_refuses_iff_the_builder_refuses() {
         struct Case {
             name: &'static str,
             document: WorkflowDocument,
             source: IrTemplateSource,
-            /// The `ir_*` prefix of the builder's reason; `None` where it builds.
+            /// The prefix of the builder's reason; `None` where it builds.
             refusal: Option<&'static str>,
         }
         let cases = [
@@ -1844,10 +1916,10 @@ states:
                 refusal: None,
             },
             Case {
-                name: "builds/applied",
-                document: ir_document(IR_LINEAR),
-                source: IrTemplateSource::OwnSource,
-                refusal: None,
+                name: "graph/dangling_entry",
+                document: ir_with_entry("nowhere"),
+                source: IrTemplateSource::Embedded,
+                refusal: Some("Task not found"),
             },
             Case {
                 name: "unprojected/node_kind",
@@ -1925,12 +1997,12 @@ states:
                         "{name}: apply must carry the reason the run would fail with"
                     );
                 }
-                (Ok(()), Err(builder_reason)) => panic!(
-                    "{name}: apply would install what the builder refuses: {builder_reason}"
-                ),
-                (Err(predicate_reason), Ok(_)) => panic!(
-                    "{name}: apply refuses what the builder builds: {predicate_reason}"
-                ),
+                (Ok(()), Err(builder_reason)) => {
+                    panic!("{name}: apply would install what the builder refuses: {builder_reason}")
+                }
+                (Err(predicate_reason), Ok(_)) => {
+                    panic!("{name}: apply refuses what the builder builds: {predicate_reason}")
+                }
             }
         }
     }

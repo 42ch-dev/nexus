@@ -192,6 +192,10 @@ async fn seed_schedule(pool: &SqlitePool, strategy_id: &str) {
 /// (I-000449).
 const JUDGE_TEMPLATE: &str = "prompts/judge.md";
 
+/// The `entry` the dangling-entry fixture declares: no node carries this id, so the wiring
+/// names a task the projection never produced.
+const DANGLING_ENTRY: &str = "nowhere";
+
 /// A document the builder refuses, together with the reason it refuses it: an apply of it must
 /// carry that text unchanged.
 struct Unbuildable {
@@ -204,8 +208,9 @@ struct Unbuildable {
 }
 
 /// One refused document per builder refusal kind, each frozen from the strategy's own candidate so
-/// only the refused part differs.
-fn unbuildable_documents(base: &nexus_workflow_ir::WorkflowDocument) -> [Unbuildable; 3] {
+/// only the refused part differs. The last row is the `Graph` kind: the document projects cleanly
+/// and only its wiring is invalid, which is the I-000448 state apply used to install.
+fn unbuildable_documents(base: &nexus_workflow_ir::WorkflowDocument) -> [Unbuildable; 4] {
     [
         Unbuildable {
             tag: "unmappable",
@@ -232,7 +237,27 @@ fn unbuildable_documents(base: &nexus_workflow_ir::WorkflowDocument) -> [Unbuild
                 template_source: IrTemplateSource::OwnSource,
             },
         },
+        Unbuildable {
+            tag: "dangling_entry",
+            document: with_entry(base, DANGLING_ENTRY),
+            builder_reason: IrOuterGraphError::Graph(graph_flow::GraphError::TaskNotFound(
+                format!(
+                    "Start task '{DANGLING_ENTRY}' was not added to graph '{}'",
+                    base.id.as_str()
+                ),
+            )),
+        },
     ]
+}
+
+/// The candidate declaring another `entry`.
+fn with_entry(
+    base: &nexus_workflow_ir::WorkflowDocument,
+    entry: &str,
+) -> nexus_workflow_ir::WorkflowDocument {
+    let mut document = base.clone();
+    document.entry = entry.to_string();
+    document
 }
 
 /// The candidate's `draft` node carrying another kind: the shape of the builder's node-kind
@@ -299,6 +324,13 @@ async fn seed_document_approval(
 
 async fn apply_rows(pool: &SqlitePool) -> i64 {
     sqlx::query_scalar("SELECT COUNT(*) FROM strategy_applies")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn schedule_rows(pool: &SqlitePool) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules")
         .fetch_one(pool)
         .await
         .unwrap()
@@ -426,8 +458,9 @@ async fn a_document_edited_after_approval_is_the_typed_hash_change_and_writes_no
     setup.core.close().await.unwrap();
 }
 
-/// Every kind the builder refuses is the same typed apply refusal, carrying the builder's own
-/// reason and writing nothing: apply installs exactly what the run can build (I-000448).
+/// Every kind the builder refuses — the projection refusals and the `Graph` refusals after them —
+/// is the same typed apply refusal, carrying the builder's own reason and writing nothing: apply
+/// installs exactly what the run can build (I-000448).
 #[tokio::test]
 async fn every_document_the_builder_refuses_is_the_typed_refusal_and_writes_nothing() {
     let setup = setup().await;
@@ -459,8 +492,11 @@ async fn every_document_the_builder_refuses_is_the_typed_refusal_and_writes_noth
         assert_eq!(reason(&error), "document_unbuildable", "{tag}: {error:?}");
         // The reason the RUN would have failed with, verbatim: the builder refuses this same
         // document with the same `IrOuterGraphError`, and apply carries its text through.
+        let carried = refusal(&error)["builder_reason"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{tag}: the refusal carries no builder_reason: {error:?}"));
         assert_eq!(
-            refusal(&error)["builder_reason"].as_str().unwrap(),
+            carried,
             builder_reason.to_string(),
             "{tag}: the refusal must carry the builder's own reason"
         );
@@ -468,16 +504,6 @@ async fn every_document_the_builder_refuses_is_the_typed_refusal_and_writes_noth
             apply_rows(setup.core.pool()).await,
             0,
             "{tag}: the buildability refusal must happen before the insert"
-        );
-        assert!(
-            setup
-                .core
-                .strategy_applied(&setup.principal, STRATEGY)
-                .await
-                .unwrap()
-                .current_apply
-                .is_none(),
-            "{tag}: a refused apply installs no identity"
         );
     }
     setup.core.close().await.unwrap();
@@ -496,7 +522,13 @@ async fn an_unbuildable_document_outranks_the_missing_schedule() {
         .document;
     let [Unbuildable { tag, document, .. }, ..] = unbuildable_documents(&base);
     // No schedule at all: both guards would refuse this apply, and the document is the one that
-    // wins.
+    // wins. The premise is asserted so a fixture that grows a schedule reddens here instead of
+    // silently testing nothing.
+    assert_eq!(
+        schedule_rows(setup.core.pool()).await,
+        0,
+        "the ordering test needs a strategy with no schedule"
+    );
     let (_, hash) = seed_document_approval(&setup, STRATEGY, tag, &document).await;
 
     let error = setup

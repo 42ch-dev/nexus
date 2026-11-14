@@ -97,8 +97,12 @@ source records a row nothing reads), `document_unbuildable` (the approved docume
 graph, so applying it would install an identity intake refuses to build — the payload carries the builder's
 own reason), `strategy_has_no_schedule` (nothing would run) and `already_applied` (the named approval is
 already current). `already_applied` and `approval_hash_changed` return 409; the rest are refusals on the
-same envelope. Buildability is checked before the schedule guard, so a strategy that is both unscheduled and
-unbuildable reports `document_unbuildable`: the fix is a re-approval, not a schedule.
+same envelope. Buildability is checked before both the schedule guard and the already-current guard, so two
+orderings follow: a strategy that is both unscheduled and unbuildable reports `document_unbuildable` (the fix
+is a re-approval, not a schedule), and a repeat apply of an approval that is already current but whose
+document no longer builds reports `document_unbuildable` rather than 409 `already_applied` (the identity is
+not usable, so idempotent success would be a lie; this is the one status change a client treating 409 as
+success sees).
 
 **The table is append-only and carries no current pointer.** The current apply of a strategy is the row with
 no successor; a superseded approval is a legal rollback, expressed as a new apply naming it. There is no
