@@ -711,15 +711,17 @@ cp -R strategy-samples/react-trpg-turn my-strategy
 
 **One invariant:** the validator enforces that the bundle directory name
 equals `preset.id` in the manifest (`check_bundle_id_vs_directory`). Either
-keep the directory named `react-trpg-turn`, or edit `preset.id:
-my-strategy` (and the `description`) in `my-strategy/preset.yaml` after
-copying — validation fails otherwise.
+keep the directory named `react-trpg-turn`, or change `id` (and
+`meta.description`) in `my-strategy/workflow.json` and the `preset.id` /
+`description` it exports to in `my-strategy/preset.yaml` — validation fails
+otherwise.
 
-The bundle is the standard preset format (`preset.yaml` + `templates/`). Edit
-prompts, triggers, and cadence freely; keep the manifest schema shape intact
-so the validator stays green. The authoritative authoring reference — manifest
-format, trigger/scheduled lanes, prompt templates, validator semantics, fork
-flow — is [`docs/strategy-authoring.md`](../docs/strategy-authoring.md).
+The bundle is `workflow.json` (the source) plus `preset.yaml` (its export) and
+`templates/`. Edit `workflow.json` — prompts, triggers, cadence and structure —
+and keep the exported manifest in step so the validator stays green. The
+authoritative authoring reference — manifest format, trigger/scheduled lanes,
+prompt templates, validator semantics, fork flow — is
+[`docs/strategy-authoring.md`](../docs/strategy-authoring.md).
 
 ### Validate
 
@@ -770,6 +772,103 @@ ids, persists raw input + receipts + final output in its own turn ledger, and
 applies the world-aware CAS rules when committing. The sample README and
 templates document these obligations — YAML alone does not provide a global
 idempotency ledger.
+
+### Authoring source: `workflow.json`
+
+Both bundled samples are IR-primary: `workflow.json` holds a `WorkflowDocument`
+and is the hand-edited source, `preset.yaml` is its export. A sample author
+edits the JSON directly — Canvas is not required for repository sample
+authoring, and `preset.yaml` is not the file to edit.
+
+CI arbitrates the pair. `sample_self_check` loads each `workflow.json`, checks
+`assets[]` against the templates its carriers name, re-exports it, and fails at
+the divergent YAML path when the committed `preset.yaml` is not that export:
+
+```bash
+cargo test -p nexus-orchestration --test sample_self_check
+```
+
+There is no committed generator: nothing rewrites `preset.yaml` from the JSON
+(no `cargo` subcommand, no `nexus42` verb), so a change that projects into the
+manifest also lands in `preset.yaml` — the failing path names the member to
+update. The JSON stays the authority: write it first, then make the export
+match.
+
+`examples/first-workflow` and the embedded presets stay YAML-primary: their
+`preset.yaml` is the source, and they are the live evidence that a
+hand-authored YAML bundle still imports and exports. Do not convert them.
+
+### Refreshing `assets[].content_hash`
+
+`assets[]` is not projected by the export, so it is hand-maintained in
+`workflow.json`: one entry per template a carrier references, `id` and `path`
+both that template's bundle-relative path (the gate rejects an id that names a
+different file), each `content_hash` the BLAKE3 hex digest over that file's
+bytes. Nothing recomputes it — there is no committed generator and no `nexus42`
+leaf for it, and `sample_self_check` hashes the file on disk, so a stale digest
+fails CI. Recompute one entry from the repository root:
+
+```bash
+python3 -c 'import blake3,sys;print(blake3.blake3(open(sys.argv[1],"rb").read()).hexdigest())' \
+  strategy-samples/react-trpg-turn/templates/lane-route.md
+```
+
+Any BLAKE3 implementation prints the same digest (`b3sum <file>` when the
+`blake3` CLI is installed). Paste the value into that asset's `content_hash`.
+
+### Round-trip normalisations (`preset.yaml` ↔ `WorkflowDocument`)
+
+`preset.yaml` and a `WorkflowDocument` (the IR document a sample ships as
+`workflow.json`) are two spellings of one manifest; `import_preset_bundle` /
+`export_preset` in `nexus-preset` are the bridge. Three committed manifests are
+round-tripped by `crates/nexus-orchestration/tests/sample_self_check.rs`:
+
+- `strategy-samples/game-narrative/preset.yaml`
+- `strategy-samples/react-trpg-turn/preset.yaml`
+- `examples/first-workflow/preset.yaml`
+
+All three currently re-export with **no data difference at all**. The test
+applies no normalisation: it requires the committed YAML and the export to
+deserialise to the same `serde_yaml::Value`, and reports the first divergent
+YAML path when they do not. The two lists below are therefore split by what
+that comparison can see.
+
+#### Invisible to the comparison (bytes only)
+
+| Input shape | Output shape | Why it is not a difference |
+| --- | --- | --- |
+| `#` comment lines anywhere in the file | dropped | `serde_yaml` writes values, never comments |
+| `description: "text"` (double-quoted, or a block scalar) | `description: 'text'` | scalar style only, same string value |
+| flow style (`{kind: llm_judge}`), sequences indented under their key | block style, sequence dashes at the parent indent | emitter defaults |
+| `preset:` keys, `inner_graphs:` keys in author order | schema order for `preset:`, alphabetical for `inner_graphs:` | `PresetHeader` field order, `BTreeMap` |
+
+#### Value rewrites (the test reports these — use the canonical spelling)
+
+| Input shape | Output shape | Meaning |
+| --- | --- | --- |
+| an empty value written out: `run_intents: []`, `enter: []`, `terminal: false` | key omitted | same manifest; the field's `skip_serializing_if` drops it |
+| a defaulted field left out: `preset.requires_capabilities`, `cli_args[].required`, a `previous_preset` gate's `scope`, `context_update.op.body` | the default written out: `requires_capabilities: []`, `required: false`, `scope: work`, `body: ''` | same manifest; those fields carry `#[serde(default)]` and no `skip_serializing_if` |
+| legacy `next: {kind: conditional, rules: [...]}` | `next: {branches: [...], default: ...}` | same rules, current spelling (documented `shortcut:` in `workflow_ir.rs`) |
+| judged state (`exit_when: llm_judge`) with `next: {branches: [], default: B}` | `next: B` | same meaning — a zero-rule branch always falls through to `default` — but the bytes move (I-000476); the IR cannot tell a zero-rule branch from a bare `next` on a judged node |
+
+So a manifest that spells a row of the second table does not round-trip: write
+the canonical spelling instead. Neither bundled sample uses one, and
+`examples/first-workflow`'s `walked` state is not affected — a **non**-judged
+zero-rule branch keeps its `next: {branches: [], default: B}` shape untouched.
+
+Two facts are worth knowing when authoring either spelling:
+
+- A judged state's unconditional advance (`exit_when: llm_judge` + `next: B`)
+  becomes the node's **`default`** edge in the IR — the only edge a static walk
+  may follow out of a judged node — and re-exports as the same `next: B`. Both
+  bundled samples rely on this.
+- Only the judged zero-rule branch collapses; the non-judged one is preserved.
+
+A difference that is on neither list means the exporter is wrong for that
+manifest: report it instead of editing YAML to match. A difference that is
+**semantic** — two spellings that mean different manifests — is never a
+normalisation; it blocks authoring the sample from `workflow.json`, and neither
+this list nor the test may be taught to accept it.
 
 ---
 

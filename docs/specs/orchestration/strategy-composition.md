@@ -204,11 +204,28 @@ default off, an explicit selection wins. Flag-off renders exactly the pre-compos
 
 ### 7. Boundaries
 
-Compose, approve and apply ship. The dual-read loader, IR-primary authoring and retirement of the
+Compose, approve and apply ship. IR-primary authoring for the daemon surfaces and retirement of the
 hand-authored YAML path do not: intake still prefers the YAML loader for every strategy without a current
 apply, and YAML remains the authoring path. Who may write the pattern registry is not defined here: local
 presence is not a trust claim, and a publishing channel needs its own policy (I-000422). A followed symlink
 target and the member check/open window are the trust-boundary work that policy owns.
+
+#### 7.1 Repository samples
+
+Every bundle under `strategy-samples/` is IR-primary: `workflow.json` is a `WorkflowDocument` with
+`state: candidate` and is the hand-edited authoring source, and `preset.yaml` is that document's export,
+not a file an author edits. Authoring is direct JSON editing — no candidate row, compose op, approve or
+apply is involved, and Canvas is not required for repository sample authoring. CI closes the pair: it
+imports each committed `preset.yaml`, re-exports the sample's `workflow.json` through
+`nexus_preset::export_preset` (`crates/nexus-preset/src/workflow_ir.rs`), and fails at the divergent YAML
+path when the committed manifest is not that export. `assets[]` is the one member the export does not
+project, so it stays hand-maintained: one entry per carrier-named template, each `content_hash` a BLAKE3
+digest over the template's bytes.
+
+Two surfaces stay YAML-primary and this page's boundary holds for them: `examples/first-workflow` and the
+embedded presets keep `preset.yaml` as their source, and they are the live evidence that a hand-authored
+YAML bundle still imports and exports. Nothing in the sample switch touches the intake precedence of
+§5.1, the legacy YAML write path of §6, or the pattern registry policy above.
 
 ## Invariants
 

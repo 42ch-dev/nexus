@@ -766,6 +766,14 @@ jobs:
         run: |
           pnpm --filter @42ch/nexus-contracts run build
           pnpm --filter @42ch/nexus-provider-acp build
+      # Named gate, not a duplicate of `Run tests` below: it reds on its own step when a
+      # committed `preset.yaml` stops matching the `workflow.json` it is exported from, and
+      # `--test sample_self_check` fails loudly if the target is ever deleted (a plain
+      # `cargo test` would silently run nothing). The target needs no features — it reads
+      # `nexus-preset`, not the feature-gated IR walk.
+      - name: Run sample self-check (preset.yaml equals its workflow.json export)
+        if: matrix.group == 'orchestration-core'
+        run: cargo test -p nexus-orchestration --test sample_self_check
       - name: Run tests
         run: cargo test ${{ matrix.packages }}
 
