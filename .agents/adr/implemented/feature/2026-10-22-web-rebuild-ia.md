@@ -11,7 +11,7 @@ Nexus is a local-first, AI-driven narrative-orchestration studio. The one-line p
 
 ## Decision
 
-`apps/web` ships one SPA with the app-shell IA: a topnav that carries identity rather than navigation, a module/app rail, a Creator-profile switcher, workspace chips on content surfaces, and a first-run wizard for both entrances. The landing routes are World Timeline for creators and the developer Hub (操作台) for developers. The implementation landed across v1.219–v1.222; the sections below record the IA contract that now holds.
+`apps/web` ships one SPA with the app-shell IA: a topnav that carries identity rather than navigation, a module/app rail, a Creator-profile switcher, workspace chips on content surfaces, and a first-run wizard for both entrances. The landing routes are `/works` (the creator hub) for creators and `/developer` (the developer Hub, 操作台) for developers. The World Timeline is not the creator landing: it mounts only per World, at `/worlds/:worldId`. The implementation landed across v1.219–v1.222; the sections below record the IA contract that now holds.
 
 
 | Attribute | Value |
@@ -105,9 +105,9 @@ Three zones, one shared skeleton:
 
 ### 4. Landing surfaces after onboarding
 
-#### 4.1 Creator lands in 世界 (World Timeline, Brief layer)
+#### 4.1 Creator lands in the hub; the World Timeline holds the guided empty state
 
-Guided empty state, not a blank dashboard:
+The landing surface is the dual-pane creator hub (`/works`), a browse-only shell over the creator's Worlds and Works. The guided empty state below lives one level down, inside a World at `/worlds/:worldId`:
 
 - Layer tabs Brief / Narrative / Moment (Brief default).
 - Empty-state card: "写下你的第一个 Brief" with example copy; inline editor on click; save renders the first Brief card.
@@ -115,7 +115,7 @@ Guided empty state, not a blank dashboard:
 
 #### 4.2 Developer lands in 操作台 (Hub)
 
-Rail registry: 操作台 / Harness / 模块 / 能力 / 会话. Hub cards: local service status, agent (ACP) status, Harness summary (presets, running sessions), installed modules. Every rail app beyond Hub lazy-loads on first visit.
+Rail registry: 操作台 / Harness / 模块 / 能力 / 角色 / 会话. Hub cards: local service status, agent (ACP) status, Harness summary (presets, running sessions), installed modules. Every rail app beyond Hub lazy-loads on first visit.
 
 ### 7. Carried-over invariants from the retired spec
 

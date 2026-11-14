@@ -1,6 +1,6 @@
 # ADR: Lightweight Core and Modular Packaging (“Steady Fast”)
 
-Status: proposed — not implement authority.
+Status: proposed — not implement authority, and narrower than it reads: the layering half has partly landed while the packaging half has not started. `crates/nexus-workflow-ir` is a thin facade over `nexus-contracts`, `serde_json` and `blake3`; `crates/nexus-pattern` depends on that facade rather than on orchestration; the per-concern feature crates (`nexus-agent-host`, `nexus-wasm-host`, `nexus-provider-ports`, `nexus-storage-guard`, `nexus-moment-context-assembly`) exist separately; `apps/nexus42` keeps its `connect-host` cohort behind `required-features`. Nothing about publishing or versioning moved: every member still declares `version.workspace = true` against a single `0.1.0`, `tooling/release/assert-lockstep-version.mjs` fails if any member drifts, only `modules/*` set `publish = true`, and no workflow runs `cargo publish`. The open decision is the release and versioning policy, not the crate graph. Tracking: I-000421.
 Date: 2026-11-10
 Scope: Crate-graph and publish strategy to reduce whole-workspace rebuilds, ship stable feature packages incrementally, and keep the user-facing layer on TypeScript while Rust owns narrative/orchestration truth.
 Source: migrated from the retired tracked specs corpus
@@ -15,7 +15,7 @@ Whole-workspace rebuild cost is high and packaging is coupled: `nexus-core` (~16
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | **Proposed** — not implement authority. |
+| **Status** | **Proposed** — not implement authority. Layering partly landed; packaging untouched (see the header line). |
 | **Document class** | Exploration |
 | **Scope** | Crate-graph and publish strategy to reduce whole-workspace rebuilds, ship stable feature packages incrementally, and keep the user-facing layer on TypeScript while Rust owns narrative/orchestration truth. |
 | **Coordinates with** | [docs/specs/architecture/overview.md](../../../../docs/specs/architecture/overview.md), [rust-core-service-boundary.md](../../../../docs/specs/architecture/rust-core-service-boundary.md), [canvas-composition-and-pattern-packages.md](2026-11-10-canvas-composition-and-pattern-packages.md), modules/nexus-module-sdk (existing standalone publish precedent) |
