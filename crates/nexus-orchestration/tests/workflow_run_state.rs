@@ -503,14 +503,28 @@ async fn descriptor_and_child_identity_preserved() {
     assert_eq!(child_row.current_task_id, "child_task");
 }
 
-/// P4 Task 4: the applied identity is frozen on the descriptor, and a run with
-/// no apply keeps writing exactly the bytes it always did.
+/// The applied identity is frozen on the descriptor, and a run with no apply
+/// keeps writing exactly the bytes it always did.
 #[test]
 fn descriptor_serializes_the_applied_identity_only_when_present() {
-    let no_apply = serde_json::to_value(test_descriptor("sess")).expect("descriptor serializes");
+    let no_apply_descriptor = test_descriptor("sess");
+    let no_apply = serde_json::to_value(&no_apply_descriptor).expect("descriptor serializes");
     assert!(
         no_apply.get("applied").is_none(),
         "a no-apply descriptor must not gain a key: {no_apply}"
+    );
+    // Byte-for-byte: the appended, skipped field must leave these bytes alone.
+    assert_eq!(
+        serde_json::to_string(&no_apply_descriptor).expect("descriptor serializes"),
+        concat!(
+            r#"{"creator_id":"ctr_test","work_id":"work-1","workspace_root":"/tmp/ws","#,
+            r#""preset_id":"test-preset","preset_version":3,"#,
+            r#""source":{"Embedded":{"preset_id":"test-preset","content_hash":"#,
+            "[7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7]}},",
+            r#""input":{"topic":"durable"},"#,
+            r#""agent_bindings":{"default":{"provider_id":"test-provider","model":"test-model"}},"#,
+            r#""parent_session_id":null,"graph_name":null}"#,
+        )
     );
 
     let mut applied = test_descriptor("sess");

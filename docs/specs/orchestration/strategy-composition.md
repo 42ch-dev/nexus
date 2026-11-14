@@ -141,8 +141,9 @@ descriptor graph exactly as before.
 Recovery compares that resolution with the run's own record **before** it builds: the run descriptor freezes
 the `apply_id` and `content_hash` admitted with the run, and a restart refuses
 (`reconstruction_unavailable`, non-replayable) when the strategy's current apply is any other row — whether a
-re-apply superseded it or it was rolled back. A run admitted with no apply records no identity, so its
-descriptor serializes byte for byte as before and recovery resolves it the way it always has.
+re-apply superseded it or it was rolled back. A run admitted with no apply records no identity — and
+neither does any run persisted before the descriptor carried one — so its descriptor serializes byte for
+byte as before and recovery resolves it the way it always has.
 
 Both sides re-run the same recomputation before building: an apply whose `document_json` no longer hashes
 to its recorded `content_hash` is `applied_document_changed`, and one that cannot be read is
@@ -157,8 +158,11 @@ applied document back into a hint.
 - **`required_prompt_roles` scans `llm_judge` exits and inner-graph `acp_prompt` nodes only.** A document
   that prompts through a capability enter action contributes no required role, so a run can be admitted
   without the `default` binding and fail at the prompt instead of at admission (I-000463).
-- **Recovery reads the current apply, not the apply the run was admitted under.** Re-applying during an
-  in-flight run reinterprets that run's persisted position (I-000464).
+- **A run whose descriptor records no applied identity still resolves against the current apply.** Rows
+  persisted before the descriptor carried one, and runs whose descriptor is built outside admission, hold
+  no identity, so a re-apply before a restart reinterprets that run's persisted position. Admission
+  freezes the identity on every descriptor it writes, so the admitted path is closed; the reachability of
+  those out-of-admission construction sites is I-000467.
 - **Reconstruction validates inner descendants against the descriptor manifest** while it builds the graph
   from the applied document (I-000465). The applied path admits one inner shape — a declared inner graph
   with no steps (see below) — and that shape is built and enterable: `project_inner_graphs` keeps it,

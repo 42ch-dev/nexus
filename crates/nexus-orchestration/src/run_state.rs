@@ -43,8 +43,8 @@ pub struct RunDescriptorV1 {
     pub parent_session_id: Option<SessionId>,
     /// Named inner graph this run executes (child runs).
     pub graph_name: Option<String>,
-    /// Applied identity the run was admitted under, `None` for a
-    /// descriptor-path run (`.mstar/plans/p4a-applied-identity.md` Task 4).
+    /// Applied identity the run was admitted under: `None` when admission saw
+    /// no apply, and for any row persisted before this field existed.
     ///
     /// Frozen here for the same reason `preset_version`/`source` are: recovery
     /// resolves the strategy's **current** apply, so without this a re-apply
@@ -55,7 +55,7 @@ pub struct RunDescriptorV1 {
     pub applied: Option<AppliedRunIdentity>,
 }
 
-/// The applied identity a run was admitted under (P4 Task 4).
+/// The applied identity a run was admitted under.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppliedRunIdentity {
     /// The `strategy_applies.apply_id` that was current at admission.
