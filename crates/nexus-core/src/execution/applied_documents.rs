@@ -27,7 +27,7 @@ pub struct CreatorAppliedDocuments {
 impl CreatorAppliedDocuments {
     /// Bind the source to the Creator DB pool admission resolves applies on.
     #[must_use]
-    pub fn new(pool: Arc<sqlx::SqlitePool>) -> Self {
+    pub const fn new(pool: Arc<sqlx::SqlitePool>) -> Self {
         Self { pool }
     }
 }
