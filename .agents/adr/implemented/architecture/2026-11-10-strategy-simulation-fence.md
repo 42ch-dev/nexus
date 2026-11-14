@@ -33,7 +33,7 @@ The normative current state—including the trajectory schema, supported level, 
 
 The shipped level performs static reachability from the entry node. An `llm_judge` follows its declared default edge and is disclosed as stubbed; no model chooses a branch. Invalid default-edge cardinality or a dangling default is a deterministic error, not a successful trajectory.
 
-Predicted waits are derived statically and can over-report. The result does not claim that a signal will fire or that a human will continue. Consumers treat an unknown simulation level as a newer unsupported level rather than silently interpreting it as the shipped level.
+Predicted waits are derived statically and can over-report, and they also under-report in one direction that follows from stubbing: because a judge contributes only its default edge, a wait behind any other branch is never visited and never named. Neither direction is a defect to fix at this level; both are what a disclosure has to say. The result does not claim that a signal will fire or that a human will continue. Consumers treat an unknown simulation level as a newer unsupported level rather than silently interpreting it as the shipped level.
 
 ### 4. Fidelity boundary
 
