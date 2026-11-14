@@ -319,6 +319,9 @@
       "newerApprovalAvailable": "有更新的批准可用",
       "livePending": "当前应用状态尚未加载完成。",
       "liveUnreadable": "当前应用状态读取失败：{{message}}。",
+      "target": "应用目标",
+      "targetOption": "{{approvalId}} · 修订 {{revision}}",
+      "targetsUnreadable": "应用目标读取失败：{{message}}。",
       "rollbackNote": "应用此较早的批准会将生产回滚到该快照。应用历史仅追加——不会删除任何应用记录。"
     },
     "draftTransitionEditor": "草稿转换编辑器",

@@ -95,4 +95,19 @@ describe('queryKeys', () => {
     });
   });
 
+  describe('strategies', () => {
+    it('scopes the approval list by strategy id, apart from the applied-status key', () => {
+      expect(queryKeys.strategies.approvals('user/demo')).toEqual([
+        'strategies',
+        'approvals',
+        'user/demo',
+      ]);
+      expect(queryKeys.strategies.approvals('user/demo')).not.toEqual(
+        queryKeys.strategies.applied('user/demo'),
+      );
+      expect(queryKeys.strategies.approvals('user/other')).not.toEqual(
+        queryKeys.strategies.approvals('user/demo'),
+      );
+    });
+  });
 });

@@ -118,6 +118,7 @@ import type {
   StrategySimulationRequest,
   StrategyApproveRequest,
   StrategyAppliedStatus,
+  StrategyApprovals,
   StrategyApplyRequest,
   StrategyComposeRequest,
   StrategyComposeResponse,
@@ -846,6 +847,13 @@ export interface NexusClient extends CoreSliceClient {
    * never either timestamp.
    */
   getStrategyApplied(strategyId: string): Promise<StrategyAppliedStatus>;
+  /**
+   * `GET /v1/daemon/strategies/{strategy_id}/approvals` — every approval in the status
+   * read's total order (`items[0]` is its `newest_approval`). This is the read that makes
+   * rollback reachable: Apply can name any listed approval's content hash, not only the
+   * newest.
+   */
+  listStrategyApprovals(strategyId: string): Promise<StrategyApprovals>;
   /**
    * `GET /v1/daemon/patterns` — one page of the read-only pattern registry listing.
    * `cursor`/`limit` select the page; a caller that needs every package follows

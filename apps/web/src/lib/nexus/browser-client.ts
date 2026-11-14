@@ -111,6 +111,7 @@ import type {
   StrategySimulationRequest,
   StrategyApproveRequest,
   StrategyAppliedStatus,
+  StrategyApprovals,
   StrategyApplyRequest,
   StrategyComposeRequest,
   StrategyComposeResponse,
@@ -968,6 +969,11 @@ export class BrowserClient implements NexusClient {
   getStrategyApplied(strategyId: string): Promise<StrategyAppliedStatus> {
     return this.get<StrategyAppliedStatus>(
       `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/applied`,
+    );
+  }
+  listStrategyApprovals(strategyId: string): Promise<StrategyApprovals> {
+    return this.get<StrategyApprovals>(
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/approvals`,
     );
   }
   listPatterns(query?: ListPatternsQuery): Promise<ListPatternsResponse> {

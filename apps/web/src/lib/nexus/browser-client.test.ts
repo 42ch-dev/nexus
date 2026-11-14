@@ -1939,6 +1939,37 @@ describe('BrowserClient strategy apply (v241 P3.5 T1)', () => {
     });
   });
 
+  it('lists every approval from .../approvals, superseded rows included', async () => {
+    const approvalsPath = `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/approvals`;
+    let seenPath = '';
+    useHandlers(
+      http.get(approvalsPath, ({ request }) => {
+        seenPath = new URL(request.url).pathname;
+        return HttpResponse.json({
+          items: [
+            {
+              approval_id: 'apr_2',
+              content_hash: 'hash-2',
+              candidate_revision: 4,
+              approved_at: '2026-11-14T01:00:00Z',
+            },
+            {
+              approval_id: 'apr_1',
+              content_hash: 'hash-1',
+              candidate_revision: 1,
+              approved_at: '2026-11-14T00:00:00Z',
+            },
+          ],
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listStrategyApprovals(strategyId);
+
+    expect(seenPath).toBe(approvalsPath);
+    expect(res.items.map((item) => item.approval_id)).toEqual(['apr_2', 'apr_1']);
+  });
+
   it('keeps the refusal reason typed on a 409 already_applied', async () => {
     useHandlers(
       http.post(applyPath, () =>

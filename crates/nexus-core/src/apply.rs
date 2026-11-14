@@ -205,13 +205,23 @@ pub struct AppliedStrategy {
     pub supersedes_apply_id: Option<String>,
 }
 
-/// One approval of the strategy, reduced to what the status read reports.
+/// One approval of the strategy, reduced to the keys a client lists and applies by.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct NewestApproval {
+pub struct StrategyApproval {
     pub approval_id: String,
     pub content_hash: String,
     pub candidate_revision: i64,
     pub approved_at: String,
+}
+
+/// Every approval of a strategy, newest first.
+///
+/// The order is [`CoreService::strategy_applied`]'s total order (`candidate_revision` DESC,
+/// `approved_at` DESC, `approval_id` DESC), so `items[0]` is that read's `newest_approval`. This
+/// list is what lets a client aim Apply at a superseded approval: the rollback path.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StrategyApprovals {
+    pub items: Vec<StrategyApproval>,
 }
 
 /// The strategy's applied identity and the newest approval it could move to.
@@ -222,7 +232,7 @@ pub struct NewestApproval {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StrategyAppliedStatus {
     pub current_apply: Option<AppliedStrategy>,
-    pub newest_approval: Option<NewestApproval>,
+    pub newest_approval: Option<StrategyApproval>,
 }
 
 impl CoreService {
@@ -255,7 +265,7 @@ impl CoreService {
         .await
         .map_err(|error| crate::error::local_db_err(error.into()))?
         .map(
-            |(approval_id, content_hash, candidate_revision, approved_at)| NewestApproval {
+            |(approval_id, content_hash, candidate_revision, approved_at)| StrategyApproval {
                 approval_id,
                 content_hash,
                 candidate_revision,
@@ -267,6 +277,48 @@ impl CoreService {
             current_apply,
             newest_approval,
         })
+    }
+
+    /// Every approval of `strategy_id`, newest first in the same total order as
+    /// [`Self::strategy_applied`]'s `newest_approval` (`items[0]` is that same row).
+    ///
+    /// This is the read rollback needs: the status read reports only the newest approval, so a
+    /// client cannot name a superseded one without it. Nothing is written — applying a superseded
+    /// approval appends an apply row and leaves every approval row in place.
+    ///
+    /// # Errors
+    ///
+    /// The principal and store errors. A strategy with no approval reports `items: []`; that is
+    /// not a refusal.
+    pub async fn strategy_approvals(
+        &self,
+        principal: &Principal,
+        strategy_id: &str,
+    ) -> CoreResult<StrategyApprovals> {
+        self.verify_principal(principal)?;
+
+        let items = sqlx::query_as::<_, (String, String, i64, String)>(
+            "SELECT approval_id, content_hash, candidate_revision, approved_at \
+               FROM strategy_approvals \
+              WHERE strategy_id = ? \
+              ORDER BY candidate_revision DESC, approved_at DESC, approval_id DESC",
+        )
+        .bind(strategy_id)
+        .fetch_all(&self.inner.pool)
+        .await
+        .map_err(|error| crate::error::local_db_err(error.into()))?
+        .into_iter()
+        .map(
+            |(approval_id, content_hash, candidate_revision, approved_at)| StrategyApproval {
+                approval_id,
+                content_hash,
+                candidate_revision,
+                approved_at,
+            },
+        )
+        .collect();
+
+        Ok(StrategyApprovals { items })
     }
 
     /// Apply the approval `approval_content_hash` names, recording it as the strategy's current

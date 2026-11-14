@@ -15,6 +15,7 @@ import type {
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   SimulationTrajectory,
+  StrategyApprovals,
   StrategyApproveRequest,
   StrategyAppliedStatus,
   StrategyApplyRequest,
@@ -251,6 +252,24 @@ export function strategyApplied(
   return withPrincipal(service, (principal) => service.core.strategyApplied(principal, strategyId));
 }
 
+/**
+ * `GET /v1/daemon/strategies/{strategy_id}/approvals` — every approval, newest first.
+ *
+ * The read that makes rollback reachable: the status read only reports the newest approval, so
+ * without this list a client cannot name a superseded one. The total order is the status read's
+ * (`candidate_revision` DESC, `approved_at` DESC, `approval_id` DESC), so the first item is
+ * exactly `newest_approval`. Rows are read, never written: applying a superseded approval appends
+ * a new apply row and leaves this list untouched.
+ */
+export function listStrategyApprovals(
+  service: ServiceCore,
+  strategyId: string,
+): Promise<StrategyApprovals> {
+  return withPrincipal(service, (principal) =>
+    service.core.strategyApprovals(principal, strategyId),
+  );
+}
+
 /** Exact path/verb/tier identities this family owns (composer input). */
 export const PRESET_ROUTES: readonly DomainRoute[] = [
   {
@@ -440,5 +459,14 @@ export const PRESET_ROUTES: readonly DomainRoute[] = [
     tier: 'tier2',
     family: 'presets',
     handle: async (service, params) => ({ body: await strategyApplied(service, params[0]) }),
+  },
+  {
+    method: 'GET',
+    pattern: /^\/v1\/daemon\/strategies\/([^/]+)\/approvals$/,
+    tier: 'tier2',
+    family: 'presets',
+    handle: async (service, params) => ({
+      body: await listStrategyApprovals(service, params[0]),
+    }),
   },
 ];

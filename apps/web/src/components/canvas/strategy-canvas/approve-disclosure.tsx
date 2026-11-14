@@ -14,7 +14,11 @@
  */
 import { useTranslation } from 'react-i18next';
 
-import type { SimulationTrajectory, StrategyAppliedStatus } from '@42ch/nexus-contracts';
+import type {
+  SimulationTrajectory,
+  StrategyAppliedStatus,
+  StrategyApprovals,
+} from '@42ch/nexus-contracts';
 
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import type { SimulationStatus } from '@/lib/canvas/use-simulation-trajectory';
@@ -55,10 +59,27 @@ export interface ApproveDisclosureProps {
    */
   gateReason?: string | null;
   /**
-   * The apply write path, supplied only once an approval exists: apply installs
-   * that frozen snapshot as the running identity. Absent → no Apply control.
+   * The apply write path: apply installs the chosen approval as the running
+   * identity. It is aimed at a listed approval, never at whatever the dialog
+   * happens to hold — that is how a superseded approval stays reachable.
+   * Absent → no Apply control.
    */
-  onApply?: () => void;
+  onApply?: (approval: StrategyApprovals['items'][number]) => void;
+  /**
+   * Every approval of this strategy, newest first (the status read's total
+   * order). The status read alone carries only the newest approval, so a
+   * rollback target exists only here. Absent or empty → no Apply control.
+   */
+  approvals?: StrategyApprovals['items'] | null;
+  /**
+   * The `approval_id` Apply is aimed at. Unset → the newest listed approval,
+   * which is the happy path after an approve.
+   */
+  applyTargetId?: string | null;
+  /** Aim Apply at another listed approval (the rollback target). */
+  onSelectApplyTarget?: (approvalId: string) => void;
+  /** The approvals read failed; its message replaces a silently missing Apply control. */
+  approvalsError?: string | null;
   /**
    * Compose-path apply outcome: the appended apply row, or the refusal's own
    * typed code. Absent until the wired handler ran.
@@ -89,6 +110,10 @@ export function ApproveDisclosure({
   approval = null,
   gateReason = null,
   onApply,
+  approvals = null,
+  applyTargetId = null,
+  onSelectApplyTarget,
+  approvalsError = null,
   application = null,
   onRun,
   appliedStatus = null,
@@ -99,6 +124,23 @@ export function ApproveDisclosure({
   // `status` owns the banner; `isStale` only re-adds it while a newer fact
   // (`running`, `failed`) outranks staleness in `status`.
   const showStale = status === 'stale' || isStale;
+  // Apply is aimed at a listed approval, defaulting to the newest. A stale
+  // selection (an approval a refetch no longer returns) falls back to newest.
+  const applyTarget =
+    approvals?.find((candidate) => candidate.approval_id === applyTargetId) ??
+    approvals?.[0] ??
+    null;
+  const liveApprovalId = appliedStatus?.current_apply?.approval_id ?? null;
+  const newestApprovalId = appliedStatus?.newest_approval?.approval_id ?? null;
+  // Three cases, `approval_id`s only (D11). Aimed at the live approval → the
+  // apply is an `already_applied` refusal, not a rollback. Aimed at the newest
+  // → applying moves forward, so the "newer approval available" badge stands
+  // alone. Aimed at anything else → applying it moves production back.
+  const showRollbackNote =
+    applyTarget !== null &&
+    liveApprovalId !== null &&
+    applyTarget.approval_id !== liveApprovalId &&
+    applyTarget.approval_id !== newestApprovalId;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -312,6 +354,60 @@ export function ApproveDisclosure({
                 </dd>
               </div>
             </dl>
+          </div>
+        ) : null}
+
+        {approvalsError ? (
+          <p
+            data-testid="apply-targets-error"
+            role="alert"
+            className="mt-2 rounded-card border border-amber-700 px-3 py-2 text-copy-13 text-gray-1000"
+          >
+            {t('strategy.apply.targetsUnreadable', { message: approvalsError })}
+          </p>
+        ) : null}
+
+        {onApply && approvals && approvals.length > 0 && applyTarget ? (
+          <div data-testid="apply-targets" className="mt-3 flex flex-col gap-2">
+            <label className="flex flex-col gap-1 text-label-12 text-gray-700">
+              {t('strategy.apply.target')}
+              <select
+                data-testid="apply-target-select"
+                value={applyTarget.approval_id}
+                onChange={(event) => onSelectApplyTarget?.(event.target.value)}
+                className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
+              >
+                {approvals.map((candidate) => (
+                  <option key={candidate.approval_id} value={candidate.approval_id}>
+                    {t('strategy.apply.targetOption', {
+                      approvalId: candidate.approval_id,
+                      revision: candidate.candidate_revision,
+                    })}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="button"
+              onClick={() => onApply(applyTarget)}
+              disabled={application?.kind === 'pending'}
+              className="rounded-control bg-purple-700 px-3 py-1.5 text-button-12 text-white hover:bg-purple-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {t('strategy.apply.action')}
+            </button>
+            {/* Rollback is this same control aimed at another listed approval:
+                history is append-only, so the copy never implies deletion. The
+                note appears only when the target is neither the live apply nor
+                the newest approval — only then does applying move production
+                back. Aimed at the live one it is an `already_applied` refusal;
+                aimed at the newest it moves forward even while the D9 badge
+                says a newer approval exists. */}
+            {showRollbackNote ? (
+              <p data-testid="apply-rollback-note" className="text-copy-13 text-gray-900">
+                {t('strategy.apply.rollbackNote')}
+              </p>
+            ) : null}
 
             {application?.kind === 'pending' ? (
               <p data-testid="apply-pending" className="text-copy-13 text-gray-900">
@@ -361,31 +457,6 @@ export function ApproveDisclosure({
                     </dd>
                   </div>
                 </dl>
-              </div>
-            ) : null}
-
-            {onApply ? (
-              <div className="flex flex-col gap-1.5">
-                <button
-                  type="button"
-                  onClick={onApply}
-                  disabled={application?.kind === 'pending'}
-                  className="rounded-control bg-purple-700 px-3 py-1.5 text-button-12 text-white hover:bg-purple-800 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {t('strategy.apply.action')}
-                </button>
-                {/* Rollback is this same control aimed at a superseded approval:
-                    history is append-only, so the copy never implies deletion.
-                    The note keys on the LIVE apply: when the shown approval is
-                    the live one, applying is an `already_applied` refusal, not
-                    a rollback (the mirror of D9). */}
-                {appliedStatus?.current_apply &&
-                approval.snapshot.approval_id !==
-                  appliedStatus.current_apply.approval_id ? (
-                  <p data-testid="apply-rollback-note" className="text-copy-13 text-gray-900">
-                    {t('strategy.apply.rollbackNote')}
-                  </p>
-                ) : null}
               </div>
             ) : null}
           </div>

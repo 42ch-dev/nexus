@@ -122,6 +122,7 @@ const SIMULATE_PATH = `/v1/daemon/strategies/${STRATEGY_ID}/simulate`;
 const APPROVE_PATH = `/v1/daemon/strategies/${STRATEGY_ID}/approve`;
 const APPLY_PATH = `/v1/daemon/strategies/${STRATEGY_ID}/apply`;
 const APPLIED_PATH = `/v1/daemon/strategies/${STRATEGY_ID}/applied`;
+const APPROVALS_PATH = `/v1/daemon/strategies/${STRATEGY_ID}/approvals`;
 const PATTERNS_PATH = '/v1/daemon/patterns';
 
 const SEED = servedIrDocument({ id: STRATEGY_ID });
@@ -383,6 +384,18 @@ describe('StrategyCanvas — compose path (flag on)', () => {
       http.get(APPLIED_PATH, () =>
         HttpResponse.json({ current_apply: null, newest_approval: null }),
       ),
+      http.get(APPROVALS_PATH, () =>
+        HttpResponse.json({
+          items: [
+            {
+              approval_id: 'apr_42',
+              content_hash: 'hash-1',
+              candidate_revision: 1,
+              approved_at: '2026-11-13T00:00:00Z',
+            },
+          ],
+        }),
+      ),
       http.post(APPROVE_PATH, () => {
         approveCalls += 1;
         return HttpResponse.json({
@@ -428,6 +441,124 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     await waitFor(() => expect(screen.getByTestId('approve-approved')).toHaveTextContent('apr_43'));
     // The stale "This approval is the running identity" block from apply A is gone.
     expect(screen.queryByTestId('apply-applied')).toBeNull();
+  });
+
+  it('aims Apply at an approval older than the live one and moves the live identity back to it', async () => {
+    // The read the surface needs: every approval newest first, plus the live apply.
+    const approvals: {
+      approval_id: string;
+      content_hash: string;
+      candidate_revision: number;
+      approved_at: string;
+    }[] = [];
+    let live: {
+      apply_id: string;
+      approval_id: string;
+      content_hash: string;
+      applied_at: string;
+      supersedes_apply_id: string | null;
+    } | null = null;
+    const applyBodies: unknown[] = [];
+
+    useHandlers(
+      http.get(CANDIDATE_PATH, () => HttpResponse.json(SEED)),
+      http.get(PATTERNS_PATH, () =>
+        HttpResponse.json({ items: patternItems(false), pagination: { limit: 100, has_more: false } }),
+      ),
+      http.post(COMPOSE_PATH, () => HttpResponse.json(nestedResponse())),
+      http.post(SIMULATE_PATH, () =>
+        HttpResponse.json(simulationTrajectory({ nodes_visited: ['prompt-step-slot'] })),
+      ),
+      http.get(APPLIED_PATH, () =>
+        HttpResponse.json({
+          current_apply: live,
+          newest_approval: approvals[0] ?? null,
+        }),
+      ),
+      http.get(APPROVALS_PATH, () => HttpResponse.json({ items: approvals })),
+      http.post(APPROVE_PATH, async () => {
+        const revision = approvals.length + 1;
+        const snapshot = {
+          approval_id: revision === 1 ? 'apr_42' : 'apr_43',
+          strategy_id: STRATEGY_ID,
+          candidate_revision: revision,
+          document: nestedResponse().document,
+          content_hash: `hash-${revision}`,
+          trajectory: simulationTrajectory({ ir_content_hash: `hash-${revision}` }),
+          pins: [{ id: 'prompt-step', version: '1.0.0', content_hash: 'abc' }],
+          approver: 'creator-1',
+          approved_at: '2026-11-13T00:00:00Z',
+        };
+        approvals.unshift({
+          approval_id: snapshot.approval_id,
+          content_hash: snapshot.content_hash,
+          candidate_revision: revision,
+          approved_at: snapshot.approved_at,
+        });
+        return HttpResponse.json(snapshot);
+      }),
+      http.post(APPLY_PATH, async ({ request }) => {
+        const body = (await request.json()) as { approval_content_hash: string };
+        applyBodies.push(body);
+        const target = approvals.find(
+          (approval) => approval.content_hash === body.approval_content_hash,
+        );
+        live = {
+          apply_id: `app_${applyBodies.length}`,
+          approval_id: target?.approval_id ?? 'apr_unknown',
+          content_hash: body.approval_content_hash,
+          applied_at: '2026-11-13T01:00:00Z',
+          supersedes_apply_id: live?.apply_id ?? null,
+        };
+        return HttpResponse.json(live);
+      }),
+    );
+
+    renderCanvas();
+    fireEvent.click(await screen.findByTestId('strategy-add-pattern'));
+    fireEvent.click(await screen.findByTestId('pattern-option-prompt-step'));
+    fireEvent.click(screen.getByTestId('pattern-nest'));
+    await waitFor(() => expect(screen.queryByTestId('pattern-nest')).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+
+    // Approve A and apply it: A is the live identity.
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(screen.getByTestId('approve-approved')).toHaveTextContent('apr_42'));
+    await waitFor(() =>
+      expect(screen.getByTestId('apply-target-select')).toHaveValue('apr_42'),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Apply snapshot' }));
+    await waitFor(() => expect(screen.getByTestId('apply-applied')).toHaveTextContent('apr_42'));
+
+    // Approve B: the newest target, so the badge shows and no rollback is claimed.
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(screen.getByTestId('approve-approved')).toHaveTextContent('apr_43'));
+    await waitFor(() =>
+      expect(screen.getByTestId('apply-target-select')).toHaveValue('apr_43'),
+    );
+    expect(screen.getByTestId('apply-newer-available')).toBeInTheDocument();
+    expect(screen.queryByTestId('apply-rollback-note')).toBeNull();
+
+    // Apply B: production moves forward to B, so A is now neither live nor newest.
+    fireEvent.click(screen.getByRole('button', { name: 'Apply snapshot' }));
+    await waitFor(() => expect(applyBodies).toHaveLength(2));
+    expect(applyBodies[1]).toEqual({ approval_content_hash: 'hash-2' });
+    await waitFor(() => expect(screen.getByTestId('apply-approval')).toHaveTextContent('apr_43'));
+
+    // Aim the same control at A — the superseded approval — and apply it.
+    fireEvent.change(screen.getByTestId('apply-target-select'), { target: { value: 'apr_42' } });
+    await waitFor(() =>
+      expect(screen.getByTestId('apply-rollback-note')).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Apply snapshot' }));
+
+    await waitFor(() => expect(applyBodies).toHaveLength(3));
+    expect(applyBodies[2]).toEqual({ approval_content_hash: 'hash-1' });
+    // The live identity moved back to A, and the new row superseded B's.
+    await waitFor(() => expect(screen.getByTestId('apply-approval')).toHaveTextContent('apr_42'));
+    expect(screen.getByTestId('apply-applied')).toHaveTextContent('app_3');
   });
 
   it('surfaces a 409 conflict, leaves the graph alone, and never auto-retries', async () => {

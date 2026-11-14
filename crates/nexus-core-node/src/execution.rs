@@ -1190,6 +1190,26 @@ impl NativeCore {
         })
         .await
     }
+
+    /// `GET /v1/daemon/strategies/{strategy_id}/approvals`.
+    ///
+    /// Every approval of the strategy in the status read's total order, so `items[0]` is that
+    /// read's `newest_approval`. The list is what lets a client aim Apply at a superseded
+    /// approval — the rollback path — instead of holding only the newest. Read-only.
+    #[napi]
+    pub async fn strategy_approvals(
+        &self,
+        principal_handle: String,
+        strategy_id: String,
+    ) -> Result<Buffer> {
+        self.json_call(principal_handle, async move |core, principal| {
+            let approvals: nexus_core::StrategyApprovals = core
+                .strategy_approvals(&principal, &strategy_id)
+                .await?;
+            Ok(approvals)
+        })
+        .await
+    }
 }
 
 #[cfg(test)]

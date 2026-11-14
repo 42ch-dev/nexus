@@ -326,6 +326,9 @@
       "newerApprovalAvailable": "Newer approval available",
       "livePending": "Live apply state has not loaded yet.",
       "liveUnreadable": "Live apply state is unreadable: {{message}}.",
+      "target": "Apply target",
+      "targetOption": "{{approvalId}} · revision {{revision}}",
+      "targetsUnreadable": "Apply targets are unreadable: {{message}}.",
       "rollbackNote": "Applying this earlier approval rolls production back to it. Apply history is append-only — no apply row is deleted."
     },
     "draftTransitionEditor": "Draft transition editor",

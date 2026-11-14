@@ -122,6 +122,11 @@ export const queryKeys = {
     all: ['strategies'] as const,
     applied: (strategyId: string) =>
       [...queryKeys.strategies.all, 'applied', strategyId] as const,
+    // Every approval of one strategy, newest first. Separate from `applied` because
+    // an apply refreshes the live identity while the approval rows do not move; an
+    // approve moves both.
+    approvals: (strategyId: string) =>
+      [...queryKeys.strategies.all, 'approvals', strategyId] as const,
   },
   worldKb: {
     all: ['worldKb'] as const,

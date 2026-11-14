@@ -13,7 +13,7 @@
 import { useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
-import type { ApprovedStrategySnapshot, StrategyAppliedStatus } from '@42ch/nexus-contracts';
+import type { StrategyAppliedStatus } from '@42ch/nexus-contracts';
 
 import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
@@ -40,7 +40,7 @@ export function useApplyStrategy(presetId: string) {
   const [state, setState] = useState<ApplyRenderState | null>(null);
 
   const apply = useCallback(
-    async (approval: ApprovedStrategySnapshot) => {
+    async (approval: { content_hash: string }) => {
       setState({ kind: 'pending' });
       try {
         const applied = await client.applyStrategy(presetId, {

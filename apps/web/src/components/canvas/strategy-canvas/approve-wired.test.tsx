@@ -5,11 +5,11 @@
  * refusal copy for the cases that refuse. The flag-off surface passes none of
  * this, keeping the shipped disabled disclosure (T7).
  */
-import { fireEvent, screen } from '@testing-library/react';
+import { cleanup, fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { NexusClientError } from '@/lib/nexus';
-import type { ApprovedStrategySnapshot } from '@42ch/nexus-contracts';
+import type { ApprovedStrategySnapshot, StrategyApprovals } from '@42ch/nexus-contracts';
 
 import { renderInApp } from '@/test/test-providers';
 import { ApproveDisclosure } from './approve-disclosure';
@@ -27,6 +27,15 @@ function snapshot(): ApprovedStrategySnapshot {
     trajectory: simulationTrajectory({ ir_content_hash: 'hash-3' }),
     pins: [{ id: 'prompt-step', version: '1.0.0', content_hash: 'abc123' }],
     approver: 'creator-1',
+    approved_at: '2026-11-13T00:00:00Z',
+  };
+}
+
+function approvalRow(): StrategyApprovals['items'][number] {
+  return {
+    approval_id: 'apr_123',
+    content_hash: 'hash-3',
+    candidate_revision: 3,
     approved_at: '2026-11-13T00:00:00Z',
   };
 }
@@ -138,6 +147,8 @@ describe('ApproveDisclosure — apply on an approved snapshot (compose path)', (
   it('shows the applied identity the apply response returned, without a reload', () => {
     renderDisclosure({
       approval: { kind: 'approved', snapshot: snapshot() },
+      onApply: vi.fn(),
+      approvals: [approvalRow()],
       application: {
         kind: 'applied',
         applied: {
@@ -165,16 +176,27 @@ describe('ApproveDisclosure — apply on an approved snapshot (compose path)', (
     });
     renderDisclosure({
       approval: { kind: 'approved', snapshot: snapshot() },
+      onApply: vi.fn(),
+      approvals: [approvalRow()],
       application: { kind: 'refused', message: applyRefusalMessage(error) },
     });
     expect(screen.getByTestId('apply-refused')).toHaveTextContent('already_applied');
     expect(screen.getByTestId('apply-refused')).not.toHaveTextContent('already current');
   });
 
-  it('offers Apply only with an approval in hand and passes the click through', () => {
+  it('offers Apply only with a listed approval and passes that target through', () => {
     const onApply = vi.fn();
     renderDisclosure({ approval: { kind: 'approved', snapshot: snapshot() }, onApply });
+    // The frozen summary alone is not a target: the write path exists, the list does not.
+    expect(screen.queryByRole('button', { name: 'Apply snapshot' })).toBeNull();
+
+    cleanup();
+    renderDisclosure({
+      approval: { kind: 'approved', snapshot: snapshot() },
+      onApply,
+      approvals: [approvalRow()],
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Apply snapshot' }));
-    expect(onApply).toHaveBeenCalledTimes(1);
+    expect(onApply).toHaveBeenCalledWith(approvalRow());
   });
 });
