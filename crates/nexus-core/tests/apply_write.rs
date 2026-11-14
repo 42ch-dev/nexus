@@ -1,15 +1,17 @@
 //! The apply write, executed through a real `CoreService`: one approval becomes one immutable
 //! apply row; a strategy that is not a user bundle, an unknown content hash, another strategy's
-//! approval, an approval whose frozen document no longer hashes to its identity, a strategy with
-//! no schedule and a repeat apply of the current approval are typed refusals that write nothing; a
-//! superseded approval applies again (that is rollback), and two concurrent applies of one
-//! approval leave exactly one row.
+//! approval, an approval whose frozen document no longer hashes to its identity, an approved
+//! document the builder refuses, a strategy with no schedule and a repeat apply of the current
+//! approval are typed refusals that write nothing; a superseded approval applies again (that is
+//! rollback), and two concurrent applies of one approval leave exactly one row.
 //!
-//! Plan: `.mstar/plans/v241-p35-applied-identity.md` T2.
+//! Plan: `.mstar/plans/v241-p35-applied-identity.md` T2; the buildability refusal is
+//! `.mstar/plans/p4b-shared-buildability.md` T2 (I-000448).
 
 #![cfg(feature = "execution")]
 
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, Principal};
+use nexus_orchestration::preset_runtime::{IrOuterGraphError, IrTemplateSource};
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
@@ -185,6 +187,55 @@ async fn seed_schedule(pool: &SqlitePool, strategy_id: &str) {
     .unwrap();
 }
 
+/// The template the unbuildable fixture's judge gate names. The applied path builds with
+/// `IrTemplateSource::OwnSource`, which resolves nothing, so naming any template is enough
+/// (I-000449).
+const JUDGE_TEMPLATE: &str = "prompts/judge.md";
+
+/// Freeze one approval of a document the builder refuses: the fixture's `draft` state exits on an
+/// `llm_judge` whose prompt template cannot resolve from the document's own source.
+async fn seed_unbuildable_approval(
+    setup: &Setup,
+    strategy_id: &str,
+    version: u64,
+) -> (String, String) {
+    let base = setup
+        .core
+        .read_strategy_candidate(&setup.principal, strategy_id)
+        .await
+        .unwrap()
+        .document;
+    let mut document = with_version(&base, version);
+    let state = document
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "draft")
+        .expect("the fixture has a draft state");
+    state.exit_when = Some(nexus_workflow_ir::WorkflowExitWhen {
+        kind: nexus_workflow_ir::WorkflowExitWhenKind::LlmJudge,
+        template: Some(JUDGE_TEMPLATE.to_string()),
+        judge_capability: None,
+        min_interval: None,
+        duration: None,
+    });
+    let hash = nexus_workflow_ir::content_hash(&document).unwrap();
+    sqlx::query(
+        "INSERT INTO strategy_approvals \
+         (approval_id, strategy_id, content_hash, candidate_revision, document_json, \
+          trajectory_json, pins_json, approver, approved_at) \
+         VALUES (?, ?, ?, 0, ?, ?, '[]', 'test_creator', '2026-01-01T00:00:00+00:00')",
+    )
+    .bind(format!("apr_unbuildable_{version}"))
+    .bind(strategy_id)
+    .bind(&hash)
+    .bind(serde_json::to_string(&document).unwrap())
+    .bind(serde_json::json!({"ir_content_hash": hash}).to_string())
+    .execute(setup.core.pool())
+    .await
+    .unwrap();
+    (format!("apr_unbuildable_{version}"), hash)
+}
+
 async fn apply_rows(pool: &SqlitePool) -> i64 {
     sqlx::query_scalar("SELECT COUNT(*) FROM strategy_applies")
         .fetch_one(pool)
@@ -310,6 +361,53 @@ async fn a_document_edited_after_approval_is_the_typed_hash_change_and_writes_no
         apply_rows(setup.core.pool()).await,
         0,
         "the hash refusal must happen before the insert"
+    );
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn an_unbuildable_document_is_the_typed_refusal_and_writes_nothing() {
+    let setup = setup().await;
+    let (_, hash) = seed_unbuildable_approval(&setup, STRATEGY, 1).await;
+    // The strategy is a user bundle and owns a schedule, so the document's buildability is the
+    // only thing this apply can trip on — exactly the apply that used to land and fail at its
+    // first run (I-000448).
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+
+    let error = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap_err();
+
+    assert_eq!(reason(&error), "document_unbuildable");
+    // The reason the RUN would have failed with, verbatim: the builder refuses this same document
+    // with the same `IrOuterGraphError`, and apply carries its text through unchanged.
+    let builder_reason = refusal(&error)["builder_reason"].as_str().unwrap();
+    assert_eq!(
+        builder_reason,
+        IrOuterGraphError::UnresolvedTemplate {
+            node: "draft".to_string(),
+            template: Some(JUDGE_TEMPLATE.to_string()),
+            template_source: IrTemplateSource::OwnSource,
+        }
+        .to_string()
+    );
+    assert!(builder_reason.starts_with("ir_unresolved_template:"));
+    assert_eq!(
+        apply_rows(setup.core.pool()).await,
+        0,
+        "the buildability refusal must happen before the insert"
+    );
+    assert!(
+        setup
+            .core
+            .strategy_applied(&setup.principal, STRATEGY)
+            .await
+            .unwrap()
+            .current_apply
+            .is_none(),
+        "a refused apply installs no identity"
     );
     setup.core.close().await.unwrap();
 }

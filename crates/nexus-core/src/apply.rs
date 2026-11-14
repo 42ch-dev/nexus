@@ -5,9 +5,11 @@
 //! Apply is the only place an approval becomes the running identity, so each refusal here is a
 //! safety property and every one of them happens before a row exists: the requested content hash
 //! must name an approval of this strategy, the approval's frozen `document_json` must still hash
-//! to the `content_hash` the approval recorded, the strategy must resolve to a user bundle (the
-//! only source the intake ever reads an apply from), the strategy must own a schedule (nothing
-//! would run otherwise), and the approval must not already be the current apply.
+//! to the `content_hash` the approval recorded, the document must build into an outer graph (the
+//! same predicate the schedule intake uses, so an unbuildable identity is refused here instead of
+//! at its first run), the strategy must resolve to a user bundle (the only source the intake ever
+//! reads an apply from), the strategy must own a schedule (nothing would run otherwise), and the
+//! approval must not already be the current apply.
 //!
 //! `strategy_applies` is append-only and carries no current pointer: the current apply of a
 //! strategy is the row with no successor, and a superseded approval is a legal rollback (a new
@@ -28,6 +30,7 @@
 //! the other side: the intake consults [`current_apply`] for a user bundle only, so apply refuses
 //! any other source rather than record a row nothing reads.
 
+use nexus_orchestration::preset_runtime::{validate_ir_buildability, IrTemplateSource};
 use nexus_workflow_ir::{content_hash, WorkflowDocument};
 use serde_json::Value;
 
@@ -80,6 +83,12 @@ pub enum ApplyRefusal {
         /// The approval that is already current.
         approval_id: String,
     },
+    /// The approval's document cannot become an outer graph, so applying it would install an
+    /// identity the schedule intake refuses to build: the run would fail at its first build.
+    DocumentUnbuildable {
+        /// The builder's own refusal, verbatim: `IrOuterGraphError::to_string()`.
+        builder_reason: String,
+    },
 }
 
 impl ApplyRefusal {
@@ -93,6 +102,7 @@ impl ApplyRefusal {
             Self::StrategyNotUserPreset { .. } => "strategy_not_user_preset",
             Self::StrategyHasNoSchedule { .. } => "strategy_has_no_schedule",
             Self::AlreadyApplied { .. } => "already_applied",
+            Self::DocumentUnbuildable { .. } => "document_unbuildable",
         }
     }
 
@@ -144,6 +154,9 @@ impl ApplyRefusal {
             } => {
                 details.insert("apply_id".into(), Value::from(apply_id.clone()));
                 details.insert("approval_id".into(), Value::from(approval_id.clone()));
+            }
+            Self::DocumentUnbuildable { builder_reason } => {
+                details.insert("builder_reason".into(), Value::from(builder_reason.clone()));
             }
         }
         Value::Object(details)
@@ -201,6 +214,11 @@ impl std::fmt::Display for ApplyRefusal {
             } => write!(
                 f,
                 "approval `{approval_id}` is already the current apply (`{apply_id}`)"
+            ),
+            Self::DocumentUnbuildable { builder_reason } => write!(
+                f,
+                "the approved document cannot be built into a run, so this apply would install \
+                 an identity the schedule intake refuses: {builder_reason}"
             ),
         }
     }
@@ -345,9 +363,9 @@ impl CoreService {
     ///
     /// Returns [`CoreError::InputValidation`] carrying an [`ApplyRefusal::details`] envelope for
     /// a strategy that does not resolve to a user bundle, an unknown content hash, another
-    /// strategy's approval, an approval whose document no longer hashes to its identity, a
-    /// strategy with no schedule, or an approval that is already current; the principal and
-    /// store errors otherwise. A refusal writes nothing.
+    /// strategy's approval, an approval whose document no longer hashes to its identity, an
+    /// approved document the builder refuses, a strategy with no schedule, or an approval that is
+    /// already current; the principal and store errors otherwise. A refusal writes nothing.
     pub async fn apply_strategy(
         &self,
         principal: &Principal,
@@ -418,6 +436,17 @@ impl CoreService {
                 approval_id,
                 stored_hash,
                 recomputed_hash,
+            }
+            .into_error());
+        }
+
+        // The applied identity must be one the intake can build. The schedule intake builds this
+        // same document with `IrTemplateSource::OwnSource`, so a document the builder refuses
+        // would apply, report itself applied, and then fail at its first build (I-000448). Same
+        // predicate, same reason, before the row exists.
+        if let Err(reason) = validate_ir_buildability(&document, IrTemplateSource::OwnSource) {
+            return Err(ApplyRefusal::DocumentUnbuildable {
+                builder_reason: reason.to_string(),
             }
             .into_error());
         }
