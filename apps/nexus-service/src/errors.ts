@@ -61,6 +61,23 @@ const STATUS_BY_CODE: Record<CoreError['code'], number> = {
 
 const PUBLIC_INTERNAL_MESSAGE = 'Internal server error';
 
+/**
+ * The apply refusals that are conflicts, not client errors: a repeat apply of the approval that
+ * is already current, and an approval whose frozen bytes no longer hash to its identity. Both
+ * mirror `strategy_already_approved` — retrying the same request cannot succeed, so the client
+ * reloads the applied status instead of fixing the request. The remaining apply refusals
+ * (unknown hash, foreign approval, no schedule) keep the core's client-error status.
+ */
+const APPLY_CONFLICT_REASONS: Readonly<Record<string, true>> = {
+  already_applied: true,
+  approval_hash_changed: true,
+};
+
+function applyConflictStatus(details: Record<string, unknown> | undefined): number | undefined {
+  if (details?.code !== 'apply_refused') return undefined;
+  return APPLY_CONFLICT_REASONS[String(details.reason)] ? 409 : undefined;
+}
+
 export function statusForCode(code: string): number {
   if (code in STATUS_BY_CODE) {
     return STATUS_BY_CODE[code as CoreError['code']];
@@ -101,7 +118,7 @@ export function mapNativeError(error: unknown): HttpError {
         ? (wire.details as Record<string, unknown>)
         : undefined;
     return new HttpError(
-      wire.http_status ?? statusForCode(wire.code),
+      applyConflictStatus(details) ?? wire.http_status ?? statusForCode(wire.code),
       wire.code,
       wire.message,
       details,

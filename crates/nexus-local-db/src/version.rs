@@ -32,7 +32,8 @@
 // V1.231: 32 → 33 — knowledge_entries + reference_sources DROP (ADR K1 §3.1–§3.2: the archived User KnowledgeStore and reference registry are retired, not sealed; migration 20261111000001_retire_user_and_reference_stores.sql).
 // V1.239 P3: 33 → 34 — strategy_candidates draft table (plan v239-p3-compose-ops §Candidate storage Q4/D17) + its writer-protocol guard/outbox family (migration 20261113000001_strategy_candidates.sql).
 // V1.239 P3: 34 → 35 — strategy_approvals immutable snapshot table (plan v239-p3-approve-route §Q4) + its writer-protocol guard/outbox family (migration 20261113000002_strategy_approvals.sql).
-pub const DB_SCHEMA_VERSION: u32 = 35;
+// V1.241 P3.5 T1: 35 → 36 — append-only strategy_applies history (plan v241-p35-applied-identity §Architecture) + its writer-protocol guard/outbox family and approval-pin triggers (migration 20261114000001_strategy_applies.sql).
+pub const DB_SCHEMA_VERSION: u32 = 36;
 
 /// Contract schema version from generated wire types
 ///

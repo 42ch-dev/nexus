@@ -193,6 +193,8 @@ import type {
   StrategyComposeRequest,
   StrategyComposeResponse,
   StrategyApproveRequest,
+  StrategyApplyRequest,
+  StrategyAppliedStatus,
   ApprovedStrategySnapshot,
   StrategySimulationRequest,
   SimulationTrajectory,
@@ -800,6 +802,15 @@ export interface NativeCore {
     strategyId: string,
     request: StrategyApproveRequest,
   ): Promise<ApprovedStrategySnapshot>;
+  applyStrategy(
+    principal: PrincipalHandle,
+    strategyId: string,
+    request: StrategyApplyRequest,
+  ): Promise<NonNullable<StrategyAppliedStatus['current_apply']>>;
+  strategyApplied(
+    principal: PrincipalHandle,
+    strategyId: string,
+  ): Promise<StrategyAppliedStatus>;
   strategyWorkflowIr(
     principal: PrincipalHandle,
     strategyId: string,
@@ -1138,6 +1149,8 @@ type DomainSurface = Pick<
   | 'simulateStrategy'
   | 'composeStrategy'
   | 'approveStrategy'
+  | 'applyStrategy'
+  | 'strategyApplied'
   | 'strategyWorkflowIr'
   | 'strategyCandidate'
   | 'addSchedule'
@@ -1638,6 +1651,12 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
       return json(
         await inner.approveStrategy(principal, strategyId, wire(request, 'request')),
       );
+    },
+    async applyStrategy(principal, strategyId, request) {
+      return json(await inner.applyStrategy(principal, strategyId, wire(request, 'request')));
+    },
+    async strategyApplied(principal, strategyId) {
+      return json(await inner.strategyApplied(principal, strategyId));
     },
     async strategyWorkflowIr(principal, strategyId) {
       return json(await inner.strategyWorkflowIr(principal, strategyId));
