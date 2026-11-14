@@ -2933,9 +2933,16 @@ impl WorkflowRunCoordinator {
         // system preset id names no strategy, and treating one as a strategy id would redirect an
         // existing YAML schedule. The IR path refuses an apply whose frozen bytes no longer hash
         // to the identity the apply recorded, before any task exists.
+        //
+        // "User" is the source the LOADER resolved (`loaded`, step 2) — never a second
+        // classification. `locate_preset` checks embedded first, so a user bundle shadowing an
+        // embedded id would be read as `embedded` and its current apply silently skipped; only
+        // `resolve_preset` (user → system → embedded) knows which bundle actually loaded. A
+        // resolved `Directory` is the user preset here: `_system.*` ids are refused above, and
+        // the system scan matches qualified ids only, so an unqualified id never resolves there.
         let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
-        let applied = match crate::presets::locate_preset(nexus_home, &row.preset_id) {
-            Ok((source, _)) if source == "user" => {
+        let applied = match loaded.source_identity.as_ref() {
+            Some(nexus_preset::source_identity::PresetSourceIdentity::Directory { .. }) => {
                 crate::apply::current_apply(pool, &row.preset_id)
                     .await
                     .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?

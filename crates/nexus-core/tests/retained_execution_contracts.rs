@@ -7735,7 +7735,8 @@ async fn an_applied_identity_runs_instead_of_the_preset() {
     let pool = fixture.handle.coordinator().pool();
 
     // An apply needs the strategy to own a schedule. This inert row is that
-    // precondition only: `legacy_inert` is never admitted by the clock, and the
+    // precondition only: admission fails closed on a pre-seed row (it carries
+    // no version-0 core-context record, so no clock tick can admit it), and the
     // row that actually runs is added through the public path AFTER the apply,
     // so no tick can admit it under the preset first.
     sqlx::query(
@@ -7781,6 +7782,98 @@ async fn an_applied_identity_runs_instead_of_the_preset() {
     assert!(
         read_marker(&fixture.root, PRESET_MARKER).is_none(),
         "the preset's own task must not execute once the strategy has a current apply"
+    );
+
+    fixture.core.close().await.expect("core close");
+}
+
+/// The embedded preset id the shadowing fixture overrides with a user bundle.
+const SHADOWED_EMBEDDED_PRESET: &str = "novel-writing";
+
+/// T6: a user bundle that SHADOWS an embedded id keeps its apply.
+///
+/// `resolve_preset` (user → system → embedded) loads the user bundle for this
+/// id, so the schedule's strategy IS that bundle and its current apply must win.
+/// A discriminator that re-derives the source embedded-first reads the id as
+/// `embedded`, skips the apply lookup and runs the user YAML instead — this
+/// test then observes `preset-side.txt` where the applied document's
+/// `applied-side.txt` belongs.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_user_bundle_shadowing_an_embedded_id_keeps_its_apply() {
+    let fixture = hosted_fixture().await;
+    let nexus_home = fixture.tmp.path().join(".nexus42");
+    assert!(
+        nexus_preset::list_embedded_presets()
+            .iter()
+            .any(|id| id == SHADOWED_EMBEDDED_PRESET),
+        "the fixture premise is a real embedded id to shadow"
+    );
+    write_preset_bundle(
+        &nexus_home,
+        SHADOWED_EMBEDDED_PRESET,
+        &intake_preset_yaml(
+            SHADOWED_EMBEDDED_PRESET,
+            PRESET_MARKER,
+            PRESET_MARKER_B64,
+            false,
+        ),
+        "",
+    );
+    let principal = fixture.core.active_principal().await.unwrap();
+    let pool = fixture.handle.coordinator().pool();
+
+    // The apply precondition row only: admission fails closed on a pre-seed row
+    // (no version-0 core-context record), and the row that actually runs is
+    // added through the public path AFTER the apply.
+    sqlx::query(
+        "INSERT INTO creator_schedules \
+         (schedule_id, creator_id, preset_id, preset_version, status, concurrency_kind, \
+          current_core_context_version, created_at, updated_at) \
+         VALUES (?, ?, ?, 1, 'pending', 'serial', 0, 0, 0)",
+    )
+    .bind(format!("SCH-precondition-shadow-{SHADOWED_EMBEDDED_PRESET}"))
+    .bind(CREATOR)
+    .bind(SHADOWED_EMBEDDED_PRESET)
+    .execute(pool.as_ref())
+    .await
+    .expect("the apply precondition row");
+
+    // The candidate comes from the USER bundle (the id is the strategy id), and
+    // the applied snapshot differs from it in exactly what it commits.
+    let candidate = fixture
+        .core
+        .read_strategy_candidate(&principal, SHADOWED_EMBEDDED_PRESET)
+        .await
+        .expect("the shadowing strategy's import candidate")
+        .document;
+    let applied_side = applied_side_document(&candidate);
+    let hash = seed_intake_approval(
+        &fixture.core,
+        &principal,
+        SHADOWED_EMBEDDED_PRESET,
+        &applied_side,
+    )
+    .await;
+    let applied = fixture
+        .core
+        .apply_strategy(&principal, SHADOWED_EMBEDDED_PRESET, &hash)
+        .await
+        .expect("the approved snapshot applies");
+    assert_eq!(applied.content_hash, hash);
+
+    let schedule_id = add_intake_schedule(&fixture, SHADOWED_EMBEDDED_PRESET, None).await;
+    let run_id = wait_for_schedule_run(pool.as_ref(), &schedule_id).await;
+    wait_for_run_status(pool.as_ref(), &run_id, "completed").await;
+
+    assert_eq!(
+        read_marker(&fixture.root, APPLIED_MARKER).expect("the applied document's task commits"),
+        APPLIED_BYTES,
+        "a shadowing user strategy runs its applied document, not the embedded/YAML graph"
+    );
+    assert!(
+        read_marker(&fixture.root, PRESET_MARKER).is_none(),
+        "the preset's own task must not execute once the shadowing strategy has a current apply"
     );
 
     fixture.core.close().await.expect("core close");

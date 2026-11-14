@@ -494,21 +494,28 @@ pub async fn current_apply(
 /// # Errors
 ///
 /// The store errors, and `CoreError::Internal` when the approval row an apply names is absent
-/// (the foreign key the core maintains; only an admitted non-core writer can reach that state).
+/// for this strategy (the foreign key the core maintains; only an admitted non-core writer can
+/// reach that state).
+///
+/// The read is keyed by `approval_id` AND `strategy_id`, the pairing [`CoreService::apply_strategy`]
+/// enforces with `ApplyRefusal::ApprovalStrategyMismatch`: a replay must never return a foreign
+/// strategy's frozen document, even one written by a non-core writer.
 pub async fn verified_apply_document(
     pool: &sqlx::SqlitePool,
     strategy_id: &str,
     apply: &AppliedStrategy,
 ) -> CoreResult<Result<WorkflowDocument, ApplyLoadRefusal>> {
-    let document_json: Option<String> =
-        sqlx::query_scalar("SELECT document_json FROM strategy_approvals WHERE approval_id = ?")
-            .bind(&apply.approval_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(|error| crate::error::local_db_err(error.into()))?;
+    let document_json: Option<String> = sqlx::query_scalar(
+        "SELECT document_json FROM strategy_approvals WHERE approval_id = ? AND strategy_id = ?",
+    )
+    .bind(&apply.approval_id)
+    .bind(strategy_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| crate::error::local_db_err(error.into()))?;
     let Some(document_json) = document_json else {
         return Err(apply_internal(format!(
-            "apply `{}` names approval `{}`, which has no row",
+            "apply `{}` names approval `{}`, which this strategy has no row for",
             apply.apply_id, apply.approval_id
         )));
     };
