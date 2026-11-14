@@ -24,9 +24,9 @@
 //!    has to trust a comment. The I-000476 case is asserted by the target that
 //!    survives the fix, not by the collapsed spelling, so correcting the exporter
 //!    keeps it green while a retargeted edge still fails.
-//! 5. Each sample's hand-edited `workflow.json` loads back into a document that
-//!    exports the same manifest as its committed `preset.yaml`, with `assets[]`
-//!    hashed over the bytes on disk.
+//! 5. Each sample's hand-edited `workflow.json` loads back into a document whose `assets[]` names
+//!    exactly the templates its carriers reference, hashed over the bytes on disk, and that exports
+//!    the same manifest as its committed `preset.yaml`.
 //!
 //! The bundles live at the repo root; this crate resolves them via
 //! `CARGO_MANIFEST_DIR` so the test passes regardless of the invoking working
@@ -37,8 +37,8 @@ use nexus_orchestration::CapabilityRegistry;
 use nexus_preset::manifest::{EnterAction, ExitWhen, NextTarget, PresetManifest};
 use nexus_preset::workflow_ir::import_preset_manifest;
 use nexus_preset::{
-    export_preset, expr, import_preset_bundle, load_preset, validate_assets_in_bundle,
-    validate_path_safety, validate_preset_semantic,
+    collect_ir_asset_references, export_preset, expr, import_preset_bundle, load_preset,
+    validate_assets_in_bundle, validate_path_safety, validate_preset_semantic,
 };
 use serde_yaml::Value;
 
@@ -399,11 +399,14 @@ fn first_workflow_committed_yaml_round_trips() {
     assert_bundle_round_trips("examples/first-workflow");
 }
 
-/// Load one hand-edited `workflow.json`, check every `assets[]` hash against the bytes it names,
-/// and assert the manifest it exports equals the committed `preset.yaml`.
+/// Load one hand-edited `workflow.json`, check that `assets[]` names exactly the templates the
+/// carriers reference and hashes each of them over the bytes it names, then assert the manifest it
+/// exports equals the committed `preset.yaml`.
 ///
-/// The JSON is the authoring source, so the manifest equality — not the file's existence — is
-/// the acceptance: a member dropped by hand changes the export at a named YAML path.
+/// The JSON is the authoring source, so the manifest equality — not the file's existence — is the
+/// acceptance for everything `export_preset` projects: a member dropped by hand changes the export
+/// at a named YAML path. `assets[]` is not projected (export re-derives templates from the
+/// carriers), so it is compared against those carriers above instead.
 fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
     let root = repo_root().join(bundle);
     let json = std::fs::read_to_string(root.join("workflow.json"))
@@ -412,6 +415,24 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
         panic!("{bundle}/workflow.json does not load as a WorkflowDocument: {error}")
     });
 
+    let mut referenced: Vec<String> = collect_ir_asset_references(&document)
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect();
+    referenced.sort();
+    referenced.dedup();
+    let mut declared: Vec<String> = document
+        .assets
+        .iter()
+        .map(|asset| asset.id.clone())
+        .collect();
+    declared.sort();
+    assert_eq!(
+        referenced, declared,
+        "{bundle}/workflow.json: `assets[]` must name exactly the templates its carriers \
+         reference (left: referenced by a carrier, right: declared in `assets`)"
+    );
+
     for asset in &document.assets {
         let bytes = std::fs::read(root.join(&asset.path))
             .unwrap_or_else(|error| panic!("read {bundle}/{}: {error}", asset.path));
@@ -419,7 +440,8 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
         assert_eq!(
             asset.content_hash.as_deref(),
             Some(hash.as_str()),
-            "{bundle}/workflow.json: asset `{}` is not hashed over its current bytes",
+            "{bundle}/workflow.json: asset `{}` is not hashed over its current bytes \
+             (BLAKE3 of the file, hex — re-import the bundle or hash it by hand)",
             asset.path
         );
     }

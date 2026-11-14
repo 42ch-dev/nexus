@@ -22,8 +22,9 @@ pub use loader::{
     PresetLoadError, ValidationProblem, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
 };
 pub use validation::{
-    validate_assets_in_bundle, validate_path_safety, validate_preset_semantic, DiagnosticCategory,
-    DiagnosticSeverity, ValidationDiagnostic, ValidationResult,
+    collect_ir_asset_references, validate_assets_in_bundle, validate_path_safety,
+    validate_preset_semantic, DiagnosticCategory, DiagnosticSeverity, ValidationDiagnostic,
+    ValidationResult,
 };
 pub use workflow_ir::{export_preset, import_preset_bundle, PresetIrImport, WorkflowIrError};
 
