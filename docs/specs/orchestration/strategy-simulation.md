@@ -23,13 +23,14 @@ What a strategy simulation reports, what it refuses to claim, and where the disc
   A judge with zero, several, or a dangling default edge is a deterministic error, never a successful
   trajectory.
 - No provider is called. A trajectory carries no cost, no latency and no output.
-- Waits are derived from the reachable set: a `manual_wait` or a reachable `exit_when: manual` yields
-  `reason: manual` with the node id; a document-global `signals[].action: pause` yields
-  `reason: signal` with the signal name. **A wait is reported when its node is visited, and the walk
-  visits only a judge's single `default` edge**, so a wait reachable only through a judge's go or
-  no-go branch is never predicted — an under-report in the judge case, by construction, not an
-  omission to fix. Within the visited set the list over-reports instead: a wait the run would never
-  reach is still named, and a pause signal is named whatever the graph does with it.
+- Waits are derived from the visited set: a visited `manual_wait` node, or a visited state whose
+  `exit_when` is `manual`, yields `reason: manual` with the node id; a document-global
+  `signals[].action: pause` yields `reason: signal` with the signal name. **A wait is reported when
+  its node is visited, and the walk visits only a judge's single `default` edge**, so a wait
+  reachable only through a judge's go or no-go branch is never predicted — an under-report in the
+  judge case, by construction, not an omission to fix. Within the visited set the list over-reports
+  instead: a wait the run would never reach is still named, and a pause signal is named whatever the
+  graph does with it.
 
 Consumers MUST treat an unknown `simulation_level` as a newer, unsupported level rather than assuming
 `reachability`.
