@@ -1,7 +1,7 @@
 # ADR: Durability adjudication — I-000009 / I-000010 (v1.217)
 
 Status: implemented — adjudicated keep-defer in v1.217, then overtaken: v1.224 fixed both residuals and I-000009 / I-000010 closed resolved on 2026-10-25T11:24Z
-Archived: 2026-11-15 — archived on this date rather than on `Date:`, which records the 2026-11-10 migration into this corpus and not the v1.217 adjudication; the fixes landed 2026-10-25 (`7abd9d599`, `f8b8b62c4`), before that migration, so the code facts it reasons from no longer exist (I-000452)
+Archived: 2026-11-14 — archived on this date rather than on `Date:`, which records the 2026-11-10 migration into this corpus and not the v1.217 adjudication; the fixes landed 2026-10-25 (`7abd9d599`, `f8b8b62c4`), before that migration, so the code facts it reasons from no longer exist (I-000452)
 Date: 2026-11-10
 Scope: process — public-first workflow durability and budget residuals
 Source: migrated from the retired iteration-package adjudication record
@@ -10,7 +10,7 @@ Source: migrated from the retired iteration-package adjudication record
 
 Report-only adjudication of two low-severity, trigger-gated residual obligations (I-000009 large-artifact identity without a content digest; I-000010 spent-token power-loss durability). At the time of the adjudication neither issue was closed or waived: the question was whether either trigger had fired and whether a fix was justified then.
 
-Every code fact and line reference below describes the tree as it stood when the adjudication was written, in v1.217. None of them hold today: `artifactIdentity` now streams sha256 for every size and the `ARTIFACT_HASH_MAX_BYTES` threshold is gone (`7abd9d599`), and `spend` now fsyncs its file, the attempt directory and the parent directory (`f8b8b62c4`). The reasoning is kept because this is the record of a decision, not a description of the system; the landed contract lives in the guard's own header comment and its tests.
+Every code fact and line reference below describes the tree as it stood when the adjudication was written, in v1.217, and several no longer hold: `artifactIdentity` now streams sha256 for every size and the `ARTIFACT_HASH_MAX_BYTES` threshold is gone (`7abd9d599`), and `spend` now fsyncs its file, the attempt directory and the parent directory (`f8b8b62c4`). One threat-surface fact survives unchanged — `writeEvent` and `writeMarker` still write with `wx` and no `fsync` — so the exposure I-000010 described is closed for the spend record it was scoped to and open for those two records (I-000456). The reasoning is kept because this is the record of a decision, not a description of the system; the landed contract lives in the guard's own header comment and its tests.
 
 ## Decision
 
