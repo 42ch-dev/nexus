@@ -67,10 +67,12 @@ schedule runs from that applied identity, and a rollback installs the previous s
 new Apply. The qualification P3.5 carried — authoritative within one process lifetime only — is
 closed: admission resolves a strategy's current apply before it validates bindings, and recovery
 re-enters that same resolution, so a daemon restart during an in-flight applied run rebuilds the
-applied graph. At admission the role set bound to providers comes from the document that runs;
-recovery reuses the frozen descriptor's `agent_bindings` instead, so an apply landing before the
-restart leaves those bindings validated against one document while the graph is built from another
-(I-000443, I-000464).
+applied graph. At admission the role set bound to providers comes from the document that runs, and
+recovery still reads the frozen descriptor's `agent_bindings` rather than resolving them again
+(I-000443). That reuse can no longer cross documents: recovery compares the identity admission froze
+with the strategy's current apply and refuses with a typed error, `reconstruction_unavailable`, before
+it builds anything, so a re-apply during an in-flight run is a refused restart rather than bindings
+from one document and a graph from another.
 The composition spec owns the resulting precedence: a user bundle with a current apply runs
 from the applied document, embedded and system presets have no apply branch, and every other
 strategy keeps the YAML descriptor. What P4 still owes is its other half — the buildability
