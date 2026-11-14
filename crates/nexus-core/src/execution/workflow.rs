@@ -1601,7 +1601,12 @@ impl WorkflowRunCoordinator {
         // N-4: validate role/provider references BEFORE enqueue. Every
         // binding role must be a declared preset role (or `default`), and
         // every provider id must exist in the Host provider catalog.
-        validate_agent_bindings(&loaded, &agent_bindings, self.provider_catalog.as_ref()).await?;
+        validate_agent_bindings(
+            &loaded.manifest,
+            &agent_bindings,
+            self.provider_catalog.as_ref(),
+        )
+        .await?;
 
         // Freeze the supplied seed: JSON object → structured `preset.input.*`;
         // anything else → the core-context TEXT payload (the kind a bare seed
@@ -2501,7 +2506,7 @@ impl WorkflowRunCoordinator {
         //    accepts an empty map; a preset that needs prompt roles but has
         //    no configured default provider refuses with a typed admission
         //    error before any session/claim is created (qc1 F-001).
-        let roles = nexus_preset::required_prompt_roles(&loaded);
+        let roles = nexus_preset::required_prompt_roles(&loaded.manifest);
         let agent_bindings = if roles.is_empty() {
             std::collections::HashMap::new()
         } else {
@@ -2912,17 +2917,6 @@ impl WorkflowRunCoordinator {
                 None,
             ),
         };
-        // N-4: validate role/provider references BEFORE enqueue — the same
-        // gate session POST uses. Unknown roles/providers refuse before any
-        // run row is created.
-        validate_agent_bindings(&loaded, &agent_bindings, self.provider_catalog.as_ref()).await?;
-
-        // 5. Mint the owned session id and admit atomically (C-1).
-        let session_id = format!("{}:{}", row.preset_id, uuid::Uuid::new_v4());
-
-        // Build the wired outer graph (production prompt executor + tool
-        // dispatch + cancellation tokens) — mirrors boot.rs.
-        //
         // P3.5 precedence, stated once (compass D3):
         //
         //   strategy has current apply  →  build from document_json (IR)
@@ -2940,30 +2934,63 @@ impl WorkflowRunCoordinator {
         // `resolve_preset` (user → system → embedded) knows which bundle actually loaded. The
         // predicate is `crate::apply::is_user_preset`, the same one apply refuses on, so the two
         // sides cannot disagree about which schedules have an applied identity.
-        let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
+        //
+        // Resolved BEFORE the binding gate so the roles validated are the roles the run will
+        // execute, not the descriptor's.
         let applied = if crate::apply::is_user_preset(&row.preset_id, &loaded) {
-            crate::apply::current_apply(pool, &row.preset_id)
+            let current = crate::apply::current_apply(pool, &row.preset_id)
                 .await
-                .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?
+                .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?;
+            match current {
+                Some(apply) => {
+                    let document =
+                        match crate::apply::verified_apply_document(pool, &row.preset_id, &apply)
+                            .await
+                            .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?
+                        {
+                            Ok(document) => document,
+                            Err(refusal) => {
+                                return Err(RunControlError::AppliedIdentityInvalid(
+                                    refusal.into_error(),
+                                ));
+                            }
+                        };
+                    Some(document)
+                }
+                None => None,
+            }
         } else {
             None
         };
-        let wired = match applied {
-            Some(apply) => {
-                let document =
-                    match crate::apply::verified_apply_document(pool, &row.preset_id, &apply)
-                        .await
-                        .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?
-                    {
-                        Ok(document) => document,
-                        Err(refusal) => {
-                            return Err(RunControlError::AppliedIdentityInvalid(
-                                refusal.into_error(),
-                            ));
-                        }
-                    };
+
+        // N-4: validate role/provider references BEFORE enqueue — the same
+        // gate session POST uses. Unknown roles/providers refuse before any
+        // run row is created. The role material is the manifest of the
+        // document that will run: an applied document declares its own roles,
+        // and `export_preset` is the same normalisation the IR graph builder
+        // uses.
+        let applied_manifest = applied
+            .as_ref()
+            .map(nexus_preset::export_preset)
+            .transpose()
+            .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
+        validate_agent_bindings(
+            applied_manifest.as_ref().unwrap_or(&loaded.manifest),
+            &agent_bindings,
+            self.provider_catalog.as_ref(),
+        )
+        .await?;
+
+        // 5. Mint the owned session id and admit atomically (C-1).
+        let session_id = format!("{}:{}", row.preset_id, uuid::Uuid::new_v4());
+
+        // Build the wired outer graph (production prompt executor + tool
+        // dispatch + cancellation tokens) — mirrors boot.rs.
+        let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
+        let wired = match &applied {
+            Some(document) => {
                 nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
-                    &document,
+                    document,
                     // An applied user document's id is not a bundle id: reading
                     // the embedded bundle could serve a colliding preset's bytes.
                     nexus_orchestration::preset_runtime::IrTemplateSource::OwnSource,
@@ -3614,6 +3641,12 @@ impl ScheduleRunStarter for CoordinatorScheduleRunStarter {
 
 /// Validate role/provider references in agent bindings BEFORE enqueue (N-4).
 ///
+/// The role material is the manifest the run is actually built from, not the
+/// descriptor that happened to be loaded: the YAML path passes
+/// `&loaded.manifest`, the applied path passes `export_preset(&document)` of
+/// the applied document, so admission and graph construction read one role
+/// model.
+///
 /// Every binding role must be a declared preset role (or `default`), and
 /// every provider id must exist in the Host provider catalog. Unresolved
 /// keys refuse before any run row is created or any external effect runs.
@@ -3629,17 +3662,17 @@ impl ScheduleRunStarter for CoordinatorScheduleRunStarter {
 /// prompt path may accept an empty binding map — proven by graph
 /// inspection, never by deferring to the prompt executor.
 async fn validate_agent_bindings(
-    loaded: &nexus_preset::LoadedPreset,
+    manifest: &nexus_preset::manifest::PresetManifest,
     bindings: &std::collections::HashMap<String, nexus_orchestration::run_state::AgentBinding>,
     catalog: Option<&Arc<dyn ProviderCatalogPort>>,
 ) -> Result<(), RunControlError> {
     let role_ids: std::collections::HashSet<&str> =
-        loaded.roles.iter().map(|r| r.id.as_str()).collect();
+        manifest.roles.iter().map(|r| r.id.as_str()).collect();
 
     // N-4b: the COMPLETE prompt-role set is derived from the resolved outer
     // and inner graphs via the shared helper (same source the daemon's
     // internal binding builder uses — they can never drift).
-    let required = nexus_preset::required_prompt_roles(loaded);
+    let required = nexus_preset::required_prompt_roles(manifest);
 
     // Every required role must have an effective binding (N-4b). An empty
     // map is accepted ONLY when the preset has no prompt path at all.
