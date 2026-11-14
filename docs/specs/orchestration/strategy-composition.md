@@ -135,8 +135,8 @@ validates the bytes it installs, not whether intake can build a graph from them,
 installs and then refuses at admission (I-000448). The applied path carries no bundle root — serving a
 template would mean reading another package's bytes — so the §8.2.1 template refusal is unconditional
 there rather than conditional on a bad path: **any state whose `exit_when` is `llm_judge` is refused, and
-so is any document carrying an inner graph**, because every inner step is checked whether or not it names
-a template (I-000449).
+so is every inner step of every inner graph**, whether or not it names a template — the schema allows an
+inner graph with no steps, which is the only inner-graph shape the applied path admits (I-000449).
 
 ### 6. Why one structural authority
 
