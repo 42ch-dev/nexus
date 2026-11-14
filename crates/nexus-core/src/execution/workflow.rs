@@ -1048,6 +1048,14 @@ pub enum RunControlError {
     /// republished generation constructs a fresh coordinator.
     #[error("coordinator is shutting down: drive admission is fenced")]
     Closing,
+
+    /// The schedule's strategy has a current apply whose frozen document no
+    /// longer replays (edited after it was applied, or no longer a workflow
+    /// document at all). The refusal already names the strategy and the
+    /// apply and is a coded refusal, not an internal fault; nothing was
+    /// admitted and nothing ran.
+    #[error(transparent)]
+    AppliedIdentityInvalid(crate::CoreError),
 }
 
 /// Public control signal for a driven run (A4/A5).
@@ -2914,16 +2922,60 @@ impl WorkflowRunCoordinator {
 
         // Build the wired outer graph (production prompt executor + tool
         // dispatch + cancellation tokens) — mirrors boot.rs.
+        //
+        // P3.5 precedence, stated once (compass D3):
+        //
+        //   strategy has current apply  →  build from document_json (IR)
+        //   otherwise                   →  build from `preset_id` (YAML), exactly as before
+        //
+        // For a user-preset schedule `preset_id` IS the strategy id (compass D10), so no second
+        // key is introduced. Only a user (Canvas) preset may enter the lookup: an embedded or
+        // system preset id names no strategy, and treating one as a strategy id would redirect an
+        // existing YAML schedule. The IR path refuses an apply whose frozen bytes no longer hash
+        // to the identity the apply recorded, before any task exists.
         let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
-        let wired = nexus_orchestration::preset_runtime::build_wired_outer_graph(
-            &loaded,
-            &engine_proxy,
-            &registry,
-            daemon_tool_dispatch,
-            prompt_executor,
-            self.session_cancels.clone(),
-        )
-        .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
+        let applied = match crate::presets::locate_preset(nexus_home, &row.preset_id) {
+            Ok((source, _)) if source == "user" => {
+                crate::apply::current_apply(pool, &row.preset_id)
+                    .await
+                    .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?
+            }
+            _ => None,
+        };
+        let wired = match applied {
+            Some(apply) => {
+                let document =
+                    match crate::apply::verified_apply_document(pool, &row.preset_id, &apply)
+                        .await
+                        .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?
+                    {
+                        Ok(document) => document,
+                        Err(refusal) => {
+                            return Err(RunControlError::AppliedIdentityInvalid(
+                                refusal.into_error(),
+                            ));
+                        }
+                    };
+                nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
+                    &document,
+                    &engine_proxy,
+                    &registry,
+                    daemon_tool_dispatch,
+                    prompt_executor,
+                    self.session_cancels.clone(),
+                )
+                .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?
+            }
+            None => nexus_orchestration::preset_runtime::build_wired_outer_graph(
+                &loaded,
+                &engine_proxy,
+                &registry,
+                daemon_tool_dispatch,
+                prompt_executor,
+                self.session_cancels.clone(),
+            )
+            .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?,
+        };
 
         // 6. One Creator-DB transaction: schedule claim + v1 session row +
         //    schedule→session identity (C-1/C-2). A concurrent admission
