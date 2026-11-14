@@ -210,7 +210,7 @@ struct Unbuildable {
 /// One refused document per builder refusal kind, each frozen from the strategy's own candidate so
 /// only the refused part differs. The last row is the `Graph` kind: the document projects cleanly
 /// and only its wiring is invalid, which is the I-000448 state apply used to install.
-fn unbuildable_documents(base: &nexus_workflow_ir::WorkflowDocument) -> [Unbuildable; 4] {
+fn unbuildable_documents(base: &nexus_workflow_ir::WorkflowDocument) -> [Unbuildable; 5] {
     [
         Unbuildable {
             tag: "unmappable",
@@ -227,6 +227,17 @@ fn unbuildable_documents(base: &nexus_workflow_ir::WorkflowDocument) -> [Unbuild
                 concept: "node kind judge".to_string(),
                 location: "node draft".to_string(),
             },
+        },
+        // Passes the concept refusal (an inner step is a projected kind) and only the exporter
+        // refuses it: the id is not `<inner_graph>/<step>`.
+        Unbuildable {
+            tag: "unprojectable",
+            document: with_draft_kind(base, nexus_workflow_ir::WorkflowNodeKind::InnerStep),
+            builder_reason: IrOuterGraphError::Projection(
+                nexus_preset::WorkflowIrError::NotProjectable {
+                    reason: "inner step `draft` is not `<inner_graph>/<node_id>`".to_string(),
+                },
+            ),
         },
         Unbuildable {
             tag: "unresolved_template",
