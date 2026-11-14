@@ -822,8 +822,25 @@ CLI and daemon `POST /v1/daemon/presets:validate` call these functions directly 
 
 The IR → Task mapping preserves the YAML → graph-flow semantics above. IR validation uses the
 [shared semantic validation facade](#761-shared-semantic-validation-facade) (§7.6.1); this table
-does not add an IR execution intake, simulator, Apply path, or second validation implementation.
-Current production intake remains the YAML loader in §8.1.
+adds no second validation implementation.
+
+**Production intake loads a graph from IR in one case only: a user bundle with a current apply**,
+rebuilt by `build_wired_outer_graph_from_ir` (`crates/nexus-orchestration/src/preset_runtime.rs`)
+through `nexus_preset::export_preset` and `StateCompositeTask::from_manifest`. Every other strategy
+keeps the YAML loader of §8.1. The IR path reads only the strategy's own source — never an embedded
+bundle that happens to share its id — and refuses rather than building a partial graph:
+
+| Refusal | When |
+| --- | --- |
+| `ir_unmappable` | A concept with no execution counterpart in this table: `pattern_slot`, `nest_group`. |
+| `ir_unprojected` | A concept this table does map, but `export_preset` cannot project: `judge`, `manual_wait` and `join` nodes, and a `terminal` array that is not exactly one entry. |
+| `ir_unresolved_template` | An instruction template (an inner step's prompt, or the judge prompt of an `exit_when.llm_judge`) resolves to nothing through the declared template source, so its task would run without instructions. |
+
+The three rows are distinct facts and a client should not fold them: the first says the document
+uses something the model does not execute, the second says the concept executes but this adapter
+has no projection yet, the third says the document would run an empty prompt. The applied-identity
+contract and its two known limits are
+[strategy-composition.md §5.1](strategy-composition.md).
 
 | IR document concept | Task / graph-flow execution counterpart |
 | --- | --- |
@@ -851,9 +868,9 @@ Current production intake remains the YAML loader in §8.1.
 | `nodes[].effect_class` and `effect_summary` | Schema-required effect-fence metadata for validation and approval; neither creates a `Task` or changes graph execution. |
 | `meta.run_intents`, `meta.requires_capabilities`, `meta.cli_args`, `meta.gates` | Admission, loader, enqueue-time gate, and CLI-argument inputs checked before or while constructing tasks; they do not create graph nodes. |
 
-`pattern_slot`, `nest_group`, and `nests[]` are composition concepts, not P1 executable tasks.
-They require deterministic expansion into the concrete nodes and edges above before any future
-IR execution intake can construct a graph.
+`pattern_slot`, `nest_group`, and `nests[]` are composition concepts, not executable tasks. They
+require deterministic expansion into the concrete nodes and edges above before intake can construct
+a graph, and a document carrying them today is refused `ir_unmappable`.
 
 #### 8.3 Caching and reloading
 
