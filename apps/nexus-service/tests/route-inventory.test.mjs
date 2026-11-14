@@ -284,11 +284,22 @@ describe('route-inventory (P5-T5)', () => {
     assert.equal(approvals.status, 200, approvals.text);
     assert.deepEqual(approvals.payload, { items: [] });
 
-    const applyRefusal = await jsonFetch(`${baseUrl}${missingStrategy}/apply`, {
+    // Apply checks its user-preset guard before any read, so the probe needs a
+    // real user preset to reach the approval lookup: the scaffold surface writes
+    // that bundle, and the unknown hash is then the handler's own refusal.
+    const scaffolded = await jsonFetch(`${baseUrl}/v1/daemon/presets`, {
       method: 'POST',
-      body: { approval_content_hash: 'sha256:no-such-approval' },
+      body: { name: 'route-inventory-apply' },
     });
+    assert.equal(scaffolded.status, 201, scaffolded.text);
+
+    const applyRefusal = await jsonFetch(
+      `${baseUrl}/v1/daemon/strategies/${scaffolded.payload.id}/apply`,
+      { method: 'POST', body: { approval_content_hash: 'sha256:no-such-approval' } },
+    );
     assert.equal(applyRefusal.status, 422, applyRefusal.text);
+    assert.equal(applyRefusal.payload.success, false, applyRefusal.text);
+    assert.equal(applyRefusal.payload.error.code, 'invalid_input', applyRefusal.text);
     assert.equal(applyRefusal.payload.error.details.reason, 'approval_not_found');
 
     // No duplicate mounted identities, and mounted == authoritative inventory.
