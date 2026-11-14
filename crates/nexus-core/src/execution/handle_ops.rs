@@ -1477,7 +1477,7 @@ impl ExecutionHandle {
         // Explicit request bindings win, but only when they cover the preset's
         // declared prompt roles; a partial map is a refusal, not a silent
         // partial binding.
-        let roles = nexus_preset::required_prompt_roles(loaded);
+        let roles = nexus_preset::required_prompt_roles(&loaded.manifest);
         let agent_bindings = if let Some(explicit) = request.agent_bindings.as_ref() {
             let mut bindings = std::collections::HashMap::with_capacity(explicit.len());
             for (role, dto) in explicit {
@@ -1559,6 +1559,9 @@ impl ExecutionHandle {
             agent_bindings,
             parent_session_id: None,
             graph_name: None,
+            // Insertion never resolves an apply; admission freezes the apply it
+            // admits under on the run's own descriptor.
+            applied: None,
         };
         serde_json::to_vec(&descriptor)
             .map(Some)

@@ -43,6 +43,25 @@ pub struct RunDescriptorV1 {
     pub parent_session_id: Option<SessionId>,
     /// Named inner graph this run executes (child runs).
     pub graph_name: Option<String>,
+    /// Applied identity the run was admitted under: `None` when admission saw
+    /// no apply, and for any row persisted before this field existed.
+    ///
+    /// Frozen here for the same reason `preset_version`/`source` are: recovery
+    /// resolves the strategy's **current** apply, so without this a re-apply
+    /// between admission and a restart would rebuild the run from a document
+    /// it never ran (I-000464). Skipped when absent so a no-apply descriptor
+    /// serializes byte for byte as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied: Option<AppliedRunIdentity>,
+}
+
+/// The applied identity a run was admitted under.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AppliedRunIdentity {
+    /// The `strategy_applies.apply_id` that was current at admission.
+    pub apply_id: String,
+    /// The `content_hash` that apply pinned.
+    pub content_hash: String,
 }
 
 /// Role → provider binding (A1).

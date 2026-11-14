@@ -115,28 +115,68 @@ listed row appends an apply and leaves the list untouched.
 
 #### 5.1 What intake does with an applied identity
 
-For a **user bundle with a current apply**, admission rebuilds the graph from the applied document through
-the [§8.2.1 mapping](orchestration-engine.md#821-ir--task-mapping) and runs that; every other strategy keeps the YAML loader of
-[§8.1](orchestration-engine.md). The discriminator is the source identity the loader recorded, never a
-preset lookup — the embedded-first lookup would hand an applied user bundle the embedded preset's graph when
-the ids collide.
+**Precedence.** Admission and recovery choose a strategy's document in exactly three cases:
 
-Admission re-runs the same recomputation before it builds: an apply whose `document_json` no longer hashes
+| Strategy the loader resolved | Document the run is built from |
+| --- | --- |
+| a user bundle with a current apply | the applied `WorkflowDocument`, through the [§8.2.1 mapping](orchestration-engine.md#821-ir--task-mapping) |
+| an embedded or `_system.` preset | the YAML descriptor — the apply branch is never entered |
+| a user bundle with no current apply | the YAML descriptor of [§8.1](orchestration-engine.md) |
+
+The apply branch is entered only for a user bundle: `is_user_preset` requires the source identity the
+loader recorded to be a directory bundle and refuses every `_system.` id, so an embedded or system preset
+never names a strategy and is never looked up. The discriminator is that loader classification, never a
+preset lookup — the embedded-first lookup would hand an applied user bundle the embedded preset's graph
+when the ids collide. A user bundle whose apply rows have no successor-less row is on the YAML path too:
+`current_apply` returning `None` is an answer, not a refusal.
+
+Admission resolves that document **before** the binding gate, and the applied arm's role set comes from
+`export_preset(&document)` — the same normalisation the IR graph builder consumes — while the YAML arm
+passes the loaded manifest; the graph is then built from the document those roles were read from.
+
+Recovery re-enters through the same route instead of a second reader (`AppliedDocumentSource` →
+`is_user_preset` → `current_apply` → `verified_apply_document`), and a strategy with no apply recovers its
+descriptor graph exactly as before.
+
+Recovery compares that resolution with the run's own record **before** it builds: the run descriptor freezes
+the `apply_id` and `content_hash` admitted with the run, and a restart refuses
+(`reconstruction_unavailable`, non-replayable) when the strategy's current apply is any other row — whether a
+re-apply superseded it or it was rolled back. A run admitted with no apply records no identity — and
+neither does any run persisted before the descriptor carried one — so its descriptor serializes byte for
+byte as before and recovery resolves it the way it always has.
+
+Both sides re-run the same recomputation before building: an apply whose `document_json` no longer hashes
 to its recorded `content_hash` is `applied_document_changed`, and one that cannot be read is
 `applied_document_unverifiable`. Bytes edited after apply are therefore a typed refusal, not a reinterpreted
 run.
 
-**Known limit — source freeze holds within one process lifetime.** An applied run is admitted and recovered
-with the YAML descriptor, so a daemon restart during an in-flight run rebuilds the *preset* graph, and
-`validate_agent_bindings` still derives its role sets from the preset, so a prompt role that exists only in
-the applied document is not provider-checked and the run fails at the prompt executor after admission
-(I-000443). A second limit is adjacent and wider than "the templates could not be resolved": apply
-validates the bytes it installs, not whether intake can build a graph from them, so an applied document
-installs and then refuses at admission (I-000448). The applied path carries no bundle root — serving a
-template would mean reading another package's bytes — so the §8.2.1 template refusal is unconditional
-there rather than conditional on a bad path: **any state whose `exit_when` is `llm_judge` is refused, and
-so is every inner step of every inner graph**, whether or not it names a template — the schema allows an
-inner graph with no steps, which is the only inner-graph shape the applied path admits (I-000449).
+**Known limits on the applied path.** Each bounds what an applied run can do; none of them turns the
+applied document back into a hint.
+
+- **Every applied prompt runs under the `default` role.** The prompt capability sends `agent_ref: None`, so
+  a prompt role declared only in the applied document passes admission and never drives a prompt (I-000462).
+- **`required_prompt_roles` scans `llm_judge` exits and inner-graph `acp_prompt` nodes only.** A document
+  that prompts through a capability enter action contributes no required role, so a run can be admitted
+  without the `default` binding and fail at the prompt instead of at admission (I-000463).
+- **A run whose descriptor records no applied identity still resolves against the current apply.** Rows
+  persisted before the descriptor carried one, and runs whose descriptor is built outside admission, hold
+  no identity, so a re-apply before a restart reinterprets that run's persisted position. Admission
+  freezes the identity on every descriptor it writes, so the admitted path is closed; the reachability of
+  those out-of-admission construction sites is I-000467.
+- **Reconstruction validates inner descendants against the descriptor manifest** while it builds the graph
+  from the applied document (I-000465). The applied path admits one inner shape — a declared inner graph
+  with no steps (see below) — and that shape is built and enterable: `project_inner_graphs` keeps it,
+  `build_inner_graphs` inserts it, and `EnterAction::InnerGraph` spawns a child session for it. On restart
+  the child's `graph_name` is checked against the descriptor manifest's `valid_inner` before the terminal
+  short-circuit, so an inner graph only the applied document declares already makes the run
+  non-replayable.
+- **Apply validates the bytes it installs, not whether intake can build a graph from them**, so an applied
+  document installs and then refuses at admission (I-000448). The applied path carries no bundle root —
+  serving a template would mean reading another package's bytes — so the §8.2.1 template refusal is
+  unconditional there rather than conditional on a bad path: **any state whose `exit_when` is `llm_judge`
+  is refused, and so is every inner step of every inner graph**, whether or not it names a template — the
+  schema allows an inner graph with no steps, which is the only inner-graph shape the applied path admits
+  (I-000449).
 
 ### 6. Why one structural authority
 

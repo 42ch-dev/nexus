@@ -727,6 +727,12 @@ pub struct EngineSharedState {
     /// engines with no creator-DB core-context store (in-memory/test engines,
     /// session-only callers): no boundary refresh is attempted.
     pub core_context_store: Option<Arc<crate::schedule::derivation::CoreContextManager>>,
+    /// Applied-identity source (P4) — recovery resolves a run's current apply
+    /// through the SAME route admission uses, so a restart mid-run reconstructs
+    /// the applied graph instead of the descriptor's. `None` on engines that
+    /// never wire it (in-memory/test engines): recovery keeps the
+    /// descriptor-only behaviour.
+    pub applied_document_source: Option<Arc<dyn crate::capability::AppliedDocumentSource>>,
 }
 
 impl EngineSharedState {
@@ -744,6 +750,7 @@ impl EngineSharedState {
             prompt_executor: None,
             workspace_state_provider: None,
             core_context_store: None,
+            applied_document_source: None,
         }
     }
 
@@ -764,6 +771,7 @@ impl EngineSharedState {
             prompt_executor: None,
             workspace_state_provider: None,
             core_context_store: None,
+            applied_document_source: None,
         }
     }
 
@@ -790,6 +798,18 @@ impl EngineSharedState {
         store: Arc<crate::schedule::derivation::CoreContextManager>,
     ) {
         self.core_context_store = Some(store);
+    }
+
+    /// Wire the applied-identity source recovery reads (P4).
+    ///
+    /// Kept on the SHARED state so every handle recovery runs through (boot
+    /// re-drive and the on-demand attach for a resumed human wait) resolves the
+    /// same source.
+    pub fn set_applied_document_source(
+        &mut self,
+        source: Arc<dyn crate::capability::AppliedDocumentSource>,
+    ) {
+        self.applied_document_source = Some(source);
     }
 
     /// Register a run's coordinator cancellation token (A1, fail-closed
@@ -2644,6 +2664,7 @@ impl EngineSharedState {
                 agent_bindings: root_descriptor.agent_bindings.clone(),
                 parent_session_id: Some(SessionId(params.parent_session_id.clone())),
                 graph_name: Some(params.inner_graph.id.clone()),
+                applied: root_descriptor.applied.clone(),
             };
             let checkpoint = RunCheckpoint {
                 root: &session_mut,
@@ -3631,6 +3652,23 @@ impl GraphFlowEngine {
         }
     }
 
+    /// Wire the applied-identity source recovery reads (P4).
+    ///
+    /// Called once at daemon boot with the same Creator DB the schedule intake
+    /// resolves applies through, so a restart re-enters the applied identity
+    /// admission used instead of the descriptor bundle.
+    pub fn set_applied_document_source(
+        &mut self,
+        source: std::sync::Arc<dyn crate::capability::AppliedDocumentSource>,
+    ) {
+        match std::sync::Arc::get_mut(&mut self.state) {
+            Some(state) => state.set_applied_document_source(source),
+            None => {
+                tracing::warn!("applied document source not wired: engine shared state is aliased");
+            }
+        }
+    }
+
     /// Wire the creator-DB core-context store for the outer-state boundary
     /// refresh (v1.195 P0-T6).
     ///
@@ -4039,14 +4077,90 @@ impl GraphFlowEngine {
             state: self.state.clone(),
         });
         let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
-        let wired = crate::preset_runtime::build_wired_outer_graph(
-            &loaded,
-            &engine_proxy,
-            &caps,
-            self.daemon_tool_dispatch.clone(),
-            self.prompt_executor.clone(),
-            self.session_cancels.clone(),
-        )?;
+        // P4: an applied run executes the strategy's applied document, and a
+        // restart re-enters through the SAME resolution admission uses — the
+        // source owns the whole route (classification, current apply, content
+        // hash), so there is no second reader of the approved bytes. The
+        // bundle checks above stay the frozen-source proof for the no-apply
+        // path and for every applied run's descriptor bundle.
+        let applied = match &self.state.applied_document_source {
+            Some(source) => source
+                .applied_document(&descriptor.preset_id, &loaded)
+                .await
+                .map_err(|error| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "R6: applied identity of session {} does not replay: {error} \
+                         (reconstruction_unavailable, non-replayable)",
+                        session_id.0
+                    )))
+                })?,
+            None => None,
+        };
+        // P4 Task 4 (I-000464): a run admitted under an applied identity is
+        // rebuilt ONLY from that identity. The resolution above answers with the
+        // strategy's CURRENT apply, so a re-apply (or a rollback that gave the
+        // admitted row a successor) between admission and this restart would
+        // otherwise rebuild the run from a document it never ran — carrying its
+        // old position, context and bindings into a graph it was not admitted
+        // under. Refusing keeps the run non-replayable, exactly as admission
+        // refuses an applied identity it cannot verify; a descriptor with no
+        // recorded identity (no apply then, or a row predating the freeze) keeps
+        // the pre-existing resolution unchanged.
+        let applied = match (descriptor.applied.as_ref(), applied) {
+            (None, current) => current.map(|applied| applied.document),
+            (Some(recorded), Some(current)) if current.identity == *recorded => {
+                Some(current.document)
+            }
+            (Some(recorded), current) => {
+                let current = current.map_or_else(
+                    || "the strategy no longer has a current apply".to_string(),
+                    |current| {
+                        format!(
+                            "its current apply is `{}` (content hash `{}`)",
+                            current.identity.apply_id, current.identity.content_hash
+                        )
+                    },
+                );
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "R6: session {} was admitted under apply `{}` (content hash `{}`), but \
+                         {current} — the applied identity changed since admission, so this run's \
+                         graph cannot be rebuilt from the current document \
+                         (reconstruction_unavailable, non-replayable)",
+                        session_id.0, recorded.apply_id, recorded.content_hash
+                    )),
+                ));
+            }
+        };
+        let wired = match &applied {
+            // Same rule admission states: an applied user document's id is not a
+            // bundle id, so reading the embedded bundle could serve a colliding
+            // preset's bytes.
+            Some(document) => crate::preset_runtime::build_wired_outer_graph_from_ir(
+                document,
+                crate::preset_runtime::IrTemplateSource::OwnSource,
+                &engine_proxy,
+                &caps,
+                self.daemon_tool_dispatch.clone(),
+                self.prompt_executor.clone(),
+                self.session_cancels.clone(),
+            )
+            .map_err(|error| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "R6: applied document of session {} is not buildable: {error} \
+                     (reconstruction_unavailable, non-replayable)",
+                    session_id.0
+                )))
+            })?,
+            None => crate::preset_runtime::build_wired_outer_graph(
+                &loaded,
+                &engine_proxy,
+                &caps,
+                self.daemon_tool_dispatch.clone(),
+                self.prompt_executor.clone(),
+                self.session_cancels.clone(),
+            )?,
+        };
 
         // Create FlowRunner with the wired graph and existing storage.
         // The storage already contains the persisted session data, so the
@@ -4147,6 +4261,9 @@ impl GraphFlowEngine {
             agent_bindings: HashMap::new(),
             parent_session_id: None,
             graph_name: None,
+            // Filled by the admission layer when the schedule's strategy has a
+            // current apply; this seam never resolves one.
+            applied: None,
         })
     }
 
@@ -4335,6 +4452,7 @@ impl GraphFlowEngine {
         expected_core_context_version: u32,
         agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
         frozen_source: Option<PresetSourceIdentity>,
+        applied: Option<crate::run_state::AppliedRunIdentity>,
         admission_gate: Option<crate::run_state::ScheduleAdmissionGate>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
@@ -4349,6 +4467,9 @@ impl GraphFlowEngine {
         descriptor.work_id = work_id;
         descriptor.input = input.clone();
         descriptor.agent_bindings = agent_bindings;
+        // P4 Task 4: freeze the apply the caller resolved this run under, so a
+        // restart can tell whether the strategy's current apply is still that one.
+        descriptor.applied = applied;
         // N-5/N-5b: the runner is built from the FROZEN source identity
         // persisted with the schedule, never by resolving current registry
         // precedence and discarding the stored identity. The stored identity
@@ -4485,6 +4606,7 @@ impl GraphFlowEngine {
                 agent_bindings: HashMap::new(),
                 parent_session_id: None,
                 graph_name: None,
+                applied: None,
             };
             let checkpoint = RunCheckpoint {
                 root: &session,
@@ -4625,6 +4747,7 @@ impl OrchestrationEngine for GraphFlowEngine {
                 agent_bindings: HashMap::new(),
                 parent_session_id: None,
                 graph_name: None,
+                applied: None,
             };
             store
                 .start_run(
@@ -8966,6 +9089,7 @@ mod tests {
             agent_bindings: HashMap::new(),
             parent_session_id: None,
             graph_name: None,
+            applied: None,
         }
     }
 

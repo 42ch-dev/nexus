@@ -421,7 +421,7 @@ async fn try_fire_role(
             } else {
                 let caps = crate::capability::CapabilityRegistry::with_builtins();
                 if let Ok(loaded) = nexus_preset::load_embedded_preset(preset_id, &caps) {
-                    let roles = nexus_preset::required_prompt_roles(&loaded);
+                    let roles = nexus_preset::required_prompt_roles(&loaded.manifest);
                     if !roles.is_empty() {
                         warn!(
                             work_id = %row.work_id, role = role_name, preset_id,

@@ -173,6 +173,7 @@ impl ResearchScheduleFixture {
             agent_bindings: std::collections::HashMap::new(),
             parent_session_id: None,
             graph_name: None,
+            applied: None,
         };
         let descriptor_bytes =
             serde_json::to_vec(&descriptor).expect("research fixture descriptor must serialize");

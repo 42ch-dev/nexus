@@ -2165,6 +2165,7 @@ async fn seed_prompt_run(
         agent_bindings: bindings,
         parent_session_id: None,
         graph_name: None,
+        applied: None,
     };
     let root = graph_flow::Session::new_from_task(session_id.to_string(), "recall");
     root.context
@@ -7888,6 +7889,193 @@ async fn a_user_bundle_shadowing_an_embedded_id_keeps_its_apply() {
     assert!(
         read_marker(&fixture.root, PRESET_MARKER).is_none(),
         "the preset's own task must not execute once the shadowing strategy has a current apply"
+    );
+
+    fixture.core.close().await.expect("core close");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Applied identity — the role set comes from the document that runs
+// (`.mstar/plans/p4a-applied-identity.md` Task 1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The user preset whose YAML descriptor declares NO role and whose graph issues
+/// one prompt through an inline `acp.prompt` capability (an applied document
+/// cannot name a bundle template: `IrTemplateSource::OwnSource` resolves none).
+const APPLIED_ROLE_PRESET: &str = "intake-applied-role";
+
+/// The role ONLY the applied document declares.
+const APPLIED_ONLY_ROLE: &str = "applied-reviewer";
+
+/// [`APPLIED_ROLE_PRESET`]'s bundle YAML: open the `notes` scope, commit the
+/// preset-side marker, then prompt. `roles:` is absent on purpose — admission
+/// must read the role set from the applied document.
+fn applied_role_preset_yaml(preset_id: &str) -> String {
+    format!(
+        r#"
+preset:
+  id: {preset_id}
+  version: 1
+  kind: creator
+  description: "applied-role admission fixture"
+  requires_capabilities:
+    - workspace.open
+    - workspace.commit
+    - acp.prompt
+  initial: open_scope
+  terminal: done
+states:
+  - id: open_scope
+    enter:
+      - kind: capability
+        name: workspace.open
+        args:
+          path: notes
+    exit_when: {{ kind: rule }}
+    next: commit_scope
+  - id: commit_scope
+    enter:
+      - kind: capability
+        name: workspace.commit
+        args:
+          sessionId: "{{{{_capability_output.sessionId}}}}"
+          changes:
+            - path: {PRESET_MARKER}
+              op: create
+              contentBase64: "{PRESET_MARKER_B64}"
+    exit_when: {{ kind: rule }}
+    next: prompt_scope
+  - id: prompt_scope
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "review the applied document"
+    exit_when: {{ kind: rule }}
+    next: done
+  - id: done
+    terminal: true
+"#
+    )
+}
+
+/// The approved snapshot: the import candidate with the applied-side commit and
+/// the role only this document declares.
+fn applied_role_document(
+    base: &nexus_workflow_ir::WorkflowDocument,
+) -> nexus_workflow_ir::WorkflowDocument {
+    let mut document = applied_side_document(base);
+    document
+        .roles
+        .push(nexus_workflow_ir::WorkflowRoleDefinition {
+            id: APPLIED_ONLY_ROLE.to_string(),
+            description: "declared by the applied document only".to_string(),
+            system_prompt_file: String::new(),
+            recommended_skills: Vec::new(),
+        });
+    document
+}
+
+/// The role set admission validates comes from the document that RUNS.
+///
+/// The YAML descriptor declares no role; the applied document declares
+/// `applied-reviewer` and its graph issues a prompt. The schedule carries a
+/// binding for that role, so admission must accept it and the run must reach the
+/// prompt executor.
+///
+/// Mutation this fails on: admission validating the descriptor — the applied
+/// role is an unknown role there, so admission refuses
+/// (`unknown role 'applied-reviewer' … declared roles: none`), no run row exists
+/// and no prompt is ever issued.
+#[tokio::test]
+#[serial_test::serial]
+async fn an_applied_document_role_the_descriptor_does_not_declare_reaches_the_prompt() {
+    let fixture = hosted_fixture().await;
+    let nexus_home = fixture.tmp.path().join(".nexus42");
+    write_preset_bundle(
+        &nexus_home,
+        APPLIED_ROLE_PRESET,
+        &applied_role_preset_yaml(APPLIED_ROLE_PRESET),
+        "",
+    );
+    let principal = fixture.core.active_principal().await.unwrap();
+    let pool = fixture.handle.coordinator().pool();
+
+    // The apply precondition row only: admission fails closed on a pre-seed row
+    // (no version-0 core-context record), and the row that actually runs is
+    // added through the public path AFTER the apply.
+    sqlx::query(
+        "INSERT INTO creator_schedules \
+         (schedule_id, creator_id, preset_id, preset_version, status, concurrency_kind, \
+          current_core_context_version, created_at, updated_at) \
+         VALUES (?, ?, ?, 1, 'pending', 'serial', 0, 0, 0)",
+    )
+    .bind(format!("SCH-precondition-role-{APPLIED_ROLE_PRESET}"))
+    .bind(CREATOR)
+    .bind(APPLIED_ROLE_PRESET)
+    .execute(pool.as_ref())
+    .await
+    .expect("the apply precondition row");
+
+    let candidate = fixture
+        .core
+        .read_strategy_candidate(&principal, APPLIED_ROLE_PRESET)
+        .await
+        .expect("the strategy's import candidate")
+        .document;
+    assert!(
+        candidate.roles.is_empty(),
+        "the YAML descriptor must declare no role for this proof"
+    );
+    let applied_side = applied_role_document(&candidate);
+    let hash = seed_intake_approval(
+        &fixture.core,
+        &principal,
+        APPLIED_ROLE_PRESET,
+        &applied_side,
+    )
+    .await;
+    fixture
+        .core
+        .apply_strategy(&principal, APPLIED_ROLE_PRESET, &hash)
+        .await
+        .expect("the approved snapshot applies");
+
+    // The applied document declares `applied-reviewer`; the descriptor declares
+    // nothing. This binding is the admission-side proof: the descriptor path
+    // refuses it as an unknown role, the applied path accepts it. A capability
+    // prompt resolves the `default` role at prompt time, so that binding lets
+    // the run reach the prompt port.
+    let mut bindings = HashMap::new();
+    for role in [APPLIED_ONLY_ROLE, "default"] {
+        bindings.insert(
+            role.to_string(),
+            AgentBindingDto {
+                provider_id: PROVIDER.to_string(),
+                model: None,
+            },
+        );
+    }
+    let schedule_id = add_intake_schedule(&fixture, APPLIED_ROLE_PRESET, Some(bindings)).await;
+
+    wait_for_prompt_count(&fixture.host, 1).await;
+    let run_id = wait_for_schedule_run(pool.as_ref(), &schedule_id).await;
+    fixture.host.release_all();
+    wait_for_run_status(pool.as_ref(), &run_id, "completed").await;
+
+    assert_eq!(
+        fixture.host.prompt_count(),
+        1,
+        "admission read the applied document's role set, so the run reaches the prompt port"
+    );
+    assert_eq!(
+        read_marker(&fixture.root, APPLIED_MARKER).expect("the applied document's task commits"),
+        APPLIED_BYTES,
+        "the run executed the applied document"
+    );
+    assert!(
+        read_marker(&fixture.root, PRESET_MARKER).is_none(),
+        "the descriptor's own task must not execute once the strategy has a current apply"
     );
 
     fixture.core.close().await.expect("core close");

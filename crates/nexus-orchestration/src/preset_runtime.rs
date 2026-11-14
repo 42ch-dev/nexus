@@ -29,7 +29,7 @@ pub fn default_bindings_for_preset(
 ) -> Option<std::collections::HashMap<String, crate::run_state::AgentBinding>> {
     let caps = crate::capability::CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset(preset_id, &caps).ok()?;
-    let roles = required_prompt_roles(&loaded);
+    let roles = required_prompt_roles(&loaded.manifest);
     if roles.is_empty() {
         return Some(std::collections::HashMap::new());
     }
