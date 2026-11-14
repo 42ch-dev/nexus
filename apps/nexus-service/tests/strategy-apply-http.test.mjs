@@ -7,15 +7,16 @@ import { before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Apply transport (`POST /v1/daemon/strategies/{strategy_id}/apply` and
- * `GET /v1/daemon/strategies/{strategy_id}/applied`): the preset family mounts both at the
- * Strategy tier and hands the whole request body to the core authority. The apply write, its five
- * refusals, the append-only rows and the `candidate_revision` ordering are proven against a real
- * store in `crates/nexus-core/tests/apply_write.rs`; this target proves the HTTP contract — path
- * id, tier, payload passthrough, the applied identity read back through the status route, the null
- * `current_apply` case, and the refusal status mapping (`already_applied` and
- * `approval_hash_changed` are conflicts, mirroring `strategy_already_approved`; the other three
- * refusals keep the core's client-error status).
+ * Apply transport (`POST /v1/daemon/strategies/{strategy_id}/apply`,
+ * `GET /v1/daemon/strategies/{strategy_id}/applied` and
+ * `GET /v1/daemon/strategies/{strategy_id}/approvals`): the preset family mounts all three at
+ * the Strategy tier and hands the whole request body to the core authority. The apply write, its
+ * five refusals, the append-only rows and the `candidate_revision` ordering are proven against a
+ * real store in `crates/nexus-core/tests/apply_write.rs`; this target proves the HTTP contract —
+ * path id, tier, payload passthrough, the applied identity read back through the status route, the
+ * null `current_apply` case, the approvals list passthrough (the rollback target read), and the
+ * refusal status mapping (`already_applied` and `approval_hash_changed` are conflicts, mirroring
+ * `strategy_already_approved`; the other three refusals keep the core's client-error status).
  */
 
 let routes;
@@ -32,6 +33,7 @@ before(async () => {
 const STRATEGY = 'novel-project-init';
 const APPLY_PATH = `/v1/daemon/strategies/${STRATEGY}/apply`;
 const APPLIED_PATH = `/v1/daemon/strategies/${STRATEGY}/applied`;
+const APPROVALS_PATH = `/v1/daemon/strategies/${STRATEGY}/approvals`;
 
 const APPLIED = {
   apply_id: 'apl_00000000-0000-4000-8000-000000000000',
@@ -47,6 +49,16 @@ const NEWEST = {
   candidate_revision: 7,
   approved_at: '2026-11-13T00:00:00Z',
 };
+
+/** The superseded approval: neither the live one nor the newest, so applying it rolls back. */
+const SUPERSEDED = {
+  approval_id: 'apr_00000000-0000-4000-8000-000000000003',
+  content_hash: 'b'.repeat(64),
+  candidate_revision: 6,
+  approved_at: '2026-11-12T00:00:00Z',
+};
+
+const APPROVALS = { items: [NEWEST, SUPERSEDED] };
 
 function routeFor(method, path) {
   const route = routes.DOMAIN_ROUTES.find(
@@ -67,6 +79,10 @@ function serviceWith(calls) {
       strategyApplied: async (principal, strategyId) => {
         calls.push({ principal, strategyId });
         return { current_apply: APPLIED, newest_approval: NEWEST };
+      },
+      strategyApprovals: async (principal, strategyId) => {
+        calls.push({ principal, strategyId });
+        return APPROVALS;
       },
     },
   };
@@ -231,5 +247,46 @@ describe('applied status (GET /v1/daemon/strategies/{id}/applied)', () => {
     );
 
     assert.deepEqual(response.body, { current_apply: null, newest_approval: null });
+  });
+});
+
+describe('approvals list (GET /v1/daemon/strategies/{id}/approvals)', () => {
+  test('mounts on the Strategy tier of the preset family', () => {
+    const route = routeFor('GET', APPROVALS_PATH);
+    assert.equal(route.tier, 'tier2');
+    assert.equal(route.family, 'presets');
+  });
+
+  test('returns every approval in the core order, superseded rows included', async () => {
+    const calls = [];
+    const response = await routeFor('GET', APPROVALS_PATH).handle(
+      serviceWith(calls),
+      [STRATEGY],
+      new URLSearchParams(),
+      undefined,
+    );
+
+    // Passthrough, not a re-sort: the wire order is the core's candidate_revision order.
+    assert.deepEqual(response.body, APPROVALS);
+    assert.equal(response.body.items[0].approval_id, NEWEST.approval_id);
+    assert.equal(response.body.items[1].approval_id, SUPERSEDED.approval_id);
+    assert.deepEqual(calls, [{ principal: 'principal-handle', strategyId: STRATEGY }]);
+  });
+
+  test('a strategy with no approval answers an empty list instead of a refusal', async () => {
+    const service = {
+      core: {
+        activePrincipal: async () => 'principal-handle',
+        strategyApprovals: async () => ({ items: [] }),
+      },
+    };
+    const response = await routeFor('GET', APPROVALS_PATH).handle(
+      service,
+      [STRATEGY],
+      new URLSearchParams(),
+      undefined,
+    );
+
+    assert.deepEqual(response.body, { items: [] });
   });
 });

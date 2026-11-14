@@ -98,7 +98,15 @@ vi.mock('@/lib/canvas/use-outline-data', async (orig) => {
 });
 
 vi.mock('@/lib/nexus/query-keys', () => ({
-  queryKeys: { chapters: { outlines: () => ['ch', 'out'] } },
+  queryKeys: {
+    chapters: { outlines: () => ['ch', 'out'] },
+    // The Strategy canvas mounts the live-apply and approval-list reads, so this
+    // suite's partial key mock has to carry both families it evaluates on mount.
+    strategies: {
+      applied: (id: string) => ['strategies', 'applied', id],
+      approvals: (id: string) => ['strategies', 'approvals', id],
+    },
+  },
 }));
 
 vi.mock('@/components/canvas/outline-canvas/rf-projection', () => ({

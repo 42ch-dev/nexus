@@ -297,6 +297,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("SimulationTrajectory", 1),
     ("StrategyAppliedStatus", 1),
     ("StrategyApplyRequest", 1),
+    ("StrategyApprovals", 1),
     ("StrategyApproveRequest", 1),
     ("StrategyComposeRequest", 1),
     ("StrategyComposeResponse", 1),

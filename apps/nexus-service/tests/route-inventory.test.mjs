@@ -137,6 +137,7 @@ describe('route-inventory (P5-T5)', () => {
   ['GET', '/v1/daemon/runtime/health', 'unguarded', 'runtime'],
   ['GET', '/v1/daemon/runtime/status', 'unguarded', 'runtime'],
   ['GET', '/v1/daemon/strategies/([^/]+)/applied', 'tier2', 'presets'],
+  ['GET', '/v1/daemon/strategies/([^/]+)/approvals', 'tier2', 'presets'],
   ['GET', '/v1/daemon/strategies/([^/]+)/candidate', 'tier2', 'presets'],
   ['GET', '/v1/daemon/strategies/([^/]+)/workflow-ir', 'tier2', 'presets'],
   ['GET', '/v1/daemon/timeline/overview', 'tier2', 'worlds'],
@@ -276,6 +277,12 @@ describe('route-inventory (P5-T5)', () => {
     const appliedStatus = await jsonFetch(`${baseUrl}${missingStrategy}/applied`);
     assert.equal(appliedStatus.status, 200, appliedStatus.text);
     assert.deepEqual(appliedStatus.payload, { current_apply: null, newest_approval: null });
+
+    // The same cross for the rollback read: `strategyApprovals` is the napi
+    // export the Apply target list mounts.
+    const approvals = await jsonFetch(`${baseUrl}${missingStrategy}/approvals`);
+    assert.equal(approvals.status, 200, approvals.text);
+    assert.deepEqual(approvals.payload, { items: [] });
 
     const applyRefusal = await jsonFetch(`${baseUrl}${missingStrategy}/apply`, {
       method: 'POST',

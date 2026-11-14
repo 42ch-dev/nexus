@@ -399,6 +399,23 @@ async fn the_status_read_reports_the_current_apply_and_the_highest_candidate_rev
     assert_eq!(newest.approval_id, newer_approval);
     assert_eq!(newest.candidate_revision, 5);
 
+    // The rollback target read is the same total order: the first item IS `newest_approval`, and
+    // the live (older) approval is still listed — nothing is hidden once it has been applied.
+    let approvals = setup
+        .core
+        .strategy_approvals(&setup.principal, STRATEGY)
+        .await
+        .unwrap();
+    assert_eq!(
+        approvals
+            .items
+            .iter()
+            .map(|approval| approval.approval_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![newest.approval_id.as_str(), older_approval.as_str()],
+    );
+    assert_eq!(approvals.items[1].content_hash, older_hash);
+
     setup.core.close().await.unwrap();
 }
 
@@ -428,5 +445,13 @@ async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
         .unwrap();
     assert!(empty.current_apply.is_none());
     assert!(empty.newest_approval.is_none());
+
+    // The rollback target read answers an empty list for the same strategy, never a refusal.
+    let no_approvals = setup
+        .core
+        .strategy_approvals(&setup.principal, "strategy-with-nothing")
+        .await
+        .unwrap();
+    assert!(no_approvals.items.is_empty());
     setup.core.close().await.unwrap();
 }

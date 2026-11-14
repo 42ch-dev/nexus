@@ -110,6 +110,9 @@ import type {
   StrategyPatchTransitionRequest,
   StrategySimulationRequest,
   StrategyApproveRequest,
+  StrategyAppliedStatus,
+  StrategyApprovals,
+  StrategyApplyRequest,
   StrategyComposeRequest,
   StrategyComposeResponse,
   ApprovedStrategySnapshot,
@@ -952,6 +955,25 @@ export class BrowserClient implements NexusClient {
     return this.post<ApprovedStrategySnapshot>(
       `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/approve`,
       request,
+    );
+  }
+  applyStrategy(
+    strategyId: string,
+    request: StrategyApplyRequest,
+  ): Promise<NonNullable<StrategyAppliedStatus['current_apply']>> {
+    return this.post<NonNullable<StrategyAppliedStatus['current_apply']>>(
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/apply`,
+      request,
+    );
+  }
+  getStrategyApplied(strategyId: string): Promise<StrategyAppliedStatus> {
+    return this.get<StrategyAppliedStatus>(
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/applied`,
+    );
+  }
+  listStrategyApprovals(strategyId: string): Promise<StrategyApprovals> {
+    return this.get<StrategyApprovals>(
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/approvals`,
     );
   }
   listPatterns(query?: ListPatternsQuery): Promise<ListPatternsResponse> {
