@@ -486,6 +486,41 @@ fn refuse_unresolved_templates(
     Ok(())
 }
 
+/// Project a document onto the manifest the outer builder consumes, refusing
+/// what this adapter cannot express and what `template_source` cannot resolve.
+///
+/// The single refusal sequence behind both [`validate_ir_buildability`] and
+/// [`build_wired_outer_graph_from_ir`], so a caller that only needs the verdict
+/// and the builder that needs the manifest cannot drift apart.
+fn project_buildable_manifest(
+    document: &WorkflowDocument,
+    template_source: IrTemplateSource,
+) -> Result<PresetManifest, IrOuterGraphError> {
+    refuse_unmappable(document)?;
+    let manifest = nexus_preset::export_preset(document)?;
+    // I-000440 / F-004: a template that resolves to nothing would build a graph
+    // whose inner tasks prompt the Host with zero instructions and whose judge
+    // would receive a bundle path as its instructions. Refuse it here, by node
+    // and path, before any task exists.
+    refuse_unresolved_templates(&manifest, document.id.as_str(), template_source)?;
+    Ok(manifest)
+}
+
+/// Refuse a document [`build_wired_outer_graph_from_ir`] could not build.
+///
+/// Returns the same [`IrOuterGraphError`] the builder would, in the same order
+/// (`Unmappable` / `Unprojected`, then `Projection`, then `UnresolvedTemplate`),
+/// without constructing a graph.
+///
+/// # Errors
+/// Whatever [`project_buildable_manifest`] refuses.
+pub fn validate_ir_buildability(
+    document: &WorkflowDocument,
+    template_source: IrTemplateSource,
+) -> Result<(), IrOuterGraphError> {
+    project_buildable_manifest(document, template_source).map(|_| ())
+}
+
 /// Build the wired outer graph from a Workflow IR document (§8.2.1).
 ///
 /// Rows this builder covers: `entry`, `nodes[kind=outer_state|terminal]` and
@@ -541,15 +576,7 @@ pub fn build_wired_outer_graph_from_ir(
 ) -> Result<graph_flow::Graph, IrOuterGraphError> {
     use crate::tasks::StateCompositeTask;
 
-    refuse_unmappable(document)?;
-
-    let mut manifest = nexus_preset::export_preset(document)?;
-
-    // I-000440 / F-004: a template that resolves to nothing would build a graph
-    // whose inner tasks prompt the Host with zero instructions and whose judge
-    // would receive a bundle path as its instructions. Refuse it here, by node
-    // and path, before any task exists.
-    refuse_unresolved_templates(&manifest, document.id.as_str(), template_source)?;
+    let mut manifest = project_buildable_manifest(document, template_source)?;
 
     // §8.2.1 `terminal[]`: a declared terminal state ends the run even when its
     // node kind is `outer_state`; the composite task overrides with `End`.
@@ -1766,6 +1793,33 @@ states:
             &ir_with_terminals(&["done", "review"]),
             "terminal",
             "2 entries",
+        );
+    }
+
+    /// The buildability predicate states the builder's refusal text verbatim;
+    /// apply relies on it not drifting from what the builder says.
+    #[test]
+    fn ir_buildability_predicate_keeps_the_builder_refusal_texts() {
+        let unprojected =
+            validate_ir_buildability(&ir_with_node_kind(1, "judge"), IrTemplateSource::Embedded)
+                .expect_err("a judge node kind has no projection");
+        assert_eq!(
+            unprojected.to_string(),
+            "ir_unprojected: node kind judge at node review has no preset projection in the IR \
+             adapter (nexus-preset project_nodes), although §8.2.1 defines its execution \
+             counterpart"
+        );
+
+        let unresolved = validate_ir_buildability(
+            &ir_with_inner_template(2, serde_json::json!("prompts/missing.md")),
+            IrTemplateSource::Embedded,
+        )
+        .expect_err("a template the bundle lacks does not resolve");
+        assert_eq!(
+            unresolved.to_string(),
+            "ir_unresolved_template: node generate_graph/refine template \
+             Some(\"prompts/missing.md\") resolves to no content in the preset's embedded \
+             bundle; the task must carry non-empty instructions"
         );
     }
 
