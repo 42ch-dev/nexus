@@ -116,6 +116,16 @@ export const queryKeys = {
     all: ['outline'] as const,
     detail: (workId: string) => [...queryKeys.outline.all, 'detail', workId] as const,
   },
+  // v1.241 P3.5 — the strategy's applied identity. `applied` is the status read
+  // (current apply + newest approval); `apply` names one appended apply row by
+  // the id the daemon assigned it.
+  strategies: {
+    all: ['strategies'] as const,
+    applied: (strategyId: string) =>
+      [...queryKeys.strategies.all, 'applied', strategyId] as const,
+    apply: (strategyId: string, applyId: string) =>
+      [...queryKeys.strategies.all, 'apply', strategyId, applyId] as const,
+  },
   worldKb: {
     all: ['worldKb'] as const,
     graph: (worldId: string) => [...queryKeys.worldKb.all, 'graph', worldId] as const,
