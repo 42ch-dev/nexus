@@ -19,6 +19,11 @@
 //! [`CoreService::strategy_applied`] is the read side of the same shape: it answers the current
 //! apply (that same no-successor row) together with the strategy's newest approval, so the Canvas
 //! and the intake ask one question and both get the same answer.
+//!
+//! [`current_apply`] is that one answer shared as a function, and [`verified_apply_document`] is
+//! its load-side counterpart: the schedule intake re-runs the same recomputation before it builds
+//! a graph, so bytes edited after apply are a typed refusal instead of a reinterpreted run
+//! (v1.241 P3.5, `.mstar/plans/v241-p35-intake-branch.md`).
 
 use nexus_workflow_ir::{content_hash, WorkflowDocument};
 use serde_json::Value;
@@ -222,9 +227,8 @@ pub struct StrategyAppliedStatus {
 
 impl CoreService {
     /// The applied identity of `strategy_id` and its newest approval, both read from the
-    /// append-only rows: the current apply is the one with no successor. A second successor-less
-    /// row is only reachable by an admitted non-core writer; `applied_at` then `apply_id` order
-    /// the read so that case still has a defined winner.
+    /// append-only rows. The apply side is [`current_apply`] — the same answer the schedule
+    /// intake branches on, so the Canvas and the run never disagree about which apply is live.
     ///
     /// # Errors
     ///
@@ -237,31 +241,7 @@ impl CoreService {
     ) -> CoreResult<StrategyAppliedStatus> {
         self.verify_principal(principal)?;
 
-        let current_apply = sqlx::query_as::<_, (String, String, String, String, Option<String>)>(
-            "SELECT cur.apply_id, cur.approval_id, cur.content_hash, cur.applied_at, \
-                    cur.supersedes_apply_id \
-               FROM strategy_applies cur \
-              WHERE cur.strategy_id = ? \
-                AND NOT EXISTS (SELECT 1 FROM strategy_applies later \
-                                 WHERE later.supersedes_apply_id = cur.apply_id) \
-              ORDER BY cur.applied_at DESC, cur.apply_id DESC \
-              LIMIT 1",
-        )
-        .bind(strategy_id)
-        .fetch_optional(&self.inner.pool)
-        .await
-        .map_err(|error| crate::error::local_db_err(error.into()))?
-        .map(
-            |(apply_id, approval_id, content_hash, applied_at, supersedes_apply_id)| {
-                AppliedStrategy {
-                    apply_id,
-                    approval_id,
-                    content_hash,
-                    applied_at,
-                    supersedes_apply_id,
-                }
-            },
-        );
+        let current_apply = current_apply(&self.inner.pool, strategy_id).await?;
 
         let newest_approval = sqlx::query_as::<_, (String, String, i64, String)>(
             "SELECT approval_id, content_hash, candidate_revision, approved_at \
@@ -451,5 +431,296 @@ impl CoreService {
             }
             _ => apply_internal("the apply insert wrote no row and no refusal explains it"),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Load-side replay: which apply is live, and whether it still replays.
+// ---------------------------------------------------------------------------
+
+/// The apply that is live for `strategy_id`: the append-only row with no successor.
+///
+/// `None` when the strategy has no apply, which is the common case — "nothing applied" is an
+/// answer, not a refusal. A second successor-less row is only reachable by an admitted non-core
+/// writer; `applied_at` then `apply_id` order the read so that case still has a defined winner.
+///
+/// This is the ONE definition of "current apply": [`CoreService::strategy_applied`] reports it
+/// and the schedule intake branches on it.
+///
+/// # Errors
+///
+/// The store errors only.
+pub async fn current_apply(
+    pool: &sqlx::SqlitePool,
+    strategy_id: &str,
+) -> CoreResult<Option<AppliedStrategy>> {
+    Ok(
+        sqlx::query_as::<_, (String, String, String, String, Option<String>)>(
+            "SELECT cur.apply_id, cur.approval_id, cur.content_hash, cur.applied_at, \
+                cur.supersedes_apply_id \
+           FROM strategy_applies cur \
+          WHERE cur.strategy_id = ? \
+            AND NOT EXISTS (SELECT 1 FROM strategy_applies later \
+                             WHERE later.supersedes_apply_id = cur.apply_id) \
+          ORDER BY cur.applied_at DESC, cur.apply_id DESC \
+          LIMIT 1",
+        )
+        .bind(strategy_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| crate::error::local_db_err(error.into()))?
+        .map(
+            |(apply_id, approval_id, content_hash, applied_at, supersedes_apply_id)| {
+                AppliedStrategy {
+                    apply_id,
+                    approval_id,
+                    content_hash,
+                    applied_at,
+                    supersedes_apply_id,
+                }
+            },
+        ),
+    )
+}
+
+/// The document of `apply`, re-verified against the identity the apply recorded.
+///
+/// This is the same recomputation [`CoreService::apply_strategy`] performs, run again at load:
+/// the approval's frozen bytes are decoded and hashed, and a document that no longer hashes to
+/// the apply's recorded `content_hash` is refused instead of quietly reinterpreted. The refusal
+/// is returned rather than raised so the caller can name it in its own control-plane error; a
+/// row edited after it was applied must never be a 500 and never a silent new graph.
+///
+/// # Errors
+///
+/// The store errors, and `CoreError::Internal` when the approval row an apply names is absent
+/// for this strategy (the foreign key the core maintains; only an admitted non-core writer can
+/// reach that state).
+///
+/// The read is keyed by `approval_id` AND `strategy_id`, the pairing [`CoreService::apply_strategy`]
+/// enforces with `ApplyRefusal::ApprovalStrategyMismatch`: a replay must never return a foreign
+/// strategy's frozen document, even one written by a non-core writer.
+pub async fn verified_apply_document(
+    pool: &sqlx::SqlitePool,
+    strategy_id: &str,
+    apply: &AppliedStrategy,
+) -> CoreResult<Result<WorkflowDocument, ApplyLoadRefusal>> {
+    let document_json: Option<String> = sqlx::query_scalar(
+        "SELECT document_json FROM strategy_approvals WHERE approval_id = ? AND strategy_id = ?",
+    )
+    .bind(&apply.approval_id)
+    .bind(strategy_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| crate::error::local_db_err(error.into()))?;
+    let Some(document_json) = document_json else {
+        return Err(apply_internal(format!(
+            "apply `{}` names approval `{}`, which this strategy has no row for",
+            apply.apply_id, apply.approval_id
+        )));
+    };
+    Ok(verify_applied_document(strategy_id, apply, &document_json))
+}
+
+/// Why an applied identity cannot be replayed. Nothing was executed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApplyLoadRefusal {
+    /// The applied document's frozen bytes no longer hash to the identity the apply recorded.
+    DocumentChanged {
+        /// The strategy whose apply no longer replays.
+        strategy_id: String,
+        /// The apply that installed the identity.
+        apply_id: String,
+        /// The `content_hash` the apply recorded.
+        stored_hash: String,
+        /// The canonical hash of the stored `document_json`.
+        recomputed_hash: String,
+    },
+    /// The applied document's frozen bytes no longer yield a canonical identity at all: they do
+    /// not decode as a workflow document, or their hash cannot be computed.
+    DocumentUnverifiable {
+        /// The strategy whose apply no longer replays.
+        strategy_id: String,
+        /// The apply that installed the identity.
+        apply_id: String,
+        /// What could not be read.
+        detail: String,
+    },
+}
+
+impl ApplyLoadRefusal {
+    /// The stable lowercase wire code the refusal renders as — a coded refusal (HTTP 400 at the
+    /// adapter), never an internal fault.
+    #[must_use]
+    pub const fn reason(&self) -> &'static str {
+        match self {
+            Self::DocumentChanged { .. } => "applied_document_changed",
+            Self::DocumentUnverifiable { .. } => "applied_document_unverifiable",
+        }
+    }
+
+    /// The core error the load refusal returns, naming the strategy and the apply.
+    #[must_use]
+    pub fn into_error(self) -> CoreError {
+        CoreError::Coded {
+            code: self.reason().to_string(),
+            message: self.to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for ApplyLoadRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DocumentChanged {
+                strategy_id,
+                apply_id,
+                stored_hash,
+                recomputed_hash,
+            } => write!(
+                f,
+                "applied identity of strategy `{strategy_id}` (apply `{apply_id}`) records content \
+                 hash `{stored_hash}`, but its frozen document now hashes to \
+                 `{recomputed_hash}`: the applied bytes changed after apply"
+            ),
+            Self::DocumentUnverifiable {
+                strategy_id,
+                apply_id,
+                detail,
+            } => write!(
+                f,
+                "applied identity of strategy `{strategy_id}` (apply `{apply_id}`) cannot be \
+                 replayed: {detail}"
+            ),
+        }
+    }
+}
+
+/// Recompute an applied document's identity exactly as apply time did.
+fn verify_applied_document(
+    strategy_id: &str,
+    apply: &AppliedStrategy,
+    document_json: &str,
+) -> Result<WorkflowDocument, ApplyLoadRefusal> {
+    let unverifiable = |detail: String| ApplyLoadRefusal::DocumentUnverifiable {
+        strategy_id: strategy_id.to_owned(),
+        apply_id: apply.apply_id.clone(),
+        detail,
+    };
+    let document: WorkflowDocument =
+        serde_json::from_str(document_json).map_err(|error| unverifiable(error.to_string()))?;
+    let recomputed_hash =
+        content_hash(&document).map_err(|error| unverifiable(error.to_string()))?;
+    if recomputed_hash != apply.content_hash {
+        return Err(ApplyLoadRefusal::DocumentChanged {
+            strategy_id: strategy_id.to_owned(),
+            apply_id: apply.apply_id.clone(),
+            stored_hash: apply.content_hash.clone(),
+            recomputed_hash,
+        });
+    }
+    Ok(document)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const IR: &str = r#"{
+        "ir_version": 0,
+        "id": "ir-load",
+        "version": 1,
+        "revision": 0,
+        "state": "candidate",
+        "meta": {
+            "description": "load-side replay fixture",
+            "kind": "creator",
+            "run_intents": [],
+            "requires_capabilities": []
+        },
+        "entry": "plan",
+        "terminal": ["done"],
+        "nodes": [
+            {"id": "plan", "kind": "outer_state", "effect_class": "pure",
+             "exit_when": {"kind": "rule"}},
+            {"id": "done", "kind": "terminal", "effect_class": "pure"}
+        ],
+        "edges": [
+            {"id": "plan->done", "from": "plan", "to": "done", "kind": "linear"}
+        ],
+        "nests": [],
+        "assets": [],
+        "signals": [],
+        "roles": [],
+        "effect_summary": "pure",
+        "provenance": {"source": "compose"}
+    }"#;
+
+    fn applied(content_hash: String) -> AppliedStrategy {
+        AppliedStrategy {
+            apply_id: "apl_test".to_string(),
+            approval_id: "apr_test".to_string(),
+            content_hash,
+            applied_at: "2026-01-01T00:00:00+00:00".to_string(),
+            supersedes_apply_id: None,
+        }
+    }
+
+    #[test]
+    fn an_applied_document_replays_while_its_bytes_still_hash_to_the_apply() {
+        let document: WorkflowDocument = serde_json::from_str(IR).unwrap();
+        let hash = content_hash(&document).unwrap();
+
+        let replayed = verify_applied_document("ir-load", &applied(hash), IR).unwrap();
+
+        assert_eq!(replayed.id.as_str(), "ir-load");
+    }
+
+    #[test]
+    fn a_document_edited_after_apply_is_refused_by_strategy_and_apply() {
+        let document: WorkflowDocument = serde_json::from_str(IR).unwrap();
+        let hash = content_hash(&document).unwrap();
+        // Edit the frozen bytes behind the apply's back; only the recomputation can catch it.
+        let mut edited = document;
+        edited.version = 7;
+        let edited_hash = content_hash(&edited).unwrap();
+
+        let refusal = verify_applied_document(
+            "ir-load",
+            &applied(hash.clone()),
+            &serde_json::to_string(&edited).unwrap(),
+        )
+        .unwrap_err();
+
+        assert_eq!(refusal.reason(), "applied_document_changed");
+        assert_eq!(
+            refusal,
+            ApplyLoadRefusal::DocumentChanged {
+                strategy_id: "ir-load".to_string(),
+                apply_id: "apl_test".to_string(),
+                stored_hash: hash,
+                recomputed_hash: edited_hash,
+            }
+        );
+        let message = refusal.to_string();
+        assert!(
+            message.contains("ir-load") && message.contains("apl_test"),
+            "the refusal names the strategy and the apply: {message}"
+        );
+        assert!(matches!(
+            refusal.into_error(),
+            CoreError::Coded { ref code, .. } if code == "applied_document_changed"
+        ));
+    }
+
+    #[test]
+    fn undecodable_applied_bytes_are_refused_rather_than_reinterpreted() {
+        let refusal =
+            verify_applied_document("ir-load", &applied("blake3:stored".into()), "{not json")
+                .unwrap_err();
+
+        assert_eq!(refusal.reason(), "applied_document_unverifiable");
+        let message = refusal.to_string();
+        assert!(message.contains("ir-load") && message.contains("apl_test"));
     }
 }
