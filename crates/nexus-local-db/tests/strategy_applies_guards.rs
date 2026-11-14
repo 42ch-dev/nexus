@@ -6,6 +6,9 @@
 //! pair. An apply pairing A's approval with B's strategy is unrepresentable, not merely unwritten.
 //! "One current apply per strategy" is deliberately absent: a repeat apply of a superseded approval
 //! is the rollback path, so only the applying statement can tell a repeat from a rollback.
+//!
+//! I-000444 adds the rest of the documented claim: a committed row refuses `UPDATE`, `DELETE` and
+//! `INSERT OR REPLACE`, and a supersede link may only name an apply of the same strategy.
 
 use sqlx::SqlitePool;
 
@@ -193,6 +196,87 @@ async fn a_superseding_apply_leaves_exactly_one_current_row() {
         .unwrap();
     assert_eq!(total, 2);
     assert_eq!(current_applies(&pool, STRATEGY_A).await, ["apply-2"]);
+}
+
+/// I-000444: a committed apply is immutable, not merely approval-pinned. Every mutation an
+/// admitted writer can spell is refused — `UPDATE`, `DELETE`, and the `REPLACE` spelling whose
+/// conflict resolution deletes the victim without firing its DELETE trigger — and a supersede
+/// link may not name another strategy's row.
+#[tokio::test]
+async fn a_committed_apply_is_immutable_and_may_only_supersede_its_own_strategy() {
+    let (pool, _dir) = pool().await;
+    insert_approval(&pool, STRATEGY_A, "approval-a", "hash-a").await;
+    insert_apply(&pool, "apply-a", STRATEGY_A, "approval-a", "hash-a", None)
+        .await
+        .unwrap();
+    insert_approval(&pool, STRATEGY_B, "approval-b", "hash-b").await;
+    insert_apply(&pool, "apply-b", STRATEGY_B, "approval-b", "hash-b", None)
+        .await
+        .unwrap();
+
+    let update = sqlx::query(
+        "UPDATE strategy_applies SET applied_by = 'someone-else' WHERE apply_id = 'apply-a'",
+    )
+    .execute(&pool)
+    .await
+    .expect_err("a committed apply must refuse UPDATE");
+    assert!(
+        update.to_string().contains("APPLY_ROW_IMMUTABLE"),
+        "{update}"
+    );
+
+    let delete = sqlx::query("DELETE FROM strategy_applies WHERE apply_id = 'apply-a'")
+        .execute(&pool)
+        .await
+        .expect_err("a committed apply must refuse DELETE");
+    assert!(
+        delete.to_string().contains("APPLY_ROW_IMMUTABLE"),
+        "{delete}"
+    );
+
+    let replace = sqlx::query(
+        "INSERT OR REPLACE INTO strategy_applies \
+         (apply_id, strategy_id, approval_id, content_hash, applied_at, applied_by, \
+          supersedes_apply_id) \
+         VALUES ('apply-a', ?, 'approval-a', 'hash-a', '2026-11-16T00:00:00Z', 'tester', NULL)",
+    )
+    .bind(STRATEGY_A)
+    .execute(&pool)
+    .await
+    .expect_err("REPLACE must not delete-and-reinsert a committed apply");
+    assert!(
+        replace.to_string().contains("APPLY_ROW_IMMUTABLE"),
+        "{replace}"
+    );
+
+    // B's apply exists, so this link names a real row — of the wrong strategy.
+    let cross = insert_apply(
+        &pool,
+        "apply-a-2",
+        STRATEGY_A,
+        "approval-a",
+        "hash-a",
+        Some("apply-b"),
+    )
+    .await
+    .expect_err("a supersede may not name another strategy's apply");
+    assert!(
+        cross
+            .to_string()
+            .contains("APPLY_SUPERSEDE_STRATEGY_MISMATCH"),
+        "{cross}"
+    );
+
+    // Nothing was rewritten or lost: both rows read back exactly as written, and A's own current
+    // row is still the one a same-strategy supersede would name.
+    let applied_by: String =
+        sqlx::query_scalar("SELECT applied_by FROM strategy_applies WHERE apply_id = 'apply-a'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(applied_by, "tester");
+    assert_eq!(current_applies(&pool, STRATEGY_A).await, ["apply-a"]);
+    assert_eq!(current_applies(&pool, STRATEGY_B).await, ["apply-b"]);
 }
 
 /// `EXPLAIN QUERY PLAN` of the query `apply.rs` runs for the current apply (the same text with
