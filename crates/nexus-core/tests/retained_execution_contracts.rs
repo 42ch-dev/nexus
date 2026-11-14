@@ -7399,14 +7399,14 @@ fn intake_preset_yaml(
     let (next_after_commit, prompt_state, prompt_graphs) = if with_prompt {
         (
             "generate",
-            r#"  - id: generate
+            r"  - id: generate
     enter:
       - kind: inner_graph
         name: generate_graph
     exit_when: { kind: graph_complete }
     next: done
-"#,
-            r#"
+",
+            r"
 inner_graphs:
   generate_graph:
     nodes:
@@ -7415,7 +7415,7 @@ inner_graphs:
         template_file: prompts/generate.md
         tool_policy: deny_all
     output_binding: prompt.text
-"#,
+",
         )
     } else {
         ("done", "", "")
@@ -7661,10 +7661,8 @@ async fn a_schedule_with_no_apply_runs_the_yaml_graph_the_untouched_builder_buil
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while fixture.host.prompt_count() == 0 {
         if reference_drive.is_finished() {
-            panic!(
-                "the untouched builder's graph stopped without prompting: {:?}",
-                reference_drive.await.expect("the reference drive joins")
-            );
+            let outcome = reference_drive.await.expect("the reference drive joins");
+            panic!("the untouched builder's graph stopped without prompting: {outcome:?}");
         }
         assert!(
             std::time::Instant::now() < deadline,
