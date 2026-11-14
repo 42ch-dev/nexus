@@ -194,3 +194,57 @@ async fn a_superseding_apply_leaves_exactly_one_current_row() {
     assert_eq!(total, 2);
     assert_eq!(current_applies(&pool, STRATEGY_A).await, ["apply-2"]);
 }
+
+/// `EXPLAIN QUERY PLAN` of the query `apply.rs` runs for the current apply (the same text with
+/// the plan prefix): the strategy's successor-less rows in the total order the reads pick a winner
+/// by. `sqlx` requires the statement to be a literal, hence one constant rather than a format
+/// argument.
+const CURRENT_ROW_LOOKUP_PLAN: &str = "EXPLAIN QUERY PLAN \
+     SELECT cur.apply_id, cur.approval_id, cur.content_hash, cur.applied_at, \
+            cur.supersedes_apply_id \
+     FROM strategy_applies cur \
+     WHERE cur.strategy_id = 'strategy-a' \
+       AND NOT EXISTS (SELECT 1 FROM strategy_applies later \
+                        WHERE later.supersedes_apply_id = cur.apply_id) \
+     ORDER BY cur.applied_at DESC, cur.apply_id DESC \
+     LIMIT 1";
+
+async fn query_plan(pool: &SqlitePool, sql: &'static str) -> String {
+    sqlx::query_as::<_, (i64, i64, i64, String)>(sql)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(_, _, _, detail)| detail)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[tokio::test]
+async fn the_current_apply_lookup_is_two_index_searches_not_two_scans() {
+    let (pool, _dir) = pool().await;
+    insert_approval(&pool, STRATEGY_A, "approval-a", "hash-a").await;
+    insert_apply(&pool, "apply-1", STRATEGY_A, "approval-a", "hash-a", None)
+        .await
+        .unwrap();
+    insert_apply(
+        &pool,
+        "apply-2",
+        STRATEGY_A,
+        "approval-a",
+        "hash-a",
+        Some("apply-1"),
+    )
+    .await
+    .unwrap();
+
+    let plan = query_plan(&pool, CURRENT_ROW_LOOKUP_PLAN).await;
+    assert!(
+        plan.contains("SEARCH cur USING INDEX idx_strategy_applies_strategy_current"),
+        "the strategy filter and the total order are one index range: {plan}"
+    );
+    assert!(
+        plan.contains("SEARCH later USING COVERING INDEX idx_strategy_applies_supersedes"),
+        "the anti-join's inner side is a supersede-link index lookup: {plan}"
+    );
+}

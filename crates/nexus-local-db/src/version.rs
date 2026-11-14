@@ -33,7 +33,8 @@
 // V1.239 P3: 33 → 34 — strategy_candidates draft table (plan v239-p3-compose-ops §Candidate storage Q4/D17) + its writer-protocol guard/outbox family (migration 20261113000001_strategy_candidates.sql).
 // V1.239 P3: 34 → 35 — strategy_approvals immutable snapshot table (plan v239-p3-approve-route §Q4) + its writer-protocol guard/outbox family (migration 20261113000002_strategy_approvals.sql).
 // V1.241 P3.5 T1: 35 → 36 — append-only strategy_applies history (plan v241-p35-applied-identity §Architecture) + its writer-protocol guard/outbox family and approval-pin triggers (migration 20261114000001_strategy_applies.sql).
-pub const DB_SCHEMA_VERSION: u32 = 36;
+// V1.242 P4/P5 T1: 36 → 37 — strategy_applies current-row indexes (plan ride-along-apply-ir-hardening §Task 1, I-000439): the strategy+total-order index and the supersede-link index its anti-join reads (migration 20261115000001_strategy_applies_current_index.sql).
+pub const DB_SCHEMA_VERSION: u32 = 37;
 
 /// Contract schema version from generated wire types
 ///
