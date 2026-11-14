@@ -834,11 +834,13 @@ bundle that happens to share its id — and refuses rather than building a parti
 | --- | --- |
 | `ir_unmappable` | A concept with no execution counterpart in this table: `pattern_slot`, `nest_group`. |
 | `ir_unprojected` | A concept this table does map, but `export_preset` cannot project: `judge`, `manual_wait` and `join` nodes, and a `terminal` array that is not exactly one entry. |
-| `ir_unresolved_template` | An instruction template (an inner step's prompt, or the judge prompt of an `exit_when.llm_judge`) resolves to nothing through the declared template source, so its task would run without instructions. |
+| `ir_unresolved_template` | An instruction (an inner step's prompt, or the judge prompt of an `exit_when.llm_judge`) would reach its task without content. **`IrTemplateSource::OwnSource` resolves nothing**, so on the applied path this refusal is unconditional for any state or step that names a template, and for every `exit_when.llm_judge` whether it names one or not — it is not "a wrong path is refused". Only `Embedded` can resolve, and production never passes it. |
 
 The three rows are distinct facts and a client should not fold them: the first says the document
 uses something the model does not execute, the second says the concept executes but this adapter
-has no projection yet, the third says the document would run an empty prompt. The applied-identity
+has no projection yet, the third says the document would run an empty prompt. The third is also
+where the applied path is narrowest today: it carries no bundle root, so the only way to serve a
+template is to read another package's bytes, which it refuses to do. The applied-identity
 contract and its two known limits are
 [strategy-composition.md §5.1](strategy-composition.md).
 

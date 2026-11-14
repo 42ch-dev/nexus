@@ -25,7 +25,11 @@ What a strategy simulation reports, what it refuses to claim, and where the disc
 - No provider is called. A trajectory carries no cost, no latency and no output.
 - Waits are derived from the reachable set: a `manual_wait` or a reachable `exit_when: manual` yields
   `reason: manual` with the node id; a document-global `signals[].action: pause` yields
-  `reason: signal` with the signal name. Predicted waits over-report; they never under-report.
+  `reason: signal` with the signal name. **A wait is reported when its node is visited, and the walk
+  visits only a judge's single `default` edge**, so a wait reachable only through a judge's go or
+  no-go branch is never predicted — an under-report in the judge case, by construction, not an
+  omission to fix. Within the visited set the list over-reports instead: a wait the run would never
+  reach is still named, and a pause signal is named whatever the graph does with it.
 
 Consumers MUST treat an unknown `simulation_level` as a newer, unsupported level rather than assuming
 `reachability`.
@@ -53,7 +57,9 @@ this document.
   and nested children under the total order `pure < read < write_candidate < external`, taken from the
   generated enum's `Ord`. A deferred (`defer_until_apply`) nest contributes its declared class and its
   body is not walked. An effect that only happens on a collapsed branch is still reported.
-- **Predicted waits over-report; they never under-report.**
+- **The wait list is not exhaustive.** Because judges are stubbed to their `default` edge, a wait
+  behind any other branch is never predicted; no surface may present the list as complete, and the
+  disclosure obligation in §Disclosure is what keeps that visible.
 
 ## Where it lives
 
