@@ -306,6 +306,309 @@ pub fn build_wired_outer_graph(
 
     builder.build()
 }
+
+/// Why an IR document cannot become an outer graph.
+#[derive(Debug, thiserror::Error)]
+pub enum IrOuterGraphError {
+    /// The document carries a concept with no §8.2.1 outer-graph projection.
+    #[error(transparent)]
+    Projection(#[from] nexus_preset::WorkflowIrError),
+    /// The projected topology is not a valid graph.
+    #[error(transparent)]
+    Graph(#[from] graph_flow::GraphError),
+}
+
+/// Build the wired outer graph from a Workflow IR document (§8.2.1).
+///
+/// Rows this builder covers: `entry`, `nodes[kind=outer_state|terminal]` and
+/// their enter actions (`capability`, `host_tool`, `inner_graph`), every
+/// `exit_when` kind, linear/go/nogo/labeled edges, `edges[kind=conditional]`
+/// (routing stays with the source task's expression evaluation, exactly as the
+/// YAML path leaves it), `terminal[]`/`nodes[kind=terminal]`, and the
+/// `merge`/`converge`/`timeout_ms`/`on_timeout` join gate.
+///
+/// The document is projected onto the manifest's state carriers by
+/// [`nexus_preset::export_preset`], so both intakes reach the same
+/// [`crate::tasks::StateCompositeTask`] constructor: no second task type and no
+/// second validation pass. Inner graphs and output bindings are not wired here
+/// (P35 Task 2) — a state whose enter action launches one builds, and that
+/// action fails closed at run time until the graph is attached.
+///
+/// # Errors
+/// `Projection` when the document carries a concept the outer graph cannot
+/// express; `Graph` when the wired topology is invalid (an `entry` naming no
+/// outer task, or an edge to a task the projection never produced).
+#[allow(clippy::needless_pass_by_value)] // dispatch is cloned into each task, mirroring build_wired_outer_graph
+pub fn build_wired_outer_graph_from_ir(
+    document: &nexus_contracts::generated::daemon_api::orchestration::WorkflowDocument,
+    engine: &Arc<dyn crate::engine::OrchestrationEngine>,
+    caps: &Arc<CapabilityRegistry>,
+    daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
+) -> Result<graph_flow::Graph, IrOuterGraphError> {
+    use crate::tasks::StateCompositeTask;
+
+    let mut manifest = nexus_preset::export_preset(document)?;
+
+    // §8.2.1 `terminal[]`: a declared terminal state ends the run even when its
+    // node kind is `outer_state`; the composite task overrides with `End`.
+    for state in &mut manifest.states {
+        state.terminal |= document.terminal.iter().any(|id| id == &state.id);
+    }
+
+    let mut builder = graph_flow::GraphBuilder::new(&manifest.preset.id);
+
+    // Same merge/converge pre-scans the YAML builders run, so both intakes
+    // hand the composite task identical join gates.
+    let incoming_labeled = incoming_labeled_edge_counts(&manifest);
+    let converge_predecessors = converge_predecessor_sets(&manifest);
+
+    for state in &manifest.states {
+        let incoming = *incoming_labeled.get(state.id.as_str()).unwrap_or(&0);
+        let preds = converge_predecessors
+            .get(state.id.as_str())
+            .cloned()
+            .unwrap_or_default();
+        let mut task = StateCompositeTask::from_manifest(state)
+            .with_expected_incoming(incoming)
+            .with_converge_predecessors(preds)
+            .with_engine(engine.clone())
+            .with_registry(caps.clone());
+
+        if let Some(provider) = engine.workspace_state_provider() {
+            task = task.with_workspace_state_provider(provider);
+        }
+        if let Some(dispatch) = &daemon_tool_dispatch {
+            task = task.with_daemon_tool_dispatch(dispatch.clone());
+        }
+
+        builder = builder.add_task(std::sync::Arc::new(task));
+    }
+
+    // §8.2.1 `entry`: the declared entry node is the initial outer task.
+    builder = builder.set_start_task(&document.entry);
+
+    // Transitions — the same wiring as `build_wired_outer_graph`; the parity
+    // projection below fails if the two ever diverge.
+    for state in &manifest.states {
+        match &state.next {
+            Some(NextTarget::Linear(next_id)) => {
+                builder = builder.add_edge(&state.id, next_id);
+            }
+            Some(NextTarget::GoNogo(go_nogo)) => {
+                builder = builder.add_conditional_edge(
+                    &state.id,
+                    |ctx| ctx.get::<bool>("_judge_result").unwrap_or(false),
+                    &go_nogo.go,
+                    &go_nogo.nogo,
+                );
+            }
+            Some(NextTarget::Labeled(labeled_edges)) => {
+                for edge in labeled_edges {
+                    builder = builder.add_edge(&state.id, &edge.target);
+                }
+            }
+            Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) | None => {}
+        }
+    }
+
+    Ok(builder.build()?)
+}
+
+/// Converge-predecessor sets for §8.2.1's join gate.
+fn converge_predecessor_sets(
+    manifest: &PresetManifest,
+) -> HashMap<&str, std::collections::HashSet<String>> {
+    let converge: std::collections::HashSet<&str> = manifest
+        .states
+        .iter()
+        .filter(|state| state.converge.is_some())
+        .map(|state| state.id.as_str())
+        .collect();
+
+    let mut predecessors: HashMap<&str, std::collections::HashSet<String>> = HashMap::new();
+    for state in &manifest.states {
+        let mut targets: Vec<&str> = Vec::new();
+        match &state.next {
+            Some(NextTarget::Linear(next_id)) => targets.push(next_id),
+            Some(NextTarget::GoNogo(go_nogo)) => {
+                targets.push(&go_nogo.go);
+                targets.push(&go_nogo.nogo);
+            }
+            Some(NextTarget::Labeled(edges)) => {
+                targets.extend(edges.iter().map(|edge| edge.target.as_str()));
+            }
+            Some(NextTarget::Conditional(cond)) => {
+                targets.extend(cond.rules.iter().map(|rule| rule.target.as_str()));
+                targets.push(&cond.default);
+            }
+            Some(NextTarget::Branches(branches)) => {
+                targets.extend(branches.branches.iter().map(|rule| rule.target.as_str()));
+                targets.push(&branches.default);
+            }
+            None => {}
+        }
+        for target in targets {
+            if converge.contains(target) {
+                predecessors
+                    .entry(target)
+                    .or_default()
+                    .insert(state.id.clone());
+            }
+        }
+    }
+    predecessors
+}
+
+/// Normalized outer-graph description for the IR ↔ YAML parity tests.
+///
+/// Graphs cannot be compared byte-wise — tasks hold `Arc` handles, closures and
+/// injected executors — so parity compares what the runner can observe about
+/// the shape. Edges describe the routing a source task follows, including the
+/// conditional branches the graph builder leaves to expression evaluation
+/// instead of wiring as graph edges.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OuterGraphProjection {
+    /// Graph id.
+    pub graph_id: String,
+    /// `entry` (§8.2.1): the outer task the graph starts at.
+    pub entry: Option<String>,
+    /// Outer tasks in build order.
+    pub tasks: Vec<ProjectedTask>,
+    /// Routing edges as `(from, to, kind, label-or-condition)`.
+    pub edges: Vec<ProjectedEdge>,
+    /// Tasks that end the run: `terminal[]` and `nodes[kind=terminal]`.
+    pub terminals: Vec<String>,
+}
+
+/// One outer task in an [`OuterGraphProjection`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectedTask {
+    /// `Task::id()`.
+    pub id: String,
+    /// `"terminal"` when the task returns `NextAction::End`, else `"outer_state"`.
+    pub kind: &'static str,
+    /// Enter actions in declared order, in wire shape.
+    pub enter: Vec<serde_json::Value>,
+    /// Exit condition in wire shape (`rule`, `llm_judge`, `manual`, `graph_complete`, `timer`).
+    pub exit_when: Option<serde_json::Value>,
+    /// Join gate (`merge`, `converge`, `timeout_ms`, `on_timeout`); `None` for non-join states.
+    pub join: Option<serde_json::Value>,
+    /// Exit context update in wire shape.
+    pub context_update: Option<serde_json::Value>,
+}
+
+/// One routing edge in an [`OuterGraphProjection`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectedEdge {
+    /// Source task id.
+    pub from: String,
+    /// Target task id.
+    pub to: String,
+    /// `linear`, `go`, `nogo`, `labeled`, `conditional` or `default`.
+    pub kind: &'static str,
+    /// Edge label, or the `when` expression of a conditional branch.
+    pub detail: Option<String>,
+}
+
+/// Project a built outer graph plus the states it was built from into the
+/// normalized shape parity tests compare.
+///
+/// # Panics
+/// Panics when the graph is missing a task for a projected state — the builder
+/// and the projection disagree about the topology.
+#[must_use]
+pub fn outer_graph_projection(
+    graph: &graph_flow::Graph,
+    manifest: &PresetManifest,
+) -> OuterGraphProjection {
+    let mut tasks = Vec::with_capacity(manifest.states.len());
+    let mut edges = Vec::new();
+    let mut terminals = Vec::new();
+
+    for state in &manifest.states {
+        assert!(
+            graph.get_task(&state.id).is_some(),
+            "state `{}` has no task in graph `{}`",
+            state.id,
+            graph.id
+        );
+        if state.terminal {
+            terminals.push(state.id.clone());
+        }
+        let join = (state.merge.is_some()
+            || state.converge.is_some()
+            || state.timeout_ms.is_some()
+            || state.on_timeout.is_some())
+        .then(|| {
+            serde_json::json!({
+                "merge": state.merge.as_ref().map(wire),
+                "converge": state.converge.as_ref().map(wire),
+                "timeout_ms": state.timeout_ms,
+                "on_timeout": state.on_timeout,
+            })
+        });
+        tasks.push(ProjectedTask {
+            id: state.id.clone(),
+            kind: if state.terminal {
+                "terminal"
+            } else {
+                "outer_state"
+            },
+            enter: state.enter.iter().map(wire).collect(),
+            exit_when: state.exit_when.as_ref().map(wire),
+            join,
+            context_update: state.context_update.as_ref().map(wire),
+        });
+
+        let mut push = |to: &str, kind: &'static str, detail: Option<String>| {
+            edges.push(ProjectedEdge {
+                from: state.id.clone(),
+                to: to.to_string(),
+                kind,
+                detail,
+            });
+        };
+        match &state.next {
+            Some(NextTarget::Linear(next_id)) => push(next_id, "linear", None),
+            Some(NextTarget::GoNogo(go_nogo)) => {
+                push(&go_nogo.go, "go", None);
+                push(&go_nogo.nogo, "nogo", None);
+            }
+            Some(NextTarget::Labeled(labeled)) => {
+                for edge in labeled {
+                    push(&edge.target, "labeled", Some(edge.label.clone()));
+                }
+            }
+            Some(NextTarget::Conditional(cond)) => {
+                for rule in &cond.rules {
+                    push(&rule.target, "conditional", Some(rule.when.clone()));
+                }
+                push(&cond.default, "default", None);
+            }
+            Some(NextTarget::Branches(branches)) => {
+                for rule in &branches.branches {
+                    push(&rule.target, "conditional", Some(rule.when.clone()));
+                }
+                push(&branches.default, "default", None);
+            }
+            None => {}
+        }
+    }
+
+    OuterGraphProjection {
+        graph_id: graph.id.clone(),
+        entry: graph.start_task_id().map(ToOwned::to_owned),
+        tasks,
+        edges,
+        terminals,
+    }
+}
+
+/// Wire shape of a manifest carrier (plain data, so serialization cannot fail).
+fn wire<T: serde::Serialize>(value: &T) -> serde_json::Value {
+    serde_json::to_value(value).expect("preset manifest carriers are plain serializable data")
+}
+
 /// Build inner graphs per §8.2.
 ///
 /// `inner_graphs.<name>.nodes[].kind=acp_prompt` → `AcpPromptTask`.
@@ -446,6 +749,7 @@ fn build_inner_graphs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_contracts::generated::daemon_api::orchestration::WorkflowDocument;
     use nexus_preset::load_preset_from_str;
 
     fn test_capability_registry() -> CapabilityRegistry {
@@ -617,6 +921,170 @@ states:
             response.contains("1/2 arrivals, waiting"),
             "wired builder must wire expected_incoming=2 from the shared \
              incoming_labeled_edge_counts scan; got: {response}"
+        );
+    }
+
+    /// A hand-written IR document: capability enter → manual wait → a
+    /// conditional/default split with a fixup state → exactly one terminal.
+    const IR_LINEAR: &str = r#"{
+        "ir_version": 0,
+        "id": "ir-linear",
+        "version": 1,
+        "revision": 0,
+        "state": "candidate",
+        "meta": {
+            "description": "IR outer builder fixture",
+            "kind": "creator",
+            "run_intents": [],
+            "requires_capabilities": []
+        },
+        "entry": "plan",
+        "terminal": ["done"],
+        "nodes": [
+            {"id": "plan", "kind": "outer_state", "effect_class": "external",
+             "enter": [{"kind": "capability", "name": "narrative.compute"}],
+             "exit_when": {"kind": "rule"}},
+            {"id": "review", "kind": "outer_state", "effect_class": "read",
+             "exit_when": {"kind": "rule"}},
+            {"id": "fixup", "kind": "outer_state", "effect_class": "pure",
+             "exit_when": {"kind": "manual"}},
+            {"id": "done", "kind": "terminal", "effect_class": "pure"}
+        ],
+        "edges": [
+            {"id": "plan->review", "from": "plan", "to": "review", "kind": "linear"},
+            {"id": "review->done", "from": "review", "to": "done", "kind": "conditional",
+             "when": "_context.score > 1"},
+            {"id": "review->fixup", "from": "review", "to": "fixup", "kind": "default"},
+            {"id": "fixup->done", "from": "fixup", "to": "done", "kind": "linear"}
+        ],
+        "nests": [],
+        "assets": [],
+        "signals": [],
+        "roles": [],
+        "effect_summary": "external",
+        "provenance": {"source": "compose"}
+    }"#;
+
+    /// `terminal[]` names an `outer_state` node: the declaration, not the node
+    /// kind, is what makes the task end the run.
+    const IR_TERMINAL_DECLARATION: &str = r#"{
+        "ir_version": 0,
+        "id": "ir-terminal-declaration",
+        "version": 1,
+        "revision": 0,
+        "state": "candidate",
+        "meta": {
+            "description": "terminal[] on an outer_state",
+            "kind": "creator",
+            "run_intents": [],
+            "requires_capabilities": []
+        },
+        "entry": "only",
+        "terminal": ["only"],
+        "nodes": [{"id": "only", "kind": "outer_state", "effect_class": "pure"}],
+        "edges": [],
+        "nests": [],
+        "assets": [],
+        "signals": [],
+        "roles": [],
+        "effect_summary": "pure",
+        "provenance": {"source": "compose"}
+    }"#;
+
+    fn ir_document(text: &str) -> WorkflowDocument {
+        serde_json::from_str(text).expect("fixture is a valid workflow document")
+    }
+
+    fn ir_outer_graph(document: &WorkflowDocument) -> graph_flow::Graph {
+        let caps = Arc::new(test_capability_registry());
+        let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
+        build_wired_outer_graph_from_ir(document, &engine, &caps, None)
+            .expect("IR outer graph builds")
+    }
+
+    #[test]
+    fn ir_outer_builder_projects_states_edges_and_terminal() {
+        let document = ir_document(IR_LINEAR);
+        let graph = ir_outer_graph(&document);
+        let manifest =
+            nexus_preset::export_preset(&document).expect("document projects onto states");
+        let projection = outer_graph_projection(&graph, &manifest);
+
+        assert_eq!(projection.graph_id, "ir-linear");
+        assert_eq!(
+            projection.entry.as_deref(),
+            Some("plan"),
+            "§8.2.1 entry selects the initial outer task"
+        );
+        assert_eq!(
+            projection
+                .tasks
+                .iter()
+                .map(|task| (task.id.as_str(), task.kind))
+                .collect::<Vec<_>>(),
+            [
+                ("plan", "outer_state"),
+                ("review", "outer_state"),
+                ("fixup", "outer_state"),
+                ("done", "terminal")
+            ]
+        );
+        assert_eq!(
+            projection.tasks[0].enter,
+            [serde_json::json!({"kind": "capability", "name": "narrative.compute"})],
+            "§8.2.1 capability enter action is carried by the owning state task"
+        );
+        assert_eq!(
+            projection.tasks[2].exit_when,
+            Some(serde_json::json!({"kind": "manual"})),
+            "§8.2.1 manual exit_when"
+        );
+        assert_eq!(
+            projection
+                .edges
+                .iter()
+                .map(|edge| (
+                    edge.from.as_str(),
+                    edge.to.as_str(),
+                    edge.kind,
+                    edge.detail.as_deref()
+                ))
+                .collect::<Vec<_>>(),
+            [
+                ("plan", "review", "linear", None),
+                ("review", "done", "conditional", Some("_context.score > 1")),
+                ("review", "fixup", "default", None),
+                ("fixup", "done", "linear", None)
+            ]
+        );
+        assert_eq!(projection.terminals, ["done"], "§8.2.1 terminal[]");
+    }
+
+    #[tokio::test]
+    async fn ir_exit_when_manual_waits_and_terminal_declaration_ends() {
+        let fixup = ir_outer_graph(&ir_document(IR_LINEAR))
+            .get_task("fixup")
+            .expect("manual state task is wired");
+        assert_eq!(
+            fixup
+                .run(graph_flow::Context::new())
+                .await
+                .expect("manual state runs")
+                .next_action,
+            graph_flow::NextAction::WaitForInput,
+            "§8.2.1 manual exit_when returns WaitForInput"
+        );
+
+        let only = ir_outer_graph(&ir_document(IR_TERMINAL_DECLARATION))
+            .get_task("only")
+            .expect("declared terminal task is wired");
+        assert_eq!(
+            only.run(graph_flow::Context::new())
+                .await
+                .expect("terminal state runs")
+                .next_action,
+            graph_flow::NextAction::End,
+            "§8.2.1 terminal[] makes an outer_state return End"
         );
     }
 }
