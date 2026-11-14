@@ -313,13 +313,41 @@ pub fn build_wired_outer_graph(
 /// Why an IR document cannot become an outer graph.
 #[derive(Debug, thiserror::Error)]
 pub enum IrOuterGraphError {
-    /// The document uses a concept with no §8.2.1 outer-graph projection.
-    #[error("ir_unmappable: {concept} at {location} has no §8.2.1 outer-graph projection")]
+    /// The document uses a composition concept with no §8.2.1 executable row.
+    #[error(
+        "ir_unmappable: {concept} at {location} has no §8.2.1 execution row \
+         (a composition concept expands into concrete nodes before execution)"
+    )]
     Unmappable {
         /// The unmappable IR concept, by its document spelling.
         concept: String,
         /// Where it sits: a node id or a document path.
         location: String,
+    },
+    /// §8.2.1 defines the concept's execution counterpart, but this adapter
+    /// has no manifest projection for it.
+    #[error(
+        "ir_unprojected: {concept} at {location} has no preset projection in the IR \
+         adapter (nexus-preset project_nodes), although §8.2.1 defines its execution \
+         counterpart"
+    )]
+    Unprojected {
+        /// The unprojected IR concept, by its document spelling.
+        concept: String,
+        /// Where it sits: a node id or a document path.
+        location: String,
+    },
+    /// An inner-step template resolves to nothing, so its task would prompt the
+    /// Host with zero instructions.
+    #[error(
+        "ir_unresolved_template: inner-step node {node} template {template:?} resolves to \
+         no content in the preset's embedded bundle; the step must render a non-empty prompt"
+    )]
+    UnresolvedTemplate {
+        /// The `<inner_graph>/<step>` node id, as the document spells it.
+        node: String,
+        /// The bundle-relative template path the step names, if any.
+        template: Option<String>,
     },
     /// The adapter refused a payload the outer mapping carries but cannot read
     /// (a malformed edge family or inner-step id), with no §8.2.1 concept named.
@@ -330,31 +358,39 @@ pub enum IrOuterGraphError {
     Graph(#[from] graph_flow::GraphError),
 }
 
-/// Refuse a document that uses a concept with no §8.2.1 outer-graph row.
+/// Refuse a document whose concepts have no projection into this adapter.
 ///
 /// Runs before [`nexus_preset::export_preset`] and before any task is
 /// constructed, so the caller gets the concept by name instead of the
 /// adapter's projection refusal and no partially built graph escapes.
+///
+/// The refusal distinguishes two gaps. `judge` / `manual_wait` / `join` DO have
+/// a §8.2.1 execution counterpart, but this adapter projects their carriers
+/// (`exit_when`, `merge`, `converge`, `timeout_ms`, `on_timeout`) through
+/// `nodes[kind=outer_state]` only, so the kind spelling is unprojected.
+/// `pattern_slot` / `nest_group` have no execution row at all.
 fn refuse_unmappable(document: &WorkflowDocument) -> Result<(), IrOuterGraphError> {
     for node in &document.nodes {
-        let concept = match node.kind {
+        let adapter_gap = match node.kind {
             WorkflowNodeKind::Judge
             | WorkflowNodeKind::ManualWait
-            | WorkflowNodeKind::Join
-            | WorkflowNodeKind::PatternSlot
-            | WorkflowNodeKind::NestGroup => format!("node kind {}", node.kind),
+            | WorkflowNodeKind::Join => true,
+            WorkflowNodeKind::PatternSlot | WorkflowNodeKind::NestGroup => false,
             WorkflowNodeKind::OuterState
             | WorkflowNodeKind::InnerStep
             | WorkflowNodeKind::Terminal => continue,
         };
-        return Err(IrOuterGraphError::Unmappable {
-            concept,
-            location: format!("node {}", node.id),
+        let concept = format!("node kind {}", node.kind);
+        let location = format!("node {}", node.id);
+        return Err(if adapter_gap {
+            IrOuterGraphError::Unprojected { concept, location }
+        } else {
+            IrOuterGraphError::Unmappable { concept, location }
         });
     }
     match document.terminal.as_slice() {
         [_] => Ok(()),
-        terminals => Err(IrOuterGraphError::Unmappable {
+        terminals => Err(IrOuterGraphError::Unprojected {
             concept: "terminal declaration".to_string(),
             location: format!(
                 "document.terminal ({} entries; a preset carries exactly one)",
@@ -362,6 +398,39 @@ fn refuse_unmappable(document: &WorkflowDocument) -> Result<(), IrOuterGraphErro
             ),
         }),
     }
+}
+
+/// Refuse an inner-step template that resolves to no content.
+///
+/// A document carries no bundle root, so [`build_inner_graphs`] resolves every
+/// `template` against the embedded bundle keyed by document id. A missing or
+/// empty path would reach the Host as a zero-instruction prompt via
+/// `unwrap_or_default()`, so it is refused here, by node and path, before any
+/// task is built. The YAML intake needs no such check: its loader validates
+/// assets against the bundle root at load time.
+fn refuse_unresolved_templates(
+    manifest: &PresetManifest,
+    preset_id: &str,
+) -> Result<(), IrOuterGraphError> {
+    let Some(graphs) = &manifest.inner_graphs else {
+        return Ok(());
+    };
+    for (name, graph) in graphs {
+        for step in &graph.nodes {
+            let template = step.template_file.as_deref();
+            let resolved = template
+                .and_then(|path| nexus_preset::read_embedded_template(preset_id, path))
+                .is_some_and(|content| !content.trim().is_empty());
+            if !resolved {
+                return Err(IrOuterGraphError::UnresolvedTemplate {
+                    // The document spells inner-step ids `<inner_graph>/<step>`.
+                    node: format!("{name}/{}", step.id),
+                    template: template.map(std::string::ToString::to_string),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Build the wired outer graph from a Workflow IR document (§8.2.1).
@@ -384,14 +453,19 @@ fn refuse_unmappable(document: &WorkflowDocument) -> Result<(), IrOuterGraphErro
 /// per-run cancellation tokens), and `output_binding` through the same
 /// [`extract_output_bindings`] derivation. The document names its
 /// templates as bundle-relative asset paths and carries no bundle root, so the
-/// embedded bundle keyed by document id is the only resolvable template source.
+/// embedded bundle keyed by document id is the only resolvable template source;
+/// a step whose template resolves to nothing is refused
+/// ([`IrOuterGraphError::UnresolvedTemplate`]) instead of prompting the Host
+/// with zero instructions.
 ///
 /// # Errors
-/// `Unmappable` when the document uses a concept with no §8.2.1 row (named, with
-/// its node id or document path), before any task is built; `Projection` when a
-/// payload the mapping does carry cannot be read; `Graph` when the wired
-/// topology is invalid (an `entry` naming no outer task, or an edge to a task
-/// the projection never produced) or an inner graph fails to build.
+/// `Unmappable` / `Unprojected` when the document uses a concept this adapter
+/// cannot project (named, with its node id or document path), before any task is
+/// built; `UnresolvedTemplate` when an inner-step template resolves to no
+/// content; `Projection` when a payload the mapping does carry cannot be read;
+/// `Graph` when the wired topology is invalid (an `entry` naming no outer task,
+/// or an edge to a task the projection never produced) or an inner graph fails
+/// to build.
 #[allow(clippy::needless_pass_by_value, clippy::implicit_hasher)] // dispatch is cloned into each task and the cancel map is the engine's own, mirroring build_wired_outer_graph
 pub fn build_wired_outer_graph_from_ir(
     document: &WorkflowDocument,
@@ -408,6 +482,11 @@ pub fn build_wired_outer_graph_from_ir(
     refuse_unmappable(document)?;
 
     let mut manifest = nexus_preset::export_preset(document)?;
+
+    // I-000440: a template that resolves to nothing would build a graph whose
+    // inner tasks prompt the Host with zero instructions. Refuse it here, by
+    // node and path, before any task exists.
+    refuse_unresolved_templates(&manifest, document.id.as_str())?;
 
     // §8.2.1 `terminal[]`: a declared terminal state ends the run even when its
     // node kind is `outer_state`; the composite task overrides with `End`.
@@ -802,9 +881,11 @@ fn build_inner_graphs(
                         // time (N-7): the Host must receive the rendered
                         // prompt, never the raw bundle-relative path. Embedded
                         // presets read from the compiled-in bundle; directory
-                        // presets read from their resolved root. A missing
-                        // template fails closed (the node refuses at runtime
-                        // with a typed error rather than prompting with a path).
+                        // presets read from their resolved root. Resolution
+                        // failure is refused upstream — loader asset validation
+                        // for YAML presets, `refuse_unresolved_templates` for IR
+                        // documents — so the default below is unreachable for a
+                        // loaded preset.
                         let template = node
                             .template_file
                             .as_deref()
@@ -1479,7 +1560,7 @@ states:
 
     /// The typed refusal for a document the mapping cannot express; no graph.
     #[track_caller]
-    fn assert_refused(document: &WorkflowDocument, concept: &str, location: &str) {
+    fn assert_refused(document: &WorkflowDocument, concept: &str) -> IrOuterGraphError {
         let caps = Arc::new(test_capability_registry());
         let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
         let Err(error) =
@@ -1489,59 +1570,134 @@ states:
         };
         let message = error.to_string();
         assert!(
+            matches!(
+                error,
+                IrOuterGraphError::Unmappable { .. } | IrOuterGraphError::Unprojected { .. }
+            ),
+            "refusal is typed by gap, not the adapter projection: {message}"
+        );
+        assert!(message.contains(concept), "`{concept}` is named: {message}");
+        error
+    }
+
+    /// §8.2.1 has the row, the adapter has no projection for the node kind.
+    #[track_caller]
+    fn assert_unprojected(document: &WorkflowDocument, concept: &str, location: &str) {
+        let error = assert_refused(document, concept);
+        let message = error.to_string();
+        assert!(
+            matches!(error, IrOuterGraphError::Unprojected { .. }),
+            "gap is the adapter projection, not §8.2.1: {message}"
+        );
+        assert!(message.contains("ir_unprojected"), "{message}");
+        assert!(
+            message.contains("no preset projection in the IR adapter"),
+            "the adapter is named as the gap: {message}"
+        );
+        assert!(message.contains(location), "location named: {message}");
+    }
+
+    /// §8.2.1 has no execution row for the concept.
+    #[track_caller]
+    fn assert_unmappable(document: &WorkflowDocument, concept: &str, location: &str) {
+        let error = assert_refused(document, concept);
+        let message = error.to_string();
+        assert!(
             matches!(error, IrOuterGraphError::Unmappable { .. }),
-            "refusal must be typed ir_unmappable, not the adapter projection: {message}"
+            "gap is the absent §8.2.1 row: {message}"
         );
         assert!(message.contains("ir_unmappable"), "{message}");
-        assert!(message.contains(concept), "`{concept}` is named: {message}");
         assert!(message.contains(location), "location named: {message}");
     }
 
     #[test]
-    fn ir_refuses_judge_node_kind_by_name() {
-        assert_refused(&ir_with_node_kind(1, "judge"), "judge", "review");
+    fn ir_refuses_judge_node_kind_as_an_adapter_gap() {
+        assert_unprojected(&ir_with_node_kind(1, "judge"), "judge", "review");
     }
 
     #[test]
-    fn ir_refuses_manual_wait_node_kind_by_name() {
-        assert_refused(
-            &ir_with_node_kind(1, "manual_wait"),
-            "manual_wait",
-            "review",
-        );
+    fn ir_refuses_manual_wait_node_kind_as_an_adapter_gap() {
+        assert_unprojected(&ir_with_node_kind(1, "manual_wait"), "manual_wait", "review");
     }
 
     #[test]
-    fn ir_refuses_join_node_kind_by_name() {
-        assert_refused(&ir_with_node_kind(1, "join"), "join", "review");
+    fn ir_refuses_join_node_kind_as_an_adapter_gap() {
+        assert_unprojected(&ir_with_node_kind(1, "join"), "join", "review");
     }
 
     #[test]
     fn ir_refuses_pattern_slot_node_kind_by_name() {
-        assert_refused(
-            &ir_with_node_kind(1, "pattern_slot"),
-            "pattern_slot",
-            "review",
-        );
+        assert_unmappable(&ir_with_node_kind(1, "pattern_slot"), "pattern_slot", "review");
     }
 
     #[test]
     fn ir_refuses_nest_group_node_kind_by_name() {
-        assert_refused(&ir_with_node_kind(1, "nest_group"), "nest_group", "review");
+        assert_unmappable(&ir_with_node_kind(1, "nest_group"), "nest_group", "review");
     }
 
     #[test]
     fn ir_refuses_zero_terminals_by_name() {
-        assert_refused(&ir_with_terminals(&[]), "terminal", "0 entries");
+        assert_unprojected(&ir_with_terminals(&[]), "terminal", "0 entries");
     }
 
     #[test]
     fn ir_refuses_two_terminals_by_name() {
-        assert_refused(
+        assert_unprojected(
             &ir_with_terminals(&["done", "review"]),
             "terminal",
             "2 entries",
         );
+    }
+
+    /// A copy of [`IR_INNER_GRAPH`] with one inner step's `template` replaced.
+    fn ir_with_inner_template(node_index: usize, template: serde_json::Value) -> WorkflowDocument {
+        let mut document: serde_json::Value =
+            serde_json::from_str(IR_INNER_GRAPH).expect("fixture is JSON");
+        document["nodes"][node_index]["template"] = template;
+        serde_json::from_value(document).expect("mutated fixture is a valid workflow document")
+    }
+
+    /// I-000440: an unresolvable template refuses at build time; no graph.
+    #[test]
+    fn ir_refuses_an_unresolved_inner_template_before_building() {
+        let caps = Arc::new(test_capability_registry());
+        let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
+        // `generate_graph/refine` names a path the document's bundle lacks.
+        let document = ir_with_inner_template(2, serde_json::json!("prompts/missing.md"));
+        let Err(error) =
+            build_wired_outer_graph_from_ir(&document, &engine, &caps, None, None, no_cancels())
+        else {
+            panic!("a document whose template resolves to nothing is refused, not built");
+        };
+        match &error {
+            IrOuterGraphError::UnresolvedTemplate { node, template } => {
+                assert_eq!(node, "generate_graph/refine", "the node is named");
+                assert_eq!(
+                    template.as_deref(),
+                    Some("prompts/missing.md"),
+                    "the template path is named"
+                );
+            }
+            other => panic!("refusal must be typed ir_unresolved_template: {other}"),
+        }
+        let message = error.to_string();
+        assert!(message.contains("generate_graph/refine"), "{message}");
+        assert!(message.contains("prompts/missing.md"), "{message}");
+    }
+
+    /// I-000440: a step declaring no template at all is refused the same way.
+    #[test]
+    fn ir_refuses_an_inner_step_without_a_template() {
+        let caps = Arc::new(test_capability_registry());
+        let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
+        let document = ir_with_inner_template(2, serde_json::Value::Null);
+        let Err(IrOuterGraphError::UnresolvedTemplate { node, template }) =
+            build_wired_outer_graph_from_ir(&document, &engine, &caps, None, None, no_cancels())
+        else {
+            panic!("an inner step with no template is refused, not built");
+        };
+        assert_eq!(node, "generate_graph/refine");
+        assert_eq!(template, None, "no template path is reported as absent");
     }
 
     #[tokio::test]
