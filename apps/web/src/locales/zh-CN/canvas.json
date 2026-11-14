@@ -314,7 +314,10 @@
       "pending": "正在应用…",
       "applied": "已应用为 {{applyId}}（{{appliedAt}}）。该批准即为当前运行身份。",
       "approval": "批准",
-      "contentHash": "已应用内容哈希"
+      "contentHash": "已应用内容哈希",
+      "live": "当前运行：批准 {{approvalId}}，应用时间 {{appliedAt}}。",
+      "newerApprovalAvailable": "有更新的批准可用",
+      "rollbackNote": "应用此较早的批准会将生产回滚到该快照。应用历史仅追加——不会删除任何应用记录。"
     },
     "draftTransitionEditor": "草稿转换编辑器",
     "revisionBadge": {

@@ -14,7 +14,7 @@
  */
 import { useTranslation } from 'react-i18next';
 
-import type { SimulationTrajectory } from '@42ch/nexus-contracts';
+import type { SimulationTrajectory, StrategyAppliedStatus } from '@42ch/nexus-contracts';
 
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import type { SimulationStatus } from '@/lib/canvas/use-simulation-trajectory';
@@ -66,6 +66,12 @@ export interface ApproveDisclosureProps {
   application?: ApplyRenderState | null;
   /** Re-run the static walk for the current candidate (the stale/failed recovery). */
   onRun?: () => void;
+  /**
+   * Live apply-state read (compose path): which approval is running and the
+   * newest approval, to badge a live apply that is not the newest. Absent →
+   * no live block and no badge. The badge compares `approval_id`s only.
+   */
+  appliedStatus?: StrategyAppliedStatus | null;
 }
 
 export function ApproveDisclosure({
@@ -81,6 +87,7 @@ export function ApproveDisclosure({
   onApply,
   application = null,
   onRun,
+  appliedStatus = null,
 }: ApproveDisclosureProps) {
   const { t } = useTranslation('canvas');
   // `status` owns the banner; `isStale` only re-adds it while a newer fact
@@ -228,6 +235,29 @@ export function ApproveDisclosure({
           </p>
         ) : null}
 
+        {appliedStatus?.current_apply ? (
+          <div data-testid="apply-live" className="mt-3 flex flex-col gap-2">
+            <p className="rounded-card border border-teal-700 px-3 py-2 text-copy-13 text-gray-1000">
+              {t('strategy.apply.live', {
+                approvalId: appliedStatus.current_apply.approval_id,
+                appliedAt: appliedStatus.current_apply.applied_at,
+              })}
+            </p>
+            {/* D9: informational, never a warning; it blocks neither apply nor
+                rollback and disappears when the live approval is the newest. */}
+            {appliedStatus.newest_approval &&
+            appliedStatus.newest_approval.approval_id !==
+              appliedStatus.current_apply.approval_id ? (
+              <p
+                data-testid="apply-newer-available"
+                className="rounded-card border border-purple-700 px-3 py-2 text-copy-13 text-purple-1000"
+              >
+                {t('strategy.apply.newerApprovalAvailable')}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         {approval?.kind === 'approved' ? (
           <div data-testid="approve-approved" className="mt-3 flex flex-col gap-2">
             <p className="rounded-card border border-teal-700 px-3 py-2 text-copy-13 text-gray-1000">
@@ -315,7 +345,7 @@ export function ApproveDisclosure({
             ) : null}
 
             {onApply ? (
-              <div>
+              <div className="flex flex-col gap-1.5">
                 <button
                   type="button"
                   onClick={onApply}
@@ -324,6 +354,15 @@ export function ApproveDisclosure({
                 >
                   {t('strategy.apply.action')}
                 </button>
+                {/* Rollback is this same control aimed at a superseded approval:
+                    history is append-only, so the copy never implies deletion. */}
+                {appliedStatus?.newest_approval &&
+                approval.snapshot.approval_id !==
+                  appliedStatus.newest_approval.approval_id ? (
+                  <p data-testid="apply-rollback-note" className="text-copy-13 text-gray-900">
+                    {t('strategy.apply.rollbackNote')}
+                  </p>
+                ) : null}
               </div>
             ) : null}
           </div>

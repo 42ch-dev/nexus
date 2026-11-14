@@ -31,6 +31,7 @@ import { useStrategyCanvas } from '@/components/canvas/strategy-canvas/hooks/use
 import { useStrategyCompose } from '@/components/canvas/strategy-canvas/hooks/use-strategy-compose';
 import { useApproveStrategy } from '@/components/canvas/strategy-canvas/hooks/use-approve-strategy';
 import { useApplyStrategy } from '@/components/canvas/strategy-canvas/hooks/use-apply-strategy';
+import { useStrategyApplied } from '@/components/canvas/strategy-canvas/hooks/use-strategy-applied';
 import { useStrategyCanvasComposeFlag } from '@/lib/canvas/strategy-compose-flag';
 import { i18n } from '@/lib/i18n/config';
 import { CanvasFooter, CanvasHeader } from './strategy-canvas/canvas-layout';
@@ -78,6 +79,8 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   const compose = useStrategyCompose(presetId, composeEnabled);
   const approval = useApproveStrategy(presetId);
   const application = useApplyStrategy(presetId);
+  // T3: which apply is live + newest approval, for the live block and badge.
+  const appliedStatus = useStrategyApplied(presetId, composeEnabled);
   // The compose path simulates the working candidate it holds in hand; the
   // flag-off path keeps the shipped preset/candidate behaviour.
   const simulationCandidate = composeEnabled
@@ -488,6 +491,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         gateReason={composeEnabled ? approveGateReason : null}
         onApply={composeEnabled ? handleApply : undefined}
         application={composeEnabled ? application.application : null}
+        appliedStatus={composeEnabled ? (appliedStatus.data ?? null) : null}
       />
 
       <ComposeConflictDialog

@@ -321,7 +321,10 @@
       "pending": "Applying…",
       "applied": "Applied as {{applyId}} at {{appliedAt}}. This approval is the running identity.",
       "approval": "Approval",
-      "contentHash": "Applied content hash"
+      "contentHash": "Applied content hash",
+      "live": "Live: approval {{approvalId}}, applied at {{appliedAt}}.",
+      "newerApprovalAvailable": "Newer approval available",
+      "rollbackNote": "Applying this earlier approval rolls production back to it. Apply history is append-only — no apply row is deleted."
     },
     "draftTransitionEditor": "Draft transition editor",
     "revisionBadge": {
