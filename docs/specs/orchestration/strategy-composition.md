@@ -105,7 +105,7 @@ the same statement that writes, so two concurrent applies cannot both believe th
 supersedes a row it did not see.
 
 `GET /v1/daemon/strategies/{id}/applied` answers the Canvas' and the intake's question from those rows: the
-current apply and the highest-`candidate_revision` approval, each null when absent. One totals order backs it
+current apply and the highest-`candidate_revision` approval, each null when absent. One total order backs it
 (`candidate_revision` DESC, `approved_at` DESC, `approval_id` DESC).
 
 `GET /v1/daemon/strategies/{id}/approvals` lists every approval newest-first. **This read is what makes
@@ -116,7 +116,7 @@ listed row appends an apply and leaves the list untouched.
 #### 5.1 What intake does with an applied identity
 
 For a **user bundle with a current apply**, admission rebuilds the graph from the applied document through
-the [§8.2.1 mapping](orchestration-engine.md) and runs that; every other strategy keeps the YAML loader of
+the [§8.2.1 mapping](orchestration-engine.md#821-ir--task-mapping) and runs that; every other strategy keeps the YAML loader of
 [§8.1](orchestration-engine.md). The discriminator is the source identity the loader recorded, never a
 preset lookup — the embedded-first lookup would hand an applied user bundle the embedded preset's graph when
 the ids collide.
