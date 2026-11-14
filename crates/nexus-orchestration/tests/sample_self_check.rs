@@ -400,8 +400,8 @@ fn first_workflow_committed_yaml_round_trips() {
 }
 
 /// Load one hand-edited `workflow.json`, check that `assets[]` names exactly the templates the
-/// carriers reference and hashes each of them over the bytes it names, then assert the manifest it
-/// exports equals the committed `preset.yaml`.
+/// carriers reference, refuses any asset path that leaves the bundle, hashes each of them over the
+/// bytes it names, then assert the manifest it exports equals the committed `preset.yaml`.
 ///
 /// The JSON is the authoring source, so the manifest equality — not the file's existence — is the
 /// acceptance for everything `export_preset` projects: a member dropped by hand changes the export
@@ -434,6 +434,15 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
     );
 
     for asset in &document.assets {
+        // `assets[].path` is document-controlled and this loop is the only reader of it, so the
+        // loader's path-safety predicate (the one `validate_path_safety` applies to carrier
+        // references) runs here: an escaping path is refused, not hashed.
+        nexus_preset::loader::assert_template_file_safe(&asset.path).unwrap_or_else(|reason| {
+            panic!(
+                "{bundle}/workflow.json: asset `{}` is not a safe bundle-relative path: {reason}",
+                asset.path
+            )
+        });
         let bytes = std::fs::read(root.join(&asset.path))
             .unwrap_or_else(|error| panic!("read {bundle}/{}: {error}", asset.path));
         let hash = blake3::hash(&bytes).to_hex().to_string();

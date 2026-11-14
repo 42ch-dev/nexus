@@ -735,6 +735,7 @@ pub(crate) fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(S
 /// carriers themselves, not [`WorkflowDocument::assets`], so a reference the document does not
 /// register in `assets` cannot bypass the A3 checks. Public because that same property makes it
 /// the way a hand-authored document's `assets` list is checked for completeness.
+#[must_use]
 pub fn collect_ir_asset_references(document: &WorkflowDocument) -> Vec<(String, String)> {
     let mut refs: Vec<(String, String)> = Vec::new();
 

@@ -349,7 +349,7 @@ fn inner_step_node(graph_name: &str, graph: &InnerGraph, step: &GraphNode) -> Wo
 }
 
 /// Whether this state's gate is an `llm_judge`: the preset's only judged exit kind.
-fn is_judged(state: &StateDefinition) -> bool {
+const fn is_judged(state: &StateDefinition) -> bool {
     matches!(state.exit_when, Some(ExitWhen::LlmJudge { .. }))
 }
 
