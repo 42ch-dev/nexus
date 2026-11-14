@@ -307,6 +307,37 @@ pub trait WorkspaceStateProvider: Send + Sync {
     async fn workspace_state(&self) -> Option<serde_json::Value>;
 }
 
+/// Resolves the current applied identity a schedule run executes (P4).
+///
+/// Admission builds an applied run from the strategy's applied document instead
+/// of its YAML descriptor; recovery therefore asks THIS source for the same
+/// resolution, so a restart mid-run re-enters the applied identity rather than
+/// rebuilding the descriptor's graph. The source owns the whole route — the
+/// user-preset classification, the current-apply read and the content-hash
+/// verification — so there is exactly one reader of the approved bytes.
+///
+/// `preset_id` is the run's strategy id and `loaded` is the bundle the frozen
+/// descriptor named (the classification reads the source identity the loader
+/// recorded, never a fresh preset lookup). `Ok(None)` is "this strategy has no
+/// current apply", the common case.
+#[async_trait]
+pub trait AppliedDocumentSource: Send + Sync {
+    /// The verified applied document for `preset_id`, or `None` when the
+    /// strategy has no current apply.
+    ///
+    /// # Errors
+    /// The refusal or store failure that makes the applied identity
+    /// unreplayable, as the message recovery surfaces.
+    async fn applied_document(
+        &self,
+        preset_id: &str,
+        loaded: &nexus_preset::LoadedPreset,
+    ) -> Result<
+        Option<nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument>,
+        String,
+    >;
+}
+
 /// Runtime dependencies injected through `CapabilityRegistry::with_runtime_deps`.
 ///
 /// Groups pool and prompt executor so daemon boot can construct a single

@@ -441,6 +441,327 @@ async fn daemon_restart_safe_boundary_is_reconstructed_and_redriven() {
     owner.close().await.unwrap();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Applied identity across a restart (`.mstar/plans/p4a-applied-identity.md`
+// Task 2). The descriptor bundle and the applied document share the entry node
+// and reach DIFFERENT nodes from it, so the recovered position — a node id —
+// tells which graph the reconstructed runner holds.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The user preset whose applied document the restart test installs.
+const RESTART_PRESET: &str = "restart-applied-identity";
+/// The same bundle with NO apply: the no-apply side of the same restart.
+const RESTART_NO_APPLY_PRESET: &str = "restart-no-apply";
+/// The entry node BOTH documents declare — the position the killed run held.
+const SHARED_ENTRY_NODE: &str = "open_probe";
+/// Node id that exists ONLY in the applied document.
+const APPLIED_ONLY_NODE: &str = "applied_only_probe";
+/// Node id that exists ONLY in the descriptor bundle.
+const PRESET_ONLY_NODE: &str = "preset_only_probe";
+
+/// The descriptor bundle: shared entry → the preset-only node, which is a
+/// manual wait so the recovered position is durable instead of transient.
+fn restart_preset_yaml(preset_id: &str) -> String {
+    format!(
+        r#"
+preset:
+  id: {preset_id}
+  version: 1
+  kind: creator
+  description: "applied-identity restart fixture"
+  requires_capabilities: []
+  initial: {SHARED_ENTRY_NODE}
+  terminal: done
+states:
+  - id: {SHARED_ENTRY_NODE}
+    exit_when: {{ kind: rule }}
+    next: {PRESET_ONLY_NODE}
+  - id: {PRESET_ONLY_NODE}
+    exit_when: {{ kind: manual }}
+    next: done
+  - id: done
+    terminal: true
+"#
+    )
+}
+
+/// The applied document: the same entry node, and `applied_only_probe` where
+/// the bundle has `preset_only_probe`. No node id of the bundle's second state
+/// appears anywhere in it.
+fn restart_applied_document(preset_id: &str) -> String {
+    format!(
+        r#"{{
+  "ir_version": 0,
+  "id": "{preset_id}",
+  "version": 1,
+  "revision": 0,
+  "state": "candidate",
+  "meta": {{
+    "description": "applied-identity restart fixture",
+    "kind": "creator",
+    "run_intents": [],
+    "requires_capabilities": []
+  }},
+  "entry": "{SHARED_ENTRY_NODE}",
+  "terminal": ["done"],
+  "nodes": [
+    {{"id": "{SHARED_ENTRY_NODE}", "kind": "outer_state", "effect_class": "pure",
+     "exit_when": {{"kind": "rule"}}}},
+    {{"id": "{APPLIED_ONLY_NODE}", "kind": "outer_state", "effect_class": "pure",
+     "exit_when": {{"kind": "manual"}}}},
+    {{"id": "done", "kind": "terminal", "effect_class": "pure"}}
+  ],
+  "edges": [
+    {{"id": "{SHARED_ENTRY_NODE}->{APPLIED_ONLY_NODE}", "from": "{SHARED_ENTRY_NODE}",
+     "to": "{APPLIED_ONLY_NODE}", "kind": "linear"}},
+    {{"id": "{APPLIED_ONLY_NODE}->done", "from": "{APPLIED_ONLY_NODE}", "to": "done",
+     "kind": "linear"}}
+  ],
+  "nests": [],
+  "assets": [],
+  "signals": [],
+  "roles": [],
+  "effect_summary": "pure",
+  "provenance": {{"source": "compose"}}
+}}"#
+    )
+}
+
+fn write_restart_bundle(nexus_home: &Path, preset_id: &str) -> std::path::PathBuf {
+    let bundle = nexus_home.join("presets").join(preset_id);
+    std::fs::create_dir_all(&bundle).expect("restart preset bundle");
+    std::fs::write(bundle.join("preset.yaml"), restart_preset_yaml(preset_id))
+        .expect("restart preset yaml");
+    bundle
+}
+
+/// Seed the current apply of `preset_id` through the fixture's admitted writer
+/// pool: the approval freeze, then the apply row naming it — the same rows, in
+/// the same shapes, the approve and apply paths write (the
+/// `pinned_approval_strategy_applies_insert` trigger requires exactly this
+/// pairing, so a wrong row cannot be seeded at all). The real apply route is
+/// proven by the intake tests; this fixture only needs the state a restart finds.
+async fn seed_restart_apply(db_path: &Path, preset_id: &str) {
+    let document: nexus_workflow_ir::WorkflowDocument =
+        serde_json::from_str(&restart_applied_document(preset_id))
+            .expect("the applied-side document decodes");
+    let hash = nexus_workflow_ir::content_hash(&document).expect("the fixture document hashes");
+
+    let guarded = nexus_local_db::init_engine_pool(db_path)
+        .await
+        .expect("seed engine pool init");
+    let pool = guarded.pool();
+
+    // An apply requires the strategy to own a schedule. A pre-seed row is inert
+    // (it carries no version-0 core-context record), so nothing ever admits it.
+    sqlx::query(
+        "INSERT INTO creator_schedules \
+         (schedule_id, creator_id, preset_id, preset_version, status, concurrency_kind, \
+          current_core_context_version, created_at, updated_at) \
+         VALUES (?, ?, ?, 1, 'pending', 'serial', 0, 0, 0)",
+    )
+    .bind(format!("SCH-precondition-{preset_id}"))
+    .bind(CREATOR)
+    .bind(preset_id)
+    .execute(pool)
+    .await
+    .expect("the apply precondition row");
+
+    sqlx::query(
+        "INSERT INTO strategy_approvals \
+         (approval_id, strategy_id, content_hash, candidate_revision, document_json, \
+          trajectory_json, pins_json, approver, approved_at) \
+         VALUES (?, ?, ?, ?, ?, ?, '[]', ?, '2026-11-15T00:00:00+00:00')",
+    )
+    .bind(format!("apr_{preset_id}"))
+    .bind(preset_id)
+    .bind(&hash)
+    .bind(i64::try_from(document.revision).expect("revision fits"))
+    .bind(serde_json::to_string(&document).expect("document json"))
+    .bind(serde_json::json!({ "ir_content_hash": hash }).to_string())
+    .bind(CREATOR)
+    .execute(pool)
+    .await
+    .expect("approval row");
+
+    sqlx::query(
+        "INSERT INTO strategy_applies \
+         (apply_id, strategy_id, approval_id, content_hash, applied_at, applied_by, \
+          supersedes_apply_id) \
+         VALUES (?, ?, ?, ?, '2026-11-15T00:00:00+00:00', ?, NULL)",
+    )
+    .bind(format!("apl_{preset_id}"))
+    .bind(preset_id)
+    .bind(format!("apr_{preset_id}"))
+    .bind(&hash)
+    .bind(CREATOR)
+    .execute(pool)
+    .await
+    .expect("apply row");
+
+    guarded.pool().close().await;
+    nexus_local_db::writer_protocol::release_retained_writer_guards(db_path);
+}
+
+/// Seed the durable v1 row a killed daemon leaves behind: a non-terminal run of
+/// `preset_id` parked at the shared entry node, written through the REAL store
+/// API with the on-disk bundle's frozen source identity (exactly what admission
+/// persists for this run — an applied run's descriptor names the strategy's
+/// bundle, never the document).
+async fn seed_restart_run(db_path: &Path, session_id: &str, preset_id: &str, bundle: &Path) {
+    let loaded = nexus_preset::load_preset(
+        bundle,
+        &nexus_preset::capability_catalog::BuiltinCapabilityCatalog,
+    )
+    .expect("the restart fixture bundle loads");
+    let source = loaded
+        .source_identity
+        .expect("a directory bundle carries an identity");
+    let guarded = nexus_local_db::init_engine_pool(db_path)
+        .await
+        .expect("seed engine pool init");
+    let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(
+        guarded.clone_pool(),
+    ));
+    let descriptor = nexus_orchestration::RunDescriptorV1 {
+        creator_id: CREATOR.to_string(),
+        work_id: None,
+        workspace_root: std::path::PathBuf::from("/tmp/ws"),
+        preset_id: preset_id.to_string(),
+        preset_version: loaded.version,
+        source,
+        input: serde_json::Map::default(),
+        agent_bindings: std::collections::HashMap::new(),
+        parent_session_id: None,
+        graph_name: None,
+    };
+    let root = graph_flow::Session::new_from_task(session_id.to_string(), SHARED_ENTRY_NODE);
+    root.context
+        .set("_session_id", session_id.to_string())
+        .expect("seed session context");
+    let checkpoint = nexus_orchestration::RunCheckpoint {
+        root: &root,
+        children: &[],
+    };
+    store
+        .start_run(
+            &nexus_orchestration::SessionId(session_id.to_string()),
+            &descriptor,
+            checkpoint,
+            &nexus_orchestration::RunStateV1::default(),
+        )
+        .await
+        .expect("seed start_run");
+    guarded.pool().close().await;
+    nexus_local_db::writer_protocol::release_retained_writer_guards(db_path);
+}
+
+/// The run's durable record, read through the owner's own admitted pool.
+async fn read_restart_session(
+    pool: &sqlx::SqlitePool,
+    session_id: &str,
+) -> Option<graph_flow::Session> {
+    use graph_flow::SessionStorage as _;
+    nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone()))
+        .get(session_id)
+        .await
+        .expect("read the run row")
+}
+
+/// Boot recovery re-drives the seeded run past its shared entry node, then the
+/// durable record names the node the reconstructed graph reached.
+async fn recovered_position(owner: &CoreService, session_id: &str) -> graph_flow::Session {
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+    wait_until(
+        "boot recovery to re-drive the run past its shared entry node",
+        || {
+            let pool = pool.clone();
+            async move {
+                read_restart_session(&pool, session_id)
+                    .await
+                    .is_some_and(|session| session.current_task_id != SHARED_ENTRY_NODE)
+            }
+        },
+    )
+    .await;
+    read_restart_session(&pool, session_id)
+        .await
+        .expect("the recovered run row exists")
+}
+
+/// P4 Task 2: a restart during an in-flight applied run recovers into the
+/// APPLIED graph.
+///
+/// The strategy has a current apply whose document reaches `applied_only_probe`
+/// — a node id the YAML descriptor does not carry at all — while the descriptor
+/// reaches `preset_only_probe`. Both share `open_probe`, so the same seeded
+/// position is a real task in either graph and only the graph choice can move
+/// the run onto the two different nodes.
+///
+/// Mutation this fails on: recovery reconstructing from the descriptor alone
+/// (the pre-change behaviour) leaves the recovered position on
+/// `preset_only_probe`, never on the applied-only node id.
+#[tokio::test]
+async fn a_restart_during_an_applied_run_recovers_into_the_applied_graph() {
+    let f = fixture().await;
+    let bundle = write_restart_bundle(&f.tmp.path().join(".nexus42"), RESTART_PRESET);
+    seed_restart_apply(&f.db_path, RESTART_PRESET).await;
+    let session_id = format!("{RESTART_PRESET}:in-flight");
+    seed_restart_run(&f.db_path, &session_id, RESTART_PRESET, &bundle).await;
+
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+
+    let session = recovered_position(&owner, &session_id).await;
+    assert_eq!(
+        session.current_task_id, APPLIED_ONLY_NODE,
+        "the recovered run must execute the applied document's node; got {:?}",
+        session.current_task_id
+    );
+    assert_ne!(
+        session.current_task_id, PRESET_ONLY_NODE,
+        "the descriptor-only node must never run while the strategy has a current apply"
+    );
+
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
+/// P4 Task 2: a strategy with NO apply still recovers exactly as before — the
+/// descriptor bundle's graph — which is what the same seeded position proves
+/// from the other side.
+#[tokio::test]
+async fn a_restart_with_no_apply_still_recovers_the_descriptor_graph() {
+    let f = fixture().await;
+    let bundle = write_restart_bundle(&f.tmp.path().join(".nexus42"), RESTART_NO_APPLY_PRESET);
+    let session_id = format!("{RESTART_NO_APPLY_PRESET}:in-flight");
+    seed_restart_run(&f.db_path, &session_id, RESTART_NO_APPLY_PRESET, &bundle).await;
+
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+
+    let session = recovered_position(&owner, &session_id).await;
+    assert_eq!(
+        session.current_task_id, PRESET_ONLY_NODE,
+        "without an apply the descriptor graph is the run's graph, exactly as before"
+    );
+
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
 // ── Concurrency regressions (T1 review C1/C2/C3) ───────────────────────────
 
 /// Poll `cond` until it holds, failing the test instead of hanging.

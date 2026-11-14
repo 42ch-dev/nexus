@@ -727,6 +727,12 @@ pub struct EngineSharedState {
     /// engines with no creator-DB core-context store (in-memory/test engines,
     /// session-only callers): no boundary refresh is attempted.
     pub core_context_store: Option<Arc<crate::schedule::derivation::CoreContextManager>>,
+    /// Applied-identity source (P4) — recovery resolves a run's current apply
+    /// through the SAME route admission uses, so a restart mid-run reconstructs
+    /// the applied graph instead of the descriptor's. `None` on engines that
+    /// never wire it (in-memory/test engines): recovery keeps the
+    /// descriptor-only behaviour.
+    pub applied_document_source: Option<Arc<dyn crate::capability::AppliedDocumentSource>>,
 }
 
 impl EngineSharedState {
@@ -744,6 +750,7 @@ impl EngineSharedState {
             prompt_executor: None,
             workspace_state_provider: None,
             core_context_store: None,
+            applied_document_source: None,
         }
     }
 
@@ -764,6 +771,7 @@ impl EngineSharedState {
             prompt_executor: None,
             workspace_state_provider: None,
             core_context_store: None,
+            applied_document_source: None,
         }
     }
 
@@ -790,6 +798,18 @@ impl EngineSharedState {
         store: Arc<crate::schedule::derivation::CoreContextManager>,
     ) {
         self.core_context_store = Some(store);
+    }
+
+    /// Wire the applied-identity source recovery reads (P4).
+    ///
+    /// Kept on the SHARED state so every handle recovery runs through (boot
+    /// re-drive and the on-demand attach for a resumed human wait) resolves the
+    /// same source.
+    pub fn set_applied_document_source(
+        &mut self,
+        source: Arc<dyn crate::capability::AppliedDocumentSource>,
+    ) {
+        self.applied_document_source = Some(source);
     }
 
     /// Register a run's coordinator cancellation token (A1, fail-closed
@@ -3631,6 +3651,23 @@ impl GraphFlowEngine {
         }
     }
 
+    /// Wire the applied-identity source recovery reads (P4).
+    ///
+    /// Called once at daemon boot with the same Creator DB the schedule intake
+    /// resolves applies through, so a restart re-enters the applied identity
+    /// admission used instead of the descriptor bundle.
+    pub fn set_applied_document_source(
+        &mut self,
+        source: std::sync::Arc<dyn crate::capability::AppliedDocumentSource>,
+    ) {
+        match std::sync::Arc::get_mut(&mut self.state) {
+            Some(state) => state.set_applied_document_source(source),
+            None => {
+                tracing::warn!("applied document source not wired: engine shared state is aliased");
+            }
+        }
+    }
+
     /// Wire the creator-DB core-context store for the outer-state boundary
     /// refresh (v1.195 P0-T6).
     ///
@@ -4039,14 +4076,54 @@ impl GraphFlowEngine {
             state: self.state.clone(),
         });
         let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
-        let wired = crate::preset_runtime::build_wired_outer_graph(
-            &loaded,
-            &engine_proxy,
-            &caps,
-            self.daemon_tool_dispatch.clone(),
-            self.prompt_executor.clone(),
-            self.session_cancels.clone(),
-        )?;
+        // P4: an applied run executes the strategy's applied document, and a
+        // restart re-enters through the SAME resolution admission uses — the
+        // source owns the whole route (classification, current apply, content
+        // hash), so there is no second reader of the approved bytes. The
+        // bundle checks above stay the frozen-source proof for the no-apply
+        // path and for every applied run's descriptor bundle.
+        let applied = match &self.state.applied_document_source {
+            Some(source) => source
+                .applied_document(&descriptor.preset_id, &loaded)
+                .await
+                .map_err(|error| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "R6: applied identity of session {} does not replay: {error} \
+                         (reconstruction_unavailable, non-replayable)",
+                        session_id.0
+                    )))
+                })?,
+            None => None,
+        };
+        let wired = match &applied {
+            // Same rule admission states: an applied user document's id is not a
+            // bundle id, so reading the embedded bundle could serve a colliding
+            // preset's bytes.
+            Some(document) => crate::preset_runtime::build_wired_outer_graph_from_ir(
+                document,
+                crate::preset_runtime::IrTemplateSource::OwnSource,
+                &engine_proxy,
+                &caps,
+                self.daemon_tool_dispatch.clone(),
+                self.prompt_executor.clone(),
+                self.session_cancels.clone(),
+            )
+            .map_err(|error| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "R6: applied document of session {} is not buildable: {error} \
+                     (reconstruction_unavailable, non-replayable)",
+                    session_id.0
+                )))
+            })?,
+            None => crate::preset_runtime::build_wired_outer_graph(
+                &loaded,
+                &engine_proxy,
+                &caps,
+                self.daemon_tool_dispatch.clone(),
+                self.prompt_executor.clone(),
+                self.session_cancels.clone(),
+            )?,
+        };
 
         // Create FlowRunner with the wired graph and existing storage.
         // The storage already contains the persisted session data, so the
