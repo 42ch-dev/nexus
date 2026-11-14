@@ -1,6 +1,9 @@
 //! Execution-only preset graph construction and provider binding creation.
 
 use crate::capability::CapabilityRegistry;
+use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
+    WorkflowDocument, WorkflowNodeKind,
+};
 use nexus_preset::loader::{extract_output_bindings, incoming_labeled_edge_counts};
 use nexus_preset::manifest::{NextTarget, PresetManifest};
 use nexus_preset::{load_embedded_preset, required_prompt_roles, LoadedPreset};
@@ -310,12 +313,55 @@ pub fn build_wired_outer_graph(
 /// Why an IR document cannot become an outer graph.
 #[derive(Debug, thiserror::Error)]
 pub enum IrOuterGraphError {
-    /// The document carries a concept with no §8.2.1 outer-graph projection.
+    /// The document uses a concept with no §8.2.1 outer-graph projection.
+    #[error("ir_unmappable: {concept} at {location} has no §8.2.1 outer-graph projection")]
+    Unmappable {
+        /// The unmappable IR concept, by its document spelling.
+        concept: String,
+        /// Where it sits: a node id or a document path.
+        location: String,
+    },
+    /// The adapter refused a payload the outer mapping carries but cannot read
+    /// (a malformed edge family or inner-step id), with no §8.2.1 concept named.
     #[error(transparent)]
     Projection(#[from] nexus_preset::WorkflowIrError),
     /// The projected topology is not a valid graph.
     #[error(transparent)]
     Graph(#[from] graph_flow::GraphError),
+}
+
+/// Refuse a document that uses a concept with no §8.2.1 outer-graph row.
+///
+/// Runs before [`nexus_preset::export_preset`] and before any task is
+/// constructed, so the caller gets the concept by name instead of the
+/// adapter's projection refusal and no partially built graph escapes.
+fn refuse_unmappable(document: &WorkflowDocument) -> Result<(), IrOuterGraphError> {
+    for node in &document.nodes {
+        let concept = match node.kind {
+            WorkflowNodeKind::Judge
+            | WorkflowNodeKind::ManualWait
+            | WorkflowNodeKind::Join
+            | WorkflowNodeKind::PatternSlot
+            | WorkflowNodeKind::NestGroup => format!("node kind {}", node.kind),
+            WorkflowNodeKind::OuterState
+            | WorkflowNodeKind::InnerStep
+            | WorkflowNodeKind::Terminal => continue,
+        };
+        return Err(IrOuterGraphError::Unmappable {
+            concept,
+            location: format!("node {}", node.id),
+        });
+    }
+    match document.terminal.as_slice() {
+        [_] => Ok(()),
+        terminals => Err(IrOuterGraphError::Unmappable {
+            concept: "terminal declaration".to_string(),
+            location: format!(
+                "document.terminal ({} entries; a preset carries exactly one)",
+                terminals.len()
+            ),
+        }),
+    }
 }
 
 /// Build the wired outer graph from a Workflow IR document (§8.2.1).
@@ -341,13 +387,14 @@ pub enum IrOuterGraphError {
 /// embedded bundle keyed by document id is the only resolvable template source.
 ///
 /// # Errors
-/// `Projection` when the document carries a concept the outer graph cannot
-/// express; `Graph` when the wired topology is invalid (an `entry` naming no
-/// outer task, or an edge to a task the projection never produced) or an inner
-/// graph fails to build.
+/// `Unmappable` when the document uses a concept with no §8.2.1 row (named, with
+/// its node id or document path), before any task is built; `Projection` when a
+/// payload the mapping does carry cannot be read; `Graph` when the wired
+/// topology is invalid (an `entry` naming no outer task, or an edge to a task
+/// the projection never produced) or an inner graph fails to build.
 #[allow(clippy::needless_pass_by_value, clippy::implicit_hasher)] // dispatch is cloned into each task and the cancel map is the engine's own, mirroring build_wired_outer_graph
 pub fn build_wired_outer_graph_from_ir(
-    document: &nexus_contracts::generated::daemon_api::orchestration::WorkflowDocument,
+    document: &WorkflowDocument,
     engine: &Arc<dyn crate::engine::OrchestrationEngine>,
     caps: &Arc<CapabilityRegistry>,
     daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
@@ -357,6 +404,8 @@ pub fn build_wired_outer_graph_from_ir(
     >,
 ) -> Result<graph_flow::Graph, IrOuterGraphError> {
     use crate::tasks::StateCompositeTask;
+
+    refuse_unmappable(document)?;
 
     let mut manifest = nexus_preset::export_preset(document)?;
 
@@ -1410,6 +1459,89 @@ states:
             ]
         );
         assert_eq!(projection.terminals, ["done"], "§8.2.1 terminal[]");
+    }
+
+    /// A copy of [`IR_LINEAR`] with one node's kind replaced.
+    fn ir_with_node_kind(node_index: usize, kind: &str) -> WorkflowDocument {
+        let mut document: serde_json::Value =
+            serde_json::from_str(IR_LINEAR).expect("fixture is JSON");
+        document["nodes"][node_index]["kind"] = serde_json::json!(kind);
+        serde_json::from_value(document).expect("mutated fixture is a valid workflow document")
+    }
+
+    /// A copy of [`IR_LINEAR`] declaring `terminals`.
+    fn ir_with_terminals(terminals: &[&str]) -> WorkflowDocument {
+        let mut document: serde_json::Value =
+            serde_json::from_str(IR_LINEAR).expect("fixture is JSON");
+        document["terminal"] = serde_json::json!(terminals);
+        serde_json::from_value(document).expect("mutated fixture is a valid workflow document")
+    }
+
+    /// The typed refusal for a document the mapping cannot express; no graph.
+    #[track_caller]
+    fn assert_refused(document: &WorkflowDocument, concept: &str, location: &str) {
+        let caps = Arc::new(test_capability_registry());
+        let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
+        let Err(error) =
+            build_wired_outer_graph_from_ir(document, &engine, &caps, None, None, no_cancels())
+        else {
+            panic!("unmappable document is refused, not partially built");
+        };
+        let message = error.to_string();
+        assert!(
+            matches!(error, IrOuterGraphError::Unmappable { .. }),
+            "refusal must be typed ir_unmappable, not the adapter projection: {message}"
+        );
+        assert!(message.contains("ir_unmappable"), "{message}");
+        assert!(message.contains(concept), "`{concept}` is named: {message}");
+        assert!(message.contains(location), "location named: {message}");
+    }
+
+    #[test]
+    fn ir_refuses_judge_node_kind_by_name() {
+        assert_refused(&ir_with_node_kind(1, "judge"), "judge", "review");
+    }
+
+    #[test]
+    fn ir_refuses_manual_wait_node_kind_by_name() {
+        assert_refused(
+            &ir_with_node_kind(1, "manual_wait"),
+            "manual_wait",
+            "review",
+        );
+    }
+
+    #[test]
+    fn ir_refuses_join_node_kind_by_name() {
+        assert_refused(&ir_with_node_kind(1, "join"), "join", "review");
+    }
+
+    #[test]
+    fn ir_refuses_pattern_slot_node_kind_by_name() {
+        assert_refused(
+            &ir_with_node_kind(1, "pattern_slot"),
+            "pattern_slot",
+            "review",
+        );
+    }
+
+    #[test]
+    fn ir_refuses_nest_group_node_kind_by_name() {
+        assert_refused(&ir_with_node_kind(1, "nest_group"), "nest_group", "review");
+    }
+
+    #[test]
+    fn ir_refuses_zero_terminals_by_name() {
+        assert_refused(&ir_with_terminals(&[]), "terminal", "0 entries");
+    }
+
+    #[test]
+    fn ir_refuses_two_terminals_by_name() {
+        assert_refused(
+            &ir_with_terminals(&["done", "review"]),
+            "terminal",
+            "2 entries",
+        );
     }
 
     #[tokio::test]
