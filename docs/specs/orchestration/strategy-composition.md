@@ -115,8 +115,7 @@ listed row appends an apply and leaves the list untouched.
 
 #### 5.1 What intake does with an applied identity
 
-**Precedence.** Admission and recovery choose a strategy's document in exactly three cases, and this table
-is the one place that states them:
+**Precedence.** Admission and recovery choose a strategy's document in exactly three cases:
 
 | Strategy the loader resolved | Document the run is built from |
 | --- | --- |
@@ -155,8 +154,12 @@ applied document back into a hint.
 - **Recovery reads the current apply, not the apply the run was admitted under.** Re-applying during an
   in-flight run reinterprets that run's persisted position (I-000464).
 - **Reconstruction validates inner descendants against the descriptor manifest** while it builds the graph
-  from the applied document; unreachable today only because the applied path admits no inner step
-  (I-000465).
+  from the applied document (I-000465). The applied path admits one inner shape — a declared inner graph
+  with no steps (see below) — and that shape is built and enterable: `project_inner_graphs` keeps it,
+  `build_inner_graphs` inserts it, and `EnterAction::InnerGraph` spawns a child session for it. On restart
+  the child's `graph_name` is checked against the descriptor manifest's `valid_inner` before the terminal
+  short-circuit, so an inner graph only the applied document declares already makes the run
+  non-replayable.
 - **Apply validates the bytes it installs, not whether intake can build a graph from them**, so an applied
   document installs and then refuses at admission (I-000448). The applied path carries no bundle root —
   serving a template would mean reading another package's bytes — so the §8.2.1 template refusal is

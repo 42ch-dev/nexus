@@ -16,10 +16,10 @@ lacks:
 
 Two stakes that drove this record are closed and are kept only because they explain why the
 remaining stages are shaped as they are: approved identity is no longer persisted-but-never-applied,
-and the candidate lifecycle no longer stops at Approve. Both closed with a limit rather than
-cleanly: durability was that limit and it has since closed — the applied identity now survives
-admission and recovery (I-000443) — while a document can still be applied that intake later refuses
-to build (I-000448).
+and the candidate lifecycle no longer stops at Approve. Both were closed with a limit rather than
+cleanly, and only one of those limits is still live: durability was the first and it is closed — the
+applied identity now survives admission and recovery (I-000443) — while a document can still be
+applied that intake later refuses to build (I-000448).
 
 1. **Production intake is still YAML-first.** A controlled dual-read transition has to exist before
    IR-primary execution can replace the YAML-only mapper. It can begin on imported preset bundles —
@@ -67,8 +67,11 @@ schedule runs from that applied identity, and a rollback installs the previous s
 new Apply. The qualification P3.5 carried — authoritative within one process lifetime only — is
 closed: admission resolves a strategy's current apply before it validates bindings, and recovery
 re-enters that same resolution, so a daemon restart during an in-flight applied run rebuilds the
-applied graph and the role set bound to providers comes from the document that runs (I-000443).
-The composition spec states the resulting precedence once: a user bundle with a current apply runs
+applied graph. At admission the role set bound to providers comes from the document that runs;
+recovery reuses the frozen descriptor's `agent_bindings` instead, so an apply landing before the
+restart leaves those bindings validated against one document while the graph is built from another
+(I-000443, I-000464).
+The composition spec owns the resulting precedence: a user bundle with a current apply runs
 from the applied document, embedded and system presets have no apply branch, and every other
 strategy keeps the YAML descriptor. What P4 still owes is its other half — the buildability
 predicate apply and intake must share (I-000448) — and the limits that remain on the applied path
