@@ -1,21 +1,24 @@
 # ADR: Durability adjudication — I-000009 / I-000010 (v1.217)
 
-Status: implemented — both residual obligations adjudicated keep-defer; triggers remain unfired
+Status: implemented — adjudicated keep-defer in v1.217, then overtaken: v1.224 fixed both residuals and I-000009 / I-000010 closed resolved on 2026-10-25T11:24Z
+Archived: 2026-11-14 — archived on this date rather than on `Date:`, which records the 2026-11-10 migration into this corpus and not the v1.217 adjudication; the fixes landed 2026-10-25 (`7abd9d599`, `f8b8b62c4`), before that migration, so the code facts it reasons from no longer exist (I-000452)
 Date: 2026-11-10
 Scope: process — public-first workflow durability and budget residuals
 Source: migrated from the retired iteration-package adjudication record
 
 ## Problem
 
-Report-only adjudication of two low-severity, trigger-gated residual obligations (I-000009 large-artifact identity without a content digest; I-000010 spent-token power-loss durability). Neither issue was closed or waived: the question was whether either trigger had fired and whether a fix was justified now.
+Report-only adjudication of two low-severity, trigger-gated residual obligations (I-000009 large-artifact identity without a content digest; I-000010 spent-token power-loss durability). At the time of the adjudication neither issue was closed or waived: the question was whether either trigger had fired and whether a fix was justified then.
+
+Every code fact and line reference below describes the tree as it stood when the adjudication was written, in v1.217, and several no longer hold: `artifactIdentity` now streams sha256 for every size and the `ARTIFACT_HASH_MAX_BYTES` threshold is gone (`7abd9d599`), and `spend` now fsyncs its file, the attempt directory and the parent directory (`f8b8b62c4`). One threat-surface fact survives unchanged — `writeEvent` and `writeMarker` still write with `wx` and no `fsync` — so the exposure I-000010 described is closed for the spend record it was scoped to and open for those two records (I-000456). The reasoning is kept because this is the record of a decision, not a description of the system; the landed contract lives in the guard's own header comment and its tests.
 
 ## Decision
 
-Both residuals are adjudicated **keep-defer**. Their acceptance triggers have not fired; both stay open and re-testable, with the recorded trigger conditions as the re-open signal. The dispositions table in §Consequences is the record.
+Both residuals were adjudicated **keep-defer** in v1.217: their acceptance triggers had not fired, so they stayed open and re-testable with the trigger conditions below as the re-open signal. That held for about a fortnight. Before this record was migrated into the tree, `7abd9d599` and `f8b8b62c4` fixed both residuals outright and closed the two issues — so the decision is preserved as the reasoning that preceded the fix, not as standing policy.
 
 ## Alternatives considered
 
-**Fix now.** Rejected: each fix carries a real cost while no trigger has fired — streaming sha256 adds a full re-hash of a ~175 MB CLI binary to every live qualification, and fsync/dirsync adds durability machinery the current local-only flow does not claim. **Close or waive.** Rejected: both describe real, narrow residuals, so closing would erase a valid open obligation. **Keep-defer.** Chosen: the obligations stay open, bounded by precise trigger definitions.
+**Fix now.** Rejected: each fix carries a real cost while no trigger has fired — streaming sha256 adds a full re-hash of a ~175 MB CLI binary to every live qualification, and fsync/dirsync adds durability machinery the current local-only flow does not claim. **Close or waive.** Rejected: both describe real, narrow residuals, so closing would erase a valid open obligation. **Keep-defer.** Chosen at the time: the obligations stayed open, bounded by precise trigger definitions.
 
 ## Consequences
 
@@ -202,8 +205,8 @@ severity does not justify pulling it forward on its own.
 
 | Issue | Severity | Trigger fired? | Verdict | Next action |
 | --- | --- | --- | --- | --- |
-| I-000009 | low | no | keep-defer | occurrence note; re-open when qualification extends beyond the frozen installed runtime |
-| I-000010 | low | no | keep-defer | occurrence note; re-open when power-loss-safe budgeting is claimed or the guard is next touched |
+| I-000009 | low | no (at adjudication) | fixed in `7abd9d599` | closed resolved 2026-10-25T11:24Z |
+| I-000010 | low | no (at adjudication) | fixed in `f8b8b62c4` | closed resolved 2026-10-25T11:24Z |
 
-Neither issue is closed or waived: both describe real, narrow residuals whose trigger
-conditions are precise and re-testable, so the obligations stay open and verifiable.
+Both issues are closed resolved. Both described real, narrow residuals whose trigger
+conditions were precise enough to re-test — and re-testing them is what produced the fixes.
