@@ -1,6 +1,6 @@
 # ADR: Canvas Composition and Pattern Packages — Strategy Orchestration Cutover
 
-Status: proposed — P4–P6 not implemented. P3 shipped in v1.239 (#515) and P3.5 Apply/Execute in v1.241 (#520); both are governed by the composition spec, not by this record, and P3.5 carries the three limits recorded there (source freeze within one process lifetime, I-000443; apply installs what intake may refuse to build, I-000448; the applied path refuses any `llm_judge` exit condition and any inner step, I-000449)
+Status: proposed — the applied identity now survives admission and recovery; P4's shared buildability predicate, P5 and P6 are not implemented. P3 shipped in v1.239 (#515), P3.5 Apply/Execute in v1.241 (#520) and the applied-identity half of P4 in v1.242; all are governed by the composition spec, not by this record, which also carries the limits still open on that path (I-000448, I-000449, I-000462–I-000465)
 Date: 2026-11-10
 Scope: The still-unshipped part of the cutover — the dual-read loader, IR-primary authoring, and retirement of the hand-authored YAML main path while retaining `preset.yaml` import/export. The Canvas composition surface, the compose operations, the pattern packages, the candidate lifecycle **up to Approve** (v1.239) and **Apply/Execute** (v1.241) shipped and are owned by the composition spec.
 Source: split from the archived Canvas + Workflow IR redesign and Dynamic Workflow Generation and Orchestration Simulation records
@@ -17,9 +17,9 @@ lacks:
 Two stakes that drove this record are closed and are kept only because they explain why the
 remaining stages are shaped as they are: approved identity is no longer persisted-but-never-applied,
 and the candidate lifecycle no longer stops at Approve. Both closed with a limit rather than
-cleanly — the applied identity is not durable across a daemon restart, and a document can be
-applied that intake later refuses to build (I-000443, I-000448) — so the decision of what a
-persisted apply must carry for recovery is still open.
+cleanly: durability was that limit and it has since closed — the applied identity now survives
+admission and recovery (I-000443) — while a document can still be applied that intake later refuses
+to build (I-000448).
 
 1. **Production intake is still YAML-first.** A controlled dual-read transition has to exist before
    IR-primary execution can replace the YAML-only mapper. It can begin on imported preset bundles —
@@ -39,9 +39,9 @@ validate, simulate, approve, and apply") and §6's rollback-by-new-Apply both as
 
 That stage precedes P4 in practice, as predicted here: dual-read can begin by loading imported preset
 bundles (today's intake) to prove the IR→Graph mapping, and an *applied* IR identity now exists to
-load. What P3.5 did not settle is durability — the applied identity answers admission and recovery
-from the YAML descriptor, so a restart reverts to the preset graph (I-000443) — which makes that
-question P4's opening problem rather than its follow-up.
+load. What P3.5 did not settle was durability — the applied identity answered admission and recovery
+from the YAML descriptor, so a restart reverted to the preset graph (I-000443) — which made that
+question P4's opening problem rather than its follow-up. It is closed: see §5.
 
 The shipped contract — manifest fields, the content-hash pin, the four operations and their CAS, the
 approval freeze, the flag and its per-audience default — lives in
@@ -64,11 +64,15 @@ v1.241, both governed by the composition spec. What remains:
 
 P3.5's own exit criteria were met as stated — an approved candidate is applied and an existing
 schedule runs from that applied identity, and a rollback installs the previous snapshot through a
-new Apply — with one qualification that belongs in the record rather than in a footnote: **the
-applied identity is authoritative within one process lifetime only.** The decision P4 inherits is
-therefore not "how does a schedule run from an applied identity" but "what must a persisted apply
-carry so that admission and recovery stop consulting the YAML descriptor" (I-000443), together with
-the buildability question apply leaves to intake (I-000448).
+new Apply. The qualification P3.5 carried — authoritative within one process lifetime only — is
+closed: admission resolves a strategy's current apply before it validates bindings, and recovery
+re-enters that same resolution, so a daemon restart during an in-flight applied run rebuilds the
+applied graph and the role set bound to providers comes from the document that runs (I-000443).
+The composition spec states the resulting precedence once: a user bundle with a current apply runs
+from the applied document, embedded and system presets have no apply branch, and every other
+strategy keeps the YAML descriptor. What P4 still owes is its other half — the buildability
+predicate apply and intake must share (I-000448) — and the limits that remain on the applied path
+(I-000449, I-000462–I-000465) are recorded there rather than here.
 
 | Phase | Change | Exit criteria |
 | --- | --- | --- |

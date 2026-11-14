@@ -840,9 +840,9 @@ The three rows are distinct facts and a client should not fold them: the first s
 uses something the model does not execute, the second says the concept executes but this adapter
 has no projection yet, the third says the document would run an empty prompt. The third is also
 where the applied path is narrowest today: it carries no bundle root, so the only way to serve a
-template is to read another package's bytes, which it refuses to do. The applied-identity contract
-and the three limits it carries (source freeze, buildability, and this unconditional refusal) are
-[strategy-composition.md §5.1](strategy-composition.md).
+template is to read another package's bytes, which it refuses to do. The applied-identity precedence
+rule and the limits that remain on that path — the one above, buildability, and the prompt-role and
+recovery limits — are [strategy-composition.md §5.1](strategy-composition.md).
 
 | IR document concept | Task / graph-flow execution counterpart |
 | --- | --- |
