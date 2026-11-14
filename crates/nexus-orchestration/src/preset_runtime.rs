@@ -1823,6 +1823,118 @@ states:
         );
     }
 
+    /// The predicate apply consults and the builder the run uses answer alike on
+    /// the same document: apply refuses iff the builder refuses, and a refusal
+    /// carries the builder's own reason. One row per refusal kind, plus the two
+    /// documents that do build.
+    #[test]
+    fn ir_buildability_predicate_refuses_iff_the_builder_refuses() {
+        struct Case {
+            name: &'static str,
+            document: WorkflowDocument,
+            source: IrTemplateSource,
+            /// The `ir_*` prefix of the builder's reason; `None` where it builds.
+            refusal: Option<&'static str>,
+        }
+        let cases = [
+            Case {
+                name: "builds/embedded",
+                document: ir_document(IR_LINEAR),
+                source: IrTemplateSource::Embedded,
+                refusal: None,
+            },
+            Case {
+                name: "builds/applied",
+                document: ir_document(IR_LINEAR),
+                source: IrTemplateSource::OwnSource,
+                refusal: None,
+            },
+            Case {
+                name: "unprojected/node_kind",
+                document: ir_with_node_kind(1, "judge"),
+                source: IrTemplateSource::Embedded,
+                refusal: Some("ir_unprojected"),
+            },
+            Case {
+                name: "unprojected/terminals",
+                document: ir_with_terminals(&["done", "review"]),
+                source: IrTemplateSource::Embedded,
+                refusal: Some("ir_unprojected"),
+            },
+            Case {
+                name: "unmappable/node_kind",
+                document: ir_with_node_kind(1, "pattern_slot"),
+                source: IrTemplateSource::Embedded,
+                refusal: Some("ir_unmappable"),
+            },
+            Case {
+                name: "unresolved_template/inner_step",
+                document: ir_with_inner_template(2, serde_json::json!("prompts/missing.md")),
+                source: IrTemplateSource::Embedded,
+                refusal: Some("ir_unresolved_template"),
+            },
+            Case {
+                name: "unresolved_template/judge",
+                document: ir_document(IR_JUDGE_UNRESOLVED),
+                source: IrTemplateSource::Embedded,
+                refusal: Some("ir_unresolved_template"),
+            },
+            Case {
+                name: "unresolved_template/applied",
+                document: ir_document(IR_INNER_GRAPH),
+                source: IrTemplateSource::OwnSource,
+                refusal: Some("ir_unresolved_template"),
+            },
+        ];
+
+        let caps = Arc::new(test_capability_registry());
+        let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
+        for Case {
+            name,
+            document,
+            source,
+            refusal,
+        } in cases
+        {
+            let predicate = validate_ir_buildability(&document, source);
+            let built = build_wired_outer_graph_from_ir(
+                &document,
+                source,
+                &engine,
+                &caps,
+                None,
+                None,
+                no_cancels(),
+            );
+            match (predicate, built) {
+                (Ok(()), Ok(_)) => assert!(
+                    refusal.is_none(),
+                    "{name}: the builder builds, so the row's refusal kind is wrong"
+                ),
+                (Err(predicate_reason), Err(builder_reason)) => {
+                    let Some(expected) = refusal else {
+                        panic!("{name}: apply would refuse a document the builder builds");
+                    };
+                    assert!(
+                        predicate_reason.to_string().starts_with(expected),
+                        "{name}: refusal is not `{expected}`: {predicate_reason}"
+                    );
+                    assert_eq!(
+                        predicate_reason.to_string(),
+                        builder_reason.to_string(),
+                        "{name}: apply must carry the reason the run would fail with"
+                    );
+                }
+                (Ok(()), Err(builder_reason)) => panic!(
+                    "{name}: apply would install what the builder refuses: {builder_reason}"
+                ),
+                (Err(predicate_reason), Ok(_)) => panic!(
+                    "{name}: apply refuses what the builder builds: {predicate_reason}"
+                ),
+            }
+        }
+    }
+
     /// A copy of [`IR_INNER_GRAPH`] with one inner step's `template` replaced.
     fn ir_with_inner_template(node_index: usize, template: serde_json::Value) -> WorkflowDocument {
         let mut document: serde_json::Value =

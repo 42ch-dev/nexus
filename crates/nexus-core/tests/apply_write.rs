@@ -192,20 +192,70 @@ async fn seed_schedule(pool: &SqlitePool, strategy_id: &str) {
 /// (I-000449).
 const JUDGE_TEMPLATE: &str = "prompts/judge.md";
 
-/// Freeze one approval of a document the builder refuses: the fixture's `draft` state exits on an
-/// `llm_judge` whose prompt template cannot resolve from the document's own source.
-async fn seed_unbuildable_approval(
-    setup: &Setup,
-    strategy_id: &str,
-    version: u64,
-) -> (String, String) {
-    let base = setup
-        .core
-        .read_strategy_candidate(&setup.principal, strategy_id)
-        .await
-        .unwrap()
-        .document;
-    let mut document = with_version(&base, version);
+/// A document the builder refuses, together with the reason it refuses it: an apply of it must
+/// carry that text unchanged.
+struct Unbuildable {
+    /// Distinguishes the fixture's approval row.
+    tag: &'static str,
+    /// The approved document.
+    document: nexus_workflow_ir::WorkflowDocument,
+    /// What `build_wired_outer_graph_from_ir` answers for `document`.
+    builder_reason: IrOuterGraphError,
+}
+
+/// One refused document per builder refusal kind, each frozen from the strategy's own candidate so
+/// only the refused part differs.
+fn unbuildable_documents(base: &nexus_workflow_ir::WorkflowDocument) -> [Unbuildable; 3] {
+    [
+        Unbuildable {
+            tag: "unmappable",
+            document: with_draft_kind(base, nexus_workflow_ir::WorkflowNodeKind::PatternSlot),
+            builder_reason: IrOuterGraphError::Unmappable {
+                concept: "node kind pattern_slot".to_string(),
+                location: "node draft".to_string(),
+            },
+        },
+        Unbuildable {
+            tag: "unprojected",
+            document: with_draft_kind(base, nexus_workflow_ir::WorkflowNodeKind::Judge),
+            builder_reason: IrOuterGraphError::Unprojected {
+                concept: "node kind judge".to_string(),
+                location: "node draft".to_string(),
+            },
+        },
+        Unbuildable {
+            tag: "unresolved_template",
+            document: with_judge_template(base),
+            builder_reason: IrOuterGraphError::UnresolvedTemplate {
+                node: "draft".to_string(),
+                template: Some(JUDGE_TEMPLATE.to_string()),
+                template_source: IrTemplateSource::OwnSource,
+            },
+        },
+    ]
+}
+
+/// The candidate's `draft` node carrying another kind: the shape of the builder's node-kind
+/// refusals.
+fn with_draft_kind(
+    base: &nexus_workflow_ir::WorkflowDocument,
+    kind: nexus_workflow_ir::WorkflowNodeKind,
+) -> nexus_workflow_ir::WorkflowDocument {
+    let mut document = base.clone();
+    document
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "draft")
+        .expect("the fixture has a draft state")
+        .kind = kind;
+    document
+}
+
+/// The candidate whose `draft` exits on an `llm_judge` naming [`JUDGE_TEMPLATE`].
+fn with_judge_template(
+    base: &nexus_workflow_ir::WorkflowDocument,
+) -> nexus_workflow_ir::WorkflowDocument {
+    let mut document = base.clone();
     let state = document
         .nodes
         .iter_mut()
@@ -218,22 +268,33 @@ async fn seed_unbuildable_approval(
         min_interval: None,
         duration: None,
     });
-    let hash = nexus_workflow_ir::content_hash(&document).unwrap();
+    document
+}
+
+/// Freeze one approval of `document`, keyed by its recomputed hash.
+async fn seed_document_approval(
+    setup: &Setup,
+    strategy_id: &str,
+    tag: &str,
+    document: &nexus_workflow_ir::WorkflowDocument,
+) -> (String, String) {
+    let hash = nexus_workflow_ir::content_hash(document).unwrap();
+    let approval_id = format!("apr_{tag}");
     sqlx::query(
         "INSERT INTO strategy_approvals \
          (approval_id, strategy_id, content_hash, candidate_revision, document_json, \
           trajectory_json, pins_json, approver, approved_at) \
          VALUES (?, ?, ?, 0, ?, ?, '[]', 'test_creator', '2026-01-01T00:00:00+00:00')",
     )
-    .bind(format!("apr_unbuildable_{version}"))
+    .bind(&approval_id)
     .bind(strategy_id)
     .bind(&hash)
-    .bind(serde_json::to_string(&document).unwrap())
+    .bind(serde_json::to_string(document).unwrap())
     .bind(serde_json::json!({"ir_content_hash": hash}).to_string())
     .execute(setup.core.pool())
     .await
     .unwrap();
-    (format!("apr_unbuildable_{version}"), hash)
+    (approval_id, hash)
 }
 
 async fn apply_rows(pool: &SqlitePool) -> i64 {
@@ -365,14 +426,78 @@ async fn a_document_edited_after_approval_is_the_typed_hash_change_and_writes_no
     setup.core.close().await.unwrap();
 }
 
+/// Every kind the builder refuses is the same typed apply refusal, carrying the builder's own
+/// reason and writing nothing: apply installs exactly what the run can build (I-000448).
 #[tokio::test]
-async fn an_unbuildable_document_is_the_typed_refusal_and_writes_nothing() {
+async fn every_document_the_builder_refuses_is_the_typed_refusal_and_writes_nothing() {
     let setup = setup().await;
-    let (_, hash) = seed_unbuildable_approval(&setup, STRATEGY, 1).await;
-    // The strategy is a user bundle and owns a schedule, so the document's buildability is the
-    // only thing this apply can trip on — exactly the apply that used to land and fail at its
-    // first run (I-000448).
+    // The strategy is a user bundle and owns a schedule, so each document's buildability is the
+    // only thing its apply can trip on — exactly the applies that used to land and fail at their
+    // first run.
     seed_schedule(setup.core.pool(), STRATEGY).await;
+    let base = setup
+        .core
+        .read_strategy_candidate(&setup.principal, STRATEGY)
+        .await
+        .unwrap()
+        .document;
+
+    for Unbuildable {
+        tag,
+        document,
+        builder_reason,
+    } in unbuildable_documents(&base)
+    {
+        let (_, hash) = seed_document_approval(&setup, STRATEGY, tag, &document).await;
+
+        let error = setup
+            .core
+            .apply_strategy(&setup.principal, STRATEGY, &hash)
+            .await
+            .unwrap_err();
+
+        assert_eq!(reason(&error), "document_unbuildable", "{tag}: {error:?}");
+        // The reason the RUN would have failed with, verbatim: the builder refuses this same
+        // document with the same `IrOuterGraphError`, and apply carries its text through.
+        assert_eq!(
+            refusal(&error)["builder_reason"].as_str().unwrap(),
+            builder_reason.to_string(),
+            "{tag}: the refusal must carry the builder's own reason"
+        );
+        assert_eq!(
+            apply_rows(setup.core.pool()).await,
+            0,
+            "{tag}: the buildability refusal must happen before the insert"
+        );
+        assert!(
+            setup
+                .core
+                .strategy_applied(&setup.principal, STRATEGY)
+                .await
+                .unwrap()
+                .current_apply
+                .is_none(),
+            "{tag}: a refused apply installs no identity"
+        );
+    }
+    setup.core.close().await.unwrap();
+}
+
+/// Buildability is checked before the schedule guard, so a strategy that is both unscheduled and
+/// unbuildable reports the document: the client's fix is re-approval, not a schedule.
+#[tokio::test]
+async fn an_unbuildable_document_outranks_the_missing_schedule() {
+    let setup = setup().await;
+    let base = setup
+        .core
+        .read_strategy_candidate(&setup.principal, STRATEGY)
+        .await
+        .unwrap()
+        .document;
+    let [Unbuildable { tag, document, .. }, ..] = unbuildable_documents(&base);
+    // No schedule at all: both guards would refuse this apply, and the document is the one that
+    // wins.
+    let (_, hash) = seed_document_approval(&setup, STRATEGY, tag, &document).await;
 
     let error = setup
         .core
@@ -381,33 +506,10 @@ async fn an_unbuildable_document_is_the_typed_refusal_and_writes_nothing() {
         .unwrap_err();
 
     assert_eq!(reason(&error), "document_unbuildable");
-    // The reason the RUN would have failed with, verbatim: the builder refuses this same document
-    // with the same `IrOuterGraphError`, and apply carries its text through unchanged.
-    let builder_reason = refusal(&error)["builder_reason"].as_str().unwrap();
-    assert_eq!(
-        builder_reason,
-        IrOuterGraphError::UnresolvedTemplate {
-            node: "draft".to_string(),
-            template: Some(JUDGE_TEMPLATE.to_string()),
-            template_source: IrTemplateSource::OwnSource,
-        }
-        .to_string()
-    );
-    assert!(builder_reason.starts_with("ir_unresolved_template:"));
     assert_eq!(
         apply_rows(setup.core.pool()).await,
         0,
         "the buildability refusal must happen before the insert"
-    );
-    assert!(
-        setup
-            .core
-            .strategy_applied(&setup.principal, STRATEGY)
-            .await
-            .unwrap()
-            .current_apply
-            .is_none(),
-        "a refused apply installs no identity"
     );
     setup.core.close().await.unwrap();
 }
