@@ -533,7 +533,10 @@ fn descriptor_serializes_the_applied_identity_only_when_present() {
         content_hash: "blake3:abc".to_string(),
     });
     let value = serde_json::to_value(&applied).expect("descriptor serializes");
-    assert_eq!(value["applied"]["content_hash"], serde_json::json!("blake3:abc"));
+    assert_eq!(
+        value["applied"]["content_hash"],
+        serde_json::json!("blake3:abc")
+    );
     let back: RunDescriptorV1 = serde_json::from_value(value).expect("descriptor decodes");
     assert_eq!(back.applied, applied.applied);
 }
