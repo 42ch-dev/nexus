@@ -117,7 +117,7 @@ async fn seed_revision_approval(
     .bind(&approval_id)
     .bind(STRATEGY)
     .bind(&hash)
-    .bind(revision as i64)
+    .bind(i64::try_from(revision).expect("the fixture revision fits an i64"))
     .bind(serde_json::to_string(&document).unwrap())
     .bind(serde_json::json!({"ir_content_hash": hash}).to_string())
     .bind(approved_at)
