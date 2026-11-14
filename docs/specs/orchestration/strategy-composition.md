@@ -184,6 +184,12 @@ applied document back into a hint.
   is refused, and so is every inner step of every inner graph**, whether or not it names a template — the
   schema allows an inner graph with no steps, which is the only inner-graph shape the applied path admits
   (I-000449).
+- **A standalone `judge`, `manual_wait` or `join` node has no projected preset representation and never
+  will**, so a build from such a document refuses it `ir_unprojected` permanently
+  ([§8.2.1](orchestration-engine.md#821-ir--task-mapping)). The authoring form is the `outer_state`
+  carrier: `exit_when.kind=llm_judge` plus its branch edges for a judgment, `exit_when.kind=manual` for a
+  wait, and `merge` / `converge` / `timeout_ms` / `on_timeout` for a join. No direct projection of the
+  kind spelling is planned (COMPASS D10).
 
 ### 6. Why one structural authority
 

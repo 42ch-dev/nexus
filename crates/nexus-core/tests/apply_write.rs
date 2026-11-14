@@ -223,10 +223,10 @@ fn unbuildable_documents(base: &nexus_workflow_ir::WorkflowDocument) -> [Unbuild
         Unbuildable {
             tag: "unprojected",
             document: with_draft_kind(base, nexus_workflow_ir::WorkflowNodeKind::Judge),
-            builder_reason: IrOuterGraphError::Unprojected {
-                concept: "node kind judge".to_string(),
-                location: "node draft".to_string(),
-            },
+            builder_reason: IrOuterGraphError::standalone_node_kind(
+                nexus_workflow_ir::WorkflowNodeKind::Judge,
+                "draft",
+            ),
         },
         // Passes the concept refusal (an inner step is a projected kind) and only the exporter
         // refuses it: the id is not `<inner_graph>/<step>`.

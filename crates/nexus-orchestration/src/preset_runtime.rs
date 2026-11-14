@@ -351,17 +351,19 @@ pub enum IrOuterGraphError {
         location: String,
     },
     /// §8.2.1 defines the concept's execution counterpart, but this adapter
-    /// has no manifest projection for it.
+    /// has no manifest projection for it and none is planned; `remedy` names
+    /// the authoring form that does project.
     #[error(
         "ir_unprojected: {concept} at {location} has no preset projection in the IR \
-         adapter (nexus-preset project_nodes), although §8.2.1 defines its execution \
-         counterpart"
+         adapter (nexus-preset project_nodes) and this refusal is permanent; {remedy}"
     )]
     Unprojected {
         /// The unprojected IR concept, by its document spelling.
         concept: String,
         /// Where it sits: a node id or a document path.
         location: String,
+        /// The authoring form that does project, or what the document must declare.
+        remedy: String,
     },
     /// An instruction template (an inner step's prompt or an
     /// `exit_when.llm_judge` judge prompt) resolves to nothing, so its task
@@ -388,6 +390,43 @@ pub enum IrOuterGraphError {
     Graph(#[from] graph_flow::GraphError),
 }
 
+impl IrOuterGraphError {
+    /// The permanent refusal for a standalone `judge` / `manual_wait` / `join`
+    /// node, naming the `outer_state` carrier that does project.
+    ///
+    /// The adapter reads those semantics from the carriers (`exit_when`,
+    /// `merge`, `converge`, `timeout_ms`, `on_timeout`) on
+    /// `nodes[kind=outer_state]`, so no preset state is ever derived from the
+    /// standalone kind. One constructor for the builder and its callers, so
+    /// the refusal and its message cannot drift apart.
+    #[must_use]
+    pub fn standalone_node_kind(kind: WorkflowNodeKind, node_id: &str) -> Self {
+        let remedy = match kind {
+            WorkflowNodeKind::Judge => {
+                "author the judgment as an outer_state carrying exit_when.kind=llm_judge \
+                 and its branch edges"
+            }
+            WorkflowNodeKind::ManualWait => {
+                "author the wait as an outer_state carrying exit_when.kind=manual"
+            }
+            WorkflowNodeKind::Join => {
+                "author the join as an outer_state carrying merge, converge, timeout_ms \
+                 and on_timeout"
+            }
+            WorkflowNodeKind::OuterState
+            | WorkflowNodeKind::InnerStep
+            | WorkflowNodeKind::Terminal
+            | WorkflowNodeKind::PatternSlot
+            | WorkflowNodeKind::NestGroup => "a preset has no such standalone node kind",
+        };
+        Self::Unprojected {
+            concept: format!("node kind {kind}"),
+            location: format!("node {node_id}"),
+            remedy: remedy.to_string(),
+        }
+    }
+}
+
 /// Refuse a document whose concepts have no projection into this adapter.
 ///
 /// Runs before [`nexus_preset::export_preset`] and before any task is
@@ -397,24 +436,26 @@ pub enum IrOuterGraphError {
 /// The refusal distinguishes two gaps. `judge` / `manual_wait` / `join` DO have
 /// a §8.2.1 execution counterpart, but this adapter projects their carriers
 /// (`exit_when`, `merge`, `converge`, `timeout_ms`, `on_timeout`) through
-/// `nodes[kind=outer_state]` only, so the kind spelling is unprojected.
-/// `pattern_slot` / `nest_group` have no execution row at all.
+/// `nodes[kind=outer_state]` only, so the kind spelling is refused
+/// permanently and [`IrOuterGraphError::standalone_node_kind`] names the
+/// carrier to author instead. `pattern_slot` / `nest_group` have no execution
+/// row at all.
 fn refuse_unmappable(document: &WorkflowDocument) -> Result<(), IrOuterGraphError> {
     for node in &document.nodes {
-        let adapter_gap = match node.kind {
-            WorkflowNodeKind::Judge | WorkflowNodeKind::ManualWait | WorkflowNodeKind::Join => true,
-            WorkflowNodeKind::PatternSlot | WorkflowNodeKind::NestGroup => false,
+        match node.kind {
+            WorkflowNodeKind::Judge | WorkflowNodeKind::ManualWait | WorkflowNodeKind::Join => {
+                return Err(IrOuterGraphError::standalone_node_kind(node.kind, &node.id))
+            }
+            WorkflowNodeKind::PatternSlot | WorkflowNodeKind::NestGroup => {
+                return Err(IrOuterGraphError::Unmappable {
+                    concept: format!("node kind {}", node.kind),
+                    location: format!("node {}", node.id),
+                })
+            }
             WorkflowNodeKind::OuterState
             | WorkflowNodeKind::InnerStep
-            | WorkflowNodeKind::Terminal => continue,
-        };
-        let concept = format!("node kind {}", node.kind);
-        let location = format!("node {}", node.id);
-        return Err(if adapter_gap {
-            IrOuterGraphError::Unprojected { concept, location }
-        } else {
-            IrOuterGraphError::Unmappable { concept, location }
-        });
+            | WorkflowNodeKind::Terminal => {}
+        }
     }
     match document.terminal.as_slice() {
         [_] => Ok(()),
@@ -424,6 +465,7 @@ fn refuse_unmappable(document: &WorkflowDocument) -> Result<(), IrOuterGraphErro
                 "document.terminal ({} entries; a preset carries exactly one)",
                 terminals.len()
             ),
+            remedy: "declare exactly one terminal entry".to_string(),
         }),
     }
 }
@@ -1783,9 +1825,13 @@ states:
         error
     }
 
-    /// §8.2.1 has the row, the adapter has no projection for the node kind.
+    /// §8.2.1 has the row, the adapter has no projection for it — permanently.
     #[track_caller]
-    fn assert_unprojected(document: &WorkflowDocument, concept: &str, location: &str) {
+    fn assert_unprojected(
+        document: &WorkflowDocument,
+        concept: &str,
+        location: &str,
+    ) -> IrOuterGraphError {
         let error = assert_refused(document, concept);
         let message = error.to_string();
         assert!(
@@ -1798,6 +1844,7 @@ states:
             "the adapter is named as the gap: {message}"
         );
         assert!(message.contains(location), "location named: {message}");
+        error
     }
 
     /// §8.2.1 has no execution row for the concept.
@@ -1813,23 +1860,40 @@ states:
         assert!(message.contains(location), "location named: {message}");
     }
 
+    /// The standalone `judge` / `manual_wait` / `join` kinds are refused
+    /// permanently (COMPASS D10), not deferred: each refusal says so and names
+    /// the `outer_state` carrier its semantics are authored through. Apply
+    /// consults the buildability predicate, so it answers the same text.
     #[test]
-    fn ir_refuses_judge_node_kind_as_an_adapter_gap() {
-        assert_unprojected(&ir_with_node_kind(1, "judge"), "judge", "review");
-    }
+    fn ir_refuses_standalone_judge_manual_wait_and_join_kinds_permanently() {
+        for (kind, carrier) in [
+            ("judge", "outer_state carrying exit_when.kind=llm_judge"),
+            ("manual_wait", "outer_state carrying exit_when.kind=manual"),
+            (
+                "join",
+                "outer_state carrying merge, converge, timeout_ms and on_timeout",
+            ),
+        ] {
+            let document = ir_with_node_kind(1, kind);
+            let error = assert_unprojected(&document, kind, "review");
+            let message = error.to_string();
+            assert!(
+                message.contains("this refusal is permanent"),
+                "the refusal is stated as permanent: {message}"
+            );
+            assert!(
+                message.contains(carrier),
+                "the carrier is named as the authoring form: {message}"
+            );
 
-    #[test]
-    fn ir_refuses_manual_wait_node_kind_as_an_adapter_gap() {
-        assert_unprojected(
-            &ir_with_node_kind(1, "manual_wait"),
-            "manual_wait",
-            "review",
-        );
-    }
-
-    #[test]
-    fn ir_refuses_join_node_kind_as_an_adapter_gap() {
-        assert_unprojected(&ir_with_node_kind(1, "join"), "join", "review");
+            let predicate = validate_ir_buildability(&document, IrTemplateSource::Embedded)
+                .expect_err("no standalone node kind builds");
+            assert_eq!(
+                predicate.to_string(),
+                message,
+                "apply's predicate states the builder's refusal"
+            );
+        }
     }
 
     #[test]
@@ -1870,8 +1934,8 @@ states:
         assert_eq!(
             unprojected.to_string(),
             "ir_unprojected: node kind judge at node review has no preset projection in the IR \
-             adapter (nexus-preset project_nodes), although §8.2.1 defines its execution \
-             counterpart"
+             adapter (nexus-preset project_nodes) and this refusal is permanent; author the \
+             judgment as an outer_state carrying exit_when.kind=llm_judge and its branch edges"
         );
 
         let unresolved = validate_ir_buildability(
@@ -3835,11 +3899,11 @@ states:
         async fn parity_join_gate_carries_merge_converge_and_timeout() {
             // §8.2.1 `nodes[kind=join]`, `merge`, `converge`, `timeout_ms`,
             // `on_timeout` → the `StateCompositeTask` join gate. `nodes[kind=
-            // join]` itself has no preset projection (`export_preset` refuses
-            // it; the named refusal is Task 4), so the join is expressed by an
-            // `outer_state` carrying the join carriers — which is what the
-            // builder maps. Arrivals are supplied directly because a whole-graph
-            // trace cannot fabricate the second branch's arrival.
+            // join]` itself is refused permanently (`ir_unprojected`), so the
+            // join is expressed by an `outer_state` carrying the join carriers
+            // — which is what the builder maps. Arrivals are supplied directly
+            // because a whole-graph trace cannot fabricate the second branch's
+            // arrival.
             let parity = Parity::scripted(&[(
                 "parity.judge",
                 serde_json::json!({"result": true, "reason": "parity go"}),
