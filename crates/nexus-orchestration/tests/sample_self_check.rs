@@ -20,16 +20,22 @@
 //!    applied, so a divergence fails with its YAML path. [`BYTE_NORMALISATIONS`]
 //!    documents what such a comparison cannot see; [`VALUE_REWRITES`] documents
 //!    the spellings that would make it fail.
-//! 4. Those rewrites still happen exactly where the lists say — in particular the
-//!    one shape that changes the value (a judged state's zero-rule branch form,
-//!    I-000476), so a reader never has to trust a comment.
+//! 4. Those rewrites still happen exactly where the lists say, so a reader never
+//!    has to trust a comment. The I-000476 case is asserted by the target that
+//!    survives the fix, not by the collapsed spelling, so correcting the exporter
+//!    keeps it green while a retargeted edge still fails.
+//! 5. Each sample's hand-edited `workflow.json` loads back into a document that
+//!    exports the same manifest as its committed `preset.yaml`, with `assets[]`
+//!    hashed over the bytes on disk.
 //!
 //! The bundles live at the repo root; this crate resolves them via
 //! `CARGO_MANIFEST_DIR` so the test passes regardless of the invoking working
 //! directory.
 
+use nexus_contracts::generated::daemon_api::orchestration::WorkflowDocument;
 use nexus_orchestration::CapabilityRegistry;
 use nexus_preset::manifest::{EnterAction, ExitWhen, NextTarget, PresetManifest};
+use nexus_preset::workflow_ir::import_preset_manifest;
 use nexus_preset::{
     export_preset, expr, import_preset_bundle, load_preset, validate_assets_in_bundle,
     validate_path_safety, validate_preset_semantic,
@@ -393,23 +399,125 @@ fn first_workflow_committed_yaml_round_trips() {
     assert_bundle_round_trips("examples/first-workflow");
 }
 
-/// A manifest whose `a` state is spelled by `a_state` and whose graph is otherwise fixed.
-fn probe_manifest(a_state: &str) -> String {
+/// Load one hand-edited `workflow.json`, check every `assets[]` hash against the bytes it names,
+/// and assert the manifest it exports equals the committed `preset.yaml`.
+///
+/// The JSON is the authoring source, so the manifest equality — not the file's existence — is
+/// the acceptance: a member dropped by hand changes the export at a named YAML path.
+fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
+    let root = repo_root().join(bundle);
+    let json = std::fs::read_to_string(root.join("workflow.json"))
+        .unwrap_or_else(|error| panic!("read {bundle}/workflow.json: {error}"));
+    let document: WorkflowDocument = serde_json::from_str(&json).unwrap_or_else(|error| {
+        panic!("{bundle}/workflow.json does not load as a WorkflowDocument: {error}")
+    });
+
+    for asset in &document.assets {
+        let bytes = std::fs::read(root.join(&asset.path))
+            .unwrap_or_else(|error| panic!("read {bundle}/{}: {error}", asset.path));
+        let hash = blake3::hash(&bytes).to_hex().to_string();
+        assert_eq!(
+            asset.content_hash.as_deref(),
+            Some(hash.as_str()),
+            "{bundle}/workflow.json: asset `{}` is not hashed over its current bytes",
+            asset.path
+        );
+    }
+
+    let exported = export_preset(&document)
+        .unwrap_or_else(|error| panic!("export {bundle}/workflow.json: {error}"));
+    let exported: Value = serde_yaml::to_value(&exported)
+        .unwrap_or_else(|error| panic!("serialize the {bundle}/workflow.json export: {error}"));
+    let yaml = std::fs::read_to_string(root.join("preset.yaml"))
+        .unwrap_or_else(|error| panic!("read {bundle}/preset.yaml: {error}"));
+    let committed: Value = serde_yaml::from_str(&yaml)
+        .unwrap_or_else(|error| panic!("parse {bundle}/preset.yaml as YAML: {error}"));
+
+    if let Some(path) = first_divergence("", &committed, &exported) {
+        panic!(
+            "`{bundle}/workflow.json` exports a manifest that differs from the committed \
+             `preset.yaml` at `{path}`: the JSON is missing or changes that member"
+        );
+    }
+}
+
+#[test]
+fn game_narrative_workflow_json_exports_the_committed_yaml() {
+    assert_workflow_json_exports_committed_yaml("strategy-samples/game-narrative");
+}
+
+#[test]
+fn react_trpg_turn_workflow_json_exports_the_committed_yaml() {
+    assert_workflow_json_exports_committed_yaml("strategy-samples/react-trpg-turn");
+}
+
+/// A manifest whose `a` state is spelled by `a_state`, with `header_extra` spliced into the
+/// preset header, and whose graph is otherwise fixed.
+fn probe_manifest_with(header_extra: &str, a_state: &str) -> String {
     format!(
         "preset:\n  id: probe\n  version: 1\n  kind: creator\n  description: probe\n  \
-         requires_capabilities: [acp.prompt]\n  initial: a\n  terminal: done\nstates:\n  \
+         initial: a\n  terminal: done\n{header_extra}states:\n  \
          - id: a\n{a_state}  - id: b\n    next: done\n  - id: done\n    terminal: true\n"
     )
 }
 
-/// Export a probe manifest through the IR. Probes reference no assets, so the bundle root is
-/// never read; the repo root only has to exist.
-fn probe_export(a_state: &str) -> Value {
-    let yaml = probe_manifest(a_state);
-    let manifest: PresetManifest = serde_yaml::from_str(&yaml).expect("probe parses");
-    let imported = import_preset_bundle(&manifest, &repo_root()).expect("probe imports");
-    serde_yaml::to_value(export_preset(&imported.document).expect("probe exports"))
+/// A manifest whose `a` state is spelled by `a_state` and whose graph is otherwise fixed.
+fn probe_manifest(a_state: &str) -> String {
+    probe_manifest_with("  requires_capabilities: [acp.prompt]\n", a_state)
+}
+
+/// Export a whole probe manifest through the IR. Probes take the no-filesystem import, so a probe
+/// may name a template that does not exist.
+fn probe_export_manifest(yaml: &str) -> Value {
+    let manifest: PresetManifest = serde_yaml::from_str(yaml).expect("probe parses");
+    let document = import_preset_manifest(&manifest).expect("probe imports");
+    serde_yaml::to_value(export_preset(&document).expect("probe exports"))
         .expect("probe export serialises")
+}
+
+/// Export a probe manifest whose `a` state is spelled by `a_state`.
+fn probe_export(a_state: &str) -> Value {
+    probe_export_manifest(&probe_manifest(a_state))
+}
+
+/// Every defaulted field [`VALUE_REWRITES`] names is written out by the export, on each carrier it
+/// sits on: a hand-written manifest that leaves the field out still exports the canonical value.
+#[test]
+fn defaulted_fields_are_written_out() {
+    let capabilities = probe_export_manifest(&probe_manifest_with("", "    next: b\n"));
+    assert_eq!(
+        capabilities["preset"]["requires_capabilities"],
+        Value::Sequence(Vec::new())
+    );
+
+    let cli_args = probe_export_manifest(&probe_manifest_with(
+        "  cli_args:\n    - name: mode\n      type: string\n",
+        "    next: b\n",
+    ));
+    assert_eq!(
+        cli_args["preset"]["cli_args"][0]["required"],
+        Value::Bool(false)
+    );
+
+    let gate_scope = probe_export_manifest(&probe_manifest_with(
+        "  gates:\n    - kind: previous_preset\n      preset: design-writing\n      \
+         status: complete\n",
+        "    next: b\n",
+    ));
+    assert_eq!(
+        gate_scope["preset"]["gates"][0]["scope"],
+        Value::String("work".to_string())
+    );
+
+    let context_body = probe_export_manifest(&probe_manifest_with(
+        "",
+        "    context_update:\n      op:\n        kind: append\n      \
+         template_file: prompts/append.md\n    next: b\n",
+    ));
+    assert_eq!(
+        context_body["states"][0]["context_update"]["op"]["body"],
+        Value::String(String::new())
+    );
 }
 
 /// Both lists are data, so their own invariant is checked: every entry is cosmetic, and every
@@ -436,14 +544,17 @@ fn documented_shape_rewrites_and_stable_shapes_hold() {
     let bare = probe_export("    exit_when: {kind: llm_judge}\n    next: b\n");
     assert_eq!(bare["states"][0]["next"], Value::String("b".to_string()));
 
-    // I-000476: the judged zero-rule branch form is rewritten to that same bare `next`.
+    // I-000476: a judged zero-rule branch may export as that same bare `next` today, or keep its
+    // `branches` shape once the exporter can tell the two apart. Either spelling must still point
+    // at `b`: the assertion is the target, not the collapsed form, so the fix keeps it green while
+    // a retargeted edge still fails.
     let collapsed =
         probe_export("    exit_when: {kind: llm_judge}\n    next: {branches: [], default: b}\n");
+    let next = &collapsed["states"][0]["next"];
     assert_eq!(
-        collapsed["states"][0]["next"],
-        Value::String("b".to_string()),
-        "the exporter is expected to collapse this form until I-000476 is fixed; if it now \
-         round-trips, drop this case and the VALUE_REWRITES entry"
+        next.as_str().or_else(|| next["default"].as_str()),
+        Some("b"),
+        "a judged state's zero-rule branch must still target `b`, whatever spelling it exports"
     );
 
     // `examples/first-workflow` relies on this: a non-judged zero-rule branch keeps its shape.
