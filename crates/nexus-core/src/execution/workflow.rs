@@ -2937,17 +2937,16 @@ impl WorkflowRunCoordinator {
         // "User" is the source the LOADER resolved (`loaded`, step 2) — never a second
         // classification. `locate_preset` checks embedded first, so a user bundle shadowing an
         // embedded id would be read as `embedded` and its current apply silently skipped; only
-        // `resolve_preset` (user → system → embedded) knows which bundle actually loaded. A
-        // resolved `Directory` is the user preset here: `_system.*` ids are refused above, and
-        // the system scan matches qualified ids only, so an unqualified id never resolves there.
+        // `resolve_preset` (user → system → embedded) knows which bundle actually loaded. The
+        // predicate is `crate::apply::is_user_preset`, the same one apply refuses on, so the two
+        // sides cannot disagree about which schedules have an applied identity.
         let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
-        let applied = match loaded.source_identity.as_ref() {
-            Some(nexus_preset::source_identity::PresetSourceIdentity::Directory { .. }) => {
-                crate::apply::current_apply(pool, &row.preset_id)
-                    .await
-                    .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?
-            }
-            _ => None,
+        let applied = if crate::apply::is_user_preset(&row.preset_id, &loaded) {
+            crate::apply::current_apply(pool, &row.preset_id)
+                .await
+                .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?
+        } else {
+            None
         };
         let wired = match applied {
             Some(apply) => {
