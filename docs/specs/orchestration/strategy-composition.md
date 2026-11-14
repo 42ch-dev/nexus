@@ -1,4 +1,4 @@
-# Strategy composition — pattern packages, compose ops, approval freeze
+# Strategy composition — pattern packages, compose ops, approval and apply
 
 ## Scope
 
