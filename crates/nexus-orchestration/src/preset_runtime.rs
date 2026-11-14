@@ -1527,6 +1527,1737 @@ states:
             "output_binding `refine.text` writes the bound node's output"
         );
     }
+
+    /// IR ↔ YAML parity (§8.2 / §8.2.1).
+    ///
+    /// Parity is behavioural equality for the runner's observables, not byte
+    /// equality of graph values: tasks hold `Arc` handles, closures and
+    /// injected executors, so their addresses and iteration order are not
+    /// execution semantics. Each test builds the YAML preset and the equivalent
+    /// IR document, then compares
+    ///
+    /// 1. `outer_graph_projection` — entry, task ids/kinds, ordered enter
+    ///    actions, exit/join/context-update carriers, routing edges with their
+    ///    label or `when`, terminals and inner-graph shape; and
+    /// 2. a scripted trace driven through `Graph::execute_session` — task
+    ///    invocation order, the edge each `Continue` selects, `NextAction`
+    ///    waits, the terminal result and the recorded capability / host-tool /
+    ///    prompt effects.
+    ///
+    /// Two comparisons cannot be made literally and are compensated instead of
+    /// weakened:
+    ///
+    /// * `graph_flow::Graph` exposes no edge accessor (`tasks`/`edges` are
+    ///   private), so edge parity rests on the projection *plus* the trace's
+    ///   selected edges — a dropped wiring surfaces as a `Paused` step with no
+    ///   outgoing edge, not as a silently shorter edge list.
+    /// * The YAML path starts at `states[0]` (graph-flow's first task) while the
+    ///   IR path honours `document.entry`, so the linear IR fixture lists its
+    ///   entry node out of order and projections are compared with tasks
+    ///   ordered by id and edges grouped by source state. Neither is a runner
+    ///   observable; conditional rule order *within* a state is preserved
+    ///   because it is first-match execution semantics.
+    mod parity {
+        use super::super::{
+            build_wired_outer_graph, build_wired_outer_graph_from_ir, outer_graph_projection, wire,
+            OuterGraphProjection, ProjectedEdge, ProjectedTask,
+        };
+        use super::{ir_document, no_cancels, ChildRunningEngine, UnreachableEngine};
+        use crate::capability::{
+            Capability, CapabilityError, CapabilityRegistry, DaemonToolDispatch, PromptExecutor,
+            PromptRequest, PromptResult,
+        };
+        use crate::engine::OrchestrationEngine;
+        use graph_flow::{Context, ExecutionStatus, Graph, NextAction, Session};
+        use nexus_preset::load_preset_from_str;
+        use nexus_preset::manifest::PresetManifest;
+        use std::collections::{BTreeMap, HashMap};
+        use std::sync::{Arc, Mutex};
+
+        // ----- fixtures ----------------------------------------------------
+
+        /// `entry` / `outer_state` / capability enter / rule exit / linear edge /
+        /// terminal node. The IR document lists `review` first so that `entry`
+        /// cannot be satisfied positionally.
+        const YAML_LINEAR: &str = r"
+preset:
+  id: parity-linear
+  version: 1
+  kind: creator
+  description: parity linear fixture
+  requires_capabilities: []
+  initial: plan
+  terminal: done
+states:
+  - id: plan
+    enter:
+      - kind: capability
+        name: parity.record
+        args: { note: plan }
+    exit_when: { kind: rule }
+    next: review
+  - id: review
+    exit_when: { kind: rule }
+    next: done
+  - id: done
+    terminal: true
+";
+
+        const IR_LINEAR: &str = r#"{
+            "ir_version": 0,
+            "id": "parity-linear",
+            "version": 1,
+            "revision": 0,
+            "state": "candidate",
+            "meta": {"description": "parity linear fixture", "kind": "creator", "run_intents": [], "requires_capabilities": []},
+            "entry": "plan",
+            "terminal": ["done"],
+            "nodes": [
+                {"id": "review", "kind": "outer_state", "effect_class": "pure", "exit_when": {"kind": "rule"}},
+                {"id": "plan", "kind": "outer_state", "effect_class": "read",
+                 "enter": [{"kind": "capability", "name": "parity.record", "args": {"note": "plan"}}],
+                 "exit_when": {"kind": "rule"}},
+                {"id": "done", "kind": "terminal", "effect_class": "pure"}
+            ],
+            "edges": [
+                {"id": "plan->review", "from": "plan", "to": "review", "kind": "linear"},
+                {"id": "review->done", "from": "review", "to": "done", "kind": "linear"}
+            ],
+            "nests": [], "assets": [], "signals": [], "roles": [],
+            "effect_summary": "read",
+            "provenance": {"source": "compose"}
+        }"#;
+
+        /// manual and timer exits: both wait, both resume into `Continue`.
+        const YAML_WAIT: &str = r"
+preset:
+  id: parity-wait
+  version: 1
+  kind: creator
+  description: parity wait fixture
+  requires_capabilities: []
+  initial: handoff
+  terminal: done
+states:
+  - id: handoff
+    exit_when: { kind: manual }
+    next: tick
+  - id: tick
+    exit_when: { kind: timer, duration: PT1H }
+    next: done
+  - id: done
+    terminal: true
+";
+
+        const IR_WAIT: &str = r#"{
+            "ir_version": 0,
+            "id": "parity-wait",
+            "version": 1,
+            "revision": 0,
+            "state": "candidate",
+            "meta": {"description": "parity wait fixture", "kind": "creator", "run_intents": [], "requires_capabilities": []},
+            "entry": "handoff",
+            "terminal": ["done"],
+            "nodes": [
+                {"id": "handoff", "kind": "outer_state", "effect_class": "pure", "exit_when": {"kind": "manual"}},
+                {"id": "tick", "kind": "outer_state", "effect_class": "pure", "exit_when": {"kind": "timer", "duration": "PT1H"}},
+                {"id": "done", "kind": "terminal", "effect_class": "pure"}
+            ],
+            "edges": [
+                {"id": "handoff->tick", "from": "handoff", "to": "tick", "kind": "linear"},
+                {"id": "tick->done", "from": "tick", "to": "done", "kind": "linear"}
+            ],
+            "nests": [], "assets": [], "signals": [], "roles": [],
+            "effect_summary": "pure",
+            "provenance": {"source": "compose"}
+        }"#;
+
+        /// judge exit with go/nogo edges. `parity.judge` is scripted per run.
+        const YAML_JUDGE: &str = r"
+preset:
+  id: parity-judge
+  version: 1
+  kind: creator
+  description: parity judge fixture
+  requires_capabilities: []
+  initial: assess
+  terminal: done
+states:
+  - id: assess
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/parity-judge.md
+      judge_capability: parity.judge
+    next:
+      go: pass
+      nogo: revise
+  - id: pass
+    exit_when: { kind: rule }
+    next: done
+  - id: revise
+    exit_when: { kind: rule }
+    next: done
+  - id: done
+    terminal: true
+";
+
+        const IR_JUDGE: &str = r#"{
+            "ir_version": 0,
+            "id": "parity-judge",
+            "version": 1,
+            "revision": 0,
+            "state": "candidate",
+            "meta": {"description": "parity judge fixture", "kind": "creator", "run_intents": [], "requires_capabilities": []},
+            "entry": "assess",
+            "terminal": ["done"],
+            "nodes": [
+                {"id": "assess", "kind": "outer_state", "effect_class": "external",
+                 "exit_when": {"kind": "llm_judge", "template": "prompts/parity-judge.md", "judge_capability": "parity.judge"}},
+                {"id": "pass", "kind": "outer_state", "effect_class": "pure", "exit_when": {"kind": "rule"}},
+                {"id": "revise", "kind": "outer_state", "effect_class": "pure", "exit_when": {"kind": "rule"}},
+                {"id": "done", "kind": "terminal", "effect_class": "pure"}
+            ],
+            "edges": [
+                {"id": "assess->pass", "from": "assess", "to": "pass", "kind": "go"},
+                {"id": "assess->revise", "from": "assess", "to": "revise", "kind": "nogo"},
+                {"id": "pass->done", "from": "pass", "to": "done", "kind": "linear"},
+                {"id": "revise->done", "from": "revise", "to": "done", "kind": "linear"}
+            ],
+            "nests": [], "assets": [], "signals": [], "roles": [],
+            "effect_summary": "external",
+            "provenance": {"source": "compose"}
+        }"#;
+
+        /// conditional + default edges and a context-update hook.
+        const YAML_CONDITIONAL: &str = r#"
+preset:
+  id: parity-conditional
+  version: 1
+  kind: creator
+  description: parity conditional fixture
+  requires_capabilities: []
+  initial: review
+  terminal: approve
+states:
+  - id: review
+    exit_when: { kind: rule }
+    context_update:
+      op: { kind: append, body: reviewed }
+      template_file: prompts/parity-append.md
+    next:
+      branches:
+        - when: "_context.score > 1"
+          target: approve
+      default: revise
+  - id: revise
+    exit_when: { kind: rule }
+    next: approve
+  - id: approve
+    terminal: true
+"#;
+
+        const IR_CONDITIONAL: &str = r#"{
+            "ir_version": 0,
+            "id": "parity-conditional",
+            "version": 1,
+            "revision": 0,
+            "state": "candidate",
+            "meta": {"description": "parity conditional fixture", "kind": "creator", "run_intents": [], "requires_capabilities": []},
+            "entry": "review",
+            "terminal": ["approve"],
+            "nodes": [
+                {"id": "review", "kind": "outer_state", "effect_class": "read",
+                 "exit_when": {"kind": "rule"},
+                 "context_update": {"op": "append", "template": "prompts/parity-append.md", "body": "reviewed"}},
+                {"id": "revise", "kind": "outer_state", "effect_class": "pure", "exit_when": {"kind": "rule"}},
+                {"id": "approve", "kind": "terminal", "effect_class": "pure"}
+            ],
+            "edges": [
+                {"id": "review->approve", "from": "review", "to": "approve", "kind": "conditional", "when": "_context.score > 1"},
+                {"id": "review->revise", "from": "review", "to": "revise", "kind": "default"},
+                {"id": "revise->approve", "from": "revise", "to": "approve", "kind": "linear"}
+            ],
+            "nests": [], "assets": [], "signals": [], "roles": [],
+            "effect_summary": "read",
+            "provenance": {"source": "compose"}
+        }"#;
+
+        /// inner graph: enter action, `acp_prompt` nodes, `depends_on` edges,
+        /// role binding, asset template and `output_binding`. The document id names
+        /// the embedded bundle, so both intakes resolve the same templates.
+        const YAML_INNER: &str = r"
+preset:
+  id: memory-augmented
+  version: 1
+  kind: creator
+  description: parity inner-graph fixture
+  requires_capabilities: []
+  initial: generate
+  terminal: done
+roles:
+  - id: writer
+    description: parity writer
+    system_prompt_file: prompts/generate-with-memory.md
+    recommended_skills: [parity-skill]
+states:
+  - id: generate
+    enter:
+      - kind: inner_graph
+        name: generate_graph
+    exit_when: { kind: graph_complete }
+    next: done
+  - id: done
+    terminal: true
+inner_graphs:
+  generate_graph:
+    output_binding: refine.text
+    nodes:
+      - id: generate_with_context
+        kind: acp_prompt
+        template_file: prompts/generate-with-memory.md
+        tool_policy: auto_grant_read_only
+      - id: refine
+        kind: acp_prompt
+        depends_on: [generate_with_context]
+        template_file: prompts/recall-memory.md
+        tool_policy: auto_grant_read_only
+        agent: writer
+";
+
+        const IR_INNER: &str = r#"{
+            "ir_version": 0,
+            "id": "memory-augmented",
+            "version": 1,
+            "revision": 0,
+            "state": "candidate",
+            "meta": {"description": "parity inner-graph fixture", "kind": "creator", "run_intents": [], "requires_capabilities": []},
+            "entry": "generate",
+            "terminal": ["done"],
+            "nodes": [
+                {"id": "generate", "kind": "outer_state", "effect_class": "external",
+                 "enter": [{"kind": "inner_graph", "name": "generate_graph"}],
+                 "exit_when": {"kind": "graph_complete"}},
+                {"id": "generate_graph/generate_with_context", "kind": "inner_step", "effect_class": "external",
+                 "step_kind": "acp_prompt", "template": "prompts/generate-with-memory.md",
+                 "tool_policy": "auto_grant_read_only"},
+                {"id": "generate_graph/refine", "kind": "inner_step", "effect_class": "external",
+                 "step_kind": "acp_prompt", "depends_on": ["generate_graph/generate_with_context"],
+                 "template": "prompts/recall-memory.md", "tool_policy": "auto_grant_read_only",
+                 "role": "writer", "output_binding": "refine.text"},
+                {"id": "done", "kind": "terminal", "effect_class": "pure"}
+            ],
+            "edges": [
+                {"id": "generate->done", "from": "generate", "to": "done", "kind": "linear"}
+            ],
+            "nests": [],
+            "assets": [
+                {"id": "generate_prompt", "path": "prompts/generate-with-memory.md", "kind": "prompt"},
+                {"id": "recall_prompt", "path": "prompts/recall-memory.md", "kind": "prompt"}
+            ],
+            "signals": [],
+            "roles": [
+                {"id": "writer", "description": "parity writer",
+                 "system_prompt_file": "prompts/generate-with-memory.md",
+                 "recommended_skills": ["parity-skill"]}
+            ],
+            "effect_summary": "external",
+            "provenance": {"source": "compose"}
+        }"#;
+
+        /// `host_tool` enter action, dispatched in-process.
+        const YAML_HOST_TOOL: &str = r"
+preset:
+  id: parity-host-tool
+  version: 1
+  kind: creator
+  description: parity host-tool fixture
+  requires_capabilities: []
+  initial: status
+  terminal: done
+states:
+  - id: status
+    enter:
+      - kind: host_tool
+        tool_name: nexus.orchestration.schedule_status
+        args: { schedule_id: sched-1 }
+    exit_when: { kind: rule }
+    next: done
+  - id: done
+    terminal: true
+";
+
+        const IR_HOST_TOOL: &str = r#"{
+            "ir_version": 0,
+            "id": "parity-host-tool",
+            "version": 1,
+            "revision": 0,
+            "state": "candidate",
+            "meta": {"description": "parity host-tool fixture", "kind": "creator", "run_intents": [], "requires_capabilities": []},
+            "entry": "status",
+            "terminal": ["done"],
+            "nodes": [
+                {"id": "status", "kind": "outer_state", "effect_class": "read",
+                 "enter": [{"kind": "host_tool", "tool_name": "nexus.orchestration.schedule_status",
+                            "args": {"schedule_id": "sched-1"}}],
+                 "exit_when": {"kind": "rule"}},
+                {"id": "done", "kind": "terminal", "effect_class": "pure"}
+            ],
+            "edges": [{"id": "status->done", "from": "status", "to": "done", "kind": "linear"}],
+            "nests": [], "assets": [], "signals": [], "roles": [],
+            "effect_summary": "read",
+            "provenance": {"source": "compose"}
+        }"#;
+
+        /// Non-execution document fields: `initial_action`, `signals`, `roles`,
+        /// `cli_args`, `gates`, `run_intents`, `effect_class`/`effect_summary`.
+        const YAML_METADATA: &str = r"
+preset:
+  id: parity-metadata
+  version: 1
+  kind: creator
+  description: parity metadata fixture
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: only
+  terminal: done
+  initial_action: { kind: seed_direct }
+  cli_args:
+    - name: chapter
+      type: integer
+      required: false
+      description: chapter number
+  gates:
+    - kind: filesystem
+      path: 'Works/{{work_ref}}/'
+      must_exist: true
+roles:
+  - id: writer
+    description: parity writer
+    system_prompt_file: prompts/parity-writer.md
+    recommended_skills: [parity-skill]
+signals:
+  - name: pause_run
+    on_receive:
+      action: pause
+states:
+  - id: only
+    exit_when: { kind: rule }
+    next: done
+  - id: done
+    terminal: true
+";
+
+        const IR_METADATA: &str = r#"{
+            "ir_version": 0,
+            "id": "parity-metadata",
+            "version": 1,
+            "revision": 0,
+            "state": "candidate",
+            "meta": {
+                "description": "parity metadata fixture",
+                "kind": "creator",
+                "run_intents": ["work_init"],
+                "requires_capabilities": [],
+                "cli_args": [
+                    {"name": "chapter", "type": "integer", "required": false, "description": "chapter number"}
+                ],
+                "gates": [
+                    {"kind": "filesystem", "path": "Works/{{work_ref}}/", "must_exist": true}
+                ]
+            },
+            "entry": "only",
+            "initial_action": {"kind": "seed_direct"},
+            "terminal": ["done"],
+            "nodes": [
+                {"id": "only", "kind": "outer_state", "effect_class": "pure", "exit_when": {"kind": "rule"}},
+                {"id": "done", "kind": "terminal", "effect_class": "pure"}
+            ],
+            "edges": [{"id": "only->done", "from": "only", "to": "done", "kind": "linear"}],
+            "nests": [],
+            "assets": [
+                {"id": "writer_prompt", "path": "prompts/parity-writer.md", "kind": "prompt"}
+            ],
+            "signals": [{"name": "pause_run", "action": "pause"}],
+            "roles": [
+                {"id": "writer", "description": "parity writer",
+                 "system_prompt_file": "prompts/parity-writer.md",
+                 "recommended_skills": ["parity-skill"]}
+            ],
+            "effect_summary": "pure",
+            "provenance": {"source": "compose"}
+        }"#;
+
+        /// join gate: merge + converge + bounded timeout on one state.
+        const YAML_JOIN: &str = r"
+preset:
+  id: parity-join
+  version: 1
+  kind: creator
+  description: parity join fixture
+  requires_capabilities: []
+  initial: assess
+  terminal: done
+states:
+  - id: assess
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/parity-judge.md
+      judge_capability: parity.judge
+    next:
+      - label: go
+        target: gate
+      - label: keep
+        target: gate
+  - id: gate
+    merge: { kind: all }
+    converge: { strategy: wait_for_all }
+    timeout_ms: 600000
+    on_timeout: done
+    exit_when: { kind: rule }
+    next: done
+  - id: done
+    terminal: true
+";
+
+        const IR_JOIN: &str = r#"{
+            "ir_version": 0,
+            "id": "parity-join",
+            "version": 1,
+            "revision": 0,
+            "state": "candidate",
+            "meta": {"description": "parity join fixture", "kind": "creator", "run_intents": [], "requires_capabilities": []},
+            "entry": "assess",
+            "terminal": ["done"],
+            "nodes": [
+                {"id": "assess", "kind": "outer_state", "effect_class": "external",
+                 "exit_when": {"kind": "llm_judge", "template": "prompts/parity-judge.md", "judge_capability": "parity.judge"}},
+                {"id": "gate", "kind": "outer_state", "effect_class": "pure",
+                 "merge": {"kind": "all"},
+                 "converge": {"strategy": "wait_for_all"},
+                 "timeout_ms": 600000,
+                 "on_timeout": "done",
+                 "exit_when": {"kind": "rule"}},
+                {"id": "done", "kind": "terminal", "effect_class": "pure"}
+            ],
+            "edges": [
+                {"id": "assess->gate:go", "from": "assess", "to": "gate", "kind": "linear", "label": "go"},
+                {"id": "assess->gate:keep", "from": "assess", "to": "gate", "kind": "linear", "label": "keep"},
+                {"id": "gate->done", "from": "gate", "to": "done", "kind": "linear"}
+            ],
+            "nests": [], "assets": [], "signals": [], "roles": [],
+            "effect_summary": "external",
+            "provenance": {"source": "compose"}
+        }"#;
+
+        /// `terminal[]` names an `outer_state`: the declaration, not the node
+        /// kind, is what makes the task end the run.
+        const YAML_TERMINAL: &str = r"
+preset:
+  id: parity-terminal
+  version: 1
+  kind: creator
+  description: parity terminal fixture
+  requires_capabilities: []
+  initial: only
+  terminal: only
+states:
+  - id: only
+    terminal: true
+";
+
+        const IR_TERMINAL: &str = r#"{
+            "ir_version": 0,
+            "id": "parity-terminal",
+            "version": 1,
+            "revision": 0,
+            "state": "candidate",
+            "meta": {"description": "parity terminal fixture", "kind": "creator", "run_intents": [], "requires_capabilities": []},
+            "entry": "only",
+            "terminal": ["only"],
+            "nodes": [{"id": "only", "kind": "outer_state", "effect_class": "pure"}],
+            "edges": [],
+            "nests": [], "assets": [], "signals": [], "roles": [],
+            "effect_summary": "pure",
+            "provenance": {"source": "compose"}
+        }"#;
+
+        // ----- scripted effects -------------------------------------------
+
+        /// Shared logs for everything a scripted run can observe.
+        #[derive(Default, Clone)]
+        struct Recorder {
+            capabilities: Arc<Mutex<Vec<(String, serde_json::Value)>>>,
+            prompts: Arc<Mutex<Vec<(String, String)>>>,
+            host_tools: Arc<Mutex<Vec<String>>>,
+        }
+
+        #[derive(Debug, PartialEq)]
+        struct Recorded {
+            capabilities: Vec<(String, serde_json::Value)>,
+            prompts: Vec<(String, String)>,
+            host_tools: Vec<String>,
+        }
+
+        impl Recorder {
+            /// Drain what ran since the last drain, so each side is compared
+            /// against only its own effects.
+            fn drain(&self) -> Recorded {
+                Recorded {
+                    capabilities: std::mem::take(
+                        &mut *self.capabilities.lock().expect("capability log lock"),
+                    ),
+                    prompts: std::mem::take(&mut *self.prompts.lock().expect("prompt log lock")),
+                    host_tools: std::mem::take(
+                        &mut *self.host_tools.lock().expect("host tool log lock"),
+                    ),
+                }
+            }
+        }
+
+        /// A capability with a fixed output that records each invocation.
+        struct ScriptedCapability {
+            name: &'static str,
+            output: serde_json::Value,
+            recorder: Recorder,
+        }
+
+        #[async_trait::async_trait]
+        impl Capability for ScriptedCapability {
+            fn name(&self) -> &'static str {
+                self.name
+            }
+
+            fn input_schema(&self) -> &'static str {
+                r#"{"type":"object"}"#
+            }
+
+            fn output_schema(&self) -> &'static str {
+                r#"{"type":"object"}"#
+            }
+
+            async fn run(
+                &self,
+                input: serde_json::Value,
+            ) -> Result<serde_json::Value, CapabilityError> {
+                self.recorder
+                    .capabilities
+                    .lock()
+                    .expect("capability log lock")
+                    .push((self.name.to_string(), input));
+                Ok(self.output.clone())
+            }
+        }
+
+        fn scripted_registry(
+            recorder: &Recorder,
+            scripted: &[(&'static str, serde_json::Value)],
+        ) -> Arc<CapabilityRegistry> {
+            crate::capability::test_support::registry_with(
+                scripted
+                    .iter()
+                    .map(|(name, output)| {
+                        Box::new(ScriptedCapability {
+                            name,
+                            output: output.clone(),
+                            recorder: recorder.clone(),
+                        }) as Box<dyn Capability>
+                    })
+                    .collect(),
+            )
+        }
+
+        /// Records each dispatched host-tool call by name.
+        struct ScriptedDispatch {
+            recorder: Recorder,
+        }
+
+        #[async_trait::async_trait]
+        impl DaemonToolDispatch for ScriptedDispatch {
+            async fn dispatch_tool(
+                &self,
+                tool_name: &str,
+                _: &serde_json::Value,
+                _: &str,
+            ) -> Result<serde_json::Value, CapabilityError> {
+                self.recorder
+                    .host_tools
+                    .lock()
+                    .expect("host tool log lock")
+                    .push(tool_name.to_string());
+                Ok(serde_json::json!({"status": "ok"}))
+            }
+        }
+
+        /// Records each inner-node prompt through the same seam production uses.
+        struct ParityExecutor {
+            recorder: Recorder,
+        }
+
+        #[async_trait::async_trait]
+        impl PromptExecutor for ParityExecutor {
+            async fn execute(
+                &self,
+                request: PromptRequest,
+            ) -> Result<PromptResult, CapabilityError> {
+                self.recorder
+                    .prompts
+                    .lock()
+                    .expect("prompt log lock")
+                    .push((request.task_id.clone(), request.prompt.clone()));
+                Ok(PromptResult {
+                    full_text: format!("{} output", request.task_id),
+                    host_session_id: format!("host:{}", request.run_id),
+                    operation_id: "parity-op".to_string(),
+                })
+            }
+        }
+
+        // ----- harness -----------------------------------------------------
+
+        /// One intake's built graph, the manifest it was built from and its
+        /// normalized projection.
+        struct Built {
+            graph: Graph,
+            manifest: PresetManifest,
+            projection: OuterGraphProjection,
+        }
+
+        /// One side of a comparison: build result plus what the scripted run
+        /// observed.
+        struct Evidence {
+            built: Built,
+            trace: Trace,
+            recorded: Recorded,
+        }
+
+        struct Parity {
+            recorder: Recorder,
+            caps: Arc<CapabilityRegistry>,
+            engine: Arc<dyn OrchestrationEngine>,
+            dispatch: Option<Arc<dyn DaemonToolDispatch>>,
+            executor: Option<Arc<dyn PromptExecutor>>,
+            cancels: Arc<std::sync::RwLock<HashMap<String, tokio_util::sync::CancellationToken>>>,
+        }
+
+        impl Parity {
+            fn scripted(scripted: &[(&'static str, serde_json::Value)]) -> Self {
+                let recorder = Recorder::default();
+                Self {
+                    caps: scripted_registry(&recorder, scripted),
+                    recorder,
+                    engine: Arc::new(UnreachableEngine),
+                    dispatch: None,
+                    executor: None,
+                    cancels: no_cancels(),
+                }
+            }
+
+            /// Host-tool fixtures need the daemon dispatch slot filled.
+            fn with_host_tool(scripted: &[(&'static str, serde_json::Value)]) -> Self {
+                let mut parity = Self::scripted(scripted);
+                parity.dispatch = Some(Arc::new(ScriptedDispatch {
+                    recorder: parity.recorder.clone(),
+                }));
+                parity
+            }
+
+            /// Inner-graph fixtures need a child-session engine and a prompt
+            /// executor: the same wiring production injects.
+            fn with_inner_graphs() -> Self {
+                let recorder = Recorder::default();
+                let cancels = no_cancels();
+                Self {
+                    caps: scripted_registry(&recorder, &[]),
+                    engine: Arc::new(ChildRunningEngine {
+                        children: tokio::sync::Mutex::new(HashMap::new()),
+                        session_cancels: cancels.clone(),
+                    }),
+                    recorder: recorder.clone(),
+                    dispatch: None,
+                    executor: Some(Arc::new(ParityExecutor { recorder })),
+                    cancels,
+                }
+            }
+
+            fn yaml_side(&self, yaml: &str) -> Built {
+                let loaded = load_preset_from_str(yaml, self.caps.as_ref())
+                    .expect("parity YAML preset loads");
+                let graph = build_wired_outer_graph(
+                    &loaded,
+                    &self.engine,
+                    &self.caps,
+                    self.dispatch.clone(),
+                    self.executor.clone(),
+                    self.cancels.clone(),
+                )
+                .expect("YAML wired outer graph builds");
+                let manifest = loaded.manifest;
+                let projection = outer_graph_projection(&graph, &manifest);
+                Built {
+                    graph,
+                    manifest,
+                    projection,
+                }
+            }
+
+            fn ir_side(&self, ir: &str) -> Built {
+                let document = ir_document(ir);
+                let graph = build_wired_outer_graph_from_ir(
+                    &document,
+                    &self.engine,
+                    &self.caps,
+                    self.dispatch.clone(),
+                    self.executor.clone(),
+                    self.cancels.clone(),
+                )
+                .expect("IR outer graph builds");
+                let mut manifest =
+                    nexus_preset::export_preset(&document).expect("document projects onto states");
+                // The builder flags `terminal[]` on the projected states itself.
+                // The projection needs the same manifest, so the flag is mirrored
+                // here; the scripted trace is what proves the builder set it (a
+                // builder that skipped it returns `Continue`, not `End`).
+                for state in &mut manifest.states {
+                    state.terminal |= document.terminal.iter().any(|id| id == &state.id);
+                }
+                let projection = outer_graph_projection(&graph, &manifest);
+                Built {
+                    graph,
+                    manifest,
+                    projection,
+                }
+            }
+
+            /// Compare the normalized projections and the scripted traces of
+            /// the YAML and IR intakes for one workflow pair.
+            async fn compare(
+                &self,
+                yaml: &str,
+                ir: &str,
+                initial: &[(&str, serde_json::Value)],
+                probes: &[&str],
+            ) -> (Evidence, Evidence) {
+                let yaml_built = self.yaml_side(yaml);
+                let ir_built = self.ir_side(ir);
+                assert_projection_parity(&yaml_built, &ir_built);
+
+                let yaml_trace = run_trace(&yaml_built, initial, probes).await;
+                let yaml_recorded = self.recorder.drain();
+                let ir_trace = run_trace(&ir_built, initial, probes).await;
+                let ir_recorded = self.recorder.drain();
+
+                assert_eq!(
+                    yaml_trace, ir_trace,
+                    "§8.2/§8.2.1 trace parity: task invocation order, selected edges, NextAction, waits, terminal"
+                );
+                assert_eq!(
+                    yaml_recorded, ir_recorded,
+                    "§8.2/§8.2.1 effect parity: capability, host-tool and prompt invocations"
+                );
+                (
+                    Evidence {
+                        built: yaml_built,
+                        trace: yaml_trace,
+                        recorded: yaml_recorded,
+                    },
+                    Evidence {
+                        built: ir_built,
+                        trace: ir_trace,
+                        recorded: ir_recorded,
+                    },
+                )
+            }
+        }
+
+        /// Tasks ordered by id: build order is not a runner observable (the
+        /// graph stores tasks in a map), and the IR fixture may declare its
+        /// entry node anywhere in `nodes[]`.
+        fn sorted_tasks(projection: &OuterGraphProjection) -> Vec<ProjectedTask> {
+            let mut tasks = projection.tasks.clone();
+            tasks.sort_by(|left, right| left.id.cmp(&right.id));
+            tasks
+        }
+
+        /// Edges grouped by source state with declaration order preserved
+        /// inside a group — conditional rule order is first-match semantics.
+        fn routing_edges(projection: &OuterGraphProjection) -> Vec<ProjectedEdge> {
+            let mut edges = projection.edges.clone();
+            edges.sort_by(|left, right| left.from.cmp(&right.from));
+            edges
+        }
+
+        fn sorted_terminals(projection: &OuterGraphProjection) -> Vec<String> {
+            let mut terminals = projection.terminals.clone();
+            terminals.sort();
+            terminals
+        }
+
+        fn assert_projection_parity(yaml: &Built, ir: &Built) {
+            assert_eq!(
+                yaml.projection.graph_id, ir.projection.graph_id,
+                "both intakes build the graph under the workflow id"
+            );
+            assert_eq!(
+                yaml.projection.entry, ir.projection.entry,
+                "§8.2.1 entry: the initial outer Task id"
+            );
+            assert_eq!(
+                sorted_tasks(&yaml.projection),
+                sorted_tasks(&ir.projection),
+                "§8.2/§8.2.1 states → tasks: id, kind, enter actions, exit/join/context-update carriers"
+            );
+            assert_eq!(
+                routing_edges(&yaml.projection),
+                routing_edges(&ir.projection),
+                "§8.2/§8.2.1 edges: (from, to, kind, label-or-when) in per-state declaration order"
+            );
+            assert_eq!(
+                sorted_terminals(&yaml.projection),
+                sorted_terminals(&ir.projection),
+                "§8.2.1 terminal[] / §8.2 terminal: tasks that end the run"
+            );
+            assert_eq!(
+                yaml.projection.inner_graphs, ir.projection.inner_graphs,
+                "§8.2/§8.2.1 inner graphs: nodes, templates, roles, depends_on edges, output binding"
+            );
+        }
+
+        #[derive(Debug, PartialEq)]
+        struct TraceStep {
+            task: String,
+            action: &'static str,
+            next: Option<String>,
+        }
+
+        #[derive(Debug, PartialEq)]
+        struct Trace {
+            steps: Vec<TraceStep>,
+            probes: BTreeMap<String, serde_json::Value>,
+        }
+
+        const MAX_TRACE_STEPS: usize = 16;
+
+        /// Drive a graph the way the runner does: one `execute_session` per
+        /// step. `WaitForInput` is followed by the engine's advance signal
+        /// (the resumed key the composite task reads), so waits are part of the
+        /// compared trace instead of a dead end.
+        async fn run_trace(
+            built: &Built,
+            initial: &[(&str, serde_json::Value)],
+            probes: &[&str],
+        ) -> Trace {
+            let start = built
+                .graph
+                .start_task_id()
+                .expect("graph declares a start task");
+            let mut session = Session::new_from_task("parity-trace".to_string(), start);
+            for (key, value) in initial {
+                session
+                    .context
+                    .set(*key, value.clone())
+                    .expect("initial trace context");
+            }
+
+            let mut steps = Vec::new();
+            for _ in 0..MAX_TRACE_STEPS {
+                let task = session.current_task_id.clone();
+                let result = built
+                    .graph
+                    .execute_session(&mut session)
+                    .await
+                    .expect("scripted graph runs");
+                match result.status {
+                    ExecutionStatus::Completed => {
+                        steps.push(TraceStep {
+                            task,
+                            action: "end",
+                            next: None,
+                        });
+                        return Trace {
+                            steps,
+                            probes: probe(&session.context, probes),
+                        };
+                    }
+                    ExecutionStatus::WaitingForInput => {
+                        session
+                            .context
+                            .set(format!("_state_{task}_resumed"), true)
+                            .expect("resume signal");
+                        steps.push(TraceStep {
+                            task,
+                            action: "wait",
+                            next: None,
+                        });
+                    }
+                    ExecutionStatus::Paused { next_task_id, .. } => {
+                        steps.push(TraceStep {
+                            task,
+                            action: "continue",
+                            next: Some(next_task_id),
+                        });
+                    }
+                }
+            }
+            panic!("scripted trace did not terminate within {MAX_TRACE_STEPS} steps: {steps:?}");
+        }
+
+        fn probe(context: &Context, keys: &[&str]) -> BTreeMap<String, serde_json::Value> {
+            keys.iter()
+                .map(|key| {
+                    (
+                        (*key).to_string(),
+                        context
+                            .get::<serde_json::Value>(key)
+                            .unwrap_or(serde_json::Value::Null),
+                    )
+                })
+                .collect()
+        }
+
+        fn action_label(action: &NextAction) -> String {
+            match action {
+                NextAction::End => "end".to_string(),
+                NextAction::WaitForInput => "wait".to_string(),
+                NextAction::Continue => "continue".to_string(),
+                NextAction::ContinueAndExecute => "continue_and_execute".to_string(),
+                NextAction::GoTo(target) => format!("goto:{target}"),
+            }
+        }
+
+        /// Run one state task directly with a scripted context and return its
+        /// observable outcome. Join gates need externally supplied arrivals, so
+        /// they are compared here instead of through a whole-graph trace.
+        async fn run_state(
+            graph: &Graph,
+            state: &str,
+            seed: &[(&str, serde_json::Value)],
+        ) -> (String, Option<String>) {
+            let context = Context::new();
+            for (key, value) in seed {
+                context.set(*key, value.clone()).expect("scripted context");
+            }
+            let result = graph
+                .get_task(state)
+                .expect("state task is wired")
+                .run(context)
+                .await
+                .expect("state runs");
+            (action_label(&result.next_action), result.response)
+        }
+
+        fn expected_steps(steps: &[(&str, &'static str, Option<&str>)]) -> Vec<TraceStep> {
+            steps
+                .iter()
+                .map(|(task, action, next)| TraceStep {
+                    task: (*task).to_string(),
+                    action,
+                    next: next.map(ToString::to_string),
+                })
+                .collect()
+        }
+
+        // ----- §8.2.1 rows -------------------------------------------------
+
+        #[tokio::test]
+        async fn parity_entry_selects_the_declared_initial_task() {
+            // §8.2.1 `entry` → the initial outer Task. The IR fixture lists
+            // `review` first, so `entry: plan` cannot be satisfied positionally
+            // (the YAML side is positional and must therefore declare `plan`
+            // first). Removing `set_start_task` from the IR builder starts the
+            // IR run at `review` and fails this test.
+            let parity =
+                Parity::scripted(&[("parity.record", serde_json::json!({"recorded": "plan"}))]);
+            let (yaml, ir) = parity.compare(YAML_LINEAR, IR_LINEAR, &[], &[]).await;
+
+            assert_eq!(ir.built.manifest.states[0].id, "review");
+            assert_eq!(yaml.built.projection.entry.as_deref(), Some("plan"));
+            assert_eq!(
+                ir.built.projection.entry.as_deref(),
+                Some("plan"),
+                "§8.2.1 entry selects the initial outer task by id, not by position"
+            );
+            assert_eq!(
+                yaml.trace.steps.first().map(|step| step.task.as_str()),
+                Some("plan"),
+                "the runner starts at the entry task"
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_outer_state_nodes_become_one_task_each() {
+            // §8.2.1 `nodes[kind=outer_state]` / §8.2 `states[].id`.
+            let parity =
+                Parity::scripted(&[("parity.record", serde_json::json!({"recorded": "plan"}))]);
+            let (yaml, ir) = parity.compare(YAML_LINEAR, IR_LINEAR, &[], &[]).await;
+
+            assert_eq!(
+                sorted_tasks(&ir.built.projection)
+                    .iter()
+                    .map(|task| (task.id.as_str(), task.kind))
+                    .collect::<Vec<_>>(),
+                [
+                    ("done", "terminal"),
+                    ("plan", "outer_state"),
+                    ("review", "outer_state")
+                ],
+                "one outer task per state, plus the terminal"
+            );
+            assert_eq!(
+                ir.trace.steps.len(),
+                yaml.trace.steps.len(),
+                "the same number of states execute on both intakes"
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_capability_enter_action_invokes_the_capability() {
+            // §8.2.1 `outer_state.enter[kind=capability]` / §8.2
+            // `states[].enter[*].kind=capability` → `CapabilityTask`.
+            let parity =
+                Parity::scripted(&[("parity.record", serde_json::json!({"recorded": "plan"}))]);
+            let (yaml, ir) = parity
+                .compare(YAML_LINEAR, IR_LINEAR, &[], &["_capability_output"])
+                .await;
+
+            assert_eq!(
+                ir.built
+                    .projection
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == "plan")
+                    .expect("plan task is projected")
+                    .enter,
+                [
+                    serde_json::json!({"kind": "capability", "name": "parity.record", "args": {"note": "plan"}})
+                ],
+                "the capability enter action is carried in declaration order"
+            );
+            assert_eq!(
+                ir.recorded.capabilities,
+                [(
+                    ("parity.record").to_string(),
+                    serde_json::json!({"note": "plan"})
+                )],
+                "the state's enter action invokes the named capability once with its args"
+            );
+            assert_eq!(
+                ir.trace.probes["_capability_output"],
+                serde_json::json!({"recorded": "plan"}),
+                "the capability output lands in the context the next state reads"
+            );
+            assert_eq!(ir.recorded.capabilities, yaml.recorded.capabilities);
+        }
+
+        #[tokio::test]
+        async fn parity_host_tool_enter_action_dispatches_in_process() {
+            // §8.2.1 `outer_state.enter[kind=host_tool]` → `HostToolCallTask`
+            // invoked inline (never a graph node), failing closed without the
+            // injected dispatch.
+            let parity = Parity::with_host_tool(&[]);
+            let (yaml, ir) = parity.compare(YAML_HOST_TOOL, IR_HOST_TOOL, &[], &[]).await;
+
+            assert_eq!(
+                ir.recorded.host_tools,
+                ["nexus.orchestration.schedule_status"],
+                "the host tool is dispatched once through the daemon seam"
+            );
+            assert_eq!(ir.recorded.host_tools, yaml.recorded.host_tools);
+            assert_eq!(
+                ir.built
+                    .projection
+                    .tasks
+                    .iter()
+                    .map(|task| task.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["status", "done"],
+                "host_tool creates no extra graph task"
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_inner_graph_enter_action_launches_the_child_graph() {
+            // §8.2.1 `enter[kind=inner_graph]` / §8.2 same → `InnerGraphTask`
+            // over the attached child graph.
+            let parity = Parity::with_inner_graphs();
+            let (_, ir) = parity
+                .compare(
+                    YAML_INNER,
+                    IR_INNER,
+                    &[("_session_id", serde_json::json!("run:1"))],
+                    &["state.generate.output"],
+                )
+                .await;
+
+            assert_eq!(
+                ir.built
+                    .projection
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == "generate")
+                    .expect("generate task is projected")
+                    .enter,
+                [serde_json::json!({"kind": "inner_graph", "name": "generate_graph"})]
+            );
+            assert_eq!(
+                ir.recorded.prompts.len(),
+                2,
+                "the enter action launched the child graph and it ran its nodes"
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_inner_step_acp_prompt_nodes_become_inner_tasks() {
+            // §8.2.1 `nodes[kind=inner_step] step_kind=acp_prompt` / §8.2
+            // `inner_graphs.<name>.nodes[].kind=acp_prompt` → `AcpPromptTask`.
+            let parity = Parity::with_inner_graphs();
+            let (_, ir) = parity
+                .compare(
+                    YAML_INNER,
+                    IR_INNER,
+                    &[("_session_id", serde_json::json!("run:1"))],
+                    &[],
+                )
+                .await;
+
+            let inner = &ir.built.projection.inner_graphs[0];
+            assert_eq!(inner.name, "generate_graph");
+            assert_eq!(
+                inner
+                    .nodes
+                    .iter()
+                    .map(|node| (
+                        node.id.as_str(),
+                        node.kind,
+                        node.template_file.as_deref(),
+                        node.agent.as_deref()
+                    ))
+                    .collect::<Vec<_>>(),
+                [
+                    (
+                        "generate_with_context",
+                        "acp_prompt",
+                        Some("prompts/generate-with-memory.md"),
+                        None
+                    ),
+                    (
+                        "refine",
+                        "acp_prompt",
+                        Some("prompts/recall-memory.md"),
+                        Some("writer")
+                    )
+                ],
+                "each inner step keeps its template path and role binding"
+            );
+            assert_eq!(
+                ir.recorded
+                    .prompts
+                    .iter()
+                    .map(|(task_id, _)| task_id.as_str())
+                    .collect::<Vec<_>>(),
+                ["generate_with_context", "refine"]
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_depends_on_edges_order_inner_nodes() {
+            // §8.2.1 `edges[kind=depends_on]` / `inner_step.depends_on` / §8.2
+            // `depends_on` → `add_edge(dependency, step)` in the inner graph.
+            let parity = Parity::with_inner_graphs();
+            let (_, ir) = parity
+                .compare(
+                    YAML_INNER,
+                    IR_INNER,
+                    &[("_session_id", serde_json::json!("run:1"))],
+                    &[],
+                )
+                .await;
+
+            assert_eq!(
+                ir.built.projection.inner_graphs[0]
+                    .edges
+                    .iter()
+                    .map(|edge| (edge.from.as_str(), edge.to.as_str(), edge.kind))
+                    .collect::<Vec<_>>(),
+                [("generate_with_context", "refine", "depends_on")],
+                "the dependency is projected as a dependency edge"
+            );
+            assert_eq!(
+                ir.recorded
+                    .prompts
+                    .iter()
+                    .map(|(task_id, _)| task_id.as_str())
+                    .collect::<Vec<_>>(),
+                ["generate_with_context", "refine"],
+                "the wired edge is what runs the dependency before its dependant"
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_output_binding_writes_the_state_output() {
+            // §8.2.1 `output_binding` / §8.2
+            // `inner_graphs.<name>.output_binding` → `InnerGraphTask` post-run
+            // export to `state.<state>.output`.
+            let parity = Parity::with_inner_graphs();
+            let (_, ir) = parity
+                .compare(
+                    YAML_INNER,
+                    IR_INNER,
+                    &[("_session_id", serde_json::json!("run:1"))],
+                    &["state.generate.output"],
+                )
+                .await;
+
+            assert_eq!(
+                ir.built.projection.inner_graphs[0]
+                    .output_binding
+                    .as_deref(),
+                Some("refine.text"),
+                "the binding travels with the inner graph"
+            );
+            assert_eq!(
+                ir.trace.probes["state.generate.output"],
+                serde_json::json!("refine output"),
+                "the bound node's output is exported onto the outer state"
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_exit_when_rule_continues() {
+            // §8.2.1 `exit_when.kind=rule` / §8.2 → `RuleCheckTask` semantics;
+            // an unset `_rule` is the unit rule and always transitions.
+            let parity =
+                Parity::scripted(&[("parity.record", serde_json::json!({"recorded": "plan"}))]);
+            let (_, ir) = parity.compare(YAML_LINEAR, IR_LINEAR, &[], &[]).await;
+
+            assert_eq!(
+                ir.built
+                    .projection
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == "review")
+                    .expect("review task is projected")
+                    .exit_when,
+                Some(serde_json::json!({"kind": "rule"}))
+            );
+            assert_eq!(
+                ir.trace.steps,
+                expected_steps(&[
+                    ("plan", "continue", Some("review")),
+                    ("review", "continue", Some("done")),
+                    ("done", "end", None),
+                ]),
+                "rule exits continue instead of waiting"
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_exit_when_manual_waits_then_resumes() {
+            // §8.2.1 `exit_when.kind=manual` / §8.2 → `ManualWaitTask`
+            // returning `NextAction::WaitForInput`.
+            let parity = Parity::scripted(&[]);
+            let (_, ir) = parity.compare(YAML_WAIT, IR_WAIT, &[], &[]).await;
+
+            assert_eq!(
+                ir.built
+                    .projection
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == "handoff")
+                    .expect("handoff task is projected")
+                    .exit_when,
+                Some(serde_json::json!({"kind": "manual"}))
+            );
+            assert_eq!(
+                ir.trace.steps.first(),
+                Some(&TraceStep {
+                    task: "handoff".to_string(),
+                    action: "wait",
+                    next: None,
+                }),
+                "a manual exit waits for input before advancing"
+            );
+            assert_eq!(
+                ir.trace.steps,
+                expected_steps(&[
+                    ("handoff", "wait", None),
+                    ("handoff", "continue", Some("tick")),
+                    ("tick", "wait", None),
+                    ("tick", "continue", Some("done")),
+                    ("done", "end", None),
+                ]),
+                "the resumed state continues to its declared successor"
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_exit_when_timer_waits_for_input() {
+            // §8.2.1 `exit_when.kind=timer` → `TimerWaitTask`, returning
+            // `WaitForInput` (the clock signal is DR-12).
+            let parity = Parity::scripted(&[]);
+            let (_, ir) = parity.compare(YAML_WAIT, IR_WAIT, &[], &[]).await;
+
+            assert_eq!(
+                ir.built
+                    .projection
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == "tick")
+                    .expect("tick task is projected")
+                    .exit_when,
+                Some(serde_json::json!({"kind": "timer", "duration": "PT1H"})),
+                "the timer duration is carried, not dropped"
+            );
+            assert!(
+                ir.trace
+                    .steps
+                    .iter()
+                    .any(|step| step.task == "tick" && step.action == "wait"),
+                "a timer exit waits for input: {:?}",
+                ir.trace.steps
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_exit_when_llm_judge_go_continues_and_nogo_waits() {
+            // §8.2.1 `exit_when.kind=llm_judge` / §8.2 → `JudgeTask` semantics
+            // after the enter actions: go continues, no-go does not.
+            let go = Parity::scripted(&[(
+                "parity.judge",
+                serde_json::json!({"result": true, "reason": "parity go"}),
+            )]);
+            let (_, go_ir) = go
+                .compare(
+                    YAML_JUDGE,
+                    IR_JUDGE,
+                    &[],
+                    &["_judge_result", "_judge_label"],
+                )
+                .await;
+            assert_eq!(
+                go_ir
+                    .built
+                    .projection
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == "assess")
+                    .expect("assess task is projected")
+                    .exit_when,
+                Some(serde_json::json!({
+                    "kind": "llm_judge",
+                    "template_file": "prompts/parity-judge.md",
+                    "judge_capability": "parity.judge",
+                }))
+            );
+            assert_eq!(
+                go_ir.trace.steps,
+                expected_steps(&[
+                    ("assess", "continue", Some("pass")),
+                    ("pass", "continue", Some("done")),
+                    ("done", "end", None),
+                ]),
+                "a go verdict takes the go branch"
+            );
+            assert_eq!(go_ir.trace.probes["_judge_result"], serde_json::json!(true));
+
+            let nogo = Parity::scripted(&[(
+                "parity.judge",
+                serde_json::json!({"result": false, "reason": "parity nogo"}),
+            )]);
+            let (_, nogo_ir) = nogo
+                .compare(
+                    YAML_JUDGE,
+                    IR_JUDGE,
+                    &[],
+                    &["_judge_result", "_judge_label"],
+                )
+                .await;
+            assert_eq!(
+                nogo_ir.trace.steps,
+                expected_steps(&[
+                    ("assess", "continue", Some("revise")),
+                    ("revise", "continue", Some("done")),
+                    ("done", "end", None),
+                ]),
+                "a no-go verdict takes the nogo branch"
+            );
+            assert_eq!(
+                nogo_ir.trace.probes["_judge_result"],
+                serde_json::json!(false)
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_exit_when_graph_complete_continues_after_the_inner_graph() {
+            // §8.2.1 `exit_when.kind=graph_complete` / §8.2 → the inner graph
+            // completion lets the outer task return `Continue`.
+            let parity = Parity::with_inner_graphs();
+            let (_, ir) = parity
+                .compare(
+                    YAML_INNER,
+                    IR_INNER,
+                    &[("_session_id", serde_json::json!("run:1"))],
+                    &[],
+                )
+                .await;
+
+            assert_eq!(
+                ir.built
+                    .projection
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == "generate")
+                    .expect("generate task is projected")
+                    .exit_when,
+                Some(serde_json::json!({"kind": "graph_complete"}))
+            );
+            assert_eq!(
+                ir.trace.steps,
+                expected_steps(&[
+                    ("generate", "continue", Some("done")),
+                    ("done", "end", None),
+                ]),
+                "graph_complete continues to the declared successor"
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_join_gate_carries_merge_converge_and_timeout() {
+            // §8.2.1 `nodes[kind=join]`, `merge`, `converge`, `timeout_ms`,
+            // `on_timeout` → the `StateCompositeTask` join gate. `nodes[kind=
+            // join]` itself has no preset projection (`export_preset` refuses
+            // it; the named refusal is Task 4), so the join is expressed by an
+            // `outer_state` carrying the join carriers — which is what the
+            // builder maps. Arrivals are supplied directly because a whole-graph
+            // trace cannot fabricate the second branch's arrival.
+            let parity = Parity::scripted(&[(
+                "parity.judge",
+                serde_json::json!({"result": true, "reason": "parity go"}),
+            )]);
+            let yaml = parity.yaml_side(YAML_JOIN);
+            let ir = parity.ir_side(IR_JOIN);
+            assert_projection_parity(&yaml, &ir);
+
+            assert_eq!(
+                ir.projection
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == "gate")
+                    .expect("gate task is projected")
+                    .join,
+                Some(serde_json::json!({
+                    "merge": {"kind": "all"},
+                    "converge": {"strategy": "wait_for_all"},
+                    "timeout_ms": 600_000,
+                    "on_timeout": "done",
+                })),
+                "the join gate keeps its merge, converge, deadline and reroute"
+            );
+
+            let partial: [(&str, serde_json::Value); 2] = [
+                ("_merge_gate", serde_json::json!(["go"])),
+                ("_converge_arrivals_gate", serde_json::json!(["assess"])),
+            ];
+            let complete: [(&str, serde_json::Value); 2] = [
+                ("_merge_gate", serde_json::json!(["go", "keep"])),
+                ("_converge_arrivals_gate", serde_json::json!(["assess"])),
+            ];
+
+            assert_eq!(
+                run_state(&yaml.graph, "gate", &partial).await,
+                run_state(&ir.graph, "gate", &partial).await,
+                "a partial join waits identically on both intakes"
+            );
+            assert_eq!(
+                run_state(&yaml.graph, "gate", &partial).await.0,
+                "wait",
+                "one of two labeled arrivals holds the gate"
+            );
+            assert_eq!(
+                run_state(&yaml.graph, "gate", &complete).await,
+                run_state(&ir.graph, "gate", &complete).await,
+                "a satisfied join advances identically on both intakes"
+            );
+            assert_eq!(
+                run_state(&yaml.graph, "gate", &complete).await.0,
+                "continue"
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_terminal_declaration_ends_the_run() {
+            // §8.2.1 `terminal[]` or `nodes[kind=terminal]` / §8.2
+            // `terminal: <id>` → the task returns `NextAction::End`. The IR
+            // fixture declares `terminal: ["only"]` on an `outer_state`, so
+            // removing the builder's terminal-flag branch leaves it
+            // `outer_state`, and the run pauses instead of ending.
+            let parity = Parity::scripted(&[]);
+            let (_, ir) = parity.compare(YAML_TERMINAL, IR_TERMINAL, &[], &[]).await;
+
+            assert_eq!(
+                sorted_terminals(&ir.built.projection),
+                ["only"],
+                "the declared terminal is the task that ends the run"
+            );
+            assert_eq!(
+                ir.built.projection.tasks[0].kind, "terminal",
+                "terminal[] flags the projected state"
+            );
+            assert_eq!(
+                ir.trace.steps,
+                expected_steps(&[("only", "end", None)]),
+                "terminal[] on an outer_state returns End"
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_edges_linear_go_and_nogo_route_identically() {
+            // §8.2.1 `edges[kind=linear|go|nogo|default]` / §8.2 `next: <id>`
+            // → outer edges plus the source task's `NextAction` routing.
+            let linear =
+                Parity::scripted(&[("parity.record", serde_json::json!({"recorded": "plan"}))]);
+            let (_, linear_ir) = linear.compare(YAML_LINEAR, IR_LINEAR, &[], &[]).await;
+            assert_eq!(
+                routing_edges(&linear_ir.built.projection)
+                    .iter()
+                    .map(|edge| (edge.from.as_str(), edge.to.as_str(), edge.kind))
+                    .collect::<Vec<_>>(),
+                [("plan", "review", "linear"), ("review", "done", "linear")],
+                "linear edges are projected from both intakes"
+            );
+            assert_eq!(
+                linear_ir.trace.steps,
+                expected_steps(&[
+                    ("plan", "continue", Some("review")),
+                    ("review", "continue", Some("done")),
+                    ("done", "end", None),
+                ]),
+                "each Continue selects its linear successor at run time"
+            );
+
+            let judge = Parity::scripted(&[(
+                "parity.judge",
+                serde_json::json!({"result": true, "reason": "parity go"}),
+            )]);
+            let (_, judge_ir) = judge.compare(YAML_JUDGE, IR_JUDGE, &[], &[]).await;
+            assert_eq!(
+                routing_edges(&judge_ir.built.projection)
+                    .iter()
+                    .map(|edge| (edge.from.as_str(), edge.to.as_str(), edge.kind))
+                    .collect::<Vec<_>>(),
+                [
+                    ("assess", "pass", "go"),
+                    ("assess", "revise", "nogo"),
+                    ("pass", "done", "linear"),
+                    ("revise", "done", "linear")
+                ],
+                "go/nogo edges are projected with their branch kind"
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_edges_conditional_and_default_route_by_expression() {
+            // §8.2.1 `edges[kind=conditional]` / §8.2 `next.kind=conditional`
+            // → the source task evaluates the branch; the graph adds no edge for
+            // the taken branch, so the selected target is what the trace pins.
+            let mut evidence = Vec::new();
+            for score in [serde_json::json!(5), serde_json::json!(0)] {
+                let parity = Parity::scripted(&[]);
+                let (_, ir) = parity
+                    .compare(
+                        YAML_CONDITIONAL,
+                        IR_CONDITIONAL,
+                        &[("score", score.clone())],
+                        &[],
+                    )
+                    .await;
+                evidence.push((score, ir));
+            }
+
+            let (_, first) = &evidence[0];
+            assert_eq!(
+                routing_edges(&first.built.projection)
+                    .iter()
+                    .map(|edge| (
+                        edge.from.as_str(),
+                        edge.to.as_str(),
+                        edge.kind,
+                        edge.detail.as_deref()
+                    ))
+                    .collect::<Vec<_>>(),
+                [
+                    (
+                        "review",
+                        "approve",
+                        "conditional",
+                        Some("_context.score > 1")
+                    ),
+                    ("review", "revise", "default", None),
+                    ("revise", "approve", "linear", None)
+                ],
+                "the branch expression and the default are both projected"
+            );
+            assert_eq!(
+                first.trace.steps,
+                expected_steps(&[
+                    ("review", "continue", Some("approve")),
+                    ("approve", "end", None),
+                ]),
+                "score 5 matches the conditional branch"
+            );
+
+            let (_, second) = &evidence[1];
+            assert_eq!(
+                second.trace.steps,
+                expected_steps(&[
+                    ("review", "continue", Some("revise")),
+                    ("revise", "continue", Some("approve")),
+                    ("approve", "end", None),
+                ]),
+                "score 0 falls through to the default target"
+            );
+        }
+
+        #[tokio::test]
+        async fn parity_non_execution_fields_create_no_tasks() {
+            // §8.2.1 `initial_action`, `signals[]`, `roles[]`, `assets[]`,
+            // `effect_class`/`effect_summary`, `meta.*` → no graph `Task`.
+            // These rows carry data the runner consumes around task execution
+            // (or not at all), so parity is asserted on the carriers the builder
+            // hands the runtime plus the unchanged task shape and trace.
+            let parity = Parity::scripted(&[]);
+            let (yaml, ir) = parity.compare(YAML_METADATA, IR_METADATA, &[], &[]).await;
+
+            assert_eq!(
+                wire(&yaml.built.manifest.preset),
+                wire(&ir.built.manifest.preset),
+                "§8.2.1 initial_action / meta.run_intents / meta.cli_args / meta.gates keep their header carriers"
+            );
+            assert_eq!(
+                wire(&yaml.built.manifest.signals),
+                wire(&ir.built.manifest.signals),
+                "§8.2.1 signals[] keep their bindings"
+            );
+            assert_eq!(
+                wire(&yaml.built.manifest.roles),
+                wire(&ir.built.manifest.roles),
+                "§8.2.1 roles[] keep their definitions"
+            );
+            assert_eq!(
+                ir.built
+                    .projection
+                    .tasks
+                    .iter()
+                    .map(|task| task.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["only", "done"],
+                "§8.2.1 assets[]/effect_class/effect_summary/meta.* add no graph task"
+            );
+            assert_eq!(
+                ir.trace.steps,
+                expected_steps(&[("only", "continue", Some("done")), ("done", "end", None),])
+            );
+        }
+    }
 }
 
 #[test]
