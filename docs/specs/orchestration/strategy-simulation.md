@@ -66,8 +66,10 @@ this document.
   generated enum's `Ord`. A deferred (`defer_until_apply`) nest contributes its declared class and its
   body is not walked. An effect that only happens on a collapsed branch is still reported.
 - **The wait list is not exhaustive.** Because a node whose `exit_when` is `llm_judge` is left only
-  along its `default` edge, a wait behind any other branch of that node is never predicted. The
-  shipped disclosure does not state this (I-000450), so no surface may present the list as complete.
+  along its `default` edge, a wait behind any other branch of that node is never predicted. Neither
+  the trajectory nor the shipped disclosure marks the list as partial (I-000450), so a consumer
+  applies the §Levels rule rather than reading the list as complete — an obligation on the consumer,
+  not a claim that the surface states it.
 
 ## Where it lives
 
