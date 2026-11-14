@@ -78,10 +78,10 @@ use nexus_contracts::local::schedule::http::{
 };
 use nexus_contracts::{
     ApprovedStrategySnapshot, CoreStrategyPatchResponse, GetPresetResponse, ReloadPresetResponse,
-    ScaffoldPresetRequest, SimulationTrajectory, StrategyApproveRequest, StrategyComposeRequest,
-    StrategyComposeResponse, StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest,
-    StrategyPatchTransitionRequest, StrategySimulationRequest, UpdatePresetRequest,
-    UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
+    ScaffoldPresetRequest, SimulationTrajectory, StrategyApplyRequest, StrategyApproveRequest,
+    StrategyComposeRequest, StrategyComposeResponse, StrategyPatchPromptTemplateRequest,
+    StrategyPatchStateRequest, StrategyPatchTransitionRequest, StrategySimulationRequest,
+    UpdatePresetRequest, UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
 };
 use nexus_core::execution::ExecutionOpenError;
 use nexus_core::{ComposeDiagnostic, CoreError};
@@ -1143,6 +1143,67 @@ impl NativeCore {
                 .read_strategy_candidate(&principal, &strategy_id)
                 .await?;
             Ok(candidate.document)
+        })
+        .await
+    }
+
+    /// `POST /v1/daemon/strategies/{strategy_id}/apply`.
+    ///
+    /// The request names one approval by its content hash; the core recomputes the frozen
+    /// document's canonical hash and then writes at most one append-only row, refusing an unknown
+    /// hash, another strategy's approval, changed bytes, a strategy with no schedule and a repeat
+    /// apply of the current approval. The response is that row's identity.
+    #[napi]
+    pub async fn apply_strategy(
+        &self,
+        principal_handle: String,
+        strategy_id: String,
+        request_json: Buffer,
+    ) -> Result<Buffer> {
+        let request: StrategyApplyRequest = decode(request_json, "request")?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let applied: nexus_core::AppliedStrategy = core
+                .apply_strategy(&principal, &strategy_id, &request.approval_content_hash)
+                .await?;
+            Ok(applied)
+        })
+        .await
+    }
+
+    /// `GET /v1/daemon/strategies/{strategy_id}/applied`.
+    ///
+    /// The status read both the Canvas and the intake ask: the current apply (the row with no
+    /// successor) and the strategy's newest approval by `candidate_revision`. Each side is null
+    /// when the strategy has none.
+    #[napi]
+    pub async fn strategy_applied(
+        &self,
+        principal_handle: String,
+        strategy_id: String,
+    ) -> Result<Buffer> {
+        self.json_call(principal_handle, async move |core, principal| {
+            let status: nexus_core::StrategyAppliedStatus =
+                core.strategy_applied(&principal, &strategy_id).await?;
+            Ok(status)
+        })
+        .await
+    }
+
+    /// `GET /v1/daemon/strategies/{strategy_id}/approvals`.
+    ///
+    /// Every approval of the strategy in the status read's total order, so `items[0]` is that
+    /// read's `newest_approval`. The list is what lets a client aim Apply at a superseded
+    /// approval — the rollback path — instead of holding only the newest. Read-only.
+    #[napi]
+    pub async fn strategy_approvals(
+        &self,
+        principal_handle: String,
+        strategy_id: String,
+    ) -> Result<Buffer> {
+        self.json_call(principal_handle, async move |core, principal| {
+            let approvals: nexus_core::StrategyApprovals =
+                core.strategy_approvals(&principal, &strategy_id).await?;
+            Ok(approvals)
         })
         .await
     }

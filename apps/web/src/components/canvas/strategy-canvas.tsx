@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Connection, Edge, Node } from '@xyflow/react';
 
-import type { WorkflowDocument } from '@42ch/nexus-contracts';
+import type { StrategyApprovals, WorkflowDocument } from '@42ch/nexus-contracts';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { ErrorState, LoadingState, UnavailableState } from '@/components/ui/states';
@@ -30,6 +30,9 @@ import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/ca
 import { useStrategyCanvas } from '@/components/canvas/strategy-canvas/hooks/use-strategy-canvas';
 import { useStrategyCompose } from '@/components/canvas/strategy-canvas/hooks/use-strategy-compose';
 import { useApproveStrategy } from '@/components/canvas/strategy-canvas/hooks/use-approve-strategy';
+import { useApplyStrategy } from '@/components/canvas/strategy-canvas/hooks/use-apply-strategy';
+import { useStrategyApplied } from '@/components/canvas/strategy-canvas/hooks/use-strategy-applied';
+import { useStrategyApprovals } from '@/components/canvas/strategy-canvas/hooks/use-strategy-approvals';
 import { useStrategyCanvasComposeFlag } from '@/lib/canvas/strategy-compose-flag';
 import { i18n } from '@/lib/i18n/config';
 import { CanvasFooter, CanvasHeader } from './strategy-canvas/canvas-layout';
@@ -76,6 +79,11 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   const strategyState = useStrategyCanvas(presetId, composeEnabled);
   const compose = useStrategyCompose(presetId, composeEnabled);
   const approval = useApproveStrategy(presetId);
+  const application = useApplyStrategy(presetId);
+  // T3: which apply is live + newest approval, for the live block and badge.
+  const appliedStatus = useStrategyApplied(presetId, composeEnabled);
+  // T4: every approval, so Apply can be aimed at a superseded one (rollback).
+  const approvals = useStrategyApprovals(presetId, composeEnabled);
   // The compose path simulates the working candidate it holds in hand; the
   // flag-off path keeps the shipped preset/candidate behaviour.
   const simulationCandidate = composeEnabled
@@ -88,6 +96,8 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [patternPickerOpen, setPatternPickerOpen] = useState(false);
   const [approveOpen, setApproveOpen] = useState(false);
+  // Which listed approval Apply is aimed at; null means the newest (T4).
+  const [applyTargetId, setApplyTargetId] = useState<string | null>(null);
 
   const ctxRef = useRef<StrategyCanvasAdapterContext>({
     presetId,
@@ -222,6 +232,10 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
    * refusal renders verbatim with its recovery copy; nothing auto-retries.
    */
   function handleApprove() {
+    // A newer approval supersedes the previous apply block; never render both.
+    application.dismissApplication();
+    // The fresh approval is the newest, so Apply goes back to the default target.
+    setApplyTargetId(null);
     void approval
       .approve({
         baseRevision: compose.revision,
@@ -230,6 +244,18 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       .catch(() => {
         // The refusal renders from `approval.approval`; no toast duplication.
       });
+  }
+
+  /**
+   * v241 P3.5 T2/T4 — apply the approval the control is aimed at, listed or
+   * freshly approved. The request names the approval by content hash only, so a
+   * rollback is this same call; the applied identity comes back from the
+   * response, so the surface never reloads to show it.
+   */
+  function handleApply(target: StrategyApprovals['items'][number]) {
+    void application.apply(target).catch(() => {
+      // The refusal renders from `application.application`; no toast duplication.
+    });
   }
 
   /**
@@ -471,6 +497,15 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         onApprove={composeEnabled ? handleApprove : onApproveCandidate}
         approval={composeEnabled ? approval.approval : null}
         gateReason={composeEnabled ? approveGateReason : null}
+        onApply={composeEnabled ? handleApply : undefined}
+        approvals={composeEnabled ? (approvals.data?.items ?? null) : null}
+        applyTargetId={applyTargetId}
+        onSelectApplyTarget={setApplyTargetId}
+        approvalsError={composeEnabled ? (approvals.error?.message ?? null) : null}
+        application={composeEnabled ? application.application : null}
+        appliedStatus={composeEnabled ? (appliedStatus.data ?? null) : null}
+        appliedStatusPending={composeEnabled ? appliedStatus.isPending : false}
+        appliedStatusError={composeEnabled ? (appliedStatus.error?.message ?? null) : null}
       />
 
       <ComposeConflictDialog

@@ -309,6 +309,21 @@
       "listingPending": "模式列表尚未加载完成。无法确定必需槽位是否未绑定，因此暂不可批准。",
       "pinChanged": "模式 {{id}}@{{version}} 已更改：记录哈希 {{recorded}}，当前哈希 {{current}}。请重新组合并再次模拟后再批准。"
     },
+    "apply": {
+      "action": "应用快照",
+      "pending": "正在应用…",
+      "applied": "已应用为 {{applyId}}（{{appliedAt}}）。该批准即为当前运行身份。",
+      "approval": "批准",
+      "contentHash": "已应用内容哈希",
+      "live": "当前运行：批准 {{approvalId}}，应用时间 {{appliedAt}}。",
+      "newerApprovalAvailable": "有更新的批准可用",
+      "livePending": "当前应用状态尚未加载完成。",
+      "liveUnreadable": "当前应用状态读取失败：{{message}}。",
+      "target": "应用目标",
+      "targetOption": "{{approvalId}} · 修订 {{revision}}",
+      "targetsUnreadable": "应用目标读取失败：{{message}}。",
+      "rollbackNote": "应用此较早的批准会将生产回滚到该快照。应用历史仅追加——不会删除任何应用记录。"
+    },
     "draftTransitionEditor": "草稿转换编辑器",
     "revisionBadge": {
       "label": "修订 {{revision}}",

@@ -17,7 +17,7 @@ pub mod validation;
 pub mod workflow_ir;
 
 pub use loader::{
-    load_preset, load_preset_from_str, load_preset_from_str_with_limits,
+    extract_output_bindings, load_preset, load_preset_from_str, load_preset_from_str_with_limits,
     loader_validate_manifest_compat, preset_source_identity, yaml_value_depth, LoadedPreset,
     PresetLoadError, ValidationProblem, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
 };

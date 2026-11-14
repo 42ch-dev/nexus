@@ -1868,3 +1868,139 @@ describe('BrowserClient actor-knowledge family (v240 actor web surfaces, I-00012
     expect(res.item.entry_id).toBe(entryId);
   });
 });
+
+describe('BrowserClient strategy apply (v241 P3.5 T1)', () => {
+  const strategyId = 'user/demo';
+  const applyPath = `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/apply`;
+  const appliedPath = `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/applied`;
+  const applied = {
+    apply_id: 'ap_1',
+    approval_id: 'apr_1',
+    content_hash: 'hash-1',
+    applied_at: '2026-11-14T00:00:00Z',
+    supersedes_apply_id: null,
+  };
+
+  it('posts the approval content hash to .../apply and returns the appended apply row', async () => {
+    let sent: unknown;
+    let seenPath = '';
+    useHandlers(
+      http.post(applyPath, async ({ request }) => {
+        seenPath = new URL(request.url).pathname;
+        sent = await request.json();
+        return HttpResponse.json(applied);
+      }),
+    );
+
+    const res = await new BrowserClient().applyStrategy(strategyId, {
+      approval_content_hash: 'hash-1',
+    });
+
+    expect(seenPath).toBe(applyPath);
+    // The approval is named by content hash only: the path owns the strategy.
+    expect(sent).toEqual({ approval_content_hash: 'hash-1' });
+    expect(res).toEqual(applied);
+  });
+
+  it('reads the current apply and the newest approval from .../applied', async () => {
+    let seenPath = '';
+    useHandlers(
+      http.get(appliedPath, ({ request }) => {
+        seenPath = new URL(request.url).pathname;
+        return HttpResponse.json({
+          current_apply: applied,
+          newest_approval: {
+            approval_id: 'apr_2',
+            content_hash: 'hash-2',
+            candidate_revision: 4,
+            approved_at: '2026-11-14T01:00:00Z',
+          },
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().getStrategyApplied(strategyId);
+
+    expect(seenPath).toBe(appliedPath);
+    expect(res.current_apply).toEqual(applied);
+    expect(res.newest_approval?.approval_id).toBe('apr_2');
+  });
+
+  it('keeps a strategy with no apply readable: both halves are null', async () => {
+    useHandlers(
+      http.get(appliedPath, () =>
+        HttpResponse.json({ current_apply: null, newest_approval: null }),
+      ),
+    );
+
+    await expect(new BrowserClient().getStrategyApplied(strategyId)).resolves.toEqual({
+      current_apply: null,
+      newest_approval: null,
+    });
+  });
+
+  it('lists every approval from .../approvals, superseded rows included', async () => {
+    const approvalsPath = `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/approvals`;
+    let seenPath = '';
+    useHandlers(
+      http.get(approvalsPath, ({ request }) => {
+        seenPath = new URL(request.url).pathname;
+        return HttpResponse.json({
+          items: [
+            {
+              approval_id: 'apr_2',
+              content_hash: 'hash-2',
+              candidate_revision: 4,
+              approved_at: '2026-11-14T01:00:00Z',
+            },
+            {
+              approval_id: 'apr_1',
+              content_hash: 'hash-1',
+              candidate_revision: 1,
+              approved_at: '2026-11-14T00:00:00Z',
+            },
+          ],
+        });
+      }),
+    );
+
+    const res = await new BrowserClient().listStrategyApprovals(strategyId);
+
+    expect(seenPath).toBe(approvalsPath);
+    expect(res.items.map((item) => item.approval_id)).toEqual(['apr_2', 'apr_1']);
+  });
+
+  it('keeps the refusal reason typed on a 409 already_applied', async () => {
+    useHandlers(
+      http.post(applyPath, () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error: {
+              code: 'invalid_input',
+              message: 'approval apr_1 is already the current apply',
+              details: {
+                code: 'apply_refused',
+                reason: 'already_applied',
+                message: 'approval apr_1 is already the current apply',
+                apply_id: 'ap_1',
+                approval_id: 'apr_1',
+              },
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    const error = await new BrowserClient()
+      .applyStrategy(strategyId, { approval_content_hash: 'hash-1' })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(NexusClientError);
+    expect((error as NexusClientError).status).toBe(409);
+    expect(((error as NexusClientError).details as { reason?: string }).reason).toBe(
+      'already_applied',
+    );
+  });
+});

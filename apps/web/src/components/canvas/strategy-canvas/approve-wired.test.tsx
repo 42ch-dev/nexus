@@ -5,15 +5,16 @@
  * refusal copy for the cases that refuse. The flag-off surface passes none of
  * this, keeping the shipped disabled disclosure (T7).
  */
-import { screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { NexusClientError } from '@/lib/nexus';
-import type { ApprovedStrategySnapshot } from '@42ch/nexus-contracts';
+import type { ApprovedStrategySnapshot, StrategyApprovals } from '@42ch/nexus-contracts';
 
 import { renderInApp } from '@/test/test-providers';
 import { ApproveDisclosure } from './approve-disclosure';
 import { approveRefusalMessage } from './hooks/use-approve-strategy';
+import { applyRefusalMessage } from './hooks/use-apply-strategy';
 import { candidateDocument, simulationTrajectory } from '@/test/simulation-fixture';
 
 function snapshot(): ApprovedStrategySnapshot {
@@ -26,6 +27,15 @@ function snapshot(): ApprovedStrategySnapshot {
     trajectory: simulationTrajectory({ ir_content_hash: 'hash-3' }),
     pins: [{ id: 'prompt-step', version: '1.0.0', content_hash: 'abc123' }],
     approver: 'creator-1',
+    approved_at: '2026-11-13T00:00:00Z',
+  };
+}
+
+function approvalRow(): StrategyApprovals['items'][number] {
+  return {
+    approval_id: 'apr_123',
+    content_hash: 'hash-3',
+    candidate_revision: 3,
     approved_at: '2026-11-13T00:00:00Z',
   };
 }
@@ -113,5 +123,80 @@ describe('ApproveDisclosure — wired approve (compose path)', () => {
     expect(screen.getByTestId('approve-unavailable')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
     expect(screen.queryByTestId('approve-approved')).not.toBeInTheDocument();
+  });
+});
+
+describe('applyRefusalMessage', () => {
+  it('renders the refusal reason code itself, never the wire prose', () => {
+    const error = new NexusClientError(409, 'invalid_input', 'approval apr_123 is already current', {
+      code: 'apply_refused',
+      reason: 'already_applied',
+      apply_id: 'ap_1',
+      approval_id: 'apr_123',
+    });
+    expect(applyRefusalMessage(error)).toBe('already_applied');
+  });
+
+  it('keeps the message of an untyped (transport) failure', () => {
+    const error = new NexusClientError(0, 'transport_unreachable', 'Daemon is not reachable.');
+    expect(applyRefusalMessage(error)).toBe('Daemon is not reachable.');
+  });
+});
+
+describe('ApproveDisclosure — apply on an approved snapshot (compose path)', () => {
+  it('shows the applied identity the apply response returned, without a reload', () => {
+    renderDisclosure({
+      approval: { kind: 'approved', snapshot: snapshot() },
+      onApply: vi.fn(),
+      approvals: [approvalRow()],
+      application: {
+        kind: 'applied',
+        applied: {
+          apply_id: 'ap_9',
+          approval_id: 'apr_123',
+          content_hash: 'hash-3',
+          applied_at: '2026-11-14T02:00:00Z',
+          supersedes_apply_id: null,
+        },
+      },
+    });
+    expect(screen.getByTestId('apply-applied')).toHaveTextContent('ap_9');
+    expect(screen.getByTestId('apply-applied')).toHaveTextContent('2026-11-14T02:00:00Z');
+    expect(screen.getByTestId('apply-approval')).toHaveTextContent('apr_123');
+    expect(screen.getByTestId('apply-content-hash')).toHaveTextContent('hash-3');
+  });
+
+  it('renders the typed refusal code as the message, not a generic failure', () => {
+    // The refusal the daemon returns when the approval is already current.
+    const error = new NexusClientError(409, 'invalid_input', 'approval apr_123 is already current', {
+      code: 'apply_refused',
+      reason: 'already_applied',
+      apply_id: 'ap_1',
+      approval_id: 'apr_123',
+    });
+    renderDisclosure({
+      approval: { kind: 'approved', snapshot: snapshot() },
+      onApply: vi.fn(),
+      approvals: [approvalRow()],
+      application: { kind: 'refused', message: applyRefusalMessage(error) },
+    });
+    expect(screen.getByTestId('apply-refused')).toHaveTextContent('already_applied');
+    expect(screen.getByTestId('apply-refused')).not.toHaveTextContent('already current');
+  });
+
+  it('offers Apply only with a listed approval and passes that target through', () => {
+    const onApply = vi.fn();
+    renderDisclosure({ approval: { kind: 'approved', snapshot: snapshot() }, onApply });
+    // The frozen summary alone is not a target: the write path exists, the list does not.
+    expect(screen.queryByRole('button', { name: 'Apply snapshot' })).toBeNull();
+
+    cleanup();
+    renderDisclosure({
+      approval: { kind: 'approved', snapshot: snapshot() },
+      onApply,
+      approvals: [approvalRow()],
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply snapshot' }));
+    expect(onApply).toHaveBeenCalledWith(approvalRow());
   });
 });

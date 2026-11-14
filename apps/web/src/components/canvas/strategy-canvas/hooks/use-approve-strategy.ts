@@ -13,12 +13,14 @@
  * content. Nothing auto-retries.
  */
 import { useCallback, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import type { ApprovedStrategySnapshot, SimulationTrajectory } from '@42ch/nexus-contracts';
 
 import { useNexusClient } from '@/lib/client-context';
 import { i18n } from '@/lib/i18n/config';
 import { NexusClientError } from '@/lib/nexus';
+import { queryKeys } from '@/lib/nexus/query-keys';
 
 export type ApproveRenderState =
   | { kind: 'pending' }
@@ -51,6 +53,7 @@ export function approveRefusalMessage(error: NexusClientError): string {
 
 export function useApproveStrategy(presetId: string) {
   const client = useNexusClient();
+  const queryClient = useQueryClient();
   const [state, setState] = useState<ApproveRenderState | null>(null);
 
   const approve = useCallback(
@@ -62,6 +65,10 @@ export function useApproveStrategy(presetId: string) {
           trajectory: args.trajectory,
         });
         setState({ kind: 'approved', snapshot });
+        // Approving moves newest_approval; the status read is the badge's source,
+        // and the approval list gains the just-frozen target as its first row.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.strategies.applied(presetId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.strategies.approvals(presetId) });
         return snapshot;
       } catch (error) {
         if (error instanceof NexusClientError) {
@@ -79,7 +86,7 @@ export function useApproveStrategy(presetId: string) {
         throw error;
       }
     },
-    [client, presetId],
+    [client, presetId, queryClient],
   );
 
   return { approval: state, approve, dismissApproval: useCallback(() => setState(null), []) };

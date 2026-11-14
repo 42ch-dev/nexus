@@ -116,6 +116,18 @@ export const queryKeys = {
     all: ['outline'] as const,
     detail: (workId: string) => [...queryKeys.outline.all, 'detail', workId] as const,
   },
+  // v1.241 P3.5 — the strategy's applied identity: the status read (current
+  // apply + newest approval). A successful apply or approve invalidates it.
+  strategies: {
+    all: ['strategies'] as const,
+    applied: (strategyId: string) =>
+      [...queryKeys.strategies.all, 'applied', strategyId] as const,
+    // Every approval of one strategy, newest first. Separate from `applied` because
+    // an apply refreshes the live identity while the approval rows do not move; an
+    // approve moves both.
+    approvals: (strategyId: string) =>
+      [...queryKeys.strategies.all, 'approvals', strategyId] as const,
+  },
   worldKb: {
     all: ['worldKb'] as const,
     graph: (worldId: string) => [...queryKeys.worldKb.all, 'graph', worldId] as const,

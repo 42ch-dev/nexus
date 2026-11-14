@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/strategy-approvals.schema.json",
+  "schema_version": 1,
+  "title": "Nexus StrategyApprovals",
+  "description": "Response of GET /v1/daemon/strategies/{strategy_id}/approvals — every approval of the strategy in the same total order the applied status read uses to pick `newest_approval`: `candidate_revision` DESC, then `approved_at` DESC, then `approval_id` DESC. `items[0]` is therefore the status read's `newest_approval`, and no client re-sorts or derives newness from a timestamp. The list exists so a client can aim Apply at a superseded approval — the rollback path — instead of holding only the newest.",
+  "type": "object",
+  "required": ["items"],
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/StrategyApproval" },
+      "description": "Every approval of this strategy, newest first by the total order above. Empty when nothing was approved."
+    }
+  },
+  "definitions": {
+    "StrategyApproval": {
+      "title": "StrategyApproval",
+      "description": "One approval row, reduced to the keys a client needs to list it and to aim an apply at it.",
+      "type": "object",
+      "required": ["approval_id", "content_hash", "candidate_revision", "approved_at"],
+      "additionalProperties": false,
+      "properties": {
+        "approval_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Approval identity; the value a client compares with the current apply's and the newest approval's `approval_id`."
+        },
+        "content_hash": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The content hash applying this approval would install; the apply request names this value."
+        },
+        "candidate_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Candidate revision the approval froze. This key, not either timestamp, defines approval newness."
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "RFC 3339 UTC timestamp of the approval; it orders tied revisions only."
+        }
+      }
+    }
+  }
+}

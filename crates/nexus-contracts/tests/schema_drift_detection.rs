@@ -992,6 +992,22 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             StrategyApproveRequest
         ),
+        // ── daemon-api/orchestration/ (v1.241 P3.5 — apply contracts) ──────
+        entry!(
+            "schemas/daemon-api/orchestration/strategy-apply-request.schema.json",
+            Strict,
+            StrategyApplyRequest
+        ),
+        entry!(
+            "schemas/daemon-api/orchestration/strategy-applied-status.schema.json",
+            Strict,
+            StrategyAppliedStatus
+        ),
+        entry!(
+            "schemas/daemon-api/orchestration/strategy-approvals.schema.json",
+            Strict,
+            StrategyApprovals
+        ),
         // ── daemon-api/patterns/ (v1.239 P3 — pattern packages) ─────────────
         entry!(
             "schemas/daemon-api/patterns/pattern-slot.schema.json",
