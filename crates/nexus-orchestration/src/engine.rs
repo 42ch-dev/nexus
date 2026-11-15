@@ -4378,8 +4378,10 @@ impl GraphFlowEngine {
         let caps = self.current_caps();
         // P6 condition 6: the intake key governs user bundles only; embedded
         // and `_system.` presets never consult it and keep the resolution
-        // they always ran. An engine without a configured home reads the
-        // missing-file default, `ir-only`.
+        // they always ran. An engine without a configured home has no
+        // operator key to read, so it takes the missing-file default,
+        // `ir-only` — it never joins `config.toml` onto an empty path, which
+        // would read one relative to the process CWD.
         let user_bundle = nexus_home_layout::strategy_intake::is_user_strategy_bundle(
             &loaded.id,
             matches!(
@@ -4388,18 +4390,16 @@ impl GraphFlowEngine {
             ),
         );
         let intake_mode = if user_bundle {
-            match nexus_home_layout::strategy_intake::strategy_intake_mode(
+            Some(
                 self.nexus_home
                     .as_deref()
-                    .unwrap_or_else(|| std::path::Path::new("")),
-            ) {
-                Ok(mode) => Some(mode),
-                Err(reason) => {
-                    return Err(EngineError::GraphFlow(
-                        graph_flow::GraphError::StorageError(reason),
-                    ));
-                }
-            }
+                    .map(nexus_home_layout::strategy_intake::strategy_intake_mode)
+                    .transpose()
+                    .map_err(|reason| {
+                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(reason))
+                    })?
+                    .unwrap_or(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly),
+            )
         } else {
             None
         };

@@ -7011,13 +7011,156 @@ async fn preset_entries_freeze_and_run_the_strategy_apply() {
     assert_applied_entry(&storage, &sid, &identity).await;
 }
 
+/// Write a minimal valid user bundle under `home` and resolve it, asserting the
+/// loader classified it as a directory source — the only source intake gates.
+fn user_bundle_preset(home: &std::path::Path, preset_id: &str) -> nexus_preset::LoadedPreset {
+    let bundle = home.join("presets").join(preset_id);
+    std::fs::create_dir_all(&bundle).expect("bundle dir");
+    std::fs::write(
+        bundle.join("preset.yaml"),
+        format!(
+            "preset:\n  id: {preset_id}\n  version: 3\n  kind: creator\n  description: \
+             \"intake fixture\"\n  requires_capabilities: []\n  initial: a\n  terminal: b\n\
+             states:\n  - id: a\n    enter: []\n    exit_when: {{ kind: manual }}\n    next: b\n  \
+             - id: b\n    terminal: true\n"
+        ),
+    )
+    .expect("bundle yaml");
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded = nexus_preset::resolve_preset(preset_id, home, &registry).expect("bundle loads");
+    assert!(
+        matches!(
+            loaded.source_identity,
+            Some(PresetSourceIdentity::Directory { .. })
+        ),
+        "the fixture must resolve to a user directory bundle, got {:?}",
+        loaded.source_identity
+    );
+    loaded
+}
+
+/// Intake at the trait entry: a user bundle with no current apply refuses under
+/// the default `ir-only`, before any graph is built or any row is written.
+///
+/// Mutation this fails on: dropping the `ir-only` no-apply arm from
+/// `start_preset_entry` — the entry then runs the YAML bundle the gate exists
+/// to refuse, and the run is admitted as a document it never applied.
+#[tokio::test]
+async fn preset_entry_refuses_a_no_apply_user_bundle_under_ir_only() {
+    let (pool, _db) = fresh_pool().await;
+    let (_, mut engine) = fresh_engine(pool.clone());
+    let home = tempfile::tempdir().unwrap();
+    // No `[strategy_intake]` key at all: the documented default is `ir-only`.
+    let loaded = user_bundle_preset(home.path(), "ir-only-probe");
+    engine.set_nexus_home(home.path().to_path_buf());
+    // An installed source that answers "no current apply" for this strategy.
+    engine.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "some-other-strategy",
+        identity: AppliedRunIdentity {
+            apply_id: "apl_unused".to_string(),
+            content_hash: "blake3:unused".to_string(),
+        },
+        document: applied_probe_document("some-other-strategy"),
+    }));
+
+    let refused = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .expect_err("ir-only must refuse a user bundle with no current apply");
+    let reason = refused.to_string();
+    assert!(
+        reason.contains("yaml_intake_disabled"),
+        "the refusal must name the intake refusal: {reason}"
+    );
+    assert!(
+        reason.contains("ir-only"),
+        "the refusal must name the mode that refused: {reason}"
+    );
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
+        .fetch_one(&*pool)
+        .await
+        .expect("count rows");
+    assert_eq!(rows, 0, "the refusal must happen before a run row exists");
+}
+
+/// The intake key governs user bundles only: an embedded preset starts under a
+/// config value that would refuse a user bundle at the same entry, and records
+/// no intake mode.
+///
+/// Mutation this fails on: reading the key (or applying the `ir-only` no-apply
+/// arm) without the `is_user_strategy_bundle` classification — every embedded
+/// run would then be gated on an operator key that does not name it.
+#[tokio::test]
+async fn preset_entry_does_not_gate_an_embedded_preset() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, mut engine) = fresh_engine(pool);
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join("config.toml"),
+        "[strategy_intake]\nmode = \"bogus\"\n",
+    )
+    .expect("home config");
+    engine.set_nexus_home(home.path().to_path_buf());
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded =
+        nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
+
+    let sid = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .expect("an embedded preset never consults the intake key");
+    let record = storage
+        .load_run(&sid)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    let descriptor = record.descriptor.expect("v1 descriptor");
+    assert!(
+        descriptor.intake_mode.is_none(),
+        "an embedded run records no intake mode, got {:?}",
+        descriptor.intake_mode
+    );
+}
+
+/// An engine with no configured home has no operator key to read, so it takes
+/// the documented missing-file default instead of probing the process CWD.
+///
+/// Mutation this fails on: passing `Path::new("")` for a missing home — the
+/// read then joins onto the process CWD, where an unrelated `config.toml` can
+/// select `yaml-only` (admitting the YAML bundle this test expects refused) or
+/// refuse with `intake_config_invalid` naming a file the operator never set.
+#[tokio::test]
+async fn preset_entry_without_a_home_takes_ir_only() {
+    let (pool, _db) = fresh_pool().await;
+    let (_, engine) = fresh_engine(pool);
+    let home = tempfile::tempdir().unwrap();
+    // A config the home-less engine does not know about; it must not be read.
+    std::fs::write(
+        home.path().join("config.toml"),
+        "[strategy_intake]\nmode = \"yaml-only\"\n",
+    )
+    .expect("home config");
+    let loaded = user_bundle_preset(home.path(), "home-less-probe");
+
+    let refused = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .expect_err("a home-less engine must take the ir-only default");
+    let reason = refused.to_string();
+    assert!(
+        reason.contains("yaml_intake_disabled"),
+        "the absent home must not fall through to the YAML arm: {reason}"
+    );
+}
+
 /// Restart recovery over a trait-entry run: a successor apply is refused, the
 /// admitted apply is rebuilt.
 ///
 /// The run was admitted through `start_session_with_preset`, so its descriptor
 /// froze apply A and its position is the applied document's entry node. A
 /// restarted engine whose source answers with a successor apply B must keep the
-/// run non-replayable (`engine.rs:4109-4134`) and leave the durable position
+/// run non-replayable (the `(descriptor.applied.as_ref(), applied)` match in
+/// `reconstruct_runner`) and leave the durable position
 /// alone. A restarted engine whose source still answers A rebuilds the applied
 /// document — proven by one step landing on `applied_only_probe`, a node id the
 /// loaded bundle does not declare.
