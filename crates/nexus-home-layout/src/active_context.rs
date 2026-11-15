@@ -154,6 +154,55 @@ impl CliConfigSnapshot {
         }
     }
 
+    /// Load from `config.toml` without ever migrating.
+    ///
+    /// The read side of a `ReadOnly` open must not write anything: a home whose
+    /// `.nexus42` is readable but not writable still serves an already-provisioned
+    /// workspace. When `config.toml` is absent and the legacy `config.json`
+    /// exists, the same two-field snapshot is parsed in place — no writer lock,
+    /// no `config.toml` publication, no `config.json` rename and no directory
+    /// creation. A provisioned `config.toml` reads exactly as [`Self::load`].
+    ///
+    /// Writers keep [`Self::load`], so the legacy migration still takes the
+    /// lock, re-checks absence and publishes atomically.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when reading `config.toml` or the legacy `config.json`
+    /// fails, or when `config.toml` contains invalid TOML. A legacy document
+    /// that is absent (a concurrent migrator won the race), empty or invalid
+    /// JSON yields the default snapshot, exactly as [`Self::load`] treats it.
+    /// Genuinely missing config files are not errors.
+    pub fn load_read_only(nexus_root: &Path) -> Result<Self, anyhow::Error> {
+        let toml_path = nexus_root.join("config.toml");
+        if !toml_entry_absent(&toml_path)? {
+            return Self::read_document(&toml_path);
+        }
+        let json_path = nexus_root.join("config.json");
+        if json_path.exists() {
+            return Self::parse_legacy_document(&json_path);
+        }
+        Ok(Self::default())
+    }
+
+    /// Parse a legacy `config.json` snapshot without publishing or renaming it.
+    fn parse_legacy_document(json_path: &Path) -> Result<Self, anyhow::Error> {
+        let text = match std::fs::read_to_string(json_path) {
+            Ok(text) => text,
+            // A concurrent migrator can rename the file away between the
+            // existence test and this read: the documented "no legacy document"
+            // state, not a read fault.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self::default());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if text.trim().is_empty() {
+            return Ok(Self::default());
+        }
+        Ok(serde_json::from_str::<Self>(&text).unwrap_or_default())
+    }
+
     #[must_use]
     pub fn workspace_slug_for_creator(&self, creator_id: &str) -> String {
         self.active_workspace_slug_by_creator
@@ -289,6 +338,19 @@ pub fn try_active_creator_id(nexus_root: &Path) -> Option<String> {
 #[must_use]
 pub fn try_resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> Option<PathBuf> {
     let cfg = CliConfigSnapshot::load(nexus_root).ok()?;
+    let cid = cfg.active_creator_id.as_deref()?;
+    let slug = cfg.workspace_slug_for_creator(cid);
+    Some(crate::workspace_state_db_path(user_home, cid, &slug))
+}
+
+/// [`try_resolve_state_db_path`] without the legacy migration.
+///
+/// The read-only counterpart: a legacy `config.json` snapshot is parsed in
+/// place, so resolving the path on a non-writable home creates no lock, no
+/// `config.toml` and no directory entry.
+#[must_use]
+pub fn try_resolve_state_db_path_read_only(user_home: &Path, nexus_root: &Path) -> Option<PathBuf> {
+    let cfg = CliConfigSnapshot::load_read_only(nexus_root).ok()?;
     let cid = cfg.active_creator_id.as_deref()?;
     let slug = cfg.workspace_slug_for_creator(cid);
     Some(crate::workspace_state_db_path(user_home, cid, &slug))

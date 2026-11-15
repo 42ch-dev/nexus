@@ -17,7 +17,9 @@ use nexus_agent_host::{HostError, HostFacade, HostManager, ProviderCatalogEntry}
 use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
 use nexus_contracts::{CoreCloseReport, CoreCloseReportState, NativeOpenOptions};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, HostHandle};
-use nexus_home_layout::active_context::{try_resolve_state_db_path, CliConfigSnapshot};
+use nexus_home_layout::active_context::{
+    try_resolve_state_db_path, try_resolve_state_db_path_read_only, CliConfigSnapshot,
+};
 use nexus_home_layout::nexus_root_from_home;
 use nexus_provider_ports::ProviderPort;
 
@@ -35,7 +37,16 @@ fn validate_initialized_prerequisites(
     access: CoreAccess,
 ) -> Result<(), CoreError> {
     let nexus_home = nexus_root_from_home(user_home);
-    let cfg = CliConfigSnapshot::load(&nexus_home).map_err(|e| CoreError::Internal {
+    // Same split as `CoreService::open_impl`: a read-only prerequisite check
+    // reads a legacy `config.json` in place and writes nothing; every writer
+    // keeps the locked migration.
+    let read_only = access == CoreAccess::ReadOnly;
+    let snapshot = if read_only {
+        CliConfigSnapshot::load_read_only(&nexus_home)
+    } else {
+        CliConfigSnapshot::load(&nexus_home)
+    };
+    let cfg = snapshot.map_err(|e| CoreError::Internal {
         category: format!("config_load: {e}"),
     })?;
     let creator_id = cfg
@@ -46,8 +57,12 @@ fn validate_initialized_prerequisites(
     if workspace_slug.trim().is_empty() {
         return Err(CoreError::AuthRequired);
     }
-    let db_path =
-        try_resolve_state_db_path(user_home, &nexus_home).ok_or(CoreError::Uninitialized)?;
+    let db_path = if read_only {
+        try_resolve_state_db_path_read_only(user_home, &nexus_home)
+    } else {
+        try_resolve_state_db_path(user_home, &nexus_home)
+    }
+    .ok_or(CoreError::Uninitialized)?;
     if !db_path.exists() && access == CoreAccess::ReadOnly {
         return Err(CoreError::Uninitialized);
     }
@@ -1126,16 +1141,27 @@ async fn publish_full_core(
     // settlement cannot prove that recovery, so the open fails instead of
     // publishing a settled journal it does not have — and the rollback carries
     // the whole attached authority, not just its manager.
+    //
+    // A read-only open owns no write authority, so settlement is not its to
+    // perform: the provider journal refuses the write, and failing the open on
+    // that refusal would make every read-only native open impossible. The next
+    // writer open settles the orphans.
     #[cfg(test)]
     let settlement = if forcing::settle::get() {
         Err(CoreError::Internal {
             category: "forced settlement failure".to_string(),
         })
+    } else if access == CoreAccess::ReadOnly {
+        Ok(0)
     } else {
         core.settle_provider_orphans().await
     };
     #[cfg(not(test))]
-    let settlement = core.settle_provider_orphans().await;
+    let settlement = if access == CoreAccess::ReadOnly {
+        Ok(0)
+    } else {
+        core.settle_provider_orphans().await
+    };
     if let Err(err) = settlement {
         let reason = format!("journal settlement failed: {err}");
         abort_failed_open(

@@ -11,7 +11,8 @@ use nexus_contracts::{
 };
 use nexus_home_layout::active_context::{
     read_active_creator_id, read_active_workspace_slug, read_memory_provider_config,
-    try_resolve_state_db_path, CliConfigSnapshot, MemoryProviderConfig,
+    try_resolve_state_db_path, try_resolve_state_db_path_read_only, CliConfigSnapshot,
+    MemoryProviderConfig,
 };
 use nexus_local_db::open_pool_read_only;
 use nexus_local_db::writer_protocol::{
@@ -464,7 +465,17 @@ impl CoreService {
 
     async fn open_impl(options: CoreOpenOptions, expected: Option<&Path>) -> CoreResult<Self> {
         let nexus_home = nexus_home_layout::nexus_root_from_home(&options.user_home);
-        let cfg = CliConfigSnapshot::load(&nexus_home).map_err(|e| CoreError::Internal {
+        // A read-only open must not write: it reads a legacy `config.json`
+        // snapshot in place and never migrates. Every writer keeps the
+        // migration, so it still takes the lock, re-checks absence and
+        // publishes atomically.
+        let read_only = options.access == CoreAccess::ReadOnly;
+        let snapshot = if read_only {
+            CliConfigSnapshot::load_read_only(&nexus_home)
+        } else {
+            CliConfigSnapshot::load(&nexus_home)
+        };
+        let cfg = snapshot.map_err(|e| CoreError::Internal {
             category: format!("config_load: {e}"),
         })?;
         let creator_id = cfg
@@ -475,8 +486,12 @@ impl CoreService {
         if workspace_slug.trim().is_empty() {
             return Err(CoreError::AuthRequired);
         }
-        let db_path = try_resolve_state_db_path(&options.user_home, &nexus_home)
-            .ok_or(CoreError::Uninitialized)?;
+        let db_path = if read_only {
+            try_resolve_state_db_path_read_only(&options.user_home, &nexus_home)
+        } else {
+            try_resolve_state_db_path(&options.user_home, &nexus_home)
+        }
+        .ok_or(CoreError::Uninitialized)?;
         if let Some(expected) = expected {
             verify_expected_binding(expected, &db_path)?;
         }
@@ -675,6 +690,22 @@ impl CoreService {
     /// generation check. Selection changes after open are caught here, not
     /// by generation invalidation.
     pub(crate) fn verify_selected_context(&self) -> CoreResult<()> {
+        if self.inner.access == CoreAccess::ReadOnly {
+            // The open promised not to write, so verification must read the
+            // same lock-free snapshot the open used. The migration-aware
+            // readers below would otherwise take the writer lock (and fail) on
+            // a legacy home whose only config is `config.json`.
+            let Ok(cfg) = CliConfigSnapshot::load_read_only(&self.inner.nexus_home) else {
+                return Err(CoreError::AuthRequired);
+            };
+            if cfg.active_creator_id.as_deref() != Some(self.inner.creator_id.as_str())
+                || cfg.workspace_slug_for_creator(&self.inner.creator_id)
+                    != self.inner.workspace_slug
+            {
+                return Err(CoreError::AuthRequired);
+            }
+            return Ok(());
+        }
         if read_active_creator_id(&self.inner.nexus_home).as_deref()
             != Some(self.inner.creator_id.as_str())
         {
