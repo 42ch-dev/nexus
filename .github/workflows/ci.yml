@@ -800,6 +800,19 @@ jobs:
       - name: Run sample self-check (preset.yaml equals its workflow.json export)
         if: matrix.group == 'orchestration-core'
         run: cargo test -p nexus-orchestration --test sample_self_check
+      # I-000475: the preset round trips, the Simulate unit walk, the IR/YAML projection
+      # parity proofs and both embedded-preset trajectories never ran in CI, so their green
+      # was local-only. The `simulate` feature is not in `Run tests`' package set, and
+      # `--lib simulation::` / `--lib ...parity` select zero tests when the feature is off,
+      # so every invocation here is feature-explicit. Measured 40s warm locally.
+      - name: Run preset simulation and projection suites
+        if: matrix.group == 'orchestration-core'
+        timeout-minutes: 10
+        run: |
+          cargo test -p nexus-preset
+          cargo test -p nexus-orchestration --features simulate --lib simulation::
+          cargo test -p nexus-orchestration --features simulate --lib preset_runtime::tests::parity
+          cargo test -p nexus-orchestration --features simulate --test embedded_preset_trajectory --test sample_trajectory
       - name: Run tests
         run: cargo test ${{ matrix.packages }}
 
@@ -1096,6 +1109,19 @@ jobs:
           --test retained_execution_contracts --test execution_lifecycle
           --test handle_ops --test approve_route
           -- --test-threads=2
+      # I-000475 / I-000460: the Simulate wire route and the two recording Work-plane
+      # proofs had no CI owner. The step above runs neither target, and `simulation_services`
+      # is `#![cfg(feature = "execution")]`, so every invocation here names the feature
+      # explicitly rather than inheriting one. Measured 7s warm locally.
+      # shortcut: an `--exact` filter that matches no test exits 0, so renaming either
+      # recording proof would pass this step silently; add a `--list` assertion if the
+      # names ever move.
+      - name: Run core simulation and recording Work planes
+        timeout-minutes: 10
+        run: |
+          cargo test -p nexus-core --features execution --test simulation_services
+          cargo test -p nexus-core --features execution --test work_artifact_production_shape simulated_scaffold_records_without_touching_work_tree -- --exact
+          cargo test -p nexus-core --features execution --lib execution::capabilities::tests::simulated_fs_write_records_and_preserves_an_existing_chapter -- --exact
 
   rust-core-host-state:
     name: Rust core host state owners
