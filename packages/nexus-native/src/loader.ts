@@ -422,6 +422,13 @@ export interface NativeBinding {
    * protocol's exclusive migration fences (v1.192 P0-T3R).
    */
   resetLocalState(home: string): Promise<number>;
+  /**
+   * Publish a complete config document at the absolute `path` through the
+   * native publisher (probe → policy capture → sealed staging → ordered
+   * reapplication → rename). Opens no core; rejects with the wire `CoreError`
+   * envelope (`invalid_input` / `forbidden` / `internal`).
+   */
+  publishDocument(path: string, contents: string): Promise<void>;
 }
 
 interface PlatformPackageManifest {

@@ -486,6 +486,95 @@ pub async fn reset_local_state(home: String) -> Result<u32> {
     u32::try_from(count).map_err(|_| internal_reset_error("reset count out of range"))
 }
 
+/// Publish a complete config document at an absolute target path.
+///
+/// The ONE native publication path: a write-authorisation probe, the target's
+/// access-policy capture, a sealed staging directory and file, the ordered
+/// reapplication (owner → xattr → ACL → mode last) and finally a rename. It
+/// opens no core and holds no lock; the caller keeps whichever writer lock its
+/// read-modify-write requires.
+///
+/// The filesystem work is offloaded so a publication cannot stall the async
+/// runtime, and the absolute-path check runs here as well as in the TypeScript
+/// facade: a direct binding user still gets a typed refusal.
+///
+/// # Errors
+///
+/// Rejects with the wire `CoreError` envelope: `invalid_input` when `path` is
+/// not absolute, `forbidden` when the target is not writable by this process or
+/// the platform cannot reproduce its access policy, and `internal` for any
+/// other filesystem failure or a failed worker. The document's contents never
+/// appear in the rejection.
+#[napi]
+pub async fn publish_document(path: String, contents: String) -> Result<()> {
+    let requested = std::path::PathBuf::from(&path);
+    if !requested.is_absolute() {
+        return Err(core_error::napi_error_from_wire(CoreError {
+            code: CoreErrorCode::InvalidInput,
+            message: "publishDocument: path must be an absolute path".into(),
+            details: serde_json::Map::new(),
+            http_status: Some(400),
+        }));
+    }
+    let publication = tokio::task::spawn_blocking(move || {
+        nexus_home_layout::config_lock::publish_document_at(&requested, &contents)
+    })
+    .await;
+    match publication {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(napi_error_from_publication(&error)),
+        Err(_) => Err(internal_publication_error("publish worker failed")),
+    }
+}
+
+/// Map a publication refusal to the wire `CoreError` envelope.
+///
+/// The kind is mapped once, here: a denied target (the write-authorisation
+/// probe, the policy capture or the apply step) and a platform that cannot
+/// reproduce the policy are `forbidden`; every other failure stays `internal`.
+/// `ErrorKind::Unsupported` keeps its own arm so it never degrades into a
+/// generic internal failure.
+fn wire_core_error_from_publication(error: &std::io::Error) -> CoreError {
+    let (code, message, http_status) = match error.kind() {
+        std::io::ErrorKind::PermissionDenied => (
+            CoreErrorCode::Forbidden,
+            "config publication refused: the target is not writable by this process",
+            403,
+        ),
+        std::io::ErrorKind::Unsupported => (
+            CoreErrorCode::Forbidden,
+            "config publication refused: this platform cannot reproduce the target access policy",
+            403,
+        ),
+        _ => (
+            CoreErrorCode::Internal,
+            "config publication failed: filesystem error",
+            500,
+        ),
+    };
+    CoreError {
+        code,
+        message: message.into(),
+        details: serde_json::Map::new(),
+        http_status: Some(http_status),
+    }
+}
+
+/// Wire rejection for a publication failure.
+fn napi_error_from_publication(error: &std::io::Error) -> Error {
+    core_error::napi_error_from_wire(wire_core_error_from_publication(error))
+}
+
+/// Wire rejection for a publication infrastructure failure.
+fn internal_publication_error(message: &str) -> Error {
+    core_error::napi_error_from_wire(CoreError {
+        code: CoreErrorCode::Internal,
+        message: message.to_string(),
+        details: serde_json::Map::new(),
+        http_status: Some(500),
+    })
+}
+
 /// Map a local-state reset failure to the wire `CoreError` envelope.
 fn wire_core_error_from_reset(err: &nexus_local_db::LocalDbError) -> CoreError {
     match err {

@@ -786,3 +786,89 @@ test('store directory and file use 0700/0600', async (t) => {
   assert.equal(dirMode, 0o700);
   assert.equal(fileMode, 0o600);
 });
+
+// ---------------------------------------------------------------------------
+// Native publication: refusal and policy preservation
+// ---------------------------------------------------------------------------
+
+test('a write-denied store refuses, keeps ciphertext and state, and never leaks the key', async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip('EACCES cannot be simulated for the superuser');
+    return;
+  }
+  const deps = makeDeps(t);
+  const store = await ConnectionStore.open(deps);
+  await store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-live-secret' });
+  const before = readFileSync(deps.filePath);
+  chmodSync(deps.filePath, 0o444);
+
+  const logged = [];
+  const originalError = console.error;
+  console.error = (...args) => logged.push(args.map(String).join(' '));
+  let error;
+  try {
+    error = await store
+      .set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-next-secret' })
+      .then(
+        () => null,
+        (rejection) => rejection,
+      );
+  } finally {
+    console.error = originalError;
+    chmodSync(deps.filePath, 0o600);
+  }
+
+  assert.ok(error, 'a write-denied store must be refused');
+  assert.equal(errorCode(error), 'secure_store_publish_refused');
+  assert.deepEqual(readFileSync(deps.filePath), before, 'the previous ciphertext survives');
+  assert.equal(store.getAuth()?.apiKey, 'sk-live-secret', 'the in-memory state survives');
+  const surfaces = [errorMessage(error), ...logged].join('\n');
+  assert.ok(!surfaces.includes('sk-live-secret'), 'the stored plaintext key never surfaces');
+  assert.ok(!surfaces.includes('sk-next-secret'), 'the refused plaintext key never surfaces');
+});
+
+test('an existing 0640 store keeps its mode and group on set', async (t) => {
+  const deps = makeDeps(t);
+  const store = await ConnectionStore.open(deps);
+  await store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-1' });
+  chmodSync(deps.filePath, 0o640);
+  const before = statSync(deps.filePath);
+
+  await store.set({ ...BASE_CONFIG }, { action: 'keep' });
+
+  const after = statSync(deps.filePath);
+  assert.equal(after.mode & 0o777, 0o640, 'the captured mode is reapplied');
+  assert.equal(after.gid, before.gid, 'the captured group is reapplied');
+  assert.equal(store.getAuth()?.apiKey, 'sk-1');
+});
+
+test('a refused cleared marker reports secure_store_publish_refused and writes nothing', async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip('EACCES cannot be simulated for the superuser');
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'nexus-conn-store-'));
+  t.after(() => {
+    chmodSync(dir, 0o700);
+    rmSync(dir, { recursive: true, force: true });
+  });
+  // The removal primitive succeeds, so only the marker publication decides the
+  // outcome: a sealed directory refuses the staging creation.
+  const deps = {
+    filePath: join(dir, 'connection-config.enc'),
+    storage: xorCipher(0x5a),
+    removeFile: () => {},
+  };
+  const store = await ConnectionStore.open(deps);
+  chmodSync(dir, 0o555);
+
+  const error = await store.delete().then(
+    () => null,
+    (rejection) => rejection,
+  );
+
+  assert.ok(error, 'a refused marker publication must be reported');
+  assert.equal(errorCode(error), 'secure_store_publish_refused');
+  assert.equal(existsSync(join(dir, 'connection-config.cleared')), false);
+  assert.ok(!errorMessage(error).includes('sk-'), 'the refusal names no secret');
+});

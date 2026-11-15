@@ -93,10 +93,28 @@ fn release(path: &Path, token: &str) {
 
 /// Publish the complete `config.toml` document atomically.
 ///
+/// The fixed-`config.toml` caller of [`publish_document_at`]; every daemon-home
+/// writer goes through this form.
+///
+/// # Errors
+/// The same refusals [`publish_document_at`] documents: the I/O error that
+/// prevented the authorization probe, the policy capture or application, the
+/// write, the sync or the rename.
+pub fn publish_document(nexus_home: &Path, contents: &str) -> std::io::Result<()> {
+    publish_document_at(&nexus_home.join("config.toml"), contents)
+}
+
+/// Publish a complete document at `requested_path` atomically.
+///
+/// The general form of [`publish_document`]: the same probe, policy capture,
+/// sealed staging and ordered reapplication, for a target that is not the
+/// daemon-home `config.toml` (the per-agent-host document and the encrypted
+/// connection store reach it through the native `publishDocument` export).
+///
 /// I-000291: readers must see one whole document without taking the lock or
 /// writing anything, so an already-provisioned but not writable `.nexus42` can
 /// still serve a `ReadOnly` open. Writing a sibling staging file and renaming it
-/// over `config.toml` makes the replacement atomic: a reader opens either the
+/// over the target makes the replacement atomic: a reader opens either the
 /// previous complete version or the new one, never a truncated document that
 /// would read as "no `[memory_provider]`" (the implicit local default).
 ///
@@ -131,9 +149,8 @@ fn release(path: &Path, token: &str) {
 /// directory are removed on every failure path; when that cleanup also fails, the
 /// returned error keeps the original kind and names every leftover path instead
 /// of discarding the cleanup failure.
-pub fn publish_document(nexus_home: &Path, contents: &str) -> std::io::Result<()> {
-    let requested = nexus_home.join("config.toml");
-    let target = resolve_publication_target(&requested)?;
+pub fn publish_document_at(requested_path: &Path, contents: &str) -> std::io::Result<()> {
+    let target = resolve_publication_target(requested_path)?;
     let existing = existing_document(&target)?;
 
     if existing.is_some() {
@@ -159,7 +176,7 @@ pub fn publish_document(nexus_home: &Path, contents: &str) -> std::io::Result<()
     // The staging directory must share the target's directory: a symlinked
     // document can live outside the nexus home, and a cross-filesystem rename
     // would not be atomic (or would fail outright).
-    let parent = target.parent().unwrap_or(nexus_home);
+    let parent = target.parent().unwrap_or(requested_path);
     let staging = nexus_config_metadata::create_staging(
         &parent.join(format!(".nexus42-{}.tmp", uuid::Uuid::new_v4())),
     )?;
@@ -801,6 +818,47 @@ mod tests {
         assert_eq!(mode, 0o640, "the existing document mode is preserved");
         let mut entries: Vec<_> = std::fs::read_dir(&home)
             .expect("home listing")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        entries.sort();
+        assert_eq!(
+            entries,
+            ["config.toml"],
+            "only the published document remains"
+        );
+    }
+
+    /// The general publication form publishes a document that is not the
+    /// daemon-home `config.toml` — the per-agent-host document and the
+    /// encrypted connection store share this implementation — and keeps the
+    /// target's policy.
+    #[cfg(unix)]
+    #[test]
+    fn an_arbitrary_target_path_is_published_and_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let directory = tmp.path().join("agent-host");
+        std::fs::create_dir_all(&directory).expect("target directory");
+        let target = directory.join("config.toml");
+        std::fs::write(&target, "name = \"old\"\n").expect("old document");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).expect("mode");
+
+        super::publish_document_at(&target, "name = \"new\"\n").expect("publish");
+
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("published document"),
+            "name = \"new\"\n"
+        );
+        let mode = std::fs::metadata(&target)
+            .expect("published metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o640, "the target policy is preserved");
+        let mut entries: Vec<_> = std::fs::read_dir(&directory)
+            .expect("directory listing")
             .filter_map(Result::ok)
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
             .collect();

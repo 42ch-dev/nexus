@@ -1,5 +1,16 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -275,5 +286,63 @@ describe('config.toml advisory lock (I-000065)', () => {
     } finally {
       rmSync(copyPath, { force: true });
     }
+  });
+});
+
+describe('config publication policy (native publisher)', () => {
+  let writeAgentProfile;
+
+  before(async () => {
+    assert.ok(
+      existsSync(join(serviceRoot, 'dist', 'agent-profile.js')),
+      'dist/agent-profile.js is missing — run `pnpm --filter @42ch/nexus-service run build` first',
+    );
+    ({ writeAgentProfile } = await import(join(serviceRoot, 'dist', 'agent-profile.js')));
+  });
+
+  test('a write-denied config is refused as 403 forbidden and keeps its bytes', async () => {
+    const home = seededHome();
+    const original = readFileSync(configPathFor(home), 'utf8');
+    chmodSync(configPathFor(home), 0o444);
+    let error;
+    try {
+      error = await withDeadline(
+        writeAgentProfile(home, { name: 'codex-cli' }).then(
+          () => null,
+          (rejection) => rejection,
+        ),
+        5000,
+        'the refused profile write',
+      );
+    } finally {
+      chmodSync(configPathFor(home), 0o600);
+    }
+
+    assert.ok(error, 'a write-denied config must be refused');
+    assert.equal(error.code, 'forbidden');
+    assert.equal(error.status, 403);
+    assert.equal(readFileSync(configPathFor(home), 'utf8'), original);
+    // No staging residue, and the writer released its own lock.
+    assert.deepEqual(readdirSync(join(home, NEXUS_DIR)), [CONFIG_NAME]);
+  });
+
+  test('an existing 0640 config keeps its mode and group with unrelated keys intact', async () => {
+    const home = seededHome();
+    const path = configPathFor(home);
+    chmodSync(path, 0o640);
+    const before = statSync(path);
+
+    await withDeadline(writeAgentProfile(home, { name: 'codex-cli' }), 5000, 'the profile write');
+
+    const after = statSync(path);
+    assert.equal(after.mode & 0o777, 0o640, 'the captured mode is reapplied');
+    assert.equal(after.gid, before.gid, 'the captured group is reapplied');
+    const stored = parse(readFileSync(path, 'utf8'));
+    assert.deepEqual({ ...stored.agent_profile }, { name: 'codex-cli' });
+    assert.equal(stored.active_creator_id, 'ctr_localaaaaaaaaaaaa');
+    assert.deepEqual(
+      { ...stored.active_workspace_slug_by_creator },
+      { ctr_localaaaaaaaaaaaa: 'default' },
+    );
   });
 });
