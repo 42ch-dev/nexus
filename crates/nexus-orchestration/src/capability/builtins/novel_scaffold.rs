@@ -424,11 +424,9 @@ impl Capability for NovelProjectScaffold {
         // F2 (C-002, C-2, W-3): all subsequent FS writes register with
         // `txn`. On any `?` propagation before `txn.commit()`, the Drop
         // impl removes only the files/dirs THIS invocation created.
-        let mut txn = ScaffoldTransaction::new();
+        let mut txn = ScaffoldTransaction::new(executor.records_work_artifacts());
 
-        if create_dir_all_idem(&root)? {
-            txn.dirs_created.push(root.clone());
-        }
+        txn.create_dir(&root)?;
 
         // ── T2b: README.md ─────────────────────────────────────────────
         if let Some(tmpl) = load_template("README.md") {
@@ -469,15 +467,11 @@ impl Capability for NovelProjectScaffold {
 
         // ── T2c–T2g: Outlines/ subtree ────────────────────────────────
         let outlines = root.join("Outlines");
-        if create_dir_all_idem(&outlines)? {
-            txn.dirs_created.push(outlines.clone());
-        }
+        txn.create_dir(&outlines)?;
 
         // T2d: Outlines/chapters/
         let outlines_chapters = outlines.join("chapters");
-        if create_dir_all_idem(&outlines_chapters)? {
-            txn.dirs_created.push(outlines_chapters);
-        }
+        txn.create_dir(&outlines_chapters)?;
 
         // T2e: volume-outline.md
         // V1.42: render multi-volume structure when total_volumes > 1
@@ -561,22 +555,16 @@ impl Capability for NovelProjectScaffold {
 
         // ── T2h: Stories/ ──────────────────────────────────────────────
         let stories = root.join("Stories");
-        if create_dir_all_idem(&stories)? {
-            txn.dirs_created.push(stories);
-        }
+        txn.create_dir(&stories)?;
 
         // ── T2i: Logs/ ─────────────────────────────────────────────────
         let logs = root.join("Logs");
-        if create_dir_all_idem(&logs)? {
-            txn.dirs_created.push(logs.clone());
-        }
+        txn.create_dir(&logs)?;
 
         // V1.39 P3 (DF-66): Logs subdirectories for write discipline.
         for subdir in &["brainstorm", "write", "review", "publish"] {
             let sd = logs.join(subdir);
-            if create_dir_all_idem(&sd)? {
-                txn.dirs_created.push(sd);
-            }
+            txn.create_dir(&sd)?;
         }
 
         // ── T2j: Layer 2 AGENTS.md (V1.48 P2, overlay §3.1 #4) ─────────
@@ -806,18 +794,6 @@ impl Capability for NovelProjectScaffold {
 // FS helpers (idempotent — T6 compliance)
 // ---------------------------------------------------------------------------
 
-/// Create a directory and all parents. No-op if it already exists.
-///
-/// Returns `Ok(true)` if a fresh directory was created (and is therefore
-/// owned by the in-flight `ScaffoldTransaction`), `Ok(false)` if it was
-/// already present and must NOT be removed on rollback.
-fn create_dir_all_idem(path: &Path) -> Result<bool, CapabilityError> {
-    let pre_existed = path.exists();
-    std::fs::create_dir_all(path)
-        .map_err(|e| CapabilityError::Internal(format!("mkdir {}: {e}", path.display())))?;
-    Ok(!pre_existed)
-}
-
 /// Commit a file through the Work artifact port, only if it doesn't exist
 /// (idempotent per T6).
 ///
@@ -860,16 +836,40 @@ async fn write_file_idem(
 struct ScaffoldTransaction {
     files_created: Vec<PathBuf>,
     dirs_created: Vec<PathBuf>,
+    /// Whether the executor records its writes instead of landing them. Such a
+    /// run never owns a path on disk, so its rollback is inert.
+    recording: bool,
     committed: bool,
 }
 
 impl ScaffoldTransaction {
-    const fn new() -> Self {
+    const fn new(recording: bool) -> Self {
         Self {
             files_created: Vec::new(),
             dirs_created: Vec::new(),
+            recording,
             committed: false,
         }
+    }
+
+    /// Create a directory and all parents. No-op if it already exists, and a
+    /// no-op entirely under a recording executor: the bytes those directories
+    /// would hold never land, so leaving them behind would change the tree a
+    /// dry run promises to leave alone.
+    ///
+    /// A freshly created directory is owned by this transaction and removed on
+    /// rollback; a pre-existing one is never removed.
+    fn create_dir(&mut self, path: &Path) -> Result<(), CapabilityError> {
+        if self.recording {
+            return Ok(());
+        }
+        let pre_existed = path.exists();
+        std::fs::create_dir_all(path)
+            .map_err(|e| CapabilityError::Internal(format!("mkdir {}: {e}", path.display())))?;
+        if !pre_existed {
+            self.dirs_created.push(path.to_path_buf());
+        }
+        Ok(())
     }
 
     /// Mark the scaffold as successfully committed; the Drop impl becomes
@@ -881,7 +881,11 @@ impl ScaffoldTransaction {
 
 impl Drop for ScaffoldTransaction {
     fn drop(&mut self) {
-        if self.committed {
+        // A recording run owns nothing on disk: its byte commits only logged
+        // intended writes, so every registered path may be an entry this run
+        // never created (a dangling symlink passes the `exists()` check as
+        // absent). Rolling back would delete the user's own tree.
+        if self.committed || self.recording {
             return;
         }
         // Best-effort rollback. We log but do not panic — if the FS state
