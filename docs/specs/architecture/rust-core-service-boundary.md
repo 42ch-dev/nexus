@@ -48,10 +48,11 @@ These names and roles stay. The refactor does not invent a second CLI, a second 
 
 #### Current workspace boundary inventory
 
-These six workspace crates extend the frozen 2026-05 inventory in [local-cloud-crate-architecture.md](../../../.agents/adr/archived/architecture/2026-09-21-local-cloud-crate-architecture.md); they support the authority graph in §4.2, not another product or host. Membership is declared in root `Cargo.toml`; the linked per-crate `AGENTS.md` files own their detailed rules.
+These seven workspace crates extend the frozen 2026-05 inventory in [local-cloud-crate-architecture.md](../../../.agents/adr/archived/architecture/2026-09-21-local-cloud-crate-architecture.md); they support the authority graph in §4.2, not another product or host. Membership is declared in root `Cargo.toml`; the linked per-crate `AGENTS.md` files own their detailed rules.
 
 | Workspace crate | Boundary role |
 | --- | --- |
+| [`nexus-connect`](../../../crates/nexus-connect/AGENTS.md) | Owns the peer Connect protocol stack — WS transport, accept loop, sessions, MCP bridge, peer-control lane and the peer tool registry. `nexus-core` depends on it (`nexus-core → nexus-connect`); it never depends back on core, so its default graph is core- and orchestration-free. |
 | [`nexus-core`](../../../crates/nexus-core/AGENTS.md) | Owned transport-neutral World KB service and stored Actor/holder admission authority; no transport or SQL pool in its public domain surface. |
 | [`nexus-core-node`](../../../crates/nexus-core-node/AGENTS.md) | Thin Node-API cdylib composing core and provider ports, with environment-local state and an audited FFI boundary. |
 | [`nexus-preset`](../../../crates/nexus-preset/AGENTS.md) | Pure preset authoring/source-file domain library shared by core and orchestration; no execution, Host, WASM, HTTP, or database dependency. |
@@ -64,7 +65,7 @@ These six workspace crates extend the frozen 2026-05 inventory in [local-cloud-c
 ```text
  Basic Rust CLI ──────┐
  Connect-only host ───┼──> nexus-core ──> guarded SQLite / canonical spoke ports
-                     │        │
+                     │        │  └──> nexus-connect (peer protocol; no edge back)
                      │        └── one workspace engine/effect owner
                      │
  Browser / existing NexusClient
@@ -105,7 +106,7 @@ These are the shipped dependency cohorts, kept as the regression contract: an ed
 | Cohort | Selected edges | Forbidden accidental edges |
 | --- | --- | --- |
 | Core domain/default | contracts, home-layout, guarded local-db, knowledge/narrative, Creator memory, MCA, pure preset; spoke-adapter with defaults disabled | daemon-runtime, orchestration engine, Host/ACP host, graph-flow, WASM, Axum, napi, Connect |
-| Core `execution` | Existing optional orchestration, coordinator/scheduler/capability/workspace commit; explicit `RunnerDeps` ports | transport host, unconditional WASM; a ProviderPort alone is not production runner wiring |
+| Core `execution` | Existing optional orchestration, coordinator/scheduler/capability/workspace commit; explicit `RunnerDeps` ports; the optional `nexus-connect` edge that carries the peer tool registry | transport host, unconditional WASM; a ProviderPort alone is not production runner wiring |
 | Core `provider-host` | optional existing Host/ACP adapters and one admitted session registry | implicit scheduler/execution startup |
 | Core `compute` | explicit execution plus WASM/spoke compute, including optional orchestration compute edges | default/domain/Connect-host activation |
 | Peer-control operator | optional reverse-invoke/Connect-client/MCP adapters | activation by Connect-host product |
@@ -115,6 +116,8 @@ These are the shipped dependency cohorts, kept as the regression contract: an ed
 | TS native service | Current selection is core `[execution]` with native-owned Host/ProviderPort. The current-host completion selects `[execution,provider-host,compute]` and composes existing Rust owners: the workflow-control, observation/recovery and Compute whole-plan releases are accepted, and the public first workflow driver/guidance stay pending plan QC/QA and iteration integration (§6.5.1). Completing it is not merely changing the feature list. | old-daemon proxy, TS domain/SQL owner, duplicate engine/Host/WASM runtime; domain/default and Connect-only cohorts must not inherit native-service startup |
 
 The existing pure `nexus-preset` closure and default-disabled MCA/core spoke edges are retained. The app's spoke dependency also disables defaults; only `connect-host` explicitly enables its real compute feature. Current Connect invoke code already serves compute with stored holder/module scope and a shared cache; removing WASM to satisfy a graph slogan would delete supported functionality. The ordinary CLI may retain orchestration **library** edges for chronology/cron/ops without starting an engine. Core domain closure remains engine/Host/WASM-free.
+
+**Connect ownership (v1.244).** The peer Connect stack — WS transport, accept loop, sessions, config/watch, MCP bridge, embedded Model B shell, peer-control lane and the peer tool registry — lives in the `nexus-connect` crate, not in core. The only edge is `nexus-core → nexus-connect`, selected by core's `execution` cohort (peer tools) and carried forward by `connect-host` / `connect-client` / `embedded-mcp` / `memory-remote`; `nexus-connect` has its own feature set (`peer-tools`, `transport`, `connect-host`, `connect-client`, `embedded-mcp`, `memory-remote`) and no edge back into core, so `cargo tree -p nexus-connect --no-default-features` contains neither `nexus-core` nor `nexus-orchestration`.
 
 **App cohorts.** The app cohorts are `default = ["cli"]`, independent `connect-host`, and `nexus42` binary `required-features = ["cli"]`. `basic-cli`, `legacy-cli`, `web-embed` and the app-only `connect-client`/`embedded-mcp` selectors do not exist; the core `connect-client`/`embedded-mcp` **library** features remain. Generic ACP MCP descriptors remain. No second CLI, renamed legacy mode or no-op compatibility feature exists.
 

@@ -29,17 +29,33 @@ module (v1.244 packaging ladder). It owns:
   foreign type. [`PeerControlLane::new`], `set_enabled`, `allow` and `state`
   are public for exactly that boundary.
 
-`cargo tree -p nexus-connect` must stay free of `nexus-core`,
-`nexus-orchestration`, `nexus-local-db` and `nexus-agent-host`;
-`tooling/check-graph-pins.sh` pins the first two for the default graph.
+`cargo tree -p nexus-connect --no-default-features` must stay free of
+`nexus-core`, `nexus-orchestration`, `nexus-local-db` and `nexus-agent-host`;
+`tooling/check-graph-pins.sh` pins the first two for exactly that graph. Feature
+cohorts are a different matter: `peer-tools` pulls `nexus-spoke-adapter`, which
+reaches `nexus-local-db` (see Features).
 
 ## Features
 
-`nexus-connect` has no default features. `peer-tools` is the registry alone
-(all `nexus-core`'s `execution` cohort needs); `transport` is the WS transport
-alone (what `memory-remote` dials through); `connect-host` adds the Connect-host
-cohort; `connect-client` adds rmcp; `embedded-mcp` adds the Model B shell. The
-shipped Connect host never enables rmcp.
+`nexus-connect` has no default features; six select what compiles.
+
+| Feature | Adds | Selected by |
+| --- | --- | --- |
+| `peer-tools` | the registry alone (`peer_tools.rs`): admission chain, collision policy, eviction | `nexus-core`'s `execution` cohort |
+| `transport` | `ws_transport.rs` plus `spoke-connect` / `tokio-tungstenite` / `futures-util` | `memory-remote` |
+| `connect-host` | accept / config / events / session / table / watch / peer-control cohort with its contracts, home-layout and orchestration inputs; implies `peer-tools` and `transport` | `nexus-core`'s `connect-host` |
+| `connect-client` | the rmcp bridge (`mcp_bridge.rs`) via `rmcp` | core `connect-client` |
+| `embedded-mcp` | the Model B shell (`mcp_embedded.rs`) plus `futures-channel` | core `embedded-mcp` |
+| `memory-remote` | `transport` alone — the WS lane the remote memory client dials | core `memory-remote` |
+
+`peer-tools` — and so every cohort built on it (`connect-host`,
+`connect-client`, `embedded-mcp`) — reaches `nexus-local-db` transitively through
+`nexus-spoke-adapter`: the registry reuses that boundary's descriptor/argument
+validators and its wire refusal codes instead of writing a second copy. The
+protocol itself reads none of it, so an unfeatured build stays free of the
+local-db and orchestration edges.
+
+The shipped Connect host never enables rmcp.
 
 ## Tests
 

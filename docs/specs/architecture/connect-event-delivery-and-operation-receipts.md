@@ -42,14 +42,14 @@ workflow rings.
 
 #### A.2 Event surface placement
 
-- **Ring**: new module `crates/nexus-core/src/connect/events.rs` — a
+- **Ring**: new module `crates/nexus-connect/src/events.rs` — a
   bounded Connect event ring following the `RunEventRegistry` design
   (`crates/nexus-core/src/execution/run_events.rs:802` `subscribe_live`:
   atomic replay-then-live-tail; `:936-948` bounded-page + `resync_required`
   semantics). Connect-scoped (per peer session), not per workflow run.
 - **Transport**: the existing spoke-connect WebSocket lane
-  (`crates/nexus-core/src/connect/ws_transport.rs`; accept/responder lane
-  `crates/nexus-core/src/connect/accept.rs:259` `spawn_accept_loop`).
+  (`crates/nexus-connect/src/ws_transport.rs`; accept/responder lane
+  `crates/nexus-connect/src/accept.rs` `spawn_accept_loop`).
   Event frames use the SSE dialect (`id:` / `event:` / `data:`,
   `SseFrame`, `run_events.rs:157`) carried on the established Connect
   session. `nexus-runtime` gains **no HTTP listener** (A.1 invariant).
@@ -205,7 +205,7 @@ Rejected alternatives (survey verdicts, HEAD 2026-10-07):
 - **Route (A) as "intercept beside the nexus42 handler" — impossible.**
   The node lane (libp2p/noise; `SpokeConnectNode::start`,
   `apps/nexus42/src/bin/nexus-runtime.rs:166`) and the WS accept lane
-  (`spawn_accept_loop`, `accept.rs:259`) are disjoint listeners; an invoke
+  (`spawn_accept_loop`, `accept.rs`) are disjoint listeners; an invoke
   admitted on the node lane is answered inside spoke-connect's session
   loop and cannot be intercepted by nexus-core. The feasible form of (A)
   therefore RE-HOMES `subscribe` onto the WS accept/responder lane, where
@@ -259,7 +259,7 @@ The seam (all edit points named):
    the lane is loopback-only, item 6).
 4. **Advertisement / negotiation.** `tools.nexus.subscribe` is a
    host-served capability constant joined at the WS-lane hello
-   composition — `daemon_manifest` (`accept.rs:187`, called `:320`) —
+   composition — `daemon_manifest` (`accept.rs`) —
    never derived from the peer tool allowlist (that allowlist is the
    peer-tool set, AR-69). The consumer opts the session in by advertising
    `tools.nexus.subscribe` in its own hello (negotiation = intersection).
@@ -302,12 +302,12 @@ The seam (all edit points named):
    lane ordering and (d)'s total order / ack gating hold by construction;
    (d)'s replace/cancel/close lifecycle is the subscription table's
    replace rule plus the driver's close observation (responder close fails
-   pending reverse invokes, `responder.rs:560-563`; Phase 3 eviction,
-   `accept.rs:451-473`).
+   pending reverse invokes, `responder.rs:560-563`; Phase 3 eviction in
+   `accept.rs`).
 6. **Boot wiring + lane constraint.** The WS lane is built and
    contract-tested but has no production caller on HEAD
-   (`start_peer_tools_lane`, `accept.rs:519`; only
-   `crates/nexus-core/tests/retained_peer_contracts.rs` wires it).
+   (`start_peer_tools_lane`; only
+   `crates/nexus-connect/tests/retained_peer_contracts.rs` wires it).
    `connect start` (`apps/nexus42/src/commands/connect/mod.rs:295-301`)
    and `nexus-runtime` (`apps/nexus42/src/bin/nexus-runtime.rs:163-167`)
    start the lane after `build_host_config` — NOT inside it
@@ -352,7 +352,7 @@ The seam (all edit points named):
    on the node lane "advertised ⇒ served" is the invariant the interop
    honesty machine (`interop.rs:534-601`) enforces — it is untouched
    and stays green with zero node-lane diff. The WS-lane hello is a
-   separate composition (`daemon_manifest`, `accept.rs:187`) whose
+   separate composition (`daemon_manifest`, `accept.rs`) whose
    `capabilities[]` carries two honesty classes: advertised-SERVED
    (`tools.nexus.subscribe` ⇔ a per-session handler is registered,
    `responder.rs:580`) and advertised-REVERSE-USE
@@ -426,7 +426,7 @@ are the intersection of both hello `capabilities[]` lists
   `ConnectHelloManifest` (`spoke_schemas::connect::connect_hello::HostCapabilityManifest`).
 - Host wiring: `ConnectConfig.local_manifest` (boot
   `connect::build_host_config`, `docs/nexus-runtime.md:53-61`); accept-lane
-  manifest `crates/nexus-core/src/connect/accept.rs:187` `daemon_manifest`.
+  manifest `crates/nexus-connect/src/accept.rs` `daemon_manifest`.
 - **First-use-without-negotiation fails closed with the existing typed
   refusal**: an op whose capability was not negotiated is refused
   `op_unsupported` at the spoke dispatch gate before any host handler runs
@@ -618,10 +618,10 @@ beyond this table.
   served-ops honesty machine check.
 - `apps/nexus42/src/commands/connect/allowlist.rs:323-325` — op_scope
   exact-membership gate.
-- `crates/nexus-core/src/connect/accept.rs:187` — `daemon_manifest`;
-  `:259` — `spawn_accept_loop`; `:410` — `responder.remote_manifest()`
-  admission read (§A.2a reverse-leg negotiation check);
-  `crates/nexus-core/src/connect/ws_transport.rs` — the WS lane (`:5-7` one
+- `crates/nexus-connect/src/accept.rs` — `daemon_manifest`,
+  `spawn_accept_loop`, and the `responder.remote_manifest()` admission read
+  (§A.2a reverse-leg negotiation check);
+  `crates/nexus-connect/src/ws_transport.rs` — the WS lane (module doc: one
   envelope = one WS message, opaque bytes — frame-kind discrimination lives
   above the transport seam).
 - spoke-connect 0.14.1 (registry crate; frozen contract §6):
@@ -656,14 +656,14 @@ beyond this table.
   → `op_unsupported`, "not authorized by this session");
   `core/dispatch.rs:40-43` / `:57-62` — a `tools.*` op requires its own
   op string in the negotiated set, fail-closed otherwise.
-- `crates/nexus-core/src/connect/accept.rs:71-109` — `ObservedTransport`
-  decorator seam (subscribe-response ordering observation point); `:343` —
-  per-connection install; `:383` — established peer id; `:405-442` —
-  Phase 2 admission window (handler registration + driver spawn point);
-  `:451-473` — Phase 3 close observation; `:519` — `start_peer_tools_lane`
-  (no production caller on HEAD); `:550-560` — loopback fail-closed bind;
-  `crates/nexus-core/src/connect/session.rs:163` / `:197` —
-  `PeerSessionManager.get` / `register` (responder ownership registry).
+- `crates/nexus-connect/src/accept.rs` — `ObservedTransport` decorator seam
+  (subscribe-response ordering observation point), its per-connection
+  install, the established-peer-id read, the Phase 2 admission window
+  (handler registration + driver spawn point), the Phase 3 close
+  observation, `start_peer_tools_lane` (no production caller on HEAD) and
+  the loopback fail-closed bind; `crates/nexus-connect/src/session.rs:163` /
+  `:197` — `PeerSessionManager.get` / `register` (responder ownership
+  registry).
 - `crates/nexus-spoke-adapter/src/manifest.rs:930-1011` —
   no-`tools.*`-beyond-S served-ops lockstep (why the consumer-served
   delivery op never enters `LOCAL_SERVED_OPS`).
@@ -706,9 +706,9 @@ The normative constraints for this surface are stated in §Current state; a chan
 - `apps/nexus42`
 - `apps/nexus42/src/commands/connect/invoke.rs`
 - `crates/nexus-core/src/execution/run_events.rs`
-- `crates/nexus-core/src/connect/events.rs`
-- `crates/nexus-core/src/connect/ws_transport.rs`
-- `crates/nexus-core/src/connect/accept.rs`
+- `crates/nexus-connect/src/events.rs`
+- `crates/nexus-connect/src/ws_transport.rs`
+- `crates/nexus-connect/src/accept.rs`
 - `schemas/core/core-connect-invoke-request.schema.json`
 - `crates/nexus-spoke-adapter/src/manifest.rs`
 - `apps/nexus42/src/commands/connect/interop.rs`

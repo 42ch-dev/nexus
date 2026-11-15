@@ -53,7 +53,7 @@ Enforce the gate **before the listener is opened** and again on every *guarded* 
 
 ## Connect peer-tools env gate
 
-The core **Connect peer-tools lane** (`crates/nexus-core/src/connect/accept.rs:241-257`, `ensure_remote_bind_allowed`) permits a non-loopback peer-tools bind only when both `NEXUS42_DAEMON_API_KEY` and `NEXUS_DAEMON_REMOTE_BIND=1` are set. It does **not** gate the Daemon API HTTP surface.
+The **Connect peer-tools lane** (`crates/nexus-connect/src/accept.rs:241-257`, `ensure_remote_bind_allowed`) permits a non-loopback peer-tools bind only when both `NEXUS42_DAEMON_API_KEY` and `NEXUS_DAEMON_REMOTE_BIND=1` are set. It does **not** gate the Daemon API HTTP surface.
 
 ## Why this works
 
@@ -83,5 +83,5 @@ Use this pattern whenever a local-first service adds an opt-in remote listener. 
 - Startup gate: `apps/nexus-service/src/bind.ts`
 - Request gate: `apps/nexus-service/src/security.ts`
 - Config flags/key: `apps/nexus-service/src/config.ts`
-- Core Connect peer-tools env gate (live): `crates/nexus-core/src/connect/accept.rs`
+- Core Connect peer-tools env gate (live): `crates/nexus-connect/src/accept.rs`
 - Surface conventions (current): `docs/specs/runtime/daemon-api-surface-conventions.md`

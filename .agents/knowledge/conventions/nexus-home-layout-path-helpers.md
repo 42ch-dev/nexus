@@ -47,7 +47,7 @@ V1.148 P4 dogfood caught **F-1 (medium)**: `get_or_create_device_id(home)` joins
   dialer Ed25519 public keys; **missing file ⇒ empty map ⇒ fail-closed** — no
   dialer passes the responder handshake without a preconfigured key), and
   the daemon identity seed at `connect/daemon_identity.key`
-  (`daemon_identity_key_path`, `crates/nexus-core/src/connect/identity.rs`
+  (`daemon_identity_key_path`, `crates/nexus-connect/src/identity.rs`
   — raw 32-byte Ed25519 seed, created once with `create_new` + mode `0600`; a
   wrong-length existing file is a fail-closed error, never reused). All three
   are called with raw home (`config.rs::load(home)` / `load_peer_keys(home)` /
@@ -86,7 +86,7 @@ V1.148 P4 dogfood caught **F-1 (medium)**: `get_or_create_device_id(home)` joins
 - Capability scan/install: `ops_capability_registry` uses `nexus_home().parent()` (`apps/nexus42/src/commands/ops.rs:730-737`); CLI `cmd_install` uses `user_capabilities_dir(&dirs::home_dir()?)` (`apps/nexus42/src/commands/capability.rs:200-217`). Passing `state.nexus_home()` would scan `~/.nexus42/.nexus42/capabilities` and miss every install.
 - V1.174 peer-tools lane: `connect_daemon_config_path` /
   `connect_peer_keys_path` / `daemon_identity_key_path` with raw-home
-  callers in `crates/nexus-core/src/connect/{config.rs, identity.rs}`;
+  callers in `crates/nexus-connect/src/{config.rs, identity.rs}`;
   layout pinned by `connect_path_layout` in `crates/nexus-home-layout/src/lib.rs`;
   format-collision rationale in `connect/identity.rs` module docs.
 - Pre-1.0 note: a path fix that changes the canonical location is accepted without migration (one-time identity churn); record it in `crates/nexus-home-layout/AGENTS.md` path-history so future readers understand.

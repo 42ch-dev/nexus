@@ -39,7 +39,7 @@ native CLI `--mcp-config`, third-party).
 The load-bearing reality that shaped the design: **two registries exist**.
 The **orchestration** registry (`nexus-orchestration/src/capability/mod.rs`,
 V1.172 graph capabilities + boot-scanned user WASM capabilities) and the
-**daemon host-tool registry** (`crates/nexus-core/src/execution/peer_tools.rs`,
+**daemon host-tool registry** (`crates/nexus-connect/src/peer_tools.rs`,
 `LazyLock`-frozen static rows with plain `fn` pointer handlers). The MCP
 catalog is neither of them — it is a read face over the **single dispatch
 spine** that resolves across all three origins. The `origin` vocabulary is
@@ -190,8 +190,8 @@ makes the honesty lockstep family machine-checkable in both directions:
 admitted ⇄ derivation, catalog ⇄ spine, `tools/list` ⇄ catalog, listing ⇄
 table, hello ⇄ allowlist, default-deny, named negatives, duplicate collision,
 eviction, reconnect lockstep, static-table pins, and the MCP refusal mapping
-(`crates/nexus-core/src/connect/table.rs` +
-`crates/nexus-core/tests/retained_peer_contracts.rs`). A second dispatch table or an MCP-only
+(`crates/nexus-connect/src/table.rs` +
+`crates/nexus-connect/tests/retained_peer_contracts.rs`). A second dispatch table or an MCP-only
 allowlist would silently re-open the authorization surface; the four-layer
 chain keeps all policy daemon-side.
 
@@ -210,7 +210,7 @@ chain keeps all policy daemon-side.
   `mcp_visibility`, fail-closed parse, slash ids allowed for `fs/*`)
   is an additive layer evaluated at the MCP construction site
   (`EmbeddedMcpServer.policy` injected at `establish()` in
-  `crates/nexus-core/src/connect/mcp_embedded.rs`). Execution
+  `crates/nexus-connect/src/mcp_embedded.rs`). Execution
   authz stays spine-owned (L0–L3 unchanged). Two refusal classes: a
   **hidden-tool** call is seam-minted `ToolCallOutcome::NotAuthorized` →
   MCP `METHOD_NOT_FOUND` + `tool_not_authorized: {id}` discriminator before
@@ -223,16 +223,15 @@ chain keeps all policy daemon-side.
 
 - Spine + admission: `crates/nexus-core/src/execution/capabilities.rs`
   (`dispatch_peer_tool` / `dispatch_user_cap` / `user_cap_catalog_admission`);
-  the peer registry itself is `crates/nexus-core/src/execution/peer_tools.rs` (`PeerToolRegistry`),
-  `crates/nexus-core/src/execution/capabilities.rs` (dispatch) and
-  `crates/nexus-core/src/execution/peer_tools.rs` (registry/admission).
-- Peer lane: `crates/nexus-core/src/connect/{accept.rs, session.rs,
-  table.rs, config.rs, identity.rs}`; `connect/table.rs`
+  the peer registry itself is `crates/nexus-connect/src/peer_tools.rs`
+  (`PeerToolRegistry`, registry/admission).
+- Peer lane: `crates/nexus-connect/src/{accept.rs, session.rs,
+  table.rs, config.rs, identity.rs}`; `table.rs`
   (`McpCatalogRefusal::InputSchemaNotRootObject`).
 - Proof suites (all behind `connect-client`): `tests/peer_session.rs` (7),
   `tests/peer_tool.rs` (11), `tests/authz_hello.rs` (7),
   `tests/honesty_lockstep.rs` (4), `tests/worker_spine_peer.rs` (8),
-  `crates/nexus-core/tests/retained_peer_contracts.rs` (8).
+  `crates/nexus-connect/tests/retained_peer_contracts.rs` (8).
 - Lock spec (v1.174 iteration snapshot): `v1.174-peer-tools-lock.md` (AR-66..77).
 - Companions: `architecture-patterns/connect-host-tools-serving.md` (serving
   side, separate process — frozen), `architecture-patterns/wasm-module-as-capability-executor.md`

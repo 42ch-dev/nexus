@@ -37,19 +37,19 @@ bound it to ACP was deleted earlier in **v1.193 P1-T6**. No `nexus42` command
 spawns an MCP server any more, and `apps/nexus42/src/` has no `mcp` command
 group.
 
-What survives — and what this note documents — is the **transport-neutral core
-library** under `nexus_core::connect`, compiled behind the `connect-client` /
+What survives — and what this note documents — is the **transport-neutral
+`nexus-connect` library** under `nexus_connect`, compiled behind the `connect-client` /
 `embedded-mcp` cohort features:
 
-- the **shared rmcp bridge core** (`crates/nexus-core/src/connect/mcp_bridge.rs`)
+- the **shared rmcp bridge core** (`crates/nexus-connect/src/mcp_bridge.rs`)
   — a `ServerHandler` generic over a host-supplied `McpBackend`; and
 - the **embedded Model B server shell**
-  (`crates/nexus-core/src/connect/mcp_embedded.rs`) — an in-process rmcp
+  (`crates/nexus-connect/src/mcp_embedded.rs`) — an in-process rmcp
   instance over a sink/stream transport.
 
 The retired daemon supplied the concrete `WorkspaceState`-backed backend;
 native/TS consumers compose the shell directly. A core-side regression must
-supply its own `McpBackend` — see `crates/nexus-core/tests/retained_peer_contracts.rs`
+supply its own `McpBackend` — see `crates/nexus-connect/tests/retained_peer_contracts.rs`
 (the embedded-only half of that target uses a `PeerRegistryBackend`).
 
 ## Guidance
@@ -106,7 +106,7 @@ in the shell.
   must not advertise a capability it never delivers. Model A's child-side 2 s
   poll watch (DF-90 / AR-79) is **historical** — deleted with the child.
 
-Exports (`nexus_core::connect`): `start_embedded_mcp_server`,
+Exports (`nexus_connect`): `start_embedded_mcp_server`,
 `EmbeddedMcpServer`, `EmbeddedSession`, `EmbeddedShutdown`, `EmbeddedMcpError`,
 `EMBEDDED_MCP_MAX_SESSIONS`.
 
@@ -146,7 +146,7 @@ Exports (`nexus_core::connect`): `start_embedded_mcp_server`,
 
 ### 4. Schema mapping (descriptor rows → rmcp `Tool`)
 
-The catalog gates live in `crates/nexus-core/src/connect/table.rs`
+The catalog gates live in `crates/nexus-connect/src/table.rs`
 (`mcp_catalog_admission`, `mcp_catalog_output_root_object`):
 
 | Source | `input_schema` | `output_schema` |
@@ -165,7 +165,7 @@ No schema is ever synthesized from a non-schema source. See
   round trips, with stdout as the JSON-RPC channel and stderr-only logging;
   none of that surface exists now.
 - **Model B — in-process embedded rmcp service** over a sink/stream transport:
-  **retained** and relocated to the core library (§2), generic over
+  **retained** and relocated to the `nexus-connect` crate (§2), generic over
   `McpBackend`.
 - **Model C — host spawns and owns the child:** structurally incoherent for
   stdio (the stdio parent must be the MCP client) → rejected without a roadmap
@@ -209,14 +209,14 @@ round; the empty-lists reality is the honest boundary for a tools-only server.
 
 ## Examples
 
-- `crates/nexus-core/src/connect/mcp_bridge.rs` — `McpBackend`,
+- `crates/nexus-connect/src/mcp_bridge.rs` — `McpBackend`,
   `McpBridgeHandler`, `map_outcome`, `is_unroutable`, `CatalogRow`.
-- `crates/nexus-core/src/connect/mcp_embedded.rs` — embedded Model B shell
+- `crates/nexus-connect/src/mcp_embedded.rs` — embedded Model B shell
   (`start_embedded_mcp_server`, session bound, shutdown).
-- `crates/nexus-core/src/connect/table.rs` — catalog admission / output-root
+- `crates/nexus-connect/src/table.rs` — catalog admission / output-root
   gates.
-- `crates/nexus-core/src/connect/visibility.rs` — `VisibilityPolicy` seam.
-- Proof suites: `crates/nexus-core/tests/retained_peer_contracts.rs`
+- `crates/nexus-connect/src/visibility.rs` — `VisibilityPolicy` seam.
+- Proof suites: `crates/nexus-connect/tests/retained_peer_contracts.rs`
   (embedded-Model-B half behind `embedded-mcp`),
   `apps/nexus42/tests/mcp_acp_probe.rs` (generic ACP descriptor round trip).
 - Consumer docs: `docs/mcp-server.md` (retained-contract pointer); the
