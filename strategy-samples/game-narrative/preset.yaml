@@ -15,7 +15,7 @@ preset:
     kind: seed_direct
 states:
 - id: routing
-  description: 'Lane selector: judge reads preset.input.mode -> scheduled sweep (GO) or game-event trigger (NOGO)'
+  description: 'Lane selector. The expression engine resolves `_context.<path>` against a FLAT context JSON map (`build_context_json`), so a dotted key like `preset.input.mode` can never be read: `_context.preset.input.mode` resolves `map.get("preset")` -> null (context keys are stored literally, and the grammar has no bracket syntax). The only runtime-populated discriminator an expression can see is `_context._judge_result`, written by an `llm_judge` exit BEFORE branch evaluation — so lane selection is a tiny judge: GO (result true) -> scheduled interval sweep, NOGO (result false) -> game-event trigger lane. The judge prompt (templates/lane-route.md) reads the payload via {{preset.input.mode}}: template rendering nests dotted keys, unlike expression resolution.'
   exit_when:
     kind: llm_judge
     template_file: templates/lane-route.md
@@ -26,7 +26,7 @@ states:
       target: scheduled_sweep
     default: trigger_extract
 - id: trigger_extract
-  description: 'Trigger lane: game event -> extraction/assembly task'
+  description: 'Trigger lane: a game event arrives from the game runtime and becomes an extraction/assembly task. The trigger graph is sequenced with depends_on (trigger_parse -> extract_worldview -> extract_characters); each node template is self-contained and reads `preset.input` per the embedded-preset convention, and output_binding exports extract_characters.text.'
   enter:
   - kind: inner_graph
     name: trigger_graph
@@ -34,7 +34,7 @@ states:
     kind: graph_complete
   next: done
 - id: scheduled_sweep
-  description: 'Scheduled lane: inventory new/changed worldview + character documents and judge whether to import (scan state — extraction is a separate state)'
+  description: 'Scheduled lane: an interval/cron-style sweep that inventories new or changed worldview/character documents since the last run, judges whether anything new exists, and only then extracts. Scan + judge happen BEFORE extraction, mirroring the embedded `research` preset''s scanning -> extracting split: this state only runs the inventory prompt (creator.inject_prompt queues it into the creator session), then the exit judge decides. Cadence: the judge re-evaluates at most once per interval (`min_interval: PT1H`); a NOGO parks this scan state (WaitForInput) and the next interval resumes it, so the cheap scan re-runs — never the LLM extraction work.'
   enter:
   - kind: capability
     name: creator.inject_prompt
@@ -47,7 +47,7 @@ states:
     min_interval: PT1H
   next: sweep_extract
 - id: sweep_extract
-  description: 'Scheduled lane extraction: worldview/character KnowledgeEntry drafts + Relation hints (runs only after the sweep judge says GO)'
+  description: 'Scheduled lane extraction: worldview/character KnowledgeEntry drafts + Relation hints, running only after the `scheduled_sweep` judge says GO — the scan and judge happen there, so this graph is extraction only (extract_worldview -> extract_characters with depends_on). Each node template is self-contained and reads `preset.input` per the embedded-preset convention, and output_binding exports extract_characters.text.'
   enter:
   - kind: inner_graph
     name: sweep_graph

@@ -1,15 +1,19 @@
 //! End-to-end Simulate evidence over the repository's `game-narrative` sample.
 //!
-//! The fixture is the sample's imported candidate IR: `routing` is an `llm_judge` with a declared
-//! `default` edge, so the walk proves the judge stub and the whole route payload shape without a
-//! model call, a provider or an engine.
+//! `routing` is an `llm_judge` with a declared `default` edge, so the walk proves the judge stub
+//! and the whole route payload shape without a model call, a provider or an engine.
+//!
+//! The IR is the sample's golden candidate IR rather than a copy: `import_preset_bundle` produces
+//! it from the shipped bundle and `crates/nexus-preset/tests/workflow_ir_round_trip.rs` fails when
+//! that file drifts from the adapter's output, so this target cannot walk a stale sample.
 
 #![cfg(feature = "simulate")]
 
 use nexus_orchestration::{simulate_document, SimulationOptions};
 use nexus_workflow_ir::WorkflowDocument;
 
-const GAME_NARRATIVE: &str = include_str!("fixtures/game-narrative.workflow.ir.json");
+const GAME_NARRATIVE: &str =
+    include_str!("../../nexus-preset/tests/fixtures/workflow-ir/game-narrative.workflow.ir.json");
 
 fn sample() -> WorkflowDocument {
     serde_json::from_str(GAME_NARRATIVE).expect("the sample IR parses")

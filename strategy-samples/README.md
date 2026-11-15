@@ -780,6 +780,10 @@ and is the hand-edited source, `preset.yaml` is its export. A sample author
 edits the JSON directly — Canvas is not required for repository sample
 authoring, and `preset.yaml` is not the file to edit.
 
+Lane prose belongs in the lane state's `ui.description` in `workflow.json` —
+the carrier `export_preset` projects into `states[].description` — because a
+comment in `preset.yaml` does not survive the next export.
+
 CI arbitrates the pair. `sample_self_check` loads each `workflow.json`, checks
 `assets[]` against the templates its carriers name, re-exports it, and fails
 when the committed `preset.yaml` bytes are not exactly that export:
