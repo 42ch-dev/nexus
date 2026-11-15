@@ -49,8 +49,8 @@ use std::time::Duration;
 use nexus_orchestration::capability::watch::DigestPoll;
 use tokio::sync::Notify;
 
-use crate::connect::config::{load_peer_keys, PeerToolsConfig};
-use crate::connect::table::PeerToolTable;
+use crate::config::{load_peer_keys, PeerToolsConfig};
+use crate::table::PeerToolTable;
 
 /// Daemon-side poll interval for the peer config files (DF-92).
 ///
@@ -535,7 +535,7 @@ async fn apply_reload(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::connect::table::ConnectResponderAdapter;
+    use crate::table::ConnectResponderAdapter;
     use nexus_home_layout::{connect_daemon_config_path, connect_peer_keys_path};
     use nexus_spoke_adapter::HostCapabilityManifest;
     use spoke_connect::remote::{
@@ -859,24 +859,18 @@ mod tests {
         assert_eq!(snapshot.config.peer_ids, vec!["peer-b"]);
         assert_eq!(
             snapshot.config.collision_policy,
-            crate::connect::config::CollisionPolicy::PriorityOrder
+            crate::config::CollisionPolicy::PriorityOrder
         );
         assert_eq!(snapshot.config.peer_priority, vec!["peer-b", "peer-a"]);
         assert!(snapshot.peer_keys.contains_key("peer-b"));
         // Boot-scoped fields pinned to the boot values (GC #7) — a diff on
         // them must NOT change the live bound/listener/bounds.
-        assert_eq!(
-            snapshot.config.port,
-            crate::connect::config::DEFAULT_CONNECT_PORT
-        );
+        assert_eq!(snapshot.config.port, crate::config::DEFAULT_CONNECT_PORT);
         assert_eq!(
             snapshot.config.max_sessions,
-            crate::connect::session::DEFAULT_MAX_SESSIONS
+            crate::session::DEFAULT_MAX_SESSIONS
         );
-        assert_eq!(
-            snapshot.config.host,
-            crate::connect::config::DEFAULT_CONNECT_HOST
-        );
+        assert_eq!(snapshot.config.host, crate::config::DEFAULT_CONNECT_HOST);
         assert!(!snapshot.config.embedded_mcp);
         // One named restart-required entry per changed boot-scoped field.
         assert_eq!(
@@ -1031,7 +1025,7 @@ mod tests {
         let boot = PeerToolsConfig::load(home.path()).expect("boot config loads");
         assert_eq!(
             boot.collision_policy,
-            crate::connect::config::CollisionPolicy::FirstStays
+            crate::config::CollisionPolicy::FirstStays
         );
         let holder = PeerConfigHolder::new(PeerConfigSnapshot {
             config: Arc::new(boot),
@@ -1054,7 +1048,7 @@ mod tests {
         );
         assert_eq!(
             first,
-            crate::connect::AdmissionOutcome::Admitted {
+            crate::AdmissionOutcome::Admitted {
                 tool_ids: vec!["tools.t3.echo".to_owned()]
             }
         );
@@ -1068,7 +1062,7 @@ mod tests {
         );
         assert_eq!(
             refused,
-            crate::connect::AdmissionOutcome::Admitted {
+            crate::AdmissionOutcome::Admitted {
                 tool_ids: Vec::new()
             }
         );
@@ -1097,7 +1091,7 @@ mod tests {
         let fresh = holder.get();
         assert_eq!(
             fresh.config.collision_policy,
-            crate::connect::config::CollisionPolicy::PriorityOrder
+            crate::config::CollisionPolicy::PriorityOrder
         );
         assert_eq!(fresh.config.peer_priority, vec!["peer-b", "peer-a"]);
         // The table seam was fed: peer-b's same-id registration now
@@ -1112,7 +1106,7 @@ mod tests {
         );
         assert_eq!(
             preempt,
-            crate::connect::AdmissionOutcome::Admitted {
+            crate::AdmissionOutcome::Admitted {
                 tool_ids: vec!["tools.t3.echo".to_owned()]
             }
         );

@@ -26,7 +26,9 @@ use nexus_contracts::generated::daemon_api::compute::{
 };
 use nexus_contracts::CreateWorkRequest;
 use nexus_contracts::ToolsApi;
-use nexus_core::execution::capabilities::{execute_tool, ToolContext, ToolRuntimeFacts};
+use nexus_core::execution::capabilities::{
+    execute_tool, host_tool_registry, ToolContext, ToolRuntimeFacts,
+};
 use nexus_core::execution::compute::{
     accept_compute_run, clear_compute_runs, compute_run, discard_compute_run, get_compute_run,
     list_compute_runs, recover_stuck_compute_runs, ComputeContext, ComputeRunRecoveryOutcome,
@@ -4287,4 +4289,88 @@ async fn compute_run_settlement_fault_answers_the_committed_effect_refusal() {
         run_count, 1,
         "the retry must not re-apply the committed effect"
     );
+}
+
+// ── Retained tool-registry integrity ──────────────────────────────────────
+//
+// Moved here (v1.244 task 2) from `retained_peer_contracts.rs`: the assertion
+// reads core's own `host_tool_registry`, so it cannot live with the peer
+// contracts in `nexus-connect` — connect has no core edge by design.
+
+/// The 26 shipped `nexus.*` host-tool ids (V1.59 P0 roster, minus the retired
+/// `nexus.reference.refresh` and `nexus.research.query`).
+const NEXUS_TOOL_IDS: &[&str] = &[
+    "nexus.context.whoami",
+    "nexus.workspace.info",
+    "nexus.work.get",
+    "nexus.work.patch",
+    "nexus.orchestration.schedule_status",
+    "nexus.context.assemble",
+    "nexus.world.snapshot.get",
+    "nexus.timeline.recent.get",
+    "nexus.kb_snapshot.read",
+    "nexus.manuscript.chapter.get",
+    "nexus.observability.daemon.health",
+    "nexus.kb_snapshot.write",
+    "nexus.manuscript.chapter.update",
+    "nexus.world.configure",
+    "nexus.work.schedule.set",
+    "nexus.finding.resolve",
+    "nexus.pool.entry.manage",
+    "nexus.registry.refresh",
+    // V1.59 P0: DF-47 manuscript & misc parity batch (9 tools)
+    "nexus.manuscript.list",
+    "nexus.manuscript.read_range",
+    "nexus.manuscript.write",
+    "nexus.manuscript.phase.get",
+    "nexus.manuscript.phase.set",
+    "nexus.workspace.paths",
+    "nexus.runtime.health",
+    "nexus.trace.correlation",
+];
+
+/// MIGRATED from `cross_caller_e2e.rs::all_nexus_tool_ids_registered_in_capability_registry`
+/// and `::test_profile_sets_are_not_action_capabilities`.
+///
+/// Preserved: the process-global host-tool registry holds exactly the declared
+/// `nexus.*` action roster (plus the two `fs/*` ids), and the `nexus.profile.*`
+/// grouping ids are metadata, never action capabilities with handler
+/// bindings. This is the registry the peer admission chain derives its
+/// reserved set from (`live_reserved_tool_ids`), so the peer surface can never
+/// shadow a builtin id.
+///
+/// Deleted with the retired host: the other `cross_caller_e2e` cases drove
+/// `HostToolExecutor` (`POST`-path and Schedule-path wrappers built from the
+/// daemon `WorkspaceState`) and asserted caller-path equivalence; those
+/// wrappers are retired, and the tool-spine behavior they dispatched into is
+/// owned by this target (P2-T9).
+#[test]
+fn host_tool_registry_roster_is_the_declared_nexus_surface() {
+    let registry = host_tool_registry();
+    for tool_id in NEXUS_TOOL_IDS {
+        assert!(
+            registry.lookup(tool_id).is_some(),
+            "Tool '{tool_id}' must be registered in the host-tool registry"
+        );
+    }
+    assert_eq!(
+        registry.len(),
+        28,
+        "the registry holds the 26 nexus.* ids plus the 2 fs/* ids"
+    );
+
+    for profile_id in [
+        "nexus.profile.minimal",
+        "nexus.profile.writer",
+        "nexus.profile.publisher",
+    ] {
+        assert!(
+            registry.lookup(profile_id).is_none(),
+            "Profile-set id '{profile_id}' is grouping metadata, not an action capability"
+        );
+        assert!(
+            !NEXUS_TOOL_IDS.contains(&profile_id),
+            "Profile-set id '{profile_id}' must not appear in the action roster"
+        );
+    }
 }

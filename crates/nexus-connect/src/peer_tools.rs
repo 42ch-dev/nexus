@@ -443,26 +443,6 @@ pub async fn invoke_peer_tool(
         .await
 }
 
-/// The reserved tool ids: every builtin host tool plus every live user
-/// capability name.
-///
-/// Computed LIVE at admission time so a capability hot-added after the peer
-/// lane spawned is immediately reserved against. `None` reserves only the
-/// builtins.
-#[must_use]
-pub fn live_reserved_tool_ids(
-    builtin_ids: impl IntoIterator<Item = String>,
-    capability_registry: Option<&nexus_orchestration::CapabilityRegistryHolder>,
-) -> HashSet<String> {
-    let mut reserved: HashSet<String> = builtin_ids.into_iter().collect();
-    if let Some(holder) = capability_registry {
-        if let Some(reg) = holder.get() {
-            reserved.extend(reg.iter().map(|cap| cap.name().to_owned()));
-        }
-    }
-    reserved
-}
-
 /// Whether a peer descriptor's input schema may be carried on an MCP surface.
 ///
 /// The surface only carries root-object tools; a non-object input is omitted

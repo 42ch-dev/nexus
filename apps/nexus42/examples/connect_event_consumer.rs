@@ -4,7 +4,7 @@
 //! `tools.nexus.deliver_events` → cursor-ack round-trip against a running
 //! Connect host (`nexus42 connect start` / `nexus-runtime`). It speaks the
 //! shipped peer stack — the `spoke_connect::remote` adapter over the
-//! `nexus_core::connect::WsTransport` WebSocket transport — and presents a
+//! `nexus_connect::WsTransport` WebSocket transport — and presents a
 //! randomly generated Ed25519 identity persisted at `--identity-key`
 //! (default `~/.nexus42/connect/event_consumer_identity.key`, created `0600`
 //! and reused across runs) so the operator's allowlist entry is stable but
@@ -108,7 +108,7 @@
 //! cursor.
 
 use libp2p::identity::Keypair;
-use nexus_core::connect::{
+use nexus_connect::{
     load_or_create_identity_at, ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES,
 };
 use nexus_spoke_adapter::{HostCapabilityManifest, SpokeRejectCode, SpokeResult};

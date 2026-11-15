@@ -319,16 +319,16 @@ const HTTP_PROBE_CAP: usize = 4096;
 /// The Connect **peer-tools event lane**'s listen endpoint.
 ///
 /// `nexus-runtime::boot` starts the lane with
-/// `nexus_core::connect::start_peer_tools_lane`, whose plaintext-WS accept loop
+/// `nexus_connect::start_peer_tools_lane`, whose plaintext-WS accept loop
 /// binds the lane's configured `host:port`: the loopback
 /// `DEFAULT_CONNECT_HOST:DEFAULT_CONNECT_PORT`
-/// (`crates/nexus-core/src/connect/config.rs`) when no `connect/daemon.json`
+/// (`crates/nexus-connect/src/config.rs`) when no `connect/daemon.json`
 /// overrides it — which is the hermetic seeded home. The bind is loopback-only
 /// by construction: having no TLS, the lane refuses a non-loopback host.
 fn peer_tools_lane_endpoint() -> Endpoint {
     (
-        nexus_core::connect::config::DEFAULT_CONNECT_HOST.to_string(),
-        nexus_core::connect::DEFAULT_CONNECT_PORT,
+        nexus_connect::config::DEFAULT_CONNECT_HOST.to_string(),
+        nexus_connect::DEFAULT_CONNECT_PORT,
     )
 }
 

@@ -79,11 +79,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use ed25519_dalek::SigningKey;
+use nexus_connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::daemon_api::characters::memory::review_character_memory_request::ReviewCharacterMemoryRequest;
 use nexus_contracts::generated::core::CoreCharacterTransitionRequest;
 use nexus_contracts::{CoreRegisterCreatorRequest, SetActiveWorkspaceRequest};
-use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_core::memory_provider::legacy;
 use nexus_core::{
     CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreResult, CoreService,

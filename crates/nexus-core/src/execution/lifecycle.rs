@@ -313,7 +313,7 @@ pub struct ExecutionHandle {
     /// The peer-control lane this execution owner admits (v1.190 P4-T3).
     /// Empty until `start_peer_control` succeeds; closed with the owner.
     #[cfg(feature = "connect-host")]
-    pub(crate) peer_control: std::sync::Mutex<Option<Arc<crate::connect::PeerControlLane>>>,
+    pub(crate) peer_control: std::sync::Mutex<Option<Arc<nexus_connect::PeerControlLane>>>,
     /// The authorized workflow-event subscriptions this owner minted (P1-T1).
     ///
     /// Owner-scoped, never process-global: the tokens die with the generation

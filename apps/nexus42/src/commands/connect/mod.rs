@@ -297,10 +297,18 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
         .await
         .map_err(|e| CliError::Config(format!("connect node start failed: {e}")))?;
     let peer_tools_shutdown = std::sync::Arc::new(tokio::sync::Notify::new());
-    let peer_tools_lane = match nexus_core::connect::start_peer_tools_lane(
+    // The static half of the peer admission reserved set: this composition's
+    // own host-tool roster (the protocol crate names no core registry).
+    let builtin_tool_ids: std::collections::HashSet<String> =
+        nexus_core::execution::capabilities::host_tool_registry()
+            .ids()
+            .map(ToOwned::to_owned)
+            .collect();
+    let peer_tools_lane = match nexus_connect::start_peer_tools_lane(
         &home,
         std::sync::Arc::clone(&peer_tools_shutdown),
         None,
+        builtin_tool_ids,
     )
     .await
     {
@@ -321,10 +329,7 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
     // ACTUALLY bound (never the config echo); absent when the lane
     // warn-and-skipped (see the `event_lane:` warning above).
     if let Some(lane) = peer_tools_lane.as_ref() {
-        eprintln!(
-            "  {}",
-            nexus_core::connect::event_lane_readiness_line(lane.addr)
-        );
+        eprintln!("  {}", nexus_connect::event_lane_readiness_line(lane.addr));
     }
     eprintln!(
         "  allowlisted peers: {allowlist_len} (fail-closed; add via allowlist.json or --allow-peer)"

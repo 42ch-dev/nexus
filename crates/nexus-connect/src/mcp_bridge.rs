@@ -47,7 +47,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use crate::connect::visibility::VisibilityPolicy;
+use crate::visibility::VisibilityPolicy;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode,
     Implementation, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig,

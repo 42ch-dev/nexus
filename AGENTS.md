@@ -56,6 +56,7 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `apps/design-studio/` | Design-system gallery (daemon-independent Vite SPA) | [`apps/design-studio/AGENTS.md`](apps/design-studio/AGENTS.md) |
 | `crates/nexus-acp-host/` | ACP client adapter | [`crates/nexus-acp-host/AGENTS.md`](crates/nexus-acp-host/AGENTS.md) |
 | `crates/nexus-agent-host/` | Agent host adapter | [`crates/nexus-agent-host/AGENTS.md`](crates/nexus-agent-host/AGENTS.md) |
+| `crates/nexus-connect/` | Peer Connect protocol — WS transport, accept loop, sessions, MCP bridge, peer tool registry | [`crates/nexus-connect/AGENTS.md`](crates/nexus-connect/AGENTS.md) |
 | `crates/nexus-contracts/` | Generated Rust wire types | [`crates/nexus-contracts/AGENTS.md`](crates/nexus-contracts/AGENTS.md) |
 | `crates/nexus-core/` | Transport-neutral World KB service + stored Actor/holder admission authority | [`crates/nexus-core/AGENTS.md`](crates/nexus-core/AGENTS.md) |
 | `crates/nexus-core-node/` | Thin Node-API cdylib composing core + provider ports; audited FFI boundary | [`crates/nexus-core-node/AGENTS.md`](crates/nexus-core-node/AGENTS.md) |

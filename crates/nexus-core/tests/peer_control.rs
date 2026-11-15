@@ -28,9 +28,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nexus_core::connect::table::peer_tool_table;
-use nexus_core::connect::visibility::VisibilityPolicy;
-use nexus_core::execution::peer_tools::{invoke_peer_tool, AdmissionOutcome, PeerResponder};
+use nexus_connect::peer_tools::{invoke_peer_tool, AdmissionOutcome, PeerResponder};
+use nexus_connect::table::peer_tool_table;
+use nexus_connect::visibility::VisibilityPolicy;
 use nexus_spoke_adapter::HostCapabilityManifest;
 use serial_test::serial;
 
@@ -138,7 +138,7 @@ impl PeerResponder for CountingResponder {
         &self,
         _tool_id: &str,
         _arguments: serde_json::Value,
-    ) -> nexus_core::execution::peer_tools::PeerInvokeResult {
+    ) -> nexus_connect::peer_tools::PeerInvokeResult {
         self.invocations.fetch_add(1, Ordering::SeqCst);
         Ok(serde_json::json!({ "echo": true }))
     }

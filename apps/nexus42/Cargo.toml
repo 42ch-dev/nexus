@@ -85,6 +85,10 @@ nexus-home-layout = { path = "../../crates/nexus-home-layout" }
 # §2.1 basic allowlist: available to BOTH cohorts as a normal dependency —
 # the `basic-cli` feature must not be a dependency switch (it is `[]`).
 nexus-core = { path = "../../crates/nexus-core" }
+# v1.244 extraction: the Connect protocol stack (`start_peer_tools_lane`, the
+# event lane, the WS transport) is `nexus-connect`'s. Optional: only the
+# `connect-host` and `memory-remote` cohorts link it.
+nexus-connect = { path = "../../crates/nexus-connect", optional = true }
 nexus-preset = { path = "../../crates/nexus-preset" }
 # The `preset validate` IR leg runs the crate's Q2 structural checks
 # (`nexus_workflow_ir::validate`) alongside the preset facade.
@@ -192,16 +196,16 @@ nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
 # (rationale: crates/nexus-acp-host/Cargo.toml).
 agent-client-protocol = "=5.1.0"
 # v1.210 P3 T2 (D6): the `connect_event_consumer` example opens the WS event
-# lane directly (it is the consumer-side transport seam — `nexus_core`
+# lane directly (it is the consumer-side transport seam — `nexus-connect`
 # exposes `WsTransport`, not a dialer), so it needs the same
-# `tokio-tungstenite` line the nexus-core connect harness already uses. It is
+# `tokio-tungstenite` line the connect crate's harness already uses. It is
 # a DEV-dependency only: no runtime dependency is added, examples link it,
 # and the pinned normal graph (--edges normal) is unaffected.
 tokio-tungstenite = { workspace = true }
 # v1.210 P3 T2: the example wraps the WS transport in a local
 # ack-observation decorator (it must prove the signed ack write completed),
 # which means implementing the `spoke_connect::remote::Transport` async
-# trait — the same `async-trait` the nexus-core connect harness uses. Dev-only
+# trait — the same `async-trait` the connect harness uses. Dev-only
 # again; no runtime dependency.
 async-trait = { workspace = true }
 # v1.229 N3 Task 11 (C11, approval 05ED amendment 2): the C-111 remote CLI leg
@@ -265,12 +269,15 @@ cli = [
   "dep:nix",
 ]
 connect-host = [
-  # v1.207 P2: the WS accept loop + peer-tools event lane live in nexus-core's
-  # `connect-host` cohort — the Connect-host surface WITHOUT the rmcp
-  # reverse-invoke bridge. Enabling `nexus-core/connect-client` here would pull
-  # rmcp into the shipped Connect-host graph, which the product graph pins
-  # forbid (`tooling/check-graph-pins.sh` asserts rmcp ABSENT).
+  # v1.207 P2: the WS accept loop + peer-tools event lane live in
+  # `nexus-connect` (v1.244 extraction), reached through `nexus-core/connect-host`
+  # — the Connect-host surface WITHOUT the rmcp reverse-invoke bridge.
+  # Enabling `nexus-core/connect-client` here would pull rmcp into the shipped
+  # Connect-host graph, which the product graph pins forbid
+  # (`tooling/check-graph-pins.sh` asserts rmcp ABSENT).
   "nexus-core/connect-host",
+  "dep:nexus-connect",
+  "nexus-connect/connect-host",
   "dep:chrono",
   "dep:nexus-knowledge",
   "dep:nexus-local-db",
@@ -289,4 +296,8 @@ connect-host = [
 # so `creator memory list|show` can dial the selected remote provider. NON-
 # default on purpose: `cli` and `connect-host` keep their exact graphs, and no
 # default build links the memory client.
-memory-remote = ["nexus-core/memory-remote"]
+memory-remote = [
+    "nexus-core/memory-remote",
+    "dep:nexus-connect",
+    "nexus-connect/transport",
+]

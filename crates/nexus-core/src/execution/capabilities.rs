@@ -10,7 +10,7 @@
 //! One table resolves a tool id, in order:
 //!
 //! 1. a static `nexus.*` builtin row,
-//! 2. a remote peer row ([`crate::execution::peer_tools`]),
+//! 2. a remote peer row ([`nexus_connect::peer_tools`]),
 //! 3. a user capability in the live registry.
 //!
 //! An id that resolves nowhere is `not_supported` with ZERO side effects —
@@ -62,6 +62,7 @@ use crate::{ArchivePoolRequest, PromotePoolRequest, WorkDetails, WorkPatchReques
 // The tool invocation request is the generated `schemas/core/tools-api.schema.json`
 // DTO (the schema lane's authority, item 3); the daemon's handwritten copy it was
 // moved from — plus its response envelope — is deleted, not shadowed.
+use nexus_connect::peer_tools;
 use nexus_contracts::{FindingsApi, ToolsApi};
 use nexus_home_layout::active_context::{read_active_creator_id, read_active_workspace_slug};
 use nexus_local_db::works;
@@ -3048,7 +3049,7 @@ impl CapabilityRegistry {
         if self.lookup(id).is_some() {
             return true;
         }
-        if super::peer_tools::peer_tool_registry().get(id).is_some() {
+        if peer_tools::peer_tool_registry().get(id).is_some() {
             return true;
         }
         context
@@ -3094,7 +3095,7 @@ impl CapabilityRegistry {
         let row = self.lookup(&req.tool_name);
         if row.is_none() {
             // Peer arm (AR-68 #4): reverse-invoke the owning responder.
-            if let Some(entry) = super::peer_tools::peer_tool_registry().get(&req.tool_name) {
+            if let Some(entry) = peer_tools::peer_tool_registry().get(&req.tool_name) {
                 return dispatch_peer_tool(&entry, req).await;
             }
             // User-capability arm (AR-68 #6): `Capability::run(arguments)`.
@@ -3155,11 +3156,11 @@ impl Default for CapabilityRegistry {
 /// `details.wire_code`, so the spine's own `not_supported` never overwrites
 /// the peer's more precise reason.
 async fn dispatch_peer_tool(
-    entry: &super::peer_tools::PeerToolEntry,
+    entry: &peer_tools::PeerToolEntry,
     req: &ToolsApi,
 ) -> Result<Value, NexusApiError> {
-    use super::peer_tools::PeerInvokeError;
-    match super::peer_tools::invoke_peer_tool(entry, req.parameters.clone()).await {
+    use peer_tools::PeerInvokeError;
+    match peer_tools::invoke_peer_tool(entry, req.parameters.clone()).await {
         Ok(value) => Ok(value),
         // A structural argument refusal never reached the peer; it is a
         // plain client-input error.

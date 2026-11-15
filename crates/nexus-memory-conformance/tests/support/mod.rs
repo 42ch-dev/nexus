@@ -46,8 +46,8 @@ use tokio::sync::{Barrier, Notify};
 
 use sqlx::Connection as _;
 
+use nexus_connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_contracts::{CoreRegisterCreatorRequest, SetActiveWorkspaceRequest};
-use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_core::memory_provider::LocalMemoryProvider;
 use nexus_core::{CoreAccess, CoreHomeService, CoreOpenOptions, CoreService};
 use nexus_memory_conformance::{
