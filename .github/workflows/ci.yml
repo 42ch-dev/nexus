@@ -457,6 +457,14 @@ jobs:
           test -s packages/nexus-native-linux-x64-gnu/native/compatibility.json
       - name: Test nexus-service boot and bind gate
         run: pnpm --filter @42ch/nexus-service run test
+      - name: Test native config publication
+        # `readonly-config.test.mjs` is deliberately NOT wired here: it seeds its
+        # homes through `cargo run -q -p nexus-core-node --bin
+        # native-wire-fixture-seed`, an uncached debug build of the whole core, so
+        # it stays a local check. Its Rust half
+        # (`crates/nexus-core/tests/readonly_config_open.rs`) runs in the
+        # rust-tests job; the native prerequisite half runs only locally.
+        run: node --test packages/nexus-native/tests/config-publication.test.mjs
 
   web-build:
     name: Web app build & typecheck
