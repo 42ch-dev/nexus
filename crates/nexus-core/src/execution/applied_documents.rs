@@ -33,16 +33,15 @@ use crate::error::CoreResult;
 /// admitted while the strategy had no current apply resolves `None` and
 /// therefore freezes no identity — that case is recovery's, not this route's.
 ///
-/// `nexus_home` is the workspace home the strategy's bundle was resolved from.
-/// It is reserved for the pin re-comparison (`p6-pin-freeze-and-bundle-import`)
-/// and is currently unread: no pin check runs on this route yet.
+/// `nexus_home` is the workspace home the strategy's bundle was resolved from; the pin
+/// re-comparison runs against `<nexus_home>/patterns`, so no caller can skip it.
 ///
 /// # Errors
 /// The store failure as an outer `Err`; the unverifiable applied bytes as the
 /// inner `Err`, which each caller names in its own refusal type.
 pub async fn resolve_applied_document(
     pool: &sqlx::SqlitePool,
-    _nexus_home: &std::path::Path,
+    nexus_home: &std::path::Path,
     preset_id: &str,
     loaded: &LoadedPreset,
 ) -> CoreResult<Result<Option<AppliedDocument>, ApplyLoadRefusal>> {
@@ -54,7 +53,7 @@ pub async fn resolve_applied_document(
     let Some(apply) = crate::apply::current_apply(pool, preset_id).await? else {
         return Ok(Ok(None));
     };
-    match crate::apply::verified_apply_document(pool, preset_id, &apply).await? {
+    match crate::apply::verified_apply_document(pool, nexus_home, preset_id, &apply).await? {
         Ok(document) => Ok(Ok(Some(AppliedDocument {
             identity: AppliedRunIdentity {
                 apply_id: apply.apply_id,
@@ -93,6 +92,9 @@ impl AppliedDocumentSource for CreatorAppliedDocuments {
         resolve_applied_document(&self.pool, &self.nexus_home, preset_id, loaded)
             .await
             .map_err(|error| error.to_string())?
-            .map_err(|refusal| refusal.to_string())
+            // The stable code travels with the message: recovery wraps whatever
+            // arrives here in `reconstruction_unavailable`, so a bare human
+            // sentence would lose the `applied_pin_*` family a caller branches on.
+            .map_err(|refusal| format!("{}: {refusal}", refusal.reason()))
     }
 }
