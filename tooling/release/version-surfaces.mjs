@@ -288,6 +288,31 @@ export function parseCargoPackageName(contents, manifestPath) {
 }
 
 /**
+ * `[package].version` declaration form: the literal version string, or `null`
+ * when the manifest inherits the workspace version (`version.workspace = true`).
+ *
+ * @param {string} contents
+ * @param {string} manifestPath
+ * @returns {string | null}
+ */
+export function parseCargoPackageVersion(contents, manifestPath) {
+  const section = contents.match(/(?:^|\n)\[package\][\s\S]*?(?=\n\[|$)/)?.[0];
+  if (section === undefined) {
+    throw new Error(`${manifestPath}: missing [package] section`);
+  }
+  const literal = section.match(/^\s*version\s*=\s*"([^"]+)"/m)?.[1];
+  if (literal !== undefined) {
+    return literal;
+  }
+  if (/^\s*version\.workspace\s*=\s*true\s*$/m.test(section)) {
+    return null;
+  }
+  throw new Error(
+    `${manifestPath}: missing version = "..." or version.workspace = true in [package]`,
+  );
+}
+
+/**
  * Workspace members with their package names (the Cargo.lock SSOT rows).
  *
  * @param {string} repoRoot

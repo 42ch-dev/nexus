@@ -7,8 +7,15 @@
  * `apps/desktop-electron/resources/product.json`,
  * `apps/nexus-service/package.json`), the five native npm
  * manifests (`packages/nexus-native/package.json` plus the four platform
- * packages — including the loader's `@42ch/nexus-native-*` pins) and every
- * workspace member entry in `Cargo.lock`.
+ * packages — including the loader's `@42ch/nexus-native-*` pins) and the
+ * `Cargo.lock` rows of two brackets:
+ *
+ * - Contract crates (`VERSION_BRACKETS_PATH`) version independently: their
+ *   manifest declares a literal version and their lock row equals it. They are
+ *   not compared to the product version.
+ * - Every other workspace member keeps `version.workspace = true` and its lock
+ *   row equals the product version; a literal there fails as an undeclared
+ *   independent crate.
  *
  * CLI: node tooling/release/assert-lockstep-version.mjs
  *
@@ -23,10 +30,13 @@ import { fileURLToPath } from "node:url";
 import {
   CARGO_LOCK_PATH,
   NATIVE_LOADER_PACKAGE_PATH,
+  VERSION_BRACKETS_PATH,
   readSurfaceVersions,
+  readVersionBrackets,
   readWorkspaceMemberPackages,
   resolveRepoRoot,
   parseCargoLockPackageVersion,
+  parseCargoPackageVersion,
 } from "./version-surfaces.mjs";
 
 /**
@@ -48,6 +58,7 @@ export function checkLockstep(repoRoot) {
   const surfaces = readSurfaceVersions(repoRoot);
   const versions = new Set(surfaces.map((surface) => surface.version));
   const ok = versions.size === 1;
+  const productVersion = ok ? /** @type {string} */ ([...versions][0]) : null;
   if (!ok) {
     problems.push(
       `version surfaces disagree: ${surfaces
@@ -68,30 +79,74 @@ export function checkLockstep(repoRoot) {
     }
   }
 
+  const contractEntries = readVersionBrackets(repoRoot);
+  const contractNames = new Set(contractEntries.map((entry) => entry.name));
+  const members = readWorkspaceMemberPackages(repoRoot);
+  const memberNames = new Set(members.map((member) => member.name));
+
+  const lockPath = join(repoRoot, CARGO_LOCK_PATH);
+  const lockContents = existsSync(lockPath) ? readFileSync(lockPath, "utf8") : null;
+  if (lockContents === null) {
+    problems.push(`${CARGO_LOCK_PATH}: missing`);
+  }
+
+  for (const entry of contractEntries) {
+    const literal = parseCargoPackageVersion(
+      readFileSync(join(repoRoot, entry.manifest), "utf8"),
+      entry.manifest,
+    );
+    if (literal === null) {
+      problems.push(
+        `${entry.manifest}: contract crate ${entry.name} declares version.workspace = true, expected a literal version (contract crates version independently of the product)`,
+      );
+      continue;
+    }
+    if (lockContents === null) {
+      continue;
+    }
+    const pinned = parseCargoLockPackageVersion(lockContents, entry.name);
+    if (pinned === null) {
+      if (memberNames.has(entry.name)) {
+        problems.push(`${CARGO_LOCK_PATH}: missing [[package]] entry for ${entry.name}`);
+      }
+    } else if (pinned !== literal) {
+      problems.push(
+        `${CARGO_LOCK_PATH}: contract crate ${entry.name} pinned at ${pinned}, expected its manifest literal ${literal} (${entry.manifest})`,
+      );
+    }
+  }
+
   /** @type {{ name: string; version: string | null }[]} */
   const lockMembers = [];
-  const lockPath = join(repoRoot, CARGO_LOCK_PATH);
-  if (!existsSync(lockPath)) {
-    problems.push(`${CARGO_LOCK_PATH}: missing`);
-  } else {
-    const lockContents = readFileSync(lockPath, "utf8");
-    const expected = [...versions][0];
-    for (const member of readWorkspaceMemberPackages(repoRoot)) {
-      const version = parseCargoLockPackageVersion(lockContents, member.name);
-      lockMembers.push({ name: member.name, version });
-      if (version === null) {
-        problems.push(`${CARGO_LOCK_PATH}: missing [[package]] entry for ${member.name}`);
-      } else if (ok && version !== expected) {
-        problems.push(
-          `${CARGO_LOCK_PATH}: ${member.name} pinned at ${version}, expected ${expected}`,
-        );
-      }
+  for (const member of members) {
+    const pinned =
+      lockContents === null ? null : parseCargoLockPackageVersion(lockContents, member.name);
+    lockMembers.push({ name: member.name, version: pinned });
+    if (lockContents === null || contractNames.has(member.name)) {
+      continue;
+    }
+    if (pinned === null) {
+      problems.push(`${CARGO_LOCK_PATH}: missing [[package]] entry for ${member.name}`);
+      continue;
+    }
+    const literal = parseCargoPackageVersion(
+      readFileSync(join(repoRoot, member.manifestPath), "utf8"),
+      member.manifestPath,
+    );
+    if (literal !== null) {
+      problems.push(
+        `${member.manifestPath}: non-contract member ${member.name} declares literal version ${literal}, expected version.workspace = true (a literal version makes it an undeclared independent crate; list it in ${VERSION_BRACKETS_PATH} if that is intended)`,
+      );
+    } else if (ok && pinned !== productVersion) {
+      problems.push(
+        `${CARGO_LOCK_PATH}: non-contract member ${member.name} pinned at ${pinned}, expected product version ${productVersion}`,
+      );
     }
   }
 
   return {
     ok: ok && problems.length === 0,
-    version: ok ? /** @type {string} */ ([...versions][0]) : null,
+    version: productVersion,
     surfaces,
     lockMembers,
     problems,
