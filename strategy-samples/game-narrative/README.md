@@ -27,8 +27,15 @@ game-narrative/
 ## Authoring
 
 **Edit `workflow.json`.** It is the source of truth for the sample;
-`preset.yaml` is its export and is not the file to author. CI re-exports
-`workflow.json` and fails with the divergent YAML path when the two disagree:
+`preset.yaml` is its export and is not the file to author. Regenerate it after
+editing the JSON:
+
+```bash
+nexus42 preset export strategy-samples/game-narrative
+```
+
+CI re-exports `workflow.json` and fails with the divergent YAML path when the
+two disagree:
 
 ```bash
 cargo test -p nexus-orchestration --test sample_self_check
@@ -37,8 +44,7 @@ cargo test -p nexus-orchestration --test sample_self_check
 Canvas is not required for repository sample authoring — the JSON is edited
 directly. The run payload (`preset.input.mode`, `game_event`, `watermark`) is
 documented in
-[`../../docs/strategy-authoring.md`](../../docs/strategy-authoring.md), with
-per-state notes beside the states in `preset.yaml`.
+[`../../docs/strategy-authoring.md`](../../docs/strategy-authoring.md).
 
 `assets[]` is the one hand-maintained part: the export does not project it, so
 each template a carrier references needs exactly one entry whose `content_hash`

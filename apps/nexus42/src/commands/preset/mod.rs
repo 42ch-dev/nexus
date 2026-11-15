@@ -1,7 +1,11 @@
 //! `nexus42 preset` — canonical preset CLI group (PL-5, AR-24, AR-25).
 //!
 //! Top-level developer-facing surface for presets:
-//! `list|show|validate|scaffold|trigger|patch`.
+//! `list|show|validate|export|scaffold|trigger|patch`.
+//!
+//! - `export <dir>` rewrites a bundle's `preset.yaml` from its
+//!   `workflow.json` through `nexus_preset::export_preset` — the committed
+//!   manifest is that command's output, never a second projection.
 //!
 //! - `validate <path>` is the positional local validator
 //!   (`validate_preset_local`, moved here from `system`; V1.153 P3). It runs
@@ -85,6 +89,11 @@ pub enum PresetCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+    /// Rewrite a bundle's preset.yaml from its workflow.json (the only export)
+    Export {
+        /// Bundle directory holding `workflow.json`; `preset.yaml` is written beside it
+        path: String,
+    },
     /// Generate a strategy bundle from templates
     Scaffold {
         /// Name for the new user preset
@@ -127,6 +136,7 @@ pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
         PresetCommand::List { intent, json } => list_presets(config, intent.as_deref(), json).await,
         PresetCommand::Show { id, json } => show_preset(config, &id, json).await,
         PresetCommand::Validate { path, json } => validate_preset(&path, json),
+        PresetCommand::Export { path } => export_bundle_preset(&path),
         PresetCommand::Scaffold { name, json } => scaffold_preset(config, &name, json).await,
         PresetCommand::Trigger { id, json } => trigger_preset(config, &id, json).await,
         PresetCommand::Patch { command } => patch::run(command, config).await,
@@ -288,6 +298,33 @@ async fn scaffold_preset(config: &CliConfig, name: &str, json: bool) -> Result<(
     } else {
         println!("Scaffolded preset '{}' at {}", resp.id, resp.path);
     }
+    Ok(())
+}
+
+/// Regenerate `<dir>/preset.yaml` from `<dir>/workflow.json`.
+///
+/// The written bytes are [`nexus_preset::export_preset`]'s projection and
+/// nothing else, so a committed manifest is reproducible by this command
+/// instead of hand-maintained. Nothing is written until the document has
+/// loaded and projected, so a refused run leaves the previous `preset.yaml`
+/// untouched.
+fn export_bundle_preset(path: &str) -> Result<()> {
+    let bundle = std::path::Path::new(path);
+    let document_path = bundle.join("workflow.json");
+    let json = std::fs::read_to_string(&document_path)
+        .map_err(|error| CliError::Other(format!("read {}: {error}", document_path.display())))?;
+    let document: WorkflowDocument = serde_json::from_str(&json)?;
+    let manifest = nexus_preset::export_preset(&document)
+        .map_err(|error| CliError::Other(format!("export {}: {error}", document_path.display())))?;
+    let manifest_path = bundle.join("preset.yaml");
+    let yaml = serde_yaml::to_string(&manifest).map_err(|error| {
+        CliError::Other(format!(
+            "serialize the {} export: {error}",
+            document_path.display()
+        ))
+    })?;
+    std::fs::write(&manifest_path, yaml)?;
+    println!("Wrote {}", manifest_path.display());
     Ok(())
 }
 

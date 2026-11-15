@@ -167,7 +167,7 @@ pub enum Commands {
         command: SystemCommand,
     },
 
-    /// Preset strategy surface (list, show, validate, scaffold, trigger, patch)
+    /// Preset strategy surface (list, show, validate, export, scaffold, trigger, patch)
     ///
     /// Canonical developer-facing preset group (PL-5, AR-24).
     ///

@@ -788,11 +788,19 @@ the divergent YAML path when the committed `preset.yaml` is not that export:
 cargo test -p nexus-orchestration --test sample_self_check
 ```
 
-There is no committed generator: nothing rewrites `preset.yaml` from the JSON
-(no `cargo` subcommand, no `nexus42` verb), so a change that projects into the
-manifest also lands in `preset.yaml` — the failing path names the member to
-update. The JSON stays the authority: write it first, then make the export
-match.
+The committed generator is `nexus42 preset export <dir>`: it loads
+`<dir>/workflow.json`, projects it through `nexus_preset::export_preset`, and
+writes `<dir>/preset.yaml`. A change that projects into the manifest is that
+command run, never a hand edit. The JSON stays the authority: edit it first,
+then regenerate both samples:
+
+```bash
+nexus42 preset export strategy-samples/game-narrative
+nexus42 preset export strategy-samples/react-trpg-turn
+```
+
+A refused run — malformed JSON, or a document with no preset projection —
+leaves the prior `preset.yaml` untouched.
 
 `examples/first-workflow` and the embedded presets stay YAML-primary: their
 `preset.yaml` is the source, and they are the live evidence that a
@@ -803,10 +811,11 @@ hand-authored YAML bundle still imports and exports. Do not convert them.
 `assets[]` is not projected by the export, so it is hand-maintained in
 `workflow.json`: one entry per template a carrier references, `id` and `path`
 both that template's bundle-relative path (the gate rejects an id that names a
-different file), each `content_hash` the BLAKE3 hex digest over that file's
-bytes. Nothing recomputes it — there is no committed generator and no `nexus42`
-leaf for it, and `sample_self_check` hashes the file on disk, so a stale digest
-fails CI. Recompute one entry from the repository root:
+a different file), each `content_hash` the BLAKE3 hex digest over that file's
+bytes. Nothing recomputes it — `nexus42 preset export` does not project
+`assets[]` and no `nexus42` leaf recomputes hashes, and `sample_self_check`
+hashes the file on disk, so a stale digest fails CI. Recompute one entry from
+the repository root:
 
 ```bash
 python3 -c 'import blake3,sys;print(blake3.blake3(open(sys.argv[1],"rb").read()).hexdigest())' \

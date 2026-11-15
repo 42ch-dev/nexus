@@ -36,8 +36,15 @@ react-trpg-turn/
 ## Authoring
 
 **Edit `workflow.json`.** It is the source of truth for the sample;
-`preset.yaml` is its export and is not the file to author. CI re-exports
-`workflow.json` and fails with the divergent YAML path when the two disagree:
+`preset.yaml` is its export and is not the file to author. Regenerate it after
+editing the JSON:
+
+```bash
+nexus42 preset export strategy-samples/react-trpg-turn
+```
+
+CI re-exports `workflow.json` and fails with the divergent YAML path when the
+two disagree:
 
 ```bash
 cargo test -p nexus-orchestration --test sample_self_check
@@ -124,7 +131,7 @@ atomic host run: the caller sequences the ACP steps and injects
 `preset.input.parsed_intent` (the `intent_parse` step's output, bound before
 `op_request` runs) and `preset.input.receipt` (the confirmed module receipt,
 bound after the Connect `compute` op settles) between them — the same binding
-convention the `preset.yaml` comments and the op-request template document.
+convention the op-request template documents.
 
 1. `templates/natural-language-intent.md` parses the player's intent; the raw
    input stays unchanged in the ledger.
