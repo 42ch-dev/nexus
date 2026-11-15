@@ -12,7 +12,11 @@
  *
  * - Contract crates (`VERSION_BRACKETS_PATH`) version independently: their
  *   manifest declares a literal version and their lock row equals it. They are
- *   not compared to the product version.
+ *   not compared to the product version. The lockfile is the one that owns the
+ *   crate: `Cargo.lock` for a workspace member, the standalone workspace's own
+ *   lock next to the manifest otherwise.
+ * - The bracket must be complete: a crate declaring `publish = true` that the
+ *   carrier omits fails, so deleting an entry cannot shrink the checked set.
  * - Every other workspace member keeps `version.workspace = true` and its lock
  *   row equals the product version; a literal there fails as an undeclared
  *   independent crate.
@@ -25,12 +29,14 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CARGO_LOCK_PATH,
+  CARGO_WORKSPACE_PATH,
   NATIVE_LOADER_PACKAGE_PATH,
   VERSION_BRACKETS_PATH,
+  readPublishableCrates,
   readSurfaceVersions,
   readVersionBrackets,
   readWorkspaceMemberPackages,
@@ -44,9 +50,27 @@ import {
  * @property {boolean} ok
  * @property {string | null} version Canonical version when the four agree.
  * @property {{ path: string; version: string }[]} surfaces
+ * @property {{ name: string; version: string; lock: string }[]} contract
  * @property {{ name: string; version: string | null }[]} lockMembers
  * @property {string[]} problems
  */
+
+/**
+ * File contents, or `null` when the path does not exist.
+ *
+ * @param {string} path
+ * @returns {string | null}
+ */
+function readOptionalFile(path) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+    return null;
+  }
+}
 
 /**
  * @param {string} repoRoot
@@ -90,6 +114,25 @@ export function checkLockstep(repoRoot) {
     problems.push(`${CARGO_LOCK_PATH}: missing`);
   }
 
+  // A crate dropped from the carrier stops being checked, so the bracket must
+  // be complete: a declared `publish = true` means the crate versions on its
+  // own and can only be independent by being listed here. The other direction
+  // — a listed crate that goes back to inheriting — is caught below by the
+  // non-contract member literal rule.
+  const carrierManifests = new Set(
+    contractEntries.map((entry) => posix.normalize(entry.manifest)),
+  );
+  for (const crate of readPublishableCrates(repoRoot)) {
+    if (carrierManifests.has(crate.manifest)) {
+      continue;
+    }
+    problems.push(
+      `${crate.manifest}: ${crate.name} declares publish = true, so it versions independently, but ${VERSION_BRACKETS_PATH} has no contract entry for it; add { "name": "${crate.name}", "manifest": "${crate.manifest}" }`,
+    );
+  }
+
+  /** @type {{ name: string; version: string; lock: string }[]} */
+  const contractRows = [];
   for (const entry of contractEntries) {
     const literal = parseCargoPackageVersion(
       readFileSync(join(repoRoot, entry.manifest), "utf8"),
@@ -101,17 +144,35 @@ export function checkLockstep(repoRoot) {
       );
       continue;
     }
-    if (lockContents === null) {
+    // The lockfile that owns the crate's resolution: the root workspace for a
+    // member, otherwise the standalone workspace rooted next to the manifest.
+    // A crate pinned by neither is unchecked, so it fails instead.
+    const entryLockPath = memberNames.has(entry.name)
+      ? CARGO_LOCK_PATH
+      : posix.join(posix.dirname(entry.manifest), CARGO_LOCK_PATH);
+    const entryLockContents =
+      entryLockPath === CARGO_LOCK_PATH
+        ? lockContents
+        : readOptionalFile(join(repoRoot, entryLockPath));
+    if (entryLockContents === null) {
+      problems.push(
+        `${entryLockPath}: missing; contract crate ${entry.name} (${entry.manifest}) is not a member of the ${CARGO_WORKSPACE_PATH} workspace and has no lockfile of its own to pin it`,
+      );
       continue;
     }
-    const pinned = parseCargoLockPackageVersion(lockContents, entry.name);
+    contractRows.push({
+      name: entry.name,
+      version: literal,
+      lock: entryLockPath,
+    });
+    const pinned = parseCargoLockPackageVersion(entryLockContents, entry.name);
     if (pinned === null) {
-      if (memberNames.has(entry.name)) {
-        problems.push(`${CARGO_LOCK_PATH}: missing [[package]] entry for ${entry.name}`);
-      }
+      problems.push(
+        `${entryLockPath}: missing [[package]] entry for contract crate ${entry.name} (${entry.manifest})`,
+      );
     } else if (pinned !== literal) {
       problems.push(
-        `${CARGO_LOCK_PATH}: contract crate ${entry.name} pinned at ${pinned}, expected its manifest literal ${literal} (${entry.manifest})`,
+        `${entryLockPath}: contract crate ${entry.name} pinned at ${pinned}, expected its manifest literal ${literal} (${entry.manifest})`,
       );
     }
   }
@@ -148,6 +209,7 @@ export function checkLockstep(repoRoot) {
     ok: ok && problems.length === 0,
     version: productVersion,
     surfaces,
+    contract: contractRows,
     lockMembers,
     problems,
   };
@@ -166,6 +228,16 @@ function printReport(report) {
       lockVersions.size === 1 ? [...lockVersions][0] : [...lockVersions].join(", ")
     } (${report.lockMembers.length} workspace members)`,
   );
+  // Printed, not exempted: the independent crates and the lockfile that pins
+  // each one, so a crate missing from this list is visible before it passes.
+  console.log(
+    `  ${VERSION_BRACKETS_PATH} (${report.contract.length} independent crates):`,
+  );
+  for (const entry of report.contract) {
+    console.log(
+      `    ${entry.name.padEnd(24)} ${entry.version.padEnd(12)} ${entry.lock}`,
+    );
+  }
 }
 
 function main(argv) {

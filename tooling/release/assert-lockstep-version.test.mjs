@@ -7,7 +7,9 @@ import {
   NATIVE_SURFACE_PATHS,
   PRODUCT_JSON_PATH,
   ROOT_PACKAGE_PATH,
+  VERSION_BRACKETS_PATH,
   parseCargoLockPackageVersion,
+  readVersionBrackets,
   readWorkspaceMemberPackages,
 } from "./version-surfaces.mjs";
 import { checkLockstep } from "./assert-lockstep-version.mjs";
@@ -20,6 +22,7 @@ import {
   readRepoFile,
   removeRepoFile,
   runReleaseScript,
+  writeRepoFile,
 } from "./test-harness.mjs";
 
 test("checkLockstep accepts the fixture surface set", () => {
@@ -243,3 +246,128 @@ test("a non-contract member with a literal version is rejected even at the produ
     cleanupTempRepo(dir);
   }
 });
+
+/** Contract crate outside the root workspace; it pins itself in its own lock. */
+const STANDALONE_CRATE = "nexus-module-sdk";
+const STANDALONE_LOCK = "modules/nexus-module-sdk/Cargo.lock";
+
+test("the contract bracket reports the lockfile that owns each crate", () => {
+  const dir = createTempRepo();
+  try {
+    const report = checkLockstep(dir);
+    assert.equal(report.ok, true, report.problems.join("; "));
+    assert.deepEqual(
+      report.contract.map((row) => row.name).sort(),
+      readVersionBrackets(dir)
+        .map((entry) => entry.name)
+        .sort(),
+    );
+    const byName = new Map(report.contract.map((row) => [row.name, row]));
+    assert.equal(byName.get(CONTRACT_CRATE)?.lock, CARGO_LOCK_PATH);
+    assert.equal(byName.get(STANDALONE_CRATE)?.lock, STANDALONE_LOCK);
+
+    // The exemption is printed, not silent: a reader sees which lock pins the
+    // crates the root lockfile does not carry.
+    const run = runReleaseScript("assert-lockstep-version.mjs", [], dir);
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, new RegExp(STANDALONE_LOCK));
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("dropping a publishable standalone crate from the carrier is rejected", () => {
+  const dir = createTempRepo();
+  try {
+    const carrier = JSON.parse(readRepoFile(dir, VERSION_BRACKETS_PATH));
+    carrier.contract = carrier.contract.filter(
+      (entry) => entry.name !== STANDALONE_CRATE,
+    );
+    writeRepoFile(dir, VERSION_BRACKETS_PATH, `${JSON.stringify(carrier, null, 2)}\n`);
+
+    const report = checkLockstep(dir);
+    assert.equal(report.ok, false);
+    assert.ok(
+      report.problems.some(
+        (problem) =>
+          problem.includes(STANDALONE_CRATE) &&
+          problem.includes("publish = true") &&
+          problem.includes(VERSION_BRACKETS_PATH),
+      ),
+      report.problems.join("; "),
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a standalone contract crate is checked against its own lockfile", () => {
+  const dir = createTempRepo();
+  try {
+    mutateRepoFile(dir, STANDALONE_LOCK, (contents) =>
+      contents.replace(
+        new RegExp(
+          `(\\[\\[package\\]\\]\\nname = "${STANDALONE_CRATE}"\\nversion = ")[^"]+(")`,
+        ),
+        "$19.9.2$2",
+      ),
+    );
+    const report = checkLockstep(dir);
+    assert.equal(report.ok, false);
+    assert.ok(
+      report.problems.some(
+        (problem) =>
+          problem.includes(STANDALONE_LOCK) &&
+          problem.includes(STANDALONE_CRATE) &&
+          problem.includes("9.9.2"),
+      ),
+      report.problems.join("; "),
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a standalone contract crate with no lockfile of its own is rejected", () => {
+  const dir = createTempRepo();
+  try {
+    removeRepoFile(dir, STANDALONE_LOCK);
+    const report = checkLockstep(dir);
+    assert.equal(report.ok, false);
+    assert.ok(
+      report.problems.some(
+        (problem) =>
+          problem.includes(`${STANDALONE_LOCK}: missing`) &&
+          problem.includes(STANDALONE_CRATE),
+      ),
+      report.problems.join("; "),
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a contract manifest literal that disagrees with its lock row is rejected", () => {
+  const dir = createTempRepo();
+  try {
+    // The manifest moves alone: the lock row keeps the version the crate was
+    // registered at, which is the disagreement a bump would have to fix.
+    mutateRepoFile(dir, CONTRACT_MANIFEST, (contents) =>
+      contents.replace(/^version\s*=\s*"[^"]*"/m, `version = "${CONTRACT_BUMP}"`),
+    );
+    const report = checkLockstep(dir);
+    assert.equal(report.ok, false);
+    assert.ok(
+      report.problems.some(
+        (problem) =>
+          problem.includes(
+            `contract crate ${CONTRACT_CRATE} pinned at ${FIXTURE_BASELINE_VERSION}`,
+          ) && problem.includes(`literal ${CONTRACT_BUMP}`),
+      ),
+      report.problems.join("; "),
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+

@@ -15,7 +15,7 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CARGO_LOCK_PATH,
@@ -64,28 +64,59 @@ const TARGET_STUB = "// release-fixture stub\n";
  * `productVersion`: a contract crate keeps its own manifest literal, every
  * other member inherits the product version.
  *
+ * The contract literals come from {@link fixtureContractLiterals}, i.e. from
+ * the state the fixture was created in — never from the manifest a test has
+ * already mutated, or a wrong bump would move the expectation with it.
+ *
  * @param {string} repoRoot
  * @param {string} productVersion
  * @returns {Map<string, string | null>}
  */
 export function expectedMemberLockVersions(repoRoot, productVersion) {
-  const contractNames = new Set(
-    readVersionBrackets(repoRoot).map((entry) => entry.name),
-  );
+  const contractLiterals = fixtureContractLiterals(repoRoot);
   /** @type {Map<string, string | null>} */
   const expected = new Map();
   for (const member of readWorkspaceMemberPackages(repoRoot)) {
     expected.set(
       member.name,
-      contractNames.has(member.name)
-        ? parseCargoPackageVersion(
-            readFileSync(join(repoRoot, member.manifestPath), "utf8"),
-            member.manifestPath,
-          )
-        : productVersion,
+      contractLiterals.get(member.name) ?? productVersion,
     );
   }
   return expected;
+}
+
+/**
+ * Contract literals a fixture was created with, keyed by temp repo path.
+ * @type {Map<string, Map<string, string>>}
+ */
+const fixtureContractLiteralsByRepo = new Map();
+
+/**
+ * Contract literal per contract entry, from the fixture's creation-time
+ * snapshot when there is one (see {@link createTempRepo}); a root that is not
+ * a fixture (the real repository) has no snapshot, so its own manifests are the
+ * source.
+ *
+ * @param {string} repoRoot
+ * @returns {Map<string, string>}
+ */
+function fixtureContractLiterals(repoRoot) {
+  const frozen = fixtureContractLiteralsByRepo.get(repoRoot);
+  if (frozen !== undefined) {
+    return frozen;
+  }
+  /** @type {Map<string, string>} */
+  const literals = new Map();
+  for (const entry of readVersionBrackets(repoRoot)) {
+    const literal = parseCargoPackageVersion(
+      readFileSync(join(repoRoot, entry.manifest), "utf8"),
+      entry.manifest,
+    );
+    if (literal !== null) {
+      literals.set(entry.name, literal);
+    }
+  }
+  return literals;
 }
 
 /** `[lib]` / `[[bin]]` / `[[example]]` / `[[test]]` / `[[bench]]` headers. */
@@ -178,11 +209,48 @@ export function createTempRepo(options = {}) {
 
   pinFixtureVersion(dir, version, contractNames);
 
+  // A standalone contract crate owns its own workspace lock and the assertion
+  // reads that lock, so the fixture must carry the same shape with the pinned
+  // literal in the row.
+  for (const entry of contractEntries) {
+    const ownLock = posix.join(posix.dirname(entry.manifest), CARGO_LOCK_PATH);
+    if (ownLock === CARGO_LOCK_PATH || !existsSync(join(sourceRoot, ownLock))) {
+      continue;
+    }
+    writeRepoFile(
+      dir,
+      ownLock,
+      pinLockMemberVersion(
+        readFileSync(join(sourceRoot, ownLock), "utf8"),
+        entry.name,
+        version,
+      ),
+    );
+  }
+
   for (const [rel, contents] of Object.entries(options.files ?? {})) {
     const dest = join(dir, rel);
     mkdirSync(dirname(dest), { recursive: true });
     writeFileSync(dest, contents, "utf8");
   }
+
+  // Freeze the contract literals now, before any test mutates a manifest, so
+  // `expectedMemberLockVersions` never reads a version the defect wrote.
+  /** @type {Map<string, string>} */
+  const contractLiterals = new Map();
+  for (const entry of contractEntries) {
+    if (!existsSync(join(dir, entry.manifest))) {
+      continue;
+    }
+    const literal = parseCargoPackageVersion(
+      readFileSync(join(dir, entry.manifest), "utf8"),
+      entry.manifest,
+    );
+    if (literal !== null) {
+      contractLiterals.set(entry.name, literal);
+    }
+  }
+  fixtureContractLiteralsByRepo.set(dir, contractLiterals);
 
   return dir;
 }
@@ -443,6 +511,7 @@ export function commitFile(dir, relPath, contents, message) {
  */
 export function cleanupTempRepo(dir) {
   rmSync(dir, { recursive: true, force: true });
+  fixtureContractLiteralsByRepo.delete(dir);
 }
 
 /**

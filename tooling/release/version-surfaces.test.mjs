@@ -299,3 +299,27 @@ test("readVersionBrackets rejects an empty contract array instead of exempting n
   }, /empty "contract" array/);
 });
 
+test("readVersionBrackets rejects a carrier path that is not the member's manifest", () => {
+  const dir = createTempRepo();
+  try {
+    // Same package name as a workspace member, different file: it would satisfy
+    // the name check and let the real member go unchecked.
+    writeRepoFile(
+      dir,
+      "shadow/Cargo.toml",
+      '[package]\nname = "nexus-workflow-ir"\nversion = "0.1.0"\n',
+    );
+    const carrier = JSON.parse(readRepoFile(dir, VERSION_BRACKETS_PATH));
+    const entry = carrier.contract.find((row) => row.name === "nexus-workflow-ir");
+    entry.manifest = "shadow/Cargo.toml";
+    writeRepoFile(dir, VERSION_BRACKETS_PATH, `${JSON.stringify(carrier, null, 2)}\n`);
+
+    assert.throws(
+      () => readVersionBrackets(dir),
+      /contract entry nexus-workflow-ir points at shadow\/Cargo\.toml, but workspace member nexus-workflow-ir is crates\/nexus-workflow-ir\/Cargo\.toml; the entry must name the member's own manifest/,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+

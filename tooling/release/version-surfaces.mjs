@@ -24,8 +24,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const RELEASE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -374,6 +374,15 @@ export function readVersionBrackets(repoRoot) {
   }
 
   const seen = new Set();
+  // A name is not an identity: two crates can declare the same `package.name`,
+  // so a carrier entry for a workspace member must name that member's own
+  // manifest, or the member's real literal/comments would never be checked.
+  const memberManifests = new Map(
+    readWorkspaceMemberPackages(repoRoot).map((member) => [
+      member.name,
+      member.manifestPath,
+    ]),
+  );
   for (const entry of entries) {
     const name = entry?.name;
     const manifest = entry?.manifest;
@@ -393,6 +402,16 @@ export function readVersionBrackets(repoRoot) {
       );
     }
     seen.add(name);
+
+    const memberManifest = memberManifests.get(name);
+    if (
+      memberManifest !== undefined &&
+      posix.normalize(manifest) !== memberManifest
+    ) {
+      throw new Error(
+        `${VERSION_BRACKETS_PATH}: contract entry ${name} points at ${manifest}, but workspace member ${name} is ${memberManifest}; the entry must name the member's own manifest`,
+      );
+    }
 
     let contents;
     try {
@@ -414,6 +433,66 @@ export function readVersionBrackets(repoRoot) {
   }
 
   return entries;
+}
+
+/** Directories that never hold crate sources under review. */
+const SKIPPED_DIRECTORIES = new Set(["node_modules", "target"]);
+
+/**
+ * Every `Cargo.toml` in the tree, relative to `repoRoot`.
+ *
+ * Dot directories are skipped: they hold tooling state (`.git`, `.cargo`) and
+ * other checkouts of this repository (`.worktrees`), whose crates are not this
+ * tree's to classify.
+ *
+ * @param {string} repoRoot
+ * @param {string} [relativeDir]
+ * @returns {string[]}
+ */
+function collectCargoManifests(repoRoot, relativeDir = "") {
+  /** @type {string[]} */
+  const manifests = [];
+  for (const dirent of readdirSync(join(repoRoot, relativeDir), {
+    withFileTypes: true,
+  })) {
+    if (dirent.isDirectory()) {
+      if (dirent.name.startsWith(".") || SKIPPED_DIRECTORIES.has(dirent.name)) {
+        continue;
+      }
+      manifests.push(
+        ...collectCargoManifests(repoRoot, posix.join(relativeDir, dirent.name)),
+      );
+    } else if (dirent.name === "Cargo.toml") {
+      manifests.push(posix.join(relativeDir, dirent.name));
+    }
+  }
+  return manifests;
+}
+
+/**
+ * Crates that declare `publish = true` in their own `[package]` table.
+ *
+ * A declared `publish = true` is the durable signal that a crate versions on
+ * its own schedule, so it belongs in the contract bracket and cannot be
+ * dropped from it silently. The declaration is required verbatim: a manifest
+ * that omits `publish` keeps Cargo's `true` default, which would pull every
+ * workspace member into the bracket.
+ *
+ * @param {string} repoRoot
+ * @returns {ContractBracketEntry[]}
+ */
+export function readPublishableCrates(repoRoot) {
+  /** @type {ContractBracketEntry[]} */
+  const crates = [];
+  for (const manifest of collectCargoManifests(repoRoot)) {
+    const contents = readFileSync(join(repoRoot, manifest), "utf8");
+    const section = contents.match(/(?:^|\n)\[package\][\s\S]*?(?=\n\[|$)/)?.[0];
+    if (section === undefined || !/^\s*publish\s*=\s*true\s*$/m.test(section)) {
+      continue;
+    }
+    crates.push({ name: parseCargoPackageName(contents, manifest), manifest });
+  }
+  return crates;
 }
 
 /**
