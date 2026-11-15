@@ -569,10 +569,7 @@ async fn lane_fixture() -> LaneFixture {
         ..RunnerDeps::default()
     };
     let handle = core
-        .start_execution(
-            Arc::new(LaneNullProvider) as Arc<dyn ProviderPort>,
-            deps,
-        )
+        .start_execution(Arc::new(LaneNullProvider) as Arc<dyn ProviderPort>, deps)
         .await
         .expect("execution owner starts");
     LaneFixture {
@@ -683,10 +680,7 @@ async fn peer_control_allow_grants_the_named_operation() {
 
     let granted = f
         .handle
-        .peer_control(
-            &principal,
-            control_request("allow", Some("status")),
-        )
+        .peer_control(&principal, control_request("allow", Some("status")))
         .await;
     assert!(granted.is_ok(), "allow itself is allowlisted: {granted:?}");
 
