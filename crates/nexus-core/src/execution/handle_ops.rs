@@ -2362,9 +2362,7 @@ impl ExecutionHandle {
         {
             return Err(CoreError::InvalidInput {
                 field: "allowed_operations".into(),
-                reason: format!(
-                    "the start allowlists an operation nothing dispatches: {unknown}"
-                ),
+                reason: format!("the start allowlists an operation nothing dispatches: {unknown}"),
             });
         }
         // Every start installs a fresh lane: a restart naming a narrower (or

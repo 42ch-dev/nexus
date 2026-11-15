@@ -2096,13 +2096,8 @@ mod tests {
         // roster satisfies the reserved-set precondition (an empty one is
         // refused at the entry, before the bind gate this test exercises).
         let roster: HashSet<String> = HashSet::from(["nexus-test-builtin".to_owned()]);
-        let Err(err) = start_peer_tools_lane(
-            home.path(),
-            Arc::new(Notify::new()),
-            None,
-            roster.clone(),
-        )
-        .await
+        let Err(err) =
+            start_peer_tools_lane(home.path(), Arc::new(Notify::new()), None, roster.clone()).await
         else {
             panic!("non-loopback bind must fail closed without TLS")
         };
