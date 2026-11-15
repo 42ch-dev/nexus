@@ -4343,14 +4343,12 @@ impl GraphFlowEngine {
         });
         let caps = self.current_caps();
         let applied = match &self.state.applied_document_source {
-            Some(source) => {
-                source
-                    .applied_document(&loaded.id, loaded)
-                    .await
-                    .map_err(|error| {
-                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
-                    })?
-            }
+            Some(source) => source
+                .applied_document(&loaded.id, loaded)
+                .await
+                .map_err(|error| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
+                })?,
             None => None,
         };
         let wired = match &applied {

@@ -1603,10 +1603,7 @@ impl WorkflowRunCoordinator {
         // otherwise recovery's `(None, current)` arm rebuilds a graph the run
         // never ran. A strategy with no current apply keeps the YAML bundle.
         let applied = crate::execution::applied_documents::resolve_applied_document(
-            &self.pool,
-            nexus_home,
-            preset_id,
-            &loaded,
+            &self.pool, nexus_home, preset_id, &loaded,
         )
         .await
         .map_err(|error| RunControlError::Admission(error.to_string()))?

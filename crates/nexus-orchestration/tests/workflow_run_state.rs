@@ -6916,7 +6916,11 @@ async fn assert_applied_entry(
         Some(identity),
         "the descriptor must freeze the apply the run executes"
     );
-    let session = storage.get(&sid.0).await.expect("session read").expect("row");
+    let session = storage
+        .get(&sid.0)
+        .await
+        .expect("session read")
+        .expect("row");
     assert_eq!(
         session.current_task_id, APPLIED_ENTRY_PROBE,
         "the run must be built from the applied document, not the bundle"
@@ -7032,7 +7036,11 @@ async fn preset_entry_recovery_refuses_a_successor_and_rebuilds_the_admitted_app
         .run_step(&sid)
         .await
         .expect("the rebuilt run must execute the applied document's entry node");
-    let session = storage.get(&sid.0).await.expect("session read").expect("row");
+    let session = storage
+        .get(&sid.0)
+        .await
+        .expect("session read")
+        .expect("row");
     assert_eq!(
         session.current_task_id, APPLIED_ONLY_PROBE,
         "the rebuilt graph must carry the applied-only node; got {:?}",

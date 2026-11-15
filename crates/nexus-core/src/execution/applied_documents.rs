@@ -29,11 +29,13 @@ use crate::error::CoreResult;
 ///
 /// This is the ONE route to an applied document. Schedule admission,
 /// `WorkflowRunCoordinator::start_session` and recovery all call it, so a run
-/// can never be admitted under one document and rebuilt from another.
+/// admitted under a resolved document is never rebuilt from another one. A run
+/// admitted while the strategy had no current apply resolves `None` and
+/// therefore freezes no identity — that case is recovery's, not this route's.
 ///
-/// `nexus_home` is the workspace home the strategy's bundle was resolved from;
-/// the pin re-comparison that reads it (`p6-pin-freeze-and-bundle-import`) runs
-/// here so no caller can skip it.
+/// `nexus_home` is the workspace home the strategy's bundle was resolved from.
+/// It is reserved for the pin re-comparison (`p6-pin-freeze-and-bundle-import`)
+/// and is currently unread: no pin check runs on this route yet.
 ///
 /// # Errors
 /// The store failure as an outer `Err`; the unverifiable applied bytes as the
@@ -67,13 +69,17 @@ pub async fn resolve_applied_document(
 /// Reads the current apply of a strategy out of the Creator DB.
 pub struct CreatorAppliedDocuments {
     pool: Arc<sqlx::SqlitePool>,
+    nexus_home: std::path::PathBuf,
 }
 
 impl CreatorAppliedDocuments {
-    /// Bind the source to the Creator DB pool admission resolves applies on.
+    /// Bind the source to the Creator DB pool admission resolves applies on, and
+    /// to the workspace home the strategy's bundle is resolved from — the same
+    /// home admission passes, so the reserved pin re-comparison never reads a
+    /// different workspace here than there.
     #[must_use]
-    pub const fn new(pool: Arc<sqlx::SqlitePool>) -> Self {
-        Self { pool }
+    pub const fn new(pool: Arc<sqlx::SqlitePool>, nexus_home: std::path::PathBuf) -> Self {
+        Self { pool, nexus_home }
     }
 }
 
@@ -84,17 +90,9 @@ impl AppliedDocumentSource for CreatorAppliedDocuments {
         preset_id: &str,
         loaded: &LoadedPreset,
     ) -> Result<Option<AppliedDocument>, String> {
-        resolve_applied_document(
-            &self.pool,
-            // shortcut: recovery carries no workspace home, so the pin
-            // re-comparison reads an empty one; pass the real home when this
-            // source is constructed with it.
-            std::path::Path::new(""),
-            preset_id,
-            loaded,
-        )
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|refusal| refusal.to_string())
+        resolve_applied_document(&self.pool, &self.nexus_home, preset_id, loaded)
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|refusal| refusal.to_string())
     }
 }

@@ -137,10 +137,14 @@ build: which document does this strategy run? All four answer it through `resolv
 **The rule.** When the answer is a document, the entry builds the graph from that document with
 `IrTemplateSource::OwnSource` and freezes the `AppliedRunIdentity` the answer carries on the run descriptor
 it writes; when the answer is `None`, it builds the YAML bundle (`build_wired_outer_graph`) and freezes no
-identity. No entry admits YAML and recovers into IR: the graph a run executes and the identity its
-descriptor freezes come from the same resolution. Both admission entries resolve before the binding gate,
-so the roles validated are the roles the applied graph consumes — `export_preset(&document)` when an apply
-exists, the loaded manifest otherwise (`workflow.rs:3001`/`:3004` and `workflow.rs:1622`/`:1625`).
+identity. For a run admitted with a resolved document, no entry admits YAML and recovers into IR: the graph
+the run executes and the identity its descriptor freezes come from the same resolution. A run admitted
+while the strategy had no current apply resolves `None`, freezes no identity, and recovers through the
+`(None, current)` arm below — the one case in which a restart can still put a run on a document it never
+ran, and it exists because the run was admitted under none. Both admission entries resolve before the
+binding gate, so the roles validated are the roles the applied graph consumes — `export_preset(&document)`
+when an apply exists, the loaded manifest otherwise (`workflow.rs:3001`/`:3004` and
+`workflow.rs:1622`/`:1625`).
 
 | Entry | Resolves at | Applied graph | Descriptor write |
 | --- | --- | --- | --- |
@@ -208,8 +212,8 @@ code rather than by intent; each row's `path:line` is the line that decides it.
 | `crates/nexus-core/src/execution/workflow.rs:2517` `prepare_legacy_row` (`applied: None`, `:2618`) | **Inert** — the same payload write, read back by the same four fields |
 | `crates/nexus-orchestration/src/auto_chain.rs:1383` `enqueue_descriptor_json` (`applied: None`, `:1420`) | **Unreachable with a user apply** — it requires `embedded_source_identity` (`:1399`), so the source is never `Directory` and `is_user_preset` is false |
 | `crates/nexus-orchestration/src/storage/sqlite.rs:473` `child_descriptor` (`applied`, `:489`) | **Already correct** — `applied: root.applied.clone()`; a child run inherits the root's identity |
-| `crates/nexus-orchestration/src/engine.rs:4644` `start_session_with_creator` (`applied: None`, `:4680`) | **Unreachable** — no caller holds a store: its callers are `start_session` (`:4640`) and the two `workflow_store == None` fallbacks (`:4323`, `:4483`), so its store-writing arm never runs |
-| `crates/nexus-orchestration/src/engine.rs:4801` `new_session` (`applied: None`, `:4821`) | **Unreachable** — no production caller, and `EngineProxy::new_session` refuses (`:3262`, `NoGraphLoaded`) |
+| `crates/nexus-orchestration/src/engine.rs:4644` `start_session_with_creator` (`applied: None`, `:4680`) | **Callable, no known production caller** — `GraphFlowEngine::start_session` forwards to it unconditionally (`:4640`) and the `SessionStore::start_session_with_graph` entry (`:4852`) exposes that route, so a store-backed engine started this way persists `applied: None` (proven by `workflow_run_state.rs:794`). No in-repo production caller holds a store: the callers are `start_session` and the two `workflow_store == None` fallbacks (`:4323`, `:4483`) |
+| `crates/nexus-orchestration/src/engine.rs:4801` `new_session` (`applied: None`, `:4821`) | **Callable, no known production caller** — the `SessionStore::new_session` implementation is public and writes `applied: None` on a store-backed engine; only `EngineProxy`'s implementation refuses (`:3262`, `NoGraphLoaded`). Nothing in this tree calls it in production |
 | `crates/nexus-orchestration/src/engine.rs:4241` `build_descriptor` (`applied: None`, `:4266`) | **Fixed** — the shared skeleton starts empty, and all three callers overwrite it with the identity they resolved before persisting: `start_preset_run` (`:4283`), `start_preset_run_with_input` (`:4430`), `admit_schedule_run_with_input` (`:4543`) |
 
 **Known limits on the applied path.** Each bounds what an applied run can do; none of them turns the
@@ -225,8 +229,8 @@ applied document back into a hint.
   entries, and runs admitted while the strategy had no current apply hold no identity, so an apply installed
   before such a run restarts reinterprets that run's persisted position. The freeze closes only the runs
   admitted under an apply; the out-of-admission construction sites are the reclassification table above,
-  where each is inert, unreachable with a user apply, already inheriting the root identity, or without a
-  caller that holds a store.
+  where each is inert, unreachable with a user apply, already inheriting the root identity, or a raw
+  constructor with no known production caller whose store-backed entry stays callable.
 - **Reconstruction validates inner descendants against the descriptor manifest** while it builds the graph
   from the applied document (I-000465). The applied path admits one inner shape — a declared inner graph
   with no steps (see below) — and that shape is built and enterable: `project_inner_graphs` keeps it,
