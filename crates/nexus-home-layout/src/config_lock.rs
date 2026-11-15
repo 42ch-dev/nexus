@@ -145,10 +145,14 @@ pub fn publish_document(nexus_home: &Path, contents: &str) -> std::io::Result<()
 ///
 /// # Errors
 /// The I/O error that prevented the policy capture, the authorization check, the
-/// write, the sync, the policy application or the rename. The staged file and its
-/// directory are removed on every failure path; when that cleanup also fails, the
-/// returned error keeps the original kind and names every leftover path instead
-/// of discarding the cleanup failure.
+/// write, the sync, the policy application or the rename. Every deliberate
+/// refusal — a write-denied target, an unreproducible policy, a hard link, a
+/// non-regular document, a symlink chain longer than [`MAX_SYMLINK_HOPS`] — uses
+/// `ErrorKind::PermissionDenied`, which the native binding maps to `forbidden`;
+/// any other kind is a transient failure reported as `internal`. The staged file
+/// and its directory are removed on every failure path; when that cleanup also
+/// fails, the returned error keeps the original kind and names every leftover
+/// path instead of discarding the cleanup failure.
 pub fn publish_document_at(requested_path: &Path, contents: &str) -> std::io::Result<()> {
     let target = resolve_publication_target(requested_path)?;
     let existing = existing_document(&target)?;
@@ -158,10 +162,13 @@ pub fn publish_document_at(requested_path: &Path, contents: &str) -> std::io::Re
         // would silently detach that path instead of updating it. The count is
         // read natively on every platform, and an indeterminate count refuses.
         if nexus_config_metadata::link_count(&target)? > 1 {
-            return Err(std::io::Error::other(format!(
-                "refusing to replace the hard-linked document {}",
-                target.display()
-            )));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "refusing to replace the hard-linked document {}",
+                    target.display()
+                ),
+            ));
         }
         // Retain the previous write boundary: the rename is authorized by the
         // directory and must not replace a document this process may not write.
@@ -261,13 +268,21 @@ fn stage_document(
 }
 
 /// The existing document's metadata, refusing a path that is not a regular file.
+///
+/// `PermissionDenied` is the kind every policy refusal of this module shares: the
+/// native binding maps that one kind to `forbidden`, and any other kind is a
+/// transient filesystem failure reported as `internal`. Replacing a FIFO or a
+/// device is a permanent property of the target, not a retryable fault.
 fn existing_document(target: &Path) -> std::io::Result<Option<std::fs::Metadata>> {
     match std::fs::symlink_metadata(target) {
         Ok(metadata) if metadata.file_type().is_file() => Ok(Some(metadata)),
-        Ok(_) => Err(std::io::Error::other(format!(
-            "refusing to replace the non-regular document {}",
-            target.display()
-        ))),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "refusing to replace the non-regular document {}",
+                target.display()
+            ),
+        )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
@@ -289,7 +304,11 @@ fn resolve_publication_target(requested: &Path) -> std::io::Result<PathBuf> {
         match std::fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 if followed == MAX_SYMLINK_HOPS {
-                    return Err(std::io::Error::other(
+                    // A permanent shape refusal, not a retryable I/O fault: the
+                    // `PermissionDenied` kind is what the native binding maps to
+                    // `forbidden` (see `existing_document`).
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
                         "too many symbolic links in the config document path",
                     ));
                 }
@@ -964,6 +983,11 @@ mod tests {
             error.to_string().contains("non-regular"),
             "the refusal names the document kind: {error}"
         );
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::PermissionDenied,
+            "a permanent shape refusal maps to `forbidden`, never to a transient internal fault"
+        );
         let mut entries: Vec<_> = std::fs::read_dir(&home)
             .expect("home listing")
             .filter_map(Result::ok)
@@ -1080,6 +1104,11 @@ mod tests {
         assert!(
             error.to_string().contains("hard-linked"),
             "the refusal names the hard link: {error}"
+        );
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::PermissionDenied,
+            "a permanent shape refusal maps to `forbidden`, never to a transient internal fault"
         );
         assert_eq!(
             std::fs::read_to_string(&path).expect("document"),
@@ -1348,8 +1377,13 @@ mod tests {
         .expect("document");
         chain(&beyond, super::MAX_SYMLINK_HOPS + 1);
 
-        let _error = super::publish_document(&beyond, "active_creator_id = \"ctr_new\"\n")
+        let error = super::publish_document(&beyond, "active_creator_id = \"ctr_new\"\n")
             .expect_err("one hop past the limit is refused");
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::PermissionDenied,
+            "a permanent shape refusal maps to `forbidden`, never to a transient internal fault"
+        );
         assert_eq!(
             std::fs::read_to_string(beyond.join("real.toml")).expect("document"),
             "active_creator_id = \"ctr_old\"\n",
