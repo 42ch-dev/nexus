@@ -200,6 +200,24 @@ test("a contract crate bumped alone leaves product lockstep green", () => {
   }
 });
 
+test("the success summary names one version on the Cargo.lock line", () => {
+  const dir = createTempRepo();
+  try {
+    bumpContractCrate(dir, CONTRACT_BUMP);
+    const run = runReleaseScript("assert-lockstep-version.mjs", [], dir);
+    assert.equal(run.status, 0, run.stderr);
+    const escape = (value) => value.replaceAll(".", "\\.");
+    const lockLine = run.stdout
+      .split("\n")
+      .find((line) => line.trimStart().startsWith(`${CARGO_LOCK_PATH} `));
+    assert.ok(lockLine, run.stdout);
+    assert.match(lockLine, new RegExp(`\\b${escape(FIXTURE_BASELINE_VERSION)}\\b`), lockLine);
+    assert.doesNotMatch(lockLine, new RegExp(escape(CONTRACT_BUMP)), lockLine);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
 test("a contract crate back on version.workspace = true is rejected", () => {
   const dir = createTempRepo();
   try {

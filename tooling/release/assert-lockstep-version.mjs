@@ -222,7 +222,16 @@ function printReport(report) {
   for (const surface of report.surfaces) {
     console.log(`  ${surface.path.padEnd(48)} ${surface.version}`);
   }
-  const lockVersions = new Set(report.lockMembers.map((member) => member.version));
+  // The independent contract crates version on their own and are printed in
+  // the bracket below; folding them in here would show a second version on a
+  // green run and erase the pass/fail signal. Only product-version members
+  // belong on this line, so on `ok` it names exactly the decided version.
+  const contractNames = new Set(report.contract.map((entry) => entry.name));
+  const lockVersions = new Set(
+    report.lockMembers
+      .filter((member) => !contractNames.has(member.name))
+      .map((member) => member.version),
+  );
   console.log(
     `  ${CARGO_LOCK_PATH.padEnd(48)} ${
       lockVersions.size === 1 ? [...lockVersions][0] : [...lockVersions].join(", ")

@@ -111,6 +111,8 @@ The MCP/peer serving implementation is owned by the `nexus-connect` crate behind
   an absent policy stays byte-identical to the pre-seam behavior, and a
   hidden-tool call is refused at the seam before any peer invocation.
 - **Peer control.** The execution owner admits one peer-control lane
-  (`ExecutionHandle::start_peer_control` / `peer_control`): explicit
-  enablement plus a named operation allowlist; operations off the allowlist
-  are refused before any effect. The lane is composed by the native/TS consumers that host the runtime.
+  (`ExecutionHandle::start_peer_control` / `peer_control`): the enablement
+  the lane reports to the Connect surface plus a named operation allowlist
+  that alone decides admission — operations off the allowlist are refused
+  before any effect, and a disabled lane still serves an allowlisted
+  operation. The lane is composed by the native/TS consumers that host the runtime.

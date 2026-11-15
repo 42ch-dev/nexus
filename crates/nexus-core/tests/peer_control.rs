@@ -706,3 +706,113 @@ async fn peer_control_allow_grants_the_named_operation() {
         "allow without a payload-named operation is a validation refusal, not a silent grant"
     );
 }
+
+/// A restart that lands while `peer_control` is resolving its lane must not
+/// swallow the operation: the effect must reach the lane that is installed and
+/// the returned state must describe that lane. The seam parks the call at its
+/// lane-resolution boundary; the restart runs while it is parked.
+#[tokio::test]
+#[serial]
+async fn peer_control_acts_on_the_lane_installed_when_it_resolves() {
+    use nexus_core::execution::test_hooks::{set_peer_control_gate, PeerControlGate};
+
+    let f = lane_fixture().await;
+    let principal = f.core.active_principal().await.expect("active principal");
+    let allowed = ["disable", "status"];
+    f.handle
+        .start_peer_control(&principal, start_options(true, &allowed))
+        .await
+        .expect("the lane starts");
+
+    let gate = Arc::new(PeerControlGate::new());
+    set_peer_control_gate(Some(Arc::clone(&gate)));
+    let disable = f
+        .handle
+        .peer_control(&principal, control_request("disable", None));
+    // `join!` polls left to right, so `disable` reaches the seam before the
+    // restart installs the fresh lane.
+    let restart = async {
+        gate.admitted.notified().await;
+        let restarted = f
+            .handle
+            .start_peer_control(&principal, start_options(true, &allowed))
+            .await;
+        gate.proceed.notify_one();
+        restarted
+    };
+    let (disabled, restarted) = tokio::join!(disable, restart);
+    set_peer_control_gate(None);
+    restarted.expect("the restart installs a fresh enabled lane");
+    let returned = disabled.expect("disable is admitted by the allowlist");
+    let installed = f
+        .handle
+        .peer_control(&principal, control_request("status", None))
+        .await
+        .expect("status is admitted by the allowlist");
+    assert_eq!(
+        returned.enabled, installed.enabled,
+        "the returned state must describe the installed lane: returned {returned:?}, installed {installed:?}"
+    );
+    assert!(
+        !installed.enabled,
+        "the disable must reach the installed lane, got {installed:?}"
+    );
+}
+
+/// `enabled` is reported state, never a second gate: a lane started disabled
+/// still serves an allowlisted operation, and its state says the cohort is off.
+#[tokio::test]
+#[serial]
+async fn peer_control_admits_the_allowlist_when_the_lane_reports_disabled() {
+    let f = lane_fixture().await;
+    let principal = f.core.active_principal().await.expect("active principal");
+    let started = f
+        .handle
+        .start_peer_control(&principal, start_options(false, &["status"]))
+        .await
+        .expect("the lane starts");
+    assert!(!started.enabled, "the start reports the disabled lane");
+
+    let reported = f
+        .handle
+        .peer_control(&principal, control_request("status", None))
+        .await
+        .expect("the allowlist alone admits status on a disabled lane");
+    assert!(
+        !reported.enabled,
+        "the lane reports its enablement, it does not gate the allowlist"
+    );
+}
+
+/// `allow` refuses a `payload.operation` no arm dispatches: a grant nothing
+/// would ever match is not a permission, and the refusal names the field.
+#[tokio::test]
+#[serial]
+async fn peer_control_allow_rejects_an_undispatched_operation() {
+    let f = lane_fixture().await;
+    let principal = f.core.active_principal().await.expect("active principal");
+    f.handle
+        .start_peer_control(&principal, start_options(true, &["allow"]))
+        .await
+        .expect("the lane starts");
+
+    let refused = f
+        .handle
+        .peer_control(&principal, control_request("allow", Some("frobnicate")))
+        .await;
+    assert!(
+        matches!(
+            &refused,
+            Err(CoreError::InvalidInput { field, .. }) if field.as_str() == "payload.operation"
+        ),
+        "an undispatched grant target is a payload.operation refusal, got {refused:?}"
+    );
+    assert!(
+        forbidden(
+            &f.handle
+                .peer_control(&principal, control_request("status", None))
+                .await
+        ),
+        "the refused grant must not authorize the name it carried"
+    );
+}
