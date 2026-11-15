@@ -30,6 +30,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::hash::BuildHasher;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -979,11 +980,11 @@ fn event_lane_config_warning(config_path: &Path, error: &ConnectConfigError) -> 
 /// Config load, identity persistence, or listener bind failures are
 /// returned as errors — the caller decides whether to fail boot or keep the
 /// daemon core running without the peer-tools lane.
-pub async fn start_peer_tools_lane(
+pub async fn start_peer_tools_lane<S: BuildHasher>(
     home: &Path,
     shutdown: Arc<Notify>,
     capability_registry: Option<CapabilityRegistryHolder>,
-    builtin_tool_ids: HashSet<String>,
+    builtin_tool_ids: HashSet<String, S>,
 ) -> ConnectResult<PeerToolsLaneHandle> {
     // DF-92: seed the digest baseline BEFORE the boot load — an edit
     // landing anywhere in the boot window diverges from the baseline and
@@ -1058,7 +1059,10 @@ pub async fn start_peer_tools_lane(
         identity_seed,
         host_id: device_id,
         config: PeerConfigHolder::clone(&config_holder),
-        builtin_tool_ids: Arc::new(builtin_tool_ids),
+        // The field is lane-static and boot-only: one normalize into the
+        // default hasher keeps `PeerResponderOptions` non-generic (a hasher
+        // type parameter there would ripple through every handler).
+        builtin_tool_ids: Arc::new(builtin_tool_ids.into_iter().collect()),
         capability_registry,
     };
     // DF-92: the config watcher runs alongside the accept loop. The
