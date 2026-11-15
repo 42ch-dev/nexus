@@ -435,15 +435,26 @@ export function readVersionBrackets(repoRoot) {
   return entries;
 }
 
-/** Directories that never hold crate sources under review. */
-const SKIPPED_DIRECTORIES = new Set(["node_modules", "target"]);
+/**
+ * Directories that hold no crate source this repository owns: build output,
+ * installed dependencies, and the trees vendoring tools copy third-party
+ * sources into. A manifest found there describes somebody else's crate.
+ */
+const SKIPPED_DIRECTORIES = new Set([
+  "node_modules",
+  "target",
+  "vendor",
+  "vendored",
+  "third_party",
+]);
 
 /**
  * Every `Cargo.toml` in the tree, relative to `repoRoot`.
  *
  * Dot directories are skipped: they hold tooling state (`.git`, `.cargo`) and
  * other checkouts of this repository (`.worktrees`), whose crates are not this
- * tree's to classify.
+ * tree's to classify. {@link SKIPPED_DIRECTORIES} names the non-dot roots that
+ * are pruned for the same reason.
  *
  * @param {string} repoRoot
  * @param {string} [relativeDir]
@@ -470,11 +481,87 @@ function collectCargoManifests(repoRoot, relativeDir = "") {
 }
 
 /**
+ * Blank out every TOML comment and string body, keeping delimiters, newlines
+ * and the length of the text intact.
+ *
+ * What survives is the syntactic skeleton of the document: a `publish = true`
+ * inside a comment or inside a multi-line string is gone, so it cannot be read
+ * as a key, while a real declaration keeps its value.
+ *
+ * @param {string} contents TOML text.
+ * @returns {string}
+ */
+function maskTomlCommentsAndStrings(contents) {
+  const masked = contents.split("");
+  // Line structure is what the section scan relies on, so newlines stay.
+  const blank = (at) => {
+    masked[at] = contents[at] === "\n" ? "\n" : " ";
+  };
+
+  let index = 0;
+  while (index < contents.length) {
+    const character = contents[index];
+    if (character === "#") {
+      while (index < contents.length && contents[index] !== "\n") {
+        blank(index++);
+      }
+      continue;
+    }
+    if (character !== '"' && character !== "'") {
+      index += 1;
+      continue;
+    }
+    const delimiter = contents.startsWith(character.repeat(3), index)
+      ? character.repeat(3)
+      : character;
+    index += delimiter.length;
+    while (index < contents.length && !contents.startsWith(delimiter, index)) {
+      // Only a basic string honours backslash escapes; a literal string does not.
+      if (character === '"' && contents[index] === "\\") {
+        blank(index++);
+      }
+      if (index < contents.length) {
+        blank(index++);
+      }
+    }
+    index += delimiter.length;
+  }
+
+  return masked.join("");
+}
+
+/**
+ * Whether `[package]` declares `publish = true`.
+ *
+ * The value is read from the package table after masking comments and string
+ * bodies, so `publish = true # independently published` is a declaration while
+ * the same text inside a comment or a multi-line `description` is not. A
+ * manifest that omits `publish`, or inherits it with `publish.workspace`, is
+ * not one: only the explicit boolean counts.
+ *
+ * Not a TOML parser. It masks strings and comments and then matches one key at
+ * the start of a line, so it cannot see through exotic forms — a `[package]`
+ * header written inside a multi-line string still opens the table, and dotted
+ * or inline-table spellings are simply unmatched. Crate manifests in this
+ * repository are hand-written or generated in the plain one-key-per-line form
+ * above, so that boundary is where the check stops being worth more code.
+ *
+ * @param {string} contents Cargo.toml contents.
+ * @returns {boolean}
+ */
+function declaresCargoPackagePublish(contents) {
+  const section = maskTomlCommentsAndStrings(contents).match(
+    /(?:^|\n)\[package\][\s\S]*?(?=\n\[|$)/,
+  )?.[0];
+  return section !== undefined && /^\s*publish\s*=\s*true\s*$/m.test(section);
+}
+
+/**
  * Crates that declare `publish = true` in their own `[package]` table.
  *
  * A declared `publish = true` is the durable signal that a crate versions on
  * its own schedule, so it belongs in the contract bracket and cannot be
- * dropped from it silently. The declaration is required verbatim: a manifest
+ * dropped from it silently. The declaration is required explicitly: a manifest
  * that omits `publish` keeps Cargo's `true` default, which would pull every
  * workspace member into the bracket.
  *
@@ -486,8 +573,7 @@ export function readPublishableCrates(repoRoot) {
   const crates = [];
   for (const manifest of collectCargoManifests(repoRoot)) {
     const contents = readFileSync(join(repoRoot, manifest), "utf8");
-    const section = contents.match(/(?:^|\n)\[package\][\s\S]*?(?=\n\[|$)/)?.[0];
-    if (section === undefined || !/^\s*publish\s*=\s*true\s*$/m.test(section)) {
+    if (!declaresCargoPackagePublish(contents)) {
       continue;
     }
     crates.push({ name: parseCargoPackageName(contents, manifest), manifest });
