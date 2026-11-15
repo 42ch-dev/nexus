@@ -7,8 +7,19 @@
  * `apps/desktop-electron/resources/product.json`,
  * `apps/nexus-service/package.json`), the five native npm
  * manifests (`packages/nexus-native/package.json` plus the four platform
- * packages — including the loader's `@42ch/nexus-native-*` pins) and every
- * workspace member entry in `Cargo.lock`.
+ * packages — including the loader's `@42ch/nexus-native-*` pins) and the
+ * `Cargo.lock` rows of two brackets:
+ *
+ * - Contract crates (`VERSION_BRACKETS_PATH`) version independently: their
+ *   manifest declares a literal version and their lock row equals it. They are
+ *   not compared to the product version. The lockfile is the one that owns the
+ *   crate: `Cargo.lock` for a workspace member, the standalone workspace's own
+ *   lock next to the manifest otherwise.
+ * - The bracket must be complete: a crate declaring `publish = true` that the
+ *   carrier omits fails, so deleting an entry cannot shrink the checked set.
+ * - Every other workspace member keeps `version.workspace = true` and its lock
+ *   row equals the product version; a literal there fails as an undeclared
+ *   independent crate.
  *
  * CLI: node tooling/release/assert-lockstep-version.mjs
  *
@@ -18,15 +29,20 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CARGO_LOCK_PATH,
+  CARGO_WORKSPACE_PATH,
   NATIVE_LOADER_PACKAGE_PATH,
+  VERSION_BRACKETS_PATH,
+  readStandalonePublishableCrates,
   readSurfaceVersions,
+  readVersionBrackets,
   readWorkspaceMemberPackages,
   resolveRepoRoot,
   parseCargoLockPackageVersion,
+  parseCargoPackageVersion,
 } from "./version-surfaces.mjs";
 
 /**
@@ -34,9 +50,27 @@ import {
  * @property {boolean} ok
  * @property {string | null} version Canonical version when the four agree.
  * @property {{ path: string; version: string }[]} surfaces
+ * @property {{ name: string; version: string; lock: string }[]} contract
  * @property {{ name: string; version: string | null }[]} lockMembers
  * @property {string[]} problems
  */
+
+/**
+ * File contents, or `null` when the path does not exist.
+ *
+ * @param {string} path
+ * @returns {string | null}
+ */
+function readOptionalFile(path) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+    return null;
+  }
+}
 
 /**
  * @param {string} repoRoot
@@ -48,6 +82,7 @@ export function checkLockstep(repoRoot) {
   const surfaces = readSurfaceVersions(repoRoot);
   const versions = new Set(surfaces.map((surface) => surface.version));
   const ok = versions.size === 1;
+  const productVersion = ok ? /** @type {string} */ ([...versions][0]) : null;
   if (!ok) {
     problems.push(
       `version surfaces disagree: ${surfaces
@@ -68,31 +103,113 @@ export function checkLockstep(repoRoot) {
     }
   }
 
+  const contractEntries = readVersionBrackets(repoRoot);
+  const contractNames = new Set(contractEntries.map((entry) => entry.name));
+  const members = readWorkspaceMemberPackages(repoRoot);
+  const memberNames = new Set(members.map((member) => member.name));
+
+  const lockPath = join(repoRoot, CARGO_LOCK_PATH);
+  const lockContents = existsSync(lockPath) ? readFileSync(lockPath, "utf8") : null;
+  if (lockContents === null) {
+    problems.push(`${CARGO_LOCK_PATH}: missing`);
+  }
+
+  // A crate dropped from the carrier stops being checked, so the bracket must
+  // be complete: outside the root workspace there is no inherited version, so a
+  // crate Cargo would publish can only version on its own and belongs here. The
+  // other direction — a listed crate that goes back to inheriting — is caught
+  // below by the non-contract member literal rule.
+  const carrierManifests = new Set(
+    contractEntries.map((entry) => posix.normalize(entry.manifest)),
+  );
+  for (const crate of readStandalonePublishableCrates(repoRoot)) {
+    if (carrierManifests.has(crate.manifest)) {
+      continue;
+    }
+    problems.push(
+      `${crate.manifest}: ${crate.name} is publishable and lives outside the ${CARGO_WORKSPACE_PATH} workspace, so it versions independently, but ${VERSION_BRACKETS_PATH} has no contract entry for it; add { "name": "${crate.name}", "manifest": "${crate.manifest}" }`,
+    );
+  }
+
+  /** @type {{ name: string; version: string; lock: string }[]} */
+  const contractRows = [];
+  for (const entry of contractEntries) {
+    const literal = parseCargoPackageVersion(
+      readFileSync(join(repoRoot, entry.manifest), "utf8"),
+      entry.manifest,
+    );
+    if (literal === null) {
+      problems.push(
+        `${entry.manifest}: contract crate ${entry.name} declares version.workspace = true, expected a literal version (contract crates version independently of the product)`,
+      );
+      continue;
+    }
+    // The lockfile that owns the crate's resolution: the root workspace for a
+    // member, otherwise the standalone workspace rooted next to the manifest.
+    // A crate pinned by neither is unchecked, so it fails instead.
+    const entryLockPath = memberNames.has(entry.name)
+      ? CARGO_LOCK_PATH
+      : posix.join(posix.dirname(entry.manifest), CARGO_LOCK_PATH);
+    const entryLockContents =
+      entryLockPath === CARGO_LOCK_PATH
+        ? lockContents
+        : readOptionalFile(join(repoRoot, entryLockPath));
+    if (entryLockContents === null) {
+      problems.push(
+        `${entryLockPath}: missing; contract crate ${entry.name} (${entry.manifest}) is not a member of the ${CARGO_WORKSPACE_PATH} workspace and has no lockfile of its own to pin it`,
+      );
+      continue;
+    }
+    contractRows.push({
+      name: entry.name,
+      version: literal,
+      lock: entryLockPath,
+    });
+    const pinned = parseCargoLockPackageVersion(entryLockContents, entry.name);
+    if (pinned === null) {
+      problems.push(
+        `${entryLockPath}: missing [[package]] entry for contract crate ${entry.name} (${entry.manifest})`,
+      );
+    } else if (pinned !== literal) {
+      problems.push(
+        `${entryLockPath}: contract crate ${entry.name} pinned at ${pinned}, expected its manifest literal ${literal} (${entry.manifest})`,
+      );
+    }
+  }
+
   /** @type {{ name: string; version: string | null }[]} */
   const lockMembers = [];
-  const lockPath = join(repoRoot, CARGO_LOCK_PATH);
-  if (!existsSync(lockPath)) {
-    problems.push(`${CARGO_LOCK_PATH}: missing`);
-  } else {
-    const lockContents = readFileSync(lockPath, "utf8");
-    const expected = [...versions][0];
-    for (const member of readWorkspaceMemberPackages(repoRoot)) {
-      const version = parseCargoLockPackageVersion(lockContents, member.name);
-      lockMembers.push({ name: member.name, version });
-      if (version === null) {
-        problems.push(`${CARGO_LOCK_PATH}: missing [[package]] entry for ${member.name}`);
-      } else if (ok && version !== expected) {
-        problems.push(
-          `${CARGO_LOCK_PATH}: ${member.name} pinned at ${version}, expected ${expected}`,
-        );
-      }
+  for (const member of members) {
+    const pinned =
+      lockContents === null ? null : parseCargoLockPackageVersion(lockContents, member.name);
+    lockMembers.push({ name: member.name, version: pinned });
+    if (lockContents === null || contractNames.has(member.name)) {
+      continue;
+    }
+    if (pinned === null) {
+      problems.push(`${CARGO_LOCK_PATH}: missing [[package]] entry for ${member.name}`);
+      continue;
+    }
+    const literal = parseCargoPackageVersion(
+      readFileSync(join(repoRoot, member.manifestPath), "utf8"),
+      member.manifestPath,
+    );
+    if (literal !== null) {
+      problems.push(
+        `${member.manifestPath}: non-contract member ${member.name} declares literal version ${literal}, expected version.workspace = true (a literal version makes it an undeclared independent crate; list it in ${VERSION_BRACKETS_PATH} if that is intended)`,
+      );
+    } else if (ok && pinned !== productVersion) {
+      problems.push(
+        `${CARGO_LOCK_PATH}: non-contract member ${member.name} pinned at ${pinned}, expected product version ${productVersion}`,
+      );
     }
   }
 
   return {
     ok: ok && problems.length === 0,
-    version: ok ? /** @type {string} */ ([...versions][0]) : null,
+    version: productVersion,
     surfaces,
+    contract: contractRows,
     lockMembers,
     problems,
   };
@@ -105,12 +222,31 @@ function printReport(report) {
   for (const surface of report.surfaces) {
     console.log(`  ${surface.path.padEnd(48)} ${surface.version}`);
   }
-  const lockVersions = new Set(report.lockMembers.map((member) => member.version));
+  // The independent contract crates version on their own and are printed in
+  // the bracket below; folding them in here would show a second version on a
+  // green run and erase the pass/fail signal. Only product-version members
+  // belong on this line, so on `ok` it names exactly the decided version.
+  const contractNames = new Set(report.contract.map((entry) => entry.name));
+  const lockVersions = new Set(
+    report.lockMembers
+      .filter((member) => !contractNames.has(member.name))
+      .map((member) => member.version),
+  );
   console.log(
     `  ${CARGO_LOCK_PATH.padEnd(48)} ${
       lockVersions.size === 1 ? [...lockVersions][0] : [...lockVersions].join(", ")
     } (${report.lockMembers.length} workspace members)`,
   );
+  // Printed, not exempted: the independent crates and the lockfile that pins
+  // each one, so a crate missing from this list is visible before it passes.
+  console.log(
+    `  ${VERSION_BRACKETS_PATH} (${report.contract.length} independent crates):`,
+  );
+  for (const entry of report.contract) {
+    console.log(
+      `    ${entry.name.padEnd(24)} ${entry.version.padEnd(12)} ${entry.lock}`,
+    );
+  }
 }
 
 function main(argv) {

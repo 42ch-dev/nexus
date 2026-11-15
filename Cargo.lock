@@ -2894,65 +2894,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonrpsee"
-version = "0.26.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4826d5921c90b936eae1b0c09fef26697c4d7269ba5d6bb976f762a870a5ed82"
-dependencies = [
- "jsonrpsee-core",
- "jsonrpsee-proc-macros",
- "jsonrpsee-types",
- "tracing",
-]
-
-[[package]]
-name = "jsonrpsee-core"
-version = "0.26.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba6e425d1828eb60a9e054f77b60e375fbf46aabff72c46b5ea24406566f7e91"
-dependencies = [
- "async-trait",
- "futures-util",
- "http",
- "jsonrpsee-types",
- "parking_lot 0.12.5",
- "pin-project",
- "rand 0.9.5",
- "rustc-hash",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tower",
- "tracing",
-]
-
-[[package]]
-name = "jsonrpsee-proc-macros"
-version = "0.26.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cc1f1d4a2ed7619d08e9e86fa1759b16da756c5d8b02d62e98664417f3ac25d"
-dependencies = [
- "heck",
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "jsonrpsee-types"
-version = "0.26.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6e6de48c2fb8ba2773f4429c28349576f98d73a3b1d647d963f96df53210312"
-dependencies = [
- "http",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3749,6 +3690,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-connect"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "ed25519-dalek 2.2.0",
+ "futures-channel",
+ "futures-util",
+ "getrandom 0.4.3",
+ "nexus-contracts",
+ "nexus-home-layout",
+ "nexus-orchestration",
+ "nexus-spoke-adapter",
+ "parking_lot 0.13.0",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "spoke-connect",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-contracts"
 version = "0.1.0"
 dependencies = [
@@ -3757,7 +3726,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "thiserror 2.0.21",
  "uuid",
 ]
 
@@ -3770,9 +3738,7 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "ed25519-dalek 2.2.0",
- "futures-channel",
  "futures-util",
- "getrandom 0.4.3",
  "graph-flow",
  "hex",
  "http",
@@ -3781,6 +3747,7 @@ dependencies = [
  "nexus-agent-host",
  "nexus-cloud-sync",
  "nexus-config-metadata",
+ "nexus-connect",
  "nexus-contracts",
  "nexus-core",
  "nexus-creator-memory",
@@ -3799,7 +3766,6 @@ dependencies = [
  "nexus-workflow-ir",
  "nix 0.31.3",
  "parking_lot 0.13.0",
- "rmcp",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -3957,6 +3923,7 @@ dependencies = [
  "ed25519-dalek 2.2.0",
  "futures-util",
  "nexus-agent-host",
+ "nexus-connect",
  "nexus-contracts",
  "nexus-core",
  "nexus-home-layout",
@@ -3988,7 +3955,6 @@ name = "nexus-moment-context-assembly"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "nexus-cloud-sync",
  "nexus-contracts",
  "nexus-knowledge",
  "nexus-narrative",
@@ -4032,7 +3998,6 @@ dependencies = [
  "handlebars",
  "hex",
  "include_dir",
- "jsonrpsee",
  "nexus-contracts",
  "nexus-creator-memory",
  "nexus-home-layout",
@@ -4186,6 +4151,7 @@ dependencies = [
  "nexus-acp-host",
  "nexus-agent-host",
  "nexus-cloud-sync",
+ "nexus-connect",
  "nexus-contracts",
  "nexus-core",
  "nexus-creator",
@@ -4788,15 +4754,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 
 [[package]]
-name = "ppv-lite86"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
-dependencies = [
- "zerocopy",
-]
-
-[[package]]
 name = "predicates"
 version = "3.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4835,15 +4792,6 @@ dependencies = [
  "either",
  "ipnet",
  "num-traits",
-]
-
-[[package]]
-name = "proc-macro-crate"
-version = "3.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
-dependencies = [
- "toml_edit",
 ]
 
 [[package]]
@@ -5067,16 +5015,6 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
-dependencies = [
- "rand_chacha",
- "rand_core 0.9.5",
-]
-
-[[package]]
-name = "rand"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65c9fb96cbc91e3478eaae79a69fcd3f1ae4ad052e471fe6732fff548984b4af"
@@ -5087,31 +5025,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "rand_chacha"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
-dependencies = [
- "ppv-lite86",
- "rand_core 0.9.5",
-]
-
-[[package]]
 name = "rand_core"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.17",
-]
-
-[[package]]
-name = "rand_core"
-version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
-dependencies = [
- "getrandom 0.3.4",
 ]
 
 [[package]]

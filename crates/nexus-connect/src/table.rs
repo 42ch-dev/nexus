@@ -2,7 +2,7 @@
 //!
 //! v1.190 P3-T3: the table BODY (admission chain, collision policy, eviction,
 //! the process-global singleton) moved to
-//! [`crate::execution::peer_tools`]. What remains is the daemon's own
+//! [`crate::peer_tools`]. What remains is the daemon's own
 //! translation:
 //!
 //! - [`ConnectResponderAdapter`] implements the core's protocol-neutral
@@ -18,14 +18,12 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::execution::peer_tools::{
-    PeerInvokeError, PeerInvokeResult, PeerResponder, PeerToolRegistry,
-};
+use crate::peer_tools::{PeerInvokeError, PeerInvokeResult, PeerResponder, PeerToolRegistry};
 use nexus_orchestration::CapabilityRegistryHolder;
 use nexus_spoke_adapter::{SpokeRejectCode, SpokeResult};
 use spoke_connect::remote::ConnectResponder;
 
-pub use crate::execution::peer_tools::{
+pub use crate::peer_tools::{
     peer_tool_registry, AdmissionOutcome, CollisionPolicy, PeerSessionTools, PeerToolEntry,
     PeerToolsConfig, ToolRefusal,
 };
@@ -35,7 +33,7 @@ pub use crate::execution::peer_tools::{
 /// Kept as an alias so the Connect lane's type positions (`Arc<PeerToolTable>`
 /// in the config watcher) need no rename while there is still exactly one
 /// registry.
-pub type PeerToolTable = crate::execution::peer_tools::PeerToolRegistry;
+pub type PeerToolTable = crate::peer_tools::PeerToolRegistry;
 
 /// MCP catalog admission: the peer descriptor's input must be a root object.
 /// # Errors
@@ -45,7 +43,7 @@ pub type PeerToolTable = crate::execution::peer_tools::PeerToolRegistry;
 pub fn mcp_catalog_admission(
     descriptor: &nexus_spoke_adapter::ToolDescriptor,
 ) -> Result<(), McpCatalogRefusal> {
-    if crate::execution::peer_tools::catalog_input_root_object(descriptor) {
+    if crate::peer_tools::catalog_input_root_object(descriptor) {
         Ok(())
     } else {
         Err(McpCatalogRefusal::InputSchemaNotRootObject)
@@ -56,7 +54,7 @@ pub fn mcp_catalog_admission(
 /// surface.
 #[must_use]
 pub fn mcp_catalog_output_root_object(descriptor: &nexus_spoke_adapter::ToolDescriptor) -> bool {
-    crate::execution::peer_tools::catalog_output_root_object(descriptor)
+    crate::peer_tools::catalog_output_root_object(descriptor)
 }
 
 /// MCP catalog refusal for a peer descriptor.
@@ -140,20 +138,27 @@ impl PeerResponder for ConnectResponderAdapter {
     }
 }
 
-/// The reserved tool ids: builtins plus live user-capability names.
+/// The reserved tool ids: the injected builtin host-tool ids plus live
+/// user-capability names.
 ///
 /// Computed LIVE so a capability hot-added after the peer lane spawned is
-/// immediately reserved against.
+/// immediately reserved against. The builtin set is a snapshot the composing
+/// side injects ([`crate::PeerResponderOptions::builtin_tool_ids`]) — this
+/// crate never reads a host registry of its own, so the caller's boundary
+/// refuses an empty roster ([`crate::start_peer_tools_lane`]) instead of
+/// letting this function silently reserve nothing.
 #[must_use]
 pub fn live_reserved_tool_ids(
+    builtin_ids: impl IntoIterator<Item = String>,
     capability_registry: Option<&CapabilityRegistryHolder>,
 ) -> HashSet<String> {
-    crate::execution::peer_tools::live_reserved_tool_ids(
-        crate::execution::capabilities::host_tool_registry()
-            .ids()
-            .map(ToOwned::to_owned),
-        capability_registry,
-    )
+    let mut reserved: HashSet<String> = builtin_ids.into_iter().collect();
+    if let Some(holder) = capability_registry {
+        if let Some(reg) = holder.get() {
+            reserved.extend(reg.iter().map(|cap| cap.name().to_owned()));
+        }
+    }
+    reserved
 }
 
 /// The process-global registry (kept as the daemon's historical accessor name).

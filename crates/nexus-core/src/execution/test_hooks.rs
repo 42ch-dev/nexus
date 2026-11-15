@@ -300,3 +300,52 @@ pub(super) async fn compute_in_flight_gate_wait(operation_id: &str) {
         gate.proceed.notified().await;
     }
 }
+
+/// Rendezvous at the peer-control lane-resolution boundary (v1.244 fix round).
+///
+/// Lets a test prove a lane replacement cannot straddle an in-flight
+/// `peer_control`: the call signals `admitted` before it resolves the
+/// installed lane, waits for `proceed`, and the test restarts the lane while
+/// it is parked. The returned snapshot and the installed lane are then read
+/// back and compared. No sleeps, no races.
+#[derive(Debug, Default)]
+pub struct PeerControlGate {
+    /// Signalled when a `peer_control` call is parked at the seam.
+    pub admitted: Arc<tokio::sync::Notify>,
+    /// The call waits for this before resolving the installed lane.
+    pub proceed: Arc<tokio::sync::Notify>,
+}
+
+impl PeerControlGate {
+    /// An armed gate for one parked `peer_control` call.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+static PEER_CONTROL_GATE: Mutex<Option<Arc<PeerControlGate>>> = Mutex::new(None);
+
+/// Install (or clear) the peer-control gate.
+///
+/// # Panics
+///
+/// Panics if the peer-control-gate mutex was poisoned by a previous panic.
+pub fn set_peer_control_gate(gate: Option<Arc<PeerControlGate>>) {
+    *PEER_CONTROL_GATE.lock().expect("peer-control gate lock") = gate;
+}
+
+fn current_peer_control_gate() -> Option<Arc<PeerControlGate>> {
+    PEER_CONTROL_GATE
+        .lock()
+        .expect("peer-control gate lock")
+        .as_ref()
+        .map(Arc::clone)
+}
+
+pub(super) async fn peer_control_gate_wait() {
+    if let Some(gate) = current_peer_control_gate() {
+        gate.admitted.notify_one();
+        gate.proceed.notified().await;
+    }
+}

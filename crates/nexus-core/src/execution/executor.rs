@@ -18,7 +18,10 @@ use nexus_home_layout;
 use nexus_orchestration::capability::{CapabilityError, WorkspaceExecutor};
 
 use super::session::{SessionError, SessionId, WorkspaceSessionManager};
-use super::work_artifact::{FsWorkArtifactPort, WorkArtifactPort, WorkArtifactWrite};
+use super::work_artifact::{
+    FsWorkArtifactPort, RecordedMutation, RecordingWorkArtifactPort, WorkArtifactPort,
+    WorkArtifactWrite,
+};
 use crate::error::CoreError as NexusApiError;
 use crate::error::CoreResult;
 use crate::service::CoreService;
@@ -27,11 +30,19 @@ use crate::service::CoreService;
 pub struct WorkspaceCommitExecutor {
     session_manager: Arc<WorkspaceSessionManager>,
     canonical_workspace_root: String,
-    /// Home the Work artifact port resolves the active creator/workspace from.
-    ///
-    /// `None` leaves [`WorkspaceExecutor::commit_work_artifact`] refusing: the
-    /// executor was built without the production tool context (tests).
-    work_artifact_home: Option<PathBuf>,
+    /// What [`WorkspaceExecutor::commit_work_artifact`] commits through.
+    work_artifact: WorkArtifactBinding,
+}
+
+/// The Work artifact port one executor commits through.
+enum WorkArtifactBinding {
+    /// No production home attached: the commit refuses. Tests build this.
+    Unbound,
+    /// Production filesystem port; the home resolves the active
+    /// creator/workspace the port addresses.
+    Filesystem(PathBuf),
+    /// Simulate: record the intended writes and touch nothing.
+    Recording(Arc<RecordingWorkArtifactPort>),
 }
 
 impl WorkspaceCommitExecutor {
@@ -43,16 +54,77 @@ impl WorkspaceCommitExecutor {
         Self {
             session_manager,
             canonical_workspace_root,
-            work_artifact_home: None,
+            work_artifact: WorkArtifactBinding::Unbound,
+        }
+    }
+
+    /// The same executor, recording Work artifact writes instead of landing
+    /// them.
+    ///
+    /// A dry run through a scaffold must leave an existing `Works/` tree — real
+    /// chapter bytes included — byte-identical; this is the selection that
+    /// makes every `commit_work_artifact` below it a log entry.
+    #[must_use]
+    pub fn new_simulated(
+        session_manager: Arc<WorkspaceSessionManager>,
+        canonical_workspace_root: String,
+    ) -> Self {
+        Self {
+            session_manager,
+            canonical_workspace_root,
+            work_artifact: WorkArtifactBinding::Recording(Arc::new(
+                RecordingWorkArtifactPort::new(),
+            )),
         }
     }
 
     /// Attach the home whose creator/workspace config the Work artifact port
     /// resolves — the same value the hot path hands its port.
+    ///
+    /// A simulated executor keeps recording: attaching a home to it would
+    /// otherwise turn the dry run back into a real writer.
     #[must_use]
     pub fn with_work_artifact_home(mut self, nexus_home: PathBuf) -> Self {
-        self.work_artifact_home = Some(nexus_home);
+        if matches!(self.work_artifact, WorkArtifactBinding::Unbound) {
+            self.work_artifact = WorkArtifactBinding::Filesystem(nexus_home);
+        }
         self
+    }
+
+    /// The Work writes this executor recorded, or `None` for a production one.
+    ///
+    /// `None` is not an empty log: a production executor commits real bytes and
+    /// records nothing.
+    #[must_use]
+    pub fn recorded_work_artifact_mutations(&self) -> Option<Vec<RecordedMutation>> {
+        match &self.work_artifact {
+            WorkArtifactBinding::Recording(port) => Some(port.mutations()),
+            WorkArtifactBinding::Filesystem(_) | WorkArtifactBinding::Unbound => None,
+        }
+    }
+}
+
+impl WorkspaceCommitExecutor {
+    /// Commit one Work artifact write through the selected port.
+    async fn commit_into_selected_port(
+        &self,
+        write: WorkArtifactWrite<'_>,
+    ) -> Result<(), CapabilityError> {
+        match &self.work_artifact {
+            WorkArtifactBinding::Filesystem(nexus_home) => {
+                let pool = self.session_manager.pool();
+                FsWorkArtifactPort::new((*pool).clone(), nexus_home.clone())
+                    .commit(write)
+                    .await
+                    .map_err(map_port_error)
+            }
+            WorkArtifactBinding::Recording(port) => {
+                port.commit(write).await.map_err(map_port_error)
+            }
+            WorkArtifactBinding::Unbound => Err(CapabilityError::InputInvalid(
+                "work artifact commit not wired".into(),
+            )),
+        }
     }
 }
 
@@ -149,6 +221,10 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
             .unwrap_or_else(|_| PathBuf::from(&self.canonical_workspace_root)))
     }
 
+    fn records_work_artifacts(&self) -> bool {
+        matches!(self.work_artifact, WorkArtifactBinding::Recording(_))
+    }
+
     async fn open(
         &self,
         input: WorkspaceOpenInput,
@@ -209,11 +285,13 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
         &self,
         input: WorkArtifactCommitInput,
     ) -> Result<WorkArtifactCommitOutput, CapabilityError> {
-        let Some(nexus_home) = self.work_artifact_home.as_ref() else {
+        // The refusal precedes the root checks, as it did when the only
+        // selection was a home.
+        if matches!(self.work_artifact, WorkArtifactBinding::Unbound) {
             return Err(CapabilityError::InputInvalid(
                 "work artifact commit not wired".into(),
             ));
-        };
+        }
         // A builtin's default `works_root` is the workspace-relative `Works`,
         // so its owning root arrives empty. Resolve any relative/empty input
         // against the ONE canonical root this executor was built for, then
@@ -261,18 +339,16 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
                 input.rel_child
             )));
         }
-        // Same per-dispatch construction the hot path performs: one port over
-        // the shared pool, no second writer and no new public surface.
-        let pool = self.session_manager.pool();
-        FsWorkArtifactPort::new((*pool).clone(), nexus_home.clone())
-            .commit(WorkArtifactWrite {
-                workspace_root: &requested_root,
-                work_ref: &input.work_ref,
-                rel_child,
-                content: &input.content,
-            })
-            .await
-            .map_err(map_port_error)?;
+        // One selection at construction covers this commit: a simulated
+        // executor records the write, a production one commits it over the
+        // shared pool. No second writer and no new public surface.
+        self.commit_into_selected_port(WorkArtifactWrite {
+            workspace_root: &requested_root,
+            work_ref: &input.work_ref,
+            rel_child,
+            content: &input.content,
+        })
+        .await?;
         Ok(WorkArtifactCommitOutput { committed: true })
     }
 }

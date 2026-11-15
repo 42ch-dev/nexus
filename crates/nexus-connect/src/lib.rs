@@ -1,6 +1,6 @@
-//! Peer-tools Connect client stack (AR-57..77), owned by `nexus-core`
-//! (P4-T3 moved from the daemon transport) behind the `connect-host` /
-//! `connect-client` / `embedded-mcp` cohort features.
+//! Peer-tools Connect protocol stack, owned by `nexus-connect` (extracted from
+//! `nexus-core`'s `connect` module behind the `connect-host` /
+//! `connect-client` / `embedded-mcp` cohort features).
 //!
 //! - WS message-oriented [`ws_transport::Transport`] implementation over
 //!   tokio-tungstenite (AR-66).
@@ -12,60 +12,73 @@
 //!   (`mcp_embedded`) compiles only under the nested `embedded-mcp`
 //!   feature.
 //!
-//! Capability dispatch stays in P3 (`crate::execution::peer_tools` owns the
+//! Capability dispatch lives beside this stack in [`peer_tools`] (the
 //! process-level peer tool registry); this stack owns peer/MCP sessions,
 //! visibility/authz, bounded transport, and watcher ownership — no second
-//! registry. Child stdio CLI belongs to P6-T2, and the Connect-host product
-//! (P6-T3) must not enable this reverse-invoke/operator cohort.
+//! registry.
 //!
-//! `memory-remote` (v1.229 N3) compiles this module for [`ws_transport`]
-//! alone: the remote memory client dials through the one product WS
-//! `Transport` without enabling any accept/session/peer-control/rmcp cohort
-//! below (n3-provider-binding.md §6).
+//! The crate depends on nothing in `nexus-core`: the error shape is local
+//! ([`error`]), and the reserved builtin tool ids the admission chain needs
+//! are injected by the composing side (`start_peer_tools_lane`) rather than
+//! read from a core registry.
+//!
+//! `memory-remote` compiles this crate for [`ws_transport`] alone: the remote
+//! memory client dials through the one product WS `Transport` without
+//! enabling any accept/session/peer-control/rmcp cohort below
+//! (n3-provider-binding.md §6).
+
+pub mod error;
+
+pub use error::{ConnectError, ConnectResult};
+
+// The protocol-neutral peer tool registry (process-global, one per process).
+#[cfg(feature = "peer-tools")]
+pub mod peer_tools;
 
 // The message-oriented WS transport is the one surface the remote memory
 // client shares with the peer-tools stack. Everything below keeps its
 // existing Connect cohort gate.
+#[cfg(feature = "transport")]
 pub mod ws_transport;
 
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub mod accept;
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub mod config;
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub mod events;
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub mod identity;
 // The rmcp bridge is the reverse-invoke/operator surface; it compiles only
 // with the rmcp-bearing `connect-client` cohort, never in the Connect-host
-// product cohort (`connect-host`).
+// product cohort.
 #[cfg(feature = "connect-client")]
 pub mod mcp_bridge;
 #[cfg(feature = "embedded-mcp")]
 pub mod mcp_embedded;
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub mod peer_control;
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub mod session;
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub mod table;
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub mod visibility;
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub mod watch;
 
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub use accept::{
     daemon_manifest, event_lane_readiness_line, spawn_accept_loop, start_peer_tools_lane,
     PeerResponderOptions, PeerToolsLaneHandle,
 };
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub use config::{load_peer_keys, CollisionPolicy, PeerToolsConfig, DEFAULT_CONNECT_PORT};
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub use identity::load_or_create_identity;
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub use identity::load_or_create_identity_at;
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub use watch::{
     peer_config_digest, spawn_peer_config_watch, supervise_peer_config_watch, PeerConfigHolder,
     PeerConfigSnapshot,
@@ -81,15 +94,16 @@ pub use mcp_embedded::{
     start_embedded_mcp_server, EmbeddedMcpError, EmbeddedMcpServer, EmbeddedSession,
     EmbeddedShutdown, EMBEDDED_MCP_MAX_SESSIONS,
 };
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub use peer_control::PeerControlLane;
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub use session::{PeerSessionManager, SessionRecord, DEFAULT_MAX_SESSIONS};
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub use table::{
     mcp_catalog_admission, mcp_catalog_output_root_object, peer_tool_table, AdmissionOutcome,
     McpCatalogRefusal, PeerSessionTools, PeerToolEntry, PeerToolTable, ToolRefusal,
 };
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(feature = "connect-host")]
 pub use visibility::VisibilityPolicy;
+#[cfg(feature = "transport")]
 pub use ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};

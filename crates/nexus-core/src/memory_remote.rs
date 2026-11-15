@@ -42,7 +42,8 @@ use spoke_operations::spoke_schemas::{
 };
 use spoke_operations::{MemoryPort, SpokeResult};
 
-use crate::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
+use nexus_connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
+
 use crate::error::{CoreError, CoreResult};
 use crate::memory_binding::MemoryProviderBinding;
 use crate::memory_credentials::{MemoryCredential, CREDENTIAL_INVALID_CODE};

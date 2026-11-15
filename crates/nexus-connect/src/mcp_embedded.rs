@@ -11,7 +11,7 @@
 //! # Session bounds (GC #8, architect-locked)
 //!
 //! Model B carries a **documented exemption** from AR-67's
-//! [`crate::connect::session::PeerSessionManager::max_sessions`] (default 8).
+//! [`crate::session::PeerSessionManager::max_sessions`] (default 8).
 //! That bound guards the remote WS accept path against dial floods; an
 //! in-process consumer presents no remote dial surface and MUST NOT consume
 //! peer-session counters. The embedded surface carries its own compile-time
@@ -46,8 +46,8 @@ use rmcp::model::{
 use rmcp::serve_server;
 use rmcp::transport::sink_stream::SinkStreamTransport;
 
-use crate::connect::mcp_bridge::{McpBackend, McpBridgeHandler};
-use crate::connect::visibility::VisibilityPolicy;
+use crate::mcp_bridge::{McpBackend, McpBridgeHandler};
+use crate::visibility::VisibilityPolicy;
 
 /// Client→server wire messages (the client's sink / the server's stream).
 type ClientToServer = JsonRpcMessage<ClientRequest, ClientResult, ClientNotification>;
@@ -103,7 +103,7 @@ pub struct EmbeddedShutdown {
 impl EmbeddedShutdown {
     /// Bind the shutdown signal to a watch receiver.
     #[must_use]
-    pub fn new(rx: tokio::sync::watch::Receiver<bool>) -> Self {
+    pub const fn new(rx: tokio::sync::watch::Receiver<bool>) -> Self {
         Self { rx }
     }
 
@@ -199,7 +199,7 @@ impl SessionRegistry {
     fn release(&self) {
         let _ = self
             .active
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
                 Some(v.saturating_sub(1))
             });
     }
@@ -221,7 +221,7 @@ impl<B: McpBackend + Clone + 'static> EmbeddedMcpServer<B> {
     /// Build a server shell over a backend, visibility policy, and shutdown
     /// signal.
     #[must_use]
-    pub fn new(backend: B, policy: VisibilityPolicy, shutdown: EmbeddedShutdown) -> Self {
+    pub const fn new(backend: B, policy: VisibilityPolicy, shutdown: EmbeddedShutdown) -> Self {
         Self {
             backend,
             policy,

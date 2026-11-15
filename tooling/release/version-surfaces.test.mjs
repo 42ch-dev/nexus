@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import {
   CARGO_LOCK_PATH,
   ELECTRON_PACKAGE_PATH,
@@ -10,13 +10,17 @@ import {
   NATIVE_SURFACE_PATHS,
   PRODUCT_JSON_PATH,
   ROOT_PACKAGE_PATH,
+  VERSION_BRACKETS_PATH,
   parseCargoLockPackageVersion,
   parseCargoPackageName,
+  parseCargoPackageVersion,
   parseCargoWorkspaceMembers,
   parseJsonVersion,
   parseWorkspacePackageVersion,
   readSurfaceVersion,
   readSurfaceVersions,
+  readStandalonePublishableCrates,
+  readVersionBrackets,
   readWorkspaceMemberPackages,
   replaceJsonVersion,
   replaceWorkspacePackageVersion,
@@ -25,9 +29,11 @@ import {
 import {
   createTempRepo,
   cleanupTempRepo,
+  expectedMemberLockVersions,
   FIXTURE_BASELINE_VERSION,
   readRepoFile,
   REPO_ROOT,
+  writeRepoFile,
 } from "./test-harness.mjs";
 
 const currentVersion = JSON.parse(readRepoFile(REPO_ROOT, ROOT_PACKAGE_PATH)).version;
@@ -137,10 +143,17 @@ test("package names parse and members resolve to lock entries", () => {
   );
   assert.throws(() => parseCargoPackageName("[dependencies]\nfoo = \"1\"\n"), /missing \[package\]\.name/);
 
-  const members = readWorkspaceMemberPackages(REPO_ROOT);
+  // Two brackets: a contract crate's row equals its own manifest literal, every
+  // other member's row equals the product version.
+  const contractNames = readVersionBrackets(REPO_ROOT).map((entry) => entry.name);
+  const expected = expectedMemberLockVersions(REPO_ROOT, currentVersion);
+  assert.ok(
+    contractNames.some((name) => expected.has(name)),
+    "no contract crate is a workspace member, so the split row would never run",
+  );
   const lock = readRepoFile(REPO_ROOT, CARGO_LOCK_PATH);
-  for (const member of members) {
-    assert.equal(parseCargoLockPackageVersion(lock, member.name), currentVersion, member.name);
+  for (const [name, version] of expected) {
+    assert.equal(parseCargoLockPackageVersion(lock, name), version, name);
   }
 });
 
@@ -159,10 +172,20 @@ test("writeReleaseVersion regenerates Cargo.lock through Cargo", () => {
     }
 
     const lock = readFileSync(join(dir, CARGO_LOCK_PATH), "utf8");
-    const members = readWorkspaceMemberPackages(dir);
-    for (const member of members) {
-      assert.equal(parseCargoLockPackageVersion(lock, member.name), "9.9.9", member.name);
+    // Non-contract members followed the product bump; contract crates kept the
+    // literal their manifest still declares.
+    const expected = expectedMemberLockVersions(dir, "9.9.9");
+    assert.ok(
+      [...expected.values()].some((version) => version !== "9.9.9"),
+      "fixture needs a contract crate that is a workspace member",
+    );
+    for (const [name, version] of expected) {
+      assert.equal(parseCargoLockPackageVersion(lock, name), version, name);
     }
+    assert.equal(
+      parseCargoLockPackageVersion(lock, "nexus-contracts"),
+      FIXTURE_BASELINE_VERSION,
+    );
     // Non-member packages keep their versions: `nexus-module-manifest` is a
     // standalone (excluded) crate, `leb128fmt` an unrelated dependency.
     for (const name of ["nexus-module-manifest", "leb128fmt"]) {
@@ -200,3 +223,198 @@ test("writeReleaseVersion refuses a lockfile missing a workspace member entry", 
     cleanupTempRepo(dir);
   }
 });
+
+test("parseCargoPackageVersion separates a literal version from workspace inheritance", () => {
+  assert.equal(
+    parseCargoPackageVersion('[package]\nname = "a"\nversion = "9.9.9"\n'),
+    "9.9.9",
+  );
+  assert.equal(
+    parseCargoPackageVersion("[package]\nname = \"a\"\nversion.workspace = true\n"),
+    null,
+  );
+  assert.throws(
+    () => parseCargoPackageVersion('[package]\nname = "a"\n', "crates/a/Cargo.toml"),
+    /missing version = "\.\.\." or version\.workspace = true/,
+  );
+});
+
+test("the version brackets carrier names manifests whose package names agree", () => {
+  const entries = readVersionBrackets(REPO_ROOT);
+  assert.ok(entries.length > 0, "carrier is empty");
+  assert.equal(new Set(entries.map((entry) => entry.name)).size, entries.length);
+  for (const entry of entries) {
+    const contents = readRepoFile(REPO_ROOT, entry.manifest);
+    assert.equal(parseCargoPackageName(contents, entry.manifest), entry.name);
+    // Contract crates version independently: a literal, never inheritance.
+    assert.equal(typeof parseCargoPackageVersion(contents, entry.manifest), "string", entry.name);
+  }
+});
+
+/**
+ * The contract-entry identity guard compares a carrier's POSIX manifest path
+ * with the member's, so member paths must be POSIX too — the platform `join`
+ * here made every run on win32 throw instead.
+ */
+test("workspace member manifest paths use the carrier's POSIX convention", () => {
+  const members = readWorkspaceMemberPackages(REPO_ROOT);
+  assert.ok(members.length > 0, "workspace has no members");
+  for (const member of members) {
+    assert.equal(
+      member.manifestPath,
+      posix.normalize(member.manifestPath),
+      `${member.name}: member manifest paths must be repo-relative POSIX`,
+    );
+  }
+});
+
+/**
+ * Rewrite the fixture carrier through `mutate`, then require the loader to
+ * reject it.
+ *
+ * @param {(carrier: { contract: { name: string; manifest: string }[] }) => void} mutate
+ * @param {RegExp} pattern
+ */
+function assertCarrierRejected(mutate, pattern) {
+  const dir = createTempRepo();
+  try {
+    const carrier = JSON.parse(readRepoFile(dir, VERSION_BRACKETS_PATH));
+    mutate(carrier);
+    writeRepoFile(dir, VERSION_BRACKETS_PATH, `${JSON.stringify(carrier, null, 2)}\n`);
+    assert.throws(() => readVersionBrackets(dir), pattern);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+}
+
+test("readVersionBrackets rejects a duplicate contract entry", () => {
+  const [first] = readVersionBrackets(REPO_ROOT);
+  assertCarrierRejected(
+    (carrier) => carrier.contract.push({ ...first }),
+    new RegExp(`duplicate contract entry ${first.name}`),
+  );
+});
+
+test("readVersionBrackets rejects a contract entry with a missing manifest", () => {
+  assertCarrierRejected(
+    (carrier) => carrier.contract.push({ name: "nexus-absent", manifest: "crates/nexus-absent/Cargo.toml" }),
+    /contract entry nexus-absent points at a missing manifest crates\/nexus-absent\/Cargo\.toml/,
+  );
+});
+
+test("readVersionBrackets rejects a name that disagrees with its manifest", () => {
+  assertCarrierRejected(
+    (carrier) => {
+      carrier.contract[0].name = "nexus-renamed";
+    },
+    /contract entry nexus-renamed does not match package name .* in crates\/nexus-contracts\/Cargo\.toml/,
+  );
+});
+
+test("readVersionBrackets rejects an empty contract array instead of exempting nothing", () => {
+  assertCarrierRejected((carrier) => {
+    carrier.contract = [];
+  }, /empty "contract" array/);
+});
+
+test("readVersionBrackets rejects a carrier path that is not the member's manifest", () => {
+  const dir = createTempRepo();
+  try {
+    // Same package name as a workspace member, different file: it would satisfy
+    // the name check and let the real member go unchecked.
+    writeRepoFile(
+      dir,
+      "shadow/Cargo.toml",
+      '[package]\nname = "nexus-workflow-ir"\nversion = "0.1.0"\n',
+    );
+    const carrier = JSON.parse(readRepoFile(dir, VERSION_BRACKETS_PATH));
+    const entry = carrier.contract.find((row) => row.name === "nexus-workflow-ir");
+    entry.manifest = "shadow/Cargo.toml";
+    writeRepoFile(dir, VERSION_BRACKETS_PATH, `${JSON.stringify(carrier, null, 2)}\n`);
+
+    assert.throws(
+      () => readVersionBrackets(dir),
+      /contract entry nexus-workflow-ir points at shadow\/Cargo\.toml, but workspace member nexus-workflow-ir is crates\/nexus-workflow-ir\/Cargo\.toml; the entry must name the member's own manifest/,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+/** Standalone crate added to a fixture: outside the root workspace, own root. */
+const FIXTURE_STANDALONE_MANIFEST = "modules/nexus-demo/Cargo.toml";
+
+/**
+ * Add a standalone crate to a fixture — its own `[workspace]` table, its own
+ * target stub — so Cargo parses it as a workspace root of its own.
+ *
+ * @param {string} dir
+ * @param {string} publishLine `publish = false` or `""` (Cargo's publishable default).
+ * @returns {void}
+ */
+function writeFixtureStandaloneCrate(dir, publishLine) {
+  writeRepoFile(
+    dir,
+    FIXTURE_STANDALONE_MANIFEST,
+    `[package]\nname = "nexus-demo"\nversion = "0.1.0"\nedition = "2021"\n${publishLine}\n[workspace]\n`,
+  );
+  writeRepoFile(dir, "modules/nexus-demo/src/lib.rs", "// release-fixture stub\n");
+}
+
+test("readStandalonePublishableCrates skips a crate declared publish = false", () => {
+  const dir = createTempRepo();
+  try {
+    writeFixtureStandaloneCrate(dir, "publish = false");
+    const crates = readStandalonePublishableCrates(dir);
+    assert.ok(
+      !crates.some((crate) => crate.manifest === FIXTURE_STANDALONE_MANIFEST),
+      "a publish = false crate cannot version independently, so it needs no carrier entry",
+    );
+    // The scan still classifies the real declarations, so the result above is
+    // not a broken read.
+    assert.ok(
+      crates.some((crate) => crate.manifest === "modules/nexus-module-sdk/Cargo.toml"),
+      "real publishable crate missing from the read",
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("readStandalonePublishableCrates requires a crate that omits publish", () => {
+  const dir = createTempRepo();
+  try {
+    // Cargo's default is publishable, so omitting the key does not opt out.
+    writeFixtureStandaloneCrate(dir, "");
+    assert.ok(
+      readStandalonePublishableCrates(dir).some(
+        (crate) => crate.manifest === FIXTURE_STANDALONE_MANIFEST,
+      ),
+      "a crate Cargo would publish belongs in the contract bracket",
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("readStandalonePublishableCrates finds crates outside the workspace root", () => {
+  const dir = createTempRepo();
+  try {
+    const manifests = readStandalonePublishableCrates(dir).map((crate) => crate.manifest);
+    for (const manifest of [
+      "modules/nexus-module-sdk/Cargo.toml",
+      "modules/nexus-module-manifest/Cargo.toml",
+      "modules/nexus-module-test/Cargo.toml",
+    ]) {
+      assert.ok(manifests.includes(manifest), `${manifest} missing from the read`);
+    }
+    // The root workspace is a separate root: its members are not standalone.
+    assert.ok(
+      !manifests.some((manifest) => manifest.startsWith("crates/")),
+      "a workspace member was classified as a standalone crate",
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+

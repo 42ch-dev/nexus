@@ -16,7 +16,7 @@ Per-moment context assembly for ACP sessions. Three strategies:
 - **`assemble_moment` is the SSOT** — there is no separate `assemble-local` command. Stage0 /
   degradation / optional two-stage behavior are flags on `assemble-moment`.
 - **No cloud-sync dependency by default** — daemon builds use Stage-0 only.
-- `cloud-stage` feature gate adds `nexus-cloud-sync` dependency and `TwoStageAssembly`.
+- `cloud-stage` feature gate adds `TwoStageAssembly`.
 - Token budget / truncation uses chars/4 heuristic (spec §9.3).
 - **Personality section is NEVER truncated** — cross-domain truncation preserves personality
   and applies remaining budget to `world_state`, `timeline`, `world_kb` in order.
@@ -32,7 +32,6 @@ Per-moment context assembly for ACP sessions. Three strategies:
 - `nexus-contracts` (for `RuntimeMode`, `BlockType`, local types)
 - `nexus-narrative` (for `NarrativeGateway` — world state, timeline, events)
 - `nexus-knowledge` (for `KbStore`, `KbQuery` — World-scoped knowledge entries with structured queries)
-- `nexus-cloud-sync` (optional, behind `cloud-stage` feature)
 
 ## Stage0 Personality Delimiter Protocol
 

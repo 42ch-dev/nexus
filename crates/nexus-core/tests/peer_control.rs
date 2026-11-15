@@ -28,9 +28,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nexus_core::connect::table::peer_tool_table;
-use nexus_core::connect::visibility::VisibilityPolicy;
-use nexus_core::execution::peer_tools::{invoke_peer_tool, AdmissionOutcome, PeerResponder};
+use nexus_connect::peer_tools::{invoke_peer_tool, AdmissionOutcome, PeerResponder};
+use nexus_connect::table::peer_tool_table;
+use nexus_connect::visibility::VisibilityPolicy;
+use nexus_contracts::generated::core::{
+    CorePeerControlOptions, CorePeerControlOptionsAllowedOperationsItem, CorePeerControlRequest,
+    CorePeerControlRequestOperation, CorePeerControlRequestPeerId,
+};
+use nexus_contracts::{
+    CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply,
+};
+use nexus_core::execution::{ExecutionHandle, RunnerDeps};
+use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
+use nexus_provider_ports::{ProviderPort, ProviderResult};
 use nexus_spoke_adapter::HostCapabilityManifest;
 use serial_test::serial;
 
@@ -138,7 +148,7 @@ impl PeerResponder for CountingResponder {
         &self,
         _tool_id: &str,
         _arguments: serde_json::Value,
-    ) -> nexus_core::execution::peer_tools::PeerInvokeResult {
+    ) -> nexus_connect::peer_tools::PeerInvokeResult {
         self.invocations.fetch_add(1, Ordering::SeqCst);
         Ok(serde_json::json!({ "echo": true }))
     }
@@ -459,5 +469,385 @@ async fn peer_tool_admission_is_scoped_by_manifest_negotiation_allowlist_and_res
     assert!(
         registry.get(TOOL_ALPHA).is_none(),
         "the admission-matrix fixture leaves no rows behind"
+    );
+}
+
+// ── Peer-control lane state transitions (v1.190 P4-T3) ────────────────────
+//
+// The two cases below drive the lane the `ExecutionHandle` owns, not the
+// registry: a start REPLACES the allowlist (so a narrowing restart drops the
+// earlier grants) and `allow` grants the operation its payload names.
+
+const LANE_CREATOR: &str = "peer-lane-creator";
+const LANE_SLUG: &str = "default";
+const LANE_PEER: &str = "peer-lane-1";
+
+/// A provider that never performs an effect: the lane cases drive no run.
+struct LaneNullProvider;
+
+#[async_trait]
+impl ProviderPort for LaneNullProvider {
+    async fn call(&self, _request: ProviderCall) -> ProviderResult<ProviderReply> {
+        Err(WireCoreError {
+            code: CoreErrorCode::Internal,
+            message: "null provider: no live model in this test".to_string(),
+            details: serde_json::Map::default(),
+            http_status: Some(500),
+        })
+    }
+
+    async fn next(
+        &self,
+        operation_id: String,
+        _max_events: u32,
+        _max_bytes: u32,
+    ) -> ProviderResult<ProviderEventBatch> {
+        Ok(ProviderEventBatch {
+            operation_id,
+            events: vec![],
+            has_more: false,
+            gap: None,
+        })
+    }
+}
+
+struct LaneFixture {
+    core: CoreService,
+    handle: Arc<ExecutionHandle>,
+    _tmp: tempfile::TempDir,
+}
+
+/// Open an engine-owner core over a seeded home and start its execution owner,
+/// exactly as the daemon does — the lane lives on that owner.
+async fn lane_fixture() -> LaneFixture {
+    let tmp = tempfile::TempDir::new().expect("temp home");
+    let user_home = tmp.path().to_path_buf();
+    let home = user_home.join(".nexus42");
+    std::fs::create_dir_all(&home).expect("nexus home");
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        &user_home,
+        LANE_CREATOR,
+        LANE_SLUG,
+    ))
+    .expect("workspace dir");
+    std::fs::write(
+        home.join("config.toml"),
+        format!(
+            "active_creator_id = \"{LANE_CREATOR}\"\n[active_workspace_slug_by_creator]\n\"{LANE_CREATOR}\" = \"{LANE_SLUG}\"\n"
+        ),
+    )
+    .expect("config.toml");
+    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, LANE_CREATOR, LANE_SLUG);
+    {
+        // The seed guard holds the DB's engine lock; it must be gone before
+        // the engine-owner open below claims that lock itself.
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .expect("engine pool init");
+        nexus_local_db::ensure_creator_row(guarded.pool(), LANE_CREATOR, "Test")
+            .await
+            .expect("seed the admitted creator and its holder");
+        guarded.pool().close().await;
+        drop(guarded);
+    }
+    nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
+
+    let core = CoreService::open(CoreOpenOptions {
+        user_home: user_home.clone(),
+        access: CoreAccess::EngineOwner,
+        memory: None,
+    })
+    .await
+    .expect("engine-owner core open");
+    let deps = RunnerDeps {
+        workspace_root: Some(nexus_home_layout::operational_workspace_dir(
+            &user_home,
+            LANE_CREATOR,
+            LANE_SLUG,
+        )),
+        nexus_home: Some(home),
+        ..RunnerDeps::default()
+    };
+    let handle = core
+        .start_execution(Arc::new(LaneNullProvider) as Arc<dyn ProviderPort>, deps)
+        .await
+        .expect("execution owner starts");
+    LaneFixture {
+        core,
+        handle,
+        _tmp: tmp,
+    }
+}
+
+fn start_options(enabled: bool, allowed: &[&str]) -> CorePeerControlOptions {
+    CorePeerControlOptions {
+        allowed_operations: allowed
+            .iter()
+            .map(|operation| {
+                CorePeerControlOptionsAllowedOperationsItem::try_from(*operation)
+                    .expect("fixture operations are non-empty")
+            })
+            .collect(),
+        enabled,
+    }
+}
+
+/// A control request; `grants` names the operation an `allow` request adds to
+/// the allowlist (the request's own `operation` is `"allow"`).
+fn control_request(operation: &str, grants: Option<&str>) -> CorePeerControlRequest {
+    let mut payload = serde_json::Map::new();
+    if let Some(granted) = grants {
+        payload.insert(
+            "operation".to_string(),
+            serde_json::Value::String(granted.to_string()),
+        );
+    }
+    CorePeerControlRequest {
+        operation: CorePeerControlRequestOperation::try_from(operation)
+            .expect("fixture operations are non-empty"),
+        payload,
+        peer_id: CorePeerControlRequestPeerId::try_from(LANE_PEER)
+            .expect("fixture peer id is non-empty"),
+    }
+}
+
+const fn forbidden(
+    result: &Result<nexus_contracts::generated::core::CorePeerControlState, CoreError>,
+) -> bool {
+    matches!(result, Err(CoreError::Forbidden { .. }))
+}
+
+/// A restart REPLACES the allowlist: the operation the narrower start omits is
+/// refused afterwards. Additive install would keep the earlier grant.
+#[tokio::test]
+#[serial]
+async fn peer_control_restart_replaces_the_allowlist() {
+    let f = lane_fixture().await;
+    let principal = f.core.active_principal().await.expect("active principal");
+    f.handle
+        .start_peer_control(&principal, start_options(true, &["status", "evict"]))
+        .await
+        .expect("the lane starts");
+    let evict = control_request("evict", None);
+    assert!(
+        !forbidden(&f.handle.peer_control(&principal, evict.clone()).await),
+        "the first start admits evict (its refusal here is not the allowlist)"
+    );
+    assert!(
+        f.handle
+            .peer_control(&principal, control_request("status", None))
+            .await
+            .is_ok(),
+        "the first start admits status"
+    );
+
+    f.handle
+        .start_peer_control(&principal, start_options(true, &["status"]))
+        .await
+        .expect("the lane restarts");
+
+    let dropped = f.handle.peer_control(&principal, evict).await;
+    assert!(
+        forbidden(&dropped),
+        "a restart that omits evict must drop the earlier grant, got {dropped:?}"
+    );
+    assert!(
+        f.handle
+            .peer_control(&principal, control_request("status", None))
+            .await
+            .is_ok(),
+        "the narrowing start keeps the operation it names"
+    );
+}
+
+/// `allow` grants the operation its payload names — not the literal `allow` —
+/// so a later call to that operation passes the allowlist gate.
+#[tokio::test]
+#[serial]
+async fn peer_control_allow_grants_the_named_operation() {
+    let f = lane_fixture().await;
+    let principal = f.core.active_principal().await.expect("active principal");
+    f.handle
+        .start_peer_control(&principal, start_options(true, &["allow"]))
+        .await
+        .expect("the lane starts");
+
+    let status = control_request("status", None);
+    assert!(
+        forbidden(&f.handle.peer_control(&principal, status.clone()).await),
+        "status is not on the allowlist yet"
+    );
+
+    let granted = f
+        .handle
+        .peer_control(&principal, control_request("allow", Some("status")))
+        .await;
+    assert!(granted.is_ok(), "allow itself is allowlisted: {granted:?}");
+
+    assert!(
+        f.handle.peer_control(&principal, status).await.is_ok(),
+        "allow must grant the operation its payload names"
+    );
+    assert!(
+        forbidden(
+            &f.handle
+                .peer_control(&principal, control_request("evict", None))
+                .await
+        ),
+        "an operation allow never named stays refused"
+    );
+    assert!(
+        matches!(
+            f.handle
+                .peer_control(&principal, control_request("allow", None))
+                .await,
+            Err(CoreError::InvalidInput { .. })
+        ),
+        "allow without a payload-named operation is a validation refusal, not a silent grant"
+    );
+}
+
+/// A restart that lands while `peer_control` is resolving its lane must not
+/// swallow the operation: the effect must reach the lane that is installed and
+/// the returned state must describe that lane. The seam parks the call at its
+/// lane-resolution boundary; the restart runs while it is parked.
+#[tokio::test]
+#[serial]
+async fn peer_control_acts_on_the_lane_installed_when_it_resolves() {
+    use nexus_core::execution::test_hooks::{set_peer_control_gate, PeerControlGate};
+
+    let f = lane_fixture().await;
+    let principal = f.core.active_principal().await.expect("active principal");
+    let allowed = ["disable", "status"];
+    f.handle
+        .start_peer_control(&principal, start_options(true, &allowed))
+        .await
+        .expect("the lane starts");
+
+    let gate = Arc::new(PeerControlGate::new());
+    set_peer_control_gate(Some(Arc::clone(&gate)));
+    let disable = f
+        .handle
+        .peer_control(&principal, control_request("disable", None));
+    // `join!` polls left to right, so `disable` reaches the seam before the
+    // restart installs the fresh lane.
+    let restart = async {
+        gate.admitted.notified().await;
+        let restarted = f
+            .handle
+            .start_peer_control(&principal, start_options(true, &allowed))
+            .await;
+        gate.proceed.notify_one();
+        restarted
+    };
+    let (disabled, restarted) = tokio::join!(disable, restart);
+    set_peer_control_gate(None);
+    restarted.expect("the restart installs a fresh enabled lane");
+    let returned = disabled.expect("disable is admitted by the allowlist");
+    let installed = f
+        .handle
+        .peer_control(&principal, control_request("status", None))
+        .await
+        .expect("status is admitted by the allowlist");
+    assert_eq!(
+        returned.enabled, installed.enabled,
+        "the returned state must describe the installed lane: returned {returned:?}, installed {installed:?}"
+    );
+    assert!(
+        !installed.enabled,
+        "the disable must reach the installed lane, got {installed:?}"
+    );
+}
+
+/// `enabled` is reported state, never a second gate: a lane started disabled
+/// still serves an allowlisted operation, and its state says the cohort is off.
+#[tokio::test]
+#[serial]
+async fn peer_control_admits_the_allowlist_when_the_lane_reports_disabled() {
+    let f = lane_fixture().await;
+    let principal = f.core.active_principal().await.expect("active principal");
+    let started = f
+        .handle
+        .start_peer_control(&principal, start_options(false, &["status"]))
+        .await
+        .expect("the lane starts");
+    assert!(!started.enabled, "the start reports the disabled lane");
+
+    let reported = f
+        .handle
+        .peer_control(&principal, control_request("status", None))
+        .await
+        .expect("the allowlist alone admits status on a disabled lane");
+    assert!(
+        !reported.enabled,
+        "the lane reports its enablement, it does not gate the allowlist"
+    );
+}
+
+/// `allow` refuses a `payload.operation` no arm dispatches: a grant nothing
+/// would ever match is not a permission, and the refusal names the field.
+#[tokio::test]
+#[serial]
+async fn peer_control_allow_rejects_an_undispatched_operation() {
+    let f = lane_fixture().await;
+    let principal = f.core.active_principal().await.expect("active principal");
+    f.handle
+        .start_peer_control(&principal, start_options(true, &["allow"]))
+        .await
+        .expect("the lane starts");
+
+    let refused = f
+        .handle
+        .peer_control(&principal, control_request("allow", Some("frobnicate")))
+        .await;
+    assert!(
+        matches!(
+            &refused,
+            Err(CoreError::InvalidInput { field, .. }) if field.as_str() == "payload.operation"
+        ),
+        "an undispatched grant target is a payload.operation refusal, got {refused:?}"
+    );
+    assert!(
+        forbidden(
+            &f.handle
+                .peer_control(&principal, control_request("status", None))
+                .await
+        ),
+        "the refused grant must not authorize the name it carried"
+    );
+}
+
+/// A start's allowlist is a grant surface too: naming an operation no arm
+/// dispatches would authorize nothing forever, so the start refuses it instead
+/// of installing a lane that holds it.
+#[tokio::test]
+#[serial]
+async fn peer_control_start_rejects_an_undispatched_operation() {
+    let f = lane_fixture().await;
+    let principal = f.core.active_principal().await.expect("active principal");
+    let refused = f
+        .handle
+        .start_peer_control(&principal, start_options(true, &["frobnicate"]))
+        .await;
+    assert!(
+        matches!(
+            &refused,
+            Err(CoreError::InvalidInput { field, .. }) if field.as_str() == "allowed_operations"
+        ),
+        "an undispatched start allowlist entry is an allowed_operations refusal, got {refused:?}"
+    );
+
+    // The refusal precedes the install, so no lane is left behind and the
+    // next control call reports the lane-state cause, not a `peer_id`.
+    let unstarted = f
+        .handle
+        .peer_control(&principal, control_request("status", None))
+        .await;
+    assert!(
+        matches!(
+            &unstarted,
+            Err(CoreError::InvalidInput { field, .. }) if field.as_str() == "lane"
+        ),
+        "a refused start installs no lane and names the lane, got {unstarted:?}"
     );
 }

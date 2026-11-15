@@ -510,6 +510,148 @@ fn react_trpg_turn_workflow_json_exports_the_committed_yaml() {
     assert_workflow_json_exports_committed_yaml("strategy-samples/react-trpg-turn");
 }
 
+/// One authored lane prose block: the outer state that carries it and a phrase only that block
+/// contains, so a projection that drops it is visible.
+type LaneProse = (&'static str, &'static str);
+
+/// One sample's lane prose: the sample's bundle path and its per-state blocks.
+type SampleLaneProse = (&'static str, &'static [LaneProse]);
+
+/// The lane prose each sample authors in its outer-state `ui.description`, with a per-state
+/// sentinel. Generated YAML cannot carry a comment (`serde_yaml` writes values only), so this
+/// field is the carrier an export can project.
+const SAMPLE_LANE_PROSE: &[SampleLaneProse] = &[
+    (
+        "strategy-samples/game-narrative",
+        &[
+            ("routing", "FLAT context JSON map"),
+            ("trigger_extract", "trigger_parse -> extract_worldview"),
+            ("scheduled_sweep", "min_interval: PT1H"),
+            ("sweep_extract", "the scan and judge happen there"),
+        ],
+    ),
+    (
+        "strategy-samples/react-trpg-turn",
+        &[
+            ("routing", "Pure-UI operations"),
+            ("mechanical_turn", "settles FIRST"),
+            ("natural_language_turn", "preset.input.parsed_intent"),
+            ("wait_for_player", "Stop at the player response point"),
+        ],
+    ),
+];
+
+/// Load one sample's authoring source, the hand-edited `workflow.json`.
+fn load_sample_document(bundle: &str) -> WorkflowDocument {
+    let json = std::fs::read_to_string(repo_root().join(bundle).join("workflow.json"))
+        .unwrap_or_else(|error| panic!("read {bundle}/workflow.json: {error}"));
+    serde_json::from_str(&json).unwrap_or_else(|error| {
+        panic!("{bundle}/workflow.json does not load as a WorkflowDocument: {error}")
+    })
+}
+
+/// The `ui.description` a document's node carries, or `""` when it has none.
+fn node_description(document: &WorkflowDocument, id: &str) -> String {
+    let node = document
+        .nodes
+        .iter()
+        .find(|node| node.id == id)
+        .unwrap_or_else(|| panic!("document has no node `{id}`"));
+    node.ui
+        .as_ref()
+        .and_then(|ui| ui.description.clone())
+        .unwrap_or_default()
+}
+
+/// Acceptance 1: the lane prose lives on the carrier, and exporting the document twice puts it in
+/// both outputs. Clearing one carrier makes its prose disappear from the export, so the exporter
+/// reads the field rather than replaying a copy of the prose.
+#[test]
+fn sample_lane_prose_survives_a_second_export() {
+    for (bundle, lanes) in SAMPLE_LANE_PROSE {
+        let document = load_sample_document(bundle);
+
+        for (state, sentinel) in *lanes {
+            assert!(
+                node_description(&document, state).contains(sentinel),
+                "{bundle}/workflow.json: node `{state}` no longer carries its lane prose \
+                 (`{sentinel}`) in `ui.description` — the export has nothing to project"
+            );
+        }
+
+        let export = |document: &WorkflowDocument| {
+            let manifest = export_preset(document)
+                .unwrap_or_else(|error| panic!("export {bundle}/workflow.json: {error}"));
+            serde_yaml::to_string(&manifest)
+                .unwrap_or_else(|error| panic!("serialize the {bundle} export: {error}"))
+        };
+        let first = export(&document);
+        let second = export(&document);
+        assert_eq!(first, second, "{bundle}: two exports must agree");
+        for (state, sentinel) in *lanes {
+            assert!(
+                first.contains(sentinel),
+                "{bundle}: the export dropped the `{state}` lane prose (`{sentinel}`)"
+            );
+            assert!(
+                second.contains(sentinel),
+                "{bundle}: the second export dropped the `{state}` lane prose (`{sentinel}`)"
+            );
+        }
+
+        let (state, sentinel) = *lanes
+            .first()
+            .expect("every sample declares at least one lane");
+        let mut cleared = document;
+        let node = cleared
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == state)
+            .expect("node present above");
+        if let Some(ui) = node.ui.as_mut() {
+            ui.description = None;
+        }
+        assert!(
+            !export(&cleared).contains(sentinel),
+            "{bundle}: clearing `{state}`'s `ui.description` left its prose in the export — the \
+             exporter is not reading the carrier"
+        );
+    }
+}
+
+/// Acceptance 2: `import_preset_bundle` reads each state's description back into the same outer
+/// state's `ui.description`, so a manifest that arrives from a partner round-trips its prose.
+#[test]
+fn sample_lane_prose_imports_back_into_ui_description() {
+    for (bundle, lanes) in SAMPLE_LANE_PROSE {
+        let root = repo_root().join(bundle);
+        let yaml = std::fs::read_to_string(root.join("preset.yaml"))
+            .unwrap_or_else(|error| panic!("read {bundle}/preset.yaml: {error}"));
+        let manifest: PresetManifest = serde_yaml::from_str(&yaml)
+            .unwrap_or_else(|error| panic!("parse {bundle}/preset.yaml: {error}"));
+        let imported = import_preset_bundle(&manifest, &root)
+            .unwrap_or_else(|error| panic!("import {bundle}/preset.yaml: {error}"));
+
+        for (state, sentinel) in *lanes {
+            let expected = manifest
+                .states
+                .iter()
+                .find(|candidate| candidate.id == *state)
+                .and_then(|candidate| candidate.description.clone())
+                .unwrap_or_else(|| panic!("{bundle}/preset.yaml: state `{state}` has no prose"));
+            assert_eq!(
+                node_description(&imported.document, state),
+                expected,
+                "{bundle}: the import lost the `{state}` lane prose"
+            );
+            assert!(
+                expected.contains(sentinel),
+                "{bundle}/preset.yaml: state `{state}` no longer carries its lane prose"
+            );
+        }
+    }
+}
+
 /// A manifest whose `a` state is spelled by `a_state`, with `header_extra` spliced into the
 /// preset header, and whose graph is otherwise fixed.
 fn probe_manifest_with(header_extra: &str, a_state: &str) -> String {

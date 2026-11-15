@@ -1,10 +1,10 @@
 # MCP & peer-tool surface
 
-Nexus exposes MCP as a **tools-only** surface over the single capability-registry / dispatch spine. The transport-neutral implementation lives in the core library — `nexus_core::connect` behind the `connect-client` / `embedded-mcp` features (peer tool registry, shared rmcp bridge core, embedded Model B server, `VisibilityPolicy`, peer-control lane) — and is composed by the native/TS consumers. No `nexus42` command spawns an MCP server. (The removed Model A `nexus42 mcp serve` stdio bridge is recorded in [`../.agents/adr/archived/architecture/2026-10-13-mcp-server-historical-notes.md`](../.agents/adr/archived/architecture/2026-10-13-mcp-server-historical-notes.md).) See [`docs/specs/architecture/rust-core-service-boundary.md`](specs/architecture/rust-core-service-boundary.md) §3–§4 and [`ARCHITECTURE.md`](specs/architecture/overview.md).
+Nexus exposes MCP as a **tools-only** surface over the single capability-registry / dispatch spine. The transport-neutral implementation lives in the **`nexus-connect` crate** — `nexus_connect` behind the `connect-client` / `embedded-mcp` features (peer tool registry, shared rmcp bridge core, embedded Model B server, `VisibilityPolicy`, peer-control lane) — and is composed by the native/TS consumers. `nexus-core` depends on it (direction `nexus-core → nexus-connect`), and core no longer compiles the protocol as part of itself. No `nexus42` command spawns an MCP server. (The removed Model A `nexus42 mcp serve` stdio bridge is recorded in [`../.agents/adr/archived/architecture/2026-10-13-mcp-server-historical-notes.md`](../.agents/adr/archived/architecture/2026-10-13-mcp-server-historical-notes.md).) See [`docs/specs/architecture/rust-core-service-boundary.md`](specs/architecture/rust-core-service-boundary.md) §3–§4 and [`ARCHITECTURE.md`](specs/architecture/overview.md).
 
 ## Integrator & operator duties (retained contract)
 
-The peer-admission rules below are enforced by the transport-neutral core library (`nexus_core::connect::config` / `watch` / `visibility`). Read "daemon" below as "the process hosting the Connect runtime".
+The peer-admission rules below are enforced by the transport-neutral `nexus-connect` crate (`nexus_connect::config` / `watch` / `visibility`). Read "daemon" below as "the process hosting the Connect runtime".
 
 ### Both sides name the same exact tool id
 
@@ -88,21 +88,21 @@ services belong to the agent, and `rmcp` stays out of the shipped graph.
 
 ## Implementation ownership
 
-The MCP/peer serving implementation is owned by `nexus-core` behind transport-neutral boundaries. Current facts:
+The MCP/peer serving implementation is owned by the `nexus-connect` crate behind transport-neutral boundaries; `nexus-core` consumes it through the optional `nexus-connect` edge. Current facts:
 
 - **Peer tool registry.** The process-level registry of admitted peer tools
-  is `nexus_core::execution::peer_tools::peer_tool_registry()`. The
+  is `nexus_connect::peer_tools::peer_tool_registry()`. The
   connect stack admits into it and never keeps a second registry; collision
   policy, reserved tool ids and evictions are registry semantics.
 - **Peer/MCP sessions, transport, watchers.** The WS transport
   (`WsTransport`, tokio-tungstenite, bounded envelope), the accept loop +
   `PeerSessionManager`, the config snapshot/watcher chain, peer identity
   loading, and the shared rmcp bridge core live in
-  `nexus_core::connect` behind the `connect-client` feature.
+  `nexus_connect` behind the `connect-client` feature.
 - **Embedded MCP server (Model B).** The generic shell (process-global
   session budget `EMBEDDED_MCP_MAX_SESSIONS`, server-side budget-slot
   lifetime, watch-based shutdown gate) is
-  `nexus_core::connect::mcp_embedded` behind the nested `embedded-mcp`
+  `nexus_connect::mcp_embedded` behind the nested `embedded-mcp`
   feature. The fail-closed invalid-`mcp_visibility` construction refusal
   is unchanged.
 - **Visibility policy.** `VisibilityPolicy` (RN-OGA-2) is
@@ -111,6 +111,8 @@ The MCP/peer serving implementation is owned by `nexus-core` behind transport-ne
   an absent policy stays byte-identical to the pre-seam behavior, and a
   hidden-tool call is refused at the seam before any peer invocation.
 - **Peer control.** The execution owner admits one peer-control lane
-  (`ExecutionHandle::start_peer_control` / `peer_control`): explicit
-  enablement plus a named operation allowlist; operations off the allowlist
-  are refused before any effect. The lane is composed by the native/TS consumers that host the runtime.
+  (`ExecutionHandle::start_peer_control` / `peer_control`): the enablement
+  the lane reports to the Connect surface plus a named operation allowlist
+  that alone decides admission — operations off the allowlist are refused
+  before any effect, and a disabled lane still serves an allowlisted
+  operation. The lane is composed by the native/TS consumers that host the runtime.

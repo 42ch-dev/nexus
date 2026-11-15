@@ -77,6 +77,7 @@ jobs:
               - '.sqlx/**'
               - 'strategy-samples/**'
               - 'tooling/check-*.sh'
+              - 'tooling/release/**'
               - 'tooling/work-artifact-write-allowlist.tsv'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
@@ -242,6 +243,23 @@ jobs:
         run: cargo +"${FMT_NIGHTLY}" fmt --all -- --check
       - name: Run clippy
         run: cargo clippy --all --all-targets -- -D warnings
+      - name: Check contract crates are packageable offline
+        timeout-minutes: 15
+        run: |
+          # `cargo package --offline` resolves against the registry cache, and
+          # the three standalone module crates are not root-workspace members,
+          # so clippy above never fetches their graphs (e.g. `dlmalloc`).
+          node -e 'for (const { manifest } of require("./tooling/release/version-brackets.json").contract) console.log(manifest)' \
+            | while read -r manifest; do cargo fetch --manifest-path "$manifest"; done
+          node tooling/release/check-contract-packageability.mjs
+      # The release scripts decide what a governed release writes, so their
+      # fixtures (both version brackets, every carrier rejection, the
+      # packageability loop) must be green on the PR that changes them, not only
+      # in the manually dispatched new-release preflight. Runs after the step
+      # above so the registry cache already holds every contract crate graph.
+      - name: Run release tooling tests (version brackets and lockstep rules)
+        timeout-minutes: 10
+        run: node --test 'tooling/release/*.test.mjs'
 
   verify-sqlx-offline:
     name: Verify sqlx offline metadata
@@ -782,6 +800,19 @@ jobs:
       - name: Run sample self-check (preset.yaml equals its workflow.json export)
         if: matrix.group == 'orchestration-core'
         run: cargo test -p nexus-orchestration --test sample_self_check
+      # I-000475: the preset round trips, the Simulate unit walk, the IR/YAML projection
+      # parity proofs and both embedded-preset trajectories never ran in CI, so their green
+      # was local-only. The `simulate` feature is not in `Run tests`' package set, and
+      # `--lib simulation::` / `--lib ...parity` select zero tests when the feature is off,
+      # so every invocation here is feature-explicit. Measured 40s warm locally.
+      - name: Run preset simulation and projection suites
+        if: matrix.group == 'orchestration-core'
+        timeout-minutes: 10
+        run: |
+          cargo test -p nexus-preset
+          cargo test -p nexus-orchestration --features simulate --lib simulation::
+          cargo test -p nexus-orchestration --features simulate --lib preset_runtime::tests::parity
+          cargo test -p nexus-orchestration --features simulate --test embedded_preset_trajectory --test sample_trajectory
       - name: Run tests
         run: cargo test ${{ matrix.packages }}
 
@@ -989,9 +1020,12 @@ jobs:
           cargo check -p nexus-core --lib --no-default-features --features connect-client --locked
           cargo check -p nexus-core --lib --no-default-features --features connect-client,embedded-mcp --locked
       - name: Core MCP/peer library owners
-        run: >-
-          cargo test -p nexus-core --features connect-client,embedded-mcp
-          --test retained_peer_contracts --test peer_control
+        run: |
+          # The unfeatured crate is the whole fan-in proof for the v1.244
+          # extraction: it must compile with no core/orchestration edge.
+          cargo check -p nexus-connect --no-default-features --locked
+          cargo test -p nexus-connect --features connect-client,embedded-mcp --test retained_peer_contracts
+          cargo test -p nexus-core --features connect-client,embedded-mcp --test peer_control
 
   rust-core-domain-owners:
     name: Rust core domain owners
@@ -1075,6 +1109,20 @@ jobs:
           --test retained_execution_contracts --test execution_lifecycle
           --test handle_ops --test approve_route
           -- --test-threads=2
+      # I-000475 / I-000460: the Simulate wire route and the two recording Work-plane
+      # proofs had no CI owner. The step above runs neither target, and `simulation_services`
+      # is `#![cfg(feature = "execution")]`, so every invocation here names the feature
+      # explicitly rather than inheriting one. Measured 7s warm locally.
+      # shortcut: an `--exact` filter that matches no test exits 0, so renaming either
+      # recording proof would pass this step silently; add a `--list` assertion if the
+      # names ever move.
+      - name: Run core simulation and recording Work planes
+        timeout-minutes: 10
+        run: |
+          cargo test -p nexus-core --features execution --test simulation_services
+          cargo test -p nexus-core --features execution --test work_artifact_production_shape simulated_scaffold_records_without_touching_work_tree -- --exact
+          cargo test -p nexus-core --features execution --test work_artifact_production_shape a_failed_simulated_scaffold_leaves_the_work_tree_alone -- --exact
+          cargo test -p nexus-core --features execution --lib execution::capabilities::tests::simulated_fs_write_records_and_preserves_an_existing_chapter -- --exact
 
   rust-core-host-state:
     name: Rust core host state owners

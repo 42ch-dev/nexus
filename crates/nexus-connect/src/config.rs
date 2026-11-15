@@ -33,8 +33,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::connect::session::DEFAULT_MAX_SESSIONS;
-use crate::connect::ws_transport::DEFAULT_MAX_ENVELOPE_BYTES;
+use crate::session::DEFAULT_MAX_SESSIONS;
+use crate::ws_transport::DEFAULT_MAX_ENVELOPE_BYTES;
 use nexus_spoke_adapter::{parse_tool_capability_id, SpokeResult};
 
 /// Default Connect listen port (the daemon API default is 8420; the
@@ -42,7 +42,7 @@ use nexus_spoke_adapter::{parse_tool_capability_id, SpokeResult};
 pub const DEFAULT_CONNECT_PORT: u16 = 8425;
 
 /// Default Connect listen host — loopback only (non-loopback reuses the
-/// daemon remote-bind gate posture; see [`crate::boot`]).
+/// daemon remote-bind gate posture; see [`crate::accept::ensure_remote_bind_allowed`]).
 pub const DEFAULT_CONNECT_HOST: &str = "127.0.0.1";
 
 /// Default per-invoke bounded wait (ms) — parity with
@@ -184,19 +184,15 @@ pub struct PeerToolsConfig {
 
 impl PeerToolsConfig {
     /// The registry-consumed projection. Single authority rule (P4-T3): the
-    /// registry in `crate::execution::peer_tools` owns its config type; this
+    /// registry in `crate::peer_tools` owns its config type; this
     /// connect-side config keeps only the connection settings and projects
     /// the admission-relevant fields onto the registry's type.
     #[must_use]
-    pub fn registry_config(&self) -> crate::execution::peer_tools::PeerToolsConfig {
-        crate::execution::peer_tools::PeerToolsConfig {
+    pub fn registry_config(&self) -> crate::peer_tools::PeerToolsConfig {
+        crate::peer_tools::PeerToolsConfig {
             collision_policy: match self.collision_policy {
-                CollisionPolicy::FirstStays => {
-                    crate::execution::peer_tools::CollisionPolicy::FirstStays
-                }
-                CollisionPolicy::PriorityOrder => {
-                    crate::execution::peer_tools::CollisionPolicy::PriorityOrder
-                }
+                CollisionPolicy::FirstStays => crate::peer_tools::CollisionPolicy::FirstStays,
+                CollisionPolicy::PriorityOrder => crate::peer_tools::CollisionPolicy::PriorityOrder,
             },
             peer_priority: self.peer_priority.clone(),
         }

@@ -891,16 +891,15 @@ impl ExecutionHandle {
                     .to_string(),
             })?
             .to_path_buf();
-        Ok(ToolContext {
-            pool: (*self.coordinator().pool()).clone(),
+        Ok(ToolContext::new(
+            (*self.coordinator().pool()).clone(),
             nexus_home,
-            workspace_path: self
-                .workspace_root()
+            self.workspace_root()
                 .map(|p| p.to_string_lossy().into_owned()),
-            runtime_facts: self.runtime_facts().clone(),
-            core: self.linked_core().ok(),
-            user_capabilities: Some(self.capability_holder()),
-        })
+            self.runtime_facts().clone(),
+            self.linked_core().ok(),
+            Some(self.capability_holder()),
+        ))
     }
 
     /// Build the compute context for this owner.
@@ -2306,4 +2305,192 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
             category: other.to_string(),
         },
     }
+}
+
+// ── Peer control (v1.190 P4-T3) ───────────────────────────────────────────
+//
+// The lane itself is `nexus_connect::PeerControlLane`; these entry points stay
+// here because Rust cannot write an inherent impl for a foreign type, and they
+// keep `CoreError`/`CoreResult` (verification, closing, ownership) rather than
+// widening connect's error taxonomy.
+
+/// The operations [`ExecutionHandle::peer_control`] dispatches. An allowlist
+/// entry outside this set matches no arm, so it authorizes nothing and every
+/// path that inserts one refuses it instead of storing it.
+#[cfg(feature = "connect-host")]
+const PEER_CONTROL_OPERATIONS: [&str; 5] = ["status", "enable", "disable", "allow", "evict"];
+
+#[cfg(feature = "connect-host")]
+impl ExecutionHandle {
+    /// Install (or disable) this execution owner's peer-control lane
+    /// (P4-T3). `enabled` is the enablement the lane REPORTS to the Connect
+    /// surface; it is not a second gate — [`Self::peer_control`] admits an
+    /// operation on the allowlist alone, so `enabled: false` still serves an
+    /// allowlisted operation and only the state says the cohort is off. Every
+    /// start REPLACES the allowlist, so the lane holds exactly the named
+    /// `allowed_operations` (empty admits nothing) and a restart can only
+    /// narrow, never accumulate.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::NotFound`] when the owning service was already
+    /// released and [`CoreError::Closing`] while it is draining.
+    /// [`CoreError::AuthRequired`] comes from the service's principal
+    /// verification, which re-reads the home's on-disk active selection as
+    /// part of the check and refuses when either no longer matches.
+    /// [`CoreError::InvalidInput`] is returned when `allowed_operations` names
+    /// an operation no arm dispatches.
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    pub async fn start_peer_control(
+        &self,
+        principal: &crate::principal::Principal,
+        request: nexus_contracts::generated::core::CorePeerControlOptions,
+    ) -> CoreResult<nexus_contracts::generated::core::CorePeerControlState> {
+        let core = self.linked_core()?;
+        core.verify_principal(principal)?;
+        let allowed: std::collections::HashSet<String> = request
+            .allowed_operations
+            .into_iter()
+            .map(|item| item.to_string())
+            .collect();
+        // A start is a grant surface too: a name no arm dispatches would sit
+        // in the lane's allowlist and authorize nothing, so it is refused here
+        // rather than stored. An empty allowlist stays legal (admits nothing).
+        if let Some(unknown) = allowed
+            .iter()
+            .find(|operation| !PEER_CONTROL_OPERATIONS.contains(&operation.as_str()))
+        {
+            return Err(CoreError::InvalidInput {
+                field: "allowed_operations".into(),
+                reason: format!("the start allowlists an operation nothing dispatches: {unknown}"),
+            });
+        }
+        // Every start installs a fresh lane: a restart naming a narrower (or
+        // empty) allowlist drops the earlier grants instead of unioning them.
+        let lane = std::sync::Arc::new(nexus_connect::PeerControlLane::new(
+            request.enabled,
+            allowed,
+        ));
+        // Install and snapshot under one guard: the returned state must
+        // describe the lane this start installed, not a later replacement.
+        let mut slot = self
+            .peer_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot = Some(std::sync::Arc::clone(&lane));
+        let state = lane.state(active_peer_ids());
+        drop(slot);
+        Ok(state)
+    }
+
+    /// Drive one peer-control operation against this owner's lane (P4-T3).
+    /// `status` reports the lane state; `enable`/`disable` flip the reported
+    /// enablement; `allow` adds the operation its payload names
+    /// (`payload.operation`, which must be a dispatched operation) to the
+    /// allowlist; `evict` removes a peer's registered tools. Anything else is
+    /// `invalid_input`, and every operation not on the lane's allowlist is
+    /// refused before any effect — visibility of a peer tool never implies
+    /// authority to control it. The lane's `enabled` flag is reported state,
+    /// never a second gate: the allowlist alone decides admission.
+    ///
+    /// # Errors
+    /// As [`Self::start_peer_control`], plus [`CoreError::InvalidInput`] when
+    /// no lane has been started (`field: "lane"`), when the operation is
+    /// unknown, or when `allow` names no dispatched grant target;
+    /// [`CoreError::Forbidden`] when the
+    /// operation is not allowlisted, and [`CoreError::NotFound`] when `evict`
+    /// names a peer with no registered tools.
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    pub async fn peer_control(
+        &self,
+        principal: &crate::principal::Principal,
+        request: nexus_contracts::generated::core::CorePeerControlRequest,
+    ) -> CoreResult<nexus_contracts::generated::core::CorePeerControlState> {
+        let core = self.linked_core()?;
+        core.verify_principal(principal)?;
+        #[cfg(feature = "test-hooks")]
+        crate::execution::test_hooks::peer_control_gate_wait().await;
+        // One guard spans resolve → gate → mutation → snapshot: a concurrent
+        // `start_peer_control` must never swap the lane between the operation
+        // reading it and applying its effect, or the grant lands on the
+        // discarded lane and the returned state describes that lane.
+        let slot = self
+            .peer_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let lane = slot.as_ref().ok_or_else(|| CoreError::InvalidInput {
+            field: "lane".into(),
+            reason: "peer control has not been started".into(),
+        })?;
+        let operation: &str = &request.operation;
+        if !lane.allows(operation) {
+            return Err(CoreError::Forbidden {
+                resource: format!("peer_control:{operation}"),
+            });
+        }
+        match operation {
+            "status" => {}
+            "enable" => lane.set_enabled(true),
+            "disable" => lane.set_enabled(false),
+            "allow" => {
+                // The grant target is the payload's named operation — the
+                // request's own `operation` is just this arm's selector, so
+                // inserting it would grant `allow` itself and nothing else.
+                let granted = request
+                    .payload
+                    .get("operation")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| CoreError::InvalidInput {
+                        field: "payload.operation".into(),
+                        reason: "the allow operation must name the operation it grants".into(),
+                    })?;
+                // A grant for a name no arm dispatches is not a permission:
+                // it would sit in the allowlist forever and authorize nothing,
+                // so it is a validation refusal naming the field.
+                if !PEER_CONTROL_OPERATIONS.contains(&granted) {
+                    return Err(CoreError::InvalidInput {
+                        field: "payload.operation".into(),
+                        reason: format!(
+                            "the allow operation grants an operation nothing dispatches: {granted}"
+                        ),
+                    });
+                }
+                lane.allow(granted);
+            }
+            "evict" => {
+                let evicted = nexus_connect::peer_tools::peer_tool_registry()
+                    .evict_peer(&request.peer_id, None);
+                if !evicted {
+                    return Err(CoreError::NotFound {
+                        resource: format!("peer {}", *request.peer_id),
+                    });
+                }
+            }
+            other => {
+                return Err(CoreError::InvalidInput {
+                    field: "operation".into(),
+                    reason: format!("unknown peer-control operation: {other}"),
+                });
+            }
+        }
+        let state = lane.state(active_peer_ids());
+        drop(slot);
+        Ok(state)
+    }
+}
+
+/// Distinct peers with registered tools in the process-level registry (the one
+/// [`nexus_connect::peer_tools`] owns; this module never keeps a second).
+#[cfg(feature = "connect-host")]
+fn active_peer_ids() -> Vec<String> {
+    let registry = nexus_connect::peer_tools::peer_tool_registry();
+    let mut ids: std::collections::HashSet<String> = registry
+        .entries()
+        .iter()
+        .map(|e| e.peer_id.clone())
+        .collect();
+    let mut ordered: Vec<String> = ids.drain().collect();
+    ordered.sort();
+    ordered
 }

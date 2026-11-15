@@ -28,8 +28,9 @@
 //! allowlist entry is negotiable for the next handshake without a
 //! restart; tests seed the holder with the ids directly).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::hash::BuildHasher;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -45,16 +46,16 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-use crate::connect::config::{ConnectConfigError, PeerToolsConfig};
-use crate::connect::identity::{self};
-use crate::connect::session::PeerSessionManager;
-use crate::connect::table::live_reserved_tool_ids;
-use crate::connect::watch::{
+use crate::config::{ConnectConfigError, PeerToolsConfig};
+use crate::error::{ConnectError, ConnectResult};
+use crate::identity::{self};
+use crate::session::PeerSessionManager;
+use crate::table::live_reserved_tool_ids;
+use crate::watch::{
     peer_config_digest, spawn_peer_config_watch, supervise_peer_config_watch, PeerConfigHolder,
     PeerConfigSnapshot,
 };
-use crate::connect::ws_transport::{ws_config, WsTransport};
-use crate::error::{CoreError, CoreResult};
+use crate::ws_transport::{ws_config, WsTransport};
 use nexus_orchestration::CapabilityRegistryHolder;
 const SUBSCRIBE_TOOL: &str = "tools.nexus.subscribe";
 const DELIVER_TOOL: &str = "tools.nexus.deliver_events";
@@ -148,7 +149,7 @@ impl ObservedTransport {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         if let Some(session) = session {
-            crate::connect::events::connect_event_registry().activate(&session, &stream);
+            crate::events::connect_event_registry().activate(&session, &stream);
         }
     }
 
@@ -237,15 +238,15 @@ pub fn is_loopback_host(host: &str) -> bool {
 /// unaffected. Semantics verbatim from the daemon boot gate.
 ///
 /// # Errors
-/// Returns [`CoreError::Internal`] when the remote-bind gate is closed.
-pub fn ensure_remote_bind_allowed(host: &str) -> CoreResult<()> {
+/// Returns [`ConnectError::Internal`] when the remote-bind gate is closed.
+pub fn ensure_remote_bind_allowed(host: &str) -> ConnectResult<()> {
     if is_loopback_host(host) {
         return Ok(());
     }
     let key_set = std::env::var("NEXUS42_DAEMON_API_KEY").is_ok();
     let remote_allowed = std::env::var("NEXUS_DAEMON_REMOTE_BIND").as_deref() == Ok("1");
     if !key_set || !remote_allowed {
-        return Err(CoreError::Internal {
+        return Err(ConnectError::Internal {
             category: format!(
                 "Refusing to bind peer-tools lane to non-loopback address {host}: \
                  remote bind requires both NEXUS42_DAEMON_API_KEY and NEXUS_DAEMON_REMOTE_BIND=1"
@@ -270,7 +271,7 @@ pub fn ensure_remote_bind_allowed(host: &str) -> CoreResult<()> {
 /// the shape is fixed at authoring time).
 #[must_use]
 pub fn daemon_manifest(host_id: &str, tool_ids: &[String]) -> HostCapabilityManifest {
-    let mut capabilities = crate::connect::config::tools_only_capabilities(tool_ids);
+    let mut capabilities = crate::config::tools_only_capabilities(tool_ids);
     for capability in [SUBSCRIBE_TOOL, DELIVER_TOOL] {
         if !capabilities.iter().any(|id| id == capability) {
             capabilities.push(capability.to_owned());
@@ -313,6 +314,11 @@ pub struct PeerResponderOptions {
     /// the handshake allowlist (`peer_ids`), the handshake keys, and the
     /// allowlist the hello + admission derive from.
     pub config: PeerConfigHolder,
+    /// The composing side's builtin host-tool ids — the static half of the
+    /// AR-68 #2(iii) reserved set. Injected instead of read from a host
+    /// registry so this crate names no core item; the set is a snapshot taken
+    /// when the lane starts.
+    pub builtin_tool_ids: Arc<HashSet<String>>,
     /// Shared capability registry holder (AR-92) from which the
     /// AR-68 #2(iii) reserved set is derived **live** at each admission:
     /// builtin ids ∪ the current user-capability names. A user capability
@@ -479,11 +485,9 @@ async fn monitor_session(
     // `PeerToolRegistry::evict_peer` guards with `Arc::ptr_eq` against the
     // wrapper the admission stored, so a second wrapper never matches and the
     // peer's rows would survive a disconnect (AR-68 #8 honesty break).
-    let port: Arc<dyn crate::execution::peer_tools::PeerResponder> =
-        Arc::new(crate::connect::table::ConnectResponderAdapter::new(
-            Arc::clone(&responder),
-            peer_id.clone(),
-        ));
+    let port: Arc<dyn crate::peer_tools::PeerResponder> = Arc::new(
+        crate::table::ConnectResponderAdapter::new(Arc::clone(&responder), peer_id.clone()),
+    );
 
     // Phase 2: admit. T3 (AR-68): the authenticated manifest's tool ids run
     // the full admission chain inside the process-global PeerToolTable
@@ -505,8 +509,11 @@ async fn monitor_session(
             // W-A (V1.176 P1 QC fix): the reserved set is derived LIVE from
             // the shared holder at admission time — hot-reloaded user-cap
             // names stay reserved against peer admission.
-            let reserved = live_reserved_tool_ids(options.capability_registry.as_ref());
-            match crate::connect::peer_tool_table().admit_and_register(
+            let reserved = live_reserved_tool_ids(
+                options.builtin_tool_ids.iter().cloned(),
+                options.capability_registry.as_ref(),
+            );
+            match crate::peer_tool_table().admit_and_register(
                 &peer_id,
                 &manifest,
                 &port,
@@ -514,15 +521,15 @@ async fn monitor_session(
                 &allowlist,
                 &reserved,
             ) {
-                crate::connect::AdmissionOutcome::Admitted { tool_ids } => tool_ids,
-                crate::connect::AdmissionOutcome::ManifestInvalid { message } => {
+                crate::AdmissionOutcome::Admitted { tool_ids } => tool_ids,
+                crate::AdmissionOutcome::ManifestInvalid { message } => {
                     tracing::warn!(%peer_id, error = %message, "peer manifest rejected (zero ingestion)");
                     Vec::new()
                 }
             }
         });
     let event_session_id = uuid::Uuid::new_v4().to_string();
-    crate::connect::events::connect_event_registry().open_session(&event_session_id);
+    crate::events::connect_event_registry().open_session(&event_session_id);
     observed.bind_session(&event_session_id);
     serve_subscribe_tool(
         &responder,
@@ -534,7 +541,7 @@ async fn monitor_session(
 
     // Phase 3: close observation (see `wait_for_close`).
     wait_for_close(&responder, &observed).await;
-    crate::connect::events::connect_event_registry().remove_session(&event_session_id);
+    crate::events::connect_event_registry().remove_session(&event_session_id);
     let evicted = sessions.evict(&peer_id, Some(&responder));
     if evicted {
         // AR-68 #8: same tick as close observation — the PeerToolTable rows
@@ -542,7 +549,7 @@ async fn monitor_session(
         // hoisted above (the one the admission stored) is what the registry's
         // expected-responder guard compares against, so the eviction actually
         // lands.
-        crate::connect::peer_tool_table().evict_peer(&peer_id, Some(&port));
+        crate::peer_tool_table().evict_peer(&peer_id, Some(&port));
         tracing::info!(%peer_id, "peer session evicted after close observation");
     }
 }
@@ -581,7 +588,7 @@ fn serve_subscribe_tool(
     register_subscribe_handler(
         responder,
         session_id,
-        crate::connect::events::connect_event_registry().clone(),
+        crate::events::connect_event_registry().clone(),
         Arc::new(tokio::sync::Mutex::new(())),
         delivery_deadline,
     );
@@ -602,7 +609,7 @@ fn serve_subscribe_tool(
 fn register_subscribe_handler(
     responder: &Arc<ConnectResponder>,
     session_id: String,
-    events: crate::connect::events::ConnectEventRegistry,
+    events: crate::events::ConnectEventRegistry,
     delivery_lock: Arc<tokio::sync::Mutex<()>>,
     delivery_deadline: Duration,
 ) {
@@ -668,32 +675,32 @@ fn register_subscribe_handler(
                     )
                 }
             };
-            let (epoch, resumed_from, subscription) =
-                match events.subscribe(&session, &stream, cursor.as_deref()).await {
-                    Ok(result) => result,
-                    Err(error) => {
-                        let message = match error {
-                            crate::connect::events::SubscribeError::ClosedSession => {
-                                "Connect session is closed"
-                            }
-                            crate::connect::events::SubscribeError::StreamLimit => {
-                                "Connect event stream capacity is exhausted"
-                            }
-                            crate::connect::events::SubscribeError::InvalidCursor
-                            | crate::connect::events::SubscribeError::UnknownEpoch
-                            | crate::connect::events::SubscribeError::FutureCursor => {
-                                "invalid or unavailable Connect event cursor"
-                            }
-                        };
-                        return nexus_spoke_adapter::SpokeResult::Reject(
-                            nexus_spoke_adapter::SpokeReject {
-                                code: nexus_spoke_adapter::SpokeRejectCode::InvalidInput,
-                                message: message.to_owned(),
-                                details: None,
-                            },
-                        );
-                    }
-                };
+            let (epoch, resumed_from, subscription) = match events
+                .subscribe(&session, &stream, cursor.as_deref())
+                .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    let message = match error {
+                        crate::events::SubscribeError::ClosedSession => "Connect session is closed",
+                        crate::events::SubscribeError::StreamLimit => {
+                            "Connect event stream capacity is exhausted"
+                        }
+                        crate::events::SubscribeError::InvalidCursor
+                        | crate::events::SubscribeError::UnknownEpoch
+                        | crate::events::SubscribeError::FutureCursor => {
+                            "invalid or unavailable Connect event cursor"
+                        }
+                    };
+                    return nexus_spoke_adapter::SpokeResult::Reject(
+                        nexus_spoke_adapter::SpokeReject {
+                            code: nexus_spoke_adapter::SpokeRejectCode::InvalidInput,
+                            message: message.to_owned(),
+                            details: None,
+                        },
+                    );
+                }
+            };
             let cancelled = subscription.cancellation();
             let delivery_stream = stream.clone();
             let push_responder = Arc::clone(&responder);
@@ -745,7 +752,7 @@ fn register_subscribe_handler(
 /// send or cancellation drain expires, `fail_closed` terminates the session
 /// before the potentially sequence-owning future is discarded.
 async fn drive_delivery<P, Fut, F>(
-    mut subscription: crate::connect::events::EventSubscription,
+    mut subscription: crate::events::EventSubscription,
     cancelled: Arc<Notify>,
     delivery_lock: Arc<tokio::sync::Mutex<()>>,
     session: String,
@@ -753,7 +760,7 @@ async fn drive_delivery<P, Fut, F>(
     fail_closed: F,
     push: P,
 ) where
-    P: Fn(Vec<crate::connect::events::EventFrame>) -> Fut + Send,
+    P: Fn(Vec<crate::events::EventFrame>) -> Fut + Send,
     Fut: std::future::Future<Output = nexus_spoke_adapter::SpokeResult<serde_json::Value>> + Send,
     F: Fn() + Send + Sync,
 {
@@ -938,6 +945,25 @@ fn event_lane_config_warning(config_path: &Path, error: &ConnectConfigError) -> 
     )
 }
 
+/// Refuse an empty injected builtin roster before the lane does any boot work.
+///
+/// The reserved set's builtin half is only as good as this roster, and this
+/// crate has no registry to fall back to: an empty set would let a peer shadow
+/// every builtin id and nothing would say so.
+fn ensure_injected_roster<S: BuildHasher>(
+    builtin_tool_ids: &HashSet<String, S>,
+) -> ConnectResult<()> {
+    if builtin_tool_ids.is_empty() {
+        return Err(ConnectError::Internal {
+            category: "peer-tools lane refused: the injected builtin tool roster is empty, so \
+                       peer tool ids would not be reserved against; inject the composing side's \
+                       host-tool ids"
+                .to_owned(),
+        });
+    }
+    Ok(())
+}
+
 /// Boot helper: load config + persistent identity from `home`, bind the
 /// listener, spawn the accept loop + the supervised config watcher.
 ///
@@ -961,17 +987,29 @@ fn event_lane_config_warning(config_path: &Path, error: &ConnectConfigError) -> 
 /// the peer lane keeps for the AR-68 #2(ii) reserved-set check — derived
 /// LIVE at each admission so hot-reloaded user-capability names stay
 /// reserved against peer admission (V1.176 P1 QC fix W-A). `None` reserves
-/// only the static builtin host-tool ids.
+/// only `builtin_tool_ids`.
+///
+/// `builtin_tool_ids` is the composing side's host-tool roster — the static
+/// half of that same reserved set. It is injected here rather than read from
+/// a host registry because this crate names no core item; the composing side
+/// (`nexus42 connect start` / `nexus-runtime`) supplies its own registry's
+/// ids. An empty roster is refused: this crate cannot tell "no builtin tools
+/// exist" from "the caller forgot to inject them", and reserving nothing is
+/// exactly the guard failing open: [`ensure_injected_roster`] refuses an
+/// empty roster before any boot work.
 ///
 /// # Errors
-/// Config load, identity persistence, or listener bind failures are
-/// returned as errors — the caller decides whether to fail boot or keep the
-/// daemon core running without the peer-tools lane.
-pub async fn start_peer_tools_lane(
+/// An empty `builtin_tool_ids` is refused at the entry, and config load,
+/// identity persistence, or listener bind failures are returned as errors —
+/// the caller decides whether to fail boot or keep the daemon core running
+/// without the peer-tools lane.
+pub async fn start_peer_tools_lane<S: BuildHasher>(
     home: &Path,
     shutdown: Arc<Notify>,
     capability_registry: Option<CapabilityRegistryHolder>,
-) -> CoreResult<PeerToolsLaneHandle> {
+    builtin_tool_ids: HashSet<String, S>,
+) -> ConnectResult<PeerToolsLaneHandle> {
+    ensure_injected_roster(&builtin_tool_ids)?;
     // DF-92: seed the digest baseline BEFORE the boot load — an edit
     // landing anywhere in the boot window diverges from the baseline and
     // the first poll reloads (never absorbed; the capability watcher's
@@ -983,7 +1021,7 @@ pub async fn start_peer_tools_lane(
     // operator can actually edit.
     let config_path = nexus_home_layout::connect_daemon_config_path(home);
     let config = Arc::new(
-        PeerToolsConfig::load(home).map_err(|e| CoreError::Internal {
+        PeerToolsConfig::load(home).map_err(|e| ConnectError::Internal {
             category: event_lane_config_warning(&config_path, &e),
         })?,
     );
@@ -993,7 +1031,7 @@ pub async fn start_peer_tools_lane(
     // reads the capability holder the same way — p1's reload swaps the
     // Arc and NEW registrations pick up the new policy without further
     // table mutation).
-    crate::connect::peer_tool_table().set_config(Some(Arc::new(config.registry_config())));
+    crate::peer_tool_table().set_config(Some(Arc::new(config.registry_config())));
     // PR #229 F-2 (Cursor Security HIGH): the peer lane binds PLAINTEXT
     // (no WSS — `accept_async_with_config`), so a non-loopback bind must
     // FAIL CLOSED — mirroring the V1.92 daemon HTTP API posture
@@ -1004,17 +1042,17 @@ pub async fn start_peer_tools_lane(
     // runs BEFORE the remote-bind env gate so the lane always fails
     // closed for non-loopback binds, even when the gate is opened.
     if !is_loopback_host(&config.host) {
-        return Err(CoreError::Internal {
+        return Err(ConnectError::Internal {
             category: event_lane_non_loopback_warning(&config.host, config.port, &config_path),
         });
     }
     ensure_remote_bind_allowed(&config.host)?;
     let identity_seed =
-        identity::load_or_create_identity(home).map_err(|e| CoreError::Internal {
+        identity::load_or_create_identity(home).map_err(|e| ConnectError::Internal {
             category: format!("peer-tools identity: {e}"),
         })?;
     let device_id = nexus_home_layout::device_id::get_or_create_device_id(home).map_err(|e| {
-        CoreError::Internal {
+        ConnectError::Internal {
             category: format!("peer-tools device id resolution: {e}"),
         }
     })?;
@@ -1026,18 +1064,18 @@ pub async fn start_peer_tools_lane(
     // source for every boot-scoped field (GC #7).
     let config_holder = PeerConfigHolder::new(PeerConfigSnapshot {
         config: Arc::clone(&config),
-        peer_keys: Arc::new(crate::connect::config::load_peer_keys(home).map_err(|e| {
-            CoreError::Internal {
+        peer_keys: Arc::new(crate::config::load_peer_keys(home).map_err(|e| {
+            ConnectError::Internal {
                 category: format!("peer-tools key load: {e}"),
             }
         })?),
     });
     let listener = TcpListener::bind((config.host.as_str(), config.port))
         .await
-        .map_err(|e| CoreError::Internal {
+        .map_err(|e| ConnectError::Internal {
             category: event_lane_bind_warning(&config.host, config.port, &config_path, &e),
         })?;
-    let addr = listener.local_addr().map_err(|e| CoreError::Internal {
+    let addr = listener.local_addr().map_err(|e| ConnectError::Internal {
         category: format!("peer-tools local addr: {e}"),
     })?;
     let sessions = Arc::new(PeerSessionManager::new());
@@ -1045,6 +1083,10 @@ pub async fn start_peer_tools_lane(
         identity_seed,
         host_id: device_id,
         config: PeerConfigHolder::clone(&config_holder),
+        // The field is lane-static and boot-only: one normalize into the
+        // default hasher keeps `PeerResponderOptions` non-generic (a hasher
+        // type parameter there would ripple through every handler).
+        builtin_tool_ids: Arc::new(builtin_tool_ids.into_iter().collect()),
         capability_registry,
     };
     // DF-92: the config watcher runs alongside the accept loop. The
@@ -1084,7 +1126,7 @@ pub async fn start_peer_tools_lane(
             boot_digest,
             watch_home,
             watch_holder,
-            Arc::clone(crate::connect::peer_tool_table()),
+            Arc::clone(crate::peer_tool_table()),
             watch_shutdown,
         ))
         .await;
@@ -1138,7 +1180,7 @@ pub struct PeerToolsLaneHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::connect::config::CollisionPolicy;
+    use crate::config::CollisionPolicy;
 
     /// v1.210 P3 locked contract: the readiness line is the plain
     /// `event_lane: ws://<host>:<port>/connect` form, built from the bound
@@ -1237,7 +1279,7 @@ mod tests {
     async fn subscribe_response_write_activates_pending_delivery() {
         let session = format!("ordering-{}", uuid::Uuid::new_v4());
         let stream = format!("stream-{}", uuid::Uuid::new_v4());
-        let registry = crate::connect::events::connect_event_registry().clone();
+        let registry = crate::events::connect_event_registry().clone();
         registry.open_session(&session);
         registry
             .publish(&stream, "event", serde_json::json!({"n": 1}))
@@ -1289,7 +1331,7 @@ mod tests {
     async fn payload_blind_outbound_drops_are_observable() {
         let session = format!("drop-{}", uuid::Uuid::new_v4());
         let stream = format!("stream-{}", uuid::Uuid::new_v4());
-        let registry = crate::connect::events::connect_event_registry().clone();
+        let registry = crate::events::connect_event_registry().clone();
         registry.open_session(&session);
         let pair = spoke_connect::remote::loopback_transport_pair();
         let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
@@ -1335,7 +1377,7 @@ mod tests {
     async fn overlapping_subscribe_response_never_activates_the_replacement() {
         let session = format!("overlap-{}", uuid::Uuid::new_v4());
         let stream = format!("stream-{}", uuid::Uuid::new_v4());
-        let registry = crate::connect::events::connect_event_registry().clone();
+        let registry = crate::events::connect_event_registry().clone();
         registry.open_session(&session);
         let first_frame = registry
             .publish(&stream, "event", serde_json::json!({"n": 1}))
@@ -1388,7 +1430,7 @@ mod tests {
     /// allocated outbound sequence must not be skipped.
     #[tokio::test]
     async fn cancellation_completes_the_in_flight_invoke_before_handing_the_slot() {
-        let registry = crate::connect::events::connect_event_registry().clone();
+        let registry = crate::events::connect_event_registry().clone();
         let session = format!("slot-{}", uuid::Uuid::new_v4());
         registry.open_session(&session);
         let stream_a = format!("stream-a-{}", uuid::Uuid::new_v4());
@@ -1615,7 +1657,7 @@ mod tests {
     async fn cancelled_delivery_never_skips_an_allocated_wire_sequence() {
         let (responder, gated, _client) = gated_tool_session().await;
 
-        let registry = crate::connect::events::connect_event_registry().clone();
+        let registry = crate::events::connect_event_registry().clone();
         let session = format!("c3-{}", uuid::Uuid::new_v4());
         registry.open_session(&session);
         let stream = format!("c3-stream-{}", uuid::Uuid::new_v4());
@@ -1707,7 +1749,7 @@ mod tests {
     #[tokio::test]
     async fn blocked_started_delivery_expires_closed_without_sequence_reuse() {
         let (responder, gated, _client) = gated_tool_session().await;
-        let registry = crate::connect::events::connect_event_registry().clone();
+        let registry = crate::events::connect_event_registry().clone();
         let session = format!("expiry-{}", uuid::Uuid::new_v4());
         registry.open_session(&session);
         let stream = format!("expiry-stream-{}", uuid::Uuid::new_v4());
@@ -1760,7 +1802,7 @@ mod tests {
     #[tokio::test]
     async fn cancellation_drain_expiry_closes_started_push() {
         let (responder, gated, _client) = gated_tool_session().await;
-        let registry = crate::connect::events::connect_event_registry().clone();
+        let registry = crate::events::connect_event_registry().clone();
         let session = format!("drain-expiry-{}", uuid::Uuid::new_v4());
         registry.open_session(&session);
         let stream = format!("drain-expiry-stream-{}", uuid::Uuid::new_v4());
@@ -1815,7 +1857,7 @@ mod tests {
         assert!(gated.emitted.lock().unwrap().is_empty());
         assert!(matches!(
             registry.subscribe(&session, "after-close", None).await,
-            Err(crate::connect::events::SubscribeError::ClosedSession)
+            Err(crate::events::SubscribeError::ClosedSession)
         ));
         let follow_up = responder
             .invoke_tool(DELIVER_TOOL, serde_json::json!({}))
@@ -1861,7 +1903,7 @@ mod tests {
     #[tokio::test]
     async fn cancellation_before_the_first_poll_consumes_no_wire_sequence() {
         let (responder, gated, _client) = gated_tool_session().await;
-        let registry = crate::connect::events::connect_event_registry().clone();
+        let registry = crate::events::connect_event_registry().clone();
         let session = format!("c4-{}", uuid::Uuid::new_v4());
         registry.open_session(&session);
         let stream = format!("c4-stream-{}", uuid::Uuid::new_v4());
@@ -1986,7 +2028,7 @@ mod tests {
         register_subscribe_handler(
             &responder,
             "session-under-test".to_owned(),
-            crate::connect::events::ConnectEventRegistry::default(),
+            crate::events::ConnectEventRegistry::default(),
             Arc::new(tokio::sync::Mutex::new(())),
             Duration::from_secs(1),
         );
@@ -2050,11 +2092,16 @@ mod tests {
         std::fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
         let config = nexus_home_layout::connect_daemon_config_path(home.path());
         std::fs::write(&config, r#"{"host":"0.0.0.0","port":0}"#).expect("write daemon.json");
-        let Err(err) = start_peer_tools_lane(home.path(), Arc::new(Notify::new()), None).await
+        // No peer admission runs in this boot-gate case, so any non-empty
+        // roster satisfies the reserved-set precondition (an empty one is
+        // refused at the entry, before the bind gate this test exercises).
+        let roster: HashSet<String> = HashSet::from(["nexus-test-builtin".to_owned()]);
+        let Err(err) =
+            start_peer_tools_lane(home.path(), Arc::new(Notify::new()), None, roster.clone()).await
         else {
             panic!("non-loopback bind must fail closed without TLS")
         };
-        assert!(matches!(err, CoreError::Internal { .. }), "got {err:?}");
+        assert!(matches!(err, ConnectError::Internal { .. }), "got {err:?}");
 
         // Positive control: the same home on the loopback default passes the
         // plaintext gate and really binds, so the refusal above is the
@@ -2062,7 +2109,7 @@ mod tests {
         std::fs::write(&config, r#"{"host":"127.0.0.1","port":0}"#)
             .expect("write the loopback daemon.json");
         let shutdown = Arc::new(Notify::new());
-        let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None)
+        let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None, roster)
             .await
             .expect("the loopback plaintext bind starts");
         assert!(lane.addr.ip().is_loopback(), "the lane bound loopback");
@@ -2104,9 +2151,9 @@ mod tests {
         ];
         let manifest = daemon_manifest("daemon-host-uuid-0000", &tool_ids);
         let manifest_json = serde_json::to_string(&manifest).expect("serializes");
-        for forbidden in crate::connect::config::KE_CAPABILITIES
+        for forbidden in crate::config::KE_CAPABILITIES
             .iter()
-            .chain(crate::connect::config::KE_OPERATION_FAMILIES.iter())
+            .chain(crate::config::KE_OPERATION_FAMILIES.iter())
         {
             assert!(
                 !manifest.capabilities.iter().any(|c| c == forbidden),
@@ -2140,9 +2187,9 @@ mod tests {
 
         // An operator cannot allowlist a KE name: config load fails with the
         // truthful reason, so the hello above can never grow one.
-        for entry in crate::connect::config::KE_CAPABILITIES
+        for entry in crate::config::KE_CAPABILITIES
             .iter()
-            .chain(crate::connect::config::KE_OPERATION_FAMILIES.iter())
+            .chain(crate::config::KE_OPERATION_FAMILIES.iter())
         {
             let dir = tempfile::tempdir().expect("tempdir");
             std::fs::create_dir_all(nexus_home_layout::connect_dir(dir.path())).expect("mkdir");
@@ -2151,12 +2198,12 @@ mod tests {
                 serde_json::json!({ "tool_allowlist": [entry] }).to_string(),
             )
             .expect("write daemon.json");
-            let err = crate::connect::config::PeerToolsConfig::load(dir.path())
+            let err = crate::config::PeerToolsConfig::load(dir.path())
                 .expect_err("a KE name must not be allowlistable");
             assert!(
                 matches!(
                     err,
-                    crate::connect::config::ConnectConfigError::InvalidAllowlist { .. }
+                    crate::config::ConnectConfigError::InvalidAllowlist { .. }
                 ),
                 "{entry} must be refused as a KE name, got {err:?}"
             );

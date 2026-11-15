@@ -47,6 +47,10 @@
 #     spoke-connect / libp2p / rmcp / graph-flow / nexus-wasm-host /
 #     nexus-agent-host / nexus-acp-host / nexus-orchestration  ABSENT
 #     spoke-operations exactly one version
+#   -p nexus-connect --no-default-features (the extracted Connect stack):
+#     nexus-core / nexus-orchestration  ABSENT  — the edge runs
+#     `nexus-core → nexus-connect` only; core's own assertions above carry the
+#     forward (`nexus-connect` appears in their resolved feature sets).
 #   -p nexus-core --no-default-features --features connect-client (core
 #   MCP/peer library; the shipped app no longer selects it):
 #     rmcp            exactly one version
@@ -57,11 +61,12 @@
 #   in-process embedded server; implies connect-client):
 #     same pins as connect-client
 #   -p nexus-core-node (native/TS host): nexus-core resolves
-#     feats=[compute,default,execution,provider-host] — the node-owned selection
-#     gains the hosted production factory's Host-plane half (v1.195 P0-T5) and
-#     the WASM compute runtime its factory installs (v1.195 P2-T3). The
-#     default/domain and Connect cohorts below keep nexus-agent-host and
-#     nexus-wasm-host absent.
+#     feats=[compute,default,execution,nexus-connect,operation-id,provider-host]
+#     — the node-owned selection gains the hosted production factory's
+#     Host-plane half (v1.195 P0-T5) and the WASM compute runtime its factory
+#     installs (v1.195 P2-T3); v1.244 adds the `nexus-connect` forward through
+#     `execution`. The default/domain and Connect cohorts below keep
+#     nexus-agent-host and nexus-wasm-host absent.
 #
 # Feature evidence (resolved feature set on the inverted probe row):
 #   graph-flow MUST resolve with an EMPTY feature set everywhere.
@@ -250,6 +255,13 @@ assert_exactly_one nexus-core "--no-default-features" spoke-operations
 # async-trait) is execution-owned, so `connect-client` implies `execution` and
 # the resolved normal feature set is asserted exactly below. Graph structure
 # only — never a version value.
+#
+# v1.244: `nexus-connect` is core's optional Connect edge. Core forwards to it
+# as `nexus-connect/<feature>` and never says `dep:nexus-connect`, so Cargo
+# keeps the implicit optional-dependency feature named `nexus-connect` and it
+# appears in every closure that turns the edge on. That entry is asserted, not
+# tolerated: it is the visible mark of the one edge the extraction added, and a
+# `dep:` rewrite would keep the same dependency while hiding it from this pin.
 
 # v1.207 P2: `connect-host` is the Connect-host product cohort — the WS accept
 # loop + peer-tools event lane the shipped `nexus-runtime` boots, carrying NO
@@ -258,7 +270,7 @@ assert_exactly_one nexus-core "--no-default-features" spoke-operations
 # select `connect-client` (which would pull rmcp into the product graph).
 assert_empty nexus-core "--no-default-features --features connect-host" rmcp
 assert_exactly_one nexus-core "--no-default-features --features connect-host" spoke-connect
-assert_features nexus-core "--no-default-features --features connect-host" nexus-core "connect-host,execution,operation-id"
+assert_features nexus-core "--no-default-features --features connect-host" nexus-core "connect-host,execution,nexus-connect,operation-id"
 
 for feats in "--no-default-features --features connect-client" "--no-default-features --features embedded-mcp"; do
   assert_exactly_one nexus-core "$feats" rmcp
@@ -270,16 +282,26 @@ done
 # The cohorts resolve distinct feature sets (`connect-client` = `connect-host`
 # + rmcp; `embedded-mcp` additionally implies `connect-client`), and
 # `execution` implies `operation-id`, so each closure is asserted separately.
-assert_features nexus-core "--no-default-features --features connect-client" nexus-core "connect-client,connect-host,execution,operation-id"
-assert_features nexus-core "--no-default-features --features embedded-mcp" nexus-core "connect-client,connect-host,embedded-mcp,execution,operation-id"
+assert_features nexus-core "--no-default-features --features connect-client" nexus-core "connect-client,connect-host,execution,nexus-connect,operation-id"
+assert_features nexus-core "--no-default-features --features embedded-mcp" nexus-core "connect-client,connect-host,embedded-mcp,execution,nexus-connect,operation-id"
+
+# --- nexus-connect default graph -------------------------------------------
+# v1.244: the extracted Connect stack must not depend back on the crate that
+# depends on it. `--no-default-features` is the whole-crate fan-in proof: the
+# unfeatured graph is three crates, so a core or orchestration edge reaching
+# this pin means the direction reversed.
+assert_empty nexus-connect "--no-default-features" nexus-core
+assert_empty nexus-connect "--no-default-features" nexus-orchestration
 
 # --- native/TS host (nexus-core-node) ---------------------------------------
 
 # v1.195 P0-T5: the native cohort resolves the hosted production factory's
 # both halves (`execution` + `provider-host`); v1.195 P2-T3 adds the `compute`
 # runtime that same factory installs (ONE WASM engine/cache/serializer).
-# `execution` implies `operation-id` (v1.207 P3-T1), so it appears in the set.
-assert_features nexus-core-node "" nexus-core "compute,default,execution,operation-id,provider-host"
+# `execution` implies `operation-id` (v1.207 P3-T1), so it appears in the set;
+# v1.244, `execution` is also the feature that turns on the optional
+# `nexus-connect` edge, so its implicit feature name appears there too.
+assert_features nexus-core-node "" nexus-core "compute,default,execution,nexus-connect,operation-id,provider-host"
 # The cohort edge is real, not a feature-flag claim: the Host plane the hosted
 # factory composes resolves in the node cohort.
 assert_exactly_one nexus-core-node "" nexus-agent-host

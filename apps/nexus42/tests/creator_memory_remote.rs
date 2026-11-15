@@ -298,7 +298,7 @@ mod remote {
     use serde_json::{json, Value};
     use tempfile::TempDir;
 
-    use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
+    use nexus_connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
     use nexus_core::memory_provider::legacy;
     use nexus_memory_conformance::{FixtureMemoryProvider, PeerDirectory};
     use spoke_connect::core::derive_peer_id_from_ed25519_pubkey;

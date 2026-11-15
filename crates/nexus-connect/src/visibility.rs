@@ -3,7 +3,7 @@
 //! The additive seam that lets an operator grant a consumer a `tools/list`
 //! subset while `tools/call` still obeys the V1.174 capability-registry
 //! spine. Evaluated at the shared MCP serving seam
-//! ([`crate::connect::mcp_bridge::McpBridgeHandler`]) BEFORE serving
+//! ([`crate::mcp_bridge::McpBridgeHandler`]) BEFORE serving
 //! `tools/list` and BEFORE dispatching `tools/call`:
 //!
 //! - Absent policy ⇒ byte-identical current behavior (every catalog row
