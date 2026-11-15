@@ -12,7 +12,7 @@ preset:
   terminal: done
 states:
 - id: routing
-  description: 'Lane selector: judge reads preset.input.trigger_type -> mechanical-op lane (GO) or natural-language-turn lane (NOGO)'
+  description: 'Lane selector: a tiny judge on `preset.input.trigger_type` (GO = mechanical, NOGO = natural language), mirroring the game-narrative preset''s routing pattern — the expression engine cannot read dotted `preset.input.*` keys, so lane selection comes from a judge whose prompt CAN read the payload (templates/lane-route.md). Pure-UI operations (view sheet, switch page, expand spell, open inventory — partner trigger type 1) are NOT a preset lane: they make no AI call, advance no world time, and mutate no state; the README''s Browse guard governs them.'
   exit_when:
     kind: llm_judge
     template_file: templates/lane-route.md
@@ -21,7 +21,7 @@ states:
     go: mechanical_turn
     nogo: natural_language_turn
 - id: mechanical_turn
-  description: 'Mechanical-op lane: the caller settles FIRST with the client-supplied op id + params (E2 compute op over Connect, read-only), then settle_receipt confirms the module receipt -> receipt_narration (optional-skip in the client) narrates confirmed results only'
+  description: 'Mechanical-op lane (partner trigger type 2): an explicit mechanical action (attack, cast, shield block, check shortcut) carries a stable op id + parameters, and the caller settles FIRST — the E2 `compute` op over Connect (host-local WASM, read-only; settle:true is rejected) carries the client-supplied op id + params into the request UNCHANGED, with NO AI step in the request path. The caller then injects the confirmed receipt into `preset.input.receipt`: settle_receipt confirms it and receipt_narration narrates confirmed results only, optionally at the client''s discretion when UI feedback already suffices (the inner-graph format has no conditional node skip, so that skip is a client-runtime choice). output_binding exports the narration text separately from the receipt. The AI never computes, rewrites, or overrides settlement.'
   enter:
   - kind: inner_graph
     name: mechanical_graph
@@ -29,7 +29,7 @@ states:
     kind: graph_complete
   next: wait_for_player
 - id: natural_language_turn
-  description: 'Natural-language-turn lane: intent_parse -> op_request proposes op + params (no outcome claims) -> settle_receipt confirms the module receipt -> receipt_narration narrates confirmed results only'
+  description: 'Natural-language-turn lane (partner trigger type 3): intent_parse reads the player''s free-text intent (kept VERBATIM in the ledger), op_request PROPOSES an op + parameters WITHOUT pre-announcing outcomes, the local rules module settles over the E2 `compute` op (read-only over Connect) between op_request and settle_receipt, and receipt_narration narrates the confirmed receipt only. The caller binds the intent_parse output into `preset.input.parsed_intent` before op_request — the sample''s binding convention: explicitly bound prior state output, observable and caller-injected like `preset.input.receipt`. Chained dependent ops resolve stepwise — one op per graph run, the next turn''s run depends on this turn''s confirmed result.'
   enter:
   - kind: inner_graph
     name: natural_language_graph
@@ -37,7 +37,7 @@ states:
     kind: graph_complete
   next: wait_for_player
 - id: wait_for_player
-  description: 'Stop at the player response point: ExitWhen::Manual -> NextAction::WaitForInput; no automatic transition, extra op, or outcome narration before the player resumes'
+  description: 'Stop at the player response point: ExitWhen::Manual -> NextAction::WaitForInput. No automatic transition, extra op, or outcome narration before the player resumes; the raw player input and the confirmed receipt stay in the caller''s ledger for the next turn.'
   exit_when:
     kind: manual
   next: done
