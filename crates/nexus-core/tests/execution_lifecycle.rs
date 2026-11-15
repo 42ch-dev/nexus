@@ -768,6 +768,43 @@ async fn read_restart_descriptor(
         .expect("the frozen descriptor exists")
 }
 
+/// The run's authoritative record: status, durable state, frozen descriptor.
+async fn read_restart_record(
+    pool: &sqlx::SqlitePool,
+    session_id: &str,
+) -> nexus_orchestration::run_state::RunRecord {
+    nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone()))
+        .load_run(&nexus_orchestration::SessionId(session_id.to_string()))
+        .await
+        .expect("read the run record")
+        .expect("the run record exists")
+}
+
+/// Wait until the admitted run parks on the applied document's manual wait and
+/// answer the durable wait id that parking transition wrote.
+async fn wait_for_applied_manual_wait(pool: &sqlx::SqlitePool, session_id: &str) -> String {
+    wait_until("the run to park on the applied-only manual wait", || {
+        let pool = pool.clone();
+        let session_id = session_id.to_string();
+        async move {
+            let record = read_restart_record(&pool, &session_id).await;
+            record.status == nexus_orchestration::engine::SessionStatus::WaitingForInput
+                && record
+                    .state
+                    .as_ref()
+                    .and_then(|state| state.wait.as_ref())
+                    .is_some_and(|wait| wait.task_id == APPLIED_ONLY_NODE)
+        }
+    })
+    .await;
+    read_restart_record(pool, session_id)
+        .await
+        .state
+        .and_then(|state| state.wait)
+        .expect("the manual wait record exists")
+        .wait_id
+}
+
 /// Boot recovery re-drives the seeded run past its shared entry node, then the
 /// durable record names the node the reconstructed graph reached.
 async fn recovered_position(owner: &CoreService, session_id: &str) -> graph_flow::Session {
@@ -1094,6 +1131,230 @@ async fn start_session_freezes_and_runs_the_strategy_apply() {
             .get("applied")
             .is_none(),
         "a no-apply run still serialises no applied key at all"
+    );
+
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
+/// P6 Task 2: a run ADMITTED through `start_session` refuses to restart once the
+/// strategy gained a successor apply.
+///
+/// Admission froze apply A on the descriptor; while the daemon was down the
+/// strategy moved on to apply B. Recovery must keep the run non-replayable —
+/// naming both apply ids — instead of rebuilding it from a document it never
+/// ran (`engine.rs:4109-4134`), and the durable position plus the human wait
+/// must stay exactly where admission left them.
+///
+/// Mutation this fails on: admitting without freezing the identity (descriptor
+/// `applied: None`) hits recovery's `(None, current)` arm and rebuilds the run
+/// from B, so the refusal never happens.
+#[tokio::test]
+async fn a_restart_after_a_successor_apply_refuses_the_admitted_run() {
+    let f = fixture().await;
+    let nexus_home = f.tmp.path().join(".nexus42");
+    write_restart_bundle(&nexus_home, RESTART_PRESET);
+    let admitted = seed_restart_apply(&f.db_path, RESTART_PRESET).await;
+
+    // ── Generation 1: admit through the seam, freeze A, park on the applied
+    //    document's manual wait. ──
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    let caps = handle.capability_holder();
+    let session_id = handle
+        .coordinator()
+        .start_session(
+            RESTART_PRESET,
+            CREATOR,
+            None,
+            std::collections::HashMap::new(),
+            &nexus_home,
+            &caps,
+            None,
+            None,
+        )
+        .await
+        .expect("an applied strategy admits through start_session");
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+    let wait_id = wait_for_applied_manual_wait(&pool, &session_id.0).await;
+    assert_eq!(
+        read_restart_descriptor(&pool, &session_id.0).await.applied,
+        Some(admitted.clone()),
+        "the admitted descriptor must freeze the apply it runs"
+    );
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+
+    // ── The successor lands while no daemon owns the DB: the re-apply window
+    //    the frozen identity exists to close. ──
+    let superseding = seed_superseding_apply(&f.db_path, RESTART_PRESET, &admitted.apply_id).await;
+
+    // ── Generation 2: boot recovery cannot rebuild this run, and the A7
+    //    reattach seam surfaces that as the typed refusal. ──
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    let refusal = handle
+        .coordinator()
+        .signal_run(
+            &session_id,
+            nexus_core::execution::RunSignal::Continue {
+                wait_id: wait_id.clone(),
+            },
+        )
+        .await
+        .expect_err("a run whose admitted apply gained a successor must not be recovered");
+    let RunControlError::ReconstructionUnavailable { reason, .. } = refusal else {
+        panic!("expected reconstruction_unavailable, got {refusal:?}");
+    };
+    assert!(
+        reason.contains(&admitted.apply_id),
+        "the refusal must name the apply the run was admitted under: {reason}"
+    );
+    assert!(
+        reason.contains(&superseding.apply_id),
+        "the refusal must name the apply that replaced it: {reason}"
+    );
+
+    // The refusal advances nothing: same node, same human wait, same identity.
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+    let record = read_restart_record(&pool, &session_id.0).await;
+    assert_eq!(
+        record.status,
+        nexus_orchestration::engine::SessionStatus::WaitingForInput,
+        "a refused reconstruction must leave the run on its preserved wait"
+    );
+    assert_eq!(
+        record
+            .state
+            .as_ref()
+            .and_then(|state| state.wait.as_ref())
+            .map(|wait| wait.wait_id.as_str()),
+        Some(wait_id.as_str()),
+        "the human wait must survive the refusal unconsumed"
+    );
+    let session = read_restart_session(&pool, &session_id.0)
+        .await
+        .expect("the run row exists");
+    assert_eq!(
+        session.current_task_id, APPLIED_ONLY_NODE,
+        "a refused reconstruction must not advance the run; got {:?}",
+        session.current_task_id
+    );
+    assert_eq!(
+        record.descriptor.and_then(|descriptor| descriptor.applied),
+        Some(admitted),
+        "the frozen identity must survive the refused restart unchanged"
+    );
+
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
+/// P6 Task 2: the same seam admitted with NO successor restarts into the
+/// document it froze.
+///
+/// The kill left the run parked on `applied_only_probe` — a node id only the
+/// applied document declares. After the restart the run must be rebuilt from
+/// that document and driven off it: the manual wait is consumed and the run
+/// settles `completed`, which a YAML-graph reconstruction could not do (its
+/// graph has no `applied_only_probe` task to execute).
+#[tokio::test]
+async fn a_restart_of_an_admitted_applied_run_recovers_the_applied_document() {
+    let f = fixture().await;
+    let nexus_home = f.tmp.path().join(".nexus42");
+    write_restart_bundle(&nexus_home, RESTART_PRESET);
+    let admitted = seed_restart_apply(&f.db_path, RESTART_PRESET).await;
+
+    // ── Generation 1: admit through the seam and park on the applied wait. ──
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    let caps = handle.capability_holder();
+    let session_id = handle
+        .coordinator()
+        .start_session(
+            RESTART_PRESET,
+            CREATOR,
+            None,
+            std::collections::HashMap::new(),
+            &nexus_home,
+            &caps,
+            None,
+            None,
+        )
+        .await
+        .expect("an applied strategy admits through start_session");
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+    let wait_id = wait_for_applied_manual_wait(&pool, &session_id.0).await;
+    assert_eq!(
+        read_restart_descriptor(&pool, &session_id.0).await.applied,
+        Some(admitted),
+        "the admitted descriptor must freeze the apply it runs"
+    );
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+
+    // ── Generation 2: the current apply is still the admitted one, so the
+    //    restart reconstructs the applied document and re-drives the run. ──
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    handle
+        .coordinator()
+        .signal_run(
+            &session_id,
+            nexus_core::execution::RunSignal::Continue { wait_id },
+        )
+        .await
+        .expect("an unchanged apply must reconstruct the admitted document");
+
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+    let sid = session_id.0.clone();
+    wait_until("the reconstructed run to finish the applied document", || {
+        let pool = pool.clone();
+        let sid = sid.clone();
+        async move {
+            read_restart_record(&pool, &sid).await.status
+                == nexus_orchestration::engine::SessionStatus::Completed
+        }
+    })
+    .await;
+    let record = read_restart_record(&pool, &session_id.0).await;
+    let session = read_restart_session(&pool, &session_id.0)
+        .await
+        .expect("the run row exists");
+    assert_eq!(
+        record.status,
+        nexus_orchestration::engine::SessionStatus::Completed,
+        "the rebuilt run must execute the applied document to its terminal node, got {:?}",
+        record.status
+    );
+    assert_eq!(
+        session.current_task_id, "done",
+        "the applied document's terminal node is where an applied recovery ends; got {:?}",
+        session.current_task_id
     );
 
     handle.close().await.unwrap();

@@ -6958,3 +6958,84 @@ async fn preset_entries_freeze_and_run_the_strategy_apply() {
         .expect("start_session_with_preset_for_creator");
     assert_applied_entry(&storage, &sid, &identity).await;
 }
+
+/// Restart recovery over a trait-entry run: a successor apply is refused, the
+/// admitted apply is rebuilt.
+///
+/// The run was admitted through `start_session_with_preset`, so its descriptor
+/// froze apply A and its position is the applied document's entry node. A
+/// restarted engine whose source answers with a successor apply B must keep the
+/// run non-replayable (`engine.rs:4109-4134`) and leave the durable position
+/// alone. A restarted engine whose source still answers A rebuilds the applied
+/// document — proven by one step landing on `applied_only_probe`, a node id the
+/// loaded bundle does not declare.
+#[tokio::test]
+async fn preset_entry_recovery_refuses_a_successor_and_rebuilds_the_admitted_apply() {
+    let (pool, _db) = fresh_pool().await;
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded =
+        nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
+    let admitted = AppliedRunIdentity {
+        apply_id: "apl_entry".to_string(),
+        content_hash: "blake3:entry".to_string(),
+    };
+    let successor = AppliedRunIdentity {
+        apply_id: "apl_entry_successor".to_string(),
+        content_hash: "blake3:successor".to_string(),
+    };
+
+    let (storage, mut engine) = fresh_engine(pool.clone());
+    engine.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "novel-writing",
+        identity: admitted.clone(),
+        document: applied_probe_document("novel-writing"),
+    }));
+    let sid = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .expect("start_session_with_preset");
+
+    // ── Restart with a successor apply: the guard refuses, naming both. ──
+    let (_, mut restarted) = fresh_engine(pool.clone());
+    restarted.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "novel-writing",
+        identity: successor.clone(),
+        document: applied_probe_document("novel-writing"),
+    }));
+    let refused = restarted
+        .ensure_recovered_runner_inner(&sid)
+        .await
+        .expect_err("a run whose admitted apply gained a successor must not be recovered");
+    let reason = refused.to_string();
+    assert!(
+        reason.contains(&admitted.apply_id),
+        "the refusal must name the apply the run was admitted under: {reason}"
+    );
+    assert!(
+        reason.contains(&successor.apply_id),
+        "the refusal must name the apply that replaced it: {reason}"
+    );
+    assert_applied_entry(&storage, &sid, &admitted).await;
+
+    // ── Restart with the admitted apply still current: rebuild and drive. ──
+    let (_, mut recovered) = fresh_engine(pool.clone());
+    recovered.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "novel-writing",
+        identity: admitted.clone(),
+        document: applied_probe_document("novel-writing"),
+    }));
+    recovered
+        .ensure_recovered_runner_inner(&sid)
+        .await
+        .expect("the admitted apply is still current, so the run must be rebuilt");
+    recovered
+        .run_step(&sid)
+        .await
+        .expect("the rebuilt run must execute the applied document's entry node");
+    let session = storage.get(&sid.0).await.expect("session read").expect("row");
+    assert_eq!(
+        session.current_task_id, APPLIED_ONLY_PROBE,
+        "the rebuilt graph must carry the applied-only node; got {:?}",
+        session.current_task_id
+    );
+}
