@@ -77,6 +77,7 @@ jobs:
               - '.sqlx/**'
               - 'strategy-samples/**'
               - 'tooling/check-*.sh'
+              - 'tooling/release/**'
               - 'tooling/work-artifact-write-allowlist.tsv'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
@@ -242,6 +243,23 @@ jobs:
         run: cargo +"${FMT_NIGHTLY}" fmt --all -- --check
       - name: Run clippy
         run: cargo clippy --all --all-targets -- -D warnings
+      - name: Check contract crates are packageable offline
+        timeout-minutes: 15
+        run: |
+          # `cargo package --offline` resolves against the registry cache, and
+          # the three standalone module crates are not root-workspace members,
+          # so clippy above never fetches their graphs (e.g. `dlmalloc`).
+          node -e 'for (const { manifest } of require("./tooling/release/version-brackets.json").contract) console.log(manifest)' \
+            | while read -r manifest; do cargo fetch --manifest-path "$manifest"; done
+          node tooling/release/check-contract-packageability.mjs
+      # The release scripts decide what a governed release writes, so their
+      # fixtures (both version brackets, every carrier rejection, the
+      # packageability loop) must be green on the PR that changes them, not only
+      # in the manually dispatched new-release preflight. Runs after the step
+      # above so the registry cache already holds every contract crate graph.
+      - name: Run release tooling tests (version brackets and lockstep rules)
+        timeout-minutes: 10
+        run: node --test 'tooling/release/*.test.mjs'
 
   verify-sqlx-offline:
     name: Verify sqlx offline metadata

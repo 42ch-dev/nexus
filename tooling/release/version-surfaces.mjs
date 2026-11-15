@@ -24,8 +24,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join, posix, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const RELEASE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -56,6 +56,11 @@ export const PRODUCT_JSON_PATH = "apps/desktop-electron/resources/product.json";
 export const SERVICE_PACKAGE_PATH = "apps/nexus-service/package.json";
 /** Cargo lockfile pinning workspace member versions. */
 export const CARGO_LOCK_PATH = "Cargo.lock";
+/**
+ * Version bracket carrier: the crates allowed to version independently of the
+ * product version. It is not a version surface — nothing writes it.
+ */
+export const VERSION_BRACKETS_PATH = "tooling/release/version-brackets.json";
 /**
  * The contracted `Cargo.lock` regeneration vehicle: workspace members only, no
  * network, lockfile written by Cargo itself.
@@ -283,6 +288,31 @@ export function parseCargoPackageName(contents, manifestPath) {
 }
 
 /**
+ * `[package].version` declaration form: the literal version string, or `null`
+ * when the manifest inherits the workspace version (`version.workspace = true`).
+ *
+ * @param {string} contents
+ * @param {string} manifestPath
+ * @returns {string | null}
+ */
+export function parseCargoPackageVersion(contents, manifestPath) {
+  const section = contents.match(/(?:^|\n)\[package\][\s\S]*?(?=\n\[|$)/)?.[0];
+  if (section === undefined) {
+    throw new Error(`${manifestPath}: missing [package] section`);
+  }
+  const literal = section.match(/^\s*version\s*=\s*"([^"]+)"/m)?.[1];
+  if (literal !== undefined) {
+    return literal;
+  }
+  if (/^\s*version\.workspace\s*=\s*true\s*$/m.test(section)) {
+    return null;
+  }
+  throw new Error(
+    `${manifestPath}: missing version = "..." or version.workspace = true in [package]`,
+  );
+}
+
+/**
  * Workspace members with their package names (the Cargo.lock SSOT rows).
  *
  * @param {string} repoRoot
@@ -301,6 +331,203 @@ export function readWorkspaceMemberPackages(repoRoot) {
       ),
     };
   });
+}
+
+/**
+ * @typedef {object} ContractBracketEntry
+ * @property {string} name Package name.
+ * @property {string} manifest Manifest path, relative to the repository root.
+ */
+
+/**
+ * Contract-bracket entries from the version bracket carrier.
+ *
+ * The carrier is the only place the lockstep assertion and the packageability
+ * check learn which crates may version independently, so a malformed carrier
+ * fails here instead of degrading into an empty exemption list. Every entry
+ * must be unique and must point at a manifest whose `[package].name` is the
+ * entry's own name.
+ *
+ * @param {string} repoRoot
+ * @returns {ContractBracketEntry[]}
+ */
+export function readVersionBrackets(repoRoot) {
+  let data;
+  try {
+    data = JSON.parse(
+      readFileSync(join(repoRoot, VERSION_BRACKETS_PATH), "utf8"),
+    );
+  } catch (error) {
+    throw new Error(
+      `${VERSION_BRACKETS_PATH}: unusable (${
+        error instanceof Error ? error.message : error
+      })`,
+    );
+  }
+
+  const entries = data?.contract;
+  if (!Array.isArray(entries)) {
+    throw new Error(`${VERSION_BRACKETS_PATH}: missing "contract" array`);
+  }
+  if (entries.length === 0) {
+    throw new Error(`${VERSION_BRACKETS_PATH}: empty "contract" array`);
+  }
+
+  const seen = new Set();
+  // A name is not an identity: two crates can declare the same `package.name`,
+  // so a carrier entry for a workspace member must name that member's own
+  // manifest, or the member's real literal/comments would never be checked.
+  const memberManifests = new Map(
+    readWorkspaceMemberPackages(repoRoot).map((member) => [
+      member.name,
+      member.manifestPath,
+    ]),
+  );
+  for (const entry of entries) {
+    const name = entry?.name;
+    const manifest = entry?.manifest;
+    if (typeof name !== "string" || name.length === 0) {
+      throw new Error(
+        `${VERSION_BRACKETS_PATH}: contract entry without a "name" string`,
+      );
+    }
+    if (typeof manifest !== "string" || manifest.length === 0) {
+      throw new Error(
+        `${VERSION_BRACKETS_PATH}: contract entry ${name} without a "manifest" string`,
+      );
+    }
+    if (seen.has(name)) {
+      throw new Error(
+        `${VERSION_BRACKETS_PATH}: duplicate contract entry ${name}`,
+      );
+    }
+    seen.add(name);
+
+    const memberManifest = memberManifests.get(name);
+    if (
+      memberManifest !== undefined &&
+      posix.normalize(manifest) !== memberManifest
+    ) {
+      throw new Error(
+        `${VERSION_BRACKETS_PATH}: contract entry ${name} points at ${manifest}, but workspace member ${name} is ${memberManifest}; the entry must name the member's own manifest`,
+      );
+    }
+
+    let contents;
+    try {
+      contents = readFileSync(join(repoRoot, manifest), "utf8");
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        throw error;
+      }
+      throw new Error(
+        `${VERSION_BRACKETS_PATH}: contract entry ${name} points at a missing manifest ${manifest}`,
+      );
+    }
+    const packageName = parseCargoPackageName(contents, manifest);
+    if (packageName !== name) {
+      throw new Error(
+        `${VERSION_BRACKETS_PATH}: contract entry ${name} does not match package name ${packageName} in ${manifest}`,
+      );
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * Home of the standalone crates: one `modules/<name>` directory per crate, each
+ * with its own `[workspace]` table, so the root workspace's metadata never lists
+ * them.
+ */
+const MODULES_DIR = "modules";
+
+/**
+ * Cargo's own view of a workspace rooted at `manifestPath`.
+ *
+ * Cargo parses the manifest exactly, so nothing here has to: `manifest_path` is
+ * absolute as Cargo resolved it and `publish` carries the publish policy —
+ * `null` or a registry list means the crate can be published, `[]` means
+ * `publish = false`.
+ *
+ * A metadata failure throws. Returning an empty list would silently exempt
+ * every crate from the completeness check that consumes it.
+ *
+ * @param {string} manifestPath Absolute path to a workspace root manifest.
+ * @returns {{ name: string; publish: string[] | null; manifest_path: string }[]}
+ */
+function readCargoMetadataPackages(manifestPath) {
+  const result = spawnSync(
+    "cargo",
+    ["metadata", "--no-deps", "--format-version", "1", "--manifest-path", manifestPath],
+    { encoding: "utf8" },
+  );
+  if (result.error !== undefined || result.status !== 0) {
+    const detail = result.error?.message ?? result.stderr.trim();
+    throw new Error(
+      `${manifestPath}: \`cargo metadata --no-deps\` failed (${detail}); ` +
+        "reading a crate's publish policy needs the Rust toolchain and a parseable manifest",
+    );
+  }
+  return JSON.parse(result.stdout).packages;
+}
+
+/**
+ * Manifest roots of the standalone crates, absolute: one per `modules/<name>`
+ * directory. A directory without a manifest is not a crate, so it is skipped.
+ *
+ * @param {string} repoRoot
+ * @returns {string[]}
+ */
+function standaloneManifestRoots(repoRoot) {
+  const modulesDir = join(repoRoot, MODULES_DIR);
+  if (!existsSync(modulesDir)) {
+    return [];
+  }
+  return readdirSync(modulesDir, { withFileTypes: true })
+    .filter((dirent) => dirent.isDirectory())
+    .map((dirent) => join(modulesDir, dirent.name, "Cargo.toml"))
+    .filter((manifestPath) => existsSync(manifestPath));
+}
+
+/**
+ * Publishable crates that live outside the root workspace.
+ *
+ * Cargo's `publish` is the authority, so `null` (or a registry list) is
+ * publishable and `[]` is `publish = false`. A standalone crate has no
+ * workspace version to inherit, so a crate Cargo would publish can only version
+ * on its own: it belongs in the contract bracket, and dropping it from there
+ * must not silence the check.
+ *
+ * Workspace members are not returned on purpose. They inherit the product
+ * version through `version.workspace = true`, so Cargo's `null` default does
+ * not make them independent; the lockstep assertion rejects a non-contract
+ * member that switches to a literal version.
+ *
+ * shortcut: standalone roots are read from {@link MODULES_DIR} only, so a
+ * publishable standalone crate added elsewhere (under `tooling/`) is not seen;
+ * add its root here when one appears.
+ *
+ * @param {string} repoRoot
+ * @returns {ContractBracketEntry[]}
+ */
+export function readStandalonePublishableCrates(repoRoot) {
+  /** @type {ContractBracketEntry[]} */
+  const crates = [];
+  for (const manifestPath of standaloneManifestRoots(repoRoot)) {
+    for (const entry of readCargoMetadataPackages(manifestPath)) {
+      // `[]` is the one spelling of "do not publish"; `null` and a registry
+      // list both allow publishing.
+      if (entry.publish?.length === 0) {
+        continue;
+      }
+      crates.push({
+        name: entry.name,
+        manifest: posix.normalize(relative(repoRoot, entry.manifest_path)),
+      });
+    }
+  }
+  return crates;
 }
 
 /**
