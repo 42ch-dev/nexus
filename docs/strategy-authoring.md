@@ -51,11 +51,26 @@ Two forkable bundles ship as worked examples (details in
 **v1.243 deprecates the main path, not the file.** Hand-authoring `preset.yaml`
 as the main authoring path is deprecated as of v1.243. A bundle whose
 `preset.yaml` you edit as your working copy is the path being deprecated; a
-bundle that carries `preset.yaml` is not.
+bundle that carries `preset.yaml` is not. A bundle authored as Workflow IR keeps
+its `workflow.json` as the source of truth, and `nexus42 preset export <dir>`
+writes the `preset.yaml` beside it from that document.
 
 **The bundle format survives the deprecation.** `preset.yaml` stays a supported
-public format for partner and integrator bundles. Nothing converts a bundle
-automatically: a bundle keeps the files it has until you convert it yourself.
+public format for partner and integrator bundles: `nexus42 preset import <dir>`
+and `nexus42 preset export <dir>` are both part of the supported surface, and
+neither carries a removal boundary. Nothing converts a bundle automatically: a
+bundle keeps the files it has until you convert it yourself.
+
+**Only the emergency intake arm ends.** The `yaml-only` kill-switch
+(`[strategy_intake] mode = "yaml-only"` in the home `config.toml`) keeps intake
+running a user bundle's YAML manifest without reading its apply. It is supported
+for the v1.243 minor line only and is removed at v1.244.0. Default intake is
+`ir-only`: a user-bundle run executes the strategy's current apply, and a user
+bundle with none refuses before graph construction (`yaml_intake_disabled`)
+instead of falling back to YAML. That v1.244.0 boundary applies to the switch
+alone — not to the bundle format, not to `preset import`, and not to `preset
+export`. Embedded and `_system.` presets never consult the key, so the two
+YAML-primary cases below are governed by neither arm.
 
 **Conversion is the import verb.** An existing partner YAML bundle converts by
 `nexus42 preset import <dir>`, which produces the strategy's candidate through
@@ -64,7 +79,8 @@ the trajectory `approve` takes. The bundle's `preset.id` names the strategy: an
 id the host ships as an embedded preset (or a `_system.` id) is refused, and any
 other id defines a new strategy — its candidate can be read and approved, and
 the schedule intake runs it once the bundle is installed as a user preset under
-`~/.nexus42/presets/<id>/` and an apply exists.
+`~/.nexus42/presets/<id>/` (under the default `ir-only`, once an apply exists as
+well).
 
 **Two in-repo cases stay YAML-primary** and are out of scope for conversion:
 `examples/first-workflow` and the embedded presets keep `preset.yaml` as their

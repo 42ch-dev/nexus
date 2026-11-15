@@ -307,10 +307,12 @@ default off, an explicit selection wins. Flag-off renders exactly the pre-compos
 ### 7. Boundaries
 
 Compose, approve and apply ship. IR-primary authoring for the daemon surfaces and retirement of the
-hand-authored YAML path do not: intake still prefers the YAML loader for every strategy without a current
-apply, and YAML remains the authoring path. Who may write the pattern registry is not defined here: local
-presence is not a trust claim, and a publishing channel needs its own policy (I-000422). A followed symlink
-target and the member check/open window are the trust-boundary work that policy owns.
+hand-authored YAML path do not: under the default `ir-only` intake, §5.1 refuses a user bundle with no
+current apply before graph construction instead of falling back to its YAML manifest, and the bundle format
+is not retired — only its hand-authored form stops being the main path. Who may write the pattern registry
+is not defined here: local presence is not a trust claim, and a publishing channel needs its own policy
+(I-000422). A followed symlink target and the member check/open window are the trust-boundary work that
+policy owns.
 
 #### 7.1 Repository samples
 
