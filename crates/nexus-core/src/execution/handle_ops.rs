@@ -891,16 +891,15 @@ impl ExecutionHandle {
                     .to_string(),
             })?
             .to_path_buf();
-        Ok(ToolContext {
-            pool: (*self.coordinator().pool()).clone(),
+        Ok(ToolContext::new(
+            (*self.coordinator().pool()).clone(),
             nexus_home,
-            workspace_path: self
-                .workspace_root()
+            self.workspace_root()
                 .map(|p| p.to_string_lossy().into_owned()),
-            runtime_facts: self.runtime_facts().clone(),
-            core: self.linked_core().ok(),
-            user_capabilities: Some(self.capability_holder()),
-        })
+            self.runtime_facts().clone(),
+            self.linked_core().ok(),
+            Some(self.capability_holder()),
+        ))
     }
 
     /// Build the compute context for this owner.

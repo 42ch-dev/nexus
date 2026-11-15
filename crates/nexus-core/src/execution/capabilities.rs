@@ -47,7 +47,8 @@
 #![allow(clippy::too_many_lines)]
 
 use super::work_artifact::{
-    classify_work_path, FsWorkArtifactPort, WorkArtifactPort, WorkArtifactWrite, WorkPath,
+    classify_work_path, FsWorkArtifactPort, RecordedMutation, RecordingWorkArtifactPort,
+    WorkArtifactPort, WorkArtifactWrite, WorkPath,
 };
 use crate::content::resolve_guarded_path_async;
 use crate::error::{CoreError, CoreResult};
@@ -172,6 +173,12 @@ pub struct ToolContext {
     /// hot-reloaded registry is visible to the very next call — the same
     /// discipline the engine uses through the shared holder.
     pub(crate) user_capabilities: Option<nexus_orchestration::CapabilityRegistryHolder>,
+    /// The Simulate plane's Work artifact port, when this context is one.
+    ///
+    /// `None` is production: every Work byte write commits through
+    /// [`FsWorkArtifactPort`]. `Some` records the intended writes instead, so a
+    /// dry run leaves the `Works/` tree byte-identical.
+    pub(crate) recording_work_artifact: Option<Arc<RecordingWorkArtifactPort>>,
 }
 
 impl ToolContext {
@@ -180,6 +187,8 @@ impl ToolContext {
     /// The fields stay crate-private so a caller cannot mutate the authority
     /// under a running dispatch; this constructor is the public composition
     /// point a transport (or a test) uses.
+    ///
+    /// Production: Work artifact writes commit through the filesystem port.
     #[must_use]
     pub const fn new(
         pool: sqlx::SqlitePool,
@@ -196,6 +205,65 @@ impl ToolContext {
             runtime_facts,
             core,
             user_capabilities,
+            recording_work_artifact: None,
+        }
+    }
+
+    /// The same context, with Work artifact writes recorded instead of landed.
+    ///
+    /// A dry run over a workspace whose `Works/` tree already holds real
+    /// chapter bytes must not rewrite them; selecting the recording port here is
+    /// what makes that true for every Work write this context can reach.
+    #[must_use]
+    pub fn new_simulated(
+        pool: sqlx::SqlitePool,
+        nexus_home: std::path::PathBuf,
+        workspace_path: Option<String>,
+        runtime_facts: ToolRuntimeFacts,
+        core: Option<Arc<CoreService>>,
+        user_capabilities: Option<nexus_orchestration::CapabilityRegistryHolder>,
+    ) -> Self {
+        Self {
+            recording_work_artifact: Some(Arc::new(RecordingWorkArtifactPort::new())),
+            ..Self::new(
+                pool,
+                nexus_home,
+                workspace_path,
+                runtime_facts,
+                core,
+                user_capabilities,
+            )
+        }
+    }
+
+    /// The Work writes this context recorded, or `None` for a production one.
+    ///
+    /// `None` is not an empty log: a production context commits real bytes and
+    /// records nothing, so reporting `Some(vec![])` would claim a plane that
+    /// does not exist.
+    #[must_use]
+    pub fn recorded_work_artifact_mutations(&self) -> Option<Vec<RecordedMutation>> {
+        self.recording_work_artifact
+            .as_ref()
+            .map(|port| port.mutations())
+    }
+
+    /// Commit one Work artifact byte write through the selected port.
+    ///
+    /// The recording port performs no filesystem, SQLite or lock operation, so
+    /// a simulated dispatch claims Work-byte isolation only — the surrounding
+    /// capability keeps its own path guards and post-commit database behaviour.
+    async fn commit_work_artifact(
+        &self,
+        write: WorkArtifactWrite<'_>,
+    ) -> Result<(), NexusApiError> {
+        match self.recording_work_artifact.as_deref() {
+            Some(port) => port.commit(write).await,
+            None => {
+                FsWorkArtifactPort::new(self.pool.clone(), self.nexus_home.clone())
+                    .commit(write)
+                    .await
+            }
         }
     }
 
@@ -996,8 +1064,8 @@ async fn execute_write_file(
         rel_child,
     } = work_path
     {
-        FsWorkArtifactPort::new(context.pool.clone(), context.nexus_home.clone())
-            .commit(WorkArtifactWrite {
+        context
+            .commit_work_artifact(WorkArtifactWrite {
                 workspace_root: Path::new(&workspace_path_str),
                 work_ref,
                 rel_child,
@@ -1767,8 +1835,8 @@ async fn execute_manuscript_chapter_update(
         // update transaction below; a later DB failure rolls back the row
         // while the bytes stay landed, as before.
         let (body_work_ref, body_rel_child) = work_artifact_parts(&canonical_path)?;
-        FsWorkArtifactPort::new(context.pool.clone(), context.nexus_home.clone())
-            .commit(WorkArtifactWrite {
+        context
+            .commit_work_artifact(WorkArtifactWrite {
                 workspace_root: Path::new(&workspace_root),
                 work_ref: body_work_ref,
                 rel_child: body_rel_child,
@@ -2494,8 +2562,8 @@ async fn execute_manuscript_write(
     // restores the count — and it is why the byte commit comes first: the
     // reverse order would leave a row describing bytes that never landed.
     let (body_work_ref, body_rel_child) = work_artifact_parts(&body_path)?;
-    FsWorkArtifactPort::new(context.pool.clone(), context.nexus_home.clone())
-        .commit(WorkArtifactWrite {
+    context
+        .commit_work_artifact(WorkArtifactWrite {
             workspace_root: workspace_root_path,
             work_ref: body_work_ref,
             rel_child: body_rel_child,
@@ -4193,6 +4261,95 @@ mod tests {
             "the atomic temp file is cleaned up"
         );
         assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
+    }
+
+    /// Every entry below `root`, ordered by relative path, with a file's bytes.
+    fn entry_snapshot(root: &std::path::Path) -> Vec<(String, Option<Vec<u8>>)> {
+        fn walk(
+            root: &std::path::Path,
+            dir: &std::path::Path,
+            out: &mut Vec<(String, Option<Vec<u8>>)>,
+        ) {
+            let mut paths: Vec<_> = std::fs::read_dir(dir)
+                .expect("read_dir")
+                .map(|entry| entry.expect("dir entry").path())
+                .collect();
+            paths.sort();
+            for path in paths {
+                let rel = path
+                    .strip_prefix(root)
+                    .expect("entry below the snapshot root")
+                    .display()
+                    .to_string();
+                if path.is_dir() {
+                    out.push((rel, None));
+                    walk(root, &path, out);
+                } else {
+                    out.push((rel, Some(std::fs::read(&path).expect("read entry"))));
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(root, root, &mut out);
+        out
+    }
+
+    /// I-000460: a dry run over a workspace that already holds real chapter
+    /// bytes must record the write and leave the file untouched. Removing the
+    /// recording port from `ToolContext::new_simulated` rewrites the chapter, so
+    /// this test is the negative control for that selection.
+    #[tokio::test]
+    async fn simulated_fs_write_records_and_preserves_an_existing_chapter() {
+        use sha2::{Digest, Sha256};
+
+        let fixture = fixture(true).await;
+        let chapter = format!("Works/{WORK_REF}/Stories/ch1.md");
+        let target = fixture.workspace.path().join(&chapter);
+        std::fs::create_dir_all(target.parent().expect("chapter dir")).expect("chapter dir");
+        std::fs::write(&target, "the original chapter\n").expect("seed the chapter");
+        let before = entry_snapshot(fixture.workspace.path());
+
+        // The same resolved inputs the production fixture uses, plus the
+        // recording port.
+        let context = ToolContext::new_simulated(
+            fixture.pool.clone(),
+            fixture.context.nexus_home.clone(),
+            fixture.context.workspace_path(),
+            ToolRuntimeFacts::default(),
+            None,
+            None,
+        );
+        execute_write_file(&write_request(&chapter, "a rewritten chapter\n"), &context)
+            .await
+            .expect("the simulated write succeeds");
+
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read the chapter"),
+            "the original chapter\n",
+            "a dry run must leave the existing chapter bytes alone"
+        );
+        assert_eq!(
+            entry_snapshot(fixture.workspace.path()),
+            before,
+            "a dry run must not add, remove or rewrite any tree entry"
+        );
+
+        let mutations = context
+            .recorded_work_artifact_mutations()
+            .expect("a simulated context returns its log");
+        assert_eq!(mutations.len(), 1, "one Work write was intended");
+        assert_eq!(mutations[0].work_ref, WORK_REF);
+        assert_eq!(mutations[0].rel_child, "Stories/ch1.md");
+        assert_eq!(mutations[0].bytes, "a rewritten chapter\n".len());
+        assert_eq!(
+            mutations[0].sha256,
+            hex::encode(Sha256::digest(b"a rewritten chapter\n")),
+            "the log carries the digest of the bytes it would have written"
+        );
+        assert!(
+            fixture.context.recorded_work_artifact_mutations().is_none(),
+            "a production context reports no log rather than an empty one"
+        );
     }
 
     #[tokio::test]

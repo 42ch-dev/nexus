@@ -8,7 +8,10 @@
 //!
 //! No flag, environment variable or configuration selects this port (ADR #485
 //! §6.1 P5): every production route constructs [`FsWorkArtifactPort`], so
-//! Work-path writes are default-on.
+//! Work-path writes are default-on. The one exception is a simulate plane,
+//! which asks its execution context for [`RecordingWorkArtifactPort`] at
+//! construction: that port lands nothing, so a dry run cannot rewrite a real
+//! chapter file.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -516,32 +519,29 @@ impl WorkArtifactPort for FsWorkArtifactPort {
 }
 
 /// One recorded intended write in a [`RecordingWorkArtifactPort`] log.
-#[cfg_attr(not(test), allow(dead_code))]
-// unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
 #[derive(Debug, Clone, serde::Serialize)]
-pub(crate) struct RecordedMutation {
+pub struct RecordedMutation {
     /// The Work directory name the write addressed.
-    pub(crate) work_ref: String,
+    pub work_ref: String,
     /// The artifact path below the Work root.
-    pub(crate) rel_child: String,
+    pub rel_child: String,
     /// Byte length of the content that *would* have been written.
-    pub(crate) bytes: usize,
+    pub bytes: usize,
     /// sha256 hex digest of the content (same convention as the tree digest).
-    pub(crate) sha256: String,
+    pub sha256: String,
 }
 
 /// Simulate/dry-run [`WorkArtifactPort`]: records intended mutations in
 /// commit order and performs no filesystem, SQLite or lock operation.
 ///
-/// Never constructed on a production path; a future Simulate execution plane
-/// selects it at the per-dispatch construction point (`capabilities.rs`,
-/// `FsWorkArtifactPort::new`) so one selection covers every Work write.
-#[cfg_attr(not(test), allow(dead_code))] // unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
+/// Production defaults never select it: [`super::capabilities::ToolContext::new`]
+/// and [`super::executor::WorkspaceCommitExecutor::new`] keep the filesystem
+/// port, and only their `new_simulated` twins install this one — one selection
+/// at the per-dispatch construction point covers every Work write below it.
 pub(crate) struct RecordingWorkArtifactPort {
     mutations: std::sync::Mutex<Vec<RecordedMutation>>,
 }
 
-#[cfg_attr(not(test), allow(dead_code))] // unused until the first Simulate execution plane selects the stub at the per-dispatch construction point (plan v235-work-ir-p3 reopen condition)
 impl RecordingWorkArtifactPort {
     #[must_use]
     pub(crate) const fn new() -> Self {
@@ -560,7 +560,6 @@ impl RecordingWorkArtifactPort {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))] // unused until the first Simulate execution plane selects the stub (plan v235-work-ir-p3 reopen condition)
 impl WorkArtifactPort for RecordingWorkArtifactPort {
     // The trait signature is async; the stub records synchronously.
     #[allow(clippy::unused_async_trait_impl)]
