@@ -307,10 +307,7 @@ fn tree_snapshot(root: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
                 out.insert(format!("{relative}/"), None);
                 walk(&path, base, out);
             } else {
-                out.insert(
-                    relative,
-                    Some(std::fs::read(&path).expect("entry bytes")),
-                );
+                out.insert(relative, Some(std::fs::read(&path).expect("entry bytes")));
             }
         }
     }
@@ -639,7 +636,10 @@ async fn simulated_scaffold_records_without_touching_work_tree() {
                 "sim-novel".to_string(),
                 "Outlines/foreshadowing.md".to_string()
             ),
-            ("sim-novel".to_string(), "Outlines/event-index.md".to_string()),
+            (
+                "sim-novel".to_string(),
+                "Outlines/event-index.md".to_string()
+            ),
             ("sim-novel".to_string(), "AGENTS.md".to_string()),
         ],
         "the dry run records every intended Work write, in order"
@@ -647,5 +647,125 @@ async fn simulated_scaffold_records_without_touching_work_tree() {
     assert!(
         fx.executor.records_work_artifacts(),
         "the executor stays recording even with a Work artifact home attached"
+    );
+}
+
+/// The recording executor of a dry run that loses the engine database after
+/// its last Work write, so the seed/patch step behind those writes fails.
+struct RecordingThenDbLoss {
+    inner: Arc<WorkspaceCommitExecutor>,
+    pool: Arc<SqlitePool>,
+}
+
+#[async_trait]
+impl WorkspaceExecutor for RecordingThenDbLoss {
+    fn workspace_root(&self) -> Result<PathBuf, CapabilityError> {
+        self.inner.workspace_root()
+    }
+
+    async fn open(
+        &self,
+        input: WorkspaceOpenInput,
+    ) -> Result<WorkspaceOpenOutput, CapabilityError> {
+        self.inner.open(input).await
+    }
+
+    async fn commit(
+        &self,
+        input: WorkspaceCommitInput,
+    ) -> Result<WorkspaceCommitOutput, CapabilityError> {
+        self.inner.commit(input).await
+    }
+
+    fn records_work_artifacts(&self) -> bool {
+        self.inner.records_work_artifacts()
+    }
+
+    async fn commit_work_artifact(
+        &self,
+        input: WorkArtifactCommitInput,
+    ) -> Result<WorkArtifactCommitOutput, CapabilityError> {
+        // `AGENTS.md` is the scaffold's last Work write; the database steps
+        // follow it.
+        let last = input.rel_child == "AGENTS.md";
+        let recorded = self.inner.commit_work_artifact(input).await?;
+        if last {
+            self.pool.close().await;
+        }
+        Ok(recorded)
+    }
+}
+
+/// A dry run that fails after it registered Work paths must not roll them
+/// back: `Path::exists` is false for a dangling symlink, so the scaffold reads
+/// the name as free and registers it — but the entry belongs to the user, and
+/// unlinking it would make an error path of a simulation mutate the tree.
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn a_failed_simulated_scaffold_leaves_the_work_tree_alone() {
+    let fx = simulated_fixture().await;
+    let _cwd = CwdGuard::enter(fx.cwd.path());
+
+    let work_id = "wrk_sim_fail_novel";
+    works::create_work(&fx.pool, &work_record_with_ref(work_id, "sim-fail-novel"))
+        .await
+        .expect("works row with a stored ref");
+
+    let work_dir = fx.root.path().join("Works").join("sim-fail-novel");
+    std::fs::create_dir_all(&work_dir).expect("work dir");
+    let readme = work_dir.join("README.md");
+    std::os::unix::fs::symlink("never-written.md", &readme).expect("dangling symlink");
+    assert!(!readme.exists(), "the seeded link must dangle");
+
+    let executor: Arc<dyn WorkspaceExecutor> = Arc::new(RecordingThenDbLoss {
+        inner: Arc::clone(&fx.executor),
+        pool: Arc::clone(&fx.pool),
+    });
+    let novel =
+        NovelProjectScaffold::with_pool((*fx.pool).clone()).with_workspace_executor(Some(executor));
+
+    let err = novel
+        .run(json!({
+            "creator_id": CREATOR,
+            "work_id": work_id,
+            "work_ref": "sim-fail-novel",
+            "title": "Failed Simulated Novel",
+            "create_world": true,
+            "world_title": "Failed Simulated World",
+            "total_planned_chapters": 1,
+        }))
+        .await
+        .expect_err("the database step behind the recorded writes must fail");
+    assert!(
+        matches!(err, CapabilityError::Internal(_)),
+        "expected the database failure to propagate, got: {err}"
+    );
+
+    let link = std::fs::symlink_metadata(&readme)
+        .expect("a failed dry run must leave the pre-existing entry in place");
+    assert!(
+        link.file_type().is_symlink(),
+        "the pre-existing symlink must survive the failed dry run"
+    );
+    assert_eq!(
+        std::fs::read_link(&readme).expect("link target"),
+        Path::new("never-written.md"),
+        "the link target is untouched"
+    );
+    let mut entries: Vec<String> = std::fs::read_dir(&work_dir)
+        .expect("work dir readable")
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    entries.sort();
+    assert_eq!(
+        entries,
+        vec!["README.md".to_string()],
+        "a failed dry run must not add or remove entries in the Work tree"
     );
 }

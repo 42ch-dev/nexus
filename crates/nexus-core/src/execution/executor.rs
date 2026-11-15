@@ -118,7 +118,9 @@ impl WorkspaceCommitExecutor {
                     .await
                     .map_err(map_port_error)
             }
-            WorkArtifactBinding::Recording(port) => port.commit(write).await.map_err(map_port_error),
+            WorkArtifactBinding::Recording(port) => {
+                port.commit(write).await.map_err(map_port_error)
+            }
             WorkArtifactBinding::Unbound => Err(CapabilityError::InputInvalid(
                 "work artifact commit not wired".into(),
             )),

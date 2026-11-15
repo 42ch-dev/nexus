@@ -836,7 +836,8 @@ async fn write_file_idem(
 struct ScaffoldTransaction {
     files_created: Vec<PathBuf>,
     dirs_created: Vec<PathBuf>,
-    /// Whether the executor records its writes instead of landing them.
+    /// Whether the executor records its writes instead of landing them. Such a
+    /// run never owns a path on disk, so its rollback is inert.
     recording: bool,
     committed: bool,
 }
@@ -880,7 +881,11 @@ impl ScaffoldTransaction {
 
 impl Drop for ScaffoldTransaction {
     fn drop(&mut self) {
-        if self.committed {
+        // A recording run owns nothing on disk: its byte commits only logged
+        // intended writes, so every registered path may be an entry this run
+        // never created (a dangling symlink passes the `exists()` check as
+        // absent). Rolling back would delete the user's own tree.
+        if self.committed || self.recording {
             return;
         }
         // Best-effort rollback. We log but do not panic — if the FS state
