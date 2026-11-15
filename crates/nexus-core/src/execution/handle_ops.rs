@@ -2318,8 +2318,9 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
 impl ExecutionHandle {
     /// Install (or disable) this execution owner's peer-control lane
     /// (P4-T3). Enablement is explicit: `enabled: false` tears the lane down
-    /// to a disabled state; an enabled lane starts with exactly the named
-    /// `allowed_operations` (empty admits nothing).
+    /// to a disabled state; every start REPLACES the allowlist, so an enabled
+    /// lane holds exactly the named `allowed_operations` (empty admits
+    /// nothing) and a restart can only narrow, never accumulate.
     ///
     /// # Errors
     /// Returns [`CoreError::Closing`] when the owning service is closed and
@@ -2339,35 +2340,25 @@ impl ExecutionHandle {
             .into_iter()
             .map(|item| item.to_string())
             .collect();
-        let mut slot = self
+        // Every start installs a fresh lane: a restart naming a narrower (or
+        // empty) allowlist drops the earlier grants instead of unioning them.
+        let lane = std::sync::Arc::new(nexus_connect::PeerControlLane::new(
+            request.enabled,
+            allowed,
+        ));
+        *self
             .peer_control
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        #[allow(clippy::option_if_let_else)] // the else branch initializes the slot
-        let lane = if let Some(lane) = slot.as_ref() {
-            std::sync::Arc::clone(lane)
-        } else {
-            let lane = std::sync::Arc::new(nexus_connect::PeerControlLane::new(
-                false,
-                std::collections::HashSet::new(),
-            ));
-            *slot = Some(std::sync::Arc::clone(&lane));
-            lane
-        };
-        drop(slot);
-        lane.set_enabled(request.enabled);
-        if request.enabled {
-            for operation in allowed {
-                lane.allow(&operation);
-            }
-        }
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(std::sync::Arc::clone(&lane));
         Ok(lane.state(active_peer_ids()))
     }
 
     /// Drive one peer-control operation against this owner's lane (P4-T3).
     /// `status` reports the lane state; `enable`/`disable` flip enablement;
-    /// `allow` adds one operation to the allowlist; `evict` removes a peer's
-    /// registered tools. Anything else is `invalid_input`, and every
+    /// `allow` adds the operation its payload names (`payload.operation`) to
+    /// the allowlist; `evict` removes a peer's registered tools. Anything
+    /// else is `invalid_input`, and every
     /// operation not on the lane's allowlist is refused before any effect —
     /// visibility of a peer tool never implies authority to control it.
     ///
@@ -2406,7 +2397,18 @@ impl ExecutionHandle {
             "enable" => lane.set_enabled(true),
             "disable" => lane.set_enabled(false),
             "allow" => {
-                lane.allow(operation);
+                // The grant target is the payload's named operation — the
+                // request's own `operation` is just this arm's selector, so
+                // inserting it would grant `allow` itself and nothing else.
+                let granted = request
+                    .payload
+                    .get("operation")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| CoreError::InvalidInput {
+                        field: "payload.operation".into(),
+                        reason: "the allow operation must name the operation it grants".into(),
+                    })?;
+                lane.allow(granted);
             }
             "evict" => {
                 let evicted = nexus_connect::peer_tools::peer_tool_registry()

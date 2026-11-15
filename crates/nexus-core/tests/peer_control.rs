@@ -31,6 +31,16 @@ use async_trait::async_trait;
 use nexus_connect::peer_tools::{invoke_peer_tool, AdmissionOutcome, PeerResponder};
 use nexus_connect::table::peer_tool_table;
 use nexus_connect::visibility::VisibilityPolicy;
+use nexus_contracts::generated::core::{
+    CorePeerControlOptions, CorePeerControlOptionsAllowedOperationsItem, CorePeerControlRequest,
+    CorePeerControlRequestOperation, CorePeerControlRequestPeerId,
+};
+use nexus_contracts::{
+    CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply,
+};
+use nexus_core::execution::{ExecutionHandle, RunnerDeps};
+use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
+use nexus_provider_ports::{ProviderPort, ProviderResult};
 use nexus_spoke_adapter::HostCapabilityManifest;
 use serial_test::serial;
 
@@ -459,5 +469,246 @@ async fn peer_tool_admission_is_scoped_by_manifest_negotiation_allowlist_and_res
     assert!(
         registry.get(TOOL_ALPHA).is_none(),
         "the admission-matrix fixture leaves no rows behind"
+    );
+}
+
+// ── Peer-control lane state transitions (v1.190 P4-T3) ────────────────────
+//
+// The two cases below drive the lane the `ExecutionHandle` owns, not the
+// registry: a start REPLACES the allowlist (so a narrowing restart drops the
+// earlier grants) and `allow` grants the operation its payload names.
+
+const LANE_CREATOR: &str = "peer-lane-creator";
+const LANE_SLUG: &str = "default";
+const LANE_PEER: &str = "peer-lane-1";
+
+/// A provider that never performs an effect: the lane cases drive no run.
+struct LaneNullProvider;
+
+#[async_trait]
+impl ProviderPort for LaneNullProvider {
+    async fn call(&self, _request: ProviderCall) -> ProviderResult<ProviderReply> {
+        Err(WireCoreError {
+            code: CoreErrorCode::Internal,
+            message: "null provider: no live model in this test".to_string(),
+            details: serde_json::Map::default(),
+            http_status: Some(500),
+        })
+    }
+
+    async fn next(
+        &self,
+        operation_id: String,
+        _max_events: u32,
+        _max_bytes: u32,
+    ) -> ProviderResult<ProviderEventBatch> {
+        Ok(ProviderEventBatch {
+            operation_id,
+            events: vec![],
+            has_more: false,
+            gap: None,
+        })
+    }
+}
+
+struct LaneFixture {
+    core: CoreService,
+    handle: Arc<ExecutionHandle>,
+    _tmp: tempfile::TempDir,
+}
+
+/// Open an engine-owner core over a seeded home and start its execution owner,
+/// exactly as the daemon does — the lane lives on that owner.
+async fn lane_fixture() -> LaneFixture {
+    let tmp = tempfile::TempDir::new().expect("temp home");
+    let user_home = tmp.path().to_path_buf();
+    let home = user_home.join(".nexus42");
+    std::fs::create_dir_all(&home).expect("nexus home");
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        &user_home,
+        LANE_CREATOR,
+        LANE_SLUG,
+    ))
+    .expect("workspace dir");
+    std::fs::write(
+        home.join("config.toml"),
+        format!(
+            "active_creator_id = \"{LANE_CREATOR}\"\n[active_workspace_slug_by_creator]\n\"{LANE_CREATOR}\" = \"{LANE_SLUG}\"\n"
+        ),
+    )
+    .expect("config.toml");
+    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, LANE_CREATOR, LANE_SLUG);
+    {
+        // The seed guard holds the DB's engine lock; it must be gone before
+        // the engine-owner open below claims that lock itself.
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .expect("engine pool init");
+        nexus_local_db::ensure_creator_row(guarded.pool(), LANE_CREATOR, "Test")
+            .await
+            .expect("seed the admitted creator and its holder");
+        guarded.pool().close().await;
+        drop(guarded);
+    }
+    nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
+
+    let core = CoreService::open(CoreOpenOptions {
+        user_home: user_home.clone(),
+        access: CoreAccess::EngineOwner,
+        memory: None,
+    })
+    .await
+    .expect("engine-owner core open");
+    let deps = RunnerDeps {
+        workspace_root: Some(nexus_home_layout::operational_workspace_dir(
+            &user_home,
+            LANE_CREATOR,
+            LANE_SLUG,
+        )),
+        nexus_home: Some(home),
+        ..RunnerDeps::default()
+    };
+    let handle = core
+        .start_execution(
+            Arc::new(LaneNullProvider) as Arc<dyn ProviderPort>,
+            deps,
+        )
+        .await
+        .expect("execution owner starts");
+    LaneFixture {
+        core,
+        handle,
+        _tmp: tmp,
+    }
+}
+
+fn start_options(enabled: bool, allowed: &[&str]) -> CorePeerControlOptions {
+    CorePeerControlOptions {
+        allowed_operations: allowed
+            .iter()
+            .map(|operation| {
+                CorePeerControlOptionsAllowedOperationsItem::try_from(*operation)
+                    .expect("fixture operations are non-empty")
+            })
+            .collect(),
+        enabled,
+    }
+}
+
+/// A control request; `grants` names the operation an `allow` request adds to
+/// the allowlist (the request's own `operation` is `"allow"`).
+fn control_request(operation: &str, grants: Option<&str>) -> CorePeerControlRequest {
+    let mut payload = serde_json::Map::new();
+    if let Some(granted) = grants {
+        payload.insert(
+            "operation".to_string(),
+            serde_json::Value::String(granted.to_string()),
+        );
+    }
+    CorePeerControlRequest {
+        operation: CorePeerControlRequestOperation::try_from(operation)
+            .expect("fixture operations are non-empty"),
+        payload,
+        peer_id: CorePeerControlRequestPeerId::try_from(LANE_PEER)
+            .expect("fixture peer id is non-empty"),
+    }
+}
+
+const fn forbidden(
+    result: &Result<nexus_contracts::generated::core::CorePeerControlState, CoreError>,
+) -> bool {
+    matches!(result, Err(CoreError::Forbidden { .. }))
+}
+
+/// A restart REPLACES the allowlist: the operation the narrower start omits is
+/// refused afterwards. Additive install would keep the earlier grant.
+#[tokio::test]
+#[serial]
+async fn peer_control_restart_replaces_the_allowlist() {
+    let f = lane_fixture().await;
+    let principal = f.core.active_principal().await.expect("active principal");
+    f.handle
+        .start_peer_control(&principal, start_options(true, &["status", "evict"]))
+        .await
+        .expect("the lane starts");
+    let evict = control_request("evict", None);
+    assert!(
+        !forbidden(&f.handle.peer_control(&principal, evict.clone()).await),
+        "the first start admits evict (its refusal here is not the allowlist)"
+    );
+    assert!(
+        f.handle
+            .peer_control(&principal, control_request("status", None))
+            .await
+            .is_ok(),
+        "the first start admits status"
+    );
+
+    f.handle
+        .start_peer_control(&principal, start_options(true, &["status"]))
+        .await
+        .expect("the lane restarts");
+
+    let dropped = f.handle.peer_control(&principal, evict).await;
+    assert!(
+        forbidden(&dropped),
+        "a restart that omits evict must drop the earlier grant, got {dropped:?}"
+    );
+    assert!(
+        f.handle
+            .peer_control(&principal, control_request("status", None))
+            .await
+            .is_ok(),
+        "the narrowing start keeps the operation it names"
+    );
+}
+
+/// `allow` grants the operation its payload names — not the literal `allow` —
+/// so a later call to that operation passes the allowlist gate.
+#[tokio::test]
+#[serial]
+async fn peer_control_allow_grants_the_named_operation() {
+    let f = lane_fixture().await;
+    let principal = f.core.active_principal().await.expect("active principal");
+    f.handle
+        .start_peer_control(&principal, start_options(true, &["allow"]))
+        .await
+        .expect("the lane starts");
+
+    let status = control_request("status", None);
+    assert!(
+        forbidden(&f.handle.peer_control(&principal, status.clone()).await),
+        "status is not on the allowlist yet"
+    );
+
+    let granted = f
+        .handle
+        .peer_control(
+            &principal,
+            control_request("allow", Some("status")),
+        )
+        .await;
+    assert!(granted.is_ok(), "allow itself is allowlisted: {granted:?}");
+
+    assert!(
+        f.handle.peer_control(&principal, status).await.is_ok(),
+        "allow must grant the operation its payload names"
+    );
+    assert!(
+        forbidden(
+            &f.handle
+                .peer_control(&principal, control_request("evict", None))
+                .await
+        ),
+        "an operation allow never named stays refused"
+    );
+    assert!(
+        matches!(
+            f.handle
+                .peer_control(&principal, control_request("allow", None))
+                .await,
+            Err(CoreError::InvalidInput { .. })
+        ),
+        "allow without a payload-named operation is a validation refusal, not a silent grant"
     );
 }
