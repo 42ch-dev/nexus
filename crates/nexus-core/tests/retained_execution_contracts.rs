@@ -7640,6 +7640,7 @@ async fn a_schedule_with_no_apply_runs_the_yaml_graph_the_untouched_builder_buil
             reference_input,
             None,
             prompt_bindings,
+            None,
             Arc::new(reference_graph),
         )
         .await

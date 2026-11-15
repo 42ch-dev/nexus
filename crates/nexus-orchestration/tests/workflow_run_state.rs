@@ -20,9 +20,11 @@
 #![allow(clippy::significant_drop_tightening)] // tests read state snapshots; early-drop noise without contention value
 
 use graph_flow::{Session, SessionStorage};
+use nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument;
+use nexus_orchestration::capability::{AppliedDocument, AppliedDocumentSource};
 use nexus_orchestration::engine::{SessionId, SessionStatus};
 use nexus_orchestration::run_state::{
-    AgentBinding, ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunStateV1,
+    AgentBinding, AppliedRunIdentity, ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunStateV1,
     TerminalSettlementTarget, WorkflowStateStore,
 };
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
@@ -6820,4 +6822,139 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
         .expect("record");
     assert_eq!(record.status, SessionStatus::Cancelled);
     assert_eq!(record.state_revision, 4);
+}
+
+// ---------------------------------------------------------------------------
+// The YAML run seam freezes the apply it runs (P6, I-000443)
+// ---------------------------------------------------------------------------
+
+/// The applied fixture document's entry node — a node id no loaded bundle
+/// declares, so the run's persisted position names the graph that ran.
+const APPLIED_ENTRY_PROBE: &str = "applied_entry_probe";
+/// The applied fixture document's manual wait. Never reached here (no
+/// coordinator drives the entry), but it keeps the document runnable.
+const APPLIED_ONLY_PROBE: &str = "applied_only_probe";
+
+/// An applied document: entry → applied-only wait → done. It shares no node id
+/// with the bundle the loaded preset carries, so a run started on it can only
+/// be positioned on `applied_entry_probe`.
+fn applied_probe_document(id: &str) -> WorkflowDocument {
+    serde_json::from_str(&format!(
+        r#"{{
+  "ir_version": 0,
+  "id": "{id}",
+  "version": 1,
+  "revision": 0,
+  "state": "candidate",
+  "meta": {{
+    "description": "applied entry fixture",
+    "kind": "creator",
+    "run_intents": [],
+    "requires_capabilities": []
+  }},
+  "entry": "{APPLIED_ENTRY_PROBE}",
+  "terminal": ["done"],
+  "nodes": [
+    {{"id": "{APPLIED_ENTRY_PROBE}", "kind": "outer_state", "effect_class": "pure",
+     "exit_when": {{"kind": "rule"}}}},
+    {{"id": "{APPLIED_ONLY_PROBE}", "kind": "outer_state", "effect_class": "pure",
+     "exit_when": {{"kind": "manual"}}}},
+    {{"id": "done", "kind": "terminal", "effect_class": "pure"}}
+  ],
+  "edges": [
+    {{"id": "{APPLIED_ENTRY_PROBE}->{APPLIED_ONLY_PROBE}", "from": "{APPLIED_ENTRY_PROBE}",
+     "to": "{APPLIED_ONLY_PROBE}", "kind": "linear"}},
+    {{"id": "{APPLIED_ONLY_PROBE}->done", "from": "{APPLIED_ONLY_PROBE}",
+     "to": "done", "kind": "linear"}}
+  ],
+  "nests": [],
+  "assets": [],
+  "signals": [],
+  "roles": [],
+  "effect_summary": "pure",
+  "provenance": {{"source": "compose"}}
+}}"#
+    ))
+    .expect("the applied fixture document decodes")
+}
+
+/// An applied source answering for exactly one strategy id.
+struct FakeAppliedDocuments {
+    preset_id: &'static str,
+    identity: AppliedRunIdentity,
+    document: WorkflowDocument,
+}
+
+#[async_trait::async_trait]
+impl AppliedDocumentSource for FakeAppliedDocuments {
+    async fn applied_document(
+        &self,
+        preset_id: &str,
+        _loaded: &nexus_preset::LoadedPreset,
+    ) -> Result<Option<AppliedDocument>, String> {
+        Ok((preset_id == self.preset_id).then(|| AppliedDocument {
+            identity: self.identity.clone(),
+            document: self.document.clone(),
+        }))
+    }
+}
+
+/// Assert the entry admitted the applied graph and froze its identity.
+async fn assert_applied_entry(
+    storage: &Arc<SqliteSessionStorage>,
+    sid: &SessionId,
+    identity: &AppliedRunIdentity,
+) {
+    let record = storage
+        .load_run(sid)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    let descriptor = record.descriptor.expect("v1 descriptor");
+    assert_eq!(
+        descriptor.applied.as_ref(),
+        Some(identity),
+        "the descriptor must freeze the apply the run executes"
+    );
+    let session = storage.get(&sid.0).await.expect("session read").expect("row");
+    assert_eq!(
+        session.current_task_id, APPLIED_ENTRY_PROBE,
+        "the run must be built from the applied document, not the bundle"
+    );
+}
+
+/// Both preset trait entries resolve through the `AppliedDocumentSource`: they
+/// persist the identity and select the applied graph.
+///
+/// Mutation this fails on: either entry building the YAML graph unconditionally
+/// and leaving `applied: None` — then the position is the bundle's initial
+/// state and a restart rebuilds a document the run never ran.
+#[tokio::test]
+async fn preset_entries_freeze_and_run_the_strategy_apply() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, mut engine) = fresh_engine(pool);
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded =
+        nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
+    let identity = AppliedRunIdentity {
+        apply_id: "apl_entry".to_string(),
+        content_hash: "blake3:entry".to_string(),
+    };
+    engine.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "novel-writing",
+        identity: identity.clone(),
+        document: applied_probe_document("novel-writing"),
+    }));
+
+    let sid = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .expect("start_session_with_preset");
+    assert_applied_entry(&storage, &sid, &identity).await;
+
+    let sid = engine
+        .start_session_with_preset_for_creator(&loaded, "ctr_entry")
+        .await
+        .expect("start_session_with_preset_for_creator");
+    assert_applied_entry(&storage, &sid, &identity).await;
 }

@@ -4273,10 +4273,14 @@ impl GraphFlowEngine {
         &self,
         loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
+        applied: Option<crate::run_state::AppliedRunIdentity>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
         if let Some(store) = &self.state.workflow_store {
-            let descriptor = self.build_descriptor(loaded, creator_id)?;
+            let mut descriptor = self.build_descriptor(loaded, creator_id)?;
+            // The identity the caller resolved this run under, so a restart can
+            // tell whether the strategy's current apply is still that one.
+            descriptor.applied = applied;
             let session_id = format!("{}:{}", loaded.id, uuid::Uuid::new_v4());
             let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
             let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
@@ -4321,16 +4325,79 @@ impl GraphFlowEngine {
         }
     }
 
+    /// Admit a trait-entry start: the wired APPLIED graph when the strategy has
+    /// a current apply, the YAML graph otherwise.
+    ///
+    /// Both preset trait entries come through here, so neither can admit a graph
+    /// and freeze a descriptor that disagree — recovery rebuilds from the
+    /// recorded identity, and a run admitted on the YAML graph because this seam
+    /// skipped the resolution would recover into a document it never ran.
+    async fn start_preset_entry(
+        &self,
+        loaded: &nexus_preset::LoadedPreset,
+        creator_id: &str,
+    ) -> Result<SessionId, EngineError> {
+        // WS3 R1: Use EngineProxy wrapping EngineSharedState.
+        let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
+            state: self.state.clone(),
+        });
+        let caps = self.current_caps();
+        let applied = match &self.state.applied_document_source {
+            Some(source) => {
+                source
+                    .applied_document(&loaded.id, loaded)
+                    .await
+                    .map_err(|error| {
+                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
+                    })?
+            }
+            None => None,
+        };
+        let wired = match &applied {
+            // Same rule admission states: an applied user document's id is not a
+            // bundle id, so reading the embedded bundle could serve a colliding
+            // preset's bytes.
+            Some(applied) => crate::preset_runtime::build_wired_outer_graph_from_ir(
+                &applied.document,
+                crate::preset_runtime::IrTemplateSource::OwnSource,
+                &proxy,
+                &caps,
+                self.daemon_tool_dispatch.clone(),
+                self.prompt_executor.clone(),
+                self.session_cancels.clone(),
+            )
+            .map_err(|error| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(error.to_string()))
+            })?,
+            None => crate::preset_runtime::build_wired_outer_graph(
+                loaded,
+                &proxy,
+                &caps,
+                self.daemon_tool_dispatch.clone(),
+                self.prompt_executor.clone(),
+                self.session_cancels.clone(),
+            )?,
+        };
+        self.start_preset_run(
+            loaded,
+            creator_id,
+            applied.map(|applied| applied.identity),
+            Arc::new(wired),
+        )
+        .await
+    }
+
     /// Start a v1 run for a loaded preset with frozen admission input (A3).
     ///
     /// Mirrors [`start_preset_run`] but freezes the schedule admission's
-    /// input map, agent bindings and work id into the descriptor AND seeds
-    /// the session context (`preset.input.*`, the core-context payload under
-    /// the namespace its KIND owns — `core_context.text` for `Text`,
-    /// `core_context.struct` for `Struct`) before the initial checkpoint is
-    /// persisted — so the first step renders real input and the descriptor/
-    /// core seed are durable before eligibility is published (A3: persist
-    /// descriptor/core seed before enqueue).
+    /// input map, agent bindings, work id and resolved applied identity into
+    /// the descriptor AND seeds the session context (`preset.input.*`, the
+    /// core-context payload under the namespace its KIND owns —
+    /// `core_context.text` for `Text`, `core_context.struct` for `Struct`)
+    /// before the initial checkpoint is persisted — so the first step
+    /// renders real input and the descriptor/core seed are durable before
+    /// eligibility is published (A3: persist descriptor/core seed before
+    /// enqueue).
     ///
     /// `session_id` is caller-minted: the schedule admission claims the
     /// schedule row with this exact id BEFORE the run is created, so a
@@ -4350,6 +4417,7 @@ impl GraphFlowEngine {
         input: serde_json::Map<String, serde_json::Value>,
         core_context: Option<&CoreContextPayload>,
         agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+        applied: Option<crate::run_state::AppliedRunIdentity>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
         if let Some(store) = &self.state.workflow_store {
@@ -4357,6 +4425,9 @@ impl GraphFlowEngine {
             descriptor.work_id = work_id.filter(|id| !id.is_empty());
             descriptor.input = input.clone();
             descriptor.agent_bindings = agent_bindings;
+            // The identity the caller resolved this run under, so a restart can
+            // tell whether the strategy's current apply is still that one.
+            descriptor.applied = applied;
             let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
             let session =
                 graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
@@ -4892,20 +4963,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         &self,
         loaded: &nexus_preset::LoadedPreset,
     ) -> Result<SessionId, EngineError> {
-        // WS3 R1: Use EngineProxy wrapping EngineSharedState.
-        let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
-            state: self.state.clone(),
-        });
-        let caps = self.current_caps();
-        let wired = crate::preset_runtime::build_wired_outer_graph(
-            loaded,
-            &proxy,
-            &caps,
-            self.daemon_tool_dispatch.clone(),
-            self.prompt_executor.clone(),
-            self.session_cancels.clone(),
-        )?;
-        self.start_preset_run(loaded, "", Arc::new(wired)).await
+        self.start_preset_entry(loaded, "").await
     }
 
     async fn start_session_with_preset_for_creator(
@@ -4913,20 +4971,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
     ) -> Result<SessionId, EngineError> {
-        let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
-            state: self.state.clone(),
-        });
-        let caps = self.current_caps();
-        let wired = crate::preset_runtime::build_wired_outer_graph(
-            loaded,
-            &proxy,
-            &caps,
-            self.daemon_tool_dispatch.clone(),
-            self.prompt_executor.clone(),
-            self.session_cancels.clone(),
-        )?;
-        self.start_preset_run(loaded, creator_id, Arc::new(wired))
-            .await
+        self.start_preset_entry(loaded, creator_id).await
     }
 }
 

@@ -754,6 +754,20 @@ async fn read_restart_session(
         .expect("read the run row")
 }
 
+/// The frozen descriptor the run was admitted under.
+async fn read_restart_descriptor(
+    pool: &sqlx::SqlitePool,
+    session_id: &str,
+) -> nexus_orchestration::RunDescriptorV1 {
+    nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone()))
+        .load_run(&nexus_orchestration::SessionId(session_id.to_string()))
+        .await
+        .expect("read the run row")
+        .expect("the run row exists")
+        .descriptor
+        .expect("the frozen descriptor exists")
+}
+
 /// Boot recovery re-drives the seeded run past its shared entry node, then the
 /// durable record names the node the reconstructed graph reached.
 async fn recovered_position(owner: &CoreService, session_id: &str) -> graph_flow::Session {
@@ -974,6 +988,112 @@ async fn a_restart_of_an_unchanged_applied_run_still_recovers_the_applied_graph(
         session.current_task_id, APPLIED_ONLY_NODE,
         "a matching recorded identity must recover the applied graph; got {:?}",
         session.current_task_id
+    );
+
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
+// ── The YAML run seam freezes the apply it runs (P6, I-000443) ─────────────
+
+/// P6: `start_session` resolves the strategy's current apply before it builds.
+///
+/// An applied strategy must run the applied document — proven by the run's
+/// position on `applied_only_probe`, a node id the descriptor bundle does not
+/// declare — and freeze that identity on the descriptor. Without the second
+/// half, recovery's `(None, current)` arm rebuilds from whatever the strategy
+/// has applied by then: a graph this run never ran.
+///
+/// The no-apply strategy keeps the YAML bundle and a descriptor that still
+/// serialises no `applied` key at all.
+#[tokio::test]
+async fn start_session_freezes_and_runs_the_strategy_apply() {
+    let f = fixture().await;
+    let nexus_home = f.tmp.path().join(".nexus42");
+    write_restart_bundle(&nexus_home, RESTART_PRESET);
+    write_restart_bundle(&nexus_home, RESTART_NO_APPLY_PRESET);
+    let admitted = seed_restart_apply(&f.db_path, RESTART_PRESET).await;
+
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    let caps = handle.capability_holder();
+    let coordinator = handle.coordinator();
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+
+    let applied_run = coordinator
+        .start_session(
+            RESTART_PRESET,
+            CREATOR,
+            None,
+            std::collections::HashMap::new(),
+            &nexus_home,
+            &caps,
+            None,
+            None,
+        )
+        .await
+        .expect("an applied strategy admits through start_session");
+    wait_until("the applied run to reach the applied-only node", || {
+        let pool = pool.clone();
+        let session_id = applied_run.0.clone();
+        async move {
+            read_restart_session(&pool, &session_id)
+                .await
+                .is_some_and(|session| session.current_task_id == APPLIED_ONLY_NODE)
+        }
+    })
+    .await;
+    assert_ne!(
+        read_restart_session(&pool, &applied_run.0)
+            .await
+            .expect("the started run row exists")
+            .current_task_id,
+        PRESET_ONLY_NODE,
+        "the descriptor-only node must never run while the strategy has a current apply"
+    );
+    assert_eq!(
+        read_restart_descriptor(&pool, &applied_run.0).await.applied,
+        Some(admitted),
+        "the descriptor must freeze the apply the run executes"
+    );
+
+    let bundle_run = coordinator
+        .start_session(
+            RESTART_NO_APPLY_PRESET,
+            CREATOR,
+            Some("intake"),
+            std::collections::HashMap::new(),
+            &nexus_home,
+            &caps,
+            None,
+            None,
+        )
+        .await
+        .expect("a strategy with no apply still admits");
+    wait_until("the no-apply run to reach the descriptor-only node", || {
+        let pool = pool.clone();
+        let session_id = bundle_run.0.clone();
+        async move {
+            read_restart_session(&pool, &session_id)
+                .await
+                .is_some_and(|session| session.current_task_id == PRESET_ONLY_NODE)
+        }
+    })
+    .await;
+    let descriptor = read_restart_descriptor(&pool, &bundle_run.0).await;
+    assert_eq!(descriptor.applied, None);
+    assert!(
+        serde_json::to_value(&descriptor)
+            .expect("the descriptor serialises")
+            .get("applied")
+            .is_none(),
+        "a no-apply run still serialises no applied key at all"
     );
 
     handle.close().await.unwrap();
