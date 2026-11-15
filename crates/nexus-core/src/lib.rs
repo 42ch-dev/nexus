@@ -13,12 +13,11 @@ mod apply;
 mod approve;
 mod changes;
 mod chronology;
-// `connect-host` is the Connect-host product cohort (WS accept loop +
-// peer-tools event lane, no rmcp); `connect-client` is the superset
-// (connect-host + the rmcp reverse-invoke bridge). Either exposes the module.
-// `memory-remote` additionally compiles it for the one WS transport the remote
-// memory client dials through (n3-provider-binding.md §6); the accept/session/
-// peer-control submodules stay behind the two Connect cohorts.
+// The Connect protocol stack lives in `nexus-connect` (v1.244 extraction):
+// the dependency direction is `nexus-core → nexus-connect`, never back. This
+// alias is the transitional path the not-yet-migrated callers
+// (`execution/lifecycle.rs`, `memory_remote.rs`) still read; the caller
+// migration removes it.
 mod compose;
 mod config_lock;
 #[cfg(any(
@@ -26,7 +25,7 @@ mod config_lock;
     feature = "connect-host",
     feature = "memory-remote"
 ))]
-pub mod connect;
+pub use nexus_connect as connect;
 mod content;
 mod context;
 mod creators;

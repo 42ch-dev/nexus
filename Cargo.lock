@@ -3749,6 +3749,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-connect"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "ed25519-dalek 2.2.0",
+ "futures-channel",
+ "futures-util",
+ "getrandom 0.4.3",
+ "nexus-contracts",
+ "nexus-home-layout",
+ "nexus-orchestration",
+ "nexus-spoke-adapter",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "spoke-connect",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-contracts"
 version = "0.1.0"
 dependencies = [
@@ -3781,6 +3807,7 @@ dependencies = [
  "nexus-agent-host",
  "nexus-cloud-sync",
  "nexus-config-metadata",
+ "nexus-connect",
  "nexus-contracts",
  "nexus-core",
  "nexus-creator-memory",

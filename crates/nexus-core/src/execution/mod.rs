@@ -59,7 +59,11 @@ pub mod lifecycle;
 // original `nexus_core::execution::operation_id` path valid.
 #[cfg(feature = "operation-id")]
 pub use crate::operation_id;
-pub mod peer_tools;
+// v1.244: the protocol-neutral peer registry is `nexus-connect`'s — the
+// `execution → connect` direction the compass records. This re-export keeps
+// the historical `nexus_core::execution::peer_tools` path valid for the
+// capability dispatch and the callers the extraction has not migrated yet.
+pub use nexus_connect::peer_tools;
 // v1.195 P0-T1: the hosted production composition. It builds the selected-root
 // workspace port bundle for the hosted factory that the NEXT task adds, so it
 // needs both the execution layer and that factory's Host edge.

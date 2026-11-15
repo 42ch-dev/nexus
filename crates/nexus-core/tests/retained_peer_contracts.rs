@@ -31,7 +31,7 @@
 #![allow(clippy::significant_drop_tightening)]
 
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(feature = "embedded-mcp")]
 use std::future::Future;
 use std::sync::Arc;
@@ -279,6 +279,7 @@ async fn start_server(
             config: Arc::clone(&config),
             peer_keys: Arc::new(peer_keys),
         }),
+        builtin_tool_ids: Arc::new(builtin_tool_ids()),
         capability_registry: None,
     };
     let task = spawn_accept_loop(
@@ -294,6 +295,15 @@ async fn start_server(
         shutdown,
         task,
     }
+}
+
+/// The static reserved ids the production composition injects into the lane
+/// (this crate's own host-tool roster).
+fn builtin_tool_ids() -> HashSet<String> {
+    nexus_core::execution::capabilities::host_tool_registry()
+        .ids()
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 fn ws_config_for_tests() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
@@ -1482,9 +1492,10 @@ async fn boot_lane_admits_the_config_allowlist_and_rejects_unlisted_peers() {
         )),
     );
     let shutdown = Arc::new(Notify::new());
-    let handle = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None)
-        .await
-        .expect("lane starts");
+    let handle =
+        start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None, builtin_tool_ids())
+            .await
+            .expect("lane starts");
 
     // Layer 0 first: the intruder HAS a key but is not on the allowlist.
     let refused = dial(handle.addr, seed_peer(6), &[TOOL_BOOT]).await;
@@ -1538,9 +1549,10 @@ async fn boot_lane_with_an_empty_tool_allowlist_admits_nothing() {
         )),
     );
     let shutdown = Arc::new(Notify::new());
-    let handle = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None)
-        .await
-        .expect("lane starts");
+    let handle =
+        start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None, builtin_tool_ids())
+            .await
+            .expect("lane starts");
     let adapter = dial(handle.addr, seed_peer(7), &[TOOL_BOOT_EMPTY])
         .await
         .expect("the peer itself is allowlisted");
@@ -1573,7 +1585,7 @@ async fn connect_subscribe_replays_after_reconnect_and_preserves_cursor_and_orde
         )),
     );
     let shutdown = Arc::new(Notify::new());
-    let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None)
+    let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None, builtin_tool_ids())
         .await
         .expect("WS event lane starts");
     let stream = format!("reconnect-{}", uuid::Uuid::new_v4());
@@ -1736,7 +1748,7 @@ async fn unnegotiated_subscribe_is_refused_without_delivery_side_effects() {
         )),
     );
     let shutdown = Arc::new(Notify::new());
-    let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None)
+    let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None, builtin_tool_ids())
         .await
         .expect("WS event lane starts");
     let adapter = dial(lane.addr, seed_peer(22), &[DELIVER_EVENTS_TOOL])
@@ -1809,7 +1821,7 @@ async fn reverse_leg_requires_delivery_capability_before_subscription() {
         )),
     );
     let shutdown = Arc::new(Notify::new());
-    let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None)
+    let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None, builtin_tool_ids())
         .await
         .expect("WS event lane starts");
     let adapter = dial(lane.addr, seed_peer(23), &[SUBSCRIBE_TOOL])
@@ -1876,7 +1888,7 @@ async fn consumer_cannot_invoke_reverse_only_delivery_tool_on_host() {
         )),
     );
     let shutdown = Arc::new(Notify::new());
-    let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None)
+    let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None, builtin_tool_ids())
         .await
         .expect("WS event lane starts");
     let adapter = dial(
@@ -1945,9 +1957,10 @@ async fn reload_adopts_grants_at_session_boundaries_only() {
         )),
     );
     let shutdown = Arc::new(Notify::new());
-    let handle = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None)
-        .await
-        .expect("lane starts");
+    let handle =
+        start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None, builtin_tool_ids())
+            .await
+            .expect("lane starts");
     let boot_max_sessions = handle.config.get().config.max_sessions;
 
     let live = dial(handle.addr, seed_peer(8), &[TOOL_ROTATED_OLD])

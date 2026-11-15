@@ -25,6 +25,10 @@ provider-host = ["dep:nexus-agent-host", "dep:nexus-acp-host", "dep:nexus-provid
 # smallest feature rather than an execution-only edge.
 operation-id = ["dep:sha2", "dep:hex"]
 execution = [
+    # v1.244 extraction: the protocol-neutral peer tool registry lives in
+    # `nexus-connect`; capability dispatch reaches it through
+    # `execution::peer_tools`' re-export.
+    "nexus-connect/peer-tools",
     "dep:nexus-orchestration",
     # The Simulate route is served at this execution edge only: the walk runs in-process,
     # constructs no executor or provider, and stays out of the default/domain cohort.
@@ -59,6 +63,7 @@ compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute"]
 # orchestration capability registry.
 connect-host = [
     "execution",
+    "nexus-connect/connect-host",
     "dep:spoke-connect",
     "dep:tokio-tungstenite",
     "dep:futures-util",
@@ -72,13 +77,14 @@ connect-host = [
 # cohort (it links no rmcp); only the app-level MCP/peer library does.
 connect-client = [
     "connect-host",
+    "nexus-connect/connect-client",
     # mcp_bridge's rmcp server surface compiles with connect-client; only
     # the embedded server (Model B) additionally needs embedded-mcp.
     "dep:rmcp",
 ]
 # Model B's sink/stream session channels (futures_channel::mpsc) ride the
 # same rmcp transport module; the shell compiles only under embedded-mcp.
-embedded-mcp = ["connect-client", "dep:rmcp", "dep:futures-channel"]
+embedded-mcp = ["connect-client", "nexus-connect/embedded-mcp", "dep:rmcp", "dep:futures-channel"]
 # v1.229 N3 Task 1: the remote memory client (n3-provider-binding.md §6). The
 # smallest cohort that can dial a provider — the signed Connect client, the WS
 # transport and the public peer-id accessor. It enables NO accept/session/
@@ -86,6 +92,7 @@ embedded-mcp = ["connect-client", "dep:rmcp", "dep:futures-channel"]
 # `ws_transport` under this feature, and `memory_remote` is the only module
 # that consumes it. Default/domain builds keep zero Connect edges.
 memory-remote = [
+    "nexus-connect/transport",
     "dep:spoke-connect",
     "dep:tokio-tungstenite",
     "dep:futures-util",
@@ -103,6 +110,9 @@ nexus-local-db = { path = "../nexus-local-db" }
 nexus-cloud-sync = { path = "../nexus-cloud-sync", features = ["legacy-sync"] }
 nexus-knowledge = { path = "../nexus-knowledge" }
 nexus-spoke-adapter = { path = "../nexus-spoke-adapter", default-features = false }
+# v1.244 extraction: the Connect protocol stack. The edge runs
+# `nexus-core → nexus-connect` only; nothing inside the new crate names core.
+nexus-connect = { path = "../nexus-connect", optional = true }
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }

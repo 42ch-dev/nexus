@@ -169,10 +169,18 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
             nexus42::errors::CliError::Config(format!("connect node start failed: {e}"))
         })?;
     let peer_tools_shutdown = std::sync::Arc::new(tokio::sync::Notify::new());
+    // The static half of the peer admission reserved set: this composition's
+    // own host-tool roster (the protocol crate names no core registry).
+    let builtin_tool_ids: std::collections::HashSet<String> =
+        nexus_core::execution::capabilities::host_tool_registry()
+            .ids()
+            .map(ToOwned::to_owned)
+            .collect();
     let peer_tools_lane = match nexus_core::connect::start_peer_tools_lane(
         home,
         std::sync::Arc::clone(&peer_tools_shutdown),
         None,
+        builtin_tool_ids,
     )
     .await
     {

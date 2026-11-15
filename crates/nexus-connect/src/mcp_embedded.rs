@@ -11,7 +11,7 @@
 //! # Session bounds (GC #8, architect-locked)
 //!
 //! Model B carries a **documented exemption** from AR-67's
-//! [`crate::connect::session::PeerSessionManager::max_sessions`] (default 8).
+//! [`crate::session::PeerSessionManager::max_sessions`] (default 8).
 //! That bound guards the remote WS accept path against dial floods; an
 //! in-process consumer presents no remote dial surface and MUST NOT consume
 //! peer-session counters. The embedded surface carries its own compile-time
@@ -46,8 +46,8 @@ use rmcp::model::{
 use rmcp::serve_server;
 use rmcp::transport::sink_stream::SinkStreamTransport;
 
-use crate::connect::mcp_bridge::{McpBackend, McpBridgeHandler};
-use crate::connect::visibility::VisibilityPolicy;
+use crate::mcp_bridge::{McpBackend, McpBridgeHandler};
+use crate::visibility::VisibilityPolicy;
 
 /// Client→server wire messages (the client's sink / the server's stream).
 type ClientToServer = JsonRpcMessage<ClientRequest, ClientResult, ClientNotification>;
