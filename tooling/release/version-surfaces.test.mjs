@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import {
   CARGO_LOCK_PATH,
   ELECTRON_PACKAGE_PATH,
@@ -248,6 +248,23 @@ test("the version brackets carrier names manifests whose package names agree", (
     assert.equal(parseCargoPackageName(contents, entry.manifest), entry.name);
     // Contract crates version independently: a literal, never inheritance.
     assert.equal(typeof parseCargoPackageVersion(contents, entry.manifest), "string", entry.name);
+  }
+});
+
+/**
+ * The contract-entry identity guard compares a carrier's POSIX manifest path
+ * with the member's, so member paths must be POSIX too — the platform `join`
+ * here made every run on win32 throw instead.
+ */
+test("workspace member manifest paths use the carrier's POSIX convention", () => {
+  const members = readWorkspaceMemberPackages(REPO_ROOT);
+  assert.ok(members.length > 0, "workspace has no members");
+  for (const member of members) {
+    assert.equal(
+      member.manifestPath,
+      posix.normalize(member.manifestPath),
+      `${member.name}: member manifest paths must be repo-relative POSIX`,
+    );
   }
 });
 

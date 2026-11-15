@@ -2314,6 +2314,12 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
 // keep `CoreError`/`CoreResult` (verification, closing, ownership) rather than
 // widening connect's error taxonomy.
 
+/// The operations [`ExecutionHandle::peer_control`] dispatches. An allowlist
+/// entry outside this set matches no arm, so it authorizes nothing and every
+/// path that inserts one refuses it instead of storing it.
+#[cfg(feature = "connect-host")]
+const PEER_CONTROL_OPERATIONS: [&str; 5] = ["status", "enable", "disable", "allow", "evict"];
+
 #[cfg(feature = "connect-host")]
 impl ExecutionHandle {
     /// Install (or disable) this execution owner's peer-control lane
@@ -2326,9 +2332,13 @@ impl ExecutionHandle {
     /// narrow, never accumulate.
     ///
     /// # Errors
-    /// Returns [`CoreError::Closing`] when the owning service is closed and
-    /// [`CoreError::AuthRequired`] when the principal or the on-disk
-    /// selection fails verification.
+    /// Returns [`CoreError::NotFound`] when the owning service was already
+    /// released and [`CoreError::Closing`] while it is draining.
+    /// [`CoreError::AuthRequired`] comes from the service's principal
+    /// verification, which re-reads the home's on-disk active selection as
+    /// part of the check and refuses when either no longer matches.
+    /// [`CoreError::InvalidInput`] is returned when `allowed_operations` names
+    /// an operation no arm dispatches.
     #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
     #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
     pub async fn start_peer_control(
@@ -2343,6 +2353,20 @@ impl ExecutionHandle {
             .into_iter()
             .map(|item| item.to_string())
             .collect();
+        // A start is a grant surface too: a name no arm dispatches would sit
+        // in the lane's allowlist and authorize nothing, so it is refused here
+        // rather than stored. An empty allowlist stays legal (admits nothing).
+        if let Some(unknown) = allowed
+            .iter()
+            .find(|operation| !PEER_CONTROL_OPERATIONS.contains(&operation.as_str()))
+        {
+            return Err(CoreError::InvalidInput {
+                field: "allowed_operations".into(),
+                reason: format!(
+                    "the start allowlists an operation nothing dispatches: {unknown}"
+                ),
+            });
+        }
         // Every start installs a fresh lane: a restart naming a narrower (or
         // empty) allowlist drops the earlier grants instead of unioning them.
         let lane = std::sync::Arc::new(nexus_connect::PeerControlLane::new(
@@ -2372,9 +2396,12 @@ impl ExecutionHandle {
     /// never a second gate: the allowlist alone decides admission.
     ///
     /// # Errors
-    /// As [`Self::start_peer_control`], plus [`CoreError::InvalidInput`]
-    /// for an unknown operation and [`CoreError::Forbidden`] when the
-    /// operation is not allowlisted.
+    /// As [`Self::start_peer_control`], plus [`CoreError::InvalidInput`] when
+    /// no lane has been started (`field: "lane"`), when the operation is
+    /// unknown, or when `allow` names no dispatched grant target;
+    /// [`CoreError::Forbidden`] when the
+    /// operation is not allowlisted, and [`CoreError::NotFound`] when `evict`
+    /// names a peer with no registered tools.
     #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
     #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
     pub async fn peer_control(
@@ -2395,7 +2422,7 @@ impl ExecutionHandle {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let lane = slot.as_ref().ok_or_else(|| CoreError::InvalidInput {
-            field: "peer_id".into(),
+            field: "lane".into(),
             reason: "peer control has not been started".into(),
         })?;
         let operation: &str = &request.operation;
@@ -2423,7 +2450,7 @@ impl ExecutionHandle {
                 // A grant for a name no arm dispatches is not a permission:
                 // it would sit in the allowlist forever and authorize nothing,
                 // so it is a validation refusal naming the field.
-                if !matches!(granted, "status" | "enable" | "disable" | "allow" | "evict") {
+                if !PEER_CONTROL_OPERATIONS.contains(&granted) {
                     return Err(CoreError::InvalidInput {
                         field: "payload.operation".into(),
                         reason: format!(

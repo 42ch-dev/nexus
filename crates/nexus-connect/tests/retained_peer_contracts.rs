@@ -1476,6 +1476,26 @@ fn hex32(bytes: [u8; 32]) -> String {
     out
 }
 
+/// An empty injected roster reserves nothing, so the lane refuses at its entry
+/// rather than run a reserved-set guard whose builtin half is inert.
+#[tokio::test]
+#[serial]
+async fn boot_lane_refuses_an_empty_injected_roster() {
+    let home = tempfile::TempDir::new().unwrap();
+    let shutdown = Arc::new(Notify::new());
+    let refused =
+        start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None, HashSet::new()).await;
+    let Err(refused) = refused else {
+        panic!("an empty builtin roster must be refused, not started");
+    };
+    assert!(
+        refused
+            .to_string()
+            .contains("the injected builtin tool roster is empty"),
+        "the refusal names the empty roster, got {refused}"
+    );
+}
+
 /// MIGRATED from `authz_hello.rs::boot_derives_hello_from_config_allowlist`
 /// and `::boot_rejects_peer_not_in_peer_ids`.
 ///
