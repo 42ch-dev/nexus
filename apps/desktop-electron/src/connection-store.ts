@@ -121,11 +121,13 @@ async function atomicWrite(
     await publish(filePath, contents);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException | null)?.code;
+    const detail =
+      typeof code === 'string'
+        ? code
+        : ((err as Error | null)?.message ?? 'target refused');
     throw desktopError(
       'secure_store_publish_refused',
-      `connection store could not be published (${
-        typeof code === 'string' ? code : 'target refused'
-      })`,
+      `connection store could not be published (${detail})`,
     );
   }
 }

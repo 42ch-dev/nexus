@@ -184,5 +184,14 @@ jobs:
           pnpm --dir apps/nexus-service run build
           pnpm --dir apps/desktop-electron run build
 
+      - name: Stage the native addon
+        # The connection store and both config writers publish through the native
+        # publisher, so a checkout without the staged `.node` makes every write
+        # refuse. The artifact is gitignored; building it here is what makes this
+        # job test publication rather than the absence of a binding.
+        run: |
+          node packages/nexus-native/scripts/build.mjs
+          test -s packages/nexus-native-darwin-arm64/native/nexus_core_node.node
+
       - name: Run desktop clean-home tests
         run: node --test apps/desktop-electron/tests/*.test.mjs
