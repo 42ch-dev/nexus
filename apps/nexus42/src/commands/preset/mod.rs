@@ -1,7 +1,7 @@
 //! `nexus42 preset` — canonical preset CLI group (PL-5, AR-24, AR-25).
 //!
 //! Top-level developer-facing surface for presets:
-//! `list|show|validate|scaffold|trigger|patch`.
+//! `list|show|validate|scaffold|import|trigger|patch`.
 //!
 //! - `validate <path>` is the positional local validator
 //!   (`validate_preset_local`, moved here from `system`; V1.153 P3). It runs
@@ -14,6 +14,10 @@
 //! - `run` was removed in v1.193 P1-T1: it only forwarded into
 //!   `creator run`'s daemon-API path and had no complete direct core
 //!   operation of its own (PL-5).
+//! - `import <dir>` turns an external partner bundle into this workspace's
+//!   revision-1 strategy candidate (`CoreService::import_strategy_candidate`),
+//!   printing that candidate plus the trajectory Approve accepts. The bundle is
+//!   read in place through the one YAML→IR converter; nothing is copied.
 //! - `show <id>` prints the AR-20 profile (`CoreService::get_preset_profile`)
 //!   with lanes + orchestration fields; declared signals are labeled
 //!   **Declared, not delivered** (AR-25, locked trigger-lane vocabulary).
@@ -93,6 +97,16 @@ pub enum PresetCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+    /// Import an external bundle as this workspace's strategy candidate
+    ///
+    /// Reads `preset.yaml` and its assets through the one bundle converter,
+    /// validates and simulates the prospective revision-1 document, and commits
+    /// it through the same CAS every compose operation uses. Prints the
+    /// candidate together with the trajectory Approve accepts verbatim.
+    Import {
+        /// Path to the bundle directory that holds `preset.yaml`
+        dir: String,
+    },
     /// Print trigger-lane classification only (never cron authoring)
     Trigger {
         /// Preset ID (embedded, user, or `_system.` qualified)
@@ -128,6 +142,7 @@ pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
         PresetCommand::Show { id, json } => show_preset(config, &id, json).await,
         PresetCommand::Validate { path, json } => validate_preset(&path, json),
         PresetCommand::Scaffold { name, json } => scaffold_preset(config, &name, json).await,
+        PresetCommand::Import { dir } => import_bundle(config, &dir).await,
         PresetCommand::Trigger { id, json } => trigger_preset(config, &id, json).await,
         PresetCommand::Patch { command } => patch::run(command, config).await,
     }
@@ -288,6 +303,26 @@ async fn scaffold_preset(config: &CliConfig, name: &str, json: bool) -> Result<(
     } else {
         println!("Scaffolded preset '{}' at {}", resp.id, resp.path);
     }
+    Ok(())
+}
+
+/// Import an external bundle as this workspace's revision-1 strategy candidate.
+///
+/// The printed trajectory is the simulation of the bytes that were stored, so it can be handed to
+/// the Approve route unchanged: recomputing it at the call site is how a candidate and its
+/// approval evidence drift apart.
+async fn import_bundle(config: &CliConfig, dir: &str) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.import_strategy_candidate(&principal, std::path::Path::new(dir))
+            .await
+            .map_err(map_core_error)
+    }
+    .await;
+    let imported = finish_direct(&core, outcome).await?;
+
+    println!("{}", serde_json::to_string_pretty(&imported)?);
     Ok(())
 }
 
