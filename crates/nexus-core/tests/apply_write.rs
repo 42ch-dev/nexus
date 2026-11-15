@@ -1157,6 +1157,70 @@ async fn an_unchanged_pin_snapshot_with_a_nested_pin_still_applies() {
     setup.core.close().await.unwrap();
 }
 
+/// A carrier that records no hash of its own still loads a body, and that body can pin packages
+/// the approval never recorded. An empty snapshot cannot clear it: the pins are reachable, so the
+/// document is exactly the fail-closed case this check exists for.
+#[tokio::test]
+async fn a_hashless_carrier_over_a_moved_pin_refuses_an_empty_snapshot() {
+    let setup = setup().await;
+    write_package(
+        &setup.home,
+        NESTED_PACKAGE,
+        &fragment(NESTED_PACKAGE, "nested bytes"),
+    );
+    let nested = pattern_hashes(&setup.home)[NESTED_PACKAGE].clone();
+    // The carrier pins the second package by hash from INSIDE its own fragment, so nothing in the
+    // outer document names a hash to compare.
+    let mut outer = fragment(PINNED_PACKAGE, "original bytes");
+    outer["nests"] = serde_json::json!([{
+        "id": "nested-nest",
+        "parent_node": "slot",
+        "expansion": "defer_until_apply",
+        "pin_policy": "exact",
+        "child": {
+            "kind": "pattern",
+            "registry_id": NESTED_PACKAGE,
+            "version": "1.0.0",
+            "content_hash": nested,
+        },
+    }]);
+    write_package(&setup.home, PINNED_PACKAGE, &outer);
+
+    let base = candidate_document(&setup).await;
+    let mut document = pinned_document(&base, PINNED_PACKAGE, "", false);
+    document.nests[0].child.content_hash = None;
+    // The approval froze no pin at all — the snapshot the shortcut used to read as "pins nothing".
+    let (_, hash) = seed_pinned_approval(&setup, "pin-hashless", &document, "[]").await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+
+    // The nested body moved under an unchanged id and version, after the freeze.
+    write_package(
+        &setup.home,
+        NESTED_PACKAGE,
+        &fragment(NESTED_PACKAGE, "nested bytes moved"),
+    );
+    assert_ne!(pattern_hashes(&setup.home)[NESTED_PACKAGE], nested);
+
+    let error = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap_err();
+
+    assert_eq!(reason(&error), "approval_pins_unverifiable");
+    let detail = refusal(&error)["pin_detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains(PINNED_PACKAGE) && detail.contains("no recorded hash"),
+        "the refusal names the carrier it cannot compare: {detail}"
+    );
+    assert_eq!(
+        apply_rows(setup.core.pool()).await,
+        0,
+        "a refusal writes nothing"
+    );
+    setup.core.close().await.unwrap();
+}
+
 #[tokio::test]
 async fn a_document_with_no_recorded_pin_never_reads_the_patterns_root() {
     let setup = setup().await;
