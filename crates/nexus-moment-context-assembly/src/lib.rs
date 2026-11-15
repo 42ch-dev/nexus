@@ -15,8 +15,7 @@
 //!
 //! # Features
 //!
-//! - `cloud-stage` — enables `TwoStageAssembly` and platform API types
-//!   (adds dependency on `nexus-cloud-sync`).
+//! - `cloud-stage` — enables `TwoStageAssembly` and platform API types.
 //!
 //! # Domain dependencies
 //!
