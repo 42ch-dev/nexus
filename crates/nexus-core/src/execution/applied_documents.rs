@@ -24,6 +24,29 @@ use nexus_preset::LoadedPreset;
 use crate::apply::ApplyLoadRefusal;
 use crate::error::CoreResult;
 
+/// The intake mode one new admission runs under (P6 condition 6).
+///
+/// `Ok(None)` = the preset is not a user bundle (embedded, `_system.`, or a
+/// directory the loader resolved as system): the intake key never governs it
+/// and the descriptor records no mode. `Ok(Some(mode))` = a user bundle: the
+/// mode `[strategy_intake]` selected, to freeze on the descriptor so recovery
+/// follows the recorded arm, not the current config.
+///
+/// # Errors
+/// The `intake_config_invalid`-prefixed reason when the home config document
+/// is unreadable or names a mode outside `ir-only`/`yaml-only` — a mistyped
+/// key fails closed instead of silently selecting an arm.
+pub fn intake_mode_for_admission(
+    nexus_home: &std::path::Path,
+    preset_id: &str,
+    loaded: &LoadedPreset,
+) -> Result<Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>, String> {
+    if !crate::apply::is_user_preset(preset_id, loaded) {
+        return Ok(None);
+    }
+    nexus_home_layout::strategy_intake::strategy_intake_mode(nexus_home).map(Some)
+}
+
 /// Resolve the apply `preset_id` runs under: its current identity plus the
 /// document the identity pins, or `None` when the strategy has no current apply.
 ///

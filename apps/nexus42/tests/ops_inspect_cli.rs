@@ -152,6 +152,7 @@ fn run_descriptor(preset_id: &str) -> Vec<u8> {
         parent_session_id: None,
         graph_name: None,
         applied: None,
+        intake_mode: None,
     })
     .expect("serialize descriptor")
 }

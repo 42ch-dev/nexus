@@ -35,8 +35,9 @@
 //!
 //! Exception, not a migration: the trailing `Applied-identity intake` section is
 //! new coverage from `.mstar/plans/v241-p35-intake-branch.md` (T4/T5) — that a
-//! schedule with no apply still runs its YAML graph, and that one with an apply
-//! runs the applied document instead.
+//! schedule with no apply runs its YAML graph on the `yaml-only` intake arm
+//! (the default `ir-only` refuses it — P6 condition 6), and that one with an
+//! apply runs the applied document instead.
 //!
 //! No case here talks HTTP, boots a router, or launches a provider process:
 //! the prompt port is the production [`HostPromptExecutor`] over a
@@ -2166,6 +2167,7 @@ async fn seed_prompt_run(
         parent_session_id: None,
         graph_name: None,
         applied: None,
+        intake_mode: None,
     };
     let root = graph_flow::Session::new_from_task(session_id.to_string(), "recall");
     root.context
@@ -7641,6 +7643,7 @@ async fn a_schedule_with_no_apply_runs_the_yaml_graph_the_untouched_builder_buil
             None,
             prompt_bindings,
             None,
+            None,
             Arc::new(reference_graph),
         )
         .await
@@ -7708,6 +7711,15 @@ async fn a_schedule_with_no_apply_runs_the_yaml_graph_the_untouched_builder_buil
     assert_eq!(apply_rows, 0, "the fixture applies nothing");
 
     // ── The schedule: no apply, so the YAML graph must run again. ──
+    // P6 Task 3 flipped the default: a user bundle with no current apply is
+    // refused under `ir-only`, so the builder-parity comparison runs on the
+    // `yaml-only` compatibility arm (v1.243 only; removed at v1.244.0). The
+    // mode is read per admission, so pinning it before the schedule admits is
+    // enough.
+    let config_path = nexus_home.join("config.toml");
+    let mut config = std::fs::read_to_string(&config_path).expect("read the fixture config");
+    config.push_str("[strategy_intake]\nmode = \"yaml-only\"\n");
+    std::fs::write(&config_path, config).expect("write the yaml-only config");
     let schedule_id =
         add_intake_schedule(&fixture, NO_APPLY_PRESET, Some(default_bindings())).await;
     wait_for_prompt_count(&fixture.host, 2).await;

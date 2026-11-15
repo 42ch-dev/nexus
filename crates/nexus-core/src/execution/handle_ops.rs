@@ -1562,6 +1562,7 @@ impl ExecutionHandle {
             // Insertion never resolves an apply; admission freezes the apply it
             // admits under on the run's own descriptor.
             applied: None,
+            intake_mode: None,
         };
         serde_json::to_vec(&descriptor)
             .map(Some)
@@ -2276,6 +2277,21 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
             message: format!("schedule {schedule_id} is not eligible: {reason}"),
         },
         RunControlError::Closing => CoreError::Closing,
+        // Intake refusals keep their stable wire codes: a mistyped config key
+        // or a no-apply user bundle under the default mode is an
+        // operator-fixable refusal, not an internal fault.
+        RunControlError::InvalidIntakeConfig { reason } => CoreError::Coded {
+            code: "intake_config_invalid".to_string(),
+            message: format!("strategy intake config refused: {reason}"),
+        },
+        RunControlError::YamlIntakeDisabled { preset_id } => CoreError::Coded {
+            code: "yaml_intake_disabled".to_string(),
+            message: format!(
+                "yaml intake is disabled for user preset '{preset_id}' under [strategy_intake] \
+                 mode 'ir-only': the strategy has no current apply (apply a strategy, or set \
+                 mode to 'yaml-only' for the v1.243 compatibility arm)"
+            ),
+        },
         // The applied identity's own refusal, already carrying the coded
         // `(code, message)` pair that names the strategy and the apply.
         RunControlError::AppliedIdentityInvalid(error) => error,

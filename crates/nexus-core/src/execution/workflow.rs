@@ -1056,6 +1056,28 @@ pub enum RunControlError {
     /// admitted and nothing ran.
     #[error(transparent)]
     AppliedIdentityInvalid(crate::CoreError),
+
+    /// `[strategy_intake]` in the home config is unreadable or names a mode
+    /// outside `ir-only`/`yaml-only`. A mistyped key fails closed here
+    /// instead of silently selecting an intake arm.
+    #[error("intake_config_invalid: {reason}")]
+    InvalidIntakeConfig {
+        /// What could not be read or parsed.
+        reason: String,
+    },
+
+    /// The default intake (`ir-only`): a user bundle with no current apply
+    /// refuses before graph construction — never a YAML fallback. Apply a
+    /// strategy or set `[strategy_intake] mode = "yaml-only"` (supported for
+    /// the v1.243 minor line, removed at v1.244.0).
+    #[error(
+        "yaml_intake_disabled: user preset '{preset_id}' has no current apply under \
+         [strategy_intake] mode 'ir-only'"
+    )]
+    YamlIntakeDisabled {
+        /// The user preset (strategy) id the admission named.
+        preset_id: String,
+    },
 }
 
 /// Public control signal for a driven run (A4/A5).
@@ -1598,16 +1620,30 @@ impl WorkflowRunCoordinator {
         let loaded = nexus_preset::resolve_preset(preset_id, nexus_home, &registry)
             .map_err(|e| RunControlError::PresetLoad(preset_id.to_string(), e.to_string()))?;
 
-        // P6: this seam resolves the SAME apply schedule admission does, so the
-        // descriptor this run freezes names the document it actually executes —
-        // otherwise recovery's `(None, current)` arm rebuilds a graph the run
-        // never ran. A strategy with no current apply keeps the YAML bundle.
-        let applied = crate::execution::applied_documents::resolve_applied_document(
-            &self.pool, nexus_home, preset_id, &loaded,
+        // P6 condition 6 (intake mode), same gate as schedule admission: the
+        // key governs user bundles only; `yaml-only` runs the YAML bundle
+        // without reading the apply; the default `ir-only` resolves the apply
+        // below and refuses a user bundle with none before graph construction.
+        let intake_mode = crate::execution::applied_documents::intake_mode_for_admission(
+            nexus_home, preset_id, &loaded,
         )
-        .await
-        .map_err(|error| RunControlError::Admission(error.to_string()))?
-        .map_err(|refusal| RunControlError::AppliedIdentityInvalid(refusal.into_error()))?;
+        .map_err(|reason| RunControlError::InvalidIntakeConfig { reason })?;
+        let applied = match intake_mode {
+            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
+            _ => crate::execution::applied_documents::resolve_applied_document(
+                &self.pool, nexus_home, preset_id, &loaded,
+            )
+            .await
+            .map_err(|error| RunControlError::Admission(error.to_string()))?
+            .map_err(|refusal| RunControlError::AppliedIdentityInvalid(refusal.into_error()))?,
+        };
+        if intake_mode == Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
+            && applied.is_none()
+        {
+            return Err(RunControlError::YamlIntakeDisabled {
+                preset_id: preset_id.to_string(),
+            });
+        }
 
         // N-4: validate role/provider references BEFORE enqueue. Every
         // binding role must be a declared preset role (or `default`), and
@@ -1680,6 +1716,7 @@ impl WorkflowRunCoordinator {
                 core_context.as_ref(),
                 agent_bindings,
                 applied.as_ref().map(|applied| applied.identity.clone()),
+                intake_mode,
                 Arc::new(wired),
             )
             .await
@@ -2613,6 +2650,7 @@ impl WorkflowRunCoordinator {
             // Admission resolves the apply it admits under and freezes it on the
             // RUN descriptor; this insertion-time row resolves none.
             applied: None,
+            intake_mode: None,
         };
         let descriptor_bytes = serde_json::to_vec(&descriptor).map_err(|e| {
             RunControlError::Admission(format!("descriptor serialization failed: {e}"))
@@ -2957,8 +2995,10 @@ impl WorkflowRunCoordinator {
         };
         // P3.5 precedence, stated once (compass D3):
         //
-        //   strategy has current apply  →  build from document_json (IR)
-        //   otherwise                   →  build from `preset_id` (YAML), exactly as before
+        //   strategy has current apply    →  build from document_json (IR)
+        //   otherwise, `yaml-only`        →  build from `preset_id` (YAML)
+        //   otherwise, `ir-only` (default) →  refuse before graph construction — a user
+        //                                     bundle with no apply never falls back to YAML
         //
         // For a user-preset schedule `preset_id` IS the strategy id (compass D10), so no second
         // key is introduced. Only a user (Canvas) preset may enter the lookup: an embedded or
@@ -2977,15 +3017,38 @@ impl WorkflowRunCoordinator {
         // execute, not the descriptor's. The resolved identity is also carried into the run's
         // frozen descriptor (P4 Task 4), so a restart can tell whether the strategy's current
         // apply is still the one this run was admitted under.
-        let applied = crate::execution::applied_documents::resolve_applied_document(
-            pool,
+        //
+        // P6 condition 6 (intake mode): the mode governs user bundles only —
+        // embedded and `_system.` presets keep the resolution below and
+        // record no mode. `yaml-only` runs the YAML bundle without reading
+        // the current apply; the default `ir-only` resolves as P3.5 states
+        // and refuses a user bundle with no current apply before any graph
+        // is built (never a YAML fallback).
+        let intake_mode = crate::execution::applied_documents::intake_mode_for_admission(
             nexus_home,
             &row.preset_id,
             &loaded,
         )
-        .await
-        .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?
-        .map_err(|refusal| RunControlError::AppliedIdentityInvalid(refusal.into_error()))?;
+        .map_err(|reason| RunControlError::InvalidIntakeConfig { reason })?;
+        let applied = match intake_mode {
+            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
+            _ => crate::execution::applied_documents::resolve_applied_document(
+                pool,
+                nexus_home,
+                &row.preset_id,
+                &loaded,
+            )
+            .await
+            .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?
+            .map_err(|refusal| RunControlError::AppliedIdentityInvalid(refusal.into_error()))?,
+        };
+        if intake_mode == Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
+            && applied.is_none()
+        {
+            return Err(RunControlError::YamlIntakeDisabled {
+                preset_id: row.preset_id.clone(),
+            });
+        }
 
         // N-4: validate role/provider references BEFORE enqueue — the same
         // gate session POST uses. Unknown roles/providers refuse before any
@@ -3056,6 +3119,7 @@ impl WorkflowRunCoordinator {
                 agent_bindings,
                 frozen_source,
                 applied.as_ref().map(|applied| applied.identity.clone()),
+                intake_mode,
                 Some(admission_gate),
                 Arc::new(wired),
             )

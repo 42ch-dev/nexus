@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 pub mod active_context;
 pub mod config_lock;
 pub mod device_id;
+pub mod strategy_intake;
 
 pub use active_context::MemoryProviderConfig;
 

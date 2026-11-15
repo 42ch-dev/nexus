@@ -487,6 +487,7 @@ fn child_descriptor(
         parent_session_id: Some(SessionId(root_session_id.to_string())),
         graph_name: child.graph_name.clone(),
         applied: root.applied.clone(),
+        intake_mode: root.intake_mode,
     }
 }
 
@@ -3431,6 +3432,7 @@ mod tests {
             parent_session_id: None,
             graph_name: None,
             applied: None,
+            intake_mode: None,
         };
         let state = serde_json::json!({
             "wait": null,

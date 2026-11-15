@@ -605,11 +605,16 @@ impl CoreService {
 /// `_system.` id names no strategy.
 #[must_use]
 pub fn is_user_preset(strategy_id: &str, loaded: &nexus_preset::LoadedPreset) -> bool {
-    !strategy_id.starts_with("_system.")
-        && matches!(
+    // The decision itself lives in `nexus-home-layout::strategy_intake` so the
+    // engine's preset trait entries classify through the same function — one
+    // rule for both sides of the intake gate.
+    nexus_home_layout::strategy_intake::is_user_strategy_bundle(
+        strategy_id,
+        matches!(
             loaded.source_identity,
             Some(nexus_preset::source_identity::PresetSourceIdentity::Directory { .. })
-        )
+        ),
+    )
 }
 
 /// The apply that is live for `strategy_id`: the append-only row with no successor.

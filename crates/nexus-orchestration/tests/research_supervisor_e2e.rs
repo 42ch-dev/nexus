@@ -174,6 +174,7 @@ impl ResearchScheduleFixture {
             parent_session_id: None,
             graph_name: None,
             applied: None,
+            intake_mode: None,
         };
         let descriptor_bytes =
             serde_json::to_vec(&descriptor).expect("research fixture descriptor must serialize");

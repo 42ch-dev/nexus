@@ -3391,6 +3391,7 @@ mod tests_t9 {
             parent_session_id: None,
             graph_name: None,
             applied: None,
+            intake_mode: None,
         })
         .expect("descriptor json");
         sqlx::query(
