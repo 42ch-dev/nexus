@@ -330,6 +330,13 @@ pub enum PresetImportRefusal {
         /// The static walk's own refusal.
         reason: String,
     },
+    /// The bundle declares an id this host already serves: an embedded preset, or a `_system.` id.
+    /// A stored candidate row is read before the preset resolution (`read_strategy_candidate`), so
+    /// a row under one of those ids would shadow a preset no partner owns.
+    ReservedId {
+        /// The id the bundle declared.
+        strategy_id: String,
+    },
 }
 
 #[cfg(feature = "execution")]
@@ -340,6 +347,7 @@ impl PresetImportRefusal {
         match self {
             Self::InvalidDocument { .. } => "invalid_document",
             Self::SimulationUnavailable { .. } => "simulation_unavailable",
+            Self::ReservedId { .. } => "reserved_strategy_id",
         }
     }
 
@@ -364,6 +372,12 @@ impl PresetImportRefusal {
                 details.insert(
                     "simulation_reason".into(),
                     serde_json::Value::from(reason.clone()),
+                );
+            }
+            Self::ReservedId { strategy_id } => {
+                details.insert(
+                    "strategy_id".into(),
+                    serde_json::Value::from(strategy_id.clone()),
                 );
             }
         }
@@ -391,6 +405,11 @@ impl std::fmt::Display for PresetImportRefusal {
             Self::SimulationUnavailable { reason } => {
                 write!(f, "the imported bundle cannot be simulated: {reason}")
             }
+            Self::ReservedId { strategy_id } => write!(
+                f,
+                "the bundle declares `{strategy_id}`, which the host serves as an embedded or \
+                 `_system.` preset; import a user bundle under its own id"
+            ),
         }
     }
 }
@@ -420,11 +439,18 @@ impl CoreService {
     /// write is [`write_candidate`] — the same conditional statement compose commits through, at
     /// base revision 0 — so an existing candidate is the typed conflict compose answers with.
     ///
+    /// The bundle's `preset.id` names the strategy. An id the host ships as an embedded preset, or
+    /// a `_system.` id, is a [`PresetImportRefusal::ReservedId`]: the candidate read prefers a
+    /// stored row, so the import would shadow a preset no partner owns. Every other id defines a
+    /// new strategy — the candidate is stored and approvable, and the schedule intake runs it once
+    /// the bundle is installed as a user preset under `<nexus_home>/presets/<id>/` and an apply
+    /// exists (the apply gate reads only user presets).
+    ///
     /// # Errors
     ///
     /// [`CoreError::InvalidInput`] with field `bundle` for a bundle that does not load or convert,
     /// [`CoreError::InputValidation`] carrying a [`PresetImportRefusal::details`] envelope for a
-    /// document the shared validator refuses or the walk cannot simulate,
+    /// document the shared validator refuses, the walk cannot simulate, or an id the host reserves,
     /// [`CoreError::StrategyCandidateConflict`] when the strategy already has a candidate, and the
     /// principal/store errors otherwise.
     pub async fn import_strategy_candidate(
@@ -442,6 +468,15 @@ impl CoreService {
             }
         })?;
         let strategy_id = imported.document.id.as_str().to_owned();
+
+        // The candidate read (`read_strategy_candidate`) prefers a stored row over the preset
+        // resolution, so a row under an id the host already serves would shadow that preset for
+        // compose and approve. Any other id defines a new strategy; see the doc comment.
+        if strategy_id.starts_with("_system.")
+            || nexus_preset::list_embedded_presets().contains(&strategy_id)
+        {
+            return Err(PresetImportRefusal::ReservedId { strategy_id }.into_error());
+        }
 
         // The row this import would write is revision 1, and the trajectory must hash THOSE bytes:
         // approve compares the recorded trajectory with a recomputation over the stored document,

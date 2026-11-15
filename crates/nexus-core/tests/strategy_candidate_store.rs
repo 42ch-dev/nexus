@@ -206,6 +206,9 @@ async fn a_second_writer_at_the_pre_bump_revision_is_refused_not_merged() {
 /// The strategy id every import fixture declares.
 const PARTNER: &str = "partner-fixture";
 
+/// An id the host ships as an embedded preset: not a partner's to claim.
+const EMBEDDED: &str = "novel-writing";
+
 /// Write one bundle directory holding a single `preset.yaml` (the fixtures
 /// reference no assets, so nothing else belongs in the partner's directory).
 fn write_bundle(bundle: &Path, yaml: &str) -> Vec<(String, Vec<u8>)> {
@@ -231,9 +234,14 @@ fn bundle_snapshot(bundle: &Path) -> Vec<(String, Vec<u8>)> {
 
 /// A partner bundle the loader, the shared validator and the static walk all accept.
 fn partner_bundle(description: &str) -> String {
+    partner_bundle_as(PARTNER, description)
+}
+
+/// [`partner_bundle`] under another id, for the id-contract refusals.
+fn partner_bundle_as(id: &str, description: &str) -> String {
     format!(
         r#"preset:
-  id: {PARTNER}
+  id: {id}
   version: 1
   kind: creator
   description: "{description}"
@@ -464,6 +472,32 @@ async fn a_document_the_walk_cannot_simulate_is_refused_with_its_reason() {
         "the walk's own refusal travels with the refusal: {details}"
     );
     assert!(stored_row(core.pool(), PARTNER).await.is_none());
+    assert_eq!(bundle_snapshot(&bundle), before);
+    core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_bundle_declaring_an_embedded_preset_id_is_refused_by_name() {
+    let (tmp, core, principal) = setup().await;
+    // The candidate read prefers a stored row over the preset resolution, so an import under an
+    // embedded id would shadow that preset for compose and approve. The id the host ships is not
+    // a partner's to claim, so the import refuses instead of writing the row.
+    let bundle = tmp.path().join(EMBEDDED);
+    let before = write_bundle(&bundle, &partner_bundle_as(EMBEDDED, "shadow fixture"));
+
+    let details = import_refusal(
+        core.import_strategy_candidate(&principal, &bundle)
+            .await
+            .unwrap_err(),
+    );
+
+    assert_eq!(details["code"], "preset_import_refused");
+    assert_eq!(details["reason"], "reserved_strategy_id");
+    assert_eq!(
+        details["strategy_id"], EMBEDDED,
+        "the refusal names the id the bundle claimed: {details}"
+    );
+    assert!(stored_row(core.pool(), EMBEDDED).await.is_none());
     assert_eq!(bundle_snapshot(&bundle), before);
     core.close().await.unwrap();
 }

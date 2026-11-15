@@ -1002,9 +1002,12 @@ pub enum PinVerificationFailure {
 /// edited under an unchanged `id@version` passes every hash check. This is that second, narrower
 /// guard: the recorded `pins_json` is compared with the registry as it reads now.
 ///
-/// An empty recorded set is answered without reading the registry at all — a document that pins
-/// nothing needs no body, and the same shortcut is what keeps a no-pin replay off the patterns
-/// root. A nonempty recorded set may legitimately carry nested pins (pins a pinned fragment
+/// An empty recorded set is answered without reading the registry, but only for a document that
+/// names no pattern package at all: that is what keeps a no-pin replay off the patterns root. A
+/// document that does name one refuses, because a carrier with no recorded hash can still load a
+/// fragment that pins packages, and an empty snapshot cannot be compared with them.
+///
+/// A nonempty recorded set may legitimately carry nested pins (pins a pinned fragment
 /// records), so the full resolved set is compared, not the document's own nests.
 ///
 /// # Errors
@@ -1018,14 +1021,29 @@ pub fn verify_recorded_pins(
     packages: &[PatternPackage],
 ) -> Result<(), PinVerificationFailure> {
     if recorded.is_empty() {
-        return resolved_pins(document, &[]).first().map_or(Ok(()), |pin| {
-            Err(PinVerificationFailure::SnapshotMismatch {
-                detail: format!(
+        // No registry read: the shortcut is reserved for a document that names no pattern package
+        // at all. A carrier with no recorded hash is refused here rather than cleared, because the
+        // fragment it loads can pin packages the empty snapshot never recorded — deciding it pins
+        // nothing would mean reading the registry the shortcut exists to avoid.
+        for nest in &document.nests {
+            let Some(pin) = pinned_pattern(&nest.child) else {
+                continue;
+            };
+            let detail = if nest.child.content_hash.is_some() {
+                format!(
                     "the document pins `{}@{}` but the approval recorded no pins",
                     pin.id, pin.version
-                ),
-            })
-        });
+                )
+            } else {
+                format!(
+                    "the document pins `{}@{}` with no recorded hash, so the pins its fragment \
+                     loads cannot be compared against an empty snapshot",
+                    pin.id, pin.version
+                )
+            };
+            return Err(PinVerificationFailure::SnapshotMismatch { detail });
+        }
+        return Ok(());
     }
     let (_, diagnostics) = document_bodies(document, packages);
     for finding in diagnostics {

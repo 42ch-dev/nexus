@@ -535,7 +535,9 @@ const RESTART_PINNED_PACKAGE: &str = "restart-pinned-step";
 
 /// [`restart_applied_document`] plus one exact pattern pin on the shared entry
 /// node: the shape a real approval freezes when its document nests a pattern.
-fn restart_pinned_applied_document(preset_id: &str, pin_hash: &str) -> String {
+/// `pin_hash: None` is the hashless carrier — a nest whose body is decided at
+/// Apply, so the document itself records nothing to compare.
+fn restart_pinned_applied_document(preset_id: &str, pin_hash: Option<&str>) -> String {
     let mut document: serde_json::Value =
         serde_json::from_str(&restart_applied_document(preset_id, APPLIED_ONLY_NODE))
             .expect("the applied-side document decodes");
@@ -558,12 +560,27 @@ fn restart_pinned_applied_document(preset_id: &str, pin_hash: &str) -> String {
 /// recovery-side pin check reads. Two calls with different bodies are the same
 /// pin serving different bytes — the case the document hash cannot catch.
 fn write_restart_package(nexus_home: &Path, description: &str) {
-    let directory = nexus_home.join("patterns").join(RESTART_PINNED_PACKAGE);
+    write_restart_package_with(
+        nexus_home,
+        RESTART_PINNED_PACKAGE,
+        description,
+        &serde_json::json!([]),
+    );
+}
+
+/// [`write_restart_package`] for any id, with the nests its own fragment carries.
+fn write_restart_package_with(
+    nexus_home: &Path,
+    id: &str,
+    description: &str,
+    nests: &serde_json::Value,
+) {
+    let directory = nexus_home.join("patterns").join(id);
     std::fs::create_dir_all(&directory).expect("pattern directory");
     std::fs::write(
         directory.join("pattern.toml"),
         format!(
-            "id = \"{RESTART_PINNED_PACKAGE}\"\nversion = \"1.0.0\"\ndescription = \
+            "id = \"{id}\"\nversion = \"1.0.0\"\ndescription = \
              \"restart pin fixture\"\neffect_class = \"pure\"\nrequires_capabilities = []\n\
              slots = []\n\n[ir_compat]\nmin = 0\nmax = 0\n"
         ),
@@ -573,7 +590,7 @@ fn write_restart_package(nexus_home: &Path, description: &str) {
         directory.join("workflow.ir.json"),
         serde_json::json!({
             "ir_version": 0,
-            "id": RESTART_PINNED_PACKAGE,
+            "id": id,
             "version": 1,
             "revision": 0,
             "state": "candidate",
@@ -587,7 +604,7 @@ fn write_restart_package(nexus_home: &Path, description: &str) {
             "terminal": ["slot"],
             "nodes": [{"id": "slot", "kind": "pattern_slot", "effect_class": "pure"}],
             "edges": [],
-            "nests": [],
+            "nests": nests,
             "assets": [],
             "signals": [],
             "roles": [],
@@ -599,16 +616,55 @@ fn write_restart_package(nexus_home: &Path, description: &str) {
     .expect("pattern fragment");
 }
 
-/// The hash the registry serves for [`RESTART_PINNED_PACKAGE`] right now.
-fn restart_package_hash(nexus_home: &Path) -> String {
+/// The package [`RESTART_PINNED_PACKAGE`]'s own fragment nests: the pin a
+/// hashless carrier hides from its document.
+const RESTART_NESTED_PACKAGE: &str = "restart-nested-step";
+
+/// Write the carrier's fragment so it pins [`RESTART_NESTED_PACKAGE`] by hash,
+/// and return the nested hash it froze.
+fn write_restart_nested_fixture(nexus_home: &Path, nested: &str, outer: &str) -> String {
+    write_restart_package_with(
+        nexus_home,
+        RESTART_NESTED_PACKAGE,
+        nested,
+        &serde_json::json!([]),
+    );
+    let nested_hash = restart_package_hash(nexus_home, RESTART_NESTED_PACKAGE);
+    write_restart_package_with(
+        nexus_home,
+        RESTART_PINNED_PACKAGE,
+        outer,
+        &serde_json::json!([{
+            "id": "restart-nested-nest",
+            "parent_node": "slot",
+            "expansion": "defer_until_apply",
+            "pin_policy": "exact",
+            "child": {
+                "kind": "pattern",
+                "registry_id": RESTART_NESTED_PACKAGE,
+                "version": "1.0.0",
+                "content_hash": nested_hash,
+            },
+        }]),
+    );
+    nested_hash
+}
+
+/// The hash the registry serves for `id` right now.
+fn restart_package_hash(nexus_home: &Path, id: &str) -> String {
     nexus_pattern::scan_pattern_packages(
         &nexus_home.join("patterns"),
         nexus_workflow_ir::IR_VERSION,
     )
     .expect("pattern registry scan")
     .into_iter()
-    .find_map(|package| package.content_hash().map(ToOwned::to_owned))
-    .expect("the pinned package is readable")
+    .find(|package| {
+        package
+            .manifest()
+            .is_some_and(|manifest| manifest.id.as_str() == id)
+    })
+    .and_then(|package| package.content_hash().map(ToOwned::to_owned))
+    .unwrap_or_else(|| panic!("the package `{id}` is readable"))
 }
 
 fn write_restart_bundle(nexus_home: &Path, preset_id: &str) -> std::path::PathBuf {
@@ -660,13 +716,23 @@ async fn seed_pinned_restart_apply(
     preset_id: &str,
     pin_hash: &str,
 ) -> nexus_orchestration::run_state::AppliedRunIdentity {
-    let document = restart_pinned_applied_document(preset_id, pin_hash);
+    let document = restart_pinned_applied_document(preset_id, Some(pin_hash));
     let pins = serde_json::json!([{
         "id": RESTART_PINNED_PACKAGE,
         "version": "1.0.0",
         "content_hash": pin_hash,
     }]);
     seed_apply(pool, preset_id, &document, &pins.to_string()).await
+}
+
+/// The same seeded apply, with a hashless carrier and NOTHING recorded: the
+/// shape an approval writes when the nest was never resolved.
+async fn seed_hashless_restart_apply(
+    pool: &sqlx::SqlitePool,
+    preset_id: &str,
+) -> nexus_orchestration::run_state::AppliedRunIdentity {
+    let document = restart_pinned_applied_document(preset_id, None);
+    seed_apply(pool, preset_id, &document, "[]").await
 }
 
 /// Write the approval, the apply row and the schedule precondition an apply
@@ -1228,7 +1294,7 @@ async fn a_restart_after_a_pinned_body_moved_refuses_naming_the_pin() {
     let nexus_home = f.tmp.path().join(".nexus42");
     let bundle = write_restart_bundle(&nexus_home, RESTART_PRESET);
     write_restart_package(&nexus_home, "original bytes");
-    let recorded = restart_package_hash(&nexus_home);
+    let recorded = restart_package_hash(&nexus_home, RESTART_PINNED_PACKAGE);
     let session_id = format!("{RESTART_PRESET}:in-flight");
     let seed = open_seed_pool(&f.db_path).await;
     let admitted = seed_pinned_restart_apply(seed.pool(), RESTART_PRESET, &recorded).await;
@@ -1245,7 +1311,7 @@ async fn a_restart_after_a_pinned_body_moved_refuses_naming_the_pin() {
     // Same id and version, different bytes.
     write_restart_package(&nexus_home, "changed bytes");
     assert_ne!(
-        restart_package_hash(&nexus_home),
+        restart_package_hash(&nexus_home, RESTART_PINNED_PACKAGE),
         recorded,
         "the fixture must actually move the pinned bytes"
     );
@@ -1299,6 +1365,89 @@ async fn a_restart_after_a_pinned_body_moved_refuses_naming_the_pin() {
     owner.close().await.unwrap();
 }
 
+/// P6: an empty pin snapshot cannot clear a carrier whose body it never recorded.
+///
+/// The applied document names the carrier by id and version with no
+/// `content_hash`, and the approval recorded no pin at all. What the carrier
+/// consumes is decided by its own fragment — which pins
+/// [`RESTART_NESTED_PACKAGE`] by hash — so the recovery-side check must refuse
+/// instead of clearing a document whose reachable pins it never looked at.
+#[tokio::test]
+async fn a_restart_with_a_hashless_carrier_and_no_recorded_pin_refuses() {
+    let f = fixture().await;
+    let nexus_home = f.tmp.path().join(".nexus42");
+    let bundle = write_restart_bundle(&nexus_home, RESTART_PRESET);
+    let nested = write_restart_nested_fixture(&nexus_home, "nested bytes", "outer bytes");
+    let session_id = format!("{RESTART_PRESET}:in-flight");
+    let seed = open_seed_pool(&f.db_path).await;
+    let admitted = seed_hashless_restart_apply(seed.pool(), RESTART_PRESET).await;
+    seed_restart_run(
+        seed.pool(),
+        &session_id,
+        RESTART_PRESET,
+        &bundle,
+        Some(admitted),
+    )
+    .await;
+    close_seed_pool(&f.db_path, seed).await;
+
+    // The nested body moved after the freeze, and no row records what it was.
+    write_restart_package_with(
+        &nexus_home,
+        RESTART_NESTED_PACKAGE,
+        "nested bytes moved",
+        &serde_json::json!([]),
+    );
+    assert_ne!(
+        restart_package_hash(&nexus_home, RESTART_NESTED_PACKAGE),
+        nested,
+        "the fixture must actually move the nested bytes"
+    );
+
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    let refusal = handle
+        .coordinator()
+        .signal_run(
+            &nexus_orchestration::SessionId(session_id.clone()),
+            nexus_core::execution::RunSignal::Continue {
+                wait_id: "irrelevant".to_string(),
+            },
+        )
+        .await
+        .expect_err("a hashless carrier under an empty snapshot must not be recovered");
+    let RunControlError::ReconstructionUnavailable { reason, .. } = refusal else {
+        panic!("expected reconstruction_unavailable, got {refusal:?}");
+    };
+    assert!(
+        reason.contains("applied_pins_unverifiable"),
+        "the refusal keeps the coded reason: {reason}"
+    );
+    assert!(
+        reason.contains(RESTART_PINNED_PACKAGE),
+        "the refusal must name the carrier it cannot compare: {reason}"
+    );
+
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+    let session = read_restart_session(&pool, &session_id)
+        .await
+        .expect("the run row exists");
+    assert_eq!(
+        session.current_task_id, SHARED_ENTRY_NODE,
+        "a refused reconstruction must not advance the run; got {:?}",
+        session.current_task_id
+    );
+
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
 /// P6: unchanged pins recover the applied graph exactly as before — the new
 /// check must admit every applied identity whose bodies still hash to the
 /// frozen snapshot.
@@ -1308,7 +1457,7 @@ async fn a_restart_with_unchanged_pins_recovers_the_applied_graph() {
     let nexus_home = f.tmp.path().join(".nexus42");
     let bundle = write_restart_bundle(&nexus_home, RESTART_PRESET);
     write_restart_package(&nexus_home, "original bytes");
-    let recorded = restart_package_hash(&nexus_home);
+    let recorded = restart_package_hash(&nexus_home, RESTART_PINNED_PACKAGE);
     let session_id = format!("{RESTART_PRESET}:in-flight");
     let seed = open_seed_pool(&f.db_path).await;
     let admitted = seed_pinned_restart_apply(seed.pool(), RESTART_PRESET, &recorded).await;
