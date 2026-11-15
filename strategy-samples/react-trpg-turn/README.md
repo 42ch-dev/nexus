@@ -43,8 +43,8 @@ editing the JSON:
 nexus42 preset export strategy-samples/react-trpg-turn
 ```
 
-CI re-exports `workflow.json` and fails with the divergent YAML path when the
-two disagree:
+CI re-exports `workflow.json` and fails when the committed `preset.yaml` bytes
+differ:
 
 ```bash
 cargo test -p nexus-orchestration --test sample_self_check

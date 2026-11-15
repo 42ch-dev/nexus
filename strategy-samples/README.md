@@ -781,8 +781,8 @@ edits the JSON directly — Canvas is not required for repository sample
 authoring, and `preset.yaml` is not the file to edit.
 
 CI arbitrates the pair. `sample_self_check` loads each `workflow.json`, checks
-`assets[]` against the templates its carriers name, re-exports it, and fails at
-the divergent YAML path when the committed `preset.yaml` is not that export:
+`assets[]` against the templates its carriers name, re-exports it, and fails
+when the committed `preset.yaml` bytes are not exactly that export:
 
 ```bash
 cargo test -p nexus-orchestration --test sample_self_check
