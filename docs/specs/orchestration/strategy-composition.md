@@ -144,22 +144,22 @@ builds the YAML bundle (`build_wired_outer_graph`) and freezes no identity, and 
 a user bundle with no current apply is refused before graph construction instead (the intake-mode switch
 below). For a run admitted with a resolved document, no entry admits YAML and recovers into IR: the graph
 the run executes and the identity its descriptor freezes come from the same resolution. A run admitted
-under `yaml-only` while the strategy had no current apply resolves `None`, freezes no identity, and
-records the mode it was admitted under; recovery reads that record, skips the apply source and rebuilds
-the same YAML bundle, so a restart cannot put such a run on a document it never ran. The legacy
-`(None, current)` arm below is reachable only for a row that predates the field and therefore records
-neither a mode nor an identity — for a newly admitted run it is unreachable. Under the default `ir-only`
-the same no-apply admission is a refusal instead, so no such run exists at all. Both admission entries resolve before the
-binding gate, so the roles validated are the roles the applied graph consumes — `export_preset(&document)`
-when an apply exists, the loaded manifest otherwise (`export_preset` and `validate_agent_bindings` in both
-`start_session` and `admit_schedule_inner`).
+under `yaml-only` while the strategy had no current apply resolves `None`, freezes no identity, and records
+`Some(YamlOnly)`; recovery follows that recorded mode (`Some(YamlOnly)` skips the apply read), so the
+restart rebuilds the same YAML bundle even if the strategy gained an apply or the config flipped — it never
+reaches the `(None, current)` arm below. That arm is left to a descriptor that records no mode at all, a
+row predating the field, so no newly admitted run can be put on a document it never ran; under the default
+`ir-only` a no-apply user bundle is the refusal instead, so no such run exists at all. Both admission
+entries resolve before the binding gate, so the roles validated are the roles the applied graph consumes —
+`export_preset(&document)` when an apply exists, the loaded manifest otherwise (`export_preset` and
+`validate_agent_bindings` in both `start_session` and `admit_schedule_inner`).
 
 | Entry | Resolves through | Applied graph | Descriptor write |
 | --- | --- | --- | --- |
-| schedule admission | `resolve_applied_document` (`workflow.rs:2980`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:3020`) | `admit_schedule_run_with_input` sets `descriptor.applied` (`engine.rs:4541`) |
-| `start_session` | `resolve_applied_document` (`workflow.rs:1605`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:1653`) | `start_preset_run_with_input` sets `descriptor.applied` (`engine.rs:4428`) |
-| `start_session_with_preset` | `AppliedDocumentSource::applied_document` (`engine.rs:4347`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`engine.rs:4360`) | `start_preset_run` sets `descriptor.applied` (`engine.rs:4283`) |
-| `start_session_with_preset_for_creator` | `AppliedDocumentSource::applied_document` (`engine.rs:4347`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`engine.rs:4360`) | `start_preset_run` sets `descriptor.applied` (`engine.rs:4283`) |
+| schedule admission (`admit_schedule_inner`) | `resolve_applied_document` (`workflow.rs:3035`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:3079`) | `admit_schedule_run_with_input` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4626`) |
+| `start_session` | `resolve_applied_document` (`workflow.rs:1633`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:1685`) | `start_preset_run_with_input` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4512`) |
+| `start_session_with_preset` | `start_preset_entry` reads `AppliedDocumentSource::applied_document` (`crates/nexus-orchestration/src/engine.rs:4411`) | `start_preset_entry` builds with `build_wired_outer_graph_from_ir(.., OwnSource)` (`crates/nexus-orchestration/src/engine.rs:4440`) | `start_preset_run` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4314`) |
+| `start_session_with_preset_for_creator` | the same `start_preset_entry` call | the same `start_preset_entry` build | the same `start_preset_run` write |
 
 **Precedence.** The document a run is built from follows from the loader's classification and that apply
 read, in exactly three cases:
@@ -186,18 +186,25 @@ recorded mode instead (see below).
 **The intake-mode switch.** `[strategy_intake] mode = "ir-only" | "yaml-only"` in the home `config.toml`
 selects which document a **user bundle** runs; `strategy_intake_mode`
 (`crates/nexus-home-layout/src/strategy_intake.rs`) reads it per new admission. A missing file, table or
-key defaults to `ir-only`; an unreadable document or an unknown mode value is a typed refusal,
-`RunControlError::InvalidIntakeConfig` at the coordinator entries and `intake_config_invalid` at the engine
-entries — a mistyped key fails closed instead of silently selecting an arm. Embedded and `_system.` presets
-never consult the key: the classification is `is_user_strategy_bundle`
-(`strategy_intake.rs`), the same decision `is_user_preset` (`crates/nexus-core/src/apply.rs`) delegates to,
-so both sides of the gate agree.
+key — and an engine with no configured home, which has no key to read — defaults to `ir-only`. An
+unreadable document or an unknown mode value is a refusal: `RunControlError::InvalidIntakeConfig` at the
+two coordinator entries, which `map_run_control_error` (`crates/nexus-core/src/execution/handle_ops.rs`)
+renders as the coded `intake_config_invalid`, and at the two preset trait entries an
+`EngineError::GraphFlow(GraphError::StorageError)` whose message begins with that code. **The code does not
+cross the trait boundary** — `start_preset_entry` wraps the reason in a storage error, so there is no
+`intake_config_invalid` code for a caller mapping `EngineError` structurally; only the text names it, and
+nexus-core's `RunControlError::Admission` arm reports it as an internal refusal. The coordinator entries
+above are where the code is a contract. Embedded and `_system.` presets never consult the key: the
+classification is `is_user_strategy_bundle` (`strategy_intake.rs`), the same decision `is_user_preset`
+(`crates/nexus-core/src/apply.rs`) delegates to, so both sides of the gate agree.
 
 - **New admissions** (`intake_mode_for_admission` in `crates/nexus-core/src/execution/applied_documents.rs`
   gates `admit_schedule_inner` and `start_session`; the same gate inlined in `start_preset_entry` in
   `crates/nexus-orchestration/src/engine.rs` covers both preset trait entries): under `ir-only` a current
   apply runs through `resolve_applied_document` and a user bundle with none refuses with
-  `RunControlError::YamlIntakeDisabled` (`yaml_intake_disabled` at the engine entries) before graph
+  `RunControlError::YamlIntakeDisabled` at the coordinator entries; the inlined copy in `start_preset_entry`
+  refuses with the same reason wrapped in `EngineError::GraphFlow(GraphError::StorageError)`, whose message
+  begins `yaml_intake_disabled` — the text, not a code. Either way the refusal lands before graph
   construction — never a YAML fallback. Under `yaml-only` the YAML manifest and graph run without reading
   the current apply.
 - **The descriptor is the observability record.** `RunDescriptorV1.intake_mode`
@@ -214,8 +221,11 @@ so both sides of the gate agree.
   v1.244.0. Bundle discovery and import/export have no removal boundary: the switch changes which document
   executes, never whether a bundle exists or can be imported or exported.
 
-**The legacy `(None, current)` arm.** `reconstruct_runner` (`engine.rs:3842`) matches the descriptor's
-recorded identity against that resolution **before** it builds (`engine.rs:4109`):
+**The legacy `(None, current)` arm.** `reconstruct_runner`
+(`crates/nexus-orchestration/src/engine.rs:3845`) first selects the apply read by the recorded mode — the
+`descriptor.intake_mode` match (`crates/nexus-orchestration/src/engine.rs:4097`) — and then matches the
+descriptor's recorded identity against that resolution **before** it builds: the
+`(descriptor.applied.as_ref(), applied)` match (`crates/nexus-orchestration/src/engine.rs:4135`).
 
 | `descriptor.applied` | Resolved current apply | Graph rebuilt from |
 | --- | --- | --- |
@@ -223,16 +233,16 @@ recorded identity against that resolution **before** it builds (`engine.rs:4109`
 | `Some(recorded)` | identity equal | the applied document — the `current.identity == *recorded` guard |
 | `Some(recorded)` | a different apply, or none | typed refusal `reconstruction_unavailable` — the `(Some(recorded), current)` fallback |
 
-The first row is the pre-freeze arm: a descriptor that records no identity rebuilds from whatever the
-strategy's current apply is, exactly as it did before the identity existed. That is what lets a no-apply
-run reconstruct, and it is also the last way a restart can switch a run onto a document it never ran, so
-its reachability is bounded rather than assumed:
+The first row is the pre-freeze arm: a descriptor that records neither an identity nor a mode rebuilds from
+whatever the strategy's current apply is, exactly as it did before either field existed. That is what lets a
+no-apply legacy run reconstruct, and it is also the last way a restart can switch a run onto a document it
+never ran, so its reachability is bounded rather than assumed:
 
 - **A run admitted with a current apply cannot reach it.** All four entries freeze the identity they
   resolved, so the descriptor is `Some(recorded)` and recovery compares: the same apply rebuilds the same
   document, any other apply or no current apply refuses. The trait entries resolve through the installed
-  `AppliedDocumentSource`; an engine without one resolves no apply and freezes no identity, which is the
-  row-1 case below.
+  `AppliedDocumentSource`; an engine without one resolves no apply, so under `ir-only` a user bundle refuses
+  and an embedded preset freezes no identity — the row-1 case below.
 - **A run admitted while its strategy had no current apply records no identity by definition**, and an
   apply installed before that run restarts reinterprets its persisted position through row 1. The freeze
   closes the runs admitted under an apply; it cannot close the absence of one.
@@ -249,13 +259,13 @@ named item; the `:line` locates that item in the current tree.
 
 | Site | Verdict |
 | --- | --- |
-| `crates/nexus-core/src/execution/handle_ops.rs:1450` `freeze_descriptor` (`applied: None`, `:1564`) | **Inert** — this is a schedule admission *payload*, not a run descriptor: `admit_schedule_inner` re-reads only `work_id`, `input`, `agent_bindings` and `source` from it (`workflow.rs:2936-2957`) and resolves the apply itself (`workflow.rs:2980`) |
-| `crates/nexus-core/src/execution/workflow.rs:2514` `prepare_legacy_row` (`applied: None`, `:2615`) | **Inert** — the same payload write, read back by the same four fields |
+| `crates/nexus-core/src/execution/handle_ops.rs:1450` `freeze_descriptor` (`applied: None`, `:1565`) | **Inert** — this is a schedule admission *payload*, not a run descriptor: `admit_schedule_inner` re-reads only `work_id`, `input`, `agent_bindings` and `source` from it (`workflow.rs:2974`) and resolves the apply itself (`workflow.rs:3035`) |
+| `crates/nexus-core/src/execution/workflow.rs:2551` `prepare_legacy_row` (`applied: None`, `:2652`) | **Inert** — the same payload write, read back by the same four fields |
 | `crates/nexus-orchestration/src/auto_chain.rs:1383` `enqueue_descriptor_json` (`applied: None`, `:1420`) | **Unreachable with a user apply** — it requires `embedded_source_identity` (`:1399`), so the source is never `Directory` and `is_user_preset` is false |
 | `crates/nexus-orchestration/src/storage/sqlite.rs:473` `child_descriptor` (`applied`, `:489`) | **Already correct** — `applied: root.applied.clone()`; a child run inherits the root's identity |
-| `crates/nexus-orchestration/src/engine.rs:4642` `start_session_with_creator` (`applied: None`, `:4678`) | **Callable, no known production caller** — `GraphFlowEngine::start_session` forwards here unconditionally (`:4638`) and `OrchestrationEngine::start_session_with_graph` (`:4850`) exposes that route, so a store-backed engine started this way writes `applied: None`; no in-repo production caller holds a store (the callers are `start_session` and the two `workflow_store == None` fallbacks, `:4323` and `:4481`) |
-| `crates/nexus-orchestration/src/engine.rs:4799` `new_session` (`applied: None`, `:4819`) | **Callable, no known production caller** — the `GraphFlowEngine` trait implementation is public and its store arm writes `applied: None`; only `EngineProxy::new_session` refuses (`:3262`, `NoGraphLoaded`), and nothing in this tree calls the other one in production |
-| `crates/nexus-orchestration/src/engine.rs:4241` `build_descriptor` (`applied: None`, `:4266`) | **Fixed** — the shared skeleton starts empty, and all three callers overwrite it with the identity they resolved before persisting: `start_preset_run` (`:4283`), `start_preset_run_with_input` (`:4428`), `admit_schedule_run_with_input` (`:4541`) |
+| `crates/nexus-orchestration/src/engine.rs:4727` `start_session_with_creator` (`applied: None`, `:4763`) | **Callable, no known production caller** — `GraphFlowEngine::start_session` forwards here unconditionally (`:4723`) and `OrchestrationEngine::start_session_with_graph` (`:4939`) exposes that route, so a store-backed engine started this way writes `applied: None`; no in-repo production caller holds a store (the callers are `start_session` and the two `workflow_store == None` fallbacks, `:4354` and `:4565`) |
+| `crates/nexus-orchestration/src/engine.rs:4887` `new_session` (`applied: None`, `:4907`) | **Callable, no known production caller** — the `GraphFlowEngine` trait implementation is public and its store arm writes `applied: None`; only `EngineProxy::new_session` refuses (`:3265`, `NoGraphLoaded`), and nothing in this tree calls the other one in production |
+| `crates/nexus-orchestration/src/engine.rs:4269` `build_descriptor` (`applied: None`, `:4295`) | **Fixed** — the shared skeleton starts empty, and all three callers overwrite it with the identity they resolved before persisting: `start_preset_run` (`:4314`), `start_preset_run_with_input` (`:4512`), `admit_schedule_run_with_input` (`:4626`) |
 
 **Known limits on the applied path.** Each bounds what an applied run can do; none of them turns the
 applied document back into a hint.
