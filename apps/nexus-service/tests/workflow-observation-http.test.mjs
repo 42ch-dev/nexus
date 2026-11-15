@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -79,6 +79,16 @@ function seededHome() {
     { cwd: root, stdio: 'inherit' },
   );
   assert.equal(seed.status, 0, seed.stderr?.toString());
+  // These cases pin the YAML observation/control contracts (run identity,
+  // streaming ring, park/resume), not the intake policy: every preset here is
+  // scaffolded through the public surface and never applied, so the default
+  // `ir-only` would refuse its run before graph construction. Pin the v1.243
+  // `yaml-only` compatibility arm these graphs were written against (removed
+  // at v1.244.0).
+  appendFileSync(
+    join(home, '.nexus42', 'config.toml'),
+    '\n[strategy_intake]\nmode = "yaml-only"\n',
+  );
   const agentHostDir = join(home, '.nexus42', 'agent-host');
   mkdirSync(agentHostDir, { recursive: true });
   writeFileSync(join(agentHostDir, 'config.toml'), acpProviderConfig());

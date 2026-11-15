@@ -663,6 +663,23 @@ fn write_preset_bundle(nexus_home: &Path, preset_id: &str, yaml: &str, prompt_bo
     std::fs::write(bundle.join("prompts/generate.md"), prompt_body).expect("prompt template");
 }
 
+/// Pin the `yaml-only` compatibility arm on a fixture home.
+///
+/// These cases pin the YAML transport contracts — cancel, uncertain effect,
+/// workspace commit projection, resume — not the intake policy. The default
+/// `ir-only` refuses a user bundle with no current apply before graph
+/// construction, so each case selects the arm its graph was written against,
+/// the same pin `a_schedule_with_no_apply_runs_the_yaml_graph_the_untouched_builder_builds`
+/// applies. `yaml-only` is the v1.243 compatibility arm; removed at v1.244.0.
+fn select_yaml_only(nexus_home: &Path) {
+    let config_path = nexus_home.join("config.toml");
+    let mut config = std::fs::read_to_string(&config_path).unwrap_or_default();
+    // The leading newline keeps the table on its own line whatever the fixture
+    // config ends with.
+    config.push_str("\n[strategy_intake]\nmode = \"yaml-only\"\n");
+    std::fs::write(&config_path, config).expect("write the yaml-only config");
+}
+
 fn signal(name: &str) -> nexus_contracts::local::schedule::http::SignalScheduleRequest {
     nexus_contracts::local::schedule::http::SignalScheduleRequest {
         signal: name.to_string(),
@@ -2761,6 +2778,7 @@ async fn add_hosted_schedule(fixture: &HostedFixture) -> String {
 #[serial_test::serial]
 async fn hosted_schedule_drives_once_and_closes() {
     let fixture = hosted_fixture().await;
+    select_yaml_only(&fixture.tmp.path().join(".nexus42"));
     let pool = fixture.handle.coordinator().pool();
 
     // ── The factory installed ONE live background task (the supervisor
@@ -3777,6 +3795,7 @@ async fn public_cancel_fences_late_workspace_commit() {
     let coordinator = fixture.coordinator();
     let caps = fixture.handle.capability_holder();
     let home = fixture.nexus_home();
+    select_yaml_only(&home);
     let executor =
         fixture.executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>;
     write_preset_bundle(
@@ -4031,6 +4050,7 @@ async fn public_cancel_fences_late_workspace_commit() {
     let principal = hosted.core.active_principal().await.unwrap();
     let pool = hosted.handle.coordinator().pool();
     let nexus_home = hosted.tmp.path().join(".nexus42");
+    select_yaml_only(&nexus_home);
     write_preset_bundle(
         &nexus_home,
         CANCEL_EFFECT_PRESET,
@@ -4371,6 +4391,7 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
     let coordinator = fixture.coordinator();
     let caps = fixture.handle.capability_holder();
     let home = fixture.nexus_home();
+    select_yaml_only(&home);
     let executor =
         fixture.executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>;
     write_preset_bundle(
@@ -6567,6 +6588,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
     let fixture = hosted_fixture().await;
     let home = fixture.tmp.path().to_path_buf();
     let nexus_home = home.join(".nexus42");
+    select_yaml_only(&nexus_home);
     let principal = fixture.core.active_principal().await.unwrap();
     let pool = fixture.handle.coordinator().pool();
     let epoch_a = fixture.handle.engine_epoch();
@@ -6991,6 +7013,7 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
     let fixture = hosted_fixture().await;
     let home = fixture.tmp.path().to_path_buf();
     let nexus_home = home.join(".nexus42");
+    select_yaml_only(&nexus_home);
     let principal = fixture.core.active_principal().await.unwrap();
     let pool = fixture.handle.coordinator().pool();
     let epoch_a = fixture.handle.engine_epoch();
