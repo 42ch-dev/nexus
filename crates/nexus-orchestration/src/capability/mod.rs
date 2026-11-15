@@ -268,6 +268,20 @@ pub trait WorkspaceExecutor: Send + Sync {
         Err(CapabilityError::WorkerUnavailable)
     }
 
+    /// Whether this executor records Work artifact writes instead of landing
+    /// them.
+    ///
+    /// A scaffold creates the `Works/<work_ref>/` directory skeleton itself,
+    /// outside `commit_work_artifact`, so it asks this before touching the
+    /// disk: recording bytes that never land must not leave the empty tree
+    /// behind them.
+    ///
+    /// Default is production: an executor that does not say otherwise lands
+    /// its writes, so no existing implementation changes behaviour.
+    fn records_work_artifacts(&self) -> bool {
+        false
+    }
+
     /// Commit one Work artifact byte write (`Works/<work_ref>/<rel_child>`).
     ///
     /// The single production implementation delegates to the core byte-write

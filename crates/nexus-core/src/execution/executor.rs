@@ -219,6 +219,10 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
             .unwrap_or_else(|_| PathBuf::from(&self.canonical_workspace_root)))
     }
 
+    fn records_work_artifacts(&self) -> bool {
+        matches!(self.work_artifact, WorkArtifactBinding::Recording(_))
+    }
+
     async fn open(
         &self,
         input: WorkspaceOpenInput,

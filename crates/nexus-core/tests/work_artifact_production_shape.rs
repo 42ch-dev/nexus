@@ -16,6 +16,7 @@
 #![cfg(feature = "execution")]
 #![allow(clippy::unwrap_used)]
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -113,9 +114,29 @@ struct Fixture {
 }
 
 async fn fixture() -> Fixture {
-    let home = tempfile::tempdir().expect("temp home");
+    let (home, pool) = home_and_pool().await;
     let cwd = tempfile::tempdir().expect("temp cwd");
     let root = tempfile::tempdir().expect("temp workspace");
+    let executor: Arc<dyn WorkspaceExecutor> = Arc::new(
+        WorkspaceCommitExecutor::new(
+            Arc::new(WorkspaceSessionManager::new(Arc::clone(&pool))),
+            root.path().to_string_lossy().into_owned(),
+        )
+        .with_work_artifact_home(home.path().to_path_buf()),
+    );
+    Fixture {
+        _home: home,
+        cwd,
+        root,
+        pool,
+        executor,
+    }
+}
+
+/// The CLI home with the active creator/workspace selection, plus the engine
+/// pool holding the creator row the scaffold's World creation is FK-bound to.
+async fn home_and_pool() -> (tempfile::TempDir, Arc<SqlitePool>) {
+    let home = tempfile::tempdir().expect("temp home");
     let config = format!(
         "active_creator_id = \"{CREATOR}\"\n\
          active_workspace_slug_by_creator = {{ {CREATOR} = \"{WORKSPACE}\" }}\n"
@@ -127,19 +148,35 @@ async fn fixture() -> Fixture {
             .expect("engine pool")
             .clone_pool(),
     );
-    // The port resolves the active creator from this home; the World the novel
-    // scaffold creates is FK-bound to that creator row.
     nexus_local_db::creators::ensure_creator_row(&pool, CREATOR, "Production Shape")
         .await
         .expect("creator row");
-    let executor: Arc<dyn WorkspaceExecutor> = Arc::new(
-        WorkspaceCommitExecutor::new(
+    (home, pool)
+}
+
+/// The same fixture with the executor a dry run uses: recording Work writes
+/// instead of landing them, with a home attached (a simulated executor must
+/// stay recording even then).
+struct SimFixture {
+    _home: tempfile::TempDir,
+    cwd: tempfile::TempDir,
+    root: tempfile::TempDir,
+    pool: Arc<SqlitePool>,
+    executor: Arc<WorkspaceCommitExecutor>,
+}
+
+async fn simulated_fixture() -> SimFixture {
+    let (home, pool) = home_and_pool().await;
+    let cwd = tempfile::tempdir().expect("temp cwd");
+    let root = tempfile::tempdir().expect("temp workspace");
+    let executor = Arc::new(
+        WorkspaceCommitExecutor::new_simulated(
             Arc::new(WorkspaceSessionManager::new(Arc::clone(&pool))),
             root.path().to_string_lossy().into_owned(),
         )
         .with_work_artifact_home(home.path().to_path_buf()),
     );
-    Fixture {
+    SimFixture {
         _home: home,
         cwd,
         root,
@@ -246,6 +283,40 @@ async fn assert_first_scaffold_lands(
         Some(work_ref),
         "the scaffold leaves the work_ref it wrote under"
     );
+}
+
+/// Every entry under `root`, relative and ordered: `None` for a directory,
+/// `Some(bytes)` for a file.
+///
+/// A whole-tree snapshot is the only shape that catches an entry the run added
+/// or rewrote, so a single-file assertion cannot see a second file land.
+fn tree_snapshot(root: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
+    fn walk(dir: &Path, base: &Path, out: &mut BTreeMap<String, Option<Vec<u8>>>) {
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+            .map(|entry| entry.expect("directory entry").path())
+            .collect();
+        entries.sort();
+        for path in entries {
+            let relative = path
+                .strip_prefix(base)
+                .expect("entry below the snapshot root")
+                .to_string_lossy()
+                .into_owned();
+            if path.is_dir() {
+                out.insert(format!("{relative}/"), None);
+                walk(&path, base, out);
+            } else {
+                out.insert(
+                    relative,
+                    Some(std::fs::read(&path).expect("entry bytes")),
+                );
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(root, root, &mut out);
+    out
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -492,5 +563,89 @@ async fn a_partial_reinit_uses_the_stored_ref_through_the_real_port() {
         stored_work_ref(&fx.pool, work_id).await.as_deref(),
         Some("prod-keep-ref"),
         "a selection without work_ref keeps the stored ref"
+    );
+}
+
+/// The produce-side dry run: the REAL `NovelProjectScaffold` driven through the
+/// `WorkspaceExecutor` capability surface over a Work that already holds real
+/// chapter bytes. Every Work write it intends is recorded; nothing lands.
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn simulated_scaffold_records_without_touching_work_tree() {
+    let fx = simulated_fixture().await;
+    // The scaffold resolves its `Works` tree from the executor; keep the cwd
+    // elsewhere so a cwd-relative write cannot masquerade as a hit.
+    let _cwd = CwdGuard::enter(fx.cwd.path());
+
+    let work_id = "wrk_sim_novel";
+    works::create_work(&fx.pool, &work_record_with_ref(work_id, "sim-novel"))
+        .await
+        .expect("works row with a stored ref");
+
+    // Existing project tree: the Work directory plus a real chapter file.
+    let work_dir = fx.root.path().join("Works").join("sim-novel");
+    let chapter = work_dir.join("Stories/chapter-01.md");
+    std::fs::create_dir_all(chapter.parent().expect("chapter dir")).expect("chapter dir");
+    std::fs::write(&chapter, "# the existing chapter\n").expect("chapter bytes");
+
+    let before = tree_snapshot(fx.root.path());
+
+    let novel = NovelProjectScaffold::with_pool((*fx.pool).clone())
+        .with_workspace_executor(Some(Arc::clone(&fx.executor) as Arc<dyn WorkspaceExecutor>));
+    novel
+        .run(json!({
+            "creator_id": CREATOR,
+            "work_id": work_id,
+            "work_ref": "sim-novel",
+            "title": "Simulated Novel",
+            "create_world": true,
+            "world_title": "Simulated World",
+            "total_planned_chapters": 1,
+        }))
+        .await
+        .expect("the simulated scaffold runs on a real workspace");
+
+    // The whole tree — every directory, every file, every byte — is unchanged.
+    assert_eq!(
+        tree_snapshot(fx.root.path()),
+        before,
+        "a simulated scaffold must leave the whole Work tree as it found it"
+    );
+    assert_eq!(
+        std::fs::read(&chapter).expect("chapter still readable"),
+        b"# the existing chapter\n",
+        "the existing chapter bytes are untouched"
+    );
+
+    // The run was not a no-op: every Work write it intended is in the log, in
+    // commit order.
+    let recorded = fx
+        .executor
+        .recorded_work_artifact_mutations()
+        .expect("a simulated executor records its Work writes");
+    let writes: Vec<(String, String)> = recorded
+        .iter()
+        .map(|mutation| (mutation.work_ref.clone(), mutation.rel_child.clone()))
+        .collect();
+    assert_eq!(
+        writes,
+        vec![
+            ("sim-novel".to_string(), "README.md".to_string()),
+            (
+                "sim-novel".to_string(),
+                "Outlines/volume-outline.md".to_string()
+            ),
+            (
+                "sim-novel".to_string(),
+                "Outlines/foreshadowing.md".to_string()
+            ),
+            ("sim-novel".to_string(), "Outlines/event-index.md".to_string()),
+            ("sim-novel".to_string(), "AGENTS.md".to_string()),
+        ],
+        "the dry run records every intended Work write, in order"
+    );
+    assert!(
+        fx.executor.records_work_artifacts(),
+        "the executor stays recording even with a Work artifact home attached"
     );
 }
