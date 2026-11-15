@@ -53,6 +53,16 @@ pub struct RunDescriptorV1 {
     /// serializes byte for byte as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied: Option<AppliedRunIdentity>,
+    /// Intake mode the run was admitted under (`strategy_intake` config at
+    /// admission): `Some` on new user-preset runs, `None` for embedded and
+    /// `_system.` presets and for any row persisted before this field
+    /// existed. Recovery follows the RECORDED mode, not the current config —
+    /// a `yaml-only` run keeps rebuilding the YAML graph after a config flip,
+    /// and an `ir-only` run refuses when its recorded apply is absent.
+    /// Skipped when absent so a legacy descriptor serializes byte for byte
+    /// as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
 }
 
 /// The applied identity a run was admitted under.

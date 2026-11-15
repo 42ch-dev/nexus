@@ -231,6 +231,7 @@ async fn seed_run_at(
         parent_session_id: None,
         graph_name: None,
         applied: None,
+        intake_mode: None,
     };
     // The persisted position is the preset's initial state, so reconstruction
     // rebuilds a runner whose position is a real task in the frozen graph.
@@ -797,12 +798,15 @@ async fn seed_superseding_apply(
 /// `applied` is the applied identity admission freezes on a run it admits under
 /// an apply (P4 Task 4); `None` is a descriptor that records none, which
 /// recovery resolves against the strategy's current apply as it always has.
+/// `intake_mode` is the mode arm the row was admitted under (`None` = a legacy
+/// row predating the field); recovery follows the recorded value.
 async fn seed_restart_run(
     pool: &sqlx::SqlitePool,
     session_id: &str,
     preset_id: &str,
     bundle: &Path,
     applied: Option<nexus_orchestration::run_state::AppliedRunIdentity>,
+    intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
 ) {
     let loaded = nexus_preset::load_preset(
         bundle,
@@ -826,6 +830,7 @@ async fn seed_restart_run(
         parent_session_id: None,
         graph_name: None,
         applied,
+        intake_mode,
     };
     let root = graph_flow::Session::new_from_task(session_id.to_string(), SHARED_ENTRY_NODE);
     root.context
@@ -1023,7 +1028,15 @@ async fn a_restart_during_an_applied_run_recovers_into_the_applied_graph() {
     let session_id = format!("{RESTART_PRESET}:in-flight");
     let seed = open_seed_pool(&f.db_path).await;
     seed_restart_apply(seed.pool(), RESTART_PRESET).await;
-    seed_restart_run(seed.pool(), &session_id, RESTART_PRESET, &bundle, None).await;
+    seed_restart_run(
+        seed.pool(),
+        &session_id,
+        RESTART_PRESET,
+        &bundle,
+        None,
+        None,
+    )
+    .await;
     close_seed_pool(&f.db_path, seed).await;
 
     let owner = open_engine_owner(&f).await;
@@ -1064,6 +1077,7 @@ async fn a_restart_with_no_apply_still_recovers_the_descriptor_graph() {
         &session_id,
         RESTART_NO_APPLY_PRESET,
         &bundle,
+        None,
         None,
     )
     .await;
@@ -1115,6 +1129,7 @@ async fn a_restart_after_a_re_apply_refuses_instead_of_rebuilding_the_newer_docu
         RESTART_PRESET,
         &bundle,
         Some(admitted.clone()),
+        None,
     )
     .await;
     // The re-apply lands AFTER the run was admitted, which is the whole window
@@ -1189,6 +1204,7 @@ async fn a_restart_of_an_unchanged_applied_run_still_recovers_the_applied_graph(
         RESTART_PRESET,
         &bundle,
         Some(admitted),
+        None,
     )
     .await;
     close_seed_pool(&f.db_path, seed).await;
@@ -1238,6 +1254,7 @@ async fn a_restart_after_a_pinned_body_moved_refuses_naming_the_pin() {
         RESTART_PRESET,
         &bundle,
         Some(admitted),
+        None,
     )
     .await;
     close_seed_pool(&f.db_path, seed).await;
@@ -1318,6 +1335,7 @@ async fn a_restart_with_unchanged_pins_recovers_the_applied_graph() {
         RESTART_PRESET,
         &bundle,
         Some(admitted),
+        None,
     )
     .await;
     close_seed_pool(&f.db_path, seed).await;
@@ -1344,16 +1362,21 @@ async fn a_restart_with_unchanged_pins_recovers_the_applied_graph() {
 
 // ── The YAML run seam freezes the apply it runs (P6, I-000443) ─────────────
 
-/// P6: `start_session` resolves the strategy's current apply before it builds.
+/// P6: `start_session` resolves the strategy's current apply before it builds,
+/// under the intake mode the home config selects.
 ///
-/// An applied strategy must run the applied document — proven by the run's
-/// position on `applied_only_probe`, a node id the descriptor bundle does not
-/// declare — and freeze that identity on the descriptor. Without the second
-/// half, recovery's `(None, current)` arm rebuilds from whatever the strategy
-/// has applied by then: a graph this run never ran.
+/// An applied strategy under the default `ir-only` runs the applied document —
+/// proven by the run's position on `applied_only_probe`, a node id the
+/// descriptor bundle does not declare — and freezes that identity plus
+/// `intake_mode: Some(IrOnly)` on the descriptor. Without the freeze,
+/// recovery's `(None, current)` arm rebuilds from whatever the strategy has
+/// applied by then: a graph this run never ran.
 ///
-/// The no-apply strategy keeps the YAML bundle and a descriptor that still
-/// serialises no `applied` key at all.
+/// The default is also the behaviour change ADR P6 condition 3 names: a user
+/// bundle with NO current apply refuses (`yaml_intake_disabled`) before any
+/// graph is built — never a YAML fallback — and no durable run row is minted.
+/// The yaml-only arms live in
+/// `yaml_only_runs_the_yaml_bundle_with_the_apply_unread`.
 #[tokio::test]
 async fn start_session_freezes_and_runs_the_strategy_apply() {
     let f = fixture().await;
@@ -1376,6 +1399,8 @@ async fn start_session_freezes_and_runs_the_strategy_apply() {
     let coordinator = handle.coordinator();
     let pool: sqlx::SqlitePool = owner.pool().clone();
 
+    // Default (no config key): the applied strategy runs the applied document
+    // and freezes the identity AND the intake mode.
     let applied_run = coordinator
         .start_session(
             RESTART_PRESET,
@@ -1404,16 +1429,89 @@ async fn start_session_freezes_and_runs_the_strategy_apply() {
         PRESET_ONLY_NODE,
         "the descriptor-only node must never run while the strategy has a current apply"
     );
+    let applied_descriptor = read_restart_record(&pool, &applied_run.0)
+        .await
+        .descriptor
+        .expect("the frozen descriptor exists");
     assert_eq!(
-        read_restart_record(&pool, &applied_run.0)
-            .await
-            .descriptor
-            .expect("the frozen descriptor exists")
-            .applied,
+        applied_descriptor.applied,
         Some(admitted),
         "the descriptor must freeze the apply the run executes"
     );
+    assert_eq!(
+        applied_descriptor.intake_mode,
+        Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly),
+        "the default arm is ir-only and must be recorded"
+    );
 
+    // The default no-apply refusal: a user bundle with no current apply
+    // refuses before graph construction, and no run row is minted.
+    let refusal = coordinator
+        .start_session(
+            RESTART_NO_APPLY_PRESET,
+            CREATOR,
+            Some("intake"),
+            std::collections::HashMap::new(),
+            &nexus_home,
+            &caps,
+            None,
+            None,
+        )
+        .await
+        .expect_err("the default ir-only arm refuses a user bundle with no apply");
+    let RunControlError::YamlIntakeDisabled { preset_id } = refusal else {
+        panic!("expected yaml_intake_disabled, got {refusal:?}");
+    };
+    assert_eq!(preset_id, RESTART_NO_APPLY_PRESET);
+    let minted: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions WHERE preset_id = ?")
+            .bind(RESTART_NO_APPLY_PRESET)
+            .fetch_one(&pool)
+            .await
+            .expect("count run rows");
+    assert_eq!(
+        minted, 0,
+        "a refused admission must not leave a durable run row"
+    );
+
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
+/// P6 Task 3: the `yaml-only` arm — the emergency compatibility switch. The
+/// same no-apply bundle that the default refuses admits on the YAML graph,
+/// and the SAME applied strategy runs its YAML bundle with the apply never
+/// read. Both record `intake_mode: Some(YamlOnly)` and no applied identity,
+/// so recovery rebuilds the YAML graph from the recorded arm.
+#[tokio::test]
+async fn yaml_only_runs_the_yaml_bundle_with_the_apply_unread() {
+    let f = fixture().await;
+    let nexus_home = f.tmp.path().join(".nexus42");
+    write_restart_bundle(&nexus_home, RESTART_PRESET);
+    write_restart_bundle(&nexus_home, RESTART_NO_APPLY_PRESET);
+    let seed = open_seed_pool(&f.db_path).await;
+    seed_restart_apply(seed.pool(), RESTART_PRESET).await;
+    close_seed_pool(&f.db_path, seed).await;
+
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    let caps = handle.capability_holder();
+    let coordinator = handle.coordinator();
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+
+    std::fs::write(
+        nexus_home.join("config.toml"),
+        "[strategy_intake]\nmode = \"yaml-only\"\n",
+    )
+    .expect("write the yaml-only config");
+
+    // The no-apply bundle the default refuses admits on the YAML graph.
     let bundle_run = coordinator
         .start_session(
             RESTART_NO_APPLY_PRESET,
@@ -1426,7 +1524,7 @@ async fn start_session_freezes_and_runs_the_strategy_apply() {
             None,
         )
         .await
-        .expect("a strategy with no apply still admits");
+        .expect("yaml-only admits a no-apply bundle on the YAML graph");
     wait_for_position(
         &pool,
         &bundle_run.0,
@@ -1439,12 +1537,174 @@ async fn start_session_freezes_and_runs_the_strategy_apply() {
         .descriptor
         .expect("the frozen descriptor exists");
     assert_eq!(descriptor.applied, None);
+    assert_eq!(
+        descriptor.intake_mode,
+        Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly)
+    );
     assert!(
         serde_json::to_value(&descriptor)
             .expect("the descriptor serialises")
             .get("applied")
             .is_none(),
-        "a no-apply run still serialises no applied key at all"
+        "a yaml-only run still serialises no applied key at all"
+    );
+
+    // The SAME applied strategy under yaml-only: the YAML bundle runs, the
+    // apply is never read.
+    let yaml_applied_run = coordinator
+        .start_session(
+            RESTART_PRESET,
+            CREATOR,
+            None,
+            std::collections::HashMap::new(),
+            &nexus_home,
+            &caps,
+            None,
+            None,
+        )
+        .await
+        .expect("yaml-only admits the applied strategy on the YAML graph");
+    wait_for_position(
+        &pool,
+        &yaml_applied_run.0,
+        PRESET_ONLY_NODE,
+        "the yaml-only applied run to reach the descriptor-only node",
+    )
+    .await;
+    let yaml_descriptor = read_restart_record(&pool, &yaml_applied_run.0)
+        .await
+        .descriptor
+        .expect("the frozen descriptor exists");
+    assert_eq!(
+        yaml_descriptor.applied, None,
+        "yaml-only never freezes an applied identity"
+    );
+    assert_eq!(
+        yaml_descriptor.intake_mode,
+        Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly)
+    );
+
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
+/// P6 Task 3: recovery follows the RECORDED intake mode, not the current
+/// config. A run admitted under `yaml-only` — descriptor `intake_mode:
+/// Some(YamlOnly)`, no frozen apply — rebuilds the YAML graph after a restart
+/// even when the operator flipped the config to `ir-only` before the restart
+/// and the strategy has a current apply. The descriptor is the observability
+/// record of which arm ran; the config governs new admissions only.
+#[tokio::test]
+async fn a_yaml_only_descriptor_recovers_the_yaml_graph_after_a_config_flip() {
+    let f = fixture().await;
+    let nexus_home = f.tmp.path().join(".nexus42");
+    let bundle = write_restart_bundle(&nexus_home, RESTART_PRESET);
+    let session_id = format!("{RESTART_PRESET}:in-flight");
+    let seed = open_seed_pool(&f.db_path).await;
+    // The strategy HAS a current apply; the run was admitted under yaml-only
+    // before the operator flipped the switch.
+    seed_restart_apply(seed.pool(), RESTART_PRESET).await;
+    seed_restart_run(
+        seed.pool(),
+        &session_id,
+        RESTART_PRESET,
+        &bundle,
+        None,
+        Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly),
+    )
+    .await;
+    close_seed_pool(&f.db_path, seed).await;
+
+    // Flip the config to the default arm BEFORE the restarted engine
+    // recovers the run — recovery must not read it. Append the section:
+    // the fixture's home already keeps its active-creator key in this file.
+    let config_path = nexus_home.join("config.toml");
+    let mut config = std::fs::read_to_string(&config_path).expect("read the seeded config");
+    config.push_str("[strategy_intake]\nmode = \"ir-only\"\n");
+    std::fs::write(&config_path, config).expect("write the flipped config");
+
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    let session = recovered_position(&owner, &session_id).await;
+    assert_eq!(
+        session.current_task_id, PRESET_ONLY_NODE,
+        "the recorded yaml-only arm rebuilds the YAML graph even after the config flip; got {:?}",
+        session.current_task_id
+    );
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
+/// P6 Task 3: an `ir-only` descriptor that records no applied identity is the
+/// no-apply admission refusal resurfaced at recovery: a typed, non-replayable
+/// refusal — never a YAML rebuild, even though the strategy has since gained
+/// a current apply (recovery under ir-only does not fall back).
+#[tokio::test]
+async fn an_ir_only_descriptor_without_an_apply_refuses_recovery() {
+    let f = fixture().await;
+    let nexus_home = f.tmp.path().join(".nexus42");
+    let bundle = write_restart_bundle(&nexus_home, RESTART_PRESET);
+    let session_id = format!("{RESTART_PRESET}:in-flight");
+    let seed = open_seed_pool(&f.db_path).await;
+    // The strategy has a current apply NOW; the descriptor records none, the
+    // state a tampered or partially-written ir-only row can reach.
+    seed_restart_apply(seed.pool(), RESTART_PRESET).await;
+    seed_restart_run(
+        seed.pool(),
+        &session_id,
+        RESTART_PRESET,
+        &bundle,
+        None,
+        Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly),
+    )
+    .await;
+    close_seed_pool(&f.db_path, seed).await;
+
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+
+    // The A7 reattach seam refuses instead of rebuilding from YAML or from
+    // the strategy's current apply.
+    let refusal = handle
+        .coordinator()
+        .signal_run(
+            &nexus_orchestration::SessionId(session_id.clone()),
+            nexus_core::execution::RunSignal::Continue {
+                wait_id: "irrelevant".to_string(),
+            },
+        )
+        .await
+        .expect_err("an ir-only descriptor without an apply must not recover");
+    let RunControlError::ReconstructionUnavailable { reason, .. } = refusal else {
+        panic!("expected reconstruction_unavailable, got {refusal:?}");
+    };
+    assert!(
+        reason.contains("yaml_intake_disabled"),
+        "the refusal must carry the stable intake text: {reason}"
+    );
+
+    // Not a recovered graph: the durable position never left the shared
+    // entry node.
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+    let session = read_restart_session(&pool, &session_id)
+        .await
+        .expect("the run row exists");
+    assert_eq!(
+        session.current_task_id, SHARED_ENTRY_NODE,
+        "a refused reconstruction must not advance the run; got {:?}",
+        session.current_task_id
     );
 
     handle.close().await.unwrap();

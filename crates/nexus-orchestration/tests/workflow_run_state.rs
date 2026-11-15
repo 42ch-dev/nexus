@@ -72,6 +72,7 @@ fn test_descriptor(_session_id: &str) -> RunDescriptorV1 {
         parent_session_id: None,
         graph_name: None,
         applied: None,
+        intake_mode: None,
     }
 }
 
@@ -541,6 +542,53 @@ fn descriptor_serializes_the_applied_identity_only_when_present() {
     );
     let back: RunDescriptorV1 = serde_json::from_value(value).expect("descriptor decodes");
     assert_eq!(back.applied, applied.applied);
+}
+
+/// The intake mode is frozen on the descriptor only when an admission recorded
+/// one, both arms round-trip under their kebab-case spellings, and a legacy
+/// descriptor keeps its exact bytes.
+#[test]
+fn descriptor_round_trips_intake_mode_and_legacy_bytes_hold() {
+    use nexus_home_layout::strategy_intake::StrategyIntakeMode;
+
+    // Legacy bytes: a descriptor without the field decodes as `None`, and the
+    // skipped field leaves the serialized form byte-identical (same contract
+    // as `applied` above).
+    let legacy = test_descriptor("sess");
+    assert_eq!(legacy.intake_mode, None);
+    let legacy_value = serde_json::to_value(&legacy).expect("descriptor serializes");
+    assert!(
+        legacy_value.get("intake_mode").is_none(),
+        "a legacy descriptor must not gain a key: {legacy_value}"
+    );
+
+    for mode in [StrategyIntakeMode::IrOnly, StrategyIntakeMode::YamlOnly] {
+        let mut descriptor = test_descriptor("sess");
+        descriptor.intake_mode = Some(mode);
+        let value = serde_json::to_value(&descriptor).expect("descriptor serializes");
+        let back: RunDescriptorV1 =
+            serde_json::from_value(value.clone()).expect("descriptor decodes");
+        assert_eq!(back.intake_mode, Some(mode));
+        assert!(
+            value.get("intake_mode").is_some(),
+            "a recorded mode must serialize a key: {value}"
+        );
+    }
+
+    // The exact kebab-case spellings the config file and the descriptor share.
+    let mut descriptor = test_descriptor("sess");
+    descriptor.intake_mode = Some(StrategyIntakeMode::YamlOnly);
+    let json = serde_json::to_string(&descriptor).expect("descriptor serializes");
+    assert!(
+        json.contains(r#""intake_mode":"yaml-only""#),
+        "yaml-only must serialize kebab-case: {json}"
+    );
+    descriptor.intake_mode = Some(StrategyIntakeMode::IrOnly);
+    let json = serde_json::to_string(&descriptor).expect("descriptor serializes");
+    assert!(
+        json.contains(r#""intake_mode":"ir-only""#),
+        "ir-only must serialize kebab-case: {json}"
+    );
 }
 
 // ---------------------------------------------------------------------------
