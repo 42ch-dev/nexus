@@ -69,7 +69,7 @@ response object).
 - Location: the daemon home `config.toml` (`<user_home>/.nexus42/config.toml` —
   the same file the core owns for `active_creator_id` and workspace path
   config; the service `home` is the raw user home, so the `.nexus42` segment is
-  resolved explicitly and the directory is created before the temp write).
+  resolved explicitly and the directory is created before the first publication).
 - Shape: one `[agent_profile]` table with `name` and optional `launch_command`.
   `name` is a TOML string; `launch_command` is omitted when unset.
 - ONE daemon-global profile — the desktop semantics. It is deliberately **not**
