@@ -1061,14 +1061,14 @@ impl McpBackend for PeerRegistryBackend {
                     message,
                     wire_code: None,
                 }),
-                Err(PeerInvokeError::Disconnected { message })
-                | Err(PeerInvokeError::Internal { message }) => {
-                    Ok(ToolCallOutcome::ExecutedError {
-                        code: "internal".to_owned(),
-                        message,
-                        wire_code: None,
-                    })
-                }
+                Err(
+                    PeerInvokeError::Disconnected { message }
+                    | PeerInvokeError::Internal { message },
+                ) => Ok(ToolCallOutcome::ExecutedError {
+                    code: "internal".to_owned(),
+                    message,
+                    wire_code: None,
+                }),
             }
         }
     }

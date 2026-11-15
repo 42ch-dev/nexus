@@ -103,7 +103,7 @@ pub struct EmbeddedShutdown {
 impl EmbeddedShutdown {
     /// Bind the shutdown signal to a watch receiver.
     #[must_use]
-    pub fn new(rx: tokio::sync::watch::Receiver<bool>) -> Self {
+    pub const fn new(rx: tokio::sync::watch::Receiver<bool>) -> Self {
         Self { rx }
     }
 
@@ -199,7 +199,7 @@ impl SessionRegistry {
     fn release(&self) {
         let _ = self
             .active
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
                 Some(v.saturating_sub(1))
             });
     }
@@ -221,7 +221,7 @@ impl<B: McpBackend + Clone + 'static> EmbeddedMcpServer<B> {
     /// Build a server shell over a backend, visibility policy, and shutdown
     /// signal.
     #[must_use]
-    pub fn new(backend: B, policy: VisibilityPolicy, shutdown: EmbeddedShutdown) -> Self {
+    pub const fn new(backend: B, policy: VisibilityPolicy, shutdown: EmbeddedShutdown) -> Self {
         Self {
             backend,
             policy,
