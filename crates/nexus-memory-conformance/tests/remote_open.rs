@@ -3,7 +3,7 @@
 //! The test drives the public `CoreService::open` surface against a durable
 //! `FixtureMemoryProvider` served through the SDK's `connect_responder` over a
 //! real `127.0.0.1` socket, with the one product WS transport
-//! (`nexus_core::connect::ws_transport::WsTransport`) on both ends. Nothing is
+//! (`nexus_connect::ws_transport::WsTransport`) on both ends. Nothing is
 //! mocked: the credential file, the signed hello, `memory.describe`,
 //! `memory.spaces.list`, the provider's admission table and the pinned binding
 //! are the real ones.
@@ -54,10 +54,10 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
+use nexus_connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_contracts::generated::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::generated::daemon_api::memory::create_pending_review_request::CreatePendingReviewRequest;
 use nexus_contracts::{CoreRegisterCreatorRequest, SetActiveWorkspaceRequest};
-use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_core::memory_provider::legacy;
 use nexus_core::{
     CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreResult, CoreService,

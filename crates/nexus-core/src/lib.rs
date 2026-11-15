@@ -14,18 +14,10 @@ mod approve;
 mod changes;
 mod chronology;
 // The Connect protocol stack lives in `nexus-connect` (v1.244 extraction):
-// the dependency direction is `nexus-core → nexus-connect`, never back. This
-// alias is the transitional path the not-yet-migrated callers
-// (`execution/lifecycle.rs`, `memory_remote.rs`) still read; the caller
-// migration removes it.
+// the dependency direction is `nexus-core → nexus-connect`, never back, and
+// callers name the crate directly.
 mod compose;
 mod config_lock;
-#[cfg(any(
-    feature = "connect-client",
-    feature = "connect-host",
-    feature = "memory-remote"
-))]
-pub use nexus_connect as connect;
 mod content;
 mod context;
 mod creators;

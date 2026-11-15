@@ -81,6 +81,7 @@ use nexus_agent_host::{
     HostError, HostFacade, HostManager, HostOperationId, HostResult, HostSessionId, LaunchStrategy,
     ProviderAdapter, ProviderId,
 };
+use nexus_connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::daemon_api::characters::memory::review_character_memory_request::ReviewCharacterMemoryRequest;
 use nexus_contracts::generated::daemon_api::agent_host::create_session_request::CreateSessionRequest;
@@ -89,7 +90,6 @@ use nexus_contracts::{
     CoreRegisterCreatorRequest, ProviderCall, ProviderEventBatch, ProviderReply,
     SetActiveWorkspaceRequest,
 };
-use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_core::memory_provider::legacy;
 use nexus_core::{
     CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreResult, CoreService,

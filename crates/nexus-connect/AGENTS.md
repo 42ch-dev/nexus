@@ -43,7 +43,8 @@ shipped Connect host never enables rmcp.
 
 ## Tests
 
-The retained peer contract assertions still live in
-`crates/nexus-core/tests/retained_peer_contracts.rs` (reachable through core's
-transitional `nexus_core::connect` alias); they move beside this crate with the
-caller migration.
+The retained peer contract assertions live beside this crate in
+`crates/nexus-connect/tests/retained_peer_contracts.rs` and run with
+`--features connect-client,embedded-mcp`. Their one core-only case (core's
+host-tool roster) stayed in core's `tests/capability_compute.rs`: this crate has
+no core edge.

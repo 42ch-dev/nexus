@@ -176,7 +176,7 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
             .ids()
             .map(ToOwned::to_owned)
             .collect();
-    let peer_tools_lane = match nexus_core::connect::start_peer_tools_lane(
+    let peer_tools_lane = match nexus_connect::start_peer_tools_lane(
         home,
         std::sync::Arc::clone(&peer_tools_shutdown),
         None,
@@ -203,10 +203,7 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
     // ACTUALLY bound (never the config echo); absent when the lane
     // warn-and-skipped (see the `event_lane:` warning above).
     if let Some(lane) = peer_tools_lane.as_ref() {
-        println!(
-            "  {}",
-            nexus_core::connect::event_lane_readiness_line(lane.addr)
-        );
+        println!("  {}", nexus_connect::event_lane_readiness_line(lane.addr));
     }
     println!(
         "  allowlisted peers: {allowlist_len} (fail-closed; add via allowlist.json or --allow-peer)"

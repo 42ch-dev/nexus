@@ -1007,9 +1007,9 @@ jobs:
           cargo check -p nexus-core --lib --no-default-features --features connect-client --locked
           cargo check -p nexus-core --lib --no-default-features --features connect-client,embedded-mcp --locked
       - name: Core MCP/peer library owners
-        run: >-
-          cargo test -p nexus-core --features connect-client,embedded-mcp
-          --test retained_peer_contracts --test peer_control
+        run: |
+          cargo test -p nexus-connect --features connect-client,embedded-mcp --test retained_peer_contracts
+          cargo test -p nexus-core --features connect-client,embedded-mcp --test peer_control
 
   rust-core-domain-owners:
     name: Rust core domain owners

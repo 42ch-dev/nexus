@@ -15,10 +15,11 @@ path = "src/lib.rs"
 
 [features]
 default = []
-# The protocol-neutral peer tool registry alone. `nexus-core`'s `execution`
-# cohort owns the capability dispatch that consults it, so this is the one
-# feature an execution-only consumer needs.
-peer-tools = ["dep:nexus-spoke-adapter"]
+# The protocol-neutral peer tool registry alone (`peer_tools.rs` logs its
+# admission refusals). `nexus-core`'s `execution` cohort owns the capability
+# dispatch that consults it, so this is the one feature an execution-only
+# consumer needs.
+peer-tools = ["dep:nexus-spoke-adapter", "dep:tracing"]
 # The one product WS transport the remote memory client shares with the peer
 # stack (n3-provider-binding.md §6).
 transport = ["dep:spoke-connect", "dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
@@ -34,7 +35,6 @@ connect-host = [
     "dep:chrono",
     "dep:getrandom",
     "dep:serde",
-    "dep:tracing",
     "dep:uuid",
 ]
 # The reverse-invoke/operator MCP bridge on top of the Connect-host cohort.
@@ -79,3 +79,10 @@ futures-channel = { version = "0.3", optional = true }
 tempfile.workspace = true
 # The accept-lane fixtures build fixed-seed Ed25519 keypairs.
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+# The retained contract target's `#[tokio::test]` runtime and its sockets.
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# Lock guards in the socket-driven cases are held across an asserted step on
+# purpose (the target's own justification comment).
+parking_lot = "0.13"
+# The process-global registry cases must not interleave with each other.
+serial_test = "4"

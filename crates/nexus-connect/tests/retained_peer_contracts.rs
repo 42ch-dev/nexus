@@ -9,9 +9,9 @@
 //! catalog, `ApiState` and the Model A child are neither imported nor
 //! emulated.
 //!
-//! What lives here (all against the retained core library features
-//! `connect-client` / `embedded-mcp`):
-//! - the core-owned WS [`WsTransport`] conformance bar (opaque envelopes,
+//! What lives here (all against the crate's `connect-client` /
+//! `embedded-mcp` features):
+//! - the connect-owned WS [`WsTransport`] conformance bar (opaque envelopes,
 //!   order, close semantics, the 2 MiB / non-Binary fail-closed framing);
 //! - the accept-loop session lifecycle (`PeerSessionManager` replace/evict,
 //!   fail-fast handshake refusals, the registered + in-flight budget);
@@ -19,7 +19,12 @@
 //!   disconnect REVOKES a peer tool from the in-process MCP surface;
 //! - the boot lane's config-derived hello, its Layer-0 refusals, and the
 //!   grant-at-establish session boundary under a live config reload;
-//! - the core peer port's honest-refusal mapping (peer wire code preserved).
+//! - the connect peer port's honest-refusal mapping (peer wire code preserved).
+//!
+//! v1.244 extraction: this target moved here from `nexus-core`, whose
+//! `connect` module became this crate. The one case that reads core's own
+//! host-tool registry (`host_tool_registry_roster_is_the_declared_nexus_surface`)
+//! stayed in core's `tests/capability_compute.rs`: connect has no core edge.
 
 #![cfg(feature = "connect-client")]
 // Justification (repo convention, cf. tests/peer_control.rs): integration-test
@@ -40,15 +45,15 @@ use std::time::{Duration, Instant};
 use ed25519_dalek::SigningKey;
 use futures_util::future::BoxFuture;
 use futures_util::{SinkExt, StreamExt};
-use nexus_core::connect::table::ConnectResponderAdapter;
-use nexus_core::connect::{
+#[cfg(feature = "embedded-mcp")]
+use nexus_connect::peer_tools::invoke_peer_tool;
+use nexus_connect::peer_tools::{PeerInvokeError, PeerResponder};
+use nexus_connect::table::ConnectResponderAdapter;
+use nexus_connect::{
     peer_tool_table, spawn_accept_loop, start_peer_tools_lane, ws_config, PeerConfigHolder,
     PeerConfigSnapshot, PeerResponderOptions, PeerSessionManager, PeerToolsConfig, WsTransport,
     DEFAULT_MAX_ENVELOPE_BYTES,
 };
-#[cfg(feature = "embedded-mcp")]
-use nexus_core::execution::peer_tools::invoke_peer_tool;
-use nexus_core::execution::peer_tools::{PeerInvokeError, PeerResponder};
 use nexus_spoke_adapter::{HostCapabilityManifest, SpokeResult};
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -297,13 +302,13 @@ async fn start_server(
     }
 }
 
-/// The static reserved ids the production composition injects into the lane
-/// (this crate's own host-tool roster).
+/// The static reserved ids the production composition injects into the lane.
+///
+/// The composing side owns the real roster (core's `host_tool_registry`); this
+/// crate must not reach it, so the fixture stands in for a builtin name the
+/// peer surface may never shadow.
 fn builtin_tool_ids() -> HashSet<String> {
-    nexus_core::execution::capabilities::host_tool_registry()
-        .ids()
-        .map(ToOwned::to_owned)
-        .collect()
+    HashSet::from(["nexus.fixture.builtin".to_string()])
 }
 
 fn ws_config_for_tests() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
@@ -311,7 +316,7 @@ fn ws_config_for_tests() -> tokio_tungstenite::tungstenite::protocol::WebSocketC
 }
 
 /// Dial the harness daemon (fixed `seed_host()` identity) with a spoke adapter
-/// over the core [`WsTransport`].
+/// over the [`WsTransport`].
 async fn dial(
     addr: std::net::SocketAddr,
     seed: [u8; 32],
@@ -359,9 +364,9 @@ async fn wait_until(mut cond: impl FnMut() -> bool, timeout: Duration) -> bool {
     cond()
 }
 
-// ── Core-owned WS transport conformance ───────────────────────────────────
+// ── WS transport conformance ──────────────────────────────────────────────
 
-/// A (client, server) pair of core [`WsTransport`]s over a real `TcpListener`
+/// A (client, server) pair of [`WsTransport`]s over a real `TcpListener`
 /// on `127.0.0.1:0`.
 async fn ws_pair() -> (Arc<dyn Transport>, Arc<dyn Transport>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -394,7 +399,7 @@ async fn ws_pair() -> (Arc<dyn Transport>, Arc<dyn Transport>) {
 /// byte-identical in BOTH directions), and message order is preserved in both
 /// directions under interleaved writers.
 ///
-/// Narrowed: only the core-owned [`WsTransport`] is exercised. The retired
+/// Narrowed: only the [`WsTransport`] is exercised. The retired
 /// fixture parametrized the same bar over spoke-connect's
 /// `loopback_transport_pair()`; that transport's semantics belong to the
 /// spoke-connect crate's own `tests/remote_loopback.rs` family (Duplicate).
@@ -568,7 +573,7 @@ async fn ws_transport_fails_closed_on_over_cap_and_non_binary_frames() {
 
 /// MIGRATED from `transport_conformance.rs::conformance_golden_path_handshake_and_tool_invoke`.
 ///
-/// Preserved: over the core [`WsTransport`] a full spoke handshake completes on
+/// Preserved: over the [`WsTransport`] a full spoke handshake completes on
 /// BOTH ends (adapter `Established` + the responder's observed peer manifest)
 /// and one reverse tool invoke round-trips to the registered handler exactly
 /// once. Narrowed to the WS half (see the round-trip case).
@@ -975,15 +980,13 @@ async fn accept_gate_bounds_registered_and_in_flight_connections() {
 // this target; the transport/session/boot cases above need `connect-client`
 // alone).
 #[cfg(feature = "embedded-mcp")]
-use nexus_core::connect::mcp_bridge::{CatalogRow, McpBackend, ToolCallOutcome};
+use nexus_connect::mcp_bridge::{CatalogRow, McpBackend, ToolCallOutcome};
 #[cfg(feature = "embedded-mcp")]
-use nexus_core::connect::mcp_embedded::{
-    start_embedded_mcp_server, EmbeddedMcpServer, EmbeddedShutdown,
-};
+use nexus_connect::mcp_embedded::{start_embedded_mcp_server, EmbeddedMcpServer, EmbeddedShutdown};
 #[cfg(feature = "embedded-mcp")]
-use nexus_core::connect::table::{mcp_catalog_admission, mcp_catalog_output_root_object};
+use nexus_connect::table::{mcp_catalog_admission, mcp_catalog_output_root_object};
 #[cfg(feature = "embedded-mcp")]
-use nexus_core::connect::VisibilityPolicy;
+use nexus_connect::VisibilityPolicy;
 #[cfg(feature = "embedded-mcp")]
 use rmcp::model::{CallToolRequestParams, ClientConfig, ErrorCode};
 #[cfg(feature = "embedded-mcp")]
@@ -995,9 +998,9 @@ use rmcp::{serve_client, ServiceError};
 ///
 /// The embedded shell is generic over [`McpBackend`] by design (the
 /// retired daemon supplied the `WorkspaceState`-backed implementation), so
-/// a core-side regression must supply its own consumer. This one reads the
+/// a crate-side regression must supply its own consumer. This one reads the
 /// SAME process-global registry the accept loop registers into and
-/// projects rows through the core-owned AR-70 §3 catalog gates.
+/// projects rows through this crate's AR-70 §3 catalog gates.
 #[cfg(feature = "embedded-mcp")]
 #[derive(Clone)]
 struct PeerRegistryBackend;
@@ -1616,7 +1619,7 @@ async fn connect_subscribe_replays_after_reconnect_and_preserves_cursor_and_orde
     })
     .await
     .expect("consumer negotiates subscribe and registers its reverse delivery tool");
-    let first_frame = nexus_core::connect::events::connect_event_registry()
+    let first_frame = nexus_connect::events::connect_event_registry()
         .publish(&stream, "update", json!({"n": 1}))
         .expect("first frame fits the retained stream limit");
     let cursor_after_first = first_frame.id.clone().unwrap();
@@ -1679,7 +1682,7 @@ async fn connect_subscribe_replays_after_reconnect_and_preserves_cursor_and_orde
         .await,
         "disconnect removes the prior peer session before reconnect"
     );
-    nexus_core::connect::events::connect_event_registry()
+    nexus_connect::events::connect_event_registry()
         .publish(&stream, "update", json!({"n": 2}))
         .expect("second frame fits the retained stream limit");
 
@@ -1781,7 +1784,7 @@ async fn unnegotiated_subscribe_is_refused_without_delivery_side_effects() {
         panic!("unnegotiated subscribe must be refused");
     };
     assert_eq!(reject.details.unwrap()["wire_code"], "op_unsupported");
-    nexus_core::connect::events::connect_event_registry()
+    nexus_connect::events::connect_event_registry()
         .publish(&stream, "event", json!({"must_not_deliver": true}))
         .expect("event fits the retained stream limit");
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1853,7 +1856,7 @@ async fn reverse_leg_requires_delivery_capability_before_subscription() {
         panic!("subscribe without negotiated delivery must be refused");
     };
     assert_eq!(reject.details.unwrap()["wire_code"], "op_unsupported");
-    nexus_core::connect::events::connect_event_registry()
+    nexus_connect::events::connect_event_registry()
         .publish(&stream, "event", json!({"must_not_deliver": true}))
         .expect("event fits the retained stream limit");
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2063,84 +2066,4 @@ async fn reload_adopts_grants_at_session_boundaries_only() {
     let _ = handle.task.await;
     peer_tool_table().evict_peer(&peer_id, None);
     peer_tool_table().set_config(None);
-}
-
-// ── Retained core tool-registry integrity ─────────────────────────────────
-
-/// The 26 shipped `nexus.*` host-tool ids (V1.59 P0 roster, minus the retired
-/// `nexus.reference.refresh` and `nexus.research.query`).
-const NEXUS_TOOL_IDS: &[&str] = &[
-    "nexus.context.whoami",
-    "nexus.workspace.info",
-    "nexus.work.get",
-    "nexus.work.patch",
-    "nexus.orchestration.schedule_status",
-    "nexus.context.assemble",
-    "nexus.world.snapshot.get",
-    "nexus.timeline.recent.get",
-    "nexus.kb_snapshot.read",
-    "nexus.manuscript.chapter.get",
-    "nexus.observability.daemon.health",
-    "nexus.kb_snapshot.write",
-    "nexus.manuscript.chapter.update",
-    "nexus.world.configure",
-    "nexus.work.schedule.set",
-    "nexus.finding.resolve",
-    "nexus.pool.entry.manage",
-    "nexus.registry.refresh",
-    // V1.59 P0: DF-47 manuscript & misc parity batch (9 tools)
-    "nexus.manuscript.list",
-    "nexus.manuscript.read_range",
-    "nexus.manuscript.write",
-    "nexus.manuscript.phase.get",
-    "nexus.manuscript.phase.set",
-    "nexus.workspace.paths",
-    "nexus.runtime.health",
-    "nexus.trace.correlation",
-];
-
-/// MIGRATED from `cross_caller_e2e.rs::all_nexus_tool_ids_registered_in_capability_registry`
-/// and `::test_profile_sets_are_not_action_capabilities`.
-///
-/// Preserved: the process-global host-tool registry holds exactly the declared
-/// `nexus.*` action roster (plus the two `fs/*` ids), and the `nexus.profile.*`
-/// grouping ids are metadata, never action capabilities with handler
-/// bindings. This is the registry the peer admission chain derives its
-/// reserved set from (`live_reserved_tool_ids`), so the peer surface can never
-/// shadow a builtin id.
-///
-/// Deleted with the retired host: the other `cross_caller_e2e` cases drove
-/// `HostToolExecutor` (`POST`-path and Schedule-path wrappers built from the
-/// daemon `WorkspaceState`) and asserted caller-path equivalence; those
-/// wrappers are retired, and the tool-spine behavior they dispatched into is
-/// owned by `capability_compute.rs` (P2-T9).
-#[test]
-fn host_tool_registry_roster_is_the_declared_nexus_surface() {
-    let registry = nexus_core::execution::capabilities::host_tool_registry();
-    for tool_id in NEXUS_TOOL_IDS {
-        assert!(
-            registry.lookup(tool_id).is_some(),
-            "Tool '{tool_id}' must be registered in the host-tool registry"
-        );
-    }
-    assert_eq!(
-        registry.len(),
-        28,
-        "the registry holds the 26 nexus.* ids plus the 2 fs/* ids"
-    );
-
-    for profile_id in [
-        "nexus.profile.minimal",
-        "nexus.profile.writer",
-        "nexus.profile.publisher",
-    ] {
-        assert!(
-            registry.lookup(profile_id).is_none(),
-            "Profile-set id '{profile_id}' is grouping metadata, not an action capability"
-        );
-        assert!(
-            !NEXUS_TOOL_IDS.contains(&profile_id),
-            "Profile-set id '{profile_id}' must not appear in the action roster"
-        );
-    }
 }

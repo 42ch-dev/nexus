@@ -66,6 +66,10 @@ nexus-contracts = { path = "../nexus-contracts" }
 # signed provider.
 nexus-agent-host = { path = "../nexus-agent-host" }
 nexus-provider-ports = { path = "../nexus-provider-ports" }
+# v1.244 extraction: the WS transport the remote Core open drives on both ends
+# lives in `nexus-connect`. `transport` arrives through `nexus-core/memory-remote`
+# above, so the default graph gains no transport edge.
+nexus-connect = { path = "../nexus-connect", default-features = false }
 
 # I-000322: every target that drives the real Core surface requires the
 # test-graph feature. Without it the target is skipped instead of compiling

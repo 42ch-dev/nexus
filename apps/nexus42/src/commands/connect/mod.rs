@@ -304,7 +304,7 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
             .ids()
             .map(ToOwned::to_owned)
             .collect();
-    let peer_tools_lane = match nexus_core::connect::start_peer_tools_lane(
+    let peer_tools_lane = match nexus_connect::start_peer_tools_lane(
         &home,
         std::sync::Arc::clone(&peer_tools_shutdown),
         None,
@@ -329,10 +329,7 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
     // ACTUALLY bound (never the config echo); absent when the lane
     // warn-and-skipped (see the `event_lane:` warning above).
     if let Some(lane) = peer_tools_lane.as_ref() {
-        eprintln!(
-            "  {}",
-            nexus_core::connect::event_lane_readiness_line(lane.addr)
-        );
+        eprintln!("  {}", nexus_connect::event_lane_readiness_line(lane.addr));
     }
     eprintln!(
         "  allowlisted peers: {allowlist_len} (fail-closed; add via allowlist.json or --allow-peer)"

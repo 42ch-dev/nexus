@@ -2410,7 +2410,7 @@ impl ExecutionHandle {
                 lane.allow(operation);
             }
             "evict" => {
-                let evicted = crate::execution::peer_tools::peer_tool_registry()
+                let evicted = nexus_connect::peer_tools::peer_tool_registry()
                     .evict_peer(&request.peer_id, None);
                 if !evicted {
                     return Err(CoreError::NotFound {
@@ -2430,10 +2430,10 @@ impl ExecutionHandle {
 }
 
 /// Distinct peers with registered tools in the process-level registry (the one
-/// [`crate::execution::peer_tools`] owns; this module never keeps a second).
+/// [`nexus_connect::peer_tools`] owns; this module never keeps a second).
 #[cfg(feature = "connect-host")]
 fn active_peer_ids() -> Vec<String> {
-    let registry = crate::execution::peer_tools::peer_tool_registry();
+    let registry = nexus_connect::peer_tools::peer_tool_registry();
     let mut ids: std::collections::HashSet<String> = registry
         .entries()
         .iter()
