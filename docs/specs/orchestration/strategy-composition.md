@@ -122,17 +122,20 @@ listed row appends an apply and leaves the list untouched.
 
 #### 5.1 What intake does with an applied identity
 
+**Anchors.** Every code reference below names the file and the item that decides the claim — function,
+match arm, struct field or table row — and that name is authoritative; a `:line` only locates the item in
+the current tree, so formatting may move it while the claim stays with the name.
+
 **One rule, four admission entries.** Schedule admission (`WorkflowRunCoordinator::admit_schedule_inner`,
-`crates/nexus-core/src/execution/workflow.rs:2712`), `WorkflowRunCoordinator::start_session`
-(`workflow.rs:1564`) and both preset trait entries — `start_session_with_preset` and
+`crates/nexus-core/src/execution/workflow.rs`), `WorkflowRunCoordinator::start_session`
+(`workflow.rs`) and both preset trait entries — `start_session_with_preset` and
 `start_session_with_preset_for_creator`, which share `start_preset_entry`
-(`crates/nexus-orchestration/src/engine.rs:4962`, `:4969`, `:4335`) — ask the same question before they
-build: which document does this strategy run? All four answer it through `resolve_applied_document`
-(`crates/nexus-core/src/execution/applied_documents.rs:41`), the one route through `is_user_preset`
-(`crates/nexus-core/src/apply.rs:607`), `current_apply` (`apply.rs:627`) and `verified_apply_document`
-(`apply.rs:677`). The two trait entries reach that route through the installed `AppliedDocumentSource`
-(`engine.rs:4345`; the daemon installs the Creator-backed source at
-`crates/nexus-core/src/execution/lifecycle.rs:1133`).
+(`crates/nexus-orchestration/src/engine.rs`) — ask the same question before they build: which document does
+this strategy run? All four answer it through `resolve_applied_document`
+(`crates/nexus-core/src/execution/applied_documents.rs`), the one route through `is_user_preset`,
+`current_apply` and `verified_apply_document` (`crates/nexus-core/src/apply.rs`). The two trait entries
+reach that route through the installed `AppliedDocumentSource` (`start_preset_entry` in `engine.rs`; the
+daemon installs the Creator-backed source in `crates/nexus-core/src/execution/lifecycle.rs`).
 
 **The rule.** When the answer is a document, the entry builds the graph from that document with
 `IrTemplateSource::OwnSource` and freezes the `AppliedRunIdentity` the answer carries on the run descriptor
@@ -143,15 +146,15 @@ while the strategy had no current apply resolves `None`, freezes no identity, an
 `(None, current)` arm below — the one case in which a restart can still put a run on a document it never
 ran, and it exists because the run was admitted under none. Both admission entries resolve before the
 binding gate, so the roles validated are the roles the applied graph consumes — `export_preset(&document)`
-when an apply exists, the loaded manifest otherwise (`workflow.rs:3001`/`:3004` and
-`workflow.rs:1622`/`:1625`).
+when an apply exists, the loaded manifest otherwise (`export_preset` and `validate_agent_bindings` in both
+`start_session` and `admit_schedule_inner`).
 
-| Entry | Resolves at | Applied graph | Descriptor write |
+| Entry | Resolves through | Applied graph | Descriptor write |
 | --- | --- | --- | --- |
-| schedule admission | `workflow.rs:2983` | `workflow.rs:3023` | `engine.rs:4543` |
-| `start_session` | `workflow.rs:1605` | `workflow.rs:1656` | `engine.rs:4430` |
-| `start_session_with_preset` | `engine.rs:4345` | `engine.rs:4362` | `engine.rs:4283` |
-| `start_session_with_preset_for_creator` | `engine.rs:4345` | `engine.rs:4362` | `engine.rs:4283` |
+| schedule admission | `resolve_applied_document` (`workflow.rs:2980`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:3020`) | `admit_schedule_run_with_input` sets `descriptor.applied` (`engine.rs:4541`) |
+| `start_session` | `resolve_applied_document` (`workflow.rs:1605`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:1653`) | `start_preset_run_with_input` sets `descriptor.applied` (`engine.rs:4428`) |
+| `start_session_with_preset` | `AppliedDocumentSource::applied_document` (`engine.rs:4347`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`engine.rs:4360`) | `start_preset_run` sets `descriptor.applied` (`engine.rs:4283`) |
+| `start_session_with_preset_for_creator` | `AppliedDocumentSource::applied_document` (`engine.rs:4347`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`engine.rs:4360`) | `start_preset_run` sets `descriptor.applied` (`engine.rs:4283`) |
 
 **Precedence.** The document a run is built from follows from the loader's classification and that apply
 read, in exactly three cases:
@@ -173,14 +176,14 @@ when the ids collide. A user bundle whose apply rows have no successor-less row 
 `is_user_preset` → `current_apply` → `verified_apply_document`), and a strategy with no apply recovers its
 descriptor graph exactly as before.
 
-**The legacy `(None, current)` arm.** Recovery matches the descriptor's recorded identity against that
-resolution **before** it builds (`engine.rs:4109`):
+**The legacy `(None, current)` arm.** `reconstruct_runner` (`engine.rs:3842`) matches the descriptor's
+recorded identity against that resolution **before** it builds (`engine.rs:4109`):
 
 | `descriptor.applied` | Resolved current apply | Graph rebuilt from |
 | --- | --- | --- |
-| `None` | any | the resolved applied document when there is one, else the YAML bundle (`:4110`) |
-| `Some(recorded)` | identity equal | the applied document (`:4111`) |
-| `Some(recorded)` | a different apply, or none | typed refusal `reconstruction_unavailable` (`:4112`) |
+| `None` | any | the resolved applied document when there is one, else the YAML bundle — the `(None, current)` arm |
+| `Some(recorded)` | identity equal | the applied document — the `current.identity == *recorded` guard |
+| `Some(recorded)` | a different apply, or none | typed refusal `reconstruction_unavailable` — the `(Some(recorded), current)` fallback |
 
 The first row is the pre-freeze arm: a descriptor that records no identity rebuilds from whatever the
 strategy's current apply is, exactly as it did before the identity existed. That is what lets a no-apply
@@ -204,17 +207,17 @@ to its recorded `content_hash` is `applied_document_changed`, and one that canno
 reinterpreted run.
 
 **The I-000467 reclassification.** Every site the ticket named, plus `build_descriptor`, is decided by the
-code rather than by intent; each row's `path:line` is the line that decides it.
+named item; the `:line` locates that item in the current tree.
 
 | Site | Verdict |
 | --- | --- |
-| `crates/nexus-core/src/execution/handle_ops.rs:1450` `freeze_descriptor` (`applied: None`, `:1564`) | **Inert** — this is a schedule admission *payload*, not a run descriptor: admission re-reads only `work_id`, `input`, `agent_bindings` and `source` from it (`workflow.rs:2939-2960`) and resolves the apply itself (`workflow.rs:2983`) |
-| `crates/nexus-core/src/execution/workflow.rs:2517` `prepare_legacy_row` (`applied: None`, `:2618`) | **Inert** — the same payload write, read back by the same four fields |
+| `crates/nexus-core/src/execution/handle_ops.rs:1450` `freeze_descriptor` (`applied: None`, `:1564`) | **Inert** — this is a schedule admission *payload*, not a run descriptor: `admit_schedule_inner` re-reads only `work_id`, `input`, `agent_bindings` and `source` from it (`workflow.rs:2936-2957`) and resolves the apply itself (`workflow.rs:2980`) |
+| `crates/nexus-core/src/execution/workflow.rs:2514` `prepare_legacy_row` (`applied: None`, `:2615`) | **Inert** — the same payload write, read back by the same four fields |
 | `crates/nexus-orchestration/src/auto_chain.rs:1383` `enqueue_descriptor_json` (`applied: None`, `:1420`) | **Unreachable with a user apply** — it requires `embedded_source_identity` (`:1399`), so the source is never `Directory` and `is_user_preset` is false |
 | `crates/nexus-orchestration/src/storage/sqlite.rs:473` `child_descriptor` (`applied`, `:489`) | **Already correct** — `applied: root.applied.clone()`; a child run inherits the root's identity |
-| `crates/nexus-orchestration/src/engine.rs:4644` `start_session_with_creator` (`applied: None`, `:4680`) | **Callable, no known production caller** — `GraphFlowEngine::start_session` forwards to it unconditionally (`:4640`) and the `SessionStore::start_session_with_graph` entry (`:4852`) exposes that route, so a store-backed engine started this way persists `applied: None` (proven by `workflow_run_state.rs:794`). No in-repo production caller holds a store: the callers are `start_session` and the two `workflow_store == None` fallbacks (`:4323`, `:4483`) |
-| `crates/nexus-orchestration/src/engine.rs:4801` `new_session` (`applied: None`, `:4821`) | **Callable, no known production caller** — the `SessionStore::new_session` implementation is public and writes `applied: None` on a store-backed engine; only `EngineProxy`'s implementation refuses (`:3262`, `NoGraphLoaded`). Nothing in this tree calls it in production |
-| `crates/nexus-orchestration/src/engine.rs:4241` `build_descriptor` (`applied: None`, `:4266`) | **Fixed** — the shared skeleton starts empty, and all three callers overwrite it with the identity they resolved before persisting: `start_preset_run` (`:4283`), `start_preset_run_with_input` (`:4430`), `admit_schedule_run_with_input` (`:4543`) |
+| `crates/nexus-orchestration/src/engine.rs:4642` `start_session_with_creator` (`applied: None`, `:4678`) | **Callable, no known production caller** — `GraphFlowEngine::start_session` forwards here unconditionally (`:4638`) and `OrchestrationEngine::start_session_with_graph` (`:4850`) exposes that route, so a store-backed engine started this way writes `applied: None`; no in-repo production caller holds a store (the callers are `start_session` and the two `workflow_store == None` fallbacks, `:4323` and `:4481`) |
+| `crates/nexus-orchestration/src/engine.rs:4799` `new_session` (`applied: None`, `:4819`) | **Callable, no known production caller** — the `GraphFlowEngine` trait implementation is public and its store arm writes `applied: None`; only `EngineProxy::new_session` refuses (`:3262`, `NoGraphLoaded`), and nothing in this tree calls the other one in production |
+| `crates/nexus-orchestration/src/engine.rs:4241` `build_descriptor` (`applied: None`, `:4266`) | **Fixed** — the shared skeleton starts empty, and all three callers overwrite it with the identity they resolved before persisting: `start_preset_run` (`:4283`), `start_preset_run_with_input` (`:4428`), `admit_schedule_run_with_input` (`:4541`) |
 
 **Known limits on the applied path.** Each bounds what an applied run can do; none of them turns the
 applied document back into a hint.
