@@ -7,22 +7,24 @@
  * Storage semantics mirror the core CLI config (`read_cli_config` /
  * `write_cli_config` in `crates/nexus-core/src/creators.rs`): a missing file is
  * an empty document, every other key is preserved on write, and the document is
- * replaced atomically (temp file + rename in the same directory) so a reader
- * never observes a partially written config. Writes additionally hold the
- * daemon-home advisory lock (`config.toml.lock`) for the whole read-modify-
- * write: the core CLI and the desktop main write this file too.
+ * published atomically and policy-preserving through the native publisher
+ * (`publishDocument`) so a reader never observes a partially written config.
+ * Writes additionally hold the daemon-home advisory lock (`config.toml.lock`)
+ * for the whole read-modify-write: the core CLI and the desktop main write this
+ * file too.
  *
  * ONE daemon-global profile — matching desktop semantics. The legacy
  * per-creator localStorage key was a browser artifact and is migrated by the
  * web read path, never re-created here.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, open, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { publishDocument } from '@42ch/nexus-native';
 import { parse, stringify, type TomlTable } from 'smol-toml';
 import type { AgentProfile, AgentProfileResponse } from '@42ch/nexus-contracts';
 
-import { HttpError } from './errors.js';
+import { HttpError, mapNativeError } from './errors.js';
 import type { ServiceCore } from './lifecycle.js';
 import type { DomainRoute } from './routes.js';
 import { wirePayload } from './world-kb.js';
@@ -184,41 +186,26 @@ async function readConfigDocument(home: string): Promise<TomlTable> {
 }
 
 /**
- * Replace the config document atomically: same-directory temp file, fsync of
- * the content and of the directory entry, then rename into place.
+ * Publish the config document through the native publisher.
+ *
+ * The publisher probes the target for write access, captures its access
+ * policy, stages an owner-only copy in a sealed directory beside the target and
+ * renames it after reapplying owner/group/ACL/mode. A write-denied target
+ * refuses with `forbidden` and keeps its bytes; a `0640` document stays `0640`.
+ * The directory is created here first — a first publication has no directory
+ * yet — and there is no TypeScript temp+rename fallback.
  */
 async function writeConfigDocument(home: string, document: TomlTable): Promise<void> {
   const configPath = join(home, NEXUS_DIR, CONFIG_FILE);
-  const directory = dirname(configPath);
-  const tempPath = join(directory, `.${CONFIG_FILE}.${randomUUID()}.tmp`);
   try {
-    await mkdir(directory, { recursive: true });
-    const temp = await open(tempPath, 'w', 0o600);
-    try {
-      await temp.writeFile(stringify(document));
-      await temp.sync();
-    } finally {
-      await temp.close();
-    }
-    await rename(tempPath, configPath);
-    // The rename itself is only durable once the directory entry is synced.
-    // POSIX only: Windows cannot open a directory as a file (EPERM/EISDIR), and
-    // the failure would land AFTER the rename — reporting a successful save as
-    // a 500 and inviting a pointless retry.
-    if (process.platform !== 'win32') {
-      const dir = await open(directory, 'r');
-      try {
-        await dir.sync();
-      } finally {
-        await dir.close();
-      }
-    }
+    await mkdir(dirname(configPath), { recursive: true });
+    await publishDocument(configPath, stringify(document));
   } catch (error) {
-    // The wire answer stays generic; the operator log keeps the cause. A temp
-    // file that was already created must not survive the failed write.
+    // The operator log keeps the cause; the client gets the mapped envelope —
+    // `403 forbidden` for a refused target and the sanitized `500 internal`
+    // otherwise, never a silent success.
     console.error(`[nexus-service] ${CONFIG_FILE} write failed:`, error);
-    await rm(tempPath, { force: true }).catch(() => undefined);
-    throw new HttpError(500, 'internal', `${CONFIG_FILE} could not be written`);
+    throw mapNativeError(error);
   }
 }
 

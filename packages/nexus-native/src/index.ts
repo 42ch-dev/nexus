@@ -1779,6 +1779,30 @@ export async function resetLocalState(home: string): Promise<number> {
 }
 
 /**
+ * Publish a complete config document at the absolute target `path`.
+ *
+ * The ONE native publication path every config writer uses (probe → policy
+ * capture → sealed staging → ordered reapplication → rename); main-process and
+ * service writers only, never sandboxed renderer code. It opens no core.
+ *
+ * `path` is trusted and resolved by the caller; a non-string, empty or relative
+ * `path` is rejected here before the native binding is called, and the native
+ * side re-checks absoluteness. Every other rejection carries the wire
+ * `CoreError` envelope, so `parseNativeCoreError` yields `invalid_input`
+ * (relative path), `forbidden` (target not writable, policy not reproducible)
+ * or `internal`. The document's contents never appear in the rejection.
+ */
+export async function publishDocument(path: string, contents: string): Promise<void> {
+  if (typeof path !== 'string' || path.length === 0) {
+    throw new Error('publishDocument: path must be a non-empty path string');
+  }
+  if (!isAbsolute(path)) {
+    throw new Error('publishDocument: path must be an absolute path');
+  }
+  return loadNativeBinding().publishDocument(path, contents);
+}
+
+/**
  * Open the native core. Always awaited: the frozen facade returns a Promise so
  * callers can await the open boundary.
  */

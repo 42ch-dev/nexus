@@ -23,15 +23,18 @@
  *    in-process only, so each mutation also holds the cross-process advisory
  *    lock (`config.toml.lock`) for its whole read-modify-write — the core CLI
  *    and the service write this same file;
- *  - replacement is atomic (sibling temp file + rename);
+ *  - replacement is atomic and policy-preserving through the native publisher
+ *    (`publishDocument`: probe → policy capture → sealed staging → ordered
+ *    reapplication → rename); no TypeScript temp+rename path exists;
  *  - unrelated keys are preserved by a parse → mutate → stringify round-trip;
  *  - an existing document that cannot be parsed is an error — it is never
  *    replaced with an empty document.
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { publishDocument } from '@42ch/nexus-native';
 import { TomlDate, parse, stringify, type TomlTable, type TomlValue } from 'smol-toml';
 import {
   desktopError,
@@ -352,23 +355,22 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
   }
 
   /**
-   * Atomic replace: write a sibling temp file, then rename it into place.
+   * Publish a complete document through the native publisher.
    *
-   * The temp file is created `0600` — owner-only, like the service's own
-   * published record (`service.json`) — so a temporarily materialized copy of
-   * the document is never readable by another user. It stays in the target's
-   * directory because the rename must not cross a filesystem.
+   * The publisher probes the target for write access, captures its access
+   * policy, stages an owner-only copy in a sealed directory beside the target
+   * and renames it after reapplying owner/group/ACL/mode — so a write-denied
+   * target refuses without replacing its bytes and a `0640` document stays
+   * `0640`. The parent directory is created here first: a first publication has
+   * no directory yet. There is no TypeScript temp+rename fallback.
    */
   async function writeDocument(path: string, doc: TomlTable): Promise<void> {
-    const tmp = `${path}.${randomUUID()}.tmp`;
     try {
       await mkdir(dirname(path), { recursive: true });
-      await writeFile(tmp, stringify(doc), { encoding: 'utf8', mode: 0o600 });
-      await rename(tmp, path);
+      await publishDocument(path, stringify(doc));
     } catch (err) {
-      await rm(tmp, { force: true }).catch(() => undefined);
       throw desktopError(
-        'config_io',
+        'config_publish_refused',
         `cannot write ${path}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }

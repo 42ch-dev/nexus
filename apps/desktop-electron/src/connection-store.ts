@@ -16,15 +16,17 @@
  *   and is reported as the sanitized `legacy_credential_cleanup_failed`.
  * - Clear writes a durable tombstone marker: a later open sees the marker
  *   and never re-imports the legacy material (D-18).
- * - Writes are atomic (temp file + rename); a failed encrypt leaves the
- *   previous state fully intact.
+ * - Writes are published atomically and policy-preserving through the native
+ *   publisher; a failed encrypt or a refused target leaves the previous state
+ *   fully intact. The plaintext key never reaches an error or a log.
  *
  * Host-agnostic: Electron's `safeStorage` is injected as an adapter so the
  * module builds and tests headless under plain Node.
  */
 
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { publishDocument } from '@42ch/nexus-native';
 import type { ConnectionCredentialUpdate, PublicConnectionConfig } from './desktop-contract.js';
 import { connectionEndpointOrigin, desktopError } from './desktop-contract.js';
 
@@ -85,12 +87,29 @@ function decodeCredential(encoded: string): Uint8Array {
   return new Uint8Array(Buffer.from(encoded, 'base64'));
 }
 
-function atomicWrite(filePath: string, contents: string): void {
-  const dir = dirname(filePath);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const tmp = join(dir, `.connection-config.${process.pid}.tmp`);
-  writeFileSync(tmp, contents, { mode: 0o600 });
-  renameSync(tmp, filePath);
+/**
+ * Publish the store through the native publisher.
+ *
+ * The publisher probes the target for write access, captures its access
+ * policy, stages an owner-only copy in a sealed directory beside the target and
+ * renames it after reapplying owner/group/ACL/mode — so a write-denied target
+ * refuses and keeps its previous bytes, and an existing `0640` store keeps its
+ * policy. A refusal is `secure_store_publish_refused` naming at most an errno
+ * token: neither the plaintext key nor the ciphertext ever reaches the error.
+ */
+async function atomicWrite(filePath: string, contents: string): Promise<void> {
+  try {
+    mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
+    await publishDocument(filePath, contents);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    throw desktopError(
+      'secure_store_publish_refused',
+      `connection store could not be published (${
+        typeof code === 'string' ? code : 'target refused'
+      })`,
+    );
+  }
 }
 
 function sameEndpoint(a: PublicConnectionConfig, b: PublicConnectionConfig): boolean {
@@ -182,7 +201,7 @@ export class ConnectionStore {
         if (imported !== null) {
           // Nothing is removed before the encrypted bytes are on disk and
           // readable; no failure above can have removed either original.
-          ConnectionStore.persist(deps, imported);
+          await ConnectionStore.persist(deps, imported);
           cleanupFailure = await ConnectionStore.removeLegacy(deps);
           state = imported;
         }
@@ -282,14 +301,14 @@ export class ConnectionStore {
     return deps.storage.encryptString(plaintext);
   }
 
-  /** Serialize + atomically replace. Caller passes the complete next state. */
-  private static persist(deps: ConnectionStoreDeps, state: StoredFile): void {
+  /** Serialize + publish. Caller passes the complete next state. */
+  private static async persist(deps: ConnectionStoreDeps, state: StoredFile): Promise<void> {
     const serialized = JSON.stringify(state);
     // Encrypt BEFORE any disk write so a failure is fully non-destructive.
     if (state.credential !== undefined) {
       deps.storage.decryptString(decodeCredential(state.credential));
     }
-    atomicWrite(deps.filePath, serialized);
+    await atomicWrite(deps.filePath, serialized);
   }
 
   /**
@@ -399,7 +418,7 @@ export class ConnectionStore {
       config: { ...config, hasApiKey: nextCredential !== undefined },
       credential: nextCredential,
     };
-    ConnectionStore.persist(this.deps, next);
+    await ConnectionStore.persist(this.deps, next);
     this.state = next;
     return { ...next.config };
   }
@@ -415,8 +434,9 @@ export class ConnectionStore {
    * Resolves only when the material is actually gone: a removal failure
    * (permissions, I/O, …) throws `secure_store_delete_failed` and the
    * in-memory state is left intact so no false "cleared" is reported while
-   * bytes remain on disk. An already-absent file counts as removed. A
-   * tombstone write failure surfaces the same way.
+   * bytes remain on disk. An already-absent file counts as removed. A refused
+   * tombstone publication surfaces as `secure_store_publish_refused` the same
+   * way.
    */
   async delete(): Promise<void> {
     const remove = this.deps.removeFile ?? rmSync;
@@ -431,15 +451,7 @@ export class ConnectionStore {
         );
       }
     }
-    try {
-      atomicWrite(join(dirname(this.deps.filePath), CLEARED_MARKER_NAME), '{"cleared":true}\n');
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException | null)?.code;
-      throw desktopError(
-        'secure_store_delete_failed',
-        `cleared tombstone could not be written (${code ?? 'unknown error'})`,
-      );
-    }
+    await atomicWrite(join(dirname(this.deps.filePath), CLEARED_MARKER_NAME), '{"cleared":true}\n');
     this.state = null;
   }
 }

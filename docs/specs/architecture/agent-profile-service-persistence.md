@@ -69,40 +69,38 @@ response object).
 - Location: the daemon home `config.toml` (`<user_home>/.nexus42/config.toml` —
   the same file the core owns for `active_creator_id` and workspace path
   config; the service `home` is the raw user home, so the `.nexus42` segment is
-  resolved explicitly and the directory is created before the temp write).
+  resolved explicitly and the directory is created before the first publication).
 - Shape: one `[agent_profile]` table with `name` and optional `launch_command`.
   `name` is a TOML string; `launch_command` is omitted when unset.
 - ONE daemon-global profile — the desktop semantics. It is deliberately **not**
   per-creator; the per-creator localStorage key was a browser artifact.
 - Read semantics mirror the core CLI config (`read_cli_config`): a missing file
   is an empty document; an existing unparseable file is an error.
-- Write semantics mirror `write_cli_config` plus crash atomicity: read the whole
-  document, replace only the `agent_profile` table, every other key is
-  preserved, then write a same-directory temp file, `fsync` its content, `rename`
-  it into place and `fsync` the directory entry. `mode 0600` on the temp file;
-  on failure the temp file is removed and the underlying cause is logged while
-  the HTTP error stays generic.
+- Write semantics: read the whole document, replace only the `agent_profile`
+  table, every other key is preserved, then publish the whole document through
+  the native publisher — mechanism, ordering and refusals in
+  [rust-core-service-boundary.md §7.2](rust-core-service-boundary.md#72-config-publication-one-normative-home).
+  On failure the underlying cause is logged while the HTTP error stays generic.
 - The native core may write the same file (creator/workspace selection). Both
-  writers are whole-document read-modify-write; the service's writes are
-  atomic at the visibility level, so a reader never sees a partial document.
+  writers are whole-document read-modify-write, hold the same
+  `config.toml.lock` for their whole read, merge and publish, and publish
+  through the same rename, so a reader never sees a partial document.
 
-#### Risk acceptance (cross-writer race) — now a LIVE shared file
+#### Risk acceptance (cross-writer race) — superseded
 
 The TypeScript service is a second writer of `<user_home>/.nexus42/config.toml`
-alongside the Rust core, and both do whole-document read-modify-write. With the
-store at the daemon path this is no longer theoretical: a service `PUT` and a
-core write (creator activation, workspace selection) target the same file. A
-lost update is therefore possible — if the core and the service interleave read
-and write within the same millisecond-scale window, one side's key can be
-dropped (e.g. a creator activation landing between the profile read and the
-profile write). The exposure stays bounded: the service writes only on an
-explicit manual profile save (never on a timer or on read), core writes are
-equally rare, no user data beyond the last write is at risk, and no in-process
-lock can cover the core's write path. The acceptance therefore stands under the
-live condition. **Accepted by the PM decision on 2026-10-23**, tracked as issue
-I-000065 with the migration trigger (a lost update observed in practice, or any
-third writer added → move to a file lock or a core-owned write). Do not add
-ad-hoc locking here.
+alongside the Rust core, and both do whole-document read-modify-write. A lost
+update was accepted on 2026-10-23 under that condition, tracked as issue
+I-000065 with its own migration trigger (a lost update observed in practice, or
+any third writer added → move to a file lock or a core-owned write).
+
+That acceptance is **superseded**, and I-000065 stays recorded as the history of
+the decision rather than an open exposure: both writers now hold the same
+`config.toml.lock` for their whole read-modify-write and publish through the same
+policy-preserving rename. The migration trigger has fired and its remedy is
+shipped — the lock protects the read-modify-write window, and the rename means a
+reader never observes a half-written document. The mechanism is
+[rust-core-service-boundary.md §7.2](rust-core-service-boundary.md#72-config-publication-one-normative-home).
 
 ### 4. Browser migration read (legacy localStorage)
 

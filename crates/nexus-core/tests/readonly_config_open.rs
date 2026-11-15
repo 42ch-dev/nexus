@@ -146,6 +146,22 @@ impl Home {
         core.close().await.expect("provisioning close");
     }
 
+    /// Turn the provisioned home into a legacy-format one: the two-field
+    /// `config.json` snapshot replaces `config.toml`, which is removed.
+    fn use_legacy_json(&self) {
+        let nexus_home = self.nexus_home();
+        let legacy = serde_json::json!({
+            "active_creator_id": CREATOR,
+            "active_workspace_slug_by_creator": { (CREATOR): SLUG },
+        });
+        fs::write(
+            nexus_home.join("config.json"),
+            serde_json::to_string(&legacy).expect("legacy json"),
+        )
+        .expect("seed legacy snapshot");
+        fs::remove_file(nexus_home.join("config.toml")).expect("drop the TOML document");
+    }
+
     /// Make `.nexus42` itself readable but not writable — the exact directory
     /// the config lock is created in — and restore it on drop so the temp
     /// directory can be reclaimed.
@@ -165,6 +181,18 @@ impl Drop for SealedHome {
     fn drop(&mut self) {
         let _ = fs::set_permissions(&self.path, fs::Permissions::from_mode(0o755));
     }
+}
+
+/// The directory's own entries (not recursive), sorted: an exact, order-free
+/// record of what a call added or removed.
+fn directory_entries(directory: &Path) -> Vec<String> {
+    let mut entries: Vec<String> = fs::read_dir(directory)
+        .expect("directory listing")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    entries.sort();
+    entries
 }
 
 /// A provisioned, readable-but-unwritable `.nexus42` still serves a no-override
@@ -382,4 +410,83 @@ async fn a_failed_writer_open_releases_its_admission() {
         .await
         .expect("the failed open released its writer admission");
     writer.close().await.expect("close");
+}
+
+/// A legacy home (no `config.toml`, a `config.json` snapshot) serves a sealed
+/// read-only open without writing anything: no lock, no published TOML, no
+/// legacy rename and no new directory entry.
+#[tokio::test]
+async fn a_sealed_readonly_open_loads_a_legacy_snapshot_without_migrating() {
+    let home = Home::new(None);
+    home.provision().await;
+    home.use_legacy_json();
+
+    let nexus_home = home.nexus_home();
+    let before = directory_entries(&nexus_home);
+
+    let sealed = home.seal_nexus_home();
+    let opened = CoreService::open(home.options(CoreAccess::ReadOnly)).await;
+    drop(sealed);
+
+    // The snapshot really loaded: without its active creator and workspace the
+    // read-only open refuses as `auth_required`/`uninitialized`.
+    let core = opened.expect("a read-only open must load the legacy snapshot");
+    core.close().await.expect("close");
+
+    assert!(
+        !nexus_home.join("config.toml").exists(),
+        "the read-only open published a TOML document"
+    );
+    assert!(
+        nexus_home.join("config.json").exists(),
+        "the read-only open renamed the legacy document"
+    );
+    assert!(
+        !nexus_home.join("config.json.migrated").exists(),
+        "the read-only open completed the legacy migration"
+    );
+    assert_eq!(
+        directory_entries(&nexus_home),
+        before,
+        "the read-only open created or removed an entry in the nexus home"
+    );
+}
+
+/// The writer path still migrates: with the same legacy home, a writer open
+/// takes the lock, publishes `config.toml` atomically and renames the legacy
+/// document, leaving no lock behind.
+#[tokio::test]
+async fn a_writer_open_still_migrates_a_legacy_snapshot() {
+    let home = Home::new(None);
+    home.provision().await;
+    home.use_legacy_json();
+    let nexus_home = home.nexus_home();
+
+    let core = CoreService::open(home.options(CoreAccess::EngineOwner))
+        .await
+        .expect("the writer open migrates the legacy snapshot");
+    core.close().await.expect("close");
+
+    let published = fs::read_to_string(nexus_home.join("config.toml"))
+        .expect("the migration published config.toml");
+    let document: toml::Table = published.parse().expect("the published document is TOML");
+    assert_eq!(
+        document
+            .get("active_creator_id")
+            .and_then(toml::Value::as_str),
+        Some(CREATOR),
+        "the published document carries the legacy selection: {published}"
+    );
+    assert!(
+        nexus_home.join("config.json.migrated").exists(),
+        "the legacy document was renamed"
+    );
+    assert!(
+        !nexus_home.join("config.json").exists(),
+        "the legacy document is gone after the migration"
+    );
+    assert!(
+        !nexus_home.join("config.toml.lock").exists(),
+        "the writer released its own lock"
+    );
 }
