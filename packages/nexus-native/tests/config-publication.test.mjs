@@ -11,6 +11,9 @@ import assert from 'node:assert/strict';
 import {
   chmodSync,
   chownSync,
+  closeSync,
+  fstatSync,
+  openSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -132,10 +135,13 @@ describe('native config publication (real binding)', () => {
 
       await publishDocument(target, 'name = "new"\n');
 
-      const after = statSync(target);
+      const fd = openSync(target, 'r');
+      const after = fstatSync(fd);
+      const text = readFileSync(fd, 'utf8');
+      closeSync(fd);
       assert.equal(after.mode & 0o777, 0o640, 'the captured mode is reapplied');
       assert.equal(after.gid, group, 'the captured group is reapplied');
-      assert.equal(readFileSync(target, 'utf8'), 'name = "new"\n');
+      assert.equal(text, 'name = "new"\n');
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

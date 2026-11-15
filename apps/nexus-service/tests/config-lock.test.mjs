@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import {
   chmodSync,
   chownSync,
+  closeSync,
+  fstatSync,
+  openSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -353,10 +356,14 @@ describe('config publication policy (native publisher)', () => {
 
     await withDeadline(writeAgentProfile(home, { name: 'codex-cli' }), 5000, 'the profile write');
 
-    const after = statSync(path);
+    // One descriptor for both the metadata and the bytes: a stat-then-read pair
+    // is the file-system race the scanner flags, and a fixture does not need it.
+    const fd = openSync(path, 'r');
+    const after = fstatSync(fd);
+    const stored = parse(readFileSync(fd, 'utf8'));
+    closeSync(fd);
     assert.equal(after.mode & 0o777, 0o640, 'the captured mode is reapplied');
     assert.equal(after.gid, group, 'the captured group is reapplied');
-    const stored = parse(readFileSync(path, 'utf8'));
     assert.deepEqual({ ...stored.agent_profile }, { name: 'codex-cli' });
     assert.equal(stored.active_creator_id, 'ctr_localaaaaaaaaaaaa');
     assert.deepEqual(
