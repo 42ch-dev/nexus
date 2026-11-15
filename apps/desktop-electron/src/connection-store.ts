@@ -120,11 +120,12 @@ async function atomicWrite(
     mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
     await publish(filePath, contents);
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException | null)?.code;
-    const detail =
-      typeof code === 'string'
-        ? code
-        : ((err as Error | null)?.message ?? 'target refused');
+    // Only the wire code is safe to surface: a native refusal's message carries
+    // the absolute target path and the whole CoreError envelope, and the store's
+    // failures reach logs a user can read.
+    const error = err as { code?: unknown; details?: { code?: unknown } } | null;
+    const wire = error?.details?.code ?? error?.code;
+    const detail = typeof wire === 'string' ? wire : 'target refused';
     throw desktopError(
       'secure_store_publish_refused',
       `connection store could not be published (${detail})`,
