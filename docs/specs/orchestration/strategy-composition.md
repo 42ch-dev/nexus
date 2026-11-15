@@ -145,9 +145,11 @@ a user bundle with no current apply is refused before graph construction instead
 below). For a run admitted with a resolved document, no entry admits YAML and recovers into IR: the graph
 the run executes and the identity its descriptor freezes come from the same resolution. A run admitted
 under `yaml-only` while the strategy had no current apply resolves `None`, freezes no identity, and
-recovers through the `(None, current)` arm below — the one case in which a restart can still put a run on a
-document it never ran, and it exists because the run was admitted under none; under the default `ir-only`
-that admission is the refusal instead, so no such run exists. Both admission entries resolve before the
+records the mode it was admitted under; recovery reads that record, skips the apply source and rebuilds
+the same YAML bundle, so a restart cannot put such a run on a document it never ran. The legacy
+`(None, current)` arm below is reachable only for a row that predates the field and therefore records
+neither a mode nor an identity — for a newly admitted run it is unreachable. Under the default `ir-only`
+the same no-apply admission is a refusal instead, so no such run exists at all. Both admission entries resolve before the
 binding gate, so the roles validated are the roles the applied graph consumes — `export_preset(&document)`
 when an apply exists, the loaded manifest otherwise (`export_preset` and `validate_agent_bindings` in both
 `start_session` and `admit_schedule_inner`).

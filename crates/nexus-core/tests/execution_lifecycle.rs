@@ -1404,6 +1404,7 @@ async fn a_restart_with_a_hashless_carrier_and_no_recorded_pin_refuses() {
         RESTART_PRESET,
         &bundle,
         Some(admitted),
+        None,
     )
     .await;
     close_seed_pool(&f.db_path, seed).await;
