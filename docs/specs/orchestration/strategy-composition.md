@@ -289,7 +289,11 @@ digest over the template's bytes.
 Two surfaces stay YAML-primary and this page's boundary holds for them: `examples/first-workflow` and the
 embedded presets keep `preset.yaml` as their source, and they are the live evidence that a hand-authored
 YAML bundle still imports and exports. Nothing in the sample switch touches the intake precedence of
-§5.1, the legacy YAML write path of §6, or the pattern registry policy above.
+§5.1, the legacy YAML write path of §6, or the pattern registry policy above. The authoring note
+(`## Deprecation — hand-authored YAML as the main path` in `docs/strategy-authoring.md`) deprecates
+hand-authored YAML as the main authoring path only, changes neither YAML-primary case above, and leaves the
+bundle format with both `nexus42 preset import <dir>` and `nexus42 preset export <dir>` in place past the
+v1.244.0 boundary §5.1 sets for the `yaml-only` kill-switch.
 
 ## Invariants
 
