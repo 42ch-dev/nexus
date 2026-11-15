@@ -945,6 +945,25 @@ fn event_lane_config_warning(config_path: &Path, error: &ConnectConfigError) -> 
     )
 }
 
+/// Refuse an empty injected builtin roster before the lane does any boot work.
+///
+/// The reserved set's builtin half is only as good as this roster, and this
+/// crate has no registry to fall back to: an empty set would let a peer shadow
+/// every builtin id and nothing would say so.
+fn ensure_injected_roster<S: BuildHasher>(
+    builtin_tool_ids: &HashSet<String, S>,
+) -> ConnectResult<()> {
+    if builtin_tool_ids.is_empty() {
+        return Err(ConnectError::Internal {
+            category: "peer-tools lane refused: the injected builtin tool roster is empty, so \
+                       peer tool ids would not be reserved against; inject the composing side's \
+                       host-tool ids"
+                .to_owned(),
+        });
+    }
+    Ok(())
+}
+
 /// Boot helper: load config + persistent identity from `home`, bind the
 /// listener, spawn the accept loop + the supervised config watcher.
 ///
@@ -974,18 +993,23 @@ fn event_lane_config_warning(config_path: &Path, error: &ConnectConfigError) -> 
 /// half of that same reserved set. It is injected here rather than read from
 /// a host registry because this crate names no core item; the composing side
 /// (`nexus42 connect start` / `nexus-runtime`) supplies its own registry's
-/// ids.
+/// ids. An empty roster is refused: this crate cannot tell "no builtin tools
+/// exist" from "the caller forgot to inject them", and reserving nothing is
+/// exactly the guard failing open: [`ensure_injected_roster`] refuses an
+/// empty roster before any boot work.
 ///
 /// # Errors
-/// Config load, identity persistence, or listener bind failures are
-/// returned as errors — the caller decides whether to fail boot or keep the
-/// daemon core running without the peer-tools lane.
+/// An empty `builtin_tool_ids` is refused at the entry, and config load,
+/// identity persistence, or listener bind failures are returned as errors —
+/// the caller decides whether to fail boot or keep the daemon core running
+/// without the peer-tools lane.
 pub async fn start_peer_tools_lane<S: BuildHasher>(
     home: &Path,
     shutdown: Arc<Notify>,
     capability_registry: Option<CapabilityRegistryHolder>,
     builtin_tool_ids: HashSet<String, S>,
 ) -> ConnectResult<PeerToolsLaneHandle> {
+    ensure_injected_roster(&builtin_tool_ids)?;
     // DF-92: seed the digest baseline BEFORE the boot load — an edit
     // landing anywhere in the boot window diverges from the baseline and
     // the first poll reloads (never absorbed; the capability watcher's
@@ -2068,10 +2092,17 @@ mod tests {
         std::fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
         let config = nexus_home_layout::connect_daemon_config_path(home.path());
         std::fs::write(&config, r#"{"host":"0.0.0.0","port":0}"#).expect("write daemon.json");
-        // No peer admission runs in this boot-gate case, so the reserved
-        // builtin snapshot is empty.
-        let Err(err) =
-            start_peer_tools_lane(home.path(), Arc::new(Notify::new()), None, HashSet::new()).await
+        // No peer admission runs in this boot-gate case, so any non-empty
+        // roster satisfies the reserved-set precondition (an empty one is
+        // refused at the entry, before the bind gate this test exercises).
+        let roster: HashSet<String> = HashSet::from(["nexus-test-builtin".to_owned()]);
+        let Err(err) = start_peer_tools_lane(
+            home.path(),
+            Arc::new(Notify::new()),
+            None,
+            roster.clone(),
+        )
+        .await
         else {
             panic!("non-loopback bind must fail closed without TLS")
         };
@@ -2083,7 +2114,7 @@ mod tests {
         std::fs::write(&config, r#"{"host":"127.0.0.1","port":0}"#)
             .expect("write the loopback daemon.json");
         let shutdown = Arc::new(Notify::new());
-        let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None, HashSet::new())
+        let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None, roster)
             .await
             .expect("the loopback plaintext bind starts");
         assert!(lane.addr.ip().is_loopback(), "the lane bound loopback");

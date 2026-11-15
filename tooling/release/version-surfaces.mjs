@@ -315,13 +315,18 @@ export function parseCargoPackageVersion(contents, manifestPath) {
 /**
  * Workspace members with their package names (the Cargo.lock SSOT rows).
  *
+ * `manifestPath` is repo-relative POSIX, the same convention the carrier
+ * (`version-brackets.json`) and the `cargo metadata` rows use, so the
+ * contract-entry identity guard compares like with like on every platform.
+ * `join`/`readFileSync` accept these paths unchanged on win32.
+ *
  * @param {string} repoRoot
  * @returns {{ path: string; manifestPath: string; name: string }[]}
  */
 export function readWorkspaceMemberPackages(repoRoot) {
   const workspace = readFileSync(join(repoRoot, CARGO_WORKSPACE_PATH), "utf8");
   return parseCargoWorkspaceMembers(workspace).map((memberPath) => {
-    const manifestPath = join(memberPath, "Cargo.toml");
+    const manifestPath = posix.join(memberPath, "Cargo.toml");
     return {
       path: memberPath,
       manifestPath,

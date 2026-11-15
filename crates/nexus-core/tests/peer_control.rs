@@ -816,3 +816,38 @@ async fn peer_control_allow_rejects_an_undispatched_operation() {
         "the refused grant must not authorize the name it carried"
     );
 }
+
+/// A start's allowlist is a grant surface too: naming an operation no arm
+/// dispatches would authorize nothing forever, so the start refuses it instead
+/// of installing a lane that holds it.
+#[tokio::test]
+#[serial]
+async fn peer_control_start_rejects_an_undispatched_operation() {
+    let f = lane_fixture().await;
+    let principal = f.core.active_principal().await.expect("active principal");
+    let refused = f
+        .handle
+        .start_peer_control(&principal, start_options(true, &["frobnicate"]))
+        .await;
+    assert!(
+        matches!(
+            &refused,
+            Err(CoreError::InvalidInput { field, .. }) if field.as_str() == "allowed_operations"
+        ),
+        "an undispatched start allowlist entry is an allowed_operations refusal, got {refused:?}"
+    );
+
+    // The refusal precedes the install, so no lane is left behind and the
+    // next control call reports the lane-state cause, not a `peer_id`.
+    let unstarted = f
+        .handle
+        .peer_control(&principal, control_request("status", None))
+        .await;
+    assert!(
+        matches!(
+            &unstarted,
+            Err(CoreError::InvalidInput { field, .. }) if field.as_str() == "lane"
+        ),
+        "a refused start installs no lane and names the lane, got {unstarted:?}"
+    );
+}

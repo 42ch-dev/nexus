@@ -144,7 +144,9 @@ impl PeerResponder for ConnectResponderAdapter {
 /// Computed LIVE so a capability hot-added after the peer lane spawned is
 /// immediately reserved against. The builtin set is a snapshot the composing
 /// side injects ([`crate::PeerResponderOptions::builtin_tool_ids`]) — this
-/// crate never reads a host registry of its own.
+/// crate never reads a host registry of its own, so the caller's boundary
+/// refuses an empty roster ([`crate::start_peer_tools_lane`]) instead of
+/// letting this function silently reserve nothing.
 #[must_use]
 pub fn live_reserved_tool_ids(
     builtin_ids: impl IntoIterator<Item = String>,
