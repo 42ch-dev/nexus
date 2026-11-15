@@ -602,7 +602,7 @@ fn sample_lane_prose_survives_a_second_export() {
         let (state, sentinel) = *lanes
             .first()
             .expect("every sample declares at least one lane");
-        let mut cleared = document.clone();
+        let mut cleared = document;
         let node = cleared
             .nodes
             .iter_mut()
