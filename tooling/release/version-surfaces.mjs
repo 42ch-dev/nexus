@@ -57,6 +57,11 @@ export const SERVICE_PACKAGE_PATH = "apps/nexus-service/package.json";
 /** Cargo lockfile pinning workspace member versions. */
 export const CARGO_LOCK_PATH = "Cargo.lock";
 /**
+ * Version bracket carrier: the crates allowed to version independently of the
+ * product version. It is not a version surface — nothing writes it.
+ */
+export const VERSION_BRACKETS_PATH = "tooling/release/version-brackets.json";
+/**
  * The contracted `Cargo.lock` regeneration vehicle: workspace members only, no
  * network, lockfile written by Cargo itself.
  */
@@ -301,6 +306,86 @@ export function readWorkspaceMemberPackages(repoRoot) {
       ),
     };
   });
+}
+
+/**
+ * @typedef {object} ContractBracketEntry
+ * @property {string} name Package name.
+ * @property {string} manifest Manifest path, relative to the repository root.
+ */
+
+/**
+ * Contract-bracket entries from the version bracket carrier.
+ *
+ * The carrier is the only place the lockstep assertion and the packageability
+ * check learn which crates may version independently, so a malformed carrier
+ * fails here instead of degrading into an empty exemption list. Every entry
+ * must be unique and must point at a manifest whose `[package].name` is the
+ * entry's own name.
+ *
+ * @param {string} repoRoot
+ * @returns {ContractBracketEntry[]}
+ */
+export function readVersionBrackets(repoRoot) {
+  let data;
+  try {
+    data = JSON.parse(
+      readFileSync(join(repoRoot, VERSION_BRACKETS_PATH), "utf8"),
+    );
+  } catch (error) {
+    throw new Error(
+      `${VERSION_BRACKETS_PATH}: unusable (${
+        error instanceof Error ? error.message : error
+      })`,
+    );
+  }
+
+  const entries = data?.contract;
+  if (!Array.isArray(entries)) {
+    throw new Error(`${VERSION_BRACKETS_PATH}: missing "contract" array`);
+  }
+
+  const seen = new Set();
+  for (const entry of entries) {
+    const name = entry?.name;
+    const manifest = entry?.manifest;
+    if (typeof name !== "string" || name.length === 0) {
+      throw new Error(
+        `${VERSION_BRACKETS_PATH}: contract entry without a "name" string`,
+      );
+    }
+    if (typeof manifest !== "string" || manifest.length === 0) {
+      throw new Error(
+        `${VERSION_BRACKETS_PATH}: contract entry ${name} without a "manifest" string`,
+      );
+    }
+    if (seen.has(name)) {
+      throw new Error(
+        `${VERSION_BRACKETS_PATH}: duplicate contract entry ${name}`,
+      );
+    }
+    seen.add(name);
+
+    let contents;
+    try {
+      contents = readFileSync(join(repoRoot, manifest), "utf8");
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        throw error;
+      }
+      throw new Error(
+        `${VERSION_BRACKETS_PATH}: contract entry ${name} points at a missing manifest ${manifest}`,
+      );
+    }
+    const packageName = parseCargoPackageName(contents, manifest);
+    if (packageName !== name) {
+      throw new Error(
+        `${VERSION_BRACKETS_PATH}: contract entry ${name} does not match package name ${packageName} in ${manifest}`,
+      );
+    }
+  }
+
+  return entries;
 }
 
 /**
