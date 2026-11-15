@@ -966,8 +966,8 @@ test('after a refused clear the next open loads the store and imports no legacy 
 // Mutation ordering: one gate per store
 // ---------------------------------------------------------------------------
 
-// The published seam only exists on the gated store: before it, these two hang
-// at `hold.started`, which the timeout turns into a failure instead.
+// The injected publication seam only exists in the gated store: without it
+// these two hang at `hold.started`, which the timeout turns into a failure.
 test('a completed clear is not undone by an earlier in-flight save', { timeout: 10_000 }, async (t) => {
   const { deps, arm } = holdNextPublication(t);
   const store = await ConnectionStore.open(deps);
@@ -984,23 +984,22 @@ test('a completed clear is not undone by an earlier in-flight save', { timeout: 
   assert.equal(existsSync(deps.filePath), false, 'the earlier save did not republish the store');
 });
 
-test('a save queued behind a held save derives from the published key', { timeout: 10_000 }, async (t) => {
+// The held operation must be the REPLACE: only `keep` reads the previous
+// credential, so a queued `keep` over a still-`sk-old` state is what republishes
+// the replaced key when the derivation reads state before the gate resolves.
+test('a keep queued behind a held replace retains the published key', { timeout: 10_000 }, async (t) => {
   const { deps, arm } = holdNextPublication(t);
   const store = await ConnectionStore.open(deps);
   await store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-old' });
 
   const hold = arm();
-  const keeping = store.set({ ...BASE_CONFIG }, { action: 'keep' });
-  await hold.started;
   const replacing = store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-new' });
+  await hold.started; // the replacement is suspended inside its publication
+  const keeping = store.set({ ...BASE_CONFIG }, { action: 'keep' });
   hold.release();
-  await Promise.all([keeping, replacing]);
+  await Promise.all([replacing, keeping]);
 
-  assert.equal(
-    store.getAuth()?.apiKey,
-    'sk-new',
-    'the queued keep did not resurrect the replaced key',
-  );
+  assert.equal(store.getAuth()?.apiKey, 'sk-new', 'the queued keep read the published key');
   const reopened = await ConnectionStore.open(deps);
   assert.equal(reopened.getAuth()?.apiKey, 'sk-new', 'the published store holds the replacement');
 });
