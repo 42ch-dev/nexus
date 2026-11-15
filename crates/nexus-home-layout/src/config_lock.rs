@@ -325,12 +325,13 @@ type StagingRendezvous = (
 );
 
 #[cfg(test)]
-static AFTER_STAGING: std::sync::Mutex<Option<StagingRendezvous>> = std::sync::Mutex::new(None);
+pub(crate) static AFTER_STAGING: std::sync::Mutex<Option<StagingRendezvous>> =
+    std::sync::Mutex::new(None);
 
 /// Serializes the post-staging regressions: they share one process-wide
 /// rendezvous slot and must not arm it concurrently.
 #[cfg(test)]
-static STAGING_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static STAGING_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Test-only rendezvous after the staging file exists and before any byte is
 /// written: a regression can move the target at a real publication boundary
