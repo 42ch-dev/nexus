@@ -2317,10 +2317,13 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
 #[cfg(feature = "connect-host")]
 impl ExecutionHandle {
     /// Install (or disable) this execution owner's peer-control lane
-    /// (P4-T3). Enablement is explicit: `enabled: false` tears the lane down
-    /// to a disabled state; every start REPLACES the allowlist, so an enabled
-    /// lane holds exactly the named `allowed_operations` (empty admits
-    /// nothing) and a restart can only narrow, never accumulate.
+    /// (P4-T3). `enabled` is the enablement the lane REPORTS to the Connect
+    /// surface; it is not a second gate — [`Self::peer_control`] admits an
+    /// operation on the allowlist alone, so `enabled: false` still serves an
+    /// allowlisted operation and only the state says the cohort is off. Every
+    /// start REPLACES the allowlist, so the lane holds exactly the named
+    /// `allowed_operations` (empty admits nothing) and a restart can only
+    /// narrow, never accumulate.
     ///
     /// # Errors
     /// Returns [`CoreError::Closing`] when the owning service is closed and
@@ -2346,21 +2349,27 @@ impl ExecutionHandle {
             request.enabled,
             allowed,
         ));
-        *self
+        // Install and snapshot under one guard: the returned state must
+        // describe the lane this start installed, not a later replacement.
+        let mut slot = self
             .peer_control
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(std::sync::Arc::clone(&lane));
-        Ok(lane.state(active_peer_ids()))
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot = Some(std::sync::Arc::clone(&lane));
+        let state = lane.state(active_peer_ids());
+        drop(slot);
+        Ok(state)
     }
 
     /// Drive one peer-control operation against this owner's lane (P4-T3).
-    /// `status` reports the lane state; `enable`/`disable` flip enablement;
-    /// `allow` adds the operation its payload names (`payload.operation`) to
-    /// the allowlist; `evict` removes a peer's registered tools. Anything
-    /// else is `invalid_input`, and every
-    /// operation not on the lane's allowlist is refused before any effect —
-    /// visibility of a peer tool never implies authority to control it.
+    /// `status` reports the lane state; `enable`/`disable` flip the reported
+    /// enablement; `allow` adds the operation its payload names
+    /// (`payload.operation`, which must be a dispatched operation) to the
+    /// allowlist; `evict` removes a peer's registered tools. Anything else is
+    /// `invalid_input`, and every operation not on the lane's allowlist is
+    /// refused before any effect — visibility of a peer tool never implies
+    /// authority to control it. The lane's `enabled` flag is reported state,
+    /// never a second gate: the allowlist alone decides admission.
     ///
     /// # Errors
     /// As [`Self::start_peer_control`], plus [`CoreError::InvalidInput`]
@@ -2375,14 +2384,17 @@ impl ExecutionHandle {
     ) -> CoreResult<nexus_contracts::generated::core::CorePeerControlState> {
         let core = self.linked_core()?;
         core.verify_principal(principal)?;
-        let lane = {
-            let slot = self
-                .peer_control
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            slot.as_ref().map(std::sync::Arc::clone)
-        }
-        .ok_or_else(|| CoreError::InvalidInput {
+        #[cfg(feature = "test-hooks")]
+        crate::execution::test_hooks::peer_control_gate_wait().await;
+        // One guard spans resolve → gate → mutation → snapshot: a concurrent
+        // `start_peer_control` must never swap the lane between the operation
+        // reading it and applying its effect, or the grant lands on the
+        // discarded lane and the returned state describes that lane.
+        let slot = self
+            .peer_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let lane = slot.as_ref().ok_or_else(|| CoreError::InvalidInput {
             field: "peer_id".into(),
             reason: "peer control has not been started".into(),
         })?;
@@ -2408,6 +2420,17 @@ impl ExecutionHandle {
                         field: "payload.operation".into(),
                         reason: "the allow operation must name the operation it grants".into(),
                     })?;
+                // A grant for a name no arm dispatches is not a permission:
+                // it would sit in the allowlist forever and authorize nothing,
+                // so it is a validation refusal naming the field.
+                if !matches!(granted, "status" | "enable" | "disable" | "allow" | "evict") {
+                    return Err(CoreError::InvalidInput {
+                        field: "payload.operation".into(),
+                        reason: format!(
+                            "the allow operation grants an operation nothing dispatches: {granted}"
+                        ),
+                    });
+                }
                 lane.allow(granted);
             }
             "evict" => {
@@ -2426,7 +2449,9 @@ impl ExecutionHandle {
                 });
             }
         }
-        Ok(lane.state(active_peer_ids()))
+        let state = lane.state(active_peer_ids());
+        drop(slot);
+        Ok(state)
     }
 }
 

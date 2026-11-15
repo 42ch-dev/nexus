@@ -1,7 +1,7 @@
 //! The peer-control lane (v1.190 P4-T3).
 //!
-//! Enablement plus the operation allowlist one execution owner admits,
-//! observed by the Connect surface. Capability dispatch itself lives in
+//! The reported enablement and the operation allowlist one execution owner
+//! admits, observed by the Connect surface. Capability dispatch itself lives in
 //! [`crate::peer_tools`]: this module only holds the lane's state, and never
 //! becomes a second registry.
 //!
@@ -18,8 +18,9 @@ use std::sync::Mutex;
 
 use nexus_contracts::generated::core::CorePeerControlState;
 
-/// The peer-control lane one execution owner admits: enablement plus the
-/// operation allowlist, observed by the connect surface.
+/// The peer-control lane one execution owner admits: the enablement it reports
+/// plus the operation allowlist that decides admission, observed by the
+/// connect surface.
 #[derive(Debug)]
 pub struct PeerControlLane {
     enabled: AtomicBool,
@@ -37,7 +38,8 @@ impl PeerControlLane {
         }
     }
 
-    /// Whether the lane currently admits peer-control operations.
+    /// The enablement the lane reports to the Connect surface. Admission is
+    /// decided by the allowlist, so this is observed state, not a gate.
     #[must_use]
     pub fn enabled(&self) -> bool {
         self.enabled.load(Ordering::SeqCst)
@@ -53,7 +55,8 @@ impl PeerControlLane {
             .contains(operation)
     }
 
-    /// Flip enablement (a disabled lane refuses every operation).
+    /// Flip the reported enablement. The allowlist decides admission, so this
+    /// does not refuse or admit an operation by itself.
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::SeqCst);
     }
