@@ -110,6 +110,10 @@ const TOOL_BOOT: &str = "tools.t10bt.echo";
 const TOOL_BOOT_EMPTY: &str = "tools.t10be.echo";
 const TOOL_ROTATED_OLD: &str = "tools.t10rl.echo";
 const TOOL_ROTATED_NEW: &str = "tools.t10rl.rotated";
+// QC2-001: a grammar-valid id the composition injects as reserved, and an
+// identically negotiated/allowlisted id outside that injected set.
+const TOOL_RESERVED_BUILTIN: &str = "tools.fixture.builtin";
+const TOOL_RESERVED_CONTROL: &str = "tools.fixture.admitted";
 
 // ── Manifests ─────────────────────────────────────────────────────────────
 
@@ -306,9 +310,11 @@ async fn start_server(
 ///
 /// The composing side owns the real roster (core's `host_tool_registry`); this
 /// crate must not reach it, so the fixture stands in for a builtin name the
-/// peer surface may never shadow.
+/// peer surface may never shadow. The id is grammar-valid on purpose, so
+/// `boot_lane_refuses_an_injected_reserved_id_that_is_negotiated_and_allowlisted`
+/// can only pass the refusal via supplied-set membership.
 fn builtin_tool_ids() -> HashSet<String> {
-    HashSet::from(["nexus.fixture.builtin".to_string()])
+    HashSet::from([TOOL_RESERVED_BUILTIN.to_string()])
 }
 
 fn ws_config_for_tests() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
@@ -1570,6 +1576,61 @@ async fn boot_lane_with_an_empty_tool_allowlist_admits_nothing() {
     adapter.close();
     shutdown.notify_one();
     let _ = handle.task.await;
+    peer_tool_table().set_config(None);
+}
+
+/// QC2-001 (QC-fix wave): the composing side's injected reserved set is
+/// load-bearing through the real lane, not just the admission table.
+///
+/// Preserved: one peer advertises BOTH ids in its hello and the operator
+/// allowlists BOTH, so negotiation and allowlist admit them equally; the id
+/// the composition injected as reserved must still never become a registry
+/// row, while the otherwise-identical unreserved id is admitted. An injection
+/// that silently passed an empty set would admit the reserved id and fail
+/// here.
+#[tokio::test]
+#[serial]
+async fn boot_lane_refuses_an_injected_reserved_id_that_is_negotiated_and_allowlisted() {
+    let home = tempfile::TempDir::new().unwrap();
+    let peer_id = peer_id_of(seed_peer(9));
+    write_boot_config(
+        home.path(),
+        &[TOOL_RESERVED_BUILTIN, TOOL_RESERVED_CONTROL],
+        &[&peer_id],
+        Some(&format!(
+            r#"{{"peer_keys":{{"{peer_id}":"{}"}}}}"#,
+            hex32(pubkey(seed_peer(9)))
+        )),
+    );
+    let shutdown = Arc::new(Notify::new());
+    let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None, builtin_tool_ids())
+        .await
+        .expect("lane starts");
+    let adapter = dial(
+        lane.addr,
+        seed_peer(9),
+        &[TOOL_RESERVED_BUILTIN, TOOL_RESERVED_CONTROL],
+    )
+    .await
+    .expect("the allowlisted peer is admitted");
+    assert!(
+        wait_until(
+            || peer_tool_table().get(TOOL_RESERVED_CONTROL).is_some(),
+            Duration::from_secs(5)
+        )
+        .await,
+        "the unreserved negotiated + allowlisted id is admitted"
+    );
+    assert!(
+        peer_tool_table().get(TOOL_RESERVED_BUILTIN).is_none(),
+        "an id in the injected reserved set is refused even though the peer \
+         advertised it and the operator allowlisted it"
+    );
+
+    adapter.close();
+    shutdown.notify_one();
+    let _ = lane.task.await;
+    peer_tool_table().evict_peer(&peer_id, None);
     peer_tool_table().set_config(None);
 }
 
