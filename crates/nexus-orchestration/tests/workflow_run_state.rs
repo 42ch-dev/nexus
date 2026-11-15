@@ -20,9 +20,11 @@
 #![allow(clippy::significant_drop_tightening)] // tests read state snapshots; early-drop noise without contention value
 
 use graph_flow::{Session, SessionStorage};
+use nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument;
+use nexus_orchestration::capability::{AppliedDocument, AppliedDocumentSource};
 use nexus_orchestration::engine::{SessionId, SessionStatus};
 use nexus_orchestration::run_state::{
-    AgentBinding, ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunStateV1,
+    AgentBinding, AppliedRunIdentity, ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunStateV1,
     TerminalSettlementTarget, WorkflowStateStore,
 };
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
@@ -70,6 +72,7 @@ fn test_descriptor(_session_id: &str) -> RunDescriptorV1 {
         parent_session_id: None,
         graph_name: None,
         applied: None,
+        intake_mode: None,
     }
 }
 
@@ -539,6 +542,53 @@ fn descriptor_serializes_the_applied_identity_only_when_present() {
     );
     let back: RunDescriptorV1 = serde_json::from_value(value).expect("descriptor decodes");
     assert_eq!(back.applied, applied.applied);
+}
+
+/// The intake mode is frozen on the descriptor only when an admission recorded
+/// one, both arms round-trip under their kebab-case spellings, and a legacy
+/// descriptor keeps its exact bytes.
+#[test]
+fn descriptor_round_trips_intake_mode_and_legacy_bytes_hold() {
+    use nexus_home_layout::strategy_intake::StrategyIntakeMode;
+
+    // Legacy bytes: a descriptor without the field decodes as `None`, and the
+    // skipped field leaves the serialized form byte-identical (same contract
+    // as `applied` above).
+    let legacy = test_descriptor("sess");
+    assert_eq!(legacy.intake_mode, None);
+    let legacy_value = serde_json::to_value(&legacy).expect("descriptor serializes");
+    assert!(
+        legacy_value.get("intake_mode").is_none(),
+        "a legacy descriptor must not gain a key: {legacy_value}"
+    );
+
+    for mode in [StrategyIntakeMode::IrOnly, StrategyIntakeMode::YamlOnly] {
+        let mut descriptor = test_descriptor("sess");
+        descriptor.intake_mode = Some(mode);
+        let value = serde_json::to_value(&descriptor).expect("descriptor serializes");
+        let back: RunDescriptorV1 =
+            serde_json::from_value(value.clone()).expect("descriptor decodes");
+        assert_eq!(back.intake_mode, Some(mode));
+        assert!(
+            value.get("intake_mode").is_some(),
+            "a recorded mode must serialize a key: {value}"
+        );
+    }
+
+    // The exact kebab-case spellings the config file and the descriptor share.
+    let mut descriptor = test_descriptor("sess");
+    descriptor.intake_mode = Some(StrategyIntakeMode::YamlOnly);
+    let json = serde_json::to_string(&descriptor).expect("descriptor serializes");
+    assert!(
+        json.contains(r#""intake_mode":"yaml-only""#),
+        "yaml-only must serialize kebab-case: {json}"
+    );
+    descriptor.intake_mode = Some(StrategyIntakeMode::IrOnly);
+    let json = serde_json::to_string(&descriptor).expect("descriptor serializes");
+    assert!(
+        json.contains(r#""intake_mode":"ir-only""#),
+        "ir-only must serialize kebab-case: {json}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -6820,4 +6870,371 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
         .expect("record");
     assert_eq!(record.status, SessionStatus::Cancelled);
     assert_eq!(record.state_revision, 4);
+}
+
+// ---------------------------------------------------------------------------
+// The YAML run seam freezes the apply it runs (P6, I-000443)
+// ---------------------------------------------------------------------------
+
+/// The applied fixture document's entry node — a node id no loaded bundle
+/// declares, so the run's persisted position names the graph that ran.
+const APPLIED_ENTRY_PROBE: &str = "applied_entry_probe";
+/// The applied fixture document's manual wait. Never reached here (no
+/// coordinator drives the entry), but it keeps the document runnable.
+const APPLIED_ONLY_PROBE: &str = "applied_only_probe";
+
+/// An applied document: entry → applied-only wait → done. It shares no node id
+/// with the bundle the loaded preset carries, so a run started on it can only
+/// be positioned on `applied_entry_probe`.
+fn applied_probe_document(id: &str) -> WorkflowDocument {
+    serde_json::from_str(&format!(
+        r#"{{
+  "ir_version": 0,
+  "id": "{id}",
+  "version": 1,
+  "revision": 0,
+  "state": "candidate",
+  "meta": {{
+    "description": "applied entry fixture",
+    "kind": "creator",
+    "run_intents": [],
+    "requires_capabilities": []
+  }},
+  "entry": "{APPLIED_ENTRY_PROBE}",
+  "terminal": ["done"],
+  "nodes": [
+    {{"id": "{APPLIED_ENTRY_PROBE}", "kind": "outer_state", "effect_class": "pure",
+     "exit_when": {{"kind": "rule"}}}},
+    {{"id": "{APPLIED_ONLY_PROBE}", "kind": "outer_state", "effect_class": "pure",
+     "exit_when": {{"kind": "manual"}}}},
+    {{"id": "done", "kind": "terminal", "effect_class": "pure"}}
+  ],
+  "edges": [
+    {{"id": "{APPLIED_ENTRY_PROBE}->{APPLIED_ONLY_PROBE}", "from": "{APPLIED_ENTRY_PROBE}",
+     "to": "{APPLIED_ONLY_PROBE}", "kind": "linear"}},
+    {{"id": "{APPLIED_ONLY_PROBE}->done", "from": "{APPLIED_ONLY_PROBE}",
+     "to": "done", "kind": "linear"}}
+  ],
+  "nests": [],
+  "assets": [],
+  "signals": [],
+  "roles": [],
+  "effect_summary": "pure",
+  "provenance": {{"source": "compose"}}
+}}"#
+    ))
+    .expect("the applied fixture document decodes")
+}
+
+/// An applied source answering for exactly one strategy id.
+struct FakeAppliedDocuments {
+    preset_id: &'static str,
+    identity: AppliedRunIdentity,
+    document: WorkflowDocument,
+}
+
+#[async_trait::async_trait]
+impl AppliedDocumentSource for FakeAppliedDocuments {
+    async fn applied_document(
+        &self,
+        preset_id: &str,
+        _loaded: &nexus_preset::LoadedPreset,
+    ) -> Result<Option<AppliedDocument>, String> {
+        Ok((preset_id == self.preset_id).then(|| AppliedDocument {
+            identity: self.identity.clone(),
+            document: self.document.clone(),
+        }))
+    }
+}
+
+/// Assert the entry admitted the applied graph and froze its identity.
+async fn assert_applied_entry(
+    storage: &Arc<SqliteSessionStorage>,
+    sid: &SessionId,
+    identity: &AppliedRunIdentity,
+) {
+    let record = storage
+        .load_run(sid)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    let descriptor = record.descriptor.expect("v1 descriptor");
+    assert_eq!(
+        descriptor.applied.as_ref(),
+        Some(identity),
+        "the descriptor must freeze the apply the run executes"
+    );
+    let session = storage
+        .get(&sid.0)
+        .await
+        .expect("session read")
+        .expect("row");
+    assert_eq!(
+        session.current_task_id, APPLIED_ENTRY_PROBE,
+        "the run must be built from the applied document, not the bundle"
+    );
+}
+
+/// Both preset trait entries resolve through the `AppliedDocumentSource`: they
+/// persist the identity and select the applied graph.
+///
+/// Mutation this fails on: either entry building the YAML graph unconditionally
+/// and leaving `applied: None` — then the position is the bundle's initial
+/// state and a restart rebuilds a document the run never ran.
+#[tokio::test]
+async fn preset_entries_freeze_and_run_the_strategy_apply() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, mut engine) = fresh_engine(pool);
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded =
+        nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
+    let identity = AppliedRunIdentity {
+        apply_id: "apl_entry".to_string(),
+        content_hash: "blake3:entry".to_string(),
+    };
+    engine.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "novel-writing",
+        identity: identity.clone(),
+        document: applied_probe_document("novel-writing"),
+    }));
+
+    let sid = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .expect("start_session_with_preset");
+    assert_applied_entry(&storage, &sid, &identity).await;
+
+    let sid = engine
+        .start_session_with_preset_for_creator(&loaded, "ctr_entry")
+        .await
+        .expect("start_session_with_preset_for_creator");
+    assert_applied_entry(&storage, &sid, &identity).await;
+}
+
+/// Write a minimal valid user bundle under `home` and resolve it, asserting the
+/// loader classified it as a directory source — the only source intake gates.
+fn user_bundle_preset(home: &std::path::Path, preset_id: &str) -> nexus_preset::LoadedPreset {
+    let bundle = home.join("presets").join(preset_id);
+    std::fs::create_dir_all(&bundle).expect("bundle dir");
+    std::fs::write(
+        bundle.join("preset.yaml"),
+        format!(
+            "preset:\n  id: {preset_id}\n  version: 3\n  kind: creator\n  description: \
+             \"intake fixture\"\n  requires_capabilities: []\n  initial: a\n  terminal: b\n\
+             states:\n  - id: a\n    enter: []\n    exit_when: {{ kind: manual }}\n    next: b\n  \
+             - id: b\n    terminal: true\n"
+        ),
+    )
+    .expect("bundle yaml");
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded = nexus_preset::resolve_preset(preset_id, home, &registry).expect("bundle loads");
+    assert!(
+        matches!(
+            loaded.source_identity,
+            Some(PresetSourceIdentity::Directory { .. })
+        ),
+        "the fixture must resolve to a user directory bundle, got {:?}",
+        loaded.source_identity
+    );
+    loaded
+}
+
+/// Intake at the trait entry: a user bundle with no current apply refuses under
+/// the default `ir-only`, before any graph is built or any row is written.
+///
+/// Mutation this fails on: dropping the `ir-only` no-apply arm from
+/// `start_preset_entry` — the entry then runs the YAML bundle the gate exists
+/// to refuse, and the run is admitted as a document it never applied.
+#[tokio::test]
+async fn preset_entry_refuses_a_no_apply_user_bundle_under_ir_only() {
+    let (pool, _db) = fresh_pool().await;
+    let (_, mut engine) = fresh_engine(pool.clone());
+    let home = tempfile::tempdir().unwrap();
+    // No `[strategy_intake]` key at all: the documented default is `ir-only`.
+    let loaded = user_bundle_preset(home.path(), "ir-only-probe");
+    engine.set_nexus_home(home.path().to_path_buf());
+    // An installed source that answers "no current apply" for this strategy.
+    engine.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "some-other-strategy",
+        identity: AppliedRunIdentity {
+            apply_id: "apl_unused".to_string(),
+            content_hash: "blake3:unused".to_string(),
+        },
+        document: applied_probe_document("some-other-strategy"),
+    }));
+
+    let refused = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .expect_err("ir-only must refuse a user bundle with no current apply");
+    let reason = refused.to_string();
+    assert!(
+        reason.contains("yaml_intake_disabled"),
+        "the refusal must name the intake refusal: {reason}"
+    );
+    assert!(
+        reason.contains("ir-only"),
+        "the refusal must name the mode that refused: {reason}"
+    );
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
+        .fetch_one(&*pool)
+        .await
+        .expect("count rows");
+    assert_eq!(rows, 0, "the refusal must happen before a run row exists");
+}
+
+/// The intake key governs user bundles only: an embedded preset starts under a
+/// config value that would refuse a user bundle at the same entry, and records
+/// no intake mode.
+///
+/// Mutation this fails on: reading the key (or applying the `ir-only` no-apply
+/// arm) without the `is_user_strategy_bundle` classification — every embedded
+/// run would then be gated on an operator key that does not name it.
+#[tokio::test]
+async fn preset_entry_does_not_gate_an_embedded_preset() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, mut engine) = fresh_engine(pool);
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join("config.toml"),
+        "[strategy_intake]\nmode = \"bogus\"\n",
+    )
+    .expect("home config");
+    engine.set_nexus_home(home.path().to_path_buf());
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded =
+        nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
+
+    let sid = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .expect("an embedded preset never consults the intake key");
+    let record = storage
+        .load_run(&sid)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    let descriptor = record.descriptor.expect("v1 descriptor");
+    assert!(
+        descriptor.intake_mode.is_none(),
+        "an embedded run records no intake mode, got {:?}",
+        descriptor.intake_mode
+    );
+}
+
+/// An engine with no configured home has no operator key to read, so it takes
+/// the documented missing-file default instead of probing the process CWD.
+///
+/// Mutation this fails on: passing `Path::new("")` for a missing home — the
+/// read then joins onto the process CWD, where an unrelated `config.toml` can
+/// select `yaml-only` (admitting the YAML bundle this test expects refused) or
+/// refuse with `intake_config_invalid` naming a file the operator never set.
+#[tokio::test]
+async fn preset_entry_without_a_home_takes_ir_only() {
+    let (pool, _db) = fresh_pool().await;
+    let (_, engine) = fresh_engine(pool);
+    let home = tempfile::tempdir().unwrap();
+    // A config the home-less engine does not know about; it must not be read.
+    std::fs::write(
+        home.path().join("config.toml"),
+        "[strategy_intake]\nmode = \"yaml-only\"\n",
+    )
+    .expect("home config");
+    let loaded = user_bundle_preset(home.path(), "home-less-probe");
+
+    let refused = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .expect_err("a home-less engine must take the ir-only default");
+    let reason = refused.to_string();
+    assert!(
+        reason.contains("yaml_intake_disabled"),
+        "the absent home must not fall through to the YAML arm: {reason}"
+    );
+}
+
+/// Restart recovery over a trait-entry run: a successor apply is refused, the
+/// admitted apply is rebuilt.
+///
+/// The run was admitted through `start_session_with_preset`, so its descriptor
+/// froze apply A and its position is the applied document's entry node. A
+/// restarted engine whose source answers with a successor apply B must keep the
+/// run non-replayable (the `(descriptor.applied.as_ref(), applied)` match in
+/// `reconstruct_runner`) and leave the durable position
+/// alone. A restarted engine whose source still answers A rebuilds the applied
+/// document — proven by one step landing on `applied_only_probe`, a node id the
+/// loaded bundle does not declare.
+#[tokio::test]
+async fn preset_entry_recovery_refuses_a_successor_and_rebuilds_the_admitted_apply() {
+    let (pool, _db) = fresh_pool().await;
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded =
+        nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
+    let admitted = AppliedRunIdentity {
+        apply_id: "apl_entry".to_string(),
+        content_hash: "blake3:entry".to_string(),
+    };
+    let successor = AppliedRunIdentity {
+        apply_id: "apl_entry_successor".to_string(),
+        content_hash: "blake3:successor".to_string(),
+    };
+
+    let (storage, mut engine) = fresh_engine(pool.clone());
+    engine.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "novel-writing",
+        identity: admitted.clone(),
+        document: applied_probe_document("novel-writing"),
+    }));
+    let sid = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .expect("start_session_with_preset");
+
+    // ── Restart with a successor apply: the guard refuses, naming both. ──
+    let (_, mut restarted) = fresh_engine(pool.clone());
+    restarted.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "novel-writing",
+        identity: successor.clone(),
+        document: applied_probe_document("novel-writing"),
+    }));
+    let refused = restarted
+        .ensure_recovered_runner_inner(&sid)
+        .await
+        .expect_err("a run whose admitted apply gained a successor must not be recovered");
+    let reason = refused.to_string();
+    assert!(
+        reason.contains(&admitted.apply_id),
+        "the refusal must name the apply the run was admitted under: {reason}"
+    );
+    assert!(
+        reason.contains(&successor.apply_id),
+        "the refusal must name the apply that replaced it: {reason}"
+    );
+    assert_applied_entry(&storage, &sid, &admitted).await;
+
+    // ── Restart with the admitted apply still current: rebuild and drive. ──
+    let (_, mut recovered) = fresh_engine(pool.clone());
+    recovered.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "novel-writing",
+        identity: admitted.clone(),
+        document: applied_probe_document("novel-writing"),
+    }));
+    recovered
+        .ensure_recovered_runner_inner(&sid)
+        .await
+        .expect("the admitted apply is still current, so the run must be rebuilt");
+    recovered
+        .run_step(&sid)
+        .await
+        .expect("the rebuilt run must execute the applied document's entry node");
+    let session = storage
+        .get(&sid.0)
+        .await
+        .expect("session read")
+        .expect("row");
+    assert_eq!(
+        session.current_task_id, APPLIED_ONLY_PROBE,
+        "the rebuilt graph must carry the applied-only node; got {:?}",
+        session.current_task_id
+    );
 }

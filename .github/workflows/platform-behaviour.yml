@@ -160,7 +160,9 @@ jobs:
     needs: changes
     if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.desktop == 'true'
     runs-on: macos-latest
-    timeout-minutes: 30
+    # The addon staged below compiles the Rust workspace from cold on this
+    # runner; 30 minutes cancelled the job mid-compile rather than in a test.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -183,6 +185,15 @@ jobs:
           pnpm --filter @42ch/nexus-native run build
           pnpm --dir apps/nexus-service run build
           pnpm --dir apps/desktop-electron run build
+
+      - name: Stage the native addon
+        # The connection store and both config writers publish through the native
+        # publisher, so a checkout without the staged `.node` makes every write
+        # refuse. The artifact is gitignored; building it here is what makes this
+        # job test publication rather than the absence of a binding.
+        run: |
+          node packages/nexus-native/scripts/build.mjs
+          test -s packages/nexus-native-darwin-arm64/native/nexus_core_node.node
 
       - name: Run desktop clean-home tests
         run: node --test apps/desktop-electron/tests/*.test.mjs

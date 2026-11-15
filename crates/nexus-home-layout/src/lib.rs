@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 pub mod active_context;
 pub mod config_lock;
 pub mod device_id;
+pub mod strategy_intake;
 
 pub use active_context::MemoryProviderConfig;
 
@@ -33,12 +34,15 @@ const NEXUS_DIR: &str = ".nexus42";
 /// └── rules/               (user writing-craft rules)
 /// ```
 ///
-/// If `config.toml` does not exist, an empty default is written so that
-/// subsequent config reads succeed without error.
+/// If `config.toml` does not exist, an empty default is published through the
+/// same atomic publisher every other writer uses
+/// ([`config_lock::publish_document`]), so a failed first publication leaves no
+/// document and no staging residue instead of exposing a truncated skeleton.
 ///
 /// # Errors
 ///
-/// Returns an I/O error if directory creation or config file write fails.
+/// Returns an I/O error if directory creation or config publication fails. A
+/// failed publication is never swallowed and never reported as success.
 pub fn ensure_system_layout(nexus_home: &Path) -> std::io::Result<()> {
     // Create the nexus home root if missing
     std::fs::create_dir_all(nexus_home)?;
@@ -65,7 +69,7 @@ pub fn ensure_system_layout(nexus_home: &Path) -> std::io::Result<()> {
         tests::after_existence_check(nexus_home);
         let _lock = config_lock::acquire(nexus_home)?;
         if !toml_path.exists() && !json_path.exists() {
-            std::fs::write(&toml_path, "")?;
+            config_lock::publish_document(nexus_home, "")?;
         }
     }
 
@@ -1360,6 +1364,77 @@ mod tests {
         assert!(
             stored.contains("ctr_kept"),
             "the committed document was overwritten by the empty skeleton"
+        );
+    }
+
+    /// A failure after the staging file exists must not be reported as a
+    /// published skeleton: the startup writer propagates the error, leaves no
+    /// `config.toml` and no staging residue, and releases its own lock.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_first_publication_leaves_no_skeleton_and_no_residue() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let _serial = config_lock::STAGING_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+
+        let (arrived, arrival) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        {
+            let mut slot = config_lock::AFTER_STAGING
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            assert!(slot.is_none(), "no other test armed the rendezvous");
+            *slot = Some((home.clone(), arrived, released));
+        }
+
+        let boot = {
+            let home = home.clone();
+            std::thread::spawn(move || ensure_system_layout(&home))
+        };
+
+        arrival
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the startup writer reached the staging boundary");
+        // The staged file disappears under the publisher, so the rename is the
+        // failing operation: the skeleton is never published.
+        let staging: Vec<_> = std::fs::read_dir(&home)
+            .expect("home listing")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with(".nexus42-"))
+            })
+            .collect();
+        assert_eq!(staging.len(), 1, "exactly one staging directory exists");
+        std::fs::remove_file(staging[0].join("config.toml"))
+            .expect("the staged file was removed at the boundary");
+        release.send(()).expect("release the startup writer");
+
+        let error = boot
+            .join()
+            .expect("boot thread")
+            .expect_err("a failed publication is not reported as success");
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
+        assert!(
+            !home.join("config.toml").exists(),
+            "the failed first publication published no skeleton"
+        );
+        let residue: Vec<_> = std::fs::read_dir(&home)
+            .expect("home listing")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(".nexus42-"))
+            .collect();
+        assert!(residue.is_empty(), "staging residue remains: {residue:?}");
+        assert!(
+            !home.join("config.toml.lock").exists(),
+            "the startup writer released its own lock"
         );
     }
 }

@@ -93,10 +93,28 @@ fn release(path: &Path, token: &str) {
 
 /// Publish the complete `config.toml` document atomically.
 ///
+/// The fixed-`config.toml` caller of [`publish_document_at`]; every daemon-home
+/// writer goes through this form.
+///
+/// # Errors
+/// The same refusals [`publish_document_at`] documents: the I/O error that
+/// prevented the authorization probe, the policy capture or application, the
+/// write, the sync or the rename.
+pub fn publish_document(nexus_home: &Path, contents: &str) -> std::io::Result<()> {
+    publish_document_at(&nexus_home.join("config.toml"), contents)
+}
+
+/// Publish a complete document at `requested_path` atomically.
+///
+/// The general form of [`publish_document`]: the same probe, policy capture,
+/// sealed staging and ordered reapplication, for a target that is not the
+/// daemon-home `config.toml` (the per-agent-host document and the encrypted
+/// connection store reach it through the native `publishDocument` export).
+///
 /// I-000291: readers must see one whole document without taking the lock or
 /// writing anything, so an already-provisioned but not writable `.nexus42` can
 /// still serve a `ReadOnly` open. Writing a sibling staging file and renaming it
-/// over `config.toml` makes the replacement atomic: a reader opens either the
+/// over the target makes the replacement atomic: a reader opens either the
 /// previous complete version or the new one, never a truncated document that
 /// would read as "no `[memory_provider]`" (the implicit local default).
 ///
@@ -127,13 +145,16 @@ fn release(path: &Path, token: &str) {
 ///
 /// # Errors
 /// The I/O error that prevented the policy capture, the authorization check, the
-/// write, the sync, the policy application or the rename. The staged file and its
-/// directory are removed on every failure path; when that cleanup also fails, the
-/// returned error keeps the original kind and names every leftover path instead
-/// of discarding the cleanup failure.
-pub fn publish_document(nexus_home: &Path, contents: &str) -> std::io::Result<()> {
-    let requested = nexus_home.join("config.toml");
-    let target = resolve_publication_target(&requested)?;
+/// write, the sync, the policy application or the rename. Every deliberate
+/// refusal — a write-denied target, an unreproducible policy, a hard link, a
+/// non-regular document, a symlink chain longer than [`MAX_SYMLINK_HOPS`] — uses
+/// `ErrorKind::PermissionDenied`, which the native binding maps to `forbidden`;
+/// any other kind is a transient failure reported as `internal`. The staged file
+/// and its directory are removed on every failure path; when that cleanup also
+/// fails, the returned error keeps the original kind and names every leftover
+/// path instead of discarding the cleanup failure.
+pub fn publish_document_at(requested_path: &Path, contents: &str) -> std::io::Result<()> {
+    let target = resolve_publication_target(requested_path)?;
     let existing = existing_document(&target)?;
 
     if existing.is_some() {
@@ -141,10 +162,13 @@ pub fn publish_document(nexus_home: &Path, contents: &str) -> std::io::Result<()
         // would silently detach that path instead of updating it. The count is
         // read natively on every platform, and an indeterminate count refuses.
         if nexus_config_metadata::link_count(&target)? > 1 {
-            return Err(std::io::Error::other(format!(
-                "refusing to replace the hard-linked document {}",
-                target.display()
-            )));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "refusing to replace the hard-linked document {}",
+                    target.display()
+                ),
+            ));
         }
         // Retain the previous write boundary: the rename is authorized by the
         // directory and must not replace a document this process may not write.
@@ -159,7 +183,7 @@ pub fn publish_document(nexus_home: &Path, contents: &str) -> std::io::Result<()
     // The staging directory must share the target's directory: a symlinked
     // document can live outside the nexus home, and a cross-filesystem rename
     // would not be atomic (or would fail outright).
-    let parent = target.parent().unwrap_or(nexus_home);
+    let parent = target.parent().unwrap_or(requested_path);
     let staging = nexus_config_metadata::create_staging(
         &parent.join(format!(".nexus42-{}.tmp", uuid::Uuid::new_v4())),
     )?;
@@ -244,13 +268,21 @@ fn stage_document(
 }
 
 /// The existing document's metadata, refusing a path that is not a regular file.
+///
+/// `PermissionDenied` is the kind every policy refusal of this module shares: the
+/// native binding maps that one kind to `forbidden`, and any other kind is a
+/// transient filesystem failure reported as `internal`. Replacing a FIFO or a
+/// device is a permanent property of the target, not a retryable fault.
 fn existing_document(target: &Path) -> std::io::Result<Option<std::fs::Metadata>> {
     match std::fs::symlink_metadata(target) {
         Ok(metadata) if metadata.file_type().is_file() => Ok(Some(metadata)),
-        Ok(_) => Err(std::io::Error::other(format!(
-            "refusing to replace the non-regular document {}",
-            target.display()
-        ))),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "refusing to replace the non-regular document {}",
+                target.display()
+            ),
+        )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
@@ -272,7 +304,11 @@ fn resolve_publication_target(requested: &Path) -> std::io::Result<PathBuf> {
         match std::fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 if followed == MAX_SYMLINK_HOPS {
-                    return Err(std::io::Error::other(
+                    // A permanent shape refusal, not a retryable I/O fault: the
+                    // `PermissionDenied` kind is what the native binding maps to
+                    // `forbidden` (see `existing_document`).
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
                         "too many symbolic links in the config document path",
                     ));
                 }
@@ -308,12 +344,13 @@ type StagingRendezvous = (
 );
 
 #[cfg(test)]
-static AFTER_STAGING: std::sync::Mutex<Option<StagingRendezvous>> = std::sync::Mutex::new(None);
+pub(crate) static AFTER_STAGING: std::sync::Mutex<Option<StagingRendezvous>> =
+    std::sync::Mutex::new(None);
 
 /// Serializes the post-staging regressions: they share one process-wide
 /// rendezvous slot and must not arm it concurrently.
 #[cfg(test)]
-static STAGING_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static STAGING_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Test-only rendezvous after the staging file exists and before any byte is
 /// written: a regression can move the target at a real publication boundary
@@ -812,6 +849,47 @@ mod tests {
         );
     }
 
+    /// The general publication form publishes a document that is not the
+    /// daemon-home `config.toml` — the per-agent-host document and the
+    /// encrypted connection store share this implementation — and keeps the
+    /// target's policy.
+    #[cfg(unix)]
+    #[test]
+    fn an_arbitrary_target_path_is_published_and_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let directory = tmp.path().join("agent-host");
+        std::fs::create_dir_all(&directory).expect("target directory");
+        let target = directory.join("config.toml");
+        std::fs::write(&target, "name = \"old\"\n").expect("old document");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).expect("mode");
+
+        super::publish_document_at(&target, "name = \"new\"\n").expect("publish");
+
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("published document"),
+            "name = \"new\"\n"
+        );
+        let mode = std::fs::metadata(&target)
+            .expect("published metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o640, "the target policy is preserved");
+        let mut entries: Vec<_> = std::fs::read_dir(&directory)
+            .expect("directory listing")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        entries.sort();
+        assert_eq!(
+            entries,
+            ["config.toml"],
+            "only the published document remains"
+        );
+    }
+
     /// A symlinked `config.toml` is followed like the in-place write was: the
     /// link survives, the document it points at is replaced atomically, and the
     /// temporary file is created beside that document.
@@ -904,6 +982,11 @@ mod tests {
         assert!(
             error.to_string().contains("non-regular"),
             "the refusal names the document kind: {error}"
+        );
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::PermissionDenied,
+            "a permanent shape refusal maps to `forbidden`, never to a transient internal fault"
         );
         let mut entries: Vec<_> = std::fs::read_dir(&home)
             .expect("home listing")
@@ -1021,6 +1104,11 @@ mod tests {
         assert!(
             error.to_string().contains("hard-linked"),
             "the refusal names the hard link: {error}"
+        );
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::PermissionDenied,
+            "a permanent shape refusal maps to `forbidden`, never to a transient internal fault"
         );
         assert_eq!(
             std::fs::read_to_string(&path).expect("document"),
@@ -1289,8 +1377,13 @@ mod tests {
         .expect("document");
         chain(&beyond, super::MAX_SYMLINK_HOPS + 1);
 
-        let _error = super::publish_document(&beyond, "active_creator_id = \"ctr_new\"\n")
+        let error = super::publish_document(&beyond, "active_creator_id = \"ctr_new\"\n")
             .expect_err("one hop past the limit is refused");
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::PermissionDenied,
+            "a permanent shape refusal maps to `forbidden`, never to a transient internal fault"
+        );
         assert_eq!(
             std::fs::read_to_string(beyond.join("real.toml")).expect("document"),
             "active_creator_id = \"ctr_old\"\n",

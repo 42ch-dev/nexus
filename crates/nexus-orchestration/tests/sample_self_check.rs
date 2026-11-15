@@ -26,8 +26,8 @@
 //!    keeps it green while a retargeted edge still fails.
 //! 5. Each sample's hand-edited `workflow.json` loads back into a document whose `assets[]`
 //!    declares exactly the templates its carriers reference — one entry per `path`, each `id`
-//!    naming the file that path hashes — and that exports the same manifest as its committed
-//!    `preset.yaml`.
+//!    naming the file that path hashes — and that exports the committed `preset.yaml` byte for
+//!    byte, so a regenerated manifest (`nexus42 preset export <dir>`) is the only green state.
 //!
 //! The bundles live at the repo root; this crate resolves them via
 //! `CARGO_MANIFEST_DIR` so the test passes regardless of the invoking working
@@ -403,12 +403,13 @@ fn first_workflow_committed_yaml_round_trips() {
 /// Load one hand-edited `workflow.json`, check that `assets[]` declares exactly the templates the
 /// carriers reference and that each `id` names the file it hashes, refuses any asset path that
 /// leaves the bundle, hashes each of them over the bytes it names, then assert the manifest it
-/// exports equals the committed `preset.yaml`.
+/// exports is the committed `preset.yaml`, byte for byte.
 ///
-/// The JSON is the authoring source, so the manifest equality — not the file's existence — is the
-/// acceptance for everything `export_preset` projects: a member dropped by hand changes the export
-/// at a named YAML path. `assets[]` is not projected (export re-derives templates from the
-/// carriers), so it is compared against those carriers above instead.
+/// The JSON is the authoring source, so the byte equality — not the file's existence — is the
+/// acceptance for everything `export_preset` projects: a member changed by hand, or a formatting
+/// drift, changes the bytes and reds with the export command in the message. `assets[]` is not
+/// projected (export re-derives templates from the carriers), so it is compared against those
+/// carriers above instead.
 fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
     let root = repo_root().join(bundle);
     let json = std::fs::read_to_string(root.join("workflow.json"))
@@ -467,21 +468,36 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
         );
     }
 
+    // The committed bytes must be exactly what `nexus42 preset export <dir>` writes —
+    // not merely the same values — so a hand edit or a formatting drift reds here.
     let exported = export_preset(&document)
         .unwrap_or_else(|error| panic!("export {bundle}/workflow.json: {error}"));
-    let exported: Value = serde_yaml::to_value(&exported)
+    let exported_yaml = serde_yaml::to_string(&exported)
         .unwrap_or_else(|error| panic!("serialize the {bundle}/workflow.json export: {error}"));
-    let yaml = std::fs::read_to_string(root.join("preset.yaml"))
+    let committed = std::fs::read(root.join("preset.yaml"))
         .unwrap_or_else(|error| panic!("read {bundle}/preset.yaml: {error}"));
-    let committed: Value = serde_yaml::from_str(&yaml)
-        .unwrap_or_else(|error| panic!("parse {bundle}/preset.yaml as YAML: {error}"));
 
-    if let Some(path) = first_divergence("", &committed, &exported) {
+    if exported_yaml.as_bytes() != committed.as_slice() {
+        let detail = value_divergence_detail(bundle, &exported, &committed);
         panic!(
-            "`{bundle}/workflow.json` exports a manifest that differs from the committed \
-             `preset.yaml` at `{path}`: the JSON is missing or changes that member"
+            "`{bundle}/workflow.json` exports bytes that differ from the committed \
+             `preset.yaml`{detail}. Regenerate the manifest with `nexus42 preset export \
+             {bundle}`"
         );
     }
+}
+
+/// Diagnostic for a byte divergence: the first value-level divergence, when the YAML values
+/// disagree at all. A pure formatting drift has no value divergence, so this is empty.
+fn value_divergence_detail(bundle: &str, exported: &PresetManifest, committed: &[u8]) -> String {
+    let committed_yaml = String::from_utf8_lossy(committed);
+    let committed_value: Value = serde_yaml::from_str(&committed_yaml)
+        .unwrap_or_else(|error| panic!("parse {bundle}/preset.yaml as YAML: {error}"));
+    let exported_value = serde_yaml::to_value(exported)
+        .unwrap_or_else(|error| panic!("serialize the {bundle}/workflow.json export: {error}"));
+    first_divergence("", &committed_value, &exported_value).map_or_else(String::new, |path| {
+        format!(" (first value divergence: `{path}`)")
+    })
 }
 
 #[test]

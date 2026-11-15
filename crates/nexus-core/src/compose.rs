@@ -906,7 +906,7 @@ pub fn document_unbound_slots(
 
 /// One `{id, version, content_hash}` pin an approval freezes.
 #[cfg(feature = "execution")]
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResolvedPatternPin {
     pub id: String,
     pub version: String,
@@ -962,6 +962,145 @@ fn collect_resolved_pins(
             collect_resolved_pins(fragment, packages, seen, pins);
         }
     }
+}
+
+/// Why a frozen pin snapshot no longer agrees with the registry the document runs from.
+#[cfg(feature = "execution")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PinVerificationFailure {
+    /// The registry now serves bytes that do not hash to the pin the document recorded.
+    Changed {
+        /// The nest that pins the package.
+        nest_id: String,
+        /// The pinned package.
+        package: PatternPackageRef,
+        /// The hash the document recorded.
+        recorded_hash: String,
+        /// The hash the registry now serves.
+        scanned_hash: String,
+    },
+    /// The registry does not resolve a pin the document records, so there are no bytes to compare.
+    Unavailable {
+        /// The nest that pins the package.
+        nest_id: String,
+        /// The pinned package.
+        package: PatternPackageRef,
+        /// The hash the document recorded.
+        recorded_hash: String,
+    },
+    /// The recorded snapshot cannot be compared at all: it does not decode, it disagrees with the
+    /// document it was frozen beside, or the registry itself cannot be read.
+    SnapshotMismatch {
+        /// What could not be compared, and why.
+        detail: String,
+    },
+}
+
+/// Confirm the pins an approval froze against the registry the document will now be read from.
+///
+/// The document hash freezes the document's own bytes, not the pattern bodies it pins, so a body
+/// edited under an unchanged `id@version` passes every hash check. This is that second, narrower
+/// guard: the recorded `pins_json` is compared with the registry as it reads now.
+///
+/// An empty recorded set is answered without reading the registry, but only for a document that
+/// names no pattern package at all: that is what keeps a no-pin replay off the patterns root. A
+/// document that does name one refuses, because a carrier with no recorded hash can still load a
+/// fragment that pins packages, and an empty snapshot cannot be compared with them.
+///
+/// A nonempty recorded set may legitimately carry nested pins (pins a pinned fragment
+/// records), so the full resolved set is compared, not the document's own nests.
+///
+/// # Errors
+///
+/// The first pin the registry cannot confirm, or the recorded snapshot's disagreement with its own
+/// document.
+#[cfg(feature = "execution")]
+pub fn verify_recorded_pins(
+    document: &WorkflowDocument,
+    recorded: &[ResolvedPatternPin],
+    packages: &[PatternPackage],
+) -> Result<(), PinVerificationFailure> {
+    if recorded.is_empty() {
+        // No registry read: the shortcut is reserved for a document that names no pattern package
+        // at all. A carrier with no recorded hash is refused here rather than cleared, because the
+        // fragment it loads can pin packages the empty snapshot never recorded — deciding it pins
+        // nothing would mean reading the registry the shortcut exists to avoid.
+        for nest in &document.nests {
+            let Some(pin) = pinned_pattern(&nest.child) else {
+                continue;
+            };
+            let detail = if nest.child.content_hash.is_some() {
+                format!(
+                    "the document pins `{}@{}` but the approval recorded no pins",
+                    pin.id, pin.version
+                )
+            } else {
+                format!(
+                    "the document pins `{}@{}` with no recorded hash, so the pins its fragment \
+                     loads cannot be compared against an empty snapshot",
+                    pin.id, pin.version
+                )
+            };
+            return Err(PinVerificationFailure::SnapshotMismatch { detail });
+        }
+        return Ok(());
+    }
+    let (_, diagnostics) = document_bodies(document, packages);
+    for finding in diagnostics {
+        match finding {
+            ComposeDiagnostic::StalePin {
+                nest_id,
+                package,
+                recorded_hash,
+                scanned_hash,
+            } => {
+                return Err(PinVerificationFailure::Changed {
+                    nest_id,
+                    package,
+                    recorded_hash,
+                    scanned_hash,
+                })
+            }
+            ComposeDiagnostic::PinUnavailable {
+                nest_id,
+                package,
+                recorded_hash,
+                ..
+            } => {
+                return Err(PinVerificationFailure::Unavailable {
+                    nest_id,
+                    package,
+                    recorded_hash,
+                })
+            }
+            ComposeDiagnostic::UnboundRequiredSlot { .. }
+            | ComposeDiagnostic::DroppedSlotBinding { .. } => {}
+        }
+    }
+    let scanned = resolved_pins(document, packages);
+    let (recorded_set, scanned_set) = (pin_set(recorded), pin_set(&scanned));
+    if recorded_set != scanned_set {
+        return Err(PinVerificationFailure::SnapshotMismatch {
+            detail: format!(
+                "the approval recorded pins [{}] but the document pins [{}]",
+                recorded_set.join(", "),
+                scanned_set.join(", ")
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// A pin set as sorted `id@version=hash` labels, so the comparison is by value and order-free.
+#[cfg(feature = "execution")]
+fn pin_set(pins: &[ResolvedPatternPin]) -> Vec<String> {
+    let mut labels: Vec<String> = pins
+        .iter()
+        .map(|pin| format!("{}@{}={}", pin.id, pin.version, pin.content_hash))
+        .collect();
+    labels.sort();
+    labels.dedup();
+    labels
 }
 
 /// What flattening would lose silently: body-level declarations a moved child still refers to, and

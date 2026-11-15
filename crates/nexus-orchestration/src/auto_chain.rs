@@ -1418,6 +1418,7 @@ fn enqueue_descriptor_json(
         parent_session_id: None,
         graph_name: None,
         applied: None,
+        intake_mode: None,
     };
     serde_json::to_vec(&descriptor)
         .map_err(|e| AutoChainError::InvalidState(format!("descriptor serialization failed: {e}")))

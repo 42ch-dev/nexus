@@ -1,7 +1,11 @@
 //! `nexus42 preset` — canonical preset CLI group (PL-5, AR-24, AR-25).
 //!
 //! Top-level developer-facing surface for presets:
-//! `list|show|validate|scaffold|trigger|patch`.
+//! `list|show|validate|export|scaffold|import|trigger|patch`.
+//!
+//! - `export <dir>` rewrites a bundle's `preset.yaml` from its
+//!   `workflow.json` through `nexus_preset::export_preset` — the committed
+//!   manifest is that command's output, never a second projection.
 //!
 //! - `validate <path>` is the positional local validator
 //!   (`validate_preset_local`, moved here from `system`; V1.153 P3). It runs
@@ -14,6 +18,10 @@
 //! - `run` was removed in v1.193 P1-T1: it only forwarded into
 //!   `creator run`'s daemon-API path and had no complete direct core
 //!   operation of its own (PL-5).
+//! - `import <dir>` turns an external partner bundle into this workspace's
+//!   revision-1 strategy candidate (`CoreService::import_strategy_candidate`),
+//!   printing that candidate plus the trajectory Approve accepts. The bundle is
+//!   read in place through the one YAML→IR converter; nothing is copied.
 //! - `show <id>` prints the AR-20 profile (`CoreService::get_preset_profile`)
 //!   with lanes + orchestration fields; declared signals are labeled
 //!   **Declared, not delivered** (AR-25, locked trigger-lane vocabulary).
@@ -85,6 +93,11 @@ pub enum PresetCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+    /// Rewrite a bundle's preset.yaml from its workflow.json (the only export)
+    Export {
+        /// Bundle directory holding `workflow.json`; `preset.yaml` is written beside it
+        path: String,
+    },
     /// Generate a strategy bundle from templates
     Scaffold {
         /// Name for the new user preset
@@ -92,6 +105,16 @@ pub enum PresetCommand {
         /// Emit machine-readable JSON
         #[arg(long, default_value_t = false)]
         json: bool,
+    },
+    /// Import an external bundle as this workspace's strategy candidate
+    ///
+    /// Reads `preset.yaml` and its assets through the one bundle converter,
+    /// validates and simulates the prospective revision-1 document, and commits
+    /// it through the same CAS every compose operation uses. Prints the
+    /// candidate together with the trajectory Approve accepts verbatim.
+    Import {
+        /// Path to the bundle directory that holds `preset.yaml`
+        dir: String,
     },
     /// Print trigger-lane classification only (never cron authoring)
     Trigger {
@@ -127,7 +150,9 @@ pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
         PresetCommand::List { intent, json } => list_presets(config, intent.as_deref(), json).await,
         PresetCommand::Show { id, json } => show_preset(config, &id, json).await,
         PresetCommand::Validate { path, json } => validate_preset(&path, json),
+        PresetCommand::Export { path } => export_bundle_preset(&path),
         PresetCommand::Scaffold { name, json } => scaffold_preset(config, &name, json).await,
+        PresetCommand::Import { dir } => import_bundle(config, &dir).await,
         PresetCommand::Trigger { id, json } => trigger_preset(config, &id, json).await,
         PresetCommand::Patch { command } => patch::run(command, config).await,
     }
@@ -288,6 +313,53 @@ async fn scaffold_preset(config: &CliConfig, name: &str, json: bool) -> Result<(
     } else {
         println!("Scaffolded preset '{}' at {}", resp.id, resp.path);
     }
+    Ok(())
+}
+
+/// Import an external bundle as this workspace's revision-1 strategy candidate.
+///
+/// The printed trajectory is the simulation of the bytes that were stored, so it can be handed to
+/// the Approve route unchanged: recomputing it at the call site is how a candidate and its
+/// approval evidence drift apart.
+async fn import_bundle(config: &CliConfig, dir: &str) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.import_strategy_candidate(&principal, std::path::Path::new(dir))
+            .await
+            .map_err(map_core_error)
+    }
+    .await;
+    let imported = finish_direct(&core, outcome).await?;
+
+    println!("{}", serde_json::to_string_pretty(&imported)?);
+    Ok(())
+}
+
+/// Regenerate `<dir>/preset.yaml` from `<dir>/workflow.json`.
+///
+/// The written bytes are [`nexus_preset::export_preset`]'s projection and
+/// nothing else, so a committed manifest is reproducible by this command
+/// instead of hand-maintained. Nothing is written until the document has
+/// loaded and projected, so a refused run leaves the previous `preset.yaml`
+/// untouched.
+fn export_bundle_preset(path: &str) -> Result<()> {
+    let bundle = std::path::Path::new(path);
+    let document_path = bundle.join("workflow.json");
+    let json = std::fs::read_to_string(&document_path)
+        .map_err(|error| CliError::Other(format!("read {}: {error}", document_path.display())))?;
+    let document: WorkflowDocument = serde_json::from_str(&json)?;
+    let manifest = nexus_preset::export_preset(&document)
+        .map_err(|error| CliError::Other(format!("export {}: {error}", document_path.display())))?;
+    let manifest_path = bundle.join("preset.yaml");
+    let yaml = serde_yaml::to_string(&manifest).map_err(|error| {
+        CliError::Other(format!(
+            "serialize the {} export: {error}",
+            document_path.display()
+        ))
+    })?;
+    std::fs::write(&manifest_path, yaml)?;
+    println!("Wrote {}", manifest_path.display());
     Ok(())
 }
 

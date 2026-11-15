@@ -13,6 +13,8 @@
  */
 import assert from 'node:assert/strict';
 import {
+  chmodSync,
+  chownSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -42,6 +44,16 @@ const toPlainToml = (value) =>
       : value;
 const parseToml = (path) =>
   toPlainToml(parse(readText(path), { integersAsBigInt: 'asNeeded' }));
+
+/**
+ * A group this process may assign that differs from its effective gid, or null
+ * when it belongs to no other group. Without one a staged-and-renamed file
+ * always inherits the process egid, so a captured-group assertion cannot fail.
+ */
+function foreignGroup() {
+  const egid = process.getegid?.();
+  return process.getgroups?.().find((gid) => gid !== egid) ?? null;
+}
 
 function writeTomlFile(path, text) {
   mkdirSync(dirname(path), { recursive: true });
@@ -547,4 +559,71 @@ test('a release never unlinks a lock that only ends with our token', async (t) =
   } finally {
     rmSync(copyUrl, { force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Native publication: refusal and policy preservation
+// ---------------------------------------------------------------------------
+
+/**
+ * The desktop writer publishes through the native publisher, so a document the
+ * process may not write is refused instead of replaced by a rename that the
+ * directory — not the file — authorized.
+ */
+test('a write-denied document is refused and keeps its bytes', async (t) => {
+  const { home, config } = setup(t);
+  const daemon = 'active_creator_id = "ctr_locked"\n';
+  const agent = 'future_key = "keep"\n';
+  writeTomlFile(configPath(home), daemon);
+  writeTomlFile(agentPath(home), agent);
+  chmodSync(configPath(home), 0o444);
+  chmodSync(agentPath(home), 0o444);
+  try {
+    await expectCode(config.set_entrance({ value: 'developer' }), 'config_publish_refused');
+    await expectCode(config.set_agent_profile({ name: 'codex' }), 'config_publish_refused');
+  } finally {
+    chmodSync(configPath(home), 0o600);
+    chmodSync(agentPath(home), 0o600);
+  }
+
+  assert.equal(readText(configPath(home)), daemon);
+  assert.equal(readText(agentPath(home)), agent);
+  // The refused publication leaves no staging file behind.
+  assert.deepEqual(readdirSync(join(home, '.nexus42')).sort(), ['agent-host', 'config.toml']);
+  assert.deepEqual(readdirSync(join(home, '.nexus42', 'agent-host')), ['config.toml']);
+});
+
+/**
+ * A `0640` document keeps its mode and group: the publisher captures the target
+ * policy and reapplies it before the rename, so publication never silently
+ * tightens or widens access.
+ */
+test('an existing 0640 document keeps its mode and group', async (t) => {
+  const group = foreignGroup();
+  if (group === null) {
+    t.skip(
+      'no supplementary group distinct from the process egid: a captured-group assertion cannot fail here',
+    );
+    return;
+  }
+  const { home, config } = setup(t);
+  writeTomlFile(configPath(home), 'active_creator_id = "ctr_a"\n');
+  writeTomlFile(agentPath(home), 'future_key = "keep"\n');
+  const paths = [configPath(home), agentPath(home)];
+  for (const path of paths) {
+    chmodSync(path, 0o640);
+    chownSync(path, -1, group);
+    assert.equal(statSync(path).gid, group, 'the fixture group differs from the process egid');
+  }
+
+  await config.set_entrance({ value: 'developer' });
+  await config.set_agent_profile({ name: 'codex' });
+
+  for (const path of paths) {
+    const after = statSync(path);
+    assert.equal(after.mode & 0o777, 0o640, `${path} keeps its mode`);
+    assert.equal(after.gid, group, `${path} keeps its group`);
+  }
+  assert.equal(parseToml(configPath(home)).entrance, 'developer');
+  assert.equal(parseToml(agentPath(home)).future_key, 'keep');
 });

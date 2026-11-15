@@ -15,6 +15,7 @@
 import assert from 'node:assert/strict';
 import {
   chmodSync,
+  chownSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -24,8 +25,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { publishDocument, parseNativeCoreError } from '@42ch/nexus-native';
 import { ConnectionStore } from '../dist/connection-store.js';
 import { errorCode, errorMessage } from '../dist/desktop-contract.js';
 
@@ -83,6 +85,50 @@ function makeDeps(t, overrides = {}) {
 }
 
 const BASE_CONFIG = { endpointUrl: ENDPOINT, hasApiKey: true, active: true };
+
+/**
+ * Deps whose next publication is suspended until `release()`, so a regression
+ * can overlap two mutations at a real await boundary instead of a sleep.
+ */
+function holdNextPublication(t) {
+  let armed = null;
+  const deps = makeDeps(t, {
+    publish: async (path, contents) => {
+      if (armed !== null) {
+        const pending = armed;
+        armed = null;
+        pending.started();
+        await pending.released;
+      }
+      return publishDocument(path, contents);
+    },
+  });
+  return {
+    deps,
+    arm() {
+      let release = () => {};
+      let started = () => {};
+      const released = new Promise((resolve) => {
+        release = resolve;
+      });
+      const began = new Promise((resolve) => {
+        started = resolve;
+      });
+      armed = { released, started };
+      return { started: began, release };
+    },
+  };
+}
+
+/**
+ * A group this process may assign that differs from its effective gid, or null
+ * when it belongs to no other group. Without one a staged-and-renamed file
+ * always inherits the process egid, so a captured-group assertion cannot fail.
+ */
+function foreignGroup() {
+  const egid = process.getegid?.();
+  return process.getgroups?.().find((gid) => gid !== egid) ?? null;
+}
 
 // ---------------------------------------------------------------------------
 // Secret isolation
@@ -785,4 +831,175 @@ test('store directory and file use 0700/0600', async (t) => {
   const fileMode = statSync(deps.filePath).mode & 0o777;
   assert.equal(dirMode, 0o700);
   assert.equal(fileMode, 0o600);
+});
+
+// ---------------------------------------------------------------------------
+// Native publication: refusal and policy preservation
+// ---------------------------------------------------------------------------
+
+test('a write-denied store refuses, keeps ciphertext and state, and never leaks the key', async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip('EACCES cannot be simulated for the superuser');
+    return;
+  }
+  const deps = makeDeps(t);
+  const store = await ConnectionStore.open(deps);
+  await store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-live-secret' });
+  const before = readFileSync(deps.filePath);
+  chmodSync(deps.filePath, 0o444);
+
+  const logged = [];
+  const originalError = console.error;
+  console.error = (...args) => logged.push(args.map(String).join(' '));
+  let error;
+  let wire;
+  try {
+    error = await store
+      .set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-next-secret' })
+      .then(
+        () => null,
+        (rejection) => rejection,
+      );
+    // The envelope the store wraps must be content-free too: a future
+    // regression that put the key in `details` would pass a message-only
+    // assertion.
+    wire = await publishDocument(deps.filePath, '{"credential":"sk-envelope-secret"}').then(
+      () => null,
+      (rejection) => parseNativeCoreError(rejection),
+    );
+  } finally {
+    console.error = originalError;
+    chmodSync(deps.filePath, 0o600);
+  }
+
+  assert.ok(error, 'a write-denied store must be refused');
+  assert.equal(errorCode(error), 'secure_store_publish_refused');
+  assert.deepEqual(readFileSync(deps.filePath), before, 'the previous ciphertext survives');
+  assert.equal(store.getAuth()?.apiKey, 'sk-live-secret', 'the in-memory state survives');
+  const surfaces = [errorMessage(error), ...logged].join('\n');
+  assert.ok(!surfaces.includes('sk-live-secret'), 'the stored plaintext key never surfaces');
+  assert.ok(!surfaces.includes('sk-next-secret'), 'the refused plaintext key never surfaces');
+  assert.equal(wire?.code, 'forbidden', 'the native refusal is a policy refusal');
+  // An empty `details` is not serialised at all, so absence and `{}` both mean
+  // content-free; a populated one fails here.
+  assert.deepEqual(wire?.details ?? {}, {}, 'the refusal envelope carries no details');
+  assert.ok(
+    !JSON.stringify(wire).includes('sk-envelope-secret'),
+    'the envelope never echoes the contents',
+  );
+});
+
+test('an existing 0640 store keeps its mode and group on set', async (t) => {
+  const group = foreignGroup();
+  if (group === null) {
+    t.skip(
+      'no supplementary group distinct from the process egid: a captured-group assertion cannot fail here',
+    );
+    return;
+  }
+  const deps = makeDeps(t);
+  const store = await ConnectionStore.open(deps);
+  await store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-1' });
+  chmodSync(deps.filePath, 0o640);
+  chownSync(deps.filePath, -1, group);
+  assert.equal(statSync(deps.filePath).gid, group, 'the fixture group differs from the process egid');
+
+  await store.set({ ...BASE_CONFIG }, { action: 'keep' });
+
+  const after = statSync(deps.filePath);
+  assert.equal(after.mode & 0o777, 0o640, 'the captured mode is reapplied');
+  assert.equal(after.gid, group, 'the captured group is reapplied');
+  assert.equal(store.getAuth()?.apiKey, 'sk-1');
+});
+
+// A directory occupying the tombstone path makes the marker publication refuse
+// on every platform while the store file itself stays removable — the shape in
+// which the removal order is directly observable.
+function blockMarker(t) {
+  const deps = makeDeps(t);
+  mkdirSync(join(dirname(deps.filePath), 'connection-config.cleared'));
+  return deps;
+}
+
+test('a refused cleared marker reports secure_store_publish_refused and keeps the store', async (t) => {
+  const deps = blockMarker(t);
+  const store = await ConnectionStore.open(deps);
+  await store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-live-secret' });
+
+  const error = await store.delete().then(
+    () => null,
+    (rejection) => rejection,
+  );
+
+  assert.ok(error, 'a refused marker publication must be reported');
+  assert.equal(errorCode(error), 'secure_store_publish_refused');
+  assert.equal(existsSync(deps.filePath), true, 'the encrypted store is still in place');
+  assert.equal(store.getAuth()?.apiKey, 'sk-live-secret', 'the clear is not reported as done');
+  assert.ok(!errorMessage(error).includes('sk-'), 'the refusal names no secret');
+});
+
+test('after a refused clear the next open loads the store and imports no legacy material', async (t) => {
+  const deps = blockMarker(t);
+  const store = await ConnectionStore.open(deps);
+  await store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-live-secret' });
+  await store.delete().catch(() => {});
+
+  let legacyReads = 0;
+  const reopened = await ConnectionStore.open({
+    ...deps,
+    readLegacy: async () => {
+      legacyReads += 1;
+      return JSON.stringify({ endpointUrl: ENDPOINT, apiKey: 'sk-legacy', active: true });
+    },
+    cleanupLegacy: async () => {},
+  });
+
+  assert.equal(legacyReads, 0, 'the preserved store owns the credential: no re-import');
+  assert.equal(
+    reopened.getAuth()?.apiKey,
+    'sk-live-secret',
+    'a refused clear does not revoke a live credential',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Mutation ordering: one gate per store
+// ---------------------------------------------------------------------------
+
+// The injected publication seam only exists in the gated store: without it
+// these two hang at `hold.started`, which the timeout turns into a failure.
+test('a completed clear is not undone by an earlier in-flight save', { timeout: 10_000 }, async (t) => {
+  const { deps, arm } = holdNextPublication(t);
+  const store = await ConnectionStore.open(deps);
+
+  const hold = arm();
+  const saving = store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-live-secret' });
+  await hold.started; // the save is suspended inside its publication
+  const clearing = store.delete();
+  hold.release();
+  await Promise.all([saving, clearing]);
+
+  assert.equal(await store.get(), null, 'the clear is the last word');
+  assert.equal(store.getAuth(), null, 'no credential is active after the clear');
+  assert.equal(existsSync(deps.filePath), false, 'the earlier save did not republish the store');
+});
+
+// The held operation must be the REPLACE: only `keep` reads the previous
+// credential, so a queued `keep` over a still-`sk-old` state is what republishes
+// the replaced key when the derivation reads state before the gate resolves.
+test('a keep queued behind a held replace retains the published key', { timeout: 10_000 }, async (t) => {
+  const { deps, arm } = holdNextPublication(t);
+  const store = await ConnectionStore.open(deps);
+  await store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-old' });
+
+  const hold = arm();
+  const replacing = store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-new' });
+  await hold.started; // the replacement is suspended inside its publication
+  const keeping = store.set({ ...BASE_CONFIG }, { action: 'keep' });
+  hold.release();
+  await Promise.all([replacing, keeping]);
+
+  assert.equal(store.getAuth()?.apiKey, 'sk-new', 'the queued keep read the published key');
+  const reopened = await ConnectionStore.open(deps);
+  assert.equal(reopened.getAuth()?.apiKey, 'sk-new', 'the published store holds the replacement');
 });

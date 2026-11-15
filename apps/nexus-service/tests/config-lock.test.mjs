@@ -1,5 +1,20 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  chownSync,
+  closeSync,
+  fstatSync,
+  openSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +41,16 @@ const configPathFor = (home) => join(home, NEXUS_DIR, CONFIG_NAME);
 const lockPathFor = (home) => join(home, NEXUS_DIR, LOCK_NAME);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * A group this process may assign that differs from its effective gid, or null
+ * when it belongs to no other group. Without one a staged-and-renamed file
+ * always inherits the process egid, so a captured-group assertion cannot fail.
+ */
+function foreignGroup() {
+  const egid = process.getegid?.();
+  return process.getgroups?.().find((gid) => gid !== egid) ?? null;
+}
 
 /** A daemon home seeded with the core-owned keys the profile write must keep. */
 function seededHome() {
@@ -275,5 +300,75 @@ describe('config.toml advisory lock (I-000065)', () => {
     } finally {
       rmSync(copyPath, { force: true });
     }
+  });
+});
+
+describe('config publication policy (native publisher)', () => {
+  let writeAgentProfile;
+
+  before(async () => {
+    assert.ok(
+      existsSync(join(serviceRoot, 'dist', 'agent-profile.js')),
+      'dist/agent-profile.js is missing — run `pnpm --filter @42ch/nexus-service run build` first',
+    );
+    ({ writeAgentProfile } = await import(join(serviceRoot, 'dist', 'agent-profile.js')));
+  });
+
+  test('a write-denied config is refused as 403 forbidden and keeps its bytes', async () => {
+    const home = seededHome();
+    const original = readFileSync(configPathFor(home), 'utf8');
+    chmodSync(configPathFor(home), 0o444);
+    let error;
+    try {
+      error = await withDeadline(
+        writeAgentProfile(home, { name: 'codex-cli' }).then(
+          () => null,
+          (rejection) => rejection,
+        ),
+        5000,
+        'the refused profile write',
+      );
+    } finally {
+      chmodSync(configPathFor(home), 0o600);
+    }
+
+    assert.ok(error, 'a write-denied config must be refused');
+    assert.equal(error.code, 'forbidden');
+    assert.equal(error.status, 403);
+    assert.equal(readFileSync(configPathFor(home), 'utf8'), original);
+    // No staging residue, and the writer released its own lock.
+    assert.deepEqual(readdirSync(join(home, NEXUS_DIR)), [CONFIG_NAME]);
+  });
+
+  test('an existing 0640 config keeps its mode and group with unrelated keys intact', async (t) => {
+    const group = foreignGroup();
+    if (group === null) {
+      t.skip(
+        'no supplementary group distinct from the process egid: a captured-group assertion cannot fail here',
+      );
+      return;
+    }
+    const home = seededHome();
+    const path = configPathFor(home);
+    chmodSync(path, 0o640);
+    chownSync(path, -1, group);
+    assert.equal(statSync(path).gid, group, 'the fixture group differs from the process egid');
+
+    await withDeadline(writeAgentProfile(home, { name: 'codex-cli' }), 5000, 'the profile write');
+
+    // One descriptor for both the metadata and the bytes: a stat-then-read pair
+    // is the file-system race the scanner flags, and a fixture does not need it.
+    const fd = openSync(path, 'r');
+    const after = fstatSync(fd);
+    const stored = parse(readFileSync(fd, 'utf8'));
+    closeSync(fd);
+    assert.equal(after.mode & 0o777, 0o640, 'the captured mode is reapplied');
+    assert.equal(after.gid, group, 'the captured group is reapplied');
+    assert.deepEqual({ ...stored.agent_profile }, { name: 'codex-cli' });
+    assert.equal(stored.active_creator_id, 'ctr_localaaaaaaaaaaaa');
+    assert.deepEqual(
+      { ...stored.active_workspace_slug_by_creator },
+      { ctr_localaaaaaaaaaaaa: 'default' },
+    );
   });
 });

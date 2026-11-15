@@ -2665,6 +2665,9 @@ impl EngineSharedState {
                 parent_session_id: Some(SessionId(params.parent_session_id.clone())),
                 graph_name: Some(params.inner_graph.id.clone()),
                 applied: root_descriptor.applied.clone(),
+                // A child executes the same document arm its parent was
+                // admitted under; recovery follows the recorded mode.
+                intake_mode: root_descriptor.intake_mode,
             };
             let checkpoint = RunCheckpoint {
                 root: &session_mut,
@@ -4083,18 +4086,41 @@ impl GraphFlowEngine {
         // hash), so there is no second reader of the approved bytes. The
         // bundle checks above stay the frozen-source proof for the no-apply
         // path and for every applied run's descriptor bundle.
-        let applied = match &self.state.applied_document_source {
-            Some(source) => source
-                .applied_document(&descriptor.preset_id, &loaded)
-                .await
-                .map_err(|error| {
-                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                        "R6: applied identity of session {} does not replay: {error} \
-                         (reconstruction_unavailable, non-replayable)",
+        //
+        // P6 condition 6: recovery follows the RECORDED intake mode, never the
+        // current config. A `yaml-only` run rebuilds the YAML bundle and never
+        // reads the current apply — a config flip cannot retcon an in-flight
+        // run onto a document it never ran. An `ir-only` run without a
+        // recorded applied identity is the no-apply admission refusal
+        // resurfaced: never rebuilt from YAML. A legacy row (no recorded
+        // mode) keeps the pre-existing resolution below.
+        let applied = match descriptor.intake_mode {
+            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
+            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
+                if descriptor.applied.is_none() =>
+            {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "R6: session {} records [strategy_intake] mode 'ir-only' but no applied \
+                         identity (yaml_intake_disabled, non-replayable) — the strategy had no \
+                         current apply at admission, which ir-only refuses",
                         session_id.0
-                    )))
-                })?,
-            None => None,
+                    )),
+                ));
+            }
+            _ => match &self.state.applied_document_source {
+                Some(source) => source
+                    .applied_document(&descriptor.preset_id, &loaded)
+                    .await
+                    .map_err(|error| {
+                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                            "R6: applied identity of session {} does not replay: {error} \
+                             (reconstruction_unavailable, non-replayable)",
+                            session_id.0
+                        )))
+                    })?,
+                None => None,
+            },
         };
         // P4 Task 4 (I-000464): a run admitted under an applied identity is
         // rebuilt ONLY from that identity. The resolution above answers with the
@@ -4238,10 +4264,13 @@ impl GraphFlowEngine {
     /// directory bundle); the workspace root from the engine. `input` and
     /// `agent_bindings` are empty at this seam — the schedule/creator
     /// admission layer freezes them before driving (P2 owns that).
+    /// `intake_mode` is the mode arm the admission layer selected; the
+    /// descriptor records it so recovery follows the recorded arm.
     fn build_descriptor(
         &self,
         loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
+        intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
     ) -> Result<RunDescriptorV1, EngineError> {
         let source = loaded.source_identity.clone().ok_or_else(|| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -4264,6 +4293,7 @@ impl GraphFlowEngine {
             // Filled by the admission layer when the schedule's strategy has a
             // current apply; this seam never resolves one.
             applied: None,
+            intake_mode,
         })
     }
 
@@ -4273,10 +4303,15 @@ impl GraphFlowEngine {
         &self,
         loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
+        applied: Option<crate::run_state::AppliedRunIdentity>,
+        intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
         if let Some(store) = &self.state.workflow_store {
-            let descriptor = self.build_descriptor(loaded, creator_id)?;
+            let mut descriptor = self.build_descriptor(loaded, creator_id, intake_mode)?;
+            // The identity the caller resolved this run under, so a restart can
+            // tell whether the strategy's current apply is still that one.
+            descriptor.applied = applied;
             let session_id = format!("{}:{}", loaded.id, uuid::Uuid::new_v4());
             let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
             let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
@@ -4321,16 +4356,129 @@ impl GraphFlowEngine {
         }
     }
 
+    /// Admit a trait-entry start under the configured intake mode: the wired
+    /// APPLIED graph when the strategy has a current apply and the mode is
+    /// `ir-only`, the YAML graph under `yaml-only` (the apply unread), and —
+    /// for a user bundle under `ir-only` — a typed `yaml_intake_disabled`
+    /// refusal when there is no current apply.
+    ///
+    /// Both preset trait entries come through here, so neither can admit a graph
+    /// and freeze a descriptor that disagree — recovery rebuilds from the
+    /// recorded identity, and a run admitted on the YAML graph because this seam
+    /// skipped the resolution would recover into a document it never ran.
+    async fn start_preset_entry(
+        &self,
+        loaded: &nexus_preset::LoadedPreset,
+        creator_id: &str,
+    ) -> Result<SessionId, EngineError> {
+        // WS3 R1: Use EngineProxy wrapping EngineSharedState.
+        let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
+            state: self.state.clone(),
+        });
+        let caps = self.current_caps();
+        // P6 condition 6: the intake key governs user bundles only; embedded
+        // and `_system.` presets never consult it and keep the resolution
+        // they always ran. An engine without a configured home has no
+        // operator key to read, so it takes the missing-file default,
+        // `ir-only` — it never joins `config.toml` onto an empty path, which
+        // would read one relative to the process CWD.
+        let user_bundle = nexus_home_layout::strategy_intake::is_user_strategy_bundle(
+            &loaded.id,
+            matches!(
+                loaded.source_identity,
+                Some(nexus_preset::source_identity::PresetSourceIdentity::Directory { .. })
+            ),
+        );
+        let intake_mode = if user_bundle {
+            Some(
+                self.nexus_home
+                    .as_deref()
+                    .map(nexus_home_layout::strategy_intake::strategy_intake_mode)
+                    .transpose()
+                    .map_err(|reason| {
+                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(reason))
+                    })?
+                    .unwrap_or(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly),
+            )
+        } else {
+            None
+        };
+        let applied = match intake_mode {
+            // yaml-only runs the YAML bundle without reading the current apply.
+            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
+            _ => match &self.state.applied_document_source {
+                Some(source) => {
+                    source
+                        .applied_document(&loaded.id, loaded)
+                        .await
+                        .map_err(|error| {
+                            EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
+                        })?
+                }
+                None => None,
+            },
+        };
+        // ir-only is the default arm: a user bundle with no current apply
+        // refuses before graph construction — never a YAML fallback.
+        if user_bundle
+            && intake_mode == Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
+            && applied.is_none()
+        {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "yaml_intake_disabled: user preset '{}' has no current apply under \
+                     [strategy_intake] mode 'ir-only'; apply a strategy or set mode to \
+                     'yaml-only' to run the YAML bundle",
+                    loaded.id
+                )),
+            ));
+        }
+        let wired = match &applied {
+            // Same rule admission states: an applied user document's id is not a
+            // bundle id, so reading the embedded bundle could serve a colliding
+            // preset's bytes.
+            Some(applied) => crate::preset_runtime::build_wired_outer_graph_from_ir(
+                &applied.document,
+                crate::preset_runtime::IrTemplateSource::OwnSource,
+                &proxy,
+                &caps,
+                self.daemon_tool_dispatch.clone(),
+                self.prompt_executor.clone(),
+                self.session_cancels.clone(),
+            )
+            .map_err(|error| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(error.to_string()))
+            })?,
+            None => crate::preset_runtime::build_wired_outer_graph(
+                loaded,
+                &proxy,
+                &caps,
+                self.daemon_tool_dispatch.clone(),
+                self.prompt_executor.clone(),
+                self.session_cancels.clone(),
+            )?,
+        };
+        self.start_preset_run(
+            loaded,
+            creator_id,
+            applied.map(|applied| applied.identity),
+            intake_mode,
+            Arc::new(wired),
+        )
+        .await
+    }
+
     /// Start a v1 run for a loaded preset with frozen admission input (A3).
     ///
     /// Mirrors [`start_preset_run`] but freezes the schedule admission's
-    /// input map, agent bindings and work id into the descriptor AND seeds
-    /// the session context (`preset.input.*`, the core-context payload under
-    /// the namespace its KIND owns — `core_context.text` for `Text`,
-    /// `core_context.struct` for `Struct`) before the initial checkpoint is
-    /// persisted — so the first step renders real input and the descriptor/
-    /// core seed are durable before eligibility is published (A3: persist
-    /// descriptor/core seed before enqueue).
+    /// input map, agent bindings, work id and resolved applied identity into
+    /// the descriptor AND seeds the session context (`preset.input.*`, the
+    /// core-context payload under the namespace its KIND owns —
+    /// `core_context.text` for `Text`, `core_context.struct` for `Struct`)
+    /// before the initial checkpoint is persisted — so the first step
+    /// renders real input and the descriptor/core seed are durable before
+    /// eligibility is published (A3: persist descriptor/core seed before
+    /// enqueue).
     ///
     /// `session_id` is caller-minted: the schedule admission claims the
     /// schedule row with this exact id BEFORE the run is created, so a
@@ -4350,13 +4498,18 @@ impl GraphFlowEngine {
         input: serde_json::Map<String, serde_json::Value>,
         core_context: Option<&CoreContextPayload>,
         agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+        applied: Option<crate::run_state::AppliedRunIdentity>,
+        intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
         if let Some(store) = &self.state.workflow_store {
-            let mut descriptor = self.build_descriptor(loaded, creator_id)?;
+            let mut descriptor = self.build_descriptor(loaded, creator_id, intake_mode)?;
             descriptor.work_id = work_id.filter(|id| !id.is_empty());
             descriptor.input = input.clone();
             descriptor.agent_bindings = agent_bindings;
+            // The identity the caller resolved this run under, so a restart can
+            // tell whether the strategy's current apply is still that one.
+            descriptor.applied = applied;
             let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
             let session =
                 graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
@@ -4453,6 +4606,7 @@ impl GraphFlowEngine {
         agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
         frozen_source: Option<PresetSourceIdentity>,
         applied: Option<crate::run_state::AppliedRunIdentity>,
+        intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
         admission_gate: Option<crate::run_state::ScheduleAdmissionGate>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
@@ -4463,7 +4617,7 @@ impl GraphFlowEngine {
                 ),
             ));
         };
-        let mut descriptor = self.build_descriptor(loaded, creator_id)?;
+        let mut descriptor = self.build_descriptor(loaded, creator_id, intake_mode)?;
         descriptor.work_id = work_id;
         descriptor.input = input.clone();
         descriptor.agent_bindings = agent_bindings;
@@ -4607,6 +4761,9 @@ impl GraphFlowEngine {
                 parent_session_id: None,
                 graph_name: None,
                 applied: None,
+                // Raw graph-passed entries never resolve an apply and record
+                // no intake mode (legacy construction site).
+                intake_mode: None,
             };
             let checkpoint = RunCheckpoint {
                 root: &session,
@@ -4748,6 +4905,7 @@ impl OrchestrationEngine for GraphFlowEngine {
                 parent_session_id: None,
                 graph_name: None,
                 applied: None,
+                intake_mode: None,
             };
             store
                 .start_run(
@@ -4892,20 +5050,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         &self,
         loaded: &nexus_preset::LoadedPreset,
     ) -> Result<SessionId, EngineError> {
-        // WS3 R1: Use EngineProxy wrapping EngineSharedState.
-        let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
-            state: self.state.clone(),
-        });
-        let caps = self.current_caps();
-        let wired = crate::preset_runtime::build_wired_outer_graph(
-            loaded,
-            &proxy,
-            &caps,
-            self.daemon_tool_dispatch.clone(),
-            self.prompt_executor.clone(),
-            self.session_cancels.clone(),
-        )?;
-        self.start_preset_run(loaded, "", Arc::new(wired)).await
+        self.start_preset_entry(loaded, "").await
     }
 
     async fn start_session_with_preset_for_creator(
@@ -4913,20 +5058,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
     ) -> Result<SessionId, EngineError> {
-        let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
-            state: self.state.clone(),
-        });
-        let caps = self.current_caps();
-        let wired = crate::preset_runtime::build_wired_outer_graph(
-            loaded,
-            &proxy,
-            &caps,
-            self.daemon_tool_dispatch.clone(),
-            self.prompt_executor.clone(),
-            self.session_cancels.clone(),
-        )?;
-        self.start_preset_run(loaded, creator_id, Arc::new(wired))
-            .await
+        self.start_preset_entry(loaded, creator_id).await
     }
 }
 
@@ -9090,6 +9222,7 @@ mod tests {
             parent_session_id: None,
             graph_name: None,
             applied: None,
+            intake_mode: None,
         }
     }
 

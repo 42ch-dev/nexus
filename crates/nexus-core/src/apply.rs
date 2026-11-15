@@ -5,11 +5,12 @@
 //! Apply is the only place an approval becomes the running identity, so each refusal here is a
 //! safety property and every one of them happens before a row exists: the requested content hash
 //! must name an approval of this strategy, the approval's frozen `document_json` must still hash
-//! to the `content_hash` the approval recorded, the document must build into an outer graph (the
-//! same predicate the schedule intake uses, so an unbuildable identity is refused here instead of
-//! at its first run), the strategy must resolve to a user bundle (the only source the intake ever
-//! reads an apply from), the strategy must own a schedule (nothing would run otherwise), and the
-//! approval must not already be the current apply.
+//! to the `content_hash` the approval recorded, the pattern bodies that document pins must still
+//! hash to the frozen `pins_json` snapshot (the document hash does not cover them), the document
+//! must build into an outer graph (the same predicate the schedule intake uses, so an unbuildable
+//! identity is refused here instead of at its first run), the strategy must resolve to a user
+//! bundle (the only source the intake ever reads an apply from), the strategy must own a schedule
+//! (nothing would run otherwise), and the approval must not already be the current apply.
 //!
 //! `strategy_applies` is append-only and carries no current pointer: the current apply of a
 //! strategy is the row with no successor, and a superseded approval is a legal rollback (a new
@@ -34,6 +35,7 @@ use nexus_orchestration::preset_runtime::{validate_ir_buildability, IrTemplateSo
 use nexus_workflow_ir::{content_hash, WorkflowDocument};
 use serde_json::Value;
 
+use crate::compose::{verify_recorded_pins, PinVerificationFailure, ResolvedPatternPin};
 use crate::{CoreError, CoreResult, CoreService, Principal};
 
 /// Why an apply was refused. Nothing was written when one is returned.
@@ -89,6 +91,39 @@ pub enum ApplyRefusal {
         /// The builder's own refusal, verbatim: `IrOuterGraphError::to_string()`.
         builder_reason: String,
     },
+    /// A pattern body the approved document pins no longer hashes to the pin the approval froze,
+    /// so applying it would run bytes nobody approved.
+    PinChanged {
+        /// The nest that pins the package.
+        nest_id: String,
+        /// The pinned package id.
+        package_id: String,
+        /// The pinned package version.
+        package_version: String,
+        /// The hash the approval recorded.
+        recorded_hash: String,
+        /// The hash the registry now serves.
+        scanned_hash: String,
+    },
+    /// The registry does not resolve a pin the approval froze, so there are no bytes to compare.
+    PinUnavailable {
+        /// The nest that pins the package.
+        nest_id: String,
+        /// The pinned package id.
+        package_id: String,
+        /// The pinned package version.
+        package_version: String,
+        /// The hash the approval recorded.
+        recorded_hash: String,
+    },
+    /// The approval's recorded pin snapshot cannot be relied on: it does not decode, it disagrees
+    /// with the document it was frozen beside, or the pattern registry cannot be read.
+    PinsUnverifiable {
+        /// The approval whose pins could not be verified.
+        approval_id: String,
+        /// What could not be compared, and why.
+        detail: String,
+    },
 }
 
 impl ApplyRefusal {
@@ -103,6 +138,9 @@ impl ApplyRefusal {
             Self::StrategyHasNoSchedule { .. } => "strategy_has_no_schedule",
             Self::AlreadyApplied { .. } => "already_applied",
             Self::DocumentUnbuildable { .. } => "document_unbuildable",
+            Self::PinChanged { .. } => "pin_changed",
+            Self::PinUnavailable { .. } => "pin_unavailable",
+            Self::PinsUnverifiable { .. } => "approval_pins_unverifiable",
         }
     }
 
@@ -157,6 +195,52 @@ impl ApplyRefusal {
             }
             Self::DocumentUnbuildable { builder_reason } => {
                 details.insert("builder_reason".into(), Value::from(builder_reason.clone()));
+            }
+            Self::PinChanged {
+                nest_id,
+                package_id,
+                package_version,
+                recorded_hash,
+                scanned_hash,
+            } => {
+                details.insert("nest_id".into(), Value::from(nest_id.clone()));
+                details.insert("package_id".into(), Value::from(package_id.clone()));
+                details.insert(
+                    "package_version".into(),
+                    Value::from(package_version.clone()),
+                );
+                details.insert(
+                    "recorded_content_hash".into(),
+                    Value::from(recorded_hash.clone()),
+                );
+                details.insert(
+                    "scanned_content_hash".into(),
+                    Value::from(scanned_hash.clone()),
+                );
+            }
+            Self::PinUnavailable {
+                nest_id,
+                package_id,
+                package_version,
+                recorded_hash,
+            } => {
+                details.insert("nest_id".into(), Value::from(nest_id.clone()));
+                details.insert("package_id".into(), Value::from(package_id.clone()));
+                details.insert(
+                    "package_version".into(),
+                    Value::from(package_version.clone()),
+                );
+                details.insert(
+                    "recorded_content_hash".into(),
+                    Value::from(recorded_hash.clone()),
+                );
+            }
+            Self::PinsUnverifiable {
+                approval_id,
+                detail,
+            } => {
+                details.insert("approval_id".into(), Value::from(approval_id.clone()));
+                details.insert("pin_detail".into(), Value::from(detail.clone()));
             }
         }
         Value::Object(details)
@@ -219,6 +303,36 @@ impl std::fmt::Display for ApplyRefusal {
                 f,
                 "the approved document cannot be built into a run, so this apply would install \
                  an identity the schedule intake refuses: {builder_reason}"
+            ),
+            Self::PinChanged {
+                nest_id,
+                package_id,
+                package_version,
+                recorded_hash,
+                scanned_hash,
+            } => write!(
+                f,
+                "nest `{nest_id}` pinned `{package_id}@{package_version}` at content hash \
+                 `{recorded_hash}`, but the registry now serves `{scanned_hash}`: the approved \
+                 bytes moved, so restore the package or approve the region again"
+            ),
+            Self::PinUnavailable {
+                nest_id,
+                package_id,
+                package_version,
+                recorded_hash,
+            } => write!(
+                f,
+                "nest `{nest_id}` pinned `{package_id}@{package_version}` at content hash \
+                 `{recorded_hash}`, but the registry has no available package for that pin: \
+                 restore the package before applying"
+            ),
+            Self::PinsUnverifiable {
+                approval_id,
+                detail,
+            } => write!(
+                f,
+                "the pins approval `{approval_id}` froze cannot be verified: {detail}"
             ),
         }
     }
@@ -462,8 +576,8 @@ impl CoreService {
     ///
     /// Returns [`CoreError::InputValidation`] carrying an [`ApplyRefusal::details`] envelope for an
     /// unknown content hash, another strategy's approval, an approval whose document no longer
-    /// hashes to its identity, or an approved document the builder refuses; the store errors
-    /// otherwise.
+    /// hashes to its identity, an approval whose pattern pin moved or cannot be confirmed, an
+    /// approved document the builder refuses; the store errors otherwise.
     async fn verified_approval_identity(
         &self,
         strategy_id: &str,
@@ -473,9 +587,9 @@ impl CoreService {
         // content is legal, and the request names the strategy it applies to. `approval_id`
         // breaks the tie so a hash only foreign strategies carry names the same strategy on every
         // read: `UNIQUE (strategy_id, content_hash)` already rules out a tie inside one strategy.
-        let Some((approval_id, approval_strategy_id, stored_hash, document_json)) =
-            sqlx::query_as::<_, (String, String, String, String)>(
-                "SELECT approval_id, strategy_id, content_hash, document_json \
+        let Some((approval_id, approval_strategy_id, stored_hash, document_json, pins_json)) =
+            sqlx::query_as::<_, (String, String, String, String, String)>(
+                "SELECT approval_id, strategy_id, content_hash, document_json, pins_json \
                  FROM strategy_approvals \
                  WHERE content_hash = ? \
                  ORDER BY (strategy_id = ?) DESC, approval_id DESC",
@@ -517,6 +631,12 @@ impl CoreService {
             }
             .into_error());
         }
+
+        // The hash freezes the document, not the pattern bodies it pins: a body edited under an
+        // unchanged `id@version` leaves this hash intact. The frozen pin snapshot is the second,
+        // narrower guard, and it runs before buildability so a moved pin is named as the pin it is.
+        verify_pins(self.nexus_home(), &document, &pins_json)
+            .map_err(|failure| pin_apply_refusal(&approval_id, failure).into_error())?;
 
         // The applied identity must be one the intake can build. The schedule intake builds this
         // same document with `IrTemplateSource::OwnSource`, so a document the builder refuses
@@ -605,11 +725,16 @@ impl CoreService {
 /// `_system.` id names no strategy.
 #[must_use]
 pub fn is_user_preset(strategy_id: &str, loaded: &nexus_preset::LoadedPreset) -> bool {
-    !strategy_id.starts_with("_system.")
-        && matches!(
+    // The decision itself lives in `nexus-home-layout::strategy_intake` so the
+    // engine's preset trait entries classify through the same function — one
+    // rule for both sides of the intake gate.
+    nexus_home_layout::strategy_intake::is_user_strategy_bundle(
+        strategy_id,
+        matches!(
             loaded.source_identity,
             Some(nexus_preset::source_identity::PresetSourceIdentity::Directory { .. })
-        )
+        ),
+    )
 }
 
 /// The apply that is live for `strategy_id`: the append-only row with no successor.
@@ -665,6 +790,10 @@ pub async fn current_apply(
 /// is returned rather than raised so the caller can name it in its own control-plane error; a
 /// row edited after it was applied must never be a 500 and never a silent new graph.
 ///
+/// The frozen pin snapshot is re-compared here too, against `<nexus_home>/patterns` — the same
+/// second guard Apply runs — so a pattern body edited after apply is refused at admission and at
+/// recovery instead of being run. A document with no recorded pin never reads that root.
+///
 /// # Errors
 ///
 /// The store errors, and `CoreError::Internal` when the approval row an apply names is absent
@@ -672,28 +801,37 @@ pub async fn current_apply(
 /// reach that state).
 ///
 /// The read is keyed by `approval_id` AND `strategy_id`, the pairing [`CoreService::apply_strategy`]
-/// enforces with `ApplyRefusal::ApprovalStrategyMismatch`: a replay must never return a foreign
+/// enforces with [`ApplyRefusal::ApprovalStrategyMismatch`]: a replay must never return a foreign
 /// strategy's frozen document, even one written by a non-core writer.
 pub async fn verified_apply_document(
     pool: &sqlx::SqlitePool,
+    nexus_home: &std::path::Path,
     strategy_id: &str,
     apply: &AppliedStrategy,
 ) -> CoreResult<Result<WorkflowDocument, ApplyLoadRefusal>> {
-    let document_json: Option<String> = sqlx::query_scalar(
-        "SELECT document_json FROM strategy_approvals WHERE approval_id = ? AND strategy_id = ?",
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT document_json, pins_json FROM strategy_approvals \
+          WHERE approval_id = ? AND strategy_id = ?",
     )
     .bind(&apply.approval_id)
     .bind(strategy_id)
     .fetch_optional(pool)
     .await
     .map_err(|error| crate::error::local_db_err(error.into()))?;
-    let Some(document_json) = document_json else {
+    let Some((document_json, pins_json)) = row else {
         return Err(apply_internal(format!(
             "apply `{}` names approval `{}`, which this strategy has no row for",
             apply.apply_id, apply.approval_id
         )));
     };
-    Ok(verify_applied_document(strategy_id, apply, &document_json))
+    let document = match verify_applied_document(strategy_id, apply, &document_json) {
+        Ok(document) => document,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    if let Err(failure) = verify_pins(nexus_home, &document, &pins_json) {
+        return Ok(Err(pin_load_refusal(strategy_id, apply, &failure)));
+    }
+    Ok(Ok(document))
 }
 
 /// Why an applied identity cannot be replayed. Nothing was executed.
@@ -720,6 +858,48 @@ pub enum ApplyLoadRefusal {
         /// What could not be read.
         detail: String,
     },
+    /// A pattern body the applied document pins no longer hashes to the pin the apply froze.
+    PinChanged {
+        /// The strategy whose apply no longer replays.
+        strategy_id: String,
+        /// The apply that installed the identity.
+        apply_id: String,
+        /// The nest that pins the package.
+        nest_id: String,
+        /// The pinned package id.
+        package_id: String,
+        /// The pinned package version.
+        package_version: String,
+        /// The hash the apply recorded.
+        recorded_hash: String,
+        /// The hash the registry now serves.
+        scanned_hash: String,
+    },
+    /// The registry does not resolve a pin the applied document records.
+    PinUnavailable {
+        /// The strategy whose apply no longer replays.
+        strategy_id: String,
+        /// The apply that installed the identity.
+        apply_id: String,
+        /// The nest that pins the package.
+        nest_id: String,
+        /// The pinned package id.
+        package_id: String,
+        /// The pinned package version.
+        package_version: String,
+        /// The hash the apply recorded.
+        recorded_hash: String,
+    },
+    /// The applied identity's recorded pin snapshot cannot be relied on: it does not decode, it
+    /// disagrees with the document it was frozen beside, or the pattern registry cannot be read.
+    PinsUnverifiable {
+        /// The strategy whose apply no longer replays.
+        strategy_id: String,
+        /// The apply that installed the identity.
+        apply_id: String,
+        /// What could not be compared, and why.
+        detail: String,
+    },
 }
 
 impl ApplyLoadRefusal {
@@ -730,6 +910,9 @@ impl ApplyLoadRefusal {
         match self {
             Self::DocumentChanged { .. } => "applied_document_changed",
             Self::DocumentUnverifiable { .. } => "applied_document_unverifiable",
+            Self::PinChanged { .. } => "applied_pin_changed",
+            Self::PinUnavailable { .. } => "applied_pin_unavailable",
+            Self::PinsUnverifiable { .. } => "applied_pins_unverifiable",
         }
     }
 
@@ -766,11 +949,152 @@ impl std::fmt::Display for ApplyLoadRefusal {
                 "applied identity of strategy `{strategy_id}` (apply `{apply_id}`) cannot be \
                  replayed: {detail}"
             ),
+            Self::PinChanged {
+                strategy_id,
+                apply_id,
+                nest_id,
+                package_id,
+                package_version,
+                recorded_hash,
+                scanned_hash,
+            } => write!(
+                f,
+                "applied identity of strategy `{strategy_id}` (apply `{apply_id}`) pins \
+                 `{package_id}@{package_version}` at nest `{nest_id}` with content hash \
+                 `{recorded_hash}`, but the registry now serves `{scanned_hash}`: the pinned \
+                 bytes moved after apply"
+            ),
+            Self::PinUnavailable {
+                strategy_id,
+                apply_id,
+                nest_id,
+                package_id,
+                package_version,
+                recorded_hash,
+            } => write!(
+                f,
+                "applied identity of strategy `{strategy_id}` (apply `{apply_id}`) pins \
+                 `{package_id}@{package_version}` at nest `{nest_id}` with content hash \
+                 `{recorded_hash}`, but the registry has no available package for that pin"
+            ),
+            Self::PinsUnverifiable {
+                strategy_id,
+                apply_id,
+                detail,
+            } => write!(
+                f,
+                "applied identity of strategy `{strategy_id}` (apply `{apply_id}`) cannot have \
+                 its pins verified: {detail}"
+            ),
         }
     }
 }
 
+/// Read `pins_json` and re-compare it with the registry, scanning `<nexus_home>/patterns` only
+/// when a pin was recorded — a document that pins nothing never touches that root.
+// `PinVerificationFailure` carries the whole pin identity (nest, package, both hashes); boxing it
+// would only move the same bytes behind a pointer on this one refusal path.
+#[allow(clippy::result_large_err)]
+fn verify_pins(
+    nexus_home: &std::path::Path,
+    document: &WorkflowDocument,
+    pins_json: &str,
+) -> Result<(), PinVerificationFailure> {
+    let recorded: Vec<ResolvedPatternPin> = serde_json::from_str(pins_json).map_err(|error| {
+        PinVerificationFailure::SnapshotMismatch {
+            detail: format!("the recorded pins do not decode: {error}"),
+        }
+    })?;
+    if recorded.is_empty() {
+        return verify_recorded_pins(document, &recorded, &[]);
+    }
+    let patterns_dir = nexus_home.join("patterns");
+    let packages =
+        nexus_pattern::scan_pattern_packages(&patterns_dir, nexus_workflow_ir::IR_VERSION)
+            .map_err(|error| PinVerificationFailure::SnapshotMismatch {
+                detail: format!("pattern registry {}: {error}", patterns_dir.display()),
+            })?;
+    verify_recorded_pins(document, &recorded, &packages)
+}
+
+/// The apply-time refusal a pin failure becomes, naming the approval it was read from.
+fn pin_apply_refusal(approval_id: &str, failure: PinVerificationFailure) -> ApplyRefusal {
+    match failure {
+        PinVerificationFailure::Changed {
+            nest_id,
+            package,
+            recorded_hash,
+            scanned_hash,
+        } => ApplyRefusal::PinChanged {
+            nest_id,
+            package_id: package.id,
+            package_version: package.version,
+            recorded_hash,
+            scanned_hash,
+        },
+        PinVerificationFailure::Unavailable {
+            nest_id,
+            package,
+            recorded_hash,
+        } => ApplyRefusal::PinUnavailable {
+            nest_id,
+            package_id: package.id,
+            package_version: package.version,
+            recorded_hash,
+        },
+        PinVerificationFailure::SnapshotMismatch { detail } => ApplyRefusal::PinsUnverifiable {
+            approval_id: approval_id.to_owned(),
+            detail,
+        },
+    }
+}
+
+/// The load-time refusal a pin failure becomes, naming the strategy and the apply.
+fn pin_load_refusal(
+    strategy_id: &str,
+    apply: &AppliedStrategy,
+    failure: &PinVerificationFailure,
+) -> ApplyLoadRefusal {
+    let (strategy_id, apply_id) = (strategy_id.to_owned(), apply.apply_id.clone());
+    match failure {
+        PinVerificationFailure::Changed {
+            nest_id,
+            package,
+            recorded_hash,
+            scanned_hash,
+        } => ApplyLoadRefusal::PinChanged {
+            strategy_id,
+            apply_id,
+            nest_id: nest_id.clone(),
+            package_id: package.id.clone(),
+            package_version: package.version.clone(),
+            recorded_hash: recorded_hash.clone(),
+            scanned_hash: scanned_hash.clone(),
+        },
+        PinVerificationFailure::Unavailable {
+            nest_id,
+            package,
+            recorded_hash,
+        } => ApplyLoadRefusal::PinUnavailable {
+            strategy_id,
+            apply_id,
+            nest_id: nest_id.clone(),
+            package_id: package.id.clone(),
+            package_version: package.version.clone(),
+            recorded_hash: recorded_hash.clone(),
+        },
+        PinVerificationFailure::SnapshotMismatch { detail } => ApplyLoadRefusal::PinsUnverifiable {
+            strategy_id,
+            apply_id,
+            detail: detail.clone(),
+        },
+    }
+}
+
 /// Recompute an applied document's identity exactly as apply time did.
+// `ApplyLoadRefusal` carries the whole pin identity plus the strategy and apply it belongs to;
+// boxing it would change the type threaded through admission and recovery for one terminal path.
+#[allow(clippy::result_large_err)]
 fn verify_applied_document(
     strategy_id: &str,
     apply: &AppliedStrategy,
