@@ -56,8 +56,9 @@ python3 -c 'import blake3,sys;print(blake3.blake3(open(sys.argv[1],"rb").read())
 ```
 
 Run that per template from the repository root and paste the digest into the
-entry. The fuller authoring notes, including the round-trip normalisations, are
-in [`../README.md` §6](../README.md#6-fork-the-strategy-samples-and-validate).
+entry. The fuller authoring notes, including where lane prose is authored and
+the round-trip normalisations, are in
+[`../README.md` §6 — Authoring source](../README.md#authoring-source-workflowjson).
 
 ## Validating
 
