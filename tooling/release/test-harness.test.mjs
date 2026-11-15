@@ -5,25 +5,28 @@ import {
   ROOT_PACKAGE_PATH,
   parseCargoLockPackageVersion,
   readSurfaceVersions,
-  readWorkspaceMemberPackages,
 } from "./version-surfaces.mjs";
 import {
   cleanupTempRepo,
   createTempRepo,
+  expectedMemberLockVersions,
   FIXTURE_BASELINE_VERSION,
   readRepoFile,
 } from "./test-harness.mjs";
 
-/** Assert every version surface of a fixture repo carries `version`. */
+/**
+ * Assert every version surface of a fixture repo carries `version`, and every
+ * `Cargo.lock` member row the version its bracket requires.
+ */
 function assertFixtureVersion(dir, version) {
   for (const surface of readSurfaceVersions(dir)) {
     assert.equal(surface.version, version, surface.path);
   }
   const lock = readRepoFile(dir, CARGO_LOCK_PATH);
-  const members = readWorkspaceMemberPackages(dir);
-  assert.ok(members.length > 20, `expected > 20 members, got ${members.length}`);
-  for (const member of members) {
-    assert.equal(parseCargoLockPackageVersion(lock, member.name), version, member.name);
+  const expected = expectedMemberLockVersions(dir, version);
+  assert.ok(expected.size > 20, `expected > 20 members, got ${expected.size}`);
+  for (const [name, memberVersion] of expected) {
+    assert.equal(parseCargoLockPackageVersion(lock, name), memberVersion, name);
   }
 }
 

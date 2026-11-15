@@ -14,6 +14,7 @@ import { checkLockstep } from "./assert-lockstep-version.mjs";
 import {
   cleanupTempRepo,
   createTempRepo,
+  expectedMemberLockVersions,
   FIXTURE_BASELINE_VERSION,
   mutateRepoFile,
   readRepoFile,
@@ -141,19 +142,103 @@ test("CLI --help exits zero", () => {
   }
 });
 
-test("every workspace member resolves to a lock entry at the fixture version", () => {
+test("every workspace member resolves to its own bracket's lock entry", () => {
   const dir = createTempRepo();
   try {
     const lock = readRepoFile(dir, CARGO_LOCK_PATH);
-    const members = readWorkspaceMemberPackages(dir);
-    assert.ok(members.length > 20, `expected > 20 members, got ${members.length}`);
-    for (const member of members) {
-      assert.equal(
-        parseCargoLockPackageVersion(lock, member.name),
-        FIXTURE_BASELINE_VERSION,
-        member.name,
-      );
+    const expected = expectedMemberLockVersions(dir, FIXTURE_BASELINE_VERSION);
+    assert.ok(expected.size > 20, `expected > 20 members, got ${expected.size}`);
+    for (const [name, version] of expected) {
+      assert.equal(parseCargoLockPackageVersion(lock, name), version, name);
     }
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+/** Contract-bracket crate the bump simulation moves on its own. */
+const CONTRACT_CRATE = "nexus-workflow-ir";
+const CONTRACT_MANIFEST = "crates/nexus-workflow-ir/Cargo.toml";
+/** A contract patch bump; the product surfaces stay at the fixture baseline. */
+const CONTRACT_BUMP = "9.9.1";
+
+/**
+ * Move one contract crate's manifest literal and its lock row to `version`,
+ * leaving every product surface alone.
+ *
+ * @param {string} dir
+ * @param {string} version
+ */
+function bumpContractCrate(dir, version) {
+  mutateRepoFile(dir, CONTRACT_MANIFEST, (contents) =>
+    contents.replace(/^version\s*=\s*"[^"]*"/m, `version = "${version}"`),
+  );
+  mutateRepoFile(dir, CARGO_LOCK_PATH, (contents) =>
+    contents.replace(
+      new RegExp(`(\\[\\[package\\]\\]\\nname = "${CONTRACT_CRATE}"\\nversion = ")[^"]+(")`),
+      `$1${version}$2`,
+    ),
+  );
+}
+
+test("a contract crate bumped alone leaves product lockstep green", () => {
+  const dir = createTempRepo();
+  try {
+    bumpContractCrate(dir, CONTRACT_BUMP);
+    const report = checkLockstep(dir);
+    assert.equal(report.ok, true, report.problems.join("; "));
+    assert.equal(report.version, FIXTURE_BASELINE_VERSION);
+    assert.equal(
+      parseCargoLockPackageVersion(readRepoFile(dir, CARGO_LOCK_PATH), CONTRACT_CRATE),
+      CONTRACT_BUMP,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a contract crate back on version.workspace = true is rejected", () => {
+  const dir = createTempRepo();
+  try {
+    mutateRepoFile(dir, CONTRACT_MANIFEST, (contents) =>
+      contents.replace(/^version\s*=\s*"[^"]*"/m, "version.workspace = true"),
+    );
+    const report = checkLockstep(dir);
+    assert.equal(report.ok, false);
+    assert.ok(
+      report.problems.some(
+        (problem) =>
+          problem.includes(CONTRACT_MANIFEST) &&
+          problem.includes("expected a literal version"),
+      ),
+      report.problems.join("; "),
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a non-contract member with a literal version is rejected even at the product version", () => {
+  const dir = createTempRepo();
+  try {
+    const manifestPath = "crates/nexus-core/Cargo.toml";
+    // The same number as the product: independence is the declaration form, not
+    // the value, so this must still fail.
+    mutateRepoFile(dir, manifestPath, (contents) =>
+      contents.replace(
+        /^version\.workspace\s*=\s*true\s*$/m,
+        `version = "${FIXTURE_BASELINE_VERSION}"`,
+      ),
+    );
+    const report = checkLockstep(dir);
+    assert.equal(report.ok, false);
+    assert.ok(
+      report.problems.some(
+        (problem) =>
+          problem.includes(manifestPath) && problem.includes("declares literal version"),
+      ),
+      report.problems.join("; "),
+    );
   } finally {
     cleanupTempRepo(dir);
   }

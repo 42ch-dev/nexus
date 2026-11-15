@@ -15,6 +15,7 @@ import { bumpVersion } from "./bump-version.mjs";
 import {
   cleanupTempRepo,
   createTempRepo,
+  expectedMemberLockVersions,
   FIXTURE_BASELINE_VERSION,
   FIXTURE_TARGET_VERSION,
   readRepoFile,
@@ -47,18 +48,24 @@ test("bumpVersion writes every version surface and reports the change", () => {
     const lock = readRepoFile(dir, CARGO_LOCK_PATH);
     const members = readWorkspaceMemberPackages(dir);
     assert.ok(members.length > 20, `expected > 20 members, got ${members.length}`);
-    for (const member of members) {
-      assert.equal(parseCargoLockPackageVersion(lock, member.name), FIXTURE_TARGET_VERSION, member.name);
+    // Two brackets: inherited members followed the product bump, contract
+    // crates kept the literal their manifest still declares.
+    const expected = expectedMemberLockVersions(dir, FIXTURE_TARGET_VERSION);
+    for (const [name, version] of expected) {
+      assert.equal(parseCargoLockPackageVersion(lock, name), version, name);
     }
     assert.equal(report.changed.at(-1).members, members.length);
 
-    // Cargo, not a text edit, produced the lockfile: only the workspace member
+    // Cargo, not a text edit, produced the lockfile: only the inherited-bracket
     // version lines moved, and nothing was added or dropped.
     const before = lockBefore.split("\n");
     const after = lock.split("\n");
     assert.equal(after.length, before.length);
     const changedLines = after.filter((line, index) => line !== before[index]);
-    assert.equal(changedLines.length, members.length);
+    const bumpedMembers = [...expected.values()].filter(
+      (version) => version === FIXTURE_TARGET_VERSION,
+    ).length;
+    assert.equal(changedLines.length, bumpedMembers);
     for (const line of changedLines) {
       assert.equal(line, `version = "${FIXTURE_TARGET_VERSION}"`);
     }
@@ -101,14 +108,14 @@ test("bumpVersion refuses malformed, equal, and decreasing versions", () => {
 
 test("bumpVersion walks the clean→alpha→rc→stable ladder and refuses a downgrade", () => {
   const dir = createTempRepo();
-  /** Every surface, `Cargo.lock` members included, must carry `target` in lockstep. */
+  /** Every surface, and every `Cargo.lock` row its bracket requires, at `target`. */
   const assertSurfacesAt = (target) => {
     for (const surface of readSurfaceVersions(dir)) {
       assert.equal(surface.version, target, `${target} ${surface.path}`);
     }
     const lock = readRepoFile(dir, CARGO_LOCK_PATH);
-    for (const member of readWorkspaceMemberPackages(dir)) {
-      assert.equal(parseCargoLockPackageVersion(lock, member.name), target, `${target} ${member.name}`);
+    for (const [name, version] of expectedMemberLockVersions(dir, target)) {
+      assert.equal(parseCargoLockPackageVersion(lock, name), version, `${target} ${name}`);
     }
   };
   try {

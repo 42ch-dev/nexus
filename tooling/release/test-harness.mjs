@@ -22,8 +22,12 @@ import {
   CARGO_WORKSPACE_PATH,
   LOCKSTEP_PATHS,
   NATIVE_SURFACE_PATHS,
+  VERSION_BRACKETS_PATH,
   parseCargoLockPackageVersion,
+  parseCargoPackageName,
+  parseCargoPackageVersion,
   parseCargoWorkspaceMembers,
+  readVersionBrackets,
   readWorkspaceMemberPackages,
   replaceJsonVersion,
   replaceWorkspacePackageVersion,
@@ -35,7 +39,12 @@ const RELEASE_DIR = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(RELEASE_DIR, "../..");
 
 /** Files copied verbatim into every temp repo. */
-const FIXTURE_PATHS = [...LOCKSTEP_PATHS, ...NATIVE_SURFACE_PATHS, CARGO_LOCK_PATH];
+const FIXTURE_PATHS = [
+  ...LOCKSTEP_PATHS,
+  ...NATIVE_SURFACE_PATHS,
+  VERSION_BRACKETS_PATH,
+  CARGO_LOCK_PATH,
+];
 
 /**
  * Version pinned into every fixture repo. Fixed on purpose: a fixture that
@@ -49,6 +58,35 @@ export const FIXTURE_TARGET_VERSION = "9.8.8";
 
 /** Content of the generated crate target stubs. */
 const TARGET_STUB = "// release-fixture stub\n";
+
+/**
+ * Version each workspace member's `Cargo.lock` row must carry at
+ * `productVersion`: a contract crate keeps its own manifest literal, every
+ * other member inherits the product version.
+ *
+ * @param {string} repoRoot
+ * @param {string} productVersion
+ * @returns {Map<string, string | null>}
+ */
+export function expectedMemberLockVersions(repoRoot, productVersion) {
+  const contractNames = new Set(
+    readVersionBrackets(repoRoot).map((entry) => entry.name),
+  );
+  /** @type {Map<string, string | null>} */
+  const expected = new Map();
+  for (const member of readWorkspaceMemberPackages(repoRoot)) {
+    expected.set(
+      member.name,
+      contractNames.has(member.name)
+        ? parseCargoPackageVersion(
+            readFileSync(join(repoRoot, member.manifestPath), "utf8"),
+            member.manifestPath,
+          )
+        : productVersion,
+    );
+  }
+  return expected;
+}
 
 /** `[lib]` / `[[bin]]` / `[[example]]` / `[[test]]` / `[[bench]]` headers. */
 const TARGET_SECTION_PATTERN = /^\s*\[\[?(lib|bin|example|test|bench)\]?\]\s*$/;
@@ -101,6 +139,7 @@ export function gitOk(repoRoot, args) {
  */
 export function createTempRepo(options = {}) {
   const sourceRoot = options.sourceRoot ?? REPO_ROOT;
+  const version = options.version ?? FIXTURE_BASELINE_VERSION;
   const dir = mkdtempSync(join(tmpdir(), "nexus-release-"));
   for (const rel of FIXTURE_PATHS) {
     const dest = join(dir, rel);
@@ -108,11 +147,27 @@ export function createTempRepo(options = {}) {
     cpSync(join(sourceRoot, rel), dest);
   }
 
-  for (const rel of collectCrateManifests(sourceRoot)) {
+  const contractEntries = readVersionBrackets(sourceRoot);
+  const contractNames = new Set(contractEntries.map((entry) => entry.name));
+  const manifests = collectCrateManifests(sourceRoot);
+  for (const entry of contractEntries) {
+    // Standalone contract crates (`modules/*`) are neither workspace members
+    // nor path dependencies, so the carrier is what makes them fixture input.
+    if (!manifests.includes(entry.manifest)) {
+      manifests.push(entry.manifest);
+    }
+  }
+
+  for (const rel of manifests) {
     const crateDir = dirname(rel);
     const destDir = join(dir, crateDir);
     mkdirSync(destDir, { recursive: true });
-    const contents = readFileSync(join(sourceRoot, rel), "utf8");
+    const contents = pinFixtureManifest(
+      readFileSync(join(sourceRoot, rel), "utf8"),
+      rel,
+      contractNames,
+      version,
+    );
     writeFileSync(join(destDir, "Cargo.toml"), contents, "utf8");
     for (const target of targetPaths(sourceRoot, crateDir, contents)) {
       const dest = join(destDir, target);
@@ -121,7 +176,7 @@ export function createTempRepo(options = {}) {
     }
   }
 
-  pinFixtureVersion(dir, options.version ?? FIXTURE_BASELINE_VERSION);
+  pinFixtureVersion(dir, version, contractNames);
 
   for (const [rel, contents] of Object.entries(options.files ?? {})) {
     const dest = join(dir, rel);
@@ -130,6 +185,34 @@ export function createTempRepo(options = {}) {
   }
 
   return dir;
+}
+
+/**
+ * Pin one copied manifest to the fixture version. Contract-bracket crates keep
+ * their independent literal form, so their `[package].version` is pinned rather
+ * than inherited; a `version` requirement on a contract path dependency must
+ * follow, or Cargo refuses to resolve the literal against the path package.
+ *
+ * @param {string} contents
+ * @param {string} manifestPath
+ * @param {Set<string>} contractNames
+ * @param {string} version
+ * @returns {string}
+ */
+function pinFixtureManifest(contents, manifestPath, contractNames, version) {
+  let pinned = contents;
+  if (contractNames.has(parseCargoPackageName(contents, manifestPath))) {
+    // The `[package]` table opens the file, so the first bare `version` line is
+    // the package version (`version.workspace = true` does not match).
+    pinned = pinned.replace(/^version\s*=\s*"[^"]*"/m, `version = "${version}"`);
+  }
+  for (const name of contractNames) {
+    pinned = pinned.replace(
+      new RegExp(`^(\\s*${name}\\s*=\\s*\\{[^}]*\\bversion\\s*=\\s*)"[^"]*"`, "gm"),
+      `$1"${version}"`,
+    );
+  }
+  return pinned;
 }
 
 /**
@@ -237,7 +320,9 @@ function targetPaths(sourceRoot, crateDir, manifest) {
 
 /**
  * Pin every version surface of a fixture repo to `version`, `Cargo.lock`
- * member entries included.
+ * member entries included. Contract-bracket crates are pinned into their
+ * literal manifest form, so their lock rows are pinned too — including the
+ * standalone ones the workspace only path-depends on.
  *
  * The lockfile is rewritten in place here on purpose: this is fixture setup for
  * a throwaway tree, not the release path — the bump regenerates `Cargo.lock`
@@ -245,9 +330,10 @@ function targetPaths(sourceRoot, crateDir, manifest) {
  *
  * @param {string} dir
  * @param {string} version
+ * @param {Set<string>} contractNames
  * @returns {void}
  */
-function pinFixtureVersion(dir, version) {
+function pinFixtureVersion(dir, version, contractNames) {
   for (const path of LOCKSTEP_PATHS) {
     const contents = readFileSync(join(dir, path), "utf8");
     const updated =
@@ -267,6 +353,10 @@ function pinFixtureVersion(dir, version) {
   for (const member of readWorkspaceMemberPackages(dir)) {
     lock = pinLockMemberVersion(lock, member.name, version);
   }
+  for (const name of contractNames) {
+    // Standalone contract crates the workspace never resolves have no lock row.
+    lock = pinLockMemberVersion(lock, name, version, false);
+  }
   writeFileSync(lockPath, lock, "utf8");
 }
 
@@ -274,11 +364,15 @@ function pinFixtureVersion(dir, version) {
  * @param {string} lock
  * @param {string} packageName
  * @param {string} version
+ * @param {boolean} [required] fail when the package has no lock row
  * @returns {string}
  */
-function pinLockMemberVersion(lock, packageName, version) {
+function pinLockMemberVersion(lock, packageName, version, required = true) {
   const current = parseCargoLockPackageVersion(lock, packageName);
   if (current === null) {
+    if (!required) {
+      return lock;
+    }
     throw new Error(`${CARGO_LOCK_PATH}: fixture is missing ${packageName}`);
   }
   if (current === version) {
