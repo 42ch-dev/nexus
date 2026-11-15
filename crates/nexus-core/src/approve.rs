@@ -343,6 +343,50 @@ struct FrozenSnapshot<'a> {
     approved_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// The structural verdict on `document`, before any simulation evidence is judged.
+///
+/// This is ONE composition for Approve and import, so the two cannot disagree about which
+/// documents are approvable: the shared validation walk with the imported-preset outer-state loop
+/// exception, then the pin findings, then the required slots. Ordering is part of the contract — a
+/// changed pin and a pin whose package is gone both refuse *before* the slot check, because an
+/// unavailable package still reports the slots its manifest declared and the slot answer would
+/// hide the root cause behind an instruction nothing can satisfy.
+///
+/// The registry scan is the caller's, so Approve scans once for both this verdict and the pin
+/// snapshot it freezes.
+pub fn structural_refusal(
+    document: &WorkflowDocument,
+    packages: &[nexus_pattern::PatternPackage],
+) -> Option<ApproveRefusal> {
+    let (bodies, diagnostics) = document_bodies(document, packages);
+    let violations: Vec<Violation> = validate(&[document], &bodies)
+        .err()
+        .unwrap_or_default()
+        .into_iter()
+        // Outer-state loops are legal for imported presets (the same exception compose makes).
+        .filter(|violation| !matches!(violation, Violation::GraphCycle { .. }))
+        .collect();
+    if !violations.is_empty() {
+        return Some(ApproveRefusal::InvalidDocument {
+            violations: violations.iter().map(ToString::to_string).collect(),
+        });
+    }
+    // The pins refuse before the slots: an unavailable package still reports the slots its manifest
+    // declared, so the pin is the root cause and must be the refusal.
+    if let Some(unconfirmed) = diagnostics.into_iter().find(|finding| {
+        matches!(
+            finding,
+            ComposeDiagnostic::StalePin { .. } | ComposeDiagnostic::PinUnavailable { .. }
+        )
+    }) {
+        return Some(ApproveRefusal::from_diagnostic(unconfirmed));
+    }
+    document_unbound_slots(document, packages)
+        .into_iter()
+        .next()
+        .map(ApproveRefusal::from_diagnostic)
+}
+
 impl CoreService {
     /// Approve the candidate at `base_revision` against `trajectory`, freezing one immutable
     /// snapshot.
@@ -372,41 +416,10 @@ impl CoreService {
             }
             .into_error()
         })?;
-
         let packages = self.compose_packages()?;
-        let (bodies, diagnostics) = document_bodies(&current.document, &packages);
-        let violations: Vec<Violation> = validate(&[&current.document], &bodies)
-            .err()
-            .unwrap_or_default()
-            .into_iter()
-            // Outer-state loops are legal for imported presets (the same exception compose makes).
-            .filter(|violation| !matches!(violation, Violation::GraphCycle { .. }))
-            .collect();
-        if !violations.is_empty() {
-            return Err(ApproveRefusal::InvalidDocument {
-                violations: violations.iter().map(ToString::to_string).collect(),
-            }
-            .into_error());
-        }
-        // The pins refuse before the slots. The walk reports every pin it cannot confirm through
-        // the one `verify_pin` comparison — bytes that moved, and a pin whose package is absent —
-        // and an approval freezes the whole document, so the first such finding refuses it. It goes
-        // first because an unavailable package still reports the slots its manifest declared: the
-        // slot check would then name a binding of a package the registry cannot resolve and hide
-        // the root cause behind an instruction nothing can satisfy.
-        if let Some(unconfirmed) = diagnostics.into_iter().find(|finding| {
-            matches!(
-                finding,
-                ComposeDiagnostic::StalePin { .. } | ComposeDiagnostic::PinUnavailable { .. }
-            )
-        }) {
-            return Err(ApproveRefusal::from_diagnostic(unconfirmed).into_error());
-        }
-        if let Some(unbound) = document_unbound_slots(&current.document, &packages)
-            .into_iter()
-            .next()
-        {
-            return Err(ApproveRefusal::from_diagnostic(unbound).into_error());
+
+        if let Some(refusal) = structural_refusal(&current.document, &packages) {
+            return Err(refusal.into_error());
         }
 
         let recomputed = simulate_document(

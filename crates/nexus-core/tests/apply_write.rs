@@ -10,6 +10,9 @@
 
 #![cfg(feature = "execution")]
 
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, Principal};
 use nexus_orchestration::preset_runtime::{IrOuterGraphError, IrTemplateSource};
 use sqlx::SqlitePool;
@@ -30,6 +33,8 @@ struct Setup {
     _tmp: TempDir,
     core: CoreService,
     principal: Principal,
+    /// `<tmp>/.nexus42`: the home the core resolves patterns under.
+    home: PathBuf,
 }
 
 /// Write a minimal user preset bundle at `<nexus_home>/presets/<id>/preset.yaml` — the layout the
@@ -89,6 +94,7 @@ async fn setup() -> Setup {
         _tmp: tmp,
         core,
         principal,
+        home,
     }
 }
 
@@ -898,5 +904,324 @@ async fn a_repeat_apply_names_its_own_row_and_never_becomes_an_internal_fault() 
     assert_eq!(refusal(&repeat)["apply_id"], "apl_older_approval");
     assert_eq!(refusal(&repeat)["approval_id"], approval_id.as_str());
     assert_ne!(approval_id, other_approval);
+    setup.core.close().await.unwrap();
+}
+
+// ── The frozen pin snapshot re-compared at Apply (P6) ─────────────────────
+
+/// The package the pinned fixtures nest.
+const PINNED_PACKAGE: &str = "pinned-step";
+/// The package `PINNED_PACKAGE`'s own fragment nests, so the frozen snapshot carries a pin the
+/// applied document does not name.
+const NESTED_PACKAGE: &str = "nested-step";
+/// The nest the pinned documents carry.
+const PINNED_NEST: &str = "pinned-nest";
+
+/// The IR fragment of a package whose only node is a slot.
+fn fragment(id: &str, description: &str) -> serde_json::Value {
+    serde_json::json!({
+        "ir_version": 0,
+        "id": id,
+        "version": 1,
+        "revision": 0,
+        "state": "candidate",
+        "meta": {
+            "description": description,
+            "kind": "creator",
+            "run_intents": [],
+            "requires_capabilities": [],
+        },
+        "entry": "slot",
+        "terminal": ["slot"],
+        "nodes": [{"id": "slot", "kind": "pattern_slot", "effect_class": "pure"}],
+        "edges": [],
+        "nests": [],
+        "assets": [],
+        "signals": [],
+        "roles": [],
+        "effect_summary": "pure",
+        "provenance": {"source": "compose"},
+    })
+}
+
+/// One package directory under `<home>/patterns`: `pattern.toml` plus the IR fragment it pins.
+fn write_package(home: &Path, id: &str, body: &serde_json::Value) {
+    let directory = home.join("patterns").join(id);
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join("pattern.toml"),
+        format!(
+            "id = \"{id}\"\nversion = \"1.0.0\"\ndescription = \"apply pin fixture {id}\"\n\
+             effect_class = \"pure\"\nrequires_capabilities = []\nslots = []\n\n\
+             [ir_compat]\nmin = 0\nmax = 0\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        directory.join("workflow.ir.json"),
+        serde_json::to_string_pretty(body).unwrap(),
+    )
+    .unwrap();
+}
+
+/// The registry's current content hash for every package, keyed by package id.
+fn pattern_hashes(home: &Path) -> BTreeMap<String, String> {
+    nexus_pattern::scan_pattern_packages(&home.join("patterns"), nexus_workflow_ir::IR_VERSION)
+        .unwrap()
+        .into_iter()
+        .filter_map(|package| {
+            let manifest = package.manifest()?;
+            Some((
+                manifest.id.as_str().to_owned(),
+                package.content_hash()?.to_owned(),
+            ))
+        })
+        .collect()
+}
+
+/// The document with one exact pattern pin bound on `parents`' first node, plus — when `slot` is
+/// set — the `pattern_slot` node the compose `nest` operation also writes, so buildability would
+/// refuse the document on its own.
+fn pinned_document(
+    base: &nexus_workflow_ir::WorkflowDocument,
+    package: &str,
+    recorded_hash: &str,
+    slot: bool,
+) -> nexus_workflow_ir::WorkflowDocument {
+    let mut value = serde_json::to_value(base).unwrap();
+    let parent = base
+        .nodes
+        .iter()
+        .find(|node| node.id != "done")
+        .expect("the fixture has a non-terminal node")
+        .id
+        .clone();
+    value["nests"] = serde_json::json!([{
+        "id": PINNED_NEST,
+        "parent_node": parent,
+        "expansion": "defer_until_apply",
+        "pin_policy": "exact",
+        "child": {
+            "kind": "pattern",
+            "registry_id": package,
+            "version": "1.0.0",
+            "content_hash": recorded_hash,
+        },
+    }]);
+    if slot {
+        value["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "id": "pinned-slot",
+                "kind": "pattern_slot",
+                "effect_class": "pure",
+            }));
+    }
+    serde_json::from_value(value).unwrap()
+}
+
+/// Freeze one approval of `document` carrying the given `pins_json`.
+async fn seed_pinned_approval(
+    setup: &Setup,
+    tag: &str,
+    document: &nexus_workflow_ir::WorkflowDocument,
+    pins_json: &str,
+) -> (String, String) {
+    let hash = nexus_workflow_ir::content_hash(document).unwrap();
+    let approval_id = format!("apr_{tag}");
+    sqlx::query(
+        "INSERT INTO strategy_approvals \
+         (approval_id, strategy_id, content_hash, candidate_revision, document_json, \
+          trajectory_json, pins_json, approver, approved_at) \
+         VALUES (?, ?, ?, 0, ?, ?, ?, 'test_creator', '2026-01-01T00:00:00+00:00')",
+    )
+    .bind(&approval_id)
+    .bind(STRATEGY)
+    .bind(&hash)
+    .bind(serde_json::to_string(document).unwrap())
+    .bind(serde_json::json!({"ir_content_hash": hash}).to_string())
+    .bind(pins_json)
+    .execute(setup.core.pool())
+    .await
+    .unwrap();
+    (approval_id, hash)
+}
+
+/// The strategy's own candidate document, the base every pinned fixture starts from.
+async fn candidate_document(setup: &Setup) -> nexus_workflow_ir::WorkflowDocument {
+    setup
+        .core
+        .read_strategy_candidate(&setup.principal, STRATEGY)
+        .await
+        .unwrap()
+        .document
+}
+
+#[tokio::test]
+async fn a_pinned_body_edited_under_an_unchanged_version_refuses_apply_naming_both_hashes() {
+    let setup = setup().await;
+    write_package(
+        &setup.home,
+        PINNED_PACKAGE,
+        &fragment(PINNED_PACKAGE, "original bytes"),
+    );
+    let recorded = pattern_hashes(&setup.home)[PINNED_PACKAGE].clone();
+    let base = candidate_document(&setup).await;
+    // The slot node compose writes makes this document unbuildable on its own, so a `pin_changed`
+    // refusal also proves the pin check runs BEFORE buildability.
+    let document = pinned_document(&base, PINNED_PACKAGE, &recorded, true);
+    let pins = serde_json::json!([{
+        "id": PINNED_PACKAGE,
+        "version": "1.0.0",
+        "content_hash": recorded,
+    }]);
+    let (_, hash) = seed_pinned_approval(&setup, "pin-changed", &document, &pins.to_string()).await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+
+    // Same id and version, different bytes: the recorded pin no longer identifies the body.
+    write_package(
+        &setup.home,
+        PINNED_PACKAGE,
+        &fragment(PINNED_PACKAGE, "changed bytes"),
+    );
+    let scanned = pattern_hashes(&setup.home)[PINNED_PACKAGE].clone();
+    assert_ne!(scanned, recorded);
+
+    let error = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap_err();
+
+    let details = refusal(&error);
+    assert_eq!(details["reason"], "pin_changed");
+    assert_eq!(details["nest_id"], PINNED_NEST);
+    assert_eq!(details["package_id"], PINNED_PACKAGE);
+    assert_eq!(details["package_version"], "1.0.0");
+    assert_eq!(details["recorded_content_hash"], recorded.as_str());
+    assert_eq!(details["scanned_content_hash"], scanned.as_str());
+    assert_eq!(
+        apply_rows(setup.core.pool()).await,
+        0,
+        "a refusal writes nothing"
+    );
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn an_unchanged_pin_snapshot_with_a_nested_pin_still_applies() {
+    let setup = setup().await;
+    write_package(
+        &setup.home,
+        NESTED_PACKAGE,
+        &fragment(NESTED_PACKAGE, "nested bytes"),
+    );
+    let nested = pattern_hashes(&setup.home)[NESTED_PACKAGE].clone();
+    // The pinned package's own fragment nests the second one, so the frozen snapshot carries a pin
+    // the applied document never names — the case array equality on the document alone misses.
+    let mut outer = fragment(PINNED_PACKAGE, "original bytes");
+    outer["nests"] = serde_json::json!([{
+        "id": "nested-nest",
+        "parent_node": "slot",
+        "expansion": "defer_until_apply",
+        "pin_policy": "exact",
+        "child": {
+            "kind": "pattern",
+            "registry_id": NESTED_PACKAGE,
+            "version": "1.0.0",
+            "content_hash": nested,
+        },
+    }]);
+    write_package(&setup.home, PINNED_PACKAGE, &outer);
+    let recorded = pattern_hashes(&setup.home)[PINNED_PACKAGE].clone();
+    let base = candidate_document(&setup).await;
+    let document = pinned_document(&base, PINNED_PACKAGE, &recorded, false);
+    // Deliberately not in the deterministic order Approve writes: the comparison is a set.
+    let pins = serde_json::json!([
+        {"id": NESTED_PACKAGE, "version": "1.0.0", "content_hash": nested},
+        {"id": PINNED_PACKAGE, "version": "1.0.0", "content_hash": recorded},
+    ]);
+    let (approval_id, hash) =
+        seed_pinned_approval(&setup, "pin-unchanged", &document, &pins.to_string()).await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+
+    let applied = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap();
+
+    assert_eq!(applied.approval_id, approval_id);
+    assert_eq!(apply_rows(setup.core.pool()).await, 1);
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_document_with_no_recorded_pin_never_reads_the_patterns_root() {
+    let setup = setup().await;
+    // A regular file where the registry lives: any attempt to scan it is an I/O error, so an
+    // admitted apply is proof the pin shortcut never touched the root.
+    std::fs::write(setup.home.join("patterns"), "not a directory").unwrap();
+    let (_, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+
+    let applied = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap();
+
+    assert_eq!(applied.content_hash, hash);
+    assert_eq!(apply_rows(setup.core.pool()).await, 1);
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn an_undecodable_or_document_inconsistent_pin_snapshot_is_unverifiable() {
+    let setup = setup().await;
+    write_package(
+        &setup.home,
+        PINNED_PACKAGE,
+        &fragment(PINNED_PACKAGE, "original bytes"),
+    );
+    let recorded = pattern_hashes(&setup.home)[PINNED_PACKAGE].clone();
+    let base = candidate_document(&setup).await;
+    let document = pinned_document(&base, PINNED_PACKAGE, &recorded, false);
+    // The approvals are keyed by content hash, so the second snapshot needs its own document.
+    let inconsistent_document = with_version(&document, 2);
+    // Two snapshots no comparison can trust: one whose members are not pins at all, and one that
+    // records no pin beside a document that pins something.
+    let (_, undecodable_hash) = seed_pinned_approval(
+        &setup,
+        "pins-undecodable",
+        &document,
+        r#"[{"id": "pinned-step"}]"#,
+    )
+    .await;
+    let (_, inconsistent_hash) =
+        seed_pinned_approval(&setup, "pins-inconsistent", &inconsistent_document, "[]").await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+
+    for hash in [undecodable_hash, inconsistent_hash] {
+        let error = setup
+            .core
+            .apply_strategy(&setup.principal, STRATEGY, &hash)
+            .await
+            .unwrap_err();
+        assert_eq!(reason(&error), "approval_pins_unverifiable");
+        assert!(
+            !refusal(&error)["pin_detail"]
+                .as_str()
+                .unwrap_or_default()
+                .is_empty(),
+            "the refusal says what could not be compared"
+        );
+    }
+    assert_eq!(
+        apply_rows(setup.core.pool()).await,
+        0,
+        "a refusal writes nothing"
+    );
     setup.core.close().await.unwrap();
 }

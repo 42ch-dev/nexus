@@ -530,6 +530,87 @@ fn restart_applied_document(preset_id: &str, probe: &str) -> String {
     )
 }
 
+/// The package the pinned restart fixtures nest, and the nest it is bound through.
+const RESTART_PINNED_PACKAGE: &str = "restart-pinned-step";
+
+/// [`restart_applied_document`] plus one exact pattern pin on the shared entry
+/// node: the shape a real approval freezes when its document nests a pattern.
+fn restart_pinned_applied_document(preset_id: &str, pin_hash: &str) -> String {
+    let mut document: serde_json::Value =
+        serde_json::from_str(&restart_applied_document(preset_id, APPLIED_ONLY_NODE))
+            .expect("the applied-side document decodes");
+    document["nests"] = serde_json::json!([{
+        "id": "restart-pinned-nest",
+        "parent_node": SHARED_ENTRY_NODE,
+        "expansion": "defer_until_apply",
+        "pin_policy": "exact",
+        "child": {
+            "kind": "pattern",
+            "registry_id": RESTART_PINNED_PACKAGE,
+            "version": "1.0.0",
+            "content_hash": pin_hash,
+        },
+    }]);
+    serde_json::to_string(&document).expect("the pinned document encodes")
+}
+
+/// One package directory under `<nexus_home>/patterns`: the registry the
+/// recovery-side pin check reads. Two calls with different bodies are the same
+/// pin serving different bytes — the case the document hash cannot catch.
+fn write_restart_package(nexus_home: &Path, description: &str) {
+    let directory = nexus_home.join("patterns").join(RESTART_PINNED_PACKAGE);
+    std::fs::create_dir_all(&directory).expect("pattern directory");
+    std::fs::write(
+        directory.join("pattern.toml"),
+        format!(
+            "id = \"{RESTART_PINNED_PACKAGE}\"\nversion = \"1.0.0\"\ndescription = \
+             \"restart pin fixture\"\neffect_class = \"pure\"\nrequires_capabilities = []\n\
+             slots = []\n\n[ir_compat]\nmin = 0\nmax = 0\n"
+        ),
+    )
+    .expect("pattern manifest");
+    std::fs::write(
+        directory.join("workflow.ir.json"),
+        serde_json::json!({
+            "ir_version": 0,
+            "id": RESTART_PINNED_PACKAGE,
+            "version": 1,
+            "revision": 0,
+            "state": "candidate",
+            "meta": {
+                "description": description,
+                "kind": "creator",
+                "run_intents": [],
+                "requires_capabilities": [],
+            },
+            "entry": "slot",
+            "terminal": ["slot"],
+            "nodes": [{"id": "slot", "kind": "pattern_slot", "effect_class": "pure"}],
+            "edges": [],
+            "nests": [],
+            "assets": [],
+            "signals": [],
+            "roles": [],
+            "effect_summary": "pure",
+            "provenance": {"source": "compose"},
+        })
+        .to_string(),
+    )
+    .expect("pattern fragment");
+}
+
+/// The hash the registry serves for [`RESTART_PINNED_PACKAGE`] right now.
+fn restart_package_hash(nexus_home: &Path) -> String {
+    nexus_pattern::scan_pattern_packages(
+        &nexus_home.join("patterns"),
+        nexus_workflow_ir::IR_VERSION,
+    )
+    .expect("pattern registry scan")
+    .into_iter()
+    .find_map(|package| package.content_hash().map(ToOwned::to_owned))
+    .expect("the pinned package is readable")
+}
+
 fn write_restart_bundle(nexus_home: &Path, preset_id: &str) -> std::path::PathBuf {
     let bundle = nexus_home.join("presets").join(preset_id);
     std::fs::create_dir_all(&bundle).expect("restart preset bundle");
@@ -567,9 +648,37 @@ async fn seed_restart_apply(
     pool: &sqlx::SqlitePool,
     preset_id: &str,
 ) -> nexus_orchestration::run_state::AppliedRunIdentity {
+    let document = restart_applied_document(preset_id, APPLIED_ONLY_NODE);
+    seed_apply(pool, preset_id, &document, "[]").await
+}
+
+/// The same seeded apply carrying ONE recorded pattern pin: the applied
+/// document nests the package and `pins_json` freezes the hash the registry
+/// served when the row was seeded.
+async fn seed_pinned_restart_apply(
+    pool: &sqlx::SqlitePool,
+    preset_id: &str,
+    pin_hash: &str,
+) -> nexus_orchestration::run_state::AppliedRunIdentity {
+    let document = restart_pinned_applied_document(preset_id, pin_hash);
+    let pins = serde_json::json!([{
+        "id": RESTART_PINNED_PACKAGE,
+        "version": "1.0.0",
+        "content_hash": pin_hash,
+    }]);
+    seed_apply(pool, preset_id, &document, &pins.to_string()).await
+}
+
+/// Write the approval, the apply row and the schedule precondition an apply
+/// requires, all through the caller's admitted pool.
+async fn seed_apply(
+    pool: &sqlx::SqlitePool,
+    preset_id: &str,
+    document_json: &str,
+    pins_json: &str,
+) -> nexus_orchestration::run_state::AppliedRunIdentity {
     let document: nexus_workflow_ir::WorkflowDocument =
-        serde_json::from_str(&restart_applied_document(preset_id, APPLIED_ONLY_NODE))
-            .expect("the applied-side document decodes");
+        serde_json::from_str(document_json).expect("the applied-side document decodes");
     let hash = nexus_workflow_ir::content_hash(&document).expect("the fixture document hashes");
 
     // An apply requires the strategy to own a schedule. A pre-seed row is inert
@@ -591,7 +700,7 @@ async fn seed_restart_apply(
         "INSERT INTO strategy_approvals \
          (approval_id, strategy_id, content_hash, candidate_revision, document_json, \
           trajectory_json, pins_json, approver, approved_at) \
-         VALUES (?, ?, ?, ?, ?, ?, '[]', ?, '2026-11-15T00:00:00+00:00')",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, '2026-11-15T00:00:00+00:00')",
     )
     .bind(format!("apr_{preset_id}"))
     .bind(preset_id)
@@ -599,6 +708,7 @@ async fn seed_restart_apply(
     .bind(i64::try_from(document.revision).expect("revision fits"))
     .bind(serde_json::to_string(&document).expect("document json"))
     .bind(serde_json::json!({ "ir_content_hash": hash }).to_string())
+    .bind(pins_json)
     .bind(CREATOR)
     .execute(pool)
     .await
@@ -1096,6 +1206,135 @@ async fn a_restart_of_an_unchanged_applied_run_still_recovers_the_applied_graph(
     assert_eq!(
         session.current_task_id, APPLIED_ONLY_NODE,
         "a matching recorded identity must recover the applied graph; got {:?}",
+        session.current_task_id
+    );
+
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
+// ── The frozen pin snapshot re-compared at recovery (P6) ──────────────────
+
+/// P6: a pattern body edited between apply and restart is refused at recovery.
+///
+/// The applied document's own bytes still hash to the recorded identity — the
+/// edit moved the package, not the document — so only the frozen `pins_json`
+/// snapshot can catch it. Recovery must refuse the reconstruction with the
+/// stable `applied_pin_changed` code and name the pinned package, and the
+/// durable position must stay exactly where the killed daemon left it.
+#[tokio::test]
+async fn a_restart_after_a_pinned_body_moved_refuses_naming_the_pin() {
+    let f = fixture().await;
+    let nexus_home = f.tmp.path().join(".nexus42");
+    let bundle = write_restart_bundle(&nexus_home, RESTART_PRESET);
+    write_restart_package(&nexus_home, "original bytes");
+    let recorded = restart_package_hash(&nexus_home);
+    let session_id = format!("{RESTART_PRESET}:in-flight");
+    let seed = open_seed_pool(&f.db_path).await;
+    let admitted = seed_pinned_restart_apply(seed.pool(), RESTART_PRESET, &recorded).await;
+    seed_restart_run(
+        seed.pool(),
+        &session_id,
+        RESTART_PRESET,
+        &bundle,
+        Some(admitted),
+    )
+    .await;
+    close_seed_pool(&f.db_path, seed).await;
+
+    // Same id and version, different bytes.
+    write_restart_package(&nexus_home, "changed bytes");
+    assert_ne!(
+        restart_package_hash(&nexus_home),
+        recorded,
+        "the fixture must actually move the pinned bytes"
+    );
+
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    let refusal = handle
+        .coordinator()
+        .signal_run(
+            &nexus_orchestration::SessionId(session_id.clone()),
+            nexus_core::execution::RunSignal::Continue {
+                wait_id: "irrelevant".to_string(),
+            },
+        )
+        .await
+        .expect_err("a run whose pinned body moved must not be recovered");
+    let RunControlError::ReconstructionUnavailable { reason, .. } = refusal else {
+        panic!("expected reconstruction_unavailable, got {refusal:?}");
+    };
+    assert!(
+        reason.contains("applied_pin_changed"),
+        "the refusal keeps the coded reason: {reason}"
+    );
+    assert!(
+        reason.contains(RESTART_PINNED_PACKAGE),
+        "the refusal must name the pinned package: {reason}"
+    );
+    assert!(
+        reason.contains(&recorded),
+        "the refusal must name the hash the apply froze: {reason}"
+    );
+
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+    let session = read_restart_session(&pool, &session_id)
+        .await
+        .expect("the run row exists");
+    assert_eq!(
+        session.current_task_id, SHARED_ENTRY_NODE,
+        "a refused reconstruction must not advance the run; got {:?}",
+        session.current_task_id
+    );
+    assert_ne!(session.current_task_id, APPLIED_ONLY_NODE);
+
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
+/// P6: unchanged pins recover the applied graph exactly as before — the new
+/// check must admit every applied identity whose bodies still hash to the
+/// frozen snapshot.
+#[tokio::test]
+async fn a_restart_with_unchanged_pins_recovers_the_applied_graph() {
+    let f = fixture().await;
+    let nexus_home = f.tmp.path().join(".nexus42");
+    let bundle = write_restart_bundle(&nexus_home, RESTART_PRESET);
+    write_restart_package(&nexus_home, "original bytes");
+    let recorded = restart_package_hash(&nexus_home);
+    let session_id = format!("{RESTART_PRESET}:in-flight");
+    let seed = open_seed_pool(&f.db_path).await;
+    let admitted = seed_pinned_restart_apply(seed.pool(), RESTART_PRESET, &recorded).await;
+    seed_restart_run(
+        seed.pool(),
+        &session_id,
+        RESTART_PRESET,
+        &bundle,
+        Some(admitted),
+    )
+    .await;
+    close_seed_pool(&f.db_path, seed).await;
+
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+
+    let session = recovered_position(&owner, &session_id).await;
+    assert_eq!(
+        session.current_task_id, APPLIED_ONLY_NODE,
+        "unchanged pins must recover the applied graph; got {:?}",
         session.current_task_id
     );
 
