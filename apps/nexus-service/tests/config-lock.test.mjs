@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   chmodSync,
+  chownSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -37,6 +38,16 @@ const configPathFor = (home) => join(home, NEXUS_DIR, CONFIG_NAME);
 const lockPathFor = (home) => join(home, NEXUS_DIR, LOCK_NAME);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * A group this process may assign that differs from its effective gid, or null
+ * when it belongs to no other group. Without one a staged-and-renamed file
+ * always inherits the process egid, so a captured-group assertion cannot fail.
+ */
+function foreignGroup() {
+  const egid = process.getegid?.();
+  return process.getgroups?.().find((gid) => gid !== egid) ?? null;
+}
 
 /** A daemon home seeded with the core-owned keys the profile write must keep. */
 function seededHome() {
@@ -326,17 +337,25 @@ describe('config publication policy (native publisher)', () => {
     assert.deepEqual(readdirSync(join(home, NEXUS_DIR)), [CONFIG_NAME]);
   });
 
-  test('an existing 0640 config keeps its mode and group with unrelated keys intact', async () => {
+  test('an existing 0640 config keeps its mode and group with unrelated keys intact', async (t) => {
+    const group = foreignGroup();
+    if (group === null) {
+      t.skip(
+        'no supplementary group distinct from the process egid: a captured-group assertion cannot fail here',
+      );
+      return;
+    }
     const home = seededHome();
     const path = configPathFor(home);
     chmodSync(path, 0o640);
-    const before = statSync(path);
+    chownSync(path, -1, group);
+    assert.equal(statSync(path).gid, group, 'the fixture group differs from the process egid');
 
     await withDeadline(writeAgentProfile(home, { name: 'codex-cli' }), 5000, 'the profile write');
 
     const after = statSync(path);
     assert.equal(after.mode & 0o777, 0o640, 'the captured mode is reapplied');
-    assert.equal(after.gid, before.gid, 'the captured group is reapplied');
+    assert.equal(after.gid, group, 'the captured group is reapplied');
     const stored = parse(readFileSync(path, 'utf8'));
     assert.deepEqual({ ...stored.agent_profile }, { name: 'codex-cli' });
     assert.equal(stored.active_creator_id, 'ctr_localaaaaaaaaaaaa');

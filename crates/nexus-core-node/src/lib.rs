@@ -501,10 +501,11 @@ pub async fn reset_local_state(home: String) -> Result<u32> {
 /// # Errors
 ///
 /// Rejects with the wire `CoreError` envelope: `invalid_input` when `path` is
-/// not absolute, `forbidden` when the target is not writable by this process or
-/// the platform cannot reproduce its access policy, and `internal` for any
-/// other filesystem failure or a failed worker. The document's contents never
-/// appear in the rejection.
+/// not absolute, `forbidden` when the target's policy refuses the replacement
+/// (not writable, not replaceable: hard-linked, non-regular or an unresolvable
+/// symlink chain) or the platform cannot reproduce its access policy, and
+/// `internal` for any other filesystem failure or a failed worker. The
+/// document's contents never appear in the rejection.
 #[napi]
 pub async fn publish_document(path: String, contents: String) -> Result<()> {
     let requested = std::path::PathBuf::from(&path);
@@ -529,16 +530,18 @@ pub async fn publish_document(path: String, contents: String) -> Result<()> {
 
 /// Map a publication refusal to the wire `CoreError` envelope.
 ///
-/// The kind is mapped once, here: a denied target (the write-authorisation
-/// probe, the policy capture or the apply step) and a platform that cannot
-/// reproduce the policy are `forbidden`; every other failure stays `internal`.
+/// The kind is mapped once, here: a target policy refusal (a denied write
+/// probe, an unreproducible policy, a hard-linked or non-regular target, a
+/// symlink chain that will not resolve) and a platform without the policy
+/// contract are `forbidden`; every other failure stays `internal`, because it is
+/// a transient filesystem fault rather than a permanent property of the target.
 /// `ErrorKind::Unsupported` keeps its own arm so it never degrades into a
 /// generic internal failure.
 fn wire_core_error_from_publication(error: &std::io::Error) -> CoreError {
     let (code, message, http_status) = match error.kind() {
         std::io::ErrorKind::PermissionDenied => (
             CoreErrorCode::Forbidden,
-            "config publication refused: the target is not writable by this process",
+            "config publication refused: the target is not writable or not replaceable by this process",
             403,
         ),
         std::io::ErrorKind::Unsupported => (

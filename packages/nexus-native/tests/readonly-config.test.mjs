@@ -7,6 +7,11 @@
 // a sealed read-only home loads a legacy `config.json` snapshot without taking
 // the lock, publishing `config.toml`, renaming the legacy file or creating a
 // directory entry, while a writer open still migrates.
+//
+// LOCAL ONLY — not part of `pnpm test` and not wired into CI: it seeds through
+// `cargo run -q -p nexus-core-node --bin native-wire-fixture-seed`, an uncached
+// debug build of the whole core that no CI job stages. The Rust half runs in
+// `crates/nexus-core/tests/readonly_config_open.rs`.
 
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';

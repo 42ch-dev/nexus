@@ -14,8 +14,13 @@
  * - Cleanup is best-effort after that point: a refusal preserves the readable
  *   encrypted store and the remaining legacy source, never blocks activation,
  *   and is reported as the sanitized `legacy_credential_cleanup_failed`.
- * - Clear writes a durable tombstone marker: a later open sees the marker
- *   and never re-imports the legacy material (D-18).
+ * - Clear publishes the durable tombstone marker BEFORE it removes the store,
+ *   so a refused marker leaves the credential in place and reports failure, and
+ *   a later open sees the marker and never re-imports the legacy material
+ *   (D-18).
+ * - `set` and `delete` run one at a time through a per-store gate, so a save can
+ *   never overwrite a completed clear and a later save always derives from what
+ *   the previous one published.
  * - Writes are published atomically and policy-preserving through the native
  *   publisher; a failed encrypt or a refused target leaves the previous state
  *   fully intact. The plaintext key never reaches an error or a log.
@@ -70,7 +75,16 @@ export interface ConnectionStoreDeps {
    * confirmed-absent file makes {@link ConnectionStore.delete} throw.
    */
   removeFile?: (filePath: string) => void;
+  /**
+   * Publication primitive (defaults to the native `publishDocument`). Injectable
+   * only so a regression can hold one publication open and overlap two
+   * mutations; every production path uses the native publisher.
+   */
+  publish?: PublishDocument;
 }
+
+/** Publishes complete `contents` at the absolute `filePath`. */
+type PublishDocument = (filePath: string, contents: string) => Promise<void>;
 
 interface StoredFile {
   version: 1;
@@ -97,10 +111,14 @@ function decodeCredential(encoded: string): Uint8Array {
  * policy. A refusal is `secure_store_publish_refused` naming at most an errno
  * token: neither the plaintext key nor the ciphertext ever reaches the error.
  */
-async function atomicWrite(filePath: string, contents: string): Promise<void> {
+async function atomicWrite(
+  publish: PublishDocument,
+  filePath: string,
+  contents: string,
+): Promise<void> {
   try {
     mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
-    await publishDocument(filePath, contents);
+    await publish(filePath, contents);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException | null)?.code;
     throw desktopError(
@@ -125,6 +143,13 @@ const CLEARED_MARKER_NAME = 'connection-config.cleared';
  * injection authority for the network policy and never crosses IPC.
  */
 export class ConnectionStore {
+  /**
+   * Tail of this store's mutation chain. `set` and `delete` hold the whole
+   * read → derive → publish → state-update sequence inside it, so the previous
+   * state they derive from is the state the earlier mutation committed.
+   */
+  private tail: Promise<unknown> = Promise.resolve();
+
   private constructor(
     private readonly deps: ConnectionStoreDeps,
     private state: StoredFile | null,
@@ -152,6 +177,16 @@ export class ConnectionStore {
      */
     readonly openFailure: Error | null = null,
   ) {}
+
+  /** Run one mutation after the previous one settled; the tail never rejects. */
+  private serialize<T>(run: () => Promise<T>): Promise<T> {
+    const next = this.tail.catch(() => undefined).then(run);
+    this.tail = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
 
   /**
    * Open (or create) the store. When no store file exists, no cleared
@@ -308,7 +343,7 @@ export class ConnectionStore {
     if (state.credential !== undefined) {
       deps.storage.decryptString(decodeCredential(state.credential));
     }
-    await atomicWrite(deps.filePath, serialized);
+    await atomicWrite(deps.publish ?? publishDocument, deps.filePath, serialized);
   }
 
   /**
@@ -388,39 +423,44 @@ export class ConnectionStore {
    *   an endpoint change never carries the old endpoint's credential;
    * - if encryption is unavailable the operation throws and the previous
    *   state survives untouched (no partial writes, no plaintext fallback).
+   *
+   * Runs after every mutation already queued on this store, so `keep` sees the
+   * key an earlier `replace` published instead of restoring the replaced one.
    */
   async set(
     config: PublicConnectionConfig,
     credential: ConnectionCredentialUpdate,
   ): Promise<PublicConnectionConfig> {
-    connectionEndpointOrigin(config.endpointUrl);
-    const previous = this.state;
-    let nextCredential: string | undefined;
-    if (credential.action === 'replace') {
-      nextCredential =
-        credential.value.length > 0
-          ? encodeCredential(ConnectionStore.encrypt(this.deps, credential.value))
-          : undefined;
-    } else {
-      // keep
-      if (!previous?.credential) {
-        // No stored key and none supplied: valid, simply keyless.
-        nextCredential = undefined;
-      } else if (sameEndpoint(previous.config, config)) {
-        nextCredential = previous.credential;
+    return this.serialize(async () => {
+      connectionEndpointOrigin(config.endpointUrl);
+      const previous = this.state;
+      let nextCredential: string | undefined;
+      if (credential.action === 'replace') {
+        nextCredential =
+          credential.value.length > 0
+            ? encodeCredential(ConnectionStore.encrypt(this.deps, credential.value))
+            : undefined;
       } else {
-        // Endpoint changed: the old endpoint's credential never carries over.
-        nextCredential = undefined;
+        // keep
+        if (!previous?.credential) {
+          // No stored key and none supplied: valid, simply keyless.
+          nextCredential = undefined;
+        } else if (sameEndpoint(previous.config, config)) {
+          nextCredential = previous.credential;
+        } else {
+          // Endpoint changed: the old endpoint's credential never carries over.
+          nextCredential = undefined;
+        }
       }
-    }
-    const next: StoredFile = {
-      version: 1,
-      config: { ...config, hasApiKey: nextCredential !== undefined },
-      credential: nextCredential,
-    };
-    await ConnectionStore.persist(this.deps, next);
-    this.state = next;
-    return { ...next.config };
+      const next: StoredFile = {
+        version: 1,
+        config: { ...config, hasApiKey: nextCredential !== undefined },
+        credential: nextCredential,
+      };
+      await ConnectionStore.persist(this.deps, next);
+      this.state = next;
+      return { ...next.config };
+    });
   }
 
   /**
@@ -428,30 +468,43 @@ export class ConnectionStore {
    * the store so a later {@link ConnectionStore.open} sees the marker and
    * never re-imports the legacy material (D-18): clear is a deliberate user
    * action and must not be undone by the still-present legacy key. The
-   * marker is non-secret and is created only after the store file is
-   * confirmed gone.
+   * marker is non-secret.
    *
-   * Resolves only when the material is actually gone: a removal failure
-   * (permissions, I/O, …) throws `secure_store_delete_failed` and the
-   * in-memory state is left intact so no false "cleared" is reported while
+   * The marker is published BEFORE the store file is removed. The opposite
+   * order leaves neither store nor tombstone when the marker publication is
+   * refused, and the next open then re-imports the legacy material — a clear
+   * the user was told had failed would be quietly revoked.
+   *
+   * Resolves only when the material is actually gone: a refused tombstone
+   * publication (or a removal failure — permissions, I/O, …) throws and the
+   * in-memory state is left intact, so no false "cleared" is reported while
    * bytes remain on disk. An already-absent file counts as removed. A refused
-   * tombstone publication surfaces as `secure_store_publish_refused` the same
-   * way.
+   * tombstone surfaces as `secure_store_publish_refused`, a refused removal as
+   * `secure_store_delete_failed`.
+   *
+   * Runs after every mutation already queued on this store, so an in-flight
+   * save cannot republish the store after this clear reported success.
    */
   async delete(): Promise<void> {
-    const remove = this.deps.removeFile ?? rmSync;
-    try {
-      remove(this.deps.filePath);
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException | null)?.code;
-      if (code !== 'ENOENT') {
-        throw desktopError(
-          'secure_store_delete_failed',
-          `connection store file could not be removed (${code ?? 'unknown error'})`,
-        );
+    return this.serialize(async () => {
+      await atomicWrite(
+        this.deps.publish ?? publishDocument,
+        join(dirname(this.deps.filePath), CLEARED_MARKER_NAME),
+        '{"cleared":true}\n',
+      );
+      const remove = this.deps.removeFile ?? rmSync;
+      try {
+        remove(this.deps.filePath);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException | null)?.code;
+        if (code !== 'ENOENT') {
+          throw desktopError(
+            'secure_store_delete_failed',
+            `connection store file could not be removed (${code ?? 'unknown error'})`,
+          );
+        }
       }
-    }
-    await atomicWrite(join(dirname(this.deps.filePath), CLEARED_MARKER_NAME), '{"cleared":true}\n');
-    this.state = null;
+      this.state = null;
+    });
   }
 }

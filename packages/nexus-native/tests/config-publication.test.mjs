@@ -10,6 +10,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   chmodSync,
+  chownSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -41,6 +42,16 @@ function makeTarget(home, contents) {
 
 function wireCode(error) {
   return parseNativeCoreError(error)?.code ?? null;
+}
+
+/**
+ * A group this process may assign that differs from its effective gid, or null
+ * when it belongs to no other group. Without one a staged-and-renamed file
+ * always inherits the process egid, so a captured-group assertion cannot fail.
+ */
+function foreignGroup() {
+  const egid = process.getegid?.();
+  return process.getgroups?.().find((gid) => gid !== egid) ?? null;
 }
 
 describe('native config publication (real binding)', () => {
@@ -87,6 +98,14 @@ describe('native config publication (real binding)', () => {
 
       assert.ok(error, 'a write-denied target must be refused');
       assert.equal(wireCode(error), 'forbidden');
+      // The envelope is content-free by construction: an empty `details` is not
+      // even serialised, and a message-only assertion would pass a regression
+      // that moved the contents into it.
+      assert.deepEqual(
+        parseNativeCoreError(error)?.details ?? {},
+        {},
+        'the refusal carries no details',
+      );
       assert.equal(readFileSync(target, 'utf8'), 'name = "locked"\n');
       assert.deepEqual(readdirSync(join(home, 'agent-host')), ['config.toml']);
     } finally {
@@ -96,18 +115,26 @@ describe('native config publication (real binding)', () => {
     }
   });
 
-  test('an existing 0640 target keeps its mode and group', async () => {
+  test('an existing 0640 target keeps its mode and group', async (t) => {
+    const group = foreignGroup();
+    if (group === null) {
+      t.skip(
+        'no supplementary group distinct from the process egid: a captured-group assertion cannot fail here',
+      );
+      return;
+    }
     const home = makeHome();
     try {
       const target = makeTarget(home, 'name = "old"\n');
       chmodSync(target, 0o640);
-      const before = statSync(target);
+      chownSync(target, -1, group);
+      assert.equal(statSync(target).gid, group, 'the fixture group differs from the process egid');
 
       await publishDocument(target, 'name = "new"\n');
 
       const after = statSync(target);
       assert.equal(after.mode & 0o777, 0o640, 'the captured mode is reapplied');
-      assert.equal(after.gid, before.gid, 'the captured group is reapplied');
+      assert.equal(after.gid, group, 'the captured group is reapplied');
       assert.equal(readFileSync(target, 'utf8'), 'name = "new"\n');
     } finally {
       rmSync(home, { recursive: true, force: true });
