@@ -19,7 +19,7 @@ import {
   parseWorkspacePackageVersion,
   readSurfaceVersion,
   readSurfaceVersions,
-  readPublishableCrates,
+  readStandalonePublishableCrates,
   readVersionBrackets,
   readWorkspaceMemberPackages,
   replaceJsonVersion,
@@ -31,7 +31,6 @@ import {
   cleanupTempRepo,
   expectedMemberLockVersions,
   FIXTURE_BASELINE_VERSION,
-  mutateRepoFile,
   readRepoFile,
   REPO_ROOT,
   writeRepoFile,
@@ -325,77 +324,77 @@ test("readVersionBrackets rejects a carrier path that is not the member's manife
   }
 });
 
-test("readPublishableCrates reads the declared value, not the line", () => {
+/** Standalone crate added to a fixture: outside the root workspace, own root. */
+const FIXTURE_STANDALONE_MANIFEST = "modules/nexus-demo/Cargo.toml";
+
+/**
+ * Add a standalone crate to a fixture — its own `[workspace]` table, its own
+ * target stub — so Cargo parses it as a workspace root of its own.
+ *
+ * @param {string} dir
+ * @param {string} publishLine `publish = false` or `""` (Cargo's publishable default).
+ * @returns {void}
+ */
+function writeFixtureStandaloneCrate(dir, publishLine) {
+  writeRepoFile(
+    dir,
+    FIXTURE_STANDALONE_MANIFEST,
+    `[package]\nname = "nexus-demo"\nversion = "0.1.0"\nedition = "2021"\n${publishLine}\n[workspace]\n`,
+  );
+  writeRepoFile(dir, "modules/nexus-demo/src/lib.rs", "// release-fixture stub\n");
+}
+
+test("readStandalonePublishableCrates skips a crate declared publish = false", () => {
   const dir = createTempRepo();
   try {
-    // Valid TOML, same declaration: an inline comment must not hide it, or the
-    // crate silently leaves the completeness check.
-    mutateRepoFile(dir, "modules/nexus-module-sdk/Cargo.toml", (contents) =>
-      contents.replace(
-        /^publish = true$/m,
-        "publish = true # independently published",
-      ),
-    );
+    writeFixtureStandaloneCrate(dir, "publish = false");
+    const crates = readStandalonePublishableCrates(dir);
     assert.ok(
-      readPublishableCrates(dir).some(
-        (crate) => crate.manifest === "modules/nexus-module-sdk/Cargo.toml",
-      ),
-      "a commented publish = true declaration is still a declaration",
+      !crates.some((crate) => crate.manifest === FIXTURE_STANDALONE_MANIFEST),
+      "a publish = false crate cannot version independently, so it needs no carrier entry",
+    );
+    // The scan still classifies the real declarations, so the result above is
+    // not a broken read.
+    assert.ok(
+      crates.some((crate) => crate.manifest === "modules/nexus-module-sdk/Cargo.toml"),
+      "real publishable crate missing from the read",
     );
   } finally {
     cleanupTempRepo(dir);
   }
 });
 
-test("readPublishableCrates ignores publish text inside strings and comments", () => {
+test("readStandalonePublishableCrates requires a crate that omits publish", () => {
   const dir = createTempRepo();
   try {
-    // Neither of these is a declaration, so demanding a carrier entry for this
-    // crate would reject a valid tree.
-    writeRepoFile(
-      dir,
-      "crates/nexus-quoted/Cargo.toml",
-      '[package]\nname = "nexus-quoted"\nversion = "0.1.0"\ndescription = """\npublish = true\n"""\n# publish = true\n',
-    );
-    const crates = readPublishableCrates(dir);
+    // Cargo's default is publishable, so omitting the key does not opt out.
+    writeFixtureStandaloneCrate(dir, "");
     assert.ok(
-      !crates.some((crate) => crate.manifest === "crates/nexus-quoted/Cargo.toml"),
-      "matched source text, not a [package] key",
-    );
-    // The same scan still classifies the real declarations, so the empty-list
-    // case above is not the walk failing to find anything.
-    assert.ok(
-      crates.some((crate) => crate.manifest === "modules/nexus-module-sdk/Cargo.toml"),
-      "real declaration lost from the scan",
+      readStandalonePublishableCrates(dir).some(
+        (crate) => crate.manifest === FIXTURE_STANDALONE_MANIFEST,
+      ),
+      "a crate Cargo would publish belongs in the contract bracket",
     );
   } finally {
     cleanupTempRepo(dir);
   }
 });
 
-test("readPublishableCrates stays out of vendored and build trees", () => {
+test("readStandalonePublishableCrates finds crates outside the workspace root", () => {
   const dir = createTempRepo();
   try {
-    const excluded = ["vendor", "vendored", "third_party", "target", "node_modules"];
-    for (const root of excluded) {
-      writeRepoFile(
-        dir,
-        `${root}/dep-${root}/Cargo.toml`,
-        `[package]\nname = "dep-${root}"\nversion = "0.1.0"\npublish = true\n`,
-      );
+    const manifests = readStandalonePublishableCrates(dir).map((crate) => crate.manifest);
+    for (const manifest of [
+      "modules/nexus-module-sdk/Cargo.toml",
+      "modules/nexus-module-manifest/Cargo.toml",
+      "modules/nexus-module-test/Cargo.toml",
+    ]) {
+      assert.ok(manifests.includes(manifest), `${manifest} missing from the read`);
     }
-    const crates = readPublishableCrates(dir);
-    for (const crate of crates) {
-      assert.ok(
-        !excluded.some((root) => crate.manifest.startsWith(`${root}/`)),
-        `${crate.manifest} is not this repository's crate`,
-      );
-    }
-    // An owned standalone crate is still discoverable, so the exclusion is a
-    // boundary and not a broken walk.
+    // The root workspace is a separate root: its members are not standalone.
     assert.ok(
-      crates.some((crate) => crate.manifest === "modules/nexus-module-sdk/Cargo.toml"),
-      "owned publishable crate missing from the scan",
+      !manifests.some((manifest) => manifest.startsWith("crates/")),
+      "a workspace member was classified as a standalone crate",
     );
   } finally {
     cleanupTempRepo(dir);

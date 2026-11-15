@@ -24,8 +24,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join, posix } from "node:path";
+import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join, posix, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const RELEASE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -436,147 +436,96 @@ export function readVersionBrackets(repoRoot) {
 }
 
 /**
- * Directories that hold no crate source this repository owns: build output,
- * installed dependencies, and the trees vendoring tools copy third-party
- * sources into. A manifest found there describes somebody else's crate.
+ * Home of the standalone crates: one `modules/<name>` directory per crate, each
+ * with its own `[workspace]` table, so the root workspace's metadata never lists
+ * them.
  */
-const SKIPPED_DIRECTORIES = new Set([
-  "node_modules",
-  "target",
-  "vendor",
-  "vendored",
-  "third_party",
-]);
+const MODULES_DIR = "modules";
 
 /**
- * Every `Cargo.toml` in the tree, relative to `repoRoot`.
+ * Cargo's own view of a workspace rooted at `manifestPath`.
  *
- * Dot directories are skipped: they hold tooling state (`.git`, `.cargo`) and
- * other checkouts of this repository (`.worktrees`), whose crates are not this
- * tree's to classify. {@link SKIPPED_DIRECTORIES} names the non-dot roots that
- * are pruned for the same reason.
+ * Cargo parses the manifest exactly, so nothing here has to: `manifest_path` is
+ * absolute as Cargo resolved it and `publish` carries the publish policy —
+ * `null` or a registry list means the crate can be published, `[]` means
+ * `publish = false`.
+ *
+ * A metadata failure throws. Returning an empty list would silently exempt
+ * every crate from the completeness check that consumes it.
+ *
+ * @param {string} manifestPath Absolute path to a workspace root manifest.
+ * @returns {{ name: string; publish: string[] | null; manifest_path: string }[]}
+ */
+function readCargoMetadataPackages(manifestPath) {
+  const result = spawnSync(
+    "cargo",
+    ["metadata", "--no-deps", "--format-version", "1", "--manifest-path", manifestPath],
+    { encoding: "utf8" },
+  );
+  if (result.error !== undefined || result.status !== 0) {
+    const detail = result.error?.message ?? result.stderr.trim();
+    throw new Error(
+      `${manifestPath}: \`cargo metadata --no-deps\` failed (${detail}); ` +
+        "reading a crate's publish policy needs the Rust toolchain and a parseable manifest",
+    );
+  }
+  return JSON.parse(result.stdout).packages;
+}
+
+/**
+ * Manifest roots of the standalone crates, absolute: one per `modules/<name>`
+ * directory. A directory without a manifest is not a crate, so it is skipped.
  *
  * @param {string} repoRoot
- * @param {string} [relativeDir]
  * @returns {string[]}
  */
-function collectCargoManifests(repoRoot, relativeDir = "") {
-  /** @type {string[]} */
-  const manifests = [];
-  for (const dirent of readdirSync(join(repoRoot, relativeDir), {
-    withFileTypes: true,
-  })) {
-    if (dirent.isDirectory()) {
-      if (dirent.name.startsWith(".") || SKIPPED_DIRECTORIES.has(dirent.name)) {
-        continue;
-      }
-      manifests.push(
-        ...collectCargoManifests(repoRoot, posix.join(relativeDir, dirent.name)),
-      );
-    } else if (dirent.name === "Cargo.toml") {
-      manifests.push(posix.join(relativeDir, dirent.name));
-    }
+function standaloneManifestRoots(repoRoot) {
+  const modulesDir = join(repoRoot, MODULES_DIR);
+  if (!existsSync(modulesDir)) {
+    return [];
   }
-  return manifests;
+  return readdirSync(modulesDir, { withFileTypes: true })
+    .filter((dirent) => dirent.isDirectory())
+    .map((dirent) => join(modulesDir, dirent.name, "Cargo.toml"))
+    .filter((manifestPath) => existsSync(manifestPath));
 }
 
 /**
- * Blank out every TOML comment and string body, keeping delimiters, newlines
- * and the length of the text intact.
+ * Publishable crates that live outside the root workspace.
  *
- * What survives is the syntactic skeleton of the document: a `publish = true`
- * inside a comment or inside a multi-line string is gone, so it cannot be read
- * as a key, while a real declaration keeps its value.
+ * Cargo's `publish` is the authority, so `null` (or a registry list) is
+ * publishable and `[]` is `publish = false`. A standalone crate has no
+ * workspace version to inherit, so a crate Cargo would publish can only version
+ * on its own: it belongs in the contract bracket, and dropping it from there
+ * must not silence the check.
  *
- * @param {string} contents TOML text.
- * @returns {string}
- */
-function maskTomlCommentsAndStrings(contents) {
-  const masked = contents.split("");
-  // Line structure is what the section scan relies on, so newlines stay.
-  const blank = (at) => {
-    masked[at] = contents[at] === "\n" ? "\n" : " ";
-  };
-
-  let index = 0;
-  while (index < contents.length) {
-    const character = contents[index];
-    if (character === "#") {
-      while (index < contents.length && contents[index] !== "\n") {
-        blank(index++);
-      }
-      continue;
-    }
-    if (character !== '"' && character !== "'") {
-      index += 1;
-      continue;
-    }
-    const delimiter = contents.startsWith(character.repeat(3), index)
-      ? character.repeat(3)
-      : character;
-    index += delimiter.length;
-    while (index < contents.length && !contents.startsWith(delimiter, index)) {
-      // Only a basic string honours backslash escapes; a literal string does not.
-      if (character === '"' && contents[index] === "\\") {
-        blank(index++);
-      }
-      if (index < contents.length) {
-        blank(index++);
-      }
-    }
-    index += delimiter.length;
-  }
-
-  return masked.join("");
-}
-
-/**
- * Whether `[package]` declares `publish = true`.
+ * Workspace members are not returned on purpose. They inherit the product
+ * version through `version.workspace = true`, so Cargo's `null` default does
+ * not make them independent; the lockstep assertion rejects a non-contract
+ * member that switches to a literal version.
  *
- * The value is read from the package table after masking comments and string
- * bodies, so `publish = true # independently published` is a declaration while
- * the same text inside a comment or a multi-line `description` is not. A
- * manifest that omits `publish`, or inherits it with `publish.workspace`, is
- * not one: only the explicit boolean counts.
- *
- * Not a TOML parser. It masks strings and comments and then matches one key at
- * the start of a line, so it cannot see through exotic forms — a `[package]`
- * header written inside a multi-line string still opens the table, and dotted
- * or inline-table spellings are simply unmatched. Crate manifests in this
- * repository are hand-written or generated in the plain one-key-per-line form
- * above, so that boundary is where the check stops being worth more code.
- *
- * @param {string} contents Cargo.toml contents.
- * @returns {boolean}
- */
-function declaresCargoPackagePublish(contents) {
-  const section = maskTomlCommentsAndStrings(contents).match(
-    /(?:^|\n)\[package\][\s\S]*?(?=\n\[|$)/,
-  )?.[0];
-  return section !== undefined && /^\s*publish\s*=\s*true\s*$/m.test(section);
-}
-
-/**
- * Crates that declare `publish = true` in their own `[package]` table.
- *
- * A declared `publish = true` is the durable signal that a crate versions on
- * its own schedule, so it belongs in the contract bracket and cannot be
- * dropped from it silently. The declaration is required explicitly: a manifest
- * that omits `publish` keeps Cargo's `true` default, which would pull every
- * workspace member into the bracket.
+ * shortcut: standalone roots are read from {@link MODULES_DIR} only, so a
+ * publishable standalone crate added elsewhere (under `tooling/`) is not seen;
+ * add its root here when one appears.
  *
  * @param {string} repoRoot
  * @returns {ContractBracketEntry[]}
  */
-export function readPublishableCrates(repoRoot) {
+export function readStandalonePublishableCrates(repoRoot) {
   /** @type {ContractBracketEntry[]} */
   const crates = [];
-  for (const manifest of collectCargoManifests(repoRoot)) {
-    const contents = readFileSync(join(repoRoot, manifest), "utf8");
-    if (!declaresCargoPackagePublish(contents)) {
-      continue;
+  for (const manifestPath of standaloneManifestRoots(repoRoot)) {
+    for (const entry of readCargoMetadataPackages(manifestPath)) {
+      // `[]` is the one spelling of "do not publish"; `null` and a registry
+      // list both allow publishing.
+      if (entry.publish?.length === 0) {
+        continue;
+      }
+      crates.push({
+        name: entry.name,
+        manifest: posix.normalize(relative(repoRoot, entry.manifest_path)),
+      });
     }
-    crates.push({ name: parseCargoPackageName(contents, manifest), manifest });
   }
   return crates;
 }

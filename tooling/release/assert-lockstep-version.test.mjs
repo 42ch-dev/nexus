@@ -291,8 +291,11 @@ test("dropping a publishable standalone crate from the carrier is rejected", () 
       report.problems.some(
         (problem) =>
           problem.includes(STANDALONE_CRATE) &&
-          problem.includes("publish = true") &&
-          problem.includes(VERSION_BRACKETS_PATH),
+          problem.includes("is publishable") &&
+          problem.includes(VERSION_BRACKETS_PATH) &&
+          problem.includes(
+            `add { "name": "${STANDALONE_CRATE}", "manifest": "modules/${STANDALONE_CRATE}/Cargo.toml" }`,
+          ),
       ),
       report.problems.join("; "),
     );

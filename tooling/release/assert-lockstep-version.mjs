@@ -36,7 +36,7 @@ import {
   CARGO_WORKSPACE_PATH,
   NATIVE_LOADER_PACKAGE_PATH,
   VERSION_BRACKETS_PATH,
-  readPublishableCrates,
+  readStandalonePublishableCrates,
   readSurfaceVersions,
   readVersionBrackets,
   readWorkspaceMemberPackages,
@@ -115,19 +115,19 @@ export function checkLockstep(repoRoot) {
   }
 
   // A crate dropped from the carrier stops being checked, so the bracket must
-  // be complete: a declared `publish = true` means the crate versions on its
-  // own and can only be independent by being listed here. The other direction
-  // — a listed crate that goes back to inheriting — is caught below by the
-  // non-contract member literal rule.
+  // be complete: outside the root workspace there is no inherited version, so a
+  // crate Cargo would publish can only version on its own and belongs here. The
+  // other direction — a listed crate that goes back to inheriting — is caught
+  // below by the non-contract member literal rule.
   const carrierManifests = new Set(
     contractEntries.map((entry) => posix.normalize(entry.manifest)),
   );
-  for (const crate of readPublishableCrates(repoRoot)) {
+  for (const crate of readStandalonePublishableCrates(repoRoot)) {
     if (carrierManifests.has(crate.manifest)) {
       continue;
     }
     problems.push(
-      `${crate.manifest}: ${crate.name} declares publish = true, so it versions independently, but ${VERSION_BRACKETS_PATH} has no contract entry for it; add { "name": "${crate.name}", "manifest": "${crate.manifest}" }`,
+      `${crate.manifest}: ${crate.name} is publishable and lives outside the ${CARGO_WORKSPACE_PATH} workspace, so it versions independently, but ${VERSION_BRACKETS_PATH} has no contract entry for it; add { "name": "${crate.name}", "manifest": "${crate.manifest}" }`,
     );
   }
 
