@@ -242,6 +242,15 @@ jobs:
         run: cargo +"${FMT_NIGHTLY}" fmt --all -- --check
       - name: Run clippy
         run: cargo clippy --all --all-targets -- -D warnings
+      - name: Check contract crates are packageable offline
+        timeout-minutes: 15
+        run: |
+          # `cargo package --offline` resolves against the registry cache, and
+          # the three standalone module crates are not root-workspace members,
+          # so clippy above never fetches their graphs (e.g. `dlmalloc`).
+          node -e 'for (const { manifest } of require("./tooling/release/version-brackets.json").contract) console.log(manifest)' \
+            | while read -r manifest; do cargo fetch --manifest-path "$manifest"; done
+          node tooling/release/check-contract-packageability.mjs
 
   verify-sqlx-offline:
     name: Verify sqlx offline metadata

@@ -369,6 +369,9 @@ export function readVersionBrackets(repoRoot) {
   if (!Array.isArray(entries)) {
     throw new Error(`${VERSION_BRACKETS_PATH}: missing "contract" array`);
   }
+  if (entries.length === 0) {
+    throw new Error(`${VERSION_BRACKETS_PATH}: empty "contract" array`);
+  }
 
   const seen = new Set();
   for (const entry of entries) {
