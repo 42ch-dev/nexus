@@ -1128,12 +1128,13 @@ impl CoreService {
             )),
         ));
         // P4: recovery reads the SAME applied identity admission resolves, over
-        // the same Creator DB pool — a restart mid-run rebuilds the applied
-        // graph, not the descriptor's.
+        // the same Creator DB pool and the same workspace home — a restart
+        // mid-run rebuilds the applied graph, not the descriptor's.
         engine.set_applied_document_source(Arc::new(
-            crate::execution::applied_documents::CreatorAppliedDocuments::new(Arc::new(
-                pool.clone(),
-            )),
+            crate::execution::applied_documents::CreatorAppliedDocuments::new(
+                Arc::new(pool.clone()),
+                self.inner.nexus_home.clone(),
+            ),
         ));
         let engine = Arc::new(engine);
 

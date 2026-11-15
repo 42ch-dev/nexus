@@ -122,7 +122,42 @@ listed row appends an apply and leaves the list untouched.
 
 #### 5.1 What intake does with an applied identity
 
-**Precedence.** Admission and recovery choose a strategy's document in exactly three cases:
+**Anchors.** Every code reference below names the file and the item that decides the claim — function,
+match arm, struct field or table row — and that name is authoritative; a `:line` only locates the item in
+the current tree, so formatting may move it while the claim stays with the name.
+
+**One rule, four admission entries.** Schedule admission (`WorkflowRunCoordinator::admit_schedule_inner`,
+`crates/nexus-core/src/execution/workflow.rs`), `WorkflowRunCoordinator::start_session`
+(`workflow.rs`) and both preset trait entries — `start_session_with_preset` and
+`start_session_with_preset_for_creator`, which share `start_preset_entry`
+(`crates/nexus-orchestration/src/engine.rs`) — ask the same question before they build: which document does
+this strategy run? All four answer it through `resolve_applied_document`
+(`crates/nexus-core/src/execution/applied_documents.rs`), the one route through `is_user_preset`,
+`current_apply` and `verified_apply_document` (`crates/nexus-core/src/apply.rs`). The two trait entries
+reach that route through the installed `AppliedDocumentSource` (`start_preset_entry` in `engine.rs`; the
+daemon installs the Creator-backed source in `crates/nexus-core/src/execution/lifecycle.rs`).
+
+**The rule.** When the answer is a document, the entry builds the graph from that document with
+`IrTemplateSource::OwnSource` and freezes the `AppliedRunIdentity` the answer carries on the run descriptor
+it writes; when the answer is `None`, it builds the YAML bundle (`build_wired_outer_graph`) and freezes no
+identity. For a run admitted with a resolved document, no entry admits YAML and recovers into IR: the graph
+the run executes and the identity its descriptor freezes come from the same resolution. A run admitted
+while the strategy had no current apply resolves `None`, freezes no identity, and recovers through the
+`(None, current)` arm below — the one case in which a restart can still put a run on a document it never
+ran, and it exists because the run was admitted under none. Both admission entries resolve before the
+binding gate, so the roles validated are the roles the applied graph consumes — `export_preset(&document)`
+when an apply exists, the loaded manifest otherwise (`export_preset` and `validate_agent_bindings` in both
+`start_session` and `admit_schedule_inner`).
+
+| Entry | Resolves through | Applied graph | Descriptor write |
+| --- | --- | --- | --- |
+| schedule admission | `resolve_applied_document` (`workflow.rs:2980`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:3020`) | `admit_schedule_run_with_input` sets `descriptor.applied` (`engine.rs:4541`) |
+| `start_session` | `resolve_applied_document` (`workflow.rs:1605`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:1653`) | `start_preset_run_with_input` sets `descriptor.applied` (`engine.rs:4428`) |
+| `start_session_with_preset` | `AppliedDocumentSource::applied_document` (`engine.rs:4347`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`engine.rs:4360`) | `start_preset_run` sets `descriptor.applied` (`engine.rs:4283`) |
+| `start_session_with_preset_for_creator` | `AppliedDocumentSource::applied_document` (`engine.rs:4347`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`engine.rs:4360`) | `start_preset_run` sets `descriptor.applied` (`engine.rs:4283`) |
+
+**Precedence.** The document a run is built from follows from the loader's classification and that apply
+read, in exactly three cases:
 
 | Strategy the loader resolved | Document the run is built from |
 | --- | --- |
@@ -137,25 +172,52 @@ preset lookup — the embedded-first lookup would hand an applied user bundle th
 when the ids collide. A user bundle whose apply rows have no successor-less row is on the YAML path too:
 `current_apply` returning `None` is an answer, not a refusal.
 
-Admission resolves that document **before** the binding gate, and the applied arm's role set comes from
-`export_preset(&document)` — the same normalisation the IR graph builder consumes — while the YAML arm
-passes the loaded manifest; the graph is then built from the document those roles were read from.
-
-Recovery re-enters through the same route instead of a second reader (`AppliedDocumentSource` →
+**Recovery** re-enters through the same route instead of a second reader (`AppliedDocumentSource` →
 `is_user_preset` → `current_apply` → `verified_apply_document`), and a strategy with no apply recovers its
 descriptor graph exactly as before.
 
-Recovery compares that resolution with the run's own record **before** it builds: the run descriptor freezes
-the `apply_id` and `content_hash` admitted with the run, and a restart refuses
-(`reconstruction_unavailable`, non-replayable) when the strategy's current apply is any other row — whether a
-re-apply superseded it or it was rolled back. A run admitted with no apply records no identity — and
-neither does any run persisted before the descriptor carried one — so its descriptor serializes byte for
-byte as before and recovery resolves it the way it always has.
+**The legacy `(None, current)` arm.** `reconstruct_runner` (`engine.rs:3842`) matches the descriptor's
+recorded identity against that resolution **before** it builds (`engine.rs:4109`):
+
+| `descriptor.applied` | Resolved current apply | Graph rebuilt from |
+| --- | --- | --- |
+| `None` | any | the resolved applied document when there is one, else the YAML bundle — the `(None, current)` arm |
+| `Some(recorded)` | identity equal | the applied document — the `current.identity == *recorded` guard |
+| `Some(recorded)` | a different apply, or none | typed refusal `reconstruction_unavailable` — the `(Some(recorded), current)` fallback |
+
+The first row is the pre-freeze arm: a descriptor that records no identity rebuilds from whatever the
+strategy's current apply is, exactly as it did before the identity existed. That is what lets a no-apply
+run reconstruct, and it is also the last way a restart can switch a run onto a document it never ran, so
+its reachability is bounded rather than assumed:
+
+- **A run admitted with a current apply cannot reach it.** All four entries freeze the identity they
+  resolved, so the descriptor is `Some(recorded)` and recovery compares: the same apply rebuilds the same
+  document, any other apply or no current apply refuses. The trait entries resolve through the installed
+  `AppliedDocumentSource`; an engine without one resolves no apply and freezes no identity, which is the
+  row-1 case below.
+- **A run admitted while its strategy had no current apply records no identity by definition**, and an
+  apply installed before that run restarts reinterprets its persisted position through row 1. The freeze
+  closes the runs admitted under an apply; it cannot close the absence of one.
+- **A descriptor written outside those four entries records no identity either.** Those constructions are
+  the sites below, and the verdict on each is what bounds this arm.
 
 Both sides re-run the same recomputation before building: an apply whose `document_json` no longer hashes
 to its recorded `content_hash` is `applied_document_changed`, and one that cannot be read is
-`applied_document_unverifiable`. Bytes edited after apply are therefore a typed refusal, not a reinterpreted
-run.
+`applied_document_unverifiable`. Bytes edited after apply are therefore a typed refusal, not a
+reinterpreted run.
+
+**The I-000467 reclassification.** Every site the ticket named, plus `build_descriptor`, is decided by the
+named item; the `:line` locates that item in the current tree.
+
+| Site | Verdict |
+| --- | --- |
+| `crates/nexus-core/src/execution/handle_ops.rs:1450` `freeze_descriptor` (`applied: None`, `:1564`) | **Inert** — this is a schedule admission *payload*, not a run descriptor: `admit_schedule_inner` re-reads only `work_id`, `input`, `agent_bindings` and `source` from it (`workflow.rs:2936-2957`) and resolves the apply itself (`workflow.rs:2980`) |
+| `crates/nexus-core/src/execution/workflow.rs:2514` `prepare_legacy_row` (`applied: None`, `:2615`) | **Inert** — the same payload write, read back by the same four fields |
+| `crates/nexus-orchestration/src/auto_chain.rs:1383` `enqueue_descriptor_json` (`applied: None`, `:1420`) | **Unreachable with a user apply** — it requires `embedded_source_identity` (`:1399`), so the source is never `Directory` and `is_user_preset` is false |
+| `crates/nexus-orchestration/src/storage/sqlite.rs:473` `child_descriptor` (`applied`, `:489`) | **Already correct** — `applied: root.applied.clone()`; a child run inherits the root's identity |
+| `crates/nexus-orchestration/src/engine.rs:4642` `start_session_with_creator` (`applied: None`, `:4678`) | **Callable, no known production caller** — `GraphFlowEngine::start_session` forwards here unconditionally (`:4638`) and `OrchestrationEngine::start_session_with_graph` (`:4850`) exposes that route, so a store-backed engine started this way writes `applied: None`; no in-repo production caller holds a store (the callers are `start_session` and the two `workflow_store == None` fallbacks, `:4323` and `:4481`) |
+| `crates/nexus-orchestration/src/engine.rs:4799` `new_session` (`applied: None`, `:4819`) | **Callable, no known production caller** — the `GraphFlowEngine` trait implementation is public and its store arm writes `applied: None`; only `EngineProxy::new_session` refuses (`:3262`, `NoGraphLoaded`), and nothing in this tree calls the other one in production |
+| `crates/nexus-orchestration/src/engine.rs:4241` `build_descriptor` (`applied: None`, `:4266`) | **Fixed** — the shared skeleton starts empty, and all three callers overwrite it with the identity they resolved before persisting: `start_preset_run` (`:4283`), `start_preset_run_with_input` (`:4428`), `admit_schedule_run_with_input` (`:4541`) |
 
 **Known limits on the applied path.** Each bounds what an applied run can do; none of them turns the
 applied document back into a hint.
@@ -166,10 +228,12 @@ applied document back into a hint.
   that prompts through a capability enter action contributes no required role, so a run can be admitted
   without the `default` binding and fail at the prompt instead of at admission (I-000463).
 - **A run whose descriptor records no applied identity still resolves against the current apply.** Rows
-  persisted before the descriptor carried one, and runs whose descriptor is built outside admission, hold
-  no identity, so a re-apply before a restart reinterprets that run's persisted position. Admission
-  freezes the identity on every descriptor it writes, so the admitted path is closed; the reachability of
-  those out-of-admission construction sites is I-000467.
+  persisted before the descriptor carried one, runs whose descriptor is built outside the four admission
+  entries, and runs admitted while the strategy had no current apply hold no identity, so an apply installed
+  before such a run restarts reinterprets that run's persisted position. The freeze closes only the runs
+  admitted under an apply; the out-of-admission construction sites are the reclassification table above,
+  where each is inert, unreachable with a user apply, already inheriting the root identity, or a raw
+  constructor with no known production caller whose store-backed entry stays callable.
 - **Reconstruction validates inner descendants against the descriptor manifest** while it builds the graph
   from the applied document (I-000465). The applied path admits one inner shape — a declared inner graph
   with no steps (see below) — and that shape is built and enterable: `project_inner_graphs` keeps it,
