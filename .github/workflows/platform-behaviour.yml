@@ -160,7 +160,9 @@ jobs:
     needs: changes
     if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.desktop == 'true'
     runs-on: macos-latest
-    timeout-minutes: 30
+    # The addon staged below compiles the Rust workspace from cold on this
+    # runner; 30 minutes cancelled the job mid-compile rather than in a test.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
