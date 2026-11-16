@@ -52,7 +52,7 @@ allowlist_path = os.path.join(root, "tooling", "work-artifact-write-allowlist.ts
 
 # Named top-level inventoried modules (rules_history.rs was removed in P2).
 NAMED = [
-    "crates/nexus-core/src/execution/capabilities.rs",
+    "crates/nexus-core/src/owner/capabilities.rs",
     "crates/nexus-local-db/src/work_chapters.rs",
     "crates/nexus-orchestration/src/completion_lock.rs",
     "crates/nexus-orchestration/src/narrative_index.rs",
@@ -77,7 +77,7 @@ IMPL_RE = re.compile(r"\bimpl(?:\s*<[^>]*>)?\s+([A-Za-z_]\w*)")
 # `WorkPath::Artifact` to the port before reaching this call. Exact
 # (path, symbol) -> expected count; any other function is a violation.
 EXACT_FALLBACK = {
-    ("crates/nexus-core/src/execution/capabilities.rs", "execute_write_file"): 1,
+    ("crates/nexus-core/src/owner/capabilities.rs", "execute_write_file"): 1,
 }
 
 OPT_OUT_SYMBOL = "-"
