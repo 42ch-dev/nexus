@@ -4528,7 +4528,10 @@ mod tests {
 
         // A production context records nothing and still commits for real.
         assert!(
-            fixture.context.recorded_knowledge_entry_mutations().is_none(),
+            fixture
+                .context
+                .recorded_knowledge_entry_mutations()
+                .is_none(),
             "a production context reports no log rather than an empty one"
         );
         let live = execute_kb_snapshot_write(
