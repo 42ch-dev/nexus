@@ -9,7 +9,7 @@ Retained orchestration/preset contracts in `crates/nexus-orchestration` and `cra
 **Status**: Shipped — orchestration engine SSOT: preset loader, Host-mediated prompts, capability registry, recoverable workspace execution and settle-once cancellation (§15), `narrative.compute` + `combat-engine` (§8.4), DR-06 bounded joins (§7.5)  
 **Document class**: Master  
 **Pillar**: **Harness** — this spec is the control-strategy engine contract for the [Harness](../../../STRATEGY.md) pillar (orchestration engine + agent host + capability registry + presets). The user-visible pillar label is **Harness**; internal identifiers remain `strategy`/`preset` (architect LOCKED)
-**Date**: 2026-04-17; **Last updated**: 2026-09-29  
+**Date**: 2026-04-17; **Last updated**: 2026-11-17 — §8.2.1 IR → Task mapping rewritten (34-entry IR/task comparison; `ir_unmappable`/`ir_unprojected`/`ir_unresolved_template` refusal rows; applied-path narrowing)  
 **Scope**: Retained orchestration/preset contracts in `crates/nexus-orchestration` and `crates/nexus-preset`, their `crates/nexus-acp-host` boundary, and preset bundle format under the ordinary direct-core `cli` cohort. Current CLI entry authority: [cli-spec.md](../cli/cli-spec.md) §6.0B (`apps/nexus42/src/cli.rs`; retained crate/cohort edges in `apps/nexus42/Cargo.toml`). The retired daemon host restores no daemon group and no CLI preset runner.
 **Supersedes**: — (new topic)
 **Coordinates with**:
