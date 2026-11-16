@@ -434,6 +434,72 @@ impl SqliteKbStore {
         row.as_ref().map(KeyBlockRow::to_record).transpose()
     }
 
+    /// The record-level gates [`Self::insert_key_block_with_extensions_in_tx`]
+    /// applies before its INSERT: `canonical_name` format, body semantics under
+    /// this store's validation mode, and the native governance pair.
+    ///
+    /// Shared so a refusal-previewing caller ([`Self::would_refuse_insert`])
+    /// cannot drift from what the INSERT actually refuses.
+    fn validate_key_block(&self, kb: &KnowledgeEntryRecord) -> Result<(), KbStoreError> {
+        // Validate canonical_name format/safety (same as trait impl).
+        validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
+
+        // Validate body semantics before persisting (same as trait impl).
+        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
+            .map_err(validation_err)?;
+
+        // v1.191 P1 T3: the native governance pair is validated with the domain
+        // rule (durable §3): a disclosure requires its nonempty holder, empty
+        // strings are invalid, and only `owner-private` is native. The SQLite
+        // CHECK/FK are defense in depth; the explicit check keeps the invariant
+        // identical across the domain / memory / storage boundaries. Mapped to
+        // `ValidationLegacy` (not the `validation_err` fallback, which would
+        // mislabel it `MissingBody`).
+        nexus_knowledge::world_kb::knowledge_entry::validate_native_governance(
+            kb.holder_entry_id.as_deref(),
+            kb.disclosure.as_deref(),
+        )
+        .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Would [`Self::insert_key_block_in_tx`] refuse `kb`? Answers with the same
+    /// [`KbStoreError`] the INSERT would return, without writing anything.
+    ///
+    /// Runs [`Self::validate_key_block`] and the `idx_kb_key_blocks_active_unique`
+    /// predicate through [`Self::get_active_by_unique_key`] — the store's own
+    /// gates, so the prediction and the INSERT share one definition of each rule.
+    ///
+    /// A non-World-owned record cannot collide on that index: the index keys on
+    /// `world_id`, which is `NULL` for character and binding owners.
+    ///
+    /// shortcut: a `key_block_id` primary-key collision is not predicted; the
+    /// INSERT still reports it as [`KbStoreError::Duplicate`] at apply time.
+    ///
+    /// # Errors
+    ///
+    /// [`KbStoreError::Validation`] / [`KbStoreError::ValidationLegacy`] /
+    /// [`KbStoreError::Duplicate`] when the INSERT would refuse, or
+    /// [`KbStoreError::Storage`] when the predicate cannot be read.
+    pub async fn would_refuse_insert(&self, kb: &KnowledgeEntryRecord) -> Result<(), KbStoreError> {
+        self.validate_key_block(kb)?;
+        let Some(world_id) = kb.owner.world_id() else {
+            return Ok(());
+        };
+        if self
+            .get_active_by_unique_key(world_id, &kb.canonical_name, kb.block_type)
+            .await?
+            .is_some()
+        {
+            return Err(KbStoreError::Duplicate {
+                owner: kb.owner.clone(),
+                name: kb.canonical_name.clone(),
+                block_type: kb.block_type,
+            });
+        }
+        Ok(())
+    }
+
     /// Transaction-aware variant of [`KbStore::insert_knowledge_entry`] (R-V150KBED-03).
     ///
     /// Runs the same `canonical_name` + body validation as the trait method and
@@ -511,31 +577,13 @@ impl SqliteKbStore {
         kb: KnowledgeEntryRecord,
         extensions_nexus_json: String,
     ) -> Result<KbInsertResult, KbStoreError> {
-        // Validate canonical_name format/safety (same as trait impl).
-        validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
+        self.validate_key_block(&kb)?;
 
         // v1.191 P1 T3 (durable §5.4): a caller-supplied extension document may
         // not re-introduce the retired legacy visibility key. The wrapper path
         // builds the document itself (and never emits the key); this opaque
         // primitive is the raw-input boundary and refuses it explicitly.
         reject_legacy_creator_only_extension(&extensions_nexus_json)?;
-
-        // Validate body semantics before persisting (same as trait impl).
-        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
-            .map_err(validation_err)?;
-
-        // v1.191 P1 T3: the native governance pair is validated with the domain
-        // rule (durable §3): a disclosure requires its nonempty holder, empty
-        // strings are invalid, and only `owner-private` is native. The SQLite
-        // CHECK/FK are defense in depth; the explicit check keeps the invariant
-        // identical across the domain / memory / storage boundaries. Mapped to
-        // `ValidationLegacy` (not the `validation_err` fallback, which would
-        // mislabel it `MissingBody`).
-        nexus_knowledge::world_kb::knowledge_entry::validate_native_governance(
-            kb.holder_entry_id.as_deref(),
-            kb.disclosure.as_deref(),
-        )
-        .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
 
         let key_block_id = kb.entry_id.clone();
         let owner = kb.owner.clone();

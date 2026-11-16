@@ -1689,12 +1689,23 @@ pub(crate) fn registry_registry_refresh<'a>(
 /// `nexus.kb_snapshot.write` — upsert key blocks for a world.
 ///
 /// A production context commits every block through `SqliteKbStore`. A
-/// simulated one hands each block to the context's `KnowledgeEntryPort` stub
-/// and writes nothing; its response carries `suppressed_writes` — one object
-/// per intended `Put`, naming exactly the fields the stub records — so the run
-/// is distinguishable from a clean one. Zero puts yield the explicit empty
-/// list, `Get` never appears (a read mutates nothing), and a production
-/// context carries neither the list nor an empty-state claim.
+/// simulated one asks the store whether it would refuse each block
+/// ([`nexus_local_db::kb_store::SqliteKbStore::would_refuse_insert`] — the same
+/// gates and the same `(world_id, block_type, canonical_name)` predicate the
+/// INSERT applies) and hands the rest to the context's `KnowledgeEntryPort`
+/// stub, writing nothing.
+///
+/// The response separates the three outcomes, in input order:
+/// * `suppressed_writes` — one object per intended `Put`: the block would be
+///   written.
+/// * `refused_write` — the block the store would refuse, with the store's own
+///   error text (`entry_id` + `reason`); `null` when nothing is refused.
+/// * `unattempted_writes` — the `entry_id`s after the refusal, which the
+///   preview never put because the production loop stops at the first error
+///   and its transaction rolls back.
+///
+/// Zero blocks yield explicit empty lists, `Get` never appears (a read mutates
+/// nothing), and a production context carries none of these keys.
 async fn execute_kb_snapshot_write(
     req: &ToolsApi,
     context: &ToolContext,
@@ -1747,23 +1758,33 @@ async fn execute_kb_snapshot_write(
     }
 
     if let Some(port) = context.recording_knowledge_entry.as_deref() {
+        let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
         let mut suppressed = Vec::with_capacity(records.len());
-        for kb in records {
+        let mut refused = None;
+        let mut blocks = records.into_iter();
+        for kb in blocks.by_ref() {
+            if let Err(error) = kb_store.would_refuse_insert(&kb).await {
+                refused = Some((kb.entry_id.clone(), error));
+                break;
+            }
             let entry = nexus_spoke_adapter::conversion::knowledge_record_to_spoke(&kb);
             if let SpokeResult::Reject(reject) = port.put_knowledge_entry(entry, None).await {
                 return Err(NexusApiError::Internal {
                     category: format!("KB_PORT_ERROR: {reject:?}"),
                 });
             }
-            suppressed.push(serde_json::json!({
-                "entry_id": kb.entry_id,
-                "expected_base_revision": serde_json::Value::Null,
-            }));
+            suppressed.push(serde_json::json!({ "entry_id": kb.entry_id }));
         }
+        let unattempted: Vec<String> = blocks.map(|kb| kb.entry_id).collect();
         return Ok(serde_json::json!({
             "written": 0,
             "world_id": world_id,
             "suppressed_writes": suppressed,
+            "refused_write": refused.map(|(entry_id, error)| serde_json::json!({
+                "entry_id": entry_id,
+                "reason": format!("KB_STORE_ERROR: {error}"),
+            })),
+            "unattempted_writes": unattempted,
         }));
     }
 
@@ -3798,7 +3819,7 @@ pub fn build_registry() -> CapabilityRegistry {
                 r#"{"type":"object","properties":{"world_id":{"type":"string"},"blocks":{"type":"array","items":{"type":"object","properties":{"schema_version":{"type":"integer"},"entry_id":{"type":"string"},"world_id":{"type":"string"},"block_type":{"type":"string","enum":["character","ability","scene","organization","item","conflict","info_point","event","species","faction","magic_system","technology","deity","level","economy_tier","dialogue","beat","act","era"]},"canonical_name":{"type":"string"},"status":{"type":"string"},"revision":{"type":"integer"},"body":{"type":"object"},"source_anchor":{"type":"object"},"created_from_command_id":{"type":"string"},"created_at":{"type":"string"},"updated_at":{"type":"string"},"source_work_id":{"type":"string"},"source_chapter":{"type":"integer"},"source_provenance_kind":{"type":"string"},"extensions_nexus_extras":{"type":"object"},"modules":{"type":"object"}},"required":["schema_version","entry_id","world_id","block_type","canonical_name","status","created_at"]}}},"required":["world_id","blocks"]}"#,
             ),
             output_schema: Some(
-                r#"{"type":"object","properties":{"written":{"type":"integer"},"world_id":{"type":"string"},"suppressed_writes":{"type":"array","items":{"type":"object","properties":{"entry_id":{"type":"string"},"expected_base_revision":{"type":["integer","null"]}},"required":["entry_id","expected_base_revision"]}}},"required":["written","world_id"]}"#,
+                r#"{"type":"object","properties":{"written":{"type":"integer"},"world_id":{"type":"string"},"suppressed_writes":{"type":"array","items":{"type":"object","properties":{"entry_id":{"type":"string"}},"required":["entry_id"]}},"refused_write":{"type":["object","null"],"properties":{"entry_id":{"type":"string"},"reason":{"type":"string"}},"required":["entry_id","reason"]},"unattempted_writes":{"type":"array","items":{"type":"string"}}},"required":["written","world_id"]}"#,
             ),
         },
         failure_mode: FailureMode::Forbidden,
@@ -4541,7 +4562,7 @@ mod tests {
         );
         assert_eq!(
             result["suppressed_writes"],
-            serde_json::json!([{ "entry_id": "kb_sim_probe", "expected_base_revision": null }]),
+            serde_json::json!([{ "entry_id": "kb_sim_probe" }]),
             "the preview names the write it suppressed, with the record's own fields"
         );
         assert_eq!(
@@ -4563,6 +4584,8 @@ mod tests {
         .expect("the empty simulated write succeeds");
         assert_eq!(empty["written"], serde_json::json!(0));
         assert_eq!(empty["suppressed_writes"], serde_json::json!([]));
+        assert_eq!(empty["refused_write"], serde_json::Value::Null);
+        assert_eq!(empty["unattempted_writes"], serde_json::json!([]));
 
         // A production context records nothing and still commits for real.
         assert!(
@@ -4585,6 +4608,119 @@ mod tests {
             "a production write carries no suppression report"
         );
         assert_eq!(kb_rows(&fixture.pool).await.len(), before.len() + 1);
+    }
+
+    /// The preview's second job: a block the store would refuse must come back
+    /// as a refusal carrying the store's own reason, not as a suppressed write.
+    /// Both negative controls below point at the pre-check — delete
+    /// `would_refuse_insert` from the simulated branch and every block is
+    /// recorded as a suppressed write while `refused_write` stays null.
+    #[tokio::test]
+    async fn simulated_knowledge_write_reports_the_refusal_the_store_would_raise() {
+        use nexus_contracts::BlockType;
+        use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+        use nexus_knowledge::world_kb::store::KbStoreError;
+
+        let fixture = fixture(false).await;
+        seed_kb_fixture(&fixture.pool).await;
+        let before = kb_rows(&fixture.pool).await;
+
+        let block = |entry_id: &str, canonical_name: &str| {
+            let mut kb = KnowledgeEntryRecord::new("wld_sim", BlockType::Character, canonical_name);
+            kb.entry_id = entry_id.to_string();
+            kb
+        };
+        // `existing_entry` is the fixture's seeded active row, so the
+        // `(world_id, block_type, canonical_name)` index the INSERT keys on is
+        // taken and the store answers `Duplicate`.
+        let duplicate = block("kb_sim_dup", "existing_entry");
+        let simulated = ToolContext::new_simulated(
+            fixture.pool.clone(),
+            fixture.context.nexus_home.clone(),
+            fixture.context.workspace_path(),
+            ToolRuntimeFacts::default(),
+            None,
+            None,
+        );
+        let requested = serde_json::json!([
+            serde_json::to_value(block("kb_sim_first", "fresh_entry")).expect("serialize"),
+            serde_json::to_value(&duplicate).expect("serialize"),
+            serde_json::to_value(block("kb_sim_tail", "tail_entry")).expect("serialize"),
+        ]);
+
+        let result = execute_kb_snapshot_write(&kb_write_request(&requested), &simulated, CREATOR)
+            .await
+            .expect("a refused preview still answers");
+
+        // The three states, in input order.
+        assert_eq!(
+            result["suppressed_writes"],
+            serde_json::json!([{ "entry_id": "kb_sim_first" }]),
+            "only the block before the refusal would be written"
+        );
+        assert_eq!(
+            result["refused_write"]["entry_id"],
+            serde_json::json!("kb_sim_dup")
+        );
+        assert!(
+            result["refused_write"]["reason"]
+                .as_str()
+                .expect("a reason string")
+                .contains("duplicate"),
+            "the reason is the store's own: {}",
+            result["refused_write"]["reason"]
+        );
+        assert_eq!(
+            result["unattempted_writes"],
+            serde_json::json!(["kb_sim_tail"]),
+            "the production loop stops at the first error, so the tail is never put"
+        );
+        assert_eq!(result["written"], serde_json::json!(0));
+        assert_eq!(
+            simulated.recorded_knowledge_entry_mutations(),
+            Some(vec![StubKnowledgeEntryMutation::Put {
+                entry_id: "kb_sim_first".to_string(),
+                expected_base_revision: None,
+            }]),
+            "neither the refused nor the unattempted block reaches the port"
+        );
+        assert_eq!(
+            kb_rows(&fixture.pool).await,
+            before,
+            "predicting a refusal writes nothing"
+        );
+
+        // The prediction is the store's: the same record inserted for real is
+        // refused by the INSERT, which is what the preview claimed.
+        let store = nexus_local_db::kb_store::SqliteKbStore::new(fixture.pool.clone());
+        let mut tx = fixture.pool.begin().await.expect("begin");
+        let inserted = store.insert_key_block_in_tx(&mut tx, duplicate).await;
+        assert!(
+            matches!(inserted, Err(KbStoreError::Duplicate { .. })),
+            "the store refuses the block the preview reported: {inserted:?}"
+        );
+        drop(tx);
+
+        // The other refusal class the pre-check shares with the INSERT: a name
+        // its validator rejects. No such row can exist, so only validation can
+        // explain the refusal.
+        let invalid =
+            serde_json::json!([
+                serde_json::to_value(block("kb_sim_bad", "bad\u{7}name")).expect("serialize")
+            ]);
+        let refused = execute_kb_snapshot_write(&kb_write_request(&invalid), &simulated, CREATOR)
+            .await
+            .expect("a refused preview still answers");
+        assert!(
+            refused["refused_write"]["reason"]
+                .as_str()
+                .expect("a reason string")
+                .contains("control character"),
+            "the canonical-name refusal reaches the caller: {}",
+            refused["refused_write"]["reason"]
+        );
+        assert_eq!(refused["suppressed_writes"], serde_json::json!([]));
+        assert_eq!(kb_rows(&fixture.pool).await, before);
     }
 
     /// The snapshot must see every stored byte: `quote(TEXT)` stops at an
