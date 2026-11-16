@@ -81,10 +81,13 @@ refuses an unbuildable document through the same `validate_ir_buildability` the 
 (`crates/nexus-orchestration/src/preset_runtime.rs:559`), and it does so before the `INSERT INTO
 strategy_applies` (`apply.rs:526`). The limits that remain on the applied path (I-000449,
 I-000462–I-000465) are recorded there rather than here. P4's **third** exit criterion — the IR→Graph
-mapping compared against the IR→Task table in orchestration-engine §8.2.1 — is satisfied: the
-comparison sheet (`.mstar/iterations/v1.246-adr-complete/specs/ir-to-task-comparison.md`) classified
-34 entries — 25 `match`, 8 `table-stale`, 1 `table-omission`, **0 `code-divergent`** — with nine
-§8.2.1 amendments (`8e6f22225` plus the QC correction round). What the comparison established, beyond that it ran:
+mapping compared against the IR→Task table in orchestration-engine §8.2.1 — is satisfied. That criterion's evidence is the amended table itself, not a working note: §8.2.1 now
+carries nine amendments (`8e6f22225` plus the QC correction round) and no longer states anything the
+projection does not do. Reading §8.2.1 against `build_wired_outer_graph_from_ir`
+(`crates/nexus-orchestration/src/preset_runtime.rs:658`) yields 34 constructs — 25 already matching,
+8 whose table row was the stale side, 1 the table omitted, **0 where the code diverged** — which is
+the comparison this criterion asked for, reproducible from the two tracked artifacts by anyone.
+What it established, beyond that it ran:
 node-type coverage is closed in both directions, the one real omission found — the inner-graph
 synthetic `end` task (`preset_runtime.rs:1150-1169`) — now being in the table; edge semantics were
 corrected in four places (conditional routing is in-task `resolve_expression_target` → `GoTo` with
