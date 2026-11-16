@@ -48,7 +48,7 @@ These names and roles stay. The refactor does not invent a second CLI, a second 
 
 #### Current workspace boundary inventory
 
-These nine workspace crates extend the frozen 2026-05 inventory in [local-cloud-crate-architecture.md](../../../.agents/adr/archived/architecture/2026-09-21-local-cloud-crate-architecture.md); they support the authority graph in §4.2, not another product or host. Membership is declared in root `Cargo.toml`; the linked per-crate `AGENTS.md` files own their detailed rules.
+These nine workspace crates extend the frozen 2026-05 inventory in [local-cloud-crate-architecture.md](../../../.agents/adr/archived/architecture/2026-09-21-local-cloud-crate-architecture.md); they support the authority graph in §3.2, not another product or host. Membership is declared in root `Cargo.toml`; the linked per-crate `AGENTS.md` files own their detailed rules.
 
 | Workspace crate | Boundary role |
 | --- | --- |
