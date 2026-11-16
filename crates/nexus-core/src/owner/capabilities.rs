@@ -4427,10 +4427,12 @@ mod tests {
     /// ordered by primary key.
     ///
     /// The column list is read from the schema, so every persisted column takes
-    /// part. Each column contributes its `typeof` tag plus `hex` of the raw
-    /// bytes, which is lossless: `NULL`, the empty string, a string with an
-    /// embedded NUL and a BLOB sharing that prefix all render differently, and
-    /// no text conversion can truncate the value. Any insert, update or delete
+    /// part. Each column contributes its `typeof` tag plus a lossless rendering:
+    /// `printf('%!.17g')` for `real` (17 significant digits round-trip a double,
+    /// where `CAST(real AS BLOB)` truncates through 15-digit text), and `hex` of
+    /// the raw bytes otherwise. `NULL`, the empty string, a string with an
+    /// embedded NUL and a BLOB sharing that prefix all render differently, and no
+    /// text conversion can truncate the value. Any insert, update or delete
     /// changes this comparison.
     async fn kb_rows(pool: &SqlitePool) -> Vec<String> {
         let columns: Vec<String> =
@@ -4440,7 +4442,12 @@ mod tests {
                 .expect("kb columns");
         let rendered = columns
             .iter()
-            .map(|column| format!("typeof({column}), hex(CAST({column} AS BLOB))"))
+            .map(|column| {
+                format!(
+                    "typeof({column}), CASE typeof({column}) WHEN 'real' \
+                     THEN printf('%!.17g', {column}) ELSE hex(CAST({column} AS BLOB)) END"
+                )
+            })
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!("SELECT json_array({rendered}) FROM kb_key_blocks ORDER BY key_block_id");
@@ -4607,6 +4614,46 @@ mod tests {
             after[0].contains(&hex::encode("existing_entry\0changed").to_uppercase()),
             "the whole value, NUL included, reaches the snapshot: {}",
             after[0]
+        );
+    }
+
+    /// The real branch must be lossless too: `CAST(REAL AS BLOB)` renders through
+    /// 15-digit decimal text, so two doubles that differ past that precision share
+    /// their encoding. `revision` is INTEGER-declared but this table is not
+    /// `STRICT`, so a REAL is an admissible stored value — exactly the shape that
+    /// would slip through a `CAST`-only snapshot.
+    #[tokio::test]
+    async fn kb_rows_sees_two_reals_that_differ_past_text_precision() {
+        let fixture = fixture(false).await;
+        seed_kb_fixture(&fixture.pool).await;
+
+        let set_revision = |value: f64| {
+            let pool = fixture.pool.clone();
+            async move {
+                sqlx::query(
+                    "UPDATE kb_key_blocks SET revision = ? \
+                     WHERE key_block_id = 'kb_sim_existing'",
+                )
+                .bind(value)
+                .execute(&pool)
+                .await
+                .expect("set revision");
+            }
+        };
+
+        set_revision(1.000_000_000_000_001).await;
+        let first = kb_rows(&fixture.pool).await;
+        set_revision(1.000_000_000_000_002).await;
+        let second = kb_rows(&fixture.pool).await;
+
+        assert!(
+            first[0].contains("real"),
+            "the seeded value reaches the real branch: {}",
+            first[0]
+        );
+        assert_ne!(
+            second, first,
+            "doubles that differ past 15-digit text precision must change the snapshot"
         );
     }
 
