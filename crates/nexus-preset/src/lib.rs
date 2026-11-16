@@ -26,7 +26,9 @@ pub use validation::{
     validate_preset_semantic, DiagnosticCategory, DiagnosticSeverity, ValidationDiagnostic,
     ValidationResult,
 };
-pub use workflow_ir::{export_preset, import_preset_bundle, PresetIrImport, WorkflowIrError};
+pub use workflow_ir::{
+    canonical_twin_json, export_preset, import_preset_bundle, PresetIrImport, WorkflowIrError,
+};
 
 // ---------------------------------------------------------------------------
 // Embedded presets

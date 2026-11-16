@@ -1,11 +1,17 @@
 //! `nexus42 preset` — canonical preset CLI group (PL-5, AR-24, AR-25).
 //!
 //! Top-level developer-facing surface for presets:
-//! `list|show|validate|export|scaffold|import|trigger|patch`.
+//! `list|show|validate|export|export-ir|scaffold|import|trigger|patch`.
 //!
 //! - `export <dir>` rewrites a bundle's `preset.yaml` from its
 //!   `workflow.json` through `nexus_preset::export_preset` — the committed
 //!   manifest is that command's output, never a second projection.
+//!
+//! - `export-ir <dir> --out <file>` writes the bundle's Workflow IR twin, a
+//!   serialized `nexus_workflow_ir::WorkflowDocument` at
+//!   `nexus_preset::canonical_twin_json`. `crates/nexus-preset/ir-twins/` is
+//!   that command's output; `crates/nexus-preset/tests/embedded_ir_twins.rs`
+//!   keeps every embedded preset's twin present and current.
 //!
 //! - `validate <path>` is the positional local validator
 //!   (`validate_preset_local`, moved here from `system`; V1.153 P3). It runs
@@ -98,6 +104,14 @@ pub enum PresetCommand {
         /// Bundle directory holding `workflow.json`; `preset.yaml` is written beside it
         path: String,
     },
+    /// Write a bundle's Workflow IR twin (the committed `ir-twins/<id>.workflow.ir.json`)
+    ExportIr {
+        /// Bundle directory holding `preset.yaml`
+        path: String,
+        /// File the imported `WorkflowDocument` is written to
+        #[arg(long)]
+        out: String,
+    },
     /// Generate a strategy bundle from templates
     Scaffold {
         /// Name for the new user preset
@@ -151,6 +165,7 @@ pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
         PresetCommand::Show { id, json } => show_preset(config, &id, json).await,
         PresetCommand::Validate { path, json } => validate_preset(&path, json),
         PresetCommand::Export { path } => export_bundle_preset(&path),
+        PresetCommand::ExportIr { path, out } => export_ir_twin(&path, &out),
         PresetCommand::Scaffold { name, json } => scaffold_preset(config, &name, json).await,
         PresetCommand::Import { dir } => import_bundle(config, &dir).await,
         PresetCommand::Trigger { id, json } => trigger_preset(config, &id, json).await,
@@ -360,6 +375,27 @@ fn export_bundle_preset(path: &str) -> Result<()> {
     })?;
     std::fs::write(&manifest_path, yaml)?;
     println!("Wrote {}", manifest_path.display());
+    Ok(())
+}
+
+/// Write `<out>` as the bundle's imported [`WorkflowDocument`] — its IR twin.
+///
+/// The bytes are [`nexus_preset::import_preset_bundle`]'s document at
+/// [`nexus_preset::canonical_twin_json`], so a committed twin is this command's output instead of a
+/// hand-maintained file. Nothing is written until the manifest has parsed and imported, so a
+/// refused run leaves the previous `<out>` untouched.
+fn export_ir_twin(path: &str, out: &str) -> Result<()> {
+    let bundle = std::path::Path::new(path);
+    let manifest_path = bundle.join("preset.yaml");
+    let yaml = std::fs::read_to_string(&manifest_path)
+        .map_err(|error| CliError::Other(format!("read {}: {error}", manifest_path.display())))?;
+    let manifest: nexus_preset::manifest::PresetManifest = serde_yaml::from_str(&yaml)
+        .map_err(|error| CliError::Other(format!("parse {}: {error}", manifest_path.display())))?;
+    let imported = nexus_preset::import_preset_bundle(&manifest, bundle)
+        .map_err(|error| CliError::Other(format!("import {}: {error}", bundle.display())))?;
+    let json = nexus_preset::canonical_twin_json(&imported.document)?;
+    std::fs::write(out, json)?;
+    println!("Wrote {out}");
     Ok(())
 }
 
@@ -943,6 +979,13 @@ mod tests {
             &["preset", "list"][..],
             &["preset", "show", "novel-writing"][..],
             &["preset", "validate", "some/path"][..],
+            &[
+                "preset",
+                "export-ir",
+                "crates/nexus-preset/embedded-presets/novel-write",
+                "--out",
+                "crates/nexus-preset/ir-twins/novel-write.workflow.ir.json",
+            ][..],
             &["preset", "scaffold", "my-strategy"][..],
             &["preset", "trigger", "novel-writing"][..],
         ] {

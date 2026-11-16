@@ -1,0 +1,135 @@
+{
+  "assets": [
+    {
+      "content_hash": "eb39c53017aa9be53c4ff7dccad43dfde059bdd415b5e77e5b90969c8b2b40eb",
+      "id": "prompts/generate-with-memory.md",
+      "kind": "template",
+      "path": "prompts/generate-with-memory.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "recall",
+      "id": "recall->generate",
+      "kind": "linear",
+      "to": "generate"
+    },
+    {
+      "from": "generate",
+      "id": "generate->persist",
+      "kind": "linear",
+      "to": "persist"
+    },
+    {
+      "from": "persist",
+      "id": "persist->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "recall",
+  "id": "memory-augmented",
+  "ir_version": 0,
+  "meta": {
+    "description": "Memory-augmented generation: recall, generate with context, persist as memory",
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.read_memory",
+      "acp.prompt",
+      "creator.write_memory"
+    ],
+    "run_intents": [
+      "work_continue"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "keyword": "{{preset.input.keyword}}",
+            "limit": 50
+          },
+          "kind": "capability",
+          "name": "creator.read_memory"
+        }
+      ],
+      "exit_when": {
+        "kind": "rule"
+      },
+      "id": "recall",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Recall relevant memories using keyword filter"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "generate_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "generate",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Generate new content informed by recalled memories"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "content": "{{state.generate.output}}",
+            "keywords": [
+              "{{preset.input.keyword}}"
+            ]
+          },
+          "kind": "capability",
+          "name": "creator.write_memory"
+        }
+      ],
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "persist",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Store the generated output as a new memory fragment"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    },
+    {
+      "effect_class": "external",
+      "id": "generate_graph/generate_with_context",
+      "kind": "inner_step",
+      "output_binding": "generate_with_context.text",
+      "step_kind": "acp_prompt",
+      "template": "prompts/generate-with-memory.md",
+      "tool_policy": "auto_grant_read_only"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}

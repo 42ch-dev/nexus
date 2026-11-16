@@ -1,0 +1,232 @@
+{
+  "assets": [
+    {
+      "content_hash": "61acf917f184a469110d9e3d49fc6c4dbaee06b66a5e3c50a818e1d46b45d018",
+      "id": "prompts/draft.md",
+      "kind": "template",
+      "path": "prompts/draft.md"
+    },
+    {
+      "content_hash": "63da42b20dbee90e4a0ec7a57753cbf186d41c212e58f6ecef3f79b2cda917e4",
+      "id": "prompts/finalize-exit.md",
+      "kind": "template",
+      "path": "prompts/finalize-exit.md"
+    },
+    {
+      "content_hash": "6e7cc1db8fc2d9b3bfb2fec6625ee89dbc3b2927ebb893136cc7fdb7928b5b42",
+      "id": "prompts/finalize.md",
+      "kind": "template",
+      "path": "prompts/finalize.md"
+    },
+    {
+      "content_hash": "abbf6a209f5ce1206a7ae1ce49c2a99f97c1f6f047b42dddddb4ecf15cd95330",
+      "id": "prompts/outline.md",
+      "kind": "template",
+      "path": "prompts/outline.md"
+    },
+    {
+      "content_hash": "4c9cd311fa2d9b6c6124ec3aa73ae0f8c50299bd7b2ffe2a57245e2e482f167d",
+      "id": "prompts/revise.md",
+      "kind": "template",
+      "path": "prompts/revise.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "outline",
+      "id": "outline->draft",
+      "kind": "default",
+      "to": "draft"
+    },
+    {
+      "from": "draft",
+      "id": "draft->revise",
+      "kind": "default",
+      "to": "revise"
+    },
+    {
+      "from": "revise",
+      "id": "revise->finalize",
+      "kind": "default",
+      "to": "finalize"
+    },
+    {
+      "from": "finalize",
+      "id": "finalize->done",
+      "kind": "default",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "outline",
+  "id": "script-writing",
+  "ir_version": 0,
+  "meta": {
+    "description": "LLM-driven per-act script drafting + act/dialogue/beat 五问 review loop for script Works (V1.60: Depth 3.5)",
+    "gates": [
+      {
+        "field": "work_profile",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "script"
+      },
+      {
+        "field": "work_ref",
+        "kind": "work_field",
+        "op": "required"
+      },
+      {
+        "field": "intake_status",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "complete"
+      },
+      {
+        "kind": "filesystem",
+        "must_exist": true,
+        "path": "Works/{{work_ref}}/Scripts/"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt",
+      "judge.llm"
+    ],
+    "run_intents": [
+      "work_continue"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/outline.md",
+            "vars": {
+              "beats": "{{preset.input.beats}}",
+              "characters": "{{preset.input.characters}}",
+              "title": "{{preset.input.title}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT1H",
+        "template": "prompts/finalize-exit.md"
+      },
+      "id": "outline",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Draft act structure, beat sheet, and character setup via LLM prompt"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/draft.md",
+            "vars": {
+              "acts": "{{preset.input.acts}}",
+              "characters": "{{preset.input.characters}}",
+              "scene": "{{preset.input.scene}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT1H",
+        "template": "prompts/finalize-exit.md"
+      },
+      "id": "draft",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Generate scene + dialogue per act via LLM prompt"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/revise.md",
+            "vars": {
+              "characters": "{{preset.input.characters}}",
+              "scene": "{{preset.input.scene}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT1H",
+        "template": "prompts/finalize-exit.md"
+      },
+      "id": "revise",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Apply review feedback to the draft; revise scene + dialogue"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/finalize.md",
+            "vars": {
+              "acts": "{{preset.input.acts}}",
+              "characters": "{{preset.input.characters}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "template": "prompts/finalize-exit.md"
+      },
+      "id": "finalize",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Polish script + KB extraction hint + 五问 all-pass exit judgment"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}

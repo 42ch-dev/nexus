@@ -1,0 +1,146 @@
+{
+  "assets": [
+    {
+      "content_hash": "d17cc9e7d46704c831631a2f1ea9122c2802977e2ed1c1eb22561f3e37973fd5",
+      "id": "prompts/load-chapter.md",
+      "kind": "template",
+      "path": "prompts/load-chapter.md"
+    },
+    {
+      "content_hash": "9629aee49e208ddb7e43dbbacbf97d404d07f728f877edd9ee9a2325ec5108ec",
+      "id": "prompts/review-report.md",
+      "kind": "template",
+      "path": "prompts/review-report.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "load_chapter",
+      "id": "load_chapter->review_report",
+      "kind": "linear",
+      "to": "review_report"
+    },
+    {
+      "from": "review_report",
+      "id": "review_report->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "load_chapter",
+  "id": "novel-manuscript-audit-review",
+  "ir_version": 0,
+  "meta": {
+    "cli_args": [
+      {
+        "description": "Chapter number to review",
+        "name": "chapter",
+        "required": true,
+        "type": "integer"
+      },
+      {
+        "default": 1,
+        "description": "Volume number (default 1)",
+        "name": "volume",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "description": "On-demand chapter review: structured 五問 review report under Logs/review/ (no FL-E auto-chain)",
+    "gates": [
+      {
+        "field": "work_profile",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "novel"
+      },
+      {
+        "field": "work_ref",
+        "kind": "work_field",
+        "op": "required"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt"
+    ],
+    "run_intents": [
+      "work_continue"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/load-chapter.md",
+            "vars": {
+              "body_path": "{{preset.input.body_path}}",
+              "chapter": "{{preset.input.chapter}}",
+              "volume": "{{preset.input.volume}}",
+              "work_id": "{{preset.input.work_id}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "load_chapter",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Load chapter body from resolved path for review"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/review-report.md",
+            "vars": {
+              "chapter": "{{preset.input.chapter}}",
+              "upsert_findings": "{{preset.input.upsert_findings}}",
+              "volume": "{{preset.input.volume}}",
+              "work_id": "{{preset.input.work_id}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "review_report",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Run 五問 structured review, write report under Logs/review/"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}

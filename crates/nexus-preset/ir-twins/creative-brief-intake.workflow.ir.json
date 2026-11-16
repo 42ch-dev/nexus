@@ -1,0 +1,178 @@
+{
+  "assets": [
+    {
+      "content_hash": "94593895a1620273e6ec22dead483ca402b4df13004dffb9b5b01b9d767a2a38",
+      "id": "prompts/clarify-audience-constraints.md",
+      "kind": "template",
+      "path": "prompts/clarify-audience-constraints.md"
+    },
+    {
+      "content_hash": "e6206d3e43ed73d019280ef9b19dc698a37de1b12b5abf0b6de30d40fb796c4c",
+      "id": "prompts/clarify-genre-tone.md",
+      "kind": "template",
+      "path": "prompts/clarify-genre-tone.md"
+    },
+    {
+      "content_hash": "5ab99f563c9697d0308d3e6c07e2475291f71f7b6e7ec890e906f8c18b1653b4",
+      "id": "prompts/clarify-themes-hooks.md",
+      "kind": "template",
+      "path": "prompts/clarify-themes-hooks.md"
+    },
+    {
+      "content_hash": "fdcbf1746a83adea451fb98f4f1920026296f6481b8e59a31b641132b22f8b74",
+      "id": "prompts/synthesize-brief.md",
+      "kind": "template",
+      "path": "prompts/synthesize-brief.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "clarifying",
+      "id": "clarifying->synthesizing",
+      "kind": "linear",
+      "to": "synthesizing"
+    },
+    {
+      "from": "synthesizing",
+      "id": "synthesizing->persisting",
+      "kind": "linear",
+      "to": "persisting"
+    },
+    {
+      "from": "persisting",
+      "id": "persisting->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "clarifying",
+  "id": "creative-brief-intake",
+  "ir_version": 0,
+  "meta": {
+    "description": "Grill-me style multi-turn intake: elicit genre, tone, audience, constraints, and synthesize a structured creative brief",
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt",
+      "creator.write_brief"
+    ],
+    "run_intents": [
+      "work_init"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "clarify_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "clarifying",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Multi-turn ACP conversation to gather creative direction"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "synthesize_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "synthesizing",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Synthesize multi-turn conversation into structured brief JSON"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "briefText": "{{state.synthesizing.output}}",
+            "workId": "{{preset.input.work_id}}"
+          },
+          "kind": "capability",
+          "name": "creator.write_brief"
+        }
+      ],
+      "exit_when": {
+        "kind": "rule"
+      },
+      "id": "persisting",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Validate and persist the structured brief on the Work entity"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    },
+    {
+      "effect_class": "external",
+      "id": "clarify_graph/clarify_genre_and_tone",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "prompts/clarify-genre-tone.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "clarify_graph/clarify_genre_and_tone"
+      ],
+      "effect_class": "external",
+      "id": "clarify_graph/clarify_audience_and_constraints",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "prompts/clarify-audience-constraints.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "clarify_graph/clarify_audience_and_constraints"
+      ],
+      "effect_class": "external",
+      "id": "clarify_graph/clarify_themes_and_hooks",
+      "kind": "inner_step",
+      "output_binding": "clarify_themes_and_hooks.text",
+      "step_kind": "acp_prompt",
+      "template": "prompts/clarify-themes-hooks.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "effect_class": "external",
+      "id": "synthesize_graph/synthesize_brief",
+      "kind": "inner_step",
+      "output_binding": "synthesize_brief.text",
+      "step_kind": "acp_prompt",
+      "template": "prompts/synthesize-brief.md",
+      "tool_policy": "auto_grant_read_only"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}

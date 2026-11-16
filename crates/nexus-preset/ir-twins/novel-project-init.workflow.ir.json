@@ -1,0 +1,271 @@
+{
+  "assets": [
+    {
+      "content_hash": "91ecdd398879286fd61df4bf4bb5f11d4d604a2cc3066b6b1ca2547243bbc4f2",
+      "id": "prompts/init-chapters.md",
+      "kind": "template",
+      "path": "prompts/init-chapters.md"
+    },
+    {
+      "content_hash": "29e01d06aab441c659473fcd0adc90b179d5edff0656ad66cc987a69fb705a5f",
+      "id": "prompts/init-genre.md",
+      "kind": "template",
+      "path": "prompts/init-genre.md"
+    },
+    {
+      "content_hash": "0770262e2738f10b3c4fc3f89e52d9c782e8a3dc00a10b6cc1a4abc03906d386",
+      "id": "prompts/init-intro.md",
+      "kind": "template",
+      "path": "prompts/init-intro.md"
+    },
+    {
+      "content_hash": "6c8b8e8e69007b74511ff1440a073815b99453fe5106b3fbfde3f5053e775532",
+      "id": "prompts/init-summary.md",
+      "kind": "template",
+      "path": "prompts/init-summary.md"
+    },
+    {
+      "content_hash": "59135beba27de918970303d8d3771917afbc068553f1efa18424573af6d8bddf",
+      "id": "prompts/init-title.md",
+      "kind": "template",
+      "path": "prompts/init-title.md"
+    },
+    {
+      "content_hash": "faa4997aaa15d0d2df4eca499889fee92e8f93837aeafd27fd40dd5e6dc1c5e3",
+      "id": "prompts/init-work-ref.md",
+      "kind": "template",
+      "path": "prompts/init-work-ref.md"
+    },
+    {
+      "content_hash": "ec1bf74f81e313a45e85cd7c5fc017817b59ee6b25117ac9aeca2c677228462d",
+      "id": "prompts/init-world.md",
+      "kind": "template",
+      "path": "prompts/init-world.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "init_intro",
+      "id": "init_intro->collecting_details",
+      "kind": "linear",
+      "to": "collecting_details"
+    },
+    {
+      "from": "collecting_details",
+      "id": "collecting_details->summarizing",
+      "kind": "linear",
+      "to": "summarizing"
+    },
+    {
+      "from": "summarizing",
+      "id": "summarizing->committing",
+      "kind": "linear",
+      "to": "committing"
+    },
+    {
+      "from": "committing",
+      "id": "committing->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "init_intro",
+  "id": "novel-project-init",
+  "ir_version": 0,
+  "meta": {
+    "description": "Interactive grill-me: bootstrap a novel Work with scaffold, chapter plan, and World binding",
+    "gates": [
+      {
+        "field": "work_profile",
+        "kind": "work_field",
+        "op": "in",
+        "value": [
+          null,
+          "novel"
+        ]
+      },
+      {
+        "field": "workspace_slug",
+        "kind": "work_field",
+        "op": "required"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt",
+      "novel.project_scaffold"
+    ],
+    "run_intents": [
+      "work_init"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "intro_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "init_intro",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Greet the creator and ask for a working title"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "details_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "collecting_details",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Multi-turn ACP conversation to collect genre, chapters, work_ref, and World binding"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "summary_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "summarizing",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Recap collected information and confirm before committing"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "creator_id": "{{preset.input.creator_id}}",
+            "fields_changed": "{{preset.input.fields_changed}}",
+            "title": "{{preset.input.title}}",
+            "total_planned_chapters": "{{preset.input.total_planned_chapters}}",
+            "work_id": "{{preset.input.work_id}}",
+            "work_ref": "{{preset.input.work_ref}}",
+            "world_id": "{{preset.input.world_id}}"
+          },
+          "kind": "capability",
+          "name": "novel.project_scaffold"
+        }
+      ],
+      "exit_when": {
+        "kind": "rule"
+      },
+      "id": "committing",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Invoke novel.project_scaffold to materialize the Work scaffold"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    },
+    {
+      "effect_class": "external",
+      "id": "details_graph/collect_title",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "prompts/init-title.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "details_graph/collect_title"
+      ],
+      "effect_class": "external",
+      "id": "details_graph/collect_genre",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "prompts/init-genre.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "details_graph/collect_genre"
+      ],
+      "effect_class": "external",
+      "id": "details_graph/collect_chapters",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "prompts/init-chapters.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "details_graph/collect_chapters"
+      ],
+      "effect_class": "external",
+      "id": "details_graph/collect_work_ref",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "prompts/init-work-ref.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "details_graph/collect_work_ref"
+      ],
+      "effect_class": "external",
+      "id": "details_graph/collect_world",
+      "kind": "inner_step",
+      "output_binding": "collect_world.text",
+      "step_kind": "acp_prompt",
+      "template": "prompts/init-world.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "effect_class": "external",
+      "id": "intro_graph/ask_working_title",
+      "kind": "inner_step",
+      "output_binding": "ask_working_title.text",
+      "step_kind": "acp_prompt",
+      "template": "prompts/init-intro.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "effect_class": "external",
+      "id": "summary_graph/confirm_summary",
+      "kind": "inner_step",
+      "output_binding": "confirm_summary.text",
+      "step_kind": "acp_prompt",
+      "template": "prompts/init-summary.md",
+      "tool_policy": "auto_grant_read_only"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}

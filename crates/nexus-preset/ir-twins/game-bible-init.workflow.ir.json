@@ -1,0 +1,84 @@
+{
+  "assets": [],
+  "edges": [
+    {
+      "from": "scaffold",
+      "id": "scaffold->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "scaffold",
+  "id": "game-bible-init",
+  "ir_version": 0,
+  "meta": {
+    "description": "Filesystem scaffold: bootstrap a game-bible Work with 12 Design templates, README, and logs directories",
+    "gates": [
+      {
+        "field": "work_profile",
+        "kind": "work_field",
+        "op": "in",
+        "value": [
+          null,
+          "game_bible"
+        ]
+      },
+      {
+        "field": "workspace_slug",
+        "kind": "work_field",
+        "op": "required"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "game_bible.project_scaffold"
+    ],
+    "run_intents": [
+      "work_init"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "creator_id": "{{preset.input.creator_id}}",
+            "title": "{{preset.input.title}}",
+            "work_id": "{{preset.input.work_id}}",
+            "work_ref": "{{preset.input.work_ref}}",
+            "world_id": "{{preset.input.world_id}}"
+          },
+          "kind": "capability",
+          "name": "game_bible.project_scaffold"
+        }
+      ],
+      "exit_when": {
+        "kind": "rule"
+      },
+      "id": "scaffold",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Invoke game_bible.project_scaffold to materialize the Work directory tree"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}
