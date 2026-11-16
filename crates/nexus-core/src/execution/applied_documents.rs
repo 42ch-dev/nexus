@@ -17,6 +17,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use nexus_execution::admission::{AppliedAdmission, AppliedAdmissionError, AppliedAdmissionPort};
 use nexus_orchestration::capability::{AppliedDocument, AppliedDocumentSource};
 use nexus_orchestration::run_state::AppliedRunIdentity;
 use nexus_preset::LoadedPreset;
@@ -102,6 +103,36 @@ impl CreatorAppliedDocuments {
     #[must_use]
     pub const fn new(pool: Arc<sqlx::SqlitePool>, nexus_home: std::path::PathBuf) -> Self {
         Self { pool, nexus_home }
+    }
+}
+
+#[async_trait]
+impl AppliedAdmissionPort for CreatorAppliedDocuments {
+    async fn admit(
+        &self,
+        preset_id: &str,
+        loaded: &LoadedPreset,
+    ) -> Result<AppliedAdmission, AppliedAdmissionError> {
+        // The intake key governs user bundles only; `yaml-only` runs the YAML
+        // bundle without reading the apply at all.
+        let intake_mode = intake_mode_for_admission(&self.nexus_home, preset_id, loaded)
+            .map_err(AppliedAdmissionError::InvalidIntakeConfig)?;
+        let applied = match intake_mode {
+            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
+            _ => resolve_applied_document(&self.pool, &self.nexus_home, preset_id, loaded)
+                .await
+                .map_err(|error| AppliedAdmissionError::Store(error.to_string()))?
+                .map_err(|refusal| AppliedAdmissionError::AppliedIdentity {
+                    // The coded pair `ApplyLoadRefusal::into_error` builds: the
+                    // stable code plus the sentence naming strategy and apply.
+                    code: refusal.reason().to_string(),
+                    message: refusal.to_string(),
+                })?,
+        };
+        Ok(AppliedAdmission {
+            intake_mode,
+            applied,
+        })
     }
 }
 

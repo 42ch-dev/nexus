@@ -39,6 +39,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use graph_flow::SessionStorage;
+use nexus_execution::admission::{AppliedAdmissionError, AppliedAdmissionPort};
 use nexus_orchestration::engine::{
     EngineError, EngineSignal, FailedStepWitness, FailurePersistenceDisposition, FailureSettlement,
     FailureSettlementSummary, OrchestrationEngine, SessionId, SessionStatus, SessionSummary,
@@ -1054,8 +1055,13 @@ pub enum RunControlError {
     /// document at all). The refusal already names the strategy and the
     /// apply and is a coded refusal, not an internal fault; nothing was
     /// admitted and nothing ran.
-    #[error(transparent)]
-    AppliedIdentityInvalid(crate::CoreError),
+    #[error("{code}: {message}")]
+    AppliedIdentityInvalid {
+        /// Stable lowercase wire code of the applied-identity refusal.
+        code: String,
+        /// The sentence naming the strategy and the apply.
+        message: String,
+    },
 
     /// `[strategy_intake]` in the home config is unreadable or names a mode
     /// outside `ir-only`/`yaml-only`. A mistyped key fails closed here
@@ -1234,6 +1240,11 @@ pub struct WorkflowRunCoordinator {
     /// Bounded per-run SSE rings (P4 §6.3). `None` when the transport
     /// supplies no ring registry (tests, core-only callers).
     run_events: Option<Arc<dyn RunEventPort>>,
+    /// The applied-identity admission every run starts from.
+    ///
+    /// Mandatory: admission must resolve the strategy's current apply before
+    /// it builds a graph, and only the owner half can read the Creator store.
+    applied_admission: Arc<dyn AppliedAdmissionPort>,
 }
 
 /// An in-flight (or completed) drive owner for one session.
@@ -1406,6 +1417,7 @@ impl WorkflowRunCoordinator {
                 std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
             >,
         >,
+        applied_admission: Arc<dyn AppliedAdmissionPort>,
     ) -> Self {
         let workflow_store: Arc<dyn WorkflowStateStore> =
             Arc::new(nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(pool.clone()));
@@ -1423,6 +1435,7 @@ impl WorkflowRunCoordinator {
             config: PresetRunConfig::default(),
             schedule_supervisor: std::sync::Arc::new(std::sync::RwLock::new(None)),
             run_events: None,
+            applied_admission,
         }
     }
 
@@ -1624,19 +1637,23 @@ impl WorkflowRunCoordinator {
         // key governs user bundles only; `yaml-only` runs the YAML bundle
         // without reading the apply; the default `ir-only` resolves the apply
         // below and refuses a user bundle with none before graph construction.
-        let intake_mode = crate::execution::applied_documents::intake_mode_for_admission(
-            nexus_home, preset_id, &loaded,
-        )
-        .map_err(|reason| RunControlError::InvalidIntakeConfig { reason })?;
-        let applied = match intake_mode {
-            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
-            _ => crate::execution::applied_documents::resolve_applied_document(
-                &self.pool, nexus_home, preset_id, &loaded,
-            )
+        // The resolution itself is the admission port's: only the owner half
+        // reads the Creator store, and recovery re-enters through the same one.
+        let admission = self
+            .applied_admission
+            .admit(preset_id, &loaded)
             .await
-            .map_err(|error| RunControlError::Admission(error.to_string()))?
-            .map_err(|refusal| RunControlError::AppliedIdentityInvalid(refusal.into_error()))?,
-        };
+            .map_err(|error| match error {
+                AppliedAdmissionError::Store(message) => RunControlError::Admission(message),
+                AppliedAdmissionError::InvalidIntakeConfig(reason) => {
+                    RunControlError::InvalidIntakeConfig { reason }
+                }
+                AppliedAdmissionError::AppliedIdentity { code, message } => {
+                    RunControlError::AppliedIdentityInvalid { code, message }
+                }
+            })?;
+        let intake_mode = admission.intake_mode;
+        let applied = admission.applied;
         if intake_mode == Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
             && applied.is_none()
         {
@@ -3010,8 +3027,9 @@ impl WorkflowRunCoordinator {
         // classification. `locate_preset` checks embedded first, so a user bundle shadowing an
         // embedded id would be read as `embedded` and its current apply silently skipped; only
         // `resolve_preset` (user → system → embedded) knows which bundle actually loaded. The
-        // predicate is `crate::apply::is_user_preset`, the same one apply refuses on, so the two
-        // sides cannot disagree about which schedules have an applied identity.
+        // predicate is `nexus_home_layout::strategy_intake::is_user_strategy_bundle` — the rule
+        // the apply gate's `is_user_preset` delegates to — so the two sides cannot disagree about
+        // which schedules have an applied identity.
         //
         // Resolved BEFORE the binding gate so the roles validated are the roles the run will
         // execute, not the descriptor's. The resolved identity is also carried into the run's
@@ -3024,24 +3042,21 @@ impl WorkflowRunCoordinator {
         // the current apply; the default `ir-only` resolves as P3.5 states
         // and refuses a user bundle with no current apply before any graph
         // is built (never a YAML fallback).
-        let intake_mode = crate::execution::applied_documents::intake_mode_for_admission(
-            nexus_home,
-            &row.preset_id,
-            &loaded,
-        )
-        .map_err(|reason| RunControlError::InvalidIntakeConfig { reason })?;
-        let applied = match intake_mode {
-            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
-            _ => crate::execution::applied_documents::resolve_applied_document(
-                pool,
-                nexus_home,
-                &row.preset_id,
-                &loaded,
-            )
+        let admission = self
+            .applied_admission
+            .admit(&row.preset_id, &loaded)
             .await
-            .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?
-            .map_err(|refusal| RunControlError::AppliedIdentityInvalid(refusal.into_error()))?,
-        };
+            .map_err(|error| match error {
+                AppliedAdmissionError::Store(message) => RunControlError::ScheduleUpdate(message),
+                AppliedAdmissionError::InvalidIntakeConfig(reason) => {
+                    RunControlError::InvalidIntakeConfig { reason }
+                }
+                AppliedAdmissionError::AppliedIdentity { code, message } => {
+                    RunControlError::AppliedIdentityInvalid { code, message }
+                }
+            })?;
+        let intake_mode = admission.intake_mode;
+        let applied = admission.applied;
         if intake_mode == Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
             && applied.is_none()
         {
@@ -3827,6 +3842,29 @@ mod tests {
 
     const CREATOR: &str = "test_creator";
     const SLUG: &str = "default";
+
+    /// Admission double for the coordinator's unit tests.
+    ///
+    /// Every preset these tests drive carries no current apply, so the
+    /// resolution answers "not a user bundle, no applied document" — what a
+    /// home with no `[strategy_intake]` key answers for a non-user preset.
+    /// The applied-identity and intake-config families are asserted end to end
+    /// against the real adapter in `tests/execution_lifecycle.rs`.
+    struct NoAppliedAdmission;
+
+    #[async_trait]
+    impl AppliedAdmissionPort for NoAppliedAdmission {
+        async fn admit(
+            &self,
+            _preset_id: &str,
+            _loaded: &nexus_preset::LoadedPreset,
+        ) -> Result<nexus_execution::admission::AppliedAdmission, AppliedAdmissionError> {
+            Ok(nexus_execution::admission::AppliedAdmission {
+                intake_mode: None,
+                applied: None,
+            })
+        }
+    }
 
     /// Seed an admitted engine-owner workspace DB, mirroring the daemon's own
     /// `create_test_workspace` fixture (same admission path, so the
@@ -6389,6 +6427,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
 
         // Start a v1 run and park it at a durable human wait.
@@ -6586,6 +6625,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
 
         let race_graph = Arc::new(
@@ -6744,6 +6784,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
 
         let race_graph = Arc::new(
@@ -6897,6 +6938,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
 
         let race_graph = Arc::new(
@@ -7024,6 +7066,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -7140,6 +7183,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(fault_store);
         let session_id = engine
@@ -7222,6 +7266,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -7558,6 +7603,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(fault_store);
         let session_id = engine
@@ -7680,6 +7726,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(fault_store.clone());
         let session_id = engine
@@ -7805,6 +7852,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -7924,6 +7972,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(fault_store);
         let session_id = engine
@@ -8051,6 +8100,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -8143,6 +8193,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = SessionId("v0:recovery".to_string());
 
@@ -8400,6 +8451,7 @@ mod tests {
             real_storage.clone(),
             pool.clone(),
             Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            Arc::new(NoAppliedAdmission),
         );
         assert!(
             !coordinator
@@ -8604,6 +8656,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -8731,6 +8784,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -8859,6 +8913,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -8961,6 +9016,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let summary = SessionSummary {
             session_id: SessionId("v0:typed-failed".to_string()),
@@ -9250,6 +9306,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(barrier_store.clone());
         let session_id = engine
@@ -9374,6 +9431,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -9479,6 +9537,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(fault_store);
         let session_id = engine
@@ -9753,6 +9812,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(barrier_store.clone());
         let session_id = engine
@@ -10155,6 +10215,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels.clone(),
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(walk_store.clone())
         .with_run_events(Arc::new(GatedAdmissionPort {
@@ -10409,6 +10470,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_run_events(Arc::new(FullQuotaPort));
 
@@ -10568,6 +10630,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_run_events(Arc::clone(&port) as Arc<dyn RunEventPort>);
 

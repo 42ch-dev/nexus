@@ -1129,13 +1129,18 @@ impl CoreService {
         ));
         // P4: recovery reads the SAME applied identity admission resolves, over
         // the same Creator DB pool and the same workspace home — a restart
-        // mid-run rebuilds the applied graph, not the descriptor's.
-        engine.set_applied_document_source(Arc::new(
-            crate::execution::applied_documents::CreatorAppliedDocuments::new(
-                Arc::new(pool.clone()),
-                self.inner.nexus_home.clone(),
-            ),
-        ));
+        // mid-run rebuilds the applied graph, not the descriptor's. ONE adapter
+        // serves both the engine's recovery source and the coordinator's
+        // admission port, so the two can never resolve different documents.
+        let applied_documents: Arc<crate::execution::applied_documents::CreatorAppliedDocuments> =
+            Arc::new(
+                crate::execution::applied_documents::CreatorAppliedDocuments::new(
+                    Arc::new(pool.clone()),
+                    self.inner.nexus_home.clone(),
+                ),
+            );
+        engine.set_applied_document_source(Arc::clone(&applied_documents)
+            as Arc<dyn nexus_orchestration::capability::AppliedDocumentSource>);
         let engine = Arc::new(engine);
 
         let mut coordinator = WorkflowRunCoordinator::new(
@@ -1143,6 +1148,7 @@ impl CoreService {
             session_storage.clone(),
             Arc::new(pool.clone()),
             Arc::clone(&session_cancels),
+            applied_documents,
         );
         if let Some(catalog) = deps.provider_catalog {
             coordinator = coordinator.with_provider_catalog(catalog);

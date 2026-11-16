@@ -15,6 +15,7 @@
 //!
 //! Dependency direction: `nexus-core → nexus-execution`, never back.
 
+pub mod admission;
 pub mod authority;
 pub mod bounds;
 pub mod commit_fs;

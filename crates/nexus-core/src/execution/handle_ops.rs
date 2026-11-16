@@ -2293,7 +2293,9 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
         },
         // The applied identity's own refusal, already carrying the coded
         // `(code, message)` pair that names the strategy and the apply.
-        RunControlError::AppliedIdentityInvalid(error) => error,
+        RunControlError::AppliedIdentityInvalid { code, message } => {
+            CoreError::Coded { code, message }
+        }
         // Retryable capacity refusal (never a 500): no drive started and no
         // durable work was touched.
         RunControlError::RunEventCapacity(_) => CoreError::Busy,
