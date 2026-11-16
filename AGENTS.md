@@ -61,6 +61,7 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `crates/nexus-core/` | Transport-neutral World KB service + stored Actor/holder admission authority | [`crates/nexus-core/AGENTS.md`](crates/nexus-core/AGENTS.md) |
 | `crates/nexus-core-node/` | Thin Node-API cdylib composing core + provider ports; audited FFI boundary | [`crates/nexus-core-node/AGENTS.md`](crates/nexus-core-node/AGENTS.md) |
 | `crates/nexus-embedding/` | Embedding readiness contract (RN-OGA-3) — provider trait seam, identity tuple, fail-closed derived-index protocol; no OSS execution | [`crates/nexus-embedding/AGENTS.md`](crates/nexus-embedding/AGENTS.md) |
+| `crates/nexus-execution/` | Port-driven durable run engine — run driver/coordinator, scheduler ownership, run-event rings, workspace session/commit primitives | [`crates/nexus-execution/AGENTS.md`](crates/nexus-execution/AGENTS.md) |
 | `crates/nexus-home-layout/` | `~/.nexus42/` path layout | [`crates/nexus-home-layout/AGENTS.md`](crates/nexus-home-layout/AGENTS.md) |
 | `crates/nexus-local-db/` | Local database layer | [`crates/nexus-local-db/AGENTS.md`](crates/nexus-local-db/AGENTS.md) |
 | `crates/nexus-memory-conformance/` | Independent durable SPOKE memory provider fixture; test-only N3 conformance | [`crates/nexus-memory-conformance/AGENTS.md`](crates/nexus-memory-conformance/AGENTS.md) |
