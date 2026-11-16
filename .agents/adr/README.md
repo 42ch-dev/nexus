@@ -33,6 +33,8 @@ The first line is `# ADR: <title>`. The header block also carries one bare line 
 - `rejected/` reuses the proposed skeleton with a frozen body; only `Problem`, `Proposal` and `Alternatives considered` are required.
 - `archived/` keeps the implemented record's sections and is frozen after the move. Migration-history ledgers carried over from the retired specs corpus are frozen history, not decisions; they keep their `Problem` / `Decision` / `Alternatives considered` / `Consequences` headings but are never cited as current authority.
 
+A `Status` line declares only what a named command or symbol can prove — a path plus the refusal it raises, or the check that shows it. It is the one line most readers read and the only one no tree walk verifies, so the evidence belongs in the line itself; history, intent, and anything a reader must take on trust belong in the body, where the reader is already looking for reasons. A `Status` that promises a guarantee the code does not enforce is the defect no lint catches.
+
 `Proposal`, `Plan`, `Migration plan` and `Acceptance criteria` are banned as sections of an implemented record. Extra sections that are neither required nor banned stay.
 
 ## Lifecycle

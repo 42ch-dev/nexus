@@ -1,6 +1,6 @@
 # ADR: Dynamic Workflow Generation and Orchestration Simulation
 
-Status: implemented — split into three records on 2026-11-13
+Status: implemented — superseded by three records
 Archived: 2026-11-13 — split into three records
 Superseded-by: ../../implemented/architecture/2026-11-10-workflow-ir-document-model.md, ../../implemented/architecture/2026-11-10-strategy-simulation-fence.md, ../../proposed/architecture/2026-11-10-canvas-composition-and-pattern-packages.md
 Date: 2026-11-10

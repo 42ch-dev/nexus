@@ -190,7 +190,9 @@ v1.227–v1.230; transfer (N4-T) remains unconsumed.)
 #### 4.1 Providers
 
 - **Default local provider — `LocalMemoryProvider` (new, in-process).**
-  Implements `MemoryPort` inside `nexus-core` with **provider-private**
+  Implements `MemoryPort` in `crates/nexus-memory-provider`
+  (`crates/nexus-memory-provider/src/lib.rs:3157`), the crate the v1.245
+  extraction (#528) moved out of `nexus-core`, with **provider-private**
   storage/transaction code over the existing SQLite tables and bearer
   markdown files, enforcing all MEM-R invariants in its own transaction
   layer and running **Nexus-owned** algorithm policy (classification,
@@ -555,7 +557,7 @@ real browsers/devices, or deployments.
 
 | Task | Owner | Deps | Acceptance |
 |---|---|---|---|
-| NXM-1: `LocalMemoryProvider: MemoryPort` inside nexus-core: provider-private storage/transaction layer over existing SQLite tables + bearer files under writer admission; **Nexus-owned** policy functions for classification/recall/staleness/transfer (algorithm-variable — the unpublished fixture engine is an optional offline reference, never a dependency). Includes the §5.1 additive control-metadata migration (revision columns, stable record/candidate identity, idempotency/fence/journal metadata) registered with the writer guard/outbox and bumping `DB_SCHEMA_VERSION` | fullstack-dev | NXM-0 | `PROPOSED: cargo test -p nexus-core local_memory_provider` — round-trips capture→review→promote→recall against a temp nexus home; writer-guard triggers still fire on out-of-protocol writes (assert `WRITER_FENCED`); migration idempotent and registered in `core_writer_registration` |
+| NXM-1: `LocalMemoryProvider: MemoryPort` in `crates/nexus-memory-provider` (extracted from `nexus-core` in v1.245; the impl is `crates/nexus-memory-provider/src/lib.rs:3157`): provider-private storage/transaction layer over existing SQLite tables + bearer files under writer admission; **Nexus-owned** policy functions for classification/recall/staleness/transfer (algorithm-variable — the unpublished fixture engine is an optional offline reference, never a dependency). Includes the §5.1 additive control-metadata migration (revision columns, stable record/candidate identity, idempotency/fence/journal metadata) registered with the writer guard/outbox and bumping `DB_SCHEMA_VERSION` | fullstack-dev | NXM-0 | `PROPOSED: cargo test -p nexus-core local_memory_provider` (the round trip is still a `nexus-core` integration target, `crates/nexus-core/tests/local_memory_provider.rs`) and `cargo test -p nexus-memory-provider` (the crate's own units) — round-trips capture→review→promote→recall against a temp nexus home; writer-guard triggers still fire on out-of-protocol writes (assert `WRITER_FENCED`); migration idempotent and registered in `core_writer_registration` |
 | NXM-2: Memory-domain receipts: extend receipt store consumer set + memory scope tuple (§5.4); lift `uncertain` refusal for memory consumer | fullstack-dev | NXM-1 | `PROPOSED: cargo test -p nexus-core memory_receipts` — duplicate `memory.capture` returns `IDEMPOTENCY_CONFLICT`-free replay with identical receipt; timeout path yields `OUTCOME_UNCERTAIN` then resolves via `memory.receipts.get` |
 | NXM-3: SQL+file reconciliation pass (§5.2) | fullstack-dev | NXM-1 | `PROPOSED: cargo test -p nexus-core memory_reconcile` — kill-injected fixtures for both crash windows converge or quarantine deterministically |
 | NXM-4: Profile admission with content-kind discipline (§4.5): required authored profile missing ⇒ `PROFILE_INCOMPLETE`; optional authored data absent ⇒ honest-empty; provider-capability mismatch ⇒ distinct provider-selection failure. SOUL.md mapped to `personality`; NO fake governance/transfer/reflection profile documents | fullstack-dev | NXM-1 | `PROPOSED: cargo test -p nexus-core memory_profile_admission` — all three outcomes distinguished |

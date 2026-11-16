@@ -1,6 +1,6 @@
 # ADR: Strategy Simulation Fence — Simulate Before Approve
 
-Status: implemented — P2 simulator shipped in `v1.237-p2-simulator`; simulation is the standing safety fence before graph approval
+Status: implemented — P2 simulator shipped in `v1.237-p2-simulator`; simulation is the standing safety fence before graph approval as a capability (`approve_strategy` refuses a missing, stale or mismatched trajectory, `crates/nexus-core/src/approve.rs:406-450`) and not yet as a checked guarantee: two of three `apps/nexus-service/tests/simulate-http.test.mjs` cases are red (`I-000425`), and the CI step that names the simulation and projection suites (`.github/workflows/ci.yml:803-815`) does not prove they ran green
 Date: 2026-11-10
 Scope: Simulate-before-approve for Workflow IR: the trajectory contract, static reachability with stubbed judges, declared fidelity limits, deterministic output, effect rollup, and the requirement that Approve never renders as an enabled no-op.
 Source: split from the archived Canvas + Workflow IR redesign and Dynamic Workflow Generation and Orchestration Simulation records
@@ -64,3 +64,5 @@ P2 supplies a deterministic, isolated review artifact that makes reachability, w
 The cost is deliberate conservatism: static waits can over-report, judges disclose only their default path, and the result says nothing about output quality or production usefulness. Those limits must be shown wherever Approve is offered. Deterministic errors for invalid judge defaults and fail-closed source identity preserve safety at the cost of refusing ambiguous graphs.
 
 P2 ships validation and simulation only. Canvas compose, pinned pattern packages, the approval freeze and Apply shipped in v1.239 and v1.241 and are now governed by [the composition spec](../../../../docs/specs/orchestration/strategy-composition.md); dual-read loading, IR-primary authoring and retirement of hand-authored YAML remain in [Canvas Composition and Pattern Packages](../../proposed/architecture/2026-11-10-canvas-composition-and-pattern-packages.md), and the document model and validation parity remain in [Workflow IR Document Model](2026-11-10-workflow-ir-document-model.md).
+
+**Coverage of the fence.** `1a3eb6c66` wired the preset simulation and projection suites into `.github/workflows/ci.yml:803-815`, which makes `I-000475`'s original claim — that they never run in CI — stale. The step names the suites, and a named step is not evidence that the suite ran green: `I-000425`'s two red cases in `apps/nexus-service/tests/simulate-http.test.mjs` are the live gap, and they close the coverage clause in the Status line, not the fence.
