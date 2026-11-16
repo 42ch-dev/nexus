@@ -36,3 +36,7 @@ sqlx = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+# The in-file proofs build temporary workspace homes and file roots.
+tempfile = { workspace = true }

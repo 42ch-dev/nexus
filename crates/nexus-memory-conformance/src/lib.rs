@@ -14,7 +14,7 @@
 //! §5 families A–D) runs in the `c_admission_lifecycle` and
 //! `c_capture_candidates` integration targets. Each scenario body is
 //! provider-agnostic: rows scoped to both providers run as `_local` over the real
-//! `nexus_core::memory_provider::LocalMemoryProvider` and as `_remote` over this
+//! `nexus_memory_provider::LocalMemoryProvider` and as `_remote` over this
 //! fixture, while a remote-only row such as C-029 has only its `_remote`
 //! selector. Both legs are served through the published `spoke-connect` memory
 //! service over a real signed loopback session, so the rows observe the same

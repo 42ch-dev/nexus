@@ -1194,8 +1194,8 @@ async fn a_row_without_the_legacy_identity_at_a_legacy_id_refuses_the_pass() {
     .unwrap();
     assert_eq!(rewritten.rows_affected(), 1, "the migrated fragment exists");
     sqlx::query("DELETE FROM memory_provider_meta WHERE key = ?")
-        .bind(nexus_core::memory_provider::legacy::legacy_migration_key(
-            nexus_core::memory_provider::DEFAULT_SPACE_ID,
+        .bind(nexus_memory_provider::legacy::legacy_migration_key(
+            nexus_memory_provider::DEFAULT_SPACE_ID,
         ))
         .execute(core.pool())
         .await
@@ -1290,9 +1290,8 @@ async fn a_failed_publication_fences_every_affected_subject_until_recovery() {
     let (core, principal) = open_core(&env).await;
     let character_id = env.character_id.clone();
     let binding_id = env.binding_id.clone();
-    let creator_subject = nexus_core::memory_provider::legacy::creator_subject_id(CREATOR);
-    let character_subject =
-        nexus_core::memory_provider::legacy::character_subject_id(&character_id);
+    let creator_subject = nexus_memory_provider::legacy::creator_subject_id(CREATOR);
+    let character_subject = nexus_memory_provider::legacy::character_subject_id(&character_id);
 
     // Marker, rows and intent commit; the file publication stops after staging.
     core.memory_provider_for_test()

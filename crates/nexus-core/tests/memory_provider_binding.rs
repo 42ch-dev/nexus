@@ -10,7 +10,6 @@
 use std::fs;
 use std::path::PathBuf;
 
-use nexus_core::memory_provider::{LocalMemoryProvider, DEFAULT_SPACE_ID};
 use nexus_core::{
     CoreAccess, CoreError, CoreOpenOptions, CoreService, MemoryProviderSelection,
     RemoteMemoryProviderSelection,
@@ -18,6 +17,7 @@ use nexus_core::{
 use nexus_local_db::writer_protocol::{
     init_guarded_pool, join_live_engine_pool, GuardedPoolOptions,
 };
+use nexus_memory_provider::{LocalMemoryProvider, DEFAULT_SPACE_ID};
 use tempfile::TempDir;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -514,7 +514,9 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
 /// exist before the spawn. A finished task here means the lease did not hold it.
 async fn open_registered_writer(
     observer: &mut sqlx::SqliteConnection,
-    opening: &tokio::task::JoinHandle<nexus_core::CoreResult<LocalMemoryProvider>>,
+    opening: &tokio::task::JoinHandle<
+        Result<LocalMemoryProvider, nexus_memory_provider::ProviderError>,
+    >,
     known_writers: &[String],
 ) -> String {
     for _ in 0..200_000 {
@@ -541,7 +543,9 @@ async fn open_registered_writer(
 /// Poll the change log for the seed write only `measured_writer` produces.
 async fn opened_seed_write(
     observer: &mut sqlx::SqliteConnection,
-    opening: &tokio::task::JoinHandle<nexus_core::CoreResult<LocalMemoryProvider>>,
+    opening: &tokio::task::JoinHandle<
+        Result<LocalMemoryProvider, nexus_memory_provider::ProviderError>,
+    >,
     measured_writer: &str,
 ) {
     for _ in 0..200_000 {

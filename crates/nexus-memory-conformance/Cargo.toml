@@ -51,6 +51,10 @@ tempfile = { workspace = true }
 # so the default/workspace all-targets graph no longer unifies them in
 # unconditionally.
 nexus-core = { path = "../nexus-core" }
+# v1.245 extraction: the local provider the `Kind::Local` vertical drives. The
+# conformance crate names the provider crate directly — `nexus-core` no longer
+# hosts the module, and no re-export path exists to name it through Core.
+nexus-memory-provider = { path = "../nexus-memory-provider" }
 # The disposable user home the open resolves (workspace dir, state DB and the
 # provider's own file root) through the production layout instead of a
 # hardcoded copy of it.

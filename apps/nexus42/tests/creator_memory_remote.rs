@@ -299,8 +299,8 @@ mod remote {
     use tempfile::TempDir;
 
     use nexus_connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
-    use nexus_core::memory_provider::legacy;
     use nexus_memory_conformance::{FixtureMemoryProvider, PeerDirectory};
+    use nexus_memory_provider::legacy;
     use spoke_connect::core::derive_peer_id_from_ed25519_pubkey;
     use spoke_connect::remote::{
         connect_responder, ConnectResponder, ConnectResponderOptions, ConnectResponderState,

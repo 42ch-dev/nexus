@@ -38,7 +38,7 @@ use spoke_operations::{
     spoke_schemas as schemas, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult,
 };
 
-use nexus_core::memory_provider::LocalMemoryProvider;
+use nexus_memory_provider::LocalMemoryProvider;
 use sqlx::Connection as _;
 use std::sync::Arc;
 

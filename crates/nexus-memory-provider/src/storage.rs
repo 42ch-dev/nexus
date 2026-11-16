@@ -101,9 +101,9 @@ use uuid::Uuid;
 use nexus_local_db::writer_protocol::{init_guarded_pool, GuardedPool};
 use nexus_local_db::{begin_immediate, LocalDbError};
 
-use super::created_at_cmp;
-use super::journal::{self, FileEffect};
-use super::legacy::{self, LegacyRoots};
+use crate::created_at_cmp;
+use crate::journal::{self, FileEffect};
+use crate::legacy::{self, LegacyRoots};
 
 /// §6.10 receipt ids are provider-assigned opaque strings.
 fn mint_receipt_id() -> String {
@@ -118,12 +118,12 @@ const CLOCK_FLOOR_KEY: &str = "clock_floor_micros";
 ///
 /// Every timestamp column this module writes and every stored expiry is compared
 /// as text, so the rendering must be fixed: RFC 3339 UTC, whole seconds, `Z`.
-pub(super) fn timestamp(now: DateTime<Utc>) -> String {
+pub fn timestamp(now: DateTime<Utc>) -> String {
     now.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 #[derive(Debug)]
-pub(super) enum StoreError {
+pub enum StoreError {
     /// Something the caller can see and correct (missing row, stale revision…).
     NotFound(String),
     /// The request names something the store cannot admit (§7/I-000149: a
@@ -220,7 +220,7 @@ impl From<sqlx::Error> for StoreError {
     }
 }
 
-pub(super) type StoreResult<T> = Result<T, StoreError>;
+pub type StoreResult<T> = Result<T, StoreError>;
 
 /// A capture transaction's two failure classes.
 ///
@@ -228,7 +228,7 @@ pub(super) type StoreResult<T> = Result<T, StoreError>;
 /// vocabulary. The caller's binding provenance (compass D15) is not a provider
 /// refusal — it is the legacy-domain admission the Character capture always
 /// answered — so it travels as itself and the adapter keeps that error.
-pub(super) enum CaptureError {
+pub enum CaptureError {
     Store(StoreError),
     Binding(LocalDbError),
 }
@@ -337,7 +337,7 @@ struct GenerationRendezvous {
 
 /// §6.10 receipt status while its journaled file effect is not yet published
 /// (§5.2 step 2): durable, but not terminal.
-pub(super) const RECEIPT_PENDING: &str = "pending";
+pub const RECEIPT_PENDING: &str = "pending";
 
 /// How long a pending generate receipt's lease covers the generation running
 /// under it (§7.0.3, inspector round 2). The generation is in-process pure
@@ -351,7 +351,7 @@ const GENERATION_LEASE_SECONDS: i64 = 30;
 /// §5.2 step 3: the receipt of an intent that could not be published. Terminal:
 /// `error_json` carries the failure envelope, and a later re-drive publishes the
 /// intent and replaces this status with `committed`.
-pub(super) const RECEIPT_FAILED: &str = "failed";
+pub const RECEIPT_FAILED: &str = "failed";
 
 /// What admits a mutating op (§6.5): one requirement per capability the op
 /// needs, and every one of them must be covered by the grant set.
@@ -361,7 +361,7 @@ pub(super) const RECEIPT_FAILED: &str = "failed";
 /// they need hangs off that row's immutable placement. Those resolve the
 /// requirement *inside* the effect transaction, so authorization still sees
 /// exactly the row the write will touch.
-pub(super) enum Coverage<'a> {
+pub enum Coverage<'a> {
     /// Requirements known from the request; empty = admitted by another rule.
     Requirements(&'a [GrantRequirement<'a>]),
     /// Candidate-scoped: coverage of the candidate's `capture_scope` (§6.7).
@@ -378,7 +378,7 @@ pub(super) enum Coverage<'a> {
     },
 }
 
-pub(super) struct Admission<'a> {
+pub struct Admission<'a> {
     pub op: &'a str,
     pub space_id: &'a str,
     pub principal_id: &'a str,
@@ -398,7 +398,7 @@ pub(super) struct Admission<'a> {
 }
 
 #[derive(Debug, sqlx::FromRow)]
-pub(super) struct SpaceRow {
+pub struct SpaceRow {
     pub space_id: String,
     pub display_name: Option<String>,
     pub authority_host_id: String,
@@ -410,7 +410,7 @@ pub(super) struct SpaceRow {
 }
 
 #[derive(Debug, sqlx::FromRow)]
-pub(super) struct SubjectRow {
+pub struct SubjectRow {
     pub space_id: String,
     pub subject_id: String,
     pub kind_ns: Option<String>,
@@ -422,7 +422,7 @@ pub(super) struct SubjectRow {
 }
 
 impl SubjectRow {
-    pub(super) fn fenced_contexts(&self) -> StoreResult<Vec<String>> {
+    pub fn fenced_contexts(&self) -> StoreResult<Vec<String>> {
         serde_json::from_str(&self.fenced_contexts_json).map_err(|e| {
             StoreError::Corrupt(format!(
                 "memory_subjects.fenced_contexts_json for {}: {e}",
@@ -433,7 +433,7 @@ impl SubjectRow {
 }
 
 #[derive(Debug, sqlx::FromRow)]
-pub(super) struct GrantRow {
+pub struct GrantRow {
     pub grant_id: String,
     pub space_id: String,
     pub subject_id: Option<String>,
@@ -448,7 +448,7 @@ pub(super) struct GrantRow {
 }
 
 impl GrantRow {
-    pub(super) fn capabilities(&self) -> StoreResult<Vec<String>> {
+    pub fn capabilities(&self) -> StoreResult<Vec<String>> {
         serde_json::from_str(&self.capabilities_json).map_err(|e| {
             StoreError::Corrupt(format!(
                 "memory_grants.capabilities_json for {}: {e}",
@@ -457,7 +457,7 @@ impl GrantRow {
         })
     }
 
-    pub(super) fn context_ids(&self) -> StoreResult<Vec<String>> {
+    pub fn context_ids(&self) -> StoreResult<Vec<String>> {
         serde_json::from_str(&self.context_ids_json).map_err(|e| {
             StoreError::Corrupt(format!(
                 "memory_grants.context_ids_json for {}: {e}",
@@ -468,7 +468,7 @@ impl GrantRow {
 
     /// The §6.5 wire projection the protocol's own evaluators take.
     fn wire(&self) -> StoreResult<MemoryGrant> {
-        super::grant_wire(self).map_err(|error| StoreError::Corrupt(error.message()))
+        crate::grant_wire(self).map_err(|error| StoreError::Corrupt(error.message()))
     }
 }
 
@@ -476,7 +476,7 @@ impl GrantRow {
 /// only for the `memory.subjects.ensure` exemption. A settled row whose payloads
 /// are both `None` is the content-free tombstone left by body eviction.
 #[derive(Debug, sqlx::FromRow)]
-pub(super) struct ReceiptRow {
+pub struct ReceiptRow {
     pub space_id: String,
     pub requester_principal_id: String,
     pub op: String,
@@ -491,7 +491,7 @@ pub(super) struct ReceiptRow {
 }
 
 /// Stable operation identity handed to every mutating entry point.
-pub(super) struct OpContext<'a> {
+pub struct OpContext<'a> {
     pub space_id: &'a str,
     pub requester_principal_id: &'a str,
     pub op: &'a str,
@@ -501,7 +501,7 @@ pub(super) struct OpContext<'a> {
 }
 
 /// A grant row as the caller issues it (§7.9).
-pub(super) struct NewGrant<'a> {
+pub struct NewGrant<'a> {
     pub grant_id: &'a str,
     pub space_id: &'a str,
     pub subject_id: Option<&'a str>,
@@ -513,21 +513,21 @@ pub(super) struct NewGrant<'a> {
 }
 
 /// §7.7 fence target.
-pub(super) enum FenceTarget<'a> {
+pub enum FenceTarget<'a> {
     Subject,
     Context(&'a str),
 }
 
 /// §7.7 fence action.
 #[derive(Debug, Clone, Copy)]
-pub(super) enum FenceAction {
+pub enum FenceAction {
     Fence,
     Unfence,
     Archive,
 }
 
 /// One §7.7 fence request: what is fenced, the action, and the CAS precondition.
-pub(super) struct Fence<'a> {
+pub struct Fence<'a> {
     pub subject_id: &'a str,
     pub target: FenceTarget<'a>,
     pub action: FenceAction,
@@ -574,7 +574,7 @@ fn workspace_publish_gate(files_root: &Path) -> Arc<tokio::sync::Mutex<()>> {
 /// link→unlink window. The lease itself is only *parked* here: every file
 /// operation runs inside [`PublicationGuard::files`], whose blocking task owns it
 /// ([`journal::PublishFlock::section`]).
-pub(super) struct PublicationGuard {
+pub struct PublicationGuard {
     lease: Option<journal::PublishFlock>,
     _gate: tokio::sync::OwnedMutexGuard<()>,
 }
@@ -600,7 +600,7 @@ impl PublicationGuard {
     }
 }
 
-pub(super) struct MemoryStore {
+pub struct MemoryStore {
     /// This instance's identity, stamped as a pending generate receipt's
     /// generation-lease `owner_id` (§7.0.3, inspector round 2). Two store
     /// instances over one workspace — two processes, or two providers in one —
@@ -613,7 +613,7 @@ pub(super) struct MemoryStore {
     guarded: Option<GuardedPool>,
     /// Root of the provider's own markdown projection, next to `state.db`.
     files_root: PathBuf,
-    /// Legacy bearer roots read by the projection bridge ([`super::legacy`]).
+    /// Legacy bearer roots read by the projection bridge ([`crate::legacy`]).
     /// Held here so every composed read path projects the same sources.
     legacy: LegacyRoots,
     /// §5.2 step 2: serializes the settle-to-publish window of every operation
@@ -708,7 +708,7 @@ const SPACE_COLUMNS: &str = "s.space_id, s.display_name, s.authority_host_id, \
      (SELECT COUNT(*) FROM memory_receipts r WHERE r.space_id = s.space_id \
       AND r.status = 'pending') AS pending_receipts";
 
-pub(super) const SUBJECT_COLUMNS: &str = "space_id, subject_id, kind_ns, kind_id, status, \
+pub const SUBJECT_COLUMNS: &str = "space_id, subject_id, kind_ns, kind_id, status, \
      fenced_contexts_json, revision, created_at";
 
 const GRANT_COLUMNS: &str = "grant_id, space_id, subject_id, principal_id, \
@@ -734,7 +734,7 @@ impl MemoryStore {
     /// the pool here — explicitly, at the end of this provider's lifetime — is
     /// what lets the cooperative admission settle. A read-only store simply
     /// closes its read-only pool; it never held an admission. Idempotent.
-    pub(super) async fn close(&self) {
+    pub async fn close(&self) {
         self.pool.close().await;
     }
 
@@ -846,11 +846,7 @@ impl MemoryStore {
     /// process — [`Self::provision`]'s — already judges retention at a reading
     /// the previous process committed to, not at a wall clock that may have moved
     /// backwards across the restart.
-    pub(super) async fn open(
-        db_path: &Path,
-        creator_id: &str,
-        user_home: &Path,
-    ) -> StoreResult<Self> {
+    pub async fn open(db_path: &Path, creator_id: &str, user_home: &Path) -> StoreResult<Self> {
         let guarded = init_guarded_pool(db_path, creator_id).await?;
         let pool = guarded.clone_pool();
         Self::compose(pool, Some(guarded), db_path, creator_id, user_home).await
@@ -867,7 +863,7 @@ impl MemoryStore {
     /// A database no writer open has migrated yet carries no provider tables;
     /// the retention clock then starts at the same zero floor a fresh storage
     /// has, instead of failing the whole read-only open over an absent table.
-    pub(super) async fn open_read_only(
+    pub async fn open_read_only(
         db_path: &Path,
         creator_id: &str,
         user_home: &Path,
@@ -879,14 +875,14 @@ impl MemoryStore {
     /// Whether this store may write. A read-only store holds no writer
     /// admission; its reads include the legacy projection exactly as a
     /// writer-open store's do.
-    pub(super) const fn writable(&self) -> bool {
+    pub const fn writable(&self) -> bool {
         self.guarded.is_some()
     }
 
     /// The directory of the workspace memory-disposition lock files (fix round
     /// 2, finding F1): next to `state.db`, so two providers over one workspace —
     /// in this process or in another — contend on the same files.
-    pub(super) fn disposition_dir(&self) -> PathBuf {
+    pub fn disposition_dir(&self) -> PathBuf {
         self.files_root
             .parent()
             .unwrap_or_else(|| Path::new("."))
@@ -1032,7 +1028,7 @@ impl MemoryStore {
     /// expiries and receipt retention windows elapse. Compiled out of a
     /// production build.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn advance_clock(&self, seconds: i64) {
+    pub fn advance_clock(&self, seconds: i64) {
         self.clock_skew.fetch_add(seconds, Ordering::SeqCst);
     }
 
@@ -1041,7 +1037,7 @@ impl MemoryStore {
     /// clock while the read is queued and know it has not been sampled yet.
     /// Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn park_next_read(
+    pub fn park_next_read(
         &self,
         entered: Arc<tokio::sync::Notify>,
         release: Arc<tokio::sync::Barrier>,
@@ -1055,7 +1051,7 @@ impl MemoryStore {
     /// `remove_binding` cannot slip between that validation and the insert.
     /// Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn park_next_capture(
+    pub fn park_next_capture(
         &self,
         entered: Arc<tokio::sync::Notify>,
         release: Arc<tokio::sync::Barrier>,
@@ -1071,7 +1067,7 @@ impl MemoryStore {
     /// through `memory.receipts.get`. One-shot. Compiled out of a production
     /// build.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn park_next_generation(
+    pub fn park_next_generation(
         &self,
         entered: Arc<tokio::sync::Notify>,
         release: Arc<tokio::sync::Barrier>,
@@ -1085,7 +1081,7 @@ impl MemoryStore {
     /// a replay never runs a generation, so an armed fault stays armed across
     /// one. Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn inject_generation_fault(&self) {
+    pub fn inject_generation_fault(&self) {
         self.generation_fault.store(true, Ordering::SeqCst);
     }
 
@@ -1114,7 +1110,7 @@ impl MemoryStore {
     /// before its writer transaction (proof seam). `entered` reports that
     /// arrival, `release` frees it. Single next use, like the capture seam.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn park_next_admission(
+    pub fn park_next_admission(
         &self,
         entered: Arc<tokio::sync::Notify>,
         release: Arc<tokio::sync::Barrier>,
@@ -1133,7 +1129,7 @@ impl MemoryStore {
     /// no longer in the slot and this is a no-op (the provider's bounded wait
     /// covers that case).
     #[cfg(feature = "test-hooks")]
-    pub(super) fn disarm_next_admission(&self, token: u64) {
+    pub fn disarm_next_admission(&self, token: u64) {
         let mut gate = self.admission_barrier.lock().expect("admission gate");
         if gate.as_ref().is_some_and(|armed| armed.token == token) {
             *gate = None;
@@ -1145,7 +1141,7 @@ impl MemoryStore {
     /// a test can observe another provider instance on the same workspace waiting
     /// for it. Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn park_next_publish(
+    pub fn park_next_publish(
         &self,
         entered: Arc<tokio::sync::Notify>,
         release: Arc<tokio::sync::Barrier>,
@@ -1158,7 +1154,7 @@ impl MemoryStore {
     /// its blocking task just before it blocks, so a test can cancel callers that
     /// have really reached the wait. Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn report_flock_waits(&self, report: std::sync::mpsc::Sender<()>) {
+    pub fn report_flock_waits(&self, report: std::sync::mpsc::Sender<()>) {
         *self.flock_wait_report.lock().expect("flock wait report") = Some(report);
     }
 
@@ -1169,7 +1165,7 @@ impl MemoryStore {
     /// reached the contended lock, not merely that its task has been scheduled.
     /// Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn report_disposition_waits(&self, report: Arc<tokio::sync::Notify>) {
+    pub fn report_disposition_waits(&self, report: Arc<tokio::sync::Notify>) {
         *self
             .disposition_wait_report
             .lock()
@@ -1178,7 +1174,7 @@ impl MemoryStore {
 
     /// The armed report of [`Self::report_disposition_waits`], if any.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn take_disposition_wait_report(&self) -> Option<Arc<tokio::sync::Notify>> {
+    pub fn take_disposition_wait_report(&self) -> Option<Arc<tokio::sync::Notify>> {
         self.disposition_wait_report
             .lock()
             .expect("disposition wait report")
@@ -1190,7 +1186,7 @@ impl MemoryStore {
     /// machinery. Zero after refused writes proves no lock was attempted.
     /// Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn lock_attempts(&self) -> usize {
+    pub fn lock_attempts(&self) -> usize {
         self.lock_attempts.load(Ordering::SeqCst)
     }
 
@@ -1242,7 +1238,7 @@ impl MemoryStore {
     /// `false` fault fails before `COMMIT` (no effect), a `true` fault fails after
     /// it (effect committed, response lost). §14.2/§14.3 proof seam only.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn inject_commit_fault(&self, after_commit: bool) {
+    pub fn inject_commit_fault(&self, after_commit: bool) {
         self.commit_fault.store(
             if after_commit {
                 COMMIT_FAULT_AFTER
@@ -1258,7 +1254,7 @@ impl MemoryStore {
     /// `true` fault stops after the publish rename (content already in place,
     /// journal not yet marked applied). §5.2/C-113 proof seam only.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn inject_file_fault(&self, after_publish: bool) {
+    pub fn inject_file_fault(&self, after_publish: bool) {
         self.file_fault.store(
             if after_publish {
                 FILE_FAULT_AFTER_PUBLISH
@@ -1273,7 +1269,7 @@ impl MemoryStore {
     /// before the settle transaction opens, otherwise its write fails. Both are
     /// failures *after* the journal COMMIT (§14.3 proof seam only).
     #[cfg(feature = "test-hooks")]
-    pub(super) fn inject_settle_fault(&self, before_write: bool) {
+    pub fn inject_settle_fault(&self, before_write: bool) {
         self.settle_fault.store(
             if before_write {
                 SETTLE_FAULT_OPEN
@@ -1286,7 +1282,7 @@ impl MemoryStore {
 
     /// The provider's markdown projection root (§5.2). Test seam only.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn file_root(&self) -> &Path {
+    pub fn file_root(&self) -> &Path {
         &self.files_root
     }
 
@@ -1295,7 +1291,7 @@ impl MemoryStore {
     ///
     /// Both inserts are `INSERT OR IGNORE` keyed on their deterministic ids, so
     /// a re-open neither duplicates nor resets provisioning state.
-    pub(super) async fn provision(
+    pub async fn provision(
         &self,
         space_id: &str,
         authority_host_id: &str,
@@ -1368,7 +1364,7 @@ impl MemoryStore {
     /// read reports past its retention window is not served again by a later
     /// read after a clock correction, and a tombstone past the dedup window
     /// answers `NOT_FOUND` without needing a sweep to remove it first.
-    pub(super) async fn receipt(
+    pub async fn receipt(
         &self,
         principal_id: &str,
         space_id: &str,
@@ -1443,7 +1439,7 @@ impl MemoryStore {
     /// §7.6 subject read: the "any live grant reaches this subject" check and
     /// the subject row come from ONE read transaction on the store's clock
     /// (S-4), so a revoke committing between them cannot disclose the subject.
-    pub(super) async fn subject_for_read(
+    pub async fn subject_for_read(
         &self,
         principal_id: &str,
         space_id: &str,
@@ -1471,10 +1467,7 @@ impl MemoryStore {
     /// (§7.0.7, MEM-R026). The marker is the sum of the visible revisions, which
     /// only grows while the set is unchanged and moves when a space drifts in or
     /// out of visibility.
-    pub(super) async fn visible_spaces(
-        &self,
-        principal_id: &str,
-    ) -> StoreResult<(Vec<SpaceRow>, String)> {
+    pub async fn visible_spaces(&self, principal_id: &str) -> StoreResult<(Vec<SpaceRow>, String)> {
         // A workspace no writer ever provisioned carries no provider space
         // (fix round 2, finding F2): an empty listing, not a driver error. The
         // check re-probes while the cache says absent, so a later writer
@@ -1508,7 +1501,7 @@ impl MemoryStore {
 
     /// §7.3/§7.4 freeze-state change. `frozen`/`active` no-ops succeed without
     /// bumping the revision (§7.0.4).
-    pub(super) async fn set_space_status(
+    pub async fn set_space_status(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -1553,7 +1546,7 @@ impl MemoryStore {
     /// §7.5 get-or-create. `kind` is creation-only metadata: an existing subject
     /// is returned unchanged whatever kind the caller now names. A fenced or
     /// archived subject rejects the write in the same transaction (§7.5/§7.7).
-    pub(super) async fn ensure_subject(
+    pub async fn ensure_subject(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -1614,7 +1607,7 @@ impl MemoryStore {
     /// "already in the requested state" arms are no-ops that keep the revision
     /// (§7.0.4), and `unfence` of a non-fenced target is
     /// `INVALID_STATUS_TRANSITION` as §7.7 names explicitly.
-    pub(super) async fn fence_subject(
+    pub async fn fence_subject(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -1686,7 +1679,7 @@ impl MemoryStore {
     /// `principal_id` filter. Returns the page, its marker, the principal
     /// filter actually applied — admin sees the requested filter, everyone else
     /// sees their own grants — and whether more rows follow it.
-    pub(super) async fn grants_page_for(
+    pub async fn grants_page_for(
         &self,
         principal_id: &str,
         space_id: &str,
@@ -1705,7 +1698,7 @@ impl MemoryStore {
             principal_id,
             space_id,
             now,
-            &super::admin_requirement(subject_id),
+            &crate::admin_requirement(subject_id),
         );
         if !admin && principal_filter.is_some() {
             return Err(StoreError::NotAuthorized(
@@ -1761,7 +1754,7 @@ impl MemoryStore {
     /// §7.9 issuance. Current-coverage authorization, the dedup probe, the
     /// non-amplification check, the subject lifecycle gate and the insert are one
     /// transaction (§7.3/§11), in that order.
-    pub(super) async fn insert_grant(
+    pub async fn insert_grant(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -1809,7 +1802,7 @@ impl MemoryStore {
 
     /// §7.10 terminal revoke. A repeated revoke is a no-op success: the grant is
     /// already terminal, and §7.0.4 forbids inventing a revision bump for it.
-    pub(super) async fn revoke_grant(
+    pub async fn revoke_grant(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -2439,7 +2432,7 @@ impl MemoryStore {
     /// The placement a committed promotion left for one record, while the cache
     /// invalidation it owes has not succeeded yet (R4-F3 round 2). `None` when
     /// no promotion of this record is outstanding.
-    pub(super) async fn soul_invalidation_binding(
+    pub async fn soul_invalidation_binding(
         &self,
         space_id: &str,
         record_id: &str,
@@ -2454,7 +2447,7 @@ impl MemoryStore {
 
     /// Clear that row once the invalidation it names ran; a repeated clear (a
     /// retry after a crash between the delete and this clear) is a no-op.
-    pub(super) async fn clear_soul_invalidation(
+    pub async fn clear_soul_invalidation(
         &self,
         space_id: &str,
         record_id: &str,
@@ -2987,7 +2980,7 @@ fn authorize_issuance(
 fn writes_subject_content(op: &str) -> bool {
     matches!(
         op,
-        super::OP_CAPTURE | super::OP_RECORDS_CREATE | super::OP_PROFILE_UPDATE
+        crate::OP_CAPTURE | crate::OP_RECORDS_CREATE | crate::OP_PROFILE_UPDATE
     )
 }
 
@@ -3140,8 +3133,8 @@ fn retention(row: &ReceiptRow, now: DateTime<Utc>) -> StoreResult<Retention> {
         .with_timezone(&Utc);
     let age = now.signed_duration_since(created).num_seconds();
     let receipt_window =
-        i64::try_from(super::policy::RECEIPT_RETENTION_SECONDS).unwrap_or(i64::MAX);
-    let dedup_window = i64::try_from(super::policy::DEDUP_RETENTION_SECONDS).unwrap_or(i64::MAX);
+        i64::try_from(crate::policy::RECEIPT_RETENTION_SECONDS).unwrap_or(i64::MAX);
+    let dedup_window = i64::try_from(crate::policy::DEDUP_RETENTION_SECONDS).unwrap_or(i64::MAX);
     Ok(if age > dedup_window {
         Retention::Expired
     } else if row.status != "pending" && row.result_json.is_none() && row.error_json.is_none() {
@@ -3237,21 +3230,21 @@ async fn retention_sweep(
     )
     .bind(retention_cutoff(
         now,
-        super::policy::RECEIPT_RETENTION_SECONDS,
+        crate::policy::RECEIPT_RETENTION_SECONDS,
     ))
     .execute(&mut **tx)
     .await?;
     sqlx::query("DELETE FROM memory_receipts WHERE created_at < ?")
         .bind(retention_cutoff(
             now,
-            super::policy::DEDUP_RETENTION_SECONDS,
+            crate::policy::DEDUP_RETENTION_SECONDS,
         ))
         .execute(&mut **tx)
         .await?;
     sqlx::query("DELETE FROM memory_journal WHERE state = 'applied' AND created_at < ?")
         .bind(retention_cutoff(
             now,
-            super::policy::JOURNAL_RETENTION_SECONDS,
+            crate::policy::JOURNAL_RETENTION_SECONDS,
         ))
         .execute(&mut **tx)
         .await?;
@@ -3474,18 +3467,18 @@ const PROFILE_COLUMNS: &str = "space_id, subject_id, profile_kind, document_json
 
 /// One placement (§6.6/§6.7 `scope` / `capture_scope`) as the tables store it.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct Placement<'a> {
+pub struct Placement<'a> {
     pub visibility: &'a str,
     pub context_id: Option<&'a str>,
 }
 
 impl Placement<'_> {
-    pub(super) const SHARED: &'static str = "shared";
-    pub(super) const CONTEXT: &'static str = "context";
+    pub const SHARED: &'static str = "shared";
+    pub const CONTEXT: &'static str = "context";
 }
 
 /// The §6.12 read selection, as the read path needs it.
-pub(super) enum Selection {
+pub enum Selection {
     SubjectAll,
     SharedOnly,
     SelectedContexts {
@@ -3534,7 +3527,7 @@ impl Selection {
 /// Which read op is asking for records (§7.20 vs §7.22): the two differ in the
 /// capability they demand and in whether §7.7's archive exclusion applies.
 #[derive(Debug, Clone, Copy)]
-pub(super) enum RecordRead {
+pub enum RecordRead {
     List,
     Recall,
 }
@@ -3654,7 +3647,7 @@ async fn provider_candidate_ids(
 
 /// A pending/consumed review candidate as stored (§6.7).
 #[derive(Clone, Debug, sqlx::FromRow)]
-pub(super) struct CandidateRow {
+pub struct CandidateRow {
     pub candidate_id: String,
     pub space_id: String,
     pub subject_id: String,
@@ -3674,7 +3667,7 @@ pub(super) struct CandidateRow {
 }
 
 impl CandidateRow {
-    pub(super) fn scope(&self) -> Placement<'_> {
+    pub fn scope(&self) -> Placement<'_> {
         Placement {
             visibility: self.capture_visibility.as_str(),
             context_id: self.capture_context_id.as_deref(),
@@ -3715,7 +3708,7 @@ fn candidate_requirement<'a>(
 
 /// A retained record as stored (§6.6).
 #[derive(Clone, Debug, sqlx::FromRow)]
-pub(super) struct RecordRow {
+pub struct RecordRow {
     pub record_id: String,
     pub space_id: String,
     pub subject_id: String,
@@ -3733,14 +3726,14 @@ pub(super) struct RecordRow {
 }
 
 impl RecordRow {
-    pub(super) fn scope(&self) -> Placement<'_> {
+    pub fn scope(&self) -> Placement<'_> {
         Placement {
             visibility: self.scope_visibility.as_str(),
             context_id: self.scope_context_id.as_deref(),
         }
     }
 
-    pub(super) const fn tombstoned(&self) -> bool {
+    pub const fn tombstoned(&self) -> bool {
         self.tombstone_json.is_some()
     }
 
@@ -3758,7 +3751,7 @@ impl RecordRow {
 
 /// A trusted authored subject document as stored (§6.8).
 #[derive(Clone, Debug, sqlx::FromRow)]
-pub(super) struct ProfileRow {
+pub struct ProfileRow {
     pub space_id: String,
     pub subject_id: String,
     pub profile_kind: String,
@@ -3770,7 +3763,7 @@ pub(super) struct ProfileRow {
 }
 
 /// One candidate as `memory.capture` materializes it (§7.11).
-pub(super) struct NewCandidate<'a> {
+pub struct NewCandidate<'a> {
     pub candidate_id: &'a str,
     pub subject_id: &'a str,
     pub placement: Placement<'a>,
@@ -3783,7 +3776,7 @@ pub(super) struct NewCandidate<'a> {
 }
 
 /// The §7.15 review decision, reduced to what the write path needs.
-pub(super) enum ReviewDecision<'a> {
+pub enum ReviewDecision<'a> {
     Promote {
         kind: Option<&'a str>,
         content: Option<&'a Value>,
@@ -4176,7 +4169,7 @@ fn mint_record_id() -> String {
 }
 
 /// Stable candidate identity (§6.7): minted once, never reused.
-pub(super) fn mint_candidate_id() -> String {
+pub fn mint_candidate_id() -> String {
     format!("cnd_{}", Uuid::new_v4().simple())
 }
 
@@ -4215,7 +4208,7 @@ async fn adopt_in_tx(
         }
         let requirements = [row.requirement("capture")];
         let admission = Admission {
-            op: super::OP_LEGACY_ADOPT,
+            op: crate::OP_LEGACY_ADOPT,
             space_id,
             principal_id,
             coverage: Coverage::Requirements(&requirements),
@@ -4284,7 +4277,7 @@ async fn adopt_records_in_tx(
         }
         let requirements = [row.requirement("records_write", false)];
         let admission = Admission {
-            op: super::OP_LEGACY_ADOPT,
+            op: crate::OP_LEGACY_ADOPT,
             space_id,
             principal_id,
             coverage: Coverage::Requirements(&requirements),
@@ -4325,7 +4318,7 @@ async fn adopt_records_in_tx(
 }
 
 /// What one legacy-content migration pass did.
-pub(super) enum MigrationOutcome {
+pub enum MigrationOutcome {
     /// The pass committed its objects, its journal intent and the manifest.
     Migrated(Box<ReceiptRow>),
     /// The space was already migrated and its manifest still matches the source.
@@ -4701,7 +4694,7 @@ const REFLECTION_COLUMNS: &str =
 
 /// One generated reflection envelope as stored (§7.27).
 #[derive(Clone, Debug, sqlx::FromRow)]
-pub(super) struct ReflectionRow {
+pub struct ReflectionRow {
     // The store-assigned insertion order: the read path orders by it (whole-
     // second `created_at` stamps cannot separate same-second envelopes); the
     // wire projection never serves it.
@@ -4807,7 +4800,7 @@ async fn insert_reflection(
 // canonical basis object over the *current* authorized set on every read and
 // compares digests — there are no eager invalidation writes and the stored
 // `stale_cache` is never consulted. The digest composition itself lives on the
-// provider side (`super::reflection_state_digest`/`reflection_source_set_digest`);
+// provider side (`crate::reflection_state_digest`/`reflection_source_set_digest`);
 // this layer owns the authorized sets, the pinned-basis comparisons and the
 // tombstone exclusion (C-077), all inside one read transaction.
 
@@ -4815,14 +4808,14 @@ async fn insert_reflection(
 /// rows only — a tombstoned row leaves the authorized set at read time,
 /// C-077) and the subject's profile revisions. Pairs sorted by id, then
 /// revision.
-pub(super) struct ReflectionBasisSnapshot {
+pub struct ReflectionBasisSnapshot {
     pub records: Vec<(String, i64)>,
     pub profile_revisions: Vec<(String, i64)>,
 }
 
 /// One visible reflection envelope plus the staleness this read recomputed
 /// against its pinned basis (§7.26) — never the stored write-time cache.
-pub(super) struct VisibleReflection {
+pub struct VisibleReflection {
     pub row: ReflectionRow,
     pub stale: bool,
 }
@@ -4934,9 +4927,9 @@ fn pinned_staleness(
     };
     let pinned_source_set = pinned_member("source_set_digest")?;
     let pinned_state = pinned_member("state_digest")?;
-    let state = super::reflection_state_digest(live, profile_revisions, selection, filter)
+    let state = crate::reflection_state_digest(live, profile_revisions, selection, filter)
         .map_err(StoreError::Corrupt)?;
-    let source_live = super::reflection_source_set_digest(live).map_err(StoreError::Corrupt)?;
+    let source_live = crate::reflection_source_set_digest(live).map_err(StoreError::Corrupt)?;
     let mut counting = live.to_vec();
     // Undo the single delete-time revision bump; a tombstoned row has no
     // other revision history after the pin.
@@ -4947,7 +4940,7 @@ fn pinned_staleness(
     );
     counting.sort();
     let source_counting =
-        super::reflection_source_set_digest(&counting).map_err(StoreError::Corrupt)?;
+        crate::reflection_source_set_digest(&counting).map_err(StoreError::Corrupt)?;
     Ok((
         state != pinned_state,
         source_counting == pinned_source_set && source_live != pinned_source_set,
@@ -4975,7 +4968,7 @@ fn reflection_marker(
         .map(|grant| (grant.grant_id.clone(), grant.revision))
         .collect();
     grant_revisions.sort();
-    match super::digest_value(&json!({
+    match crate::digest_value(&json!({
         "records": records,
         "profile_revisions": profile_revisions,
         "reflections": reflections,
@@ -5000,7 +4993,7 @@ impl MemoryStore {
     /// and the pin's basis delta is not tombstoning. The marker binds the
     /// page to the snapshot it was cut from, so any state or grant change
     /// invalidates outstanding cursors.
-    pub(super) async fn reflections(
+    pub async fn reflections(
         &self,
         space_id: &str,
         subject_id: &str,
@@ -5065,7 +5058,7 @@ impl MemoryStore {
     /// [`Self::reflections`]' visibility narrowing for the same
     /// selection/filter, without the cursor marker the state op never
     /// publishes.
-    pub(super) async fn reflection_state_snapshot(
+    pub async fn reflection_state_snapshot(
         &self,
         space_id: &str,
         subject_id: &str,
@@ -5173,10 +5166,10 @@ async fn visible_reflections_in_tx(
     let mut probes: ReflectionProbeMap = HashMap::new();
     // The request filter matches a pinned filter as a set — the same
     // canonicalization the digest key renders — never by raw array order.
-    let request_filter_set = request_filter.map(super::canonical_ids);
+    let request_filter_set = request_filter.map(crate::canonical_ids);
     let mut visible = Vec::with_capacity(rows.len());
     for row in rows {
-        let pinned = super::pinned_selection(&row.selection_json).map_err(StoreError::Corrupt)?;
+        let pinned = crate::pinned_selection(&row.selection_json).map_err(StoreError::Corrupt)?;
         let filter = pinned_filter(row.filter_json.as_ref())?;
         let (live, tombstones) = {
             let key = (
@@ -5201,7 +5194,7 @@ async fn visible_reflections_in_tx(
         )?;
         if excluded
             || request_filter_set.as_ref().is_some_and(|requested| {
-                Some(requested) != filter.as_deref().map(super::canonical_ids).as_ref()
+                Some(requested) != filter.as_deref().map(crate::canonical_ids).as_ref()
             })
             || !covered(
                 grants,
@@ -5210,7 +5203,7 @@ async fn visible_reflections_in_tx(
                 now,
                 &pinned.base_requirement("reflect", subject_id),
             )
-            || !super::selection_scope_covers(&pinned, request_selection)
+            || !crate::selection_scope_covers(&pinned, request_selection)
         {
             continue;
         }
@@ -5243,7 +5236,7 @@ impl MemoryStore {
     /// envelope identity. A racing generation resolves through the dedup
     /// namespace, never through the content.
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn generate_reflection(
+    pub async fn generate_reflection(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -5279,7 +5272,7 @@ impl MemoryStore {
         // publishes, so a matching token proves the caller read this basis.
         let snapshot =
             reflection_basis_in_tx(&mut tx, selection, filter, ctx.space_id, subject_id).await?;
-        let current_digest = super::reflection_state_digest(
+        let current_digest = crate::reflection_state_digest(
             &snapshot.records,
             &snapshot.profile_revisions,
             selection,
@@ -5295,14 +5288,14 @@ impl MemoryStore {
         // `state` op reports: the missing kinds are the ones
         // `missing_required_profile_kinds` names, and the verdict is exactly
         // `data_sufficiency`'s.
-        let missing: Vec<String> = super::profile_projection(&snapshot.profile_revisions).1;
+        let missing: Vec<String> = crate::profile_projection(&snapshot.profile_revisions).1;
         if !missing.is_empty() {
             return Err(StoreError::ProfileIncomplete {
                 subject_id: subject_id.to_string(),
                 missing,
             });
         }
-        if super::data_sufficiency(snapshot.records.len()) == "insufficient" {
+        if crate::data_sufficiency(snapshot.records.len()) == "insufficient" {
             return Err(StoreError::InsufficientData {
                 subject_id: subject_id.to_string(),
             });
@@ -5359,7 +5352,7 @@ impl MemoryStore {
                 filter_json,
                 cognition_filter_json: None,
                 basis_json: &generation.basis_json,
-                engine_policy_version: super::policy::ENGINE_POLICY_VERSION,
+                engine_policy_version: crate::policy::ENGINE_POLICY_VERSION,
                 model: None,
                 schema_version: 1,
                 revision: 1,
@@ -5494,7 +5487,7 @@ impl MemoryStore {
              AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
         )
         .bind(space_id)
-        .bind(super::OP_REFLECTIONS_GENERATE)
+        .bind(crate::OP_REFLECTIONS_GENERATE)
         .bind(RECEIPT_PENDING)
         .bind(&now)
         .fetch_all(&mut *tx)
@@ -5570,7 +5563,7 @@ fn compose_generation(
     subject_id: &str,
 ) -> StoreResult<ComposedGeneration> {
     let source_set_digest =
-        super::reflection_source_set_digest(&snapshot.records).map_err(StoreError::Corrupt)?;
+        crate::reflection_source_set_digest(&snapshot.records).map_err(StoreError::Corrupt)?;
     let profile_revisions: Map<String, Value> = snapshot
         .profile_revisions
         .iter()
@@ -5581,7 +5574,7 @@ fn compose_generation(
         .iter()
         .map(|(kind, _)| kind.as_str())
         .collect();
-    let state_digest = super::reflection_state_digest(
+    let state_digest = crate::reflection_state_digest(
         &snapshot.records,
         &snapshot.profile_revisions,
         selection,
@@ -5608,7 +5601,7 @@ fn compose_generation(
          - engine_policy_version: `{}`\n",
         snapshot.records.len(),
         kinds.join(", "),
-        super::policy::ENGINE_POLICY_VERSION,
+        crate::policy::ENGINE_POLICY_VERSION,
     );
     let result = json!({
         "reflection_id": format!("refl_{}", Uuid::new_v4().simple()),
@@ -5673,7 +5666,7 @@ impl MemoryStore {
     /// probe decides which per-bearer authority section a candidate mutation
     /// must take (NXM-5 Task 2 fix round 3, finding F1), so it runs before the
     /// mutation and reads only.
-    pub(super) async fn candidate_subject(
+    pub async fn candidate_subject(
         &self,
         space_id: &str,
         candidate_id: &str,
@@ -5706,7 +5699,7 @@ impl MemoryStore {
     ///
     /// A projected legacy id is still `None`: the bridge authorizes those inside
     /// the adoption, from the row it projects.
-    pub(super) async fn reviewable_candidate_subject(
+    pub async fn reviewable_candidate_subject(
         &self,
         space_id: &str,
         candidate_id: &str,
@@ -5727,7 +5720,7 @@ impl MemoryStore {
             return Ok(None);
         }
         let admission = Admission {
-            op: super::OP_CANDIDATES_DISMISS,
+            op: crate::OP_CANDIDATES_DISMISS,
             space_id,
             principal_id,
             coverage: Coverage::Candidate {
@@ -5759,7 +5752,7 @@ impl MemoryStore {
     /// count, dismissal and review paths afterwards (fix round 1, Greptile
     /// `legacy.rs:318`). Adoption is the projection's own insert, so the row the
     /// pass later compares is byte-identical to the source.
-    pub(super) async fn adopt_legacy_candidates(
+    pub async fn adopt_legacy_candidates(
         &self,
         space_id: &str,
         principal_id: &str,
@@ -5806,13 +5799,13 @@ impl MemoryStore {
     /// attempt, so the projection is adopted under the same id and the
     /// re-delivery writes nothing of its own — migration's same-candidate
     /// check then sees one version, never two.
-    pub(super) async fn capture(
+    pub async fn capture(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
         candidates: &[NewCandidate<'_>],
         keep_existing: bool,
-        binding: Option<&super::CaptureBinding<'_>>,
+        binding: Option<&crate::CaptureBinding<'_>>,
     ) -> Result<ReceiptRow, CaptureError> {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
@@ -5908,7 +5901,7 @@ impl MemoryStore {
     /// page's ids then fetch their bodies, so rows past the page do not cross
     /// the read (S-10).
     #[allow(clippy::too_many_lines)]
-    pub(super) async fn candidates(
+    pub async fn candidates(
         &self,
         space_id: &str,
         subject_id: &str,
@@ -6104,7 +6097,7 @@ impl MemoryStore {
 
     /// §7.13: by-id read under current authorization (§7.17-style; an
     /// unauthorized candidate is reported as absent).
-    pub(super) async fn candidate_for_read(
+    pub async fn candidate_for_read(
         &self,
         space_id: &str,
         candidate_id: &str,
@@ -6150,7 +6143,7 @@ impl MemoryStore {
     }
 
     /// §7.14: dismissal consumes the candidate without producing records.
-    pub(super) async fn dismiss_candidate(
+    pub async fn dismiss_candidate(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -6179,7 +6172,7 @@ impl MemoryStore {
     /// fix round 1, finding F4). `expected_revision` is `None` because the E4
     /// dismissal has no caller-supplied CAS: the revision read inside the
     /// transaction is the one consumed.
-    pub(super) async fn dismiss_legacy_candidate(
+    pub async fn dismiss_legacy_candidate(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -6244,7 +6237,7 @@ impl MemoryStore {
             })
             .collect();
         let projected_admission = Admission {
-            op: super::OP_LEGACY_ADOPT,
+            op: crate::OP_LEGACY_ADOPT,
             space_id: ctx.space_id,
             principal_id: admission.principal_id,
             coverage: Coverage::Requirements(&requirements),
@@ -6353,7 +6346,7 @@ impl MemoryStore {
     /// §7.15: consumption + scrub + every record insert + receipt, one
     /// transaction (MEM-R009). Placement is inherited from the candidate and can
     /// never be chosen by the decision.
-    pub(super) async fn review_candidate(
+    pub async fn review_candidate(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -6376,7 +6369,7 @@ impl MemoryStore {
     /// its deterministic external id **inside this review's guarded
     /// transaction** — the review half of the one mutation-time adoption path
     /// (NXM-5 D13). A row the provider already owns is consumed as it is.
-    pub(super) async fn review_legacy_candidate(
+    pub async fn review_legacy_candidate(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -6405,7 +6398,7 @@ impl MemoryStore {
     /// (MEM-R006).
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_lines)]
-    pub(super) async fn records(
+    pub async fn records(
         &self,
         space_id: &str,
         subject_id: &str,
@@ -6611,7 +6604,7 @@ impl MemoryStore {
 
     /// §7.17: by-id read; a tombstoned record is admin-only and an unauthorized
     /// record reads as absent.
-    pub(super) async fn record_for_read(
+    pub async fn record_for_read(
         &self,
         space_id: &str,
         record_id: &str,
@@ -6673,7 +6666,7 @@ impl MemoryStore {
 
     /// §7.16 direct authored write.
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn create_record(
+    pub async fn create_record(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -6727,7 +6720,7 @@ impl MemoryStore {
     }
 
     /// §7.18: kind/content edit under CAS. Placement is not editable here.
-    pub(super) async fn update_record(
+    pub async fn update_record(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -6748,7 +6741,7 @@ impl MemoryStore {
     }
 
     /// §7.19/MEM-R014: content removed, tombstone retained, receipts untouched.
-    pub(super) async fn delete_record(
+    pub async fn delete_record(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -6779,7 +6772,7 @@ impl MemoryStore {
     /// row; the legacy surface is never written (§D6). A record the provider
     /// already owns is mutated as it is.
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn update_legacy_record(
+    pub async fn update_legacy_record(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -6802,7 +6795,7 @@ impl MemoryStore {
 
     /// [`Self::update_legacy_record`] for a tombstone (§7.19/MEM-R014).
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn delete_legacy_record(
+    pub async fn delete_legacy_record(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -6873,7 +6866,7 @@ impl MemoryStore {
             })
             .collect();
         let projected_admission = Admission {
-            op: super::OP_LEGACY_ADOPT,
+            op: crate::OP_LEGACY_ADOPT,
             space_id: ctx.space_id,
             principal_id: admission.principal_id,
             coverage: Coverage::Requirements(&requirements),
@@ -7053,7 +7046,7 @@ impl MemoryStore {
     /// one path: the wire op passes `None` and promotes a record the provider
     /// already owns.
     #[allow(clippy::too_many_lines)] // resolution, adoption, admission and the CAS are one write
-    pub(super) async fn promote_record(
+    pub async fn promote_record(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -7096,7 +7089,7 @@ impl MemoryStore {
             })
             .collect();
         let projected_admission = Admission {
-            op: super::OP_LEGACY_ADOPT,
+            op: crate::OP_LEGACY_ADOPT,
             space_id: ctx.space_id,
             principal_id: admission.principal_id,
             coverage: Coverage::Requirements(&requirements),
@@ -7263,7 +7256,7 @@ impl MemoryStore {
     /// instead of writing, but only after it has settled any intent the
     /// marker's pass left unsettled: a marker whose projection is still owed is
     /// not "complete" (P5-F2).
-    pub(super) async fn migrate_legacy(
+    pub async fn migrate_legacy(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -7368,7 +7361,7 @@ impl MemoryStore {
 
     /// §7.23 profile read: every present profile, or the requested kinds that
     /// are present. Absence is honest-empty, never an error.
-    pub(super) async fn profiles(
+    pub async fn profiles(
         &self,
         space_id: &str,
         subject_id: &str,
@@ -7431,7 +7424,7 @@ impl MemoryStore {
 
     /// §7.24 create-or-update under CAS; `expected == None` is create-only.
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn upsert_profile(
+    pub async fn upsert_profile(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
@@ -7654,7 +7647,7 @@ fn grant_capabilities(grant: &MemoryGrant) -> &[String] {
 
 /// §6.7: 64-hex SHA-256 over the JCS-canonical candidate content, computed
 /// before the body is scrubbed.
-pub(super) fn content_digest(candidate: &CandidateRow) -> StoreResult<String> {
+pub fn content_digest(candidate: &CandidateRow) -> StoreResult<String> {
     let raw = candidate
         .content_json
         .as_deref()

@@ -125,28 +125,28 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::storage::{CandidateRow, ProfileRow, RecordRow, StoreError, StoreResult};
+use crate::storage::{CandidateRow, ProfileRow, RecordRow, StoreError, StoreResult};
 
 /// The provider's file root inside the workspace directory, next to `state.db`.
-pub(super) const FILES_DIR: &str = "memory-store";
+pub const FILES_DIR: &str = "memory-store";
 
 /// How many unsettled intents one recovery pass settles. Recovery runs at open
 /// and must never page an unbounded journal; a pass that leaves work behind
 /// marks it [`STATE_DEFERRED`], which reads answer terminally until a later
 /// pass reaches it.
-pub(super) const RECOVERY_BOUND: i64 = 64;
+pub const RECOVERY_BOUND: i64 = 64;
 
-pub(super) const STATE_PENDING: &str = "pending";
-pub(super) const STATE_APPLIED: &str = "applied";
-pub(super) const STATE_QUARANTINED: &str = "quarantined";
+pub const STATE_PENDING: &str = "pending";
+pub const STATE_APPLIED: &str = "applied";
+pub const STATE_QUARANTINED: &str = "quarantined";
 /// Left over by a bounded pass: still recoverable, but no longer silently
 /// withheld — the subject's reads answer the terminal refusal (§5.2 step 5).
-pub(super) const STATE_DEFERRED: &str = "deferred";
+pub const STATE_DEFERRED: &str = "deferred";
 
 /// The workspace publication lock file, at the root of the provider's own file
 /// tree. Hidden, never removed: unlinking it would let the next holder lock a
 /// different inode while an earlier one still holds the old.
-pub(super) const PUBLISH_LOCK_FILE: &str = ".memory-publish.lock";
+pub const PUBLISH_LOCK_FILE: &str = ".memory-publish.lock";
 
 /// The cross-process half of the publish lock (§5.2 step 2): an exclusive
 /// `flock` on [`PUBLISH_LOCK_FILE`], held for the whole settle → publish section
@@ -165,7 +165,7 @@ pub(super) const PUBLISH_LOCK_FILE: &str = ".memory-publish.lock";
 ///
 /// Held for the section by whichever blocking task is running it
 /// ([`Self::section`]), released by closing the file, never by unlinking it.
-pub(super) struct PublishFlock {
+pub struct PublishFlock {
     _file: std::fs::File,
 }
 
@@ -189,11 +189,7 @@ impl PublishFlock {
     /// # Errors
     /// The I/O error that prevented opening the lock file or taking the lease.
     /// The gate is released on that path too: the wait is over.
-    pub(super) async fn acquire<H, W>(
-        root: &Path,
-        held: H,
-        report_wait: W,
-    ) -> std::io::Result<(Self, H)>
+    pub async fn acquire<H, W>(root: &Path, held: H, report_wait: W) -> std::io::Result<(Self, H)>
     where
         H: Send + 'static,
         W: FnOnce() + Send + 'static,
@@ -222,7 +218,7 @@ impl PublishFlock {
     /// caller drops the task handle, never the lease: the section still runs its
     /// ordered operations to completion and releases the lock itself, which is
     /// what keeps a committed effect from outliving its own lock.
-    pub(super) async fn section<T, F>(self, work: F) -> (Self, T)
+    pub async fn section<T, F>(self, work: F) -> (Self, T)
     where
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
@@ -241,7 +237,7 @@ impl PublishFlock {
 /// The same shape is stored in the journal and replayed by recovery, so an
 /// intent and its effect cannot drift.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(super) struct FileEffect {
+pub struct FileEffect {
     pub path: String,
     pub digest: String,
     /// The provider's own previous projection of this target, or `None` when
@@ -255,14 +251,14 @@ pub(super) struct FileEffect {
 
 impl FileEffect {
     /// Declare the projection this effect replaces.
-    pub(super) fn over(mut self, prior: Option<String>) -> Self {
+    pub fn over(mut self, prior: Option<String>) -> Self {
         self.prior = prior;
         self
     }
 }
 
 /// What recovery did with one target.
-pub(super) enum Settled {
+pub enum Settled {
     Published,
     Quarantined(String),
 }
@@ -329,24 +325,24 @@ fn optional(label: &str, value: Option<&str>) -> String {
 
 /// §6.6 record projection target. The one source of "which file this row owns":
 /// the journal writes it and an operation's predecessor check asks for it.
-pub(super) fn record_target(record_id: &str) -> String {
+pub fn record_target(record_id: &str) -> String {
     format!("records/{record_id}.md")
 }
 
 /// §6.7 consumed-candidate shell target.
-pub(super) fn candidate_target(candidate_id: &str) -> String {
+pub fn candidate_target(candidate_id: &str) -> String {
     format!("candidates/{candidate_id}.md")
 }
 
 /// §6.8 profile target. The file name is the digest of the subject/kind pair, so
 /// open-vocabulary ids never become path components.
-pub(super) fn profile_target(subject_id: &str, profile_kind: &str) -> StoreResult<String> {
+pub fn profile_target(subject_id: &str, profile_kind: &str) -> StoreResult<String> {
     let name = digest_of(&format!("{subject_id}\u{1f}{profile_kind}"))?;
     Ok(format!("profiles/{name}.md"))
 }
 
 /// §6.6 record projection: the stored row as markdown.
-pub(super) fn record_effect(row: &RecordRow) -> StoreResult<FileEffect> {
+pub fn record_effect(row: &RecordRow) -> StoreResult<FileEffect> {
     let out = format!(
         "---\n\
          record_id: {}\n\
@@ -383,7 +379,7 @@ pub(super) fn record_effect(row: &RecordRow) -> StoreResult<FileEffect> {
 }
 
 /// §6.7 consumed-candidate shell projection: the content-free audit shell.
-pub(super) fn candidate_effect(row: &CandidateRow) -> StoreResult<FileEffect> {
+pub fn candidate_effect(row: &CandidateRow) -> StoreResult<FileEffect> {
     let out = format!(
         "---\n\
          candidate_id: {}\n\
@@ -411,7 +407,7 @@ pub(super) fn candidate_effect(row: &CandidateRow) -> StoreResult<FileEffect> {
 
 /// §6.8 profile projection. The file name is the digest of the subject/kind
 /// pair, so open-vocabulary ids never become path components.
-pub(super) fn profile_effect(row: &ProfileRow) -> StoreResult<FileEffect> {
+pub fn profile_effect(row: &ProfileRow) -> StoreResult<FileEffect> {
     let target = profile_target(&row.subject_id, &row.profile_kind)?;
     let out = format!(
         "---\n\
@@ -542,7 +538,7 @@ fn obsolete(bytes: &[u8], effect: &FileEffect) -> bool {
 ///
 /// Synchronous by design: the caller runs it as part of a
 /// [`PublishFlock::section`], which owns the lease for the whole call.
-pub(super) fn stage(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::Result<()> {
+pub fn stage(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::Result<()> {
     write_staged(root, receipt_id, effect).map(|_| ())
 }
 
@@ -551,7 +547,7 @@ pub(super) fn stage(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::
 ///
 /// Synchronous by design: the caller runs it as part of a
 /// [`PublishFlock::section`], which owns the lease for the whole call.
-pub(super) fn publish(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::Result<()> {
+pub fn publish(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::Result<()> {
     let Some(target) = resolve(root, effect) else {
         return Err(std::io::Error::other("unsafe journal target"));
     };
@@ -752,7 +748,7 @@ fn restore(scratch: &Path, target: &Path) -> std::io::Result<()> {
 ///
 /// Synchronous by design: the caller runs it as part of a
 /// [`PublishFlock::section`], which owns the lease for the whole call.
-pub(super) fn settle(root: &Path, receipt_id: &str, effect: &FileEffect) -> Settled {
+pub fn settle(root: &Path, receipt_id: &str, effect: &FileEffect) -> Settled {
     settle_verifying(root, receipt_id, effect, &noop)
 }
 

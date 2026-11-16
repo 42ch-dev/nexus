@@ -121,7 +121,7 @@ async fn pending_candidates(core: &CoreService) -> Vec<Value> {
                 &spoke_principal(),
                 dto(json!({
                     "space_id": provider.space_id(),
-                    "subject_id": nexus_core::memory_provider::legacy::creator_subject_id(CREATOR),
+                    "subject_id": nexus_memory_provider::legacy::creator_subject_id(CREATOR),
                     "status": "pending",
                 })),
             )
