@@ -1,0 +1,157 @@
+{
+  "assets": [
+    {
+      "content_hash": "0bd483ae00c431c02ac4a540303d3c388b5e1303480f9b4107803f72b6c6d145",
+      "id": "prompts/gather-exit.md",
+      "kind": "template",
+      "path": "prompts/gather-exit.md"
+    },
+    {
+      "content_hash": "fc6d866446e6978d877af0f3ae279846d83395435295602cce3f28e275e9ef33",
+      "id": "prompts/gather-findings.md",
+      "kind": "template",
+      "path": "prompts/gather-findings.md"
+    },
+    {
+      "content_hash": "b67969fa3e28e8413c70441aec39afffdd57b7f02dc1cd3c6ccf62de283c816e",
+      "id": "prompts/synthesize-ctx-update.md",
+      "kind": "template",
+      "path": "prompts/synthesize-ctx-update.md"
+    },
+    {
+      "content_hash": "b59060c26f6cf7a7f03962e8b4e0be2cede74784d3297edea85e6fd7e943f3d0",
+      "id": "prompts/synthesize-exit.md",
+      "kind": "template",
+      "path": "prompts/synthesize-exit.md"
+    },
+    {
+      "content_hash": "727251573fc70a21e2ce176650a166564fc5fbb946821f07a1293c4b006461d8",
+      "id": "prompts/synthesize-ideas.md",
+      "kind": "template",
+      "path": "prompts/synthesize-ideas.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "gather",
+      "id": "gather->synthesize",
+      "kind": "default",
+      "to": "synthesize"
+    },
+    {
+      "from": "synthesize",
+      "id": "synthesize->done",
+      "kind": "default",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "gather",
+  "id": "novel-brainstorm",
+  "ir_version": 0,
+  "meta": {
+    "description": "Consume open findings and generate ideation prompts for novel writing; no direct text write",
+    "gates": [
+      {
+        "field": "work_profile",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "novel"
+      },
+      {
+        "field": "work_ref",
+        "kind": "work_field",
+        "op": "required"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt",
+      "judge.llm"
+    ],
+    "run_intents": [
+      "work_continue"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/gather-findings.md",
+            "vars": {
+              "open_findings": "{{preset.input.open_findings}}",
+              "topic": "{{preset.input.topic}}",
+              "work_id": "{{preset.input.work_id}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT1H",
+        "template": "prompts/gather-exit.md"
+      },
+      "id": "gather",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Ingest open findings and identify thematic gaps / creative opportunities"
+      }
+    },
+    {
+      "context_update": {
+        "body": "",
+        "op": "append",
+        "template": "prompts/synthesize-ctx-update.md"
+      },
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/synthesize-ideas.md",
+            "vars": {
+              "topic": "{{preset.input.topic}}",
+              "work_id": "{{preset.input.work_id}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "template": "prompts/synthesize-exit.md"
+      },
+      "id": "synthesize",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Produce structured ideation prompts and cluster proposals from gathered findings"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}

@@ -248,7 +248,15 @@ assert_empty nexus-core "--no-default-features" nexus-wasm-host
 assert_empty nexus-core "--no-default-features" nexus-agent-host
 assert_empty nexus-core "--no-default-features" nexus-acp-host
 assert_empty nexus-core "--no-default-features" nexus-orchestration
+# v1.245: the run engine is an OPTIONAL edge enabled only by core's `execution`
+# feature. This pin is what makes "absent from the default dependency graph"
+# checkable instead of resting on the `optional = true` declaration alone.
+assert_empty nexus-core "--no-default-features" nexus-execution
 assert_exactly_one nexus-core "--no-default-features" spoke-operations
+# The forward half of the same edge: with `execution` on, core resolves the
+# extracted engine exactly once (no version split between the worked edge and
+# the dev-time self-reference).
+assert_exactly_one nexus-core "--features execution" nexus-execution
 
 # --- core MCP/peer library + Connect-host product cohort --------------------
 # v1.196 P1-T1: the cohort's public peer API (peer-tool types, capability and
@@ -292,6 +300,28 @@ assert_features nexus-core "--no-default-features --features embedded-mcp" nexus
 # this pin means the direction reversed.
 assert_empty nexus-connect "--no-default-features" nexus-core
 assert_empty nexus-connect "--no-default-features" nexus-orchestration
+
+# --- nexus-execution default graph -----------------------------------------
+# v1.245: the extracted run engine must not depend back on the crate that
+# composes it. `--no-default-features` is the whole-crate fan-in proof: the
+# unfeatured graph names no core, so an edge reaching this pin means the
+# extraction direction reversed.
+assert_empty nexus-execution "--no-default-features" nexus-core
+
+# --- nexus-memory-provider default graph -----------------------------------
+# v1.245: the extracted in-process memory provider must not depend back on the
+# crate that opens it, nor on the orchestration layer. The edge runs
+# `nexus-core → nexus-memory-provider` only.
+#
+# The forward half is the opposite shape from `nexus-execution`'s: the provider
+# is NOT optional (`service.rs` pins it on every core open, and `lib.rs`
+# declared the module ungated before the move), so "absent from core's default
+# graph" is false by construction here. What this pin asserts instead is that
+# the default graph resolves it exactly once — no version split between the
+# worked edge and the dev-time self-reference.
+assert_empty nexus-memory-provider "--no-default-features" nexus-core
+assert_empty nexus-memory-provider "--no-default-features" nexus-orchestration
+assert_exactly_one nexus-core "--no-default-features" nexus-memory-provider
 
 # --- native/TS host (nexus-core-node) ---------------------------------------
 

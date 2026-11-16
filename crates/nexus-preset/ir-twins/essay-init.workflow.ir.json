@@ -1,0 +1,286 @@
+{
+  "assets": [
+    {
+      "content_hash": "1b68e52dd50fa8e001a0296888c6d33361e5603e5f4a5001778765048db3f0ff",
+      "id": "prompts/collect-audience.md",
+      "kind": "template",
+      "path": "prompts/collect-audience.md"
+    },
+    {
+      "content_hash": "51731d39be33488583aa49b07ee76d3a66b43d6ea65041d748b8138834375878",
+      "id": "prompts/collect-structure.md",
+      "kind": "template",
+      "path": "prompts/collect-structure.md"
+    },
+    {
+      "content_hash": "55f41a1a8c540bd80a72be726620a88a0853befa38113fce8c0c95d92ae37a42",
+      "id": "prompts/collect-thesis.md",
+      "kind": "template",
+      "path": "prompts/collect-thesis.md"
+    },
+    {
+      "content_hash": "05ba2927f310456e0a591c307628ebddbb27fc2f39e303ef8d78d8c216c3daef",
+      "id": "prompts/collect-title.md",
+      "kind": "template",
+      "path": "prompts/collect-title.md"
+    },
+    {
+      "content_hash": "f4cd1b407e515aecddb28cf759abc2013e8a02cb02cee4508195f3efbd9727b4",
+      "id": "prompts/collect-work-ref.md",
+      "kind": "template",
+      "path": "prompts/collect-work-ref.md"
+    },
+    {
+      "content_hash": "ca6f1881f6872add864f1014419eded87c6631d178534f312095c54c8efe2d68",
+      "id": "prompts/collect-world.md",
+      "kind": "template",
+      "path": "prompts/collect-world.md"
+    },
+    {
+      "content_hash": "61aba56a4009835adcf8061a99f5ad3b97e6a156d90c4f99d6880e7491c9907c",
+      "id": "prompts/intake.md",
+      "kind": "template",
+      "path": "prompts/intake.md"
+    },
+    {
+      "content_hash": "f2437ae79c9d1c7657947c0f9b4ac5b7bac8be94fd1cd108a98923d8999755ea",
+      "id": "prompts/summary.md",
+      "kind": "template",
+      "path": "prompts/summary.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "init_intro",
+      "id": "init_intro->collecting_details",
+      "kind": "linear",
+      "to": "collecting_details"
+    },
+    {
+      "from": "collecting_details",
+      "id": "collecting_details->summarizing",
+      "kind": "linear",
+      "to": "summarizing"
+    },
+    {
+      "from": "summarizing",
+      "id": "summarizing->committing",
+      "kind": "linear",
+      "to": "committing"
+    },
+    {
+      "from": "committing",
+      "id": "committing->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "init_intro",
+  "id": "essay-init",
+  "ir_version": 0,
+  "meta": {
+    "description": "Interactive grill-me: bootstrap an essay Work with outline and draft templates",
+    "gates": [
+      {
+        "field": "work_profile",
+        "kind": "work_field",
+        "op": "in",
+        "value": [
+          null,
+          "essay"
+        ]
+      },
+      {
+        "field": "workspace_slug",
+        "kind": "work_field",
+        "op": "required"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt",
+      "essay.project_scaffold"
+    ],
+    "run_intents": [
+      "work_init"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "intro_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "init_intro",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Greet the creator and ask for an essay working title"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "details_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "collecting_details",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Multi-turn ACP conversation to collect thesis, audience, structure, work_ref, and optional World binding"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "summary_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "summarizing",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Recap collected information and confirm before committing"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "creator_id": "{{preset.input.creator_id}}",
+            "title": "{{preset.input.title}}",
+            "work_id": "{{preset.input.work_id}}",
+            "work_ref": "{{preset.input.work_ref}}",
+            "world_id": "{{preset.input.world_id}}"
+          },
+          "kind": "capability",
+          "name": "essay.project_scaffold"
+        }
+      ],
+      "exit_when": {
+        "kind": "rule"
+      },
+      "id": "committing",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Invoke essay.project_scaffold to materialize the Work scaffold"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    },
+    {
+      "effect_class": "external",
+      "id": "details_graph/collect_title",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "prompts/collect-title.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "details_graph/collect_title"
+      ],
+      "effect_class": "external",
+      "id": "details_graph/collect_thesis",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "prompts/collect-thesis.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "details_graph/collect_thesis"
+      ],
+      "effect_class": "external",
+      "id": "details_graph/collect_audience",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "prompts/collect-audience.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "details_graph/collect_audience"
+      ],
+      "effect_class": "external",
+      "id": "details_graph/collect_structure",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "prompts/collect-structure.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "details_graph/collect_structure"
+      ],
+      "effect_class": "external",
+      "id": "details_graph/collect_work_ref",
+      "kind": "inner_step",
+      "step_kind": "acp_prompt",
+      "template": "prompts/collect-work-ref.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "details_graph/collect_work_ref"
+      ],
+      "effect_class": "external",
+      "id": "details_graph/collect_world",
+      "kind": "inner_step",
+      "output_binding": "collect_world.text",
+      "step_kind": "acp_prompt",
+      "template": "prompts/collect-world.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "effect_class": "external",
+      "id": "intro_graph/ask_working_title",
+      "kind": "inner_step",
+      "output_binding": "ask_working_title.text",
+      "step_kind": "acp_prompt",
+      "template": "prompts/intake.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "effect_class": "external",
+      "id": "summary_graph/confirm_summary",
+      "kind": "inner_step",
+      "output_binding": "confirm_summary.text",
+      "step_kind": "acp_prompt",
+      "template": "prompts/summary.md",
+      "tool_policy": "auto_grant_read_only"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}

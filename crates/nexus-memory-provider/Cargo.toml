@@ -1,0 +1,42 @@
+[package]
+name = "nexus-memory-provider"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The in-process spoke_operations::MemoryPort provider (v1.245 extraction)"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+# The crash-window / commit-boundary seams the provider's own proofs drive.
+# Compiled out of a production build; `nexus-core`'s `test-hooks` forwards here
+# because its integration targets arm them on a pinned provider.
+test-hooks = []
+
+[dependencies]
+nexus-creator-memory = { path = "../nexus-creator-memory" }
+nexus-home-layout = { path = "../nexus-home-layout" }
+nexus-local-db = { path = "../nexus-local-db" }
+# The protocol's own validators, digest helpers, grant evaluation and wire
+# types: the provider implements the upstream `MemoryPort` boundary and
+# re-implements no protocol rule.
+spoke-operations.workspace = true
+async-trait = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+# The in-file proofs build temporary workspace homes and file roots.
+tempfile = { workspace = true }

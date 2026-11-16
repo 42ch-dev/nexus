@@ -1,0 +1,4724 @@
+//! The in-process `spoke_operations::MemoryPort` provider (v1.245 extraction).
+//!
+//! `LocalMemoryProvider` is the single `MemoryPort` boundary over the
+//! workspace's existing local storage (v1.227 NXM-1); it owns admission (freeze
+//! allowlist, grant coverage, revision CAS, idempotent replay) and delegates the
+//! protocol-free parts to:
+//!
+//! * [`storage`] — the provider-private transaction layer inside the core writer
+//!   guard (never a second storage protocol),
+//! * [`policy`] — the Nexus-owned declared surface (limits, policy version,
+//!   required profile kinds),
+//! * `spoke_operations` — the protocol's own validators, digest helpers and grant
+//!   evaluation, so no protocol rule is re-implemented here.
+//!
+//! What this crate deliberately does NOT own: the core error taxonomy its
+//! refusals project onto. [`ProviderError`] is the crate's public error, and the
+//! projection onto that taxonomy lives in `nexus-core` as a `From<ProviderError>`
+//! impl on the core error type, so nothing here names a core type.
+//! The workspace binding, the service handle, the transports and the daemon stay
+//! where they were.
+//!
+//! Dependency direction: `nexus-core → nexus-memory-provider`, never back.
+//!
+//! **Error shape.** Refusals travel the port's own `SpokeResult::Reject` channel,
+//! never the success channel: the memory error codes are ops-layer reject codes
+//! (§14.1, `spoke_operations::SpokeRejectCode`), and an unserved op is
+//! `CAPABILITY_PORT_MISSING` — the code upstream's own responder answers an
+//! unimplemented port op with, and serializes as-is
+//! (`responder.rs:367-371`, `responder.rs:1506-1522`). The lowercase
+//! `op_unsupported` string exists only on the *inbound* side, where
+//! `map_error_envelope` folds a peer's dispatch-deny into
+//! `CAPABILITY_PORT_MISSING` + `details.wire_code` (`remote_adapter.rs:296-299`),
+//! so minting it here would name a code no reject can serialize.
+//! Every reject carries `details.retry_class` (§14.2);
+//! `OUTCOME_UNCERTAIN` is the only `uncertain` class, and `INTERNAL_ERROR` is
+//! `retryable` only because it is raised strictly before the effect commits.
+//!
+//! **Served surface.** `memory.describe`, `memory.spaces.*`,
+//! `memory.subjects.*`, `memory.grants.*`, `memory.capture`,
+//! `memory.candidates.*`, `memory.records.*`, `memory.recall`,
+//! `memory.profile.*` and `memory.receipts.get` (§7.28) are served. The
+//! sub-capability gated families (reflection, transfer) are rejected as not
+//! served.
+
+mod journal;
+/// The single provider-seam legacy projection/read bridge (NXM-5 Task 1).
+pub mod legacy;
+pub mod policy;
+pub mod profile;
+mod storage;
+
+use std::collections::BTreeMap;
+use std::num::NonZeroU64;
+use std::path::PathBuf;
+
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use serde_json::{json, Map, Value};
+use spoke_operations::spoke_schemas as schemas;
+use spoke_operations::{
+    grant_covers, jcs_sha256_hex, validate_memory_candidates_list,
+    validate_memory_candidates_review, validate_memory_capture, validate_memory_grants_grant,
+    validate_memory_grants_list, validate_memory_recall, validate_memory_records_create,
+    validate_memory_records_list, validate_memory_records_update,
+    validate_memory_reflections_generate, validate_memory_reflections_list,
+    validate_memory_reflections_state, validate_memory_spaces_list, validate_memory_subjects_fence,
+    GrantRequirement, IssuedGrant, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult,
+};
+
+use nexus_local_db::LocalDbError;
+use storage::{
+    Admission, CandidateRow, CaptureError, Coverage, Fence, FenceAction, FenceTarget, GrantRow,
+    MemoryStore, MigrationOutcome, NewCandidate, NewGrant, OpContext, Placement, ProfileRow,
+    ReceiptRow, RecordRead, RecordRow, ReflectionRow, ReviewDecision, Selection, SpaceRow,
+    StoreError, SubjectRow, RECEIPT_FAILED, RECEIPT_PENDING,
+};
+
+/// The Character binding a binding-local capture stands on (compass D15).
+///
+/// The capture hands it to the provider's own write transaction, which re-reads
+/// the binding rows on that connection before inserting the candidate, so the
+/// check and the write are never separated by a `remove_binding`.
+#[derive(Debug, Clone, Copy)]
+pub struct CaptureBinding<'a> {
+    pub owner_creator: &'a str,
+    pub character: &'a str,
+    pub binding: &'a str,
+}
+
+/// The single space this provider provisions (§7.0.6). Clients discover it via
+/// `memory.describe`/`memory.spaces.list`; it is never a payload default.
+pub const DEFAULT_SPACE_ID: &str = "spc_local_default";
+
+/// `authority_host_id` of the single authoritative provider (MEM-R001). It is an
+/// opaque host label, not a transport address.
+pub const LOCAL_AUTHORITY_HOST_ID: &str = "nexus-local";
+
+const DEFAULT_SPACE_DISPLAY_NAME: &str = "Local memory";
+
+const OP_FREEZE_SPACE: &str = "memory.spaces.freeze";
+const OP_UNFREEZE_SPACE: &str = "memory.spaces.unfreeze";
+const OP_ENSURE_SUBJECT: &str = "memory.subjects.ensure";
+const OP_FENCE_SUBJECT: &str = "memory.subjects.fence";
+const OP_GRANT: &str = "memory.grants.grant";
+const OP_REVOKE_GRANT: &str = "memory.grants.revoke";
+const OP_CAPTURE: &str = "memory.capture";
+const OP_CANDIDATES_LIST: &str = "memory.candidates.list";
+const OP_CANDIDATES_DISMISS: &str = "memory.candidates.dismiss";
+const OP_CANDIDATES_REVIEW: &str = "memory.candidates.review";
+const OP_RECORDS_CREATE: &str = "memory.records.create";
+const OP_RECORDS_UPDATE: &str = "memory.records.update";
+const OP_RECORDS_DELETE: &str = "memory.records.delete";
+const OP_RECORDS_LIST: &str = "memory.records.list";
+const OP_RECORDS_PROMOTE: &str = "memory.records.promote";
+const OP_RECALL: &str = "memory.recall";
+const OP_PROFILE_UPDATE: &str = "memory.profile.update";
+/// The §7.25–§7.27 reflection family (N4-R). Served under the
+/// `spoke-memory-reflection` sub-capability; Task 2 wires their admission.
+const OP_REFLECTIONS_STATE: &str = "memory.reflections.state";
+const OP_REFLECTIONS_LIST: &str = "memory.reflections.list";
+const OP_REFLECTIONS_GENERATE: &str = "memory.reflections.generate";
+/// NXM-5 Task 2's internal op: adopting a legacy-derived object into provider
+/// storage. It is never a wire op — it is the receipt identity of the
+/// just-in-time adoption a dismissal performs **inside the transaction that
+/// consumes the row** (NXM-5 Task 2 fix round 3, finding F1), so a retried
+/// dismissal replays instead of duplicating and no adopted row is left pending.
+const OP_LEGACY_ADOPT: &str = "memory.legacy.adopt";
+
+/// P5's one-shot legacy-content migration. Like [`OP_LEGACY_ADOPT`] it is never
+/// a wire op: it is the operator-invoked pass's receipt identity, so the
+/// migration commits a journal intent and a receipt through the same protocol
+/// every other guarded write uses.
+const OP_LEGACY_MIGRATE: &str = "memory.legacy.migrate";
+
+/// Time order for a merged read.
+///
+/// A provider row renders whole seconds, while a projected legacy row keeps the
+/// precision its legacy column carried, so the two renderings are not
+/// comparable as text (NXM-5 QC1-F1).
+///
+/// Both sides order through [`legacy::parse_timestamp`] — the parser the legacy
+/// projection itself uses, which accepts RFC 3339 and the SQLite/bare-`T`
+/// forms — so a queue mixing those formats still shares one instant order. Any
+/// value it cannot parse is a separate class after every parsed instant,
+/// ordered by its raw text; the class assignment never depends on the pair
+/// being compared, which is what makes this comparator transitive and gives
+/// `sort_by` the total order it requires (NXM-5 QC1-F1 fix round 2).
+#[must_use]
+pub fn created_at_cmp(left: &str, right: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (
+        legacy::parse_timestamp(left),
+        legacy::parse_timestamp(right),
+    ) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => left.cmp(right),
+    }
+}
+
+/// §7.3/§7.4: the two space lifecycle transitions, each naming its op string and
+/// the state it writes.
+#[derive(Clone, Copy)]
+enum SpaceTransition {
+    Freeze,
+    Unfreeze,
+}
+
+impl SpaceTransition {
+    const fn op(self) -> &'static str {
+        match self {
+            Self::Freeze => OP_FREEZE_SPACE,
+            Self::Unfreeze => OP_UNFREEZE_SPACE,
+        }
+    }
+
+    const fn status(self) -> &'static str {
+        match self {
+            Self::Freeze => "frozen",
+            Self::Unfreeze => "active",
+        }
+    }
+}
+
+/// Why an op was refused, in protocol vocabulary (§14.1).
+///
+/// Every variant maps onto a wire `code` plus its §14.2 retry class, so the
+/// mapping lives in one place and cannot drift between ops.
+///
+/// This is the crate's public error: the entry points that are not wire ops
+/// ([`LocalMemoryProvider::open`] and its siblings, the migration pass, the
+/// review-disposition section) return it, and `nexus-core` projects it onto its
+/// own taxonomy through a `From<ProviderError>` impl. It is deliberately
+/// narrower than that taxonomy.
+#[derive(Debug)]
+pub enum ProviderError {
+    NotFound(String),
+    NotAuthorized(String),
+    SpaceFrozen(String),
+    SubjectFenced {
+        subject_id: String,
+        status: String,
+        context_id: Option<String>,
+    },
+    RevisionConflict {
+        current: i64,
+    },
+    /// §7.25 state CAS (reflection generate): the recomputed basis digest no
+    /// longer matches `expected_state_digest`. Terminal; the recovery is
+    /// re-reading `memory.reflections.state` and retrying with the fresh
+    /// token, which `details.current_state_digest` names.
+    StateConflict {
+        current: String,
+    },
+    /// §7.27 data-sufficiency policy (C-079): the authorized basis cannot
+    /// support generation. Terminal; the recovery is authoring or capturing
+    /// source content, never a retry of the same request.
+    InsufficientData(String),
+    IdempotencyConflict,
+    /// §6.10/MEM-R021: the receipt body is past `receipt_retention_seconds`; the
+    /// op is never re-executed and only the tombstone's last known status is
+    /// disclosed (§7.28).
+    ReceiptExpired {
+        last_known_status: String,
+    },
+    CandidateConsumed(String),
+    /// §4.2/MEM-R005: an admission-relevant consumer is missing a required
+    /// authored content kind — fail closed, never an empty success.
+    ProfileIncomplete {
+        subject_id: String,
+        missing: Vec<String>,
+    },
+    InvalidInput {
+        field: String,
+        reason: String,
+        /// Structured protocol keys the published validator attached (e.g.
+        /// `limit`); `None` when this refusal comes from the provider itself.
+        details: Option<Map<String, Value>>,
+    },
+    StatusTransition(String),
+    CursorInvalid,
+    /// The effect may have committed (§14.2/§14.3): never reported as a clean
+    /// no-effect failure.
+    OutcomeUncertain(String),
+    /// §5.2/D-10: the subject's journaled file intent is quarantined, so its
+    /// objects are withheld until an operator resolves it. Terminal: retrying
+    /// cannot help.
+    Unreconciled {
+        subject_id: String,
+    },
+    /// §5.2 step 3/MEM-R010: this receipt records a quarantine — the intent
+    /// committed but its file effect could not be published. Terminal on the
+    /// replay channel; the recorded envelope is served by
+    /// `memory.receipts.get`, and recovery re-drives the intent once the target
+    /// is resolved.
+    ReceiptFailed {
+        receipt_id: String,
+        message: String,
+    },
+    /// §5.2 step 2: an earlier intent for this operation's file target is still
+    /// unsettled. Raised before the operation commits, so retrying after the
+    /// journal recovery settles that predecessor is the supported path.
+    UnsettledPredecessor {
+        receipt_id: String,
+        state: String,
+    },
+    /// The provider was opened read-only: a mutation is refused before
+    /// admission, retention, the publication lock or any connection write
+    /// (fix round 2, finding F3).
+    ReadOnly(String),
+    Internal(String),
+}
+
+impl ProviderError {
+    /// The published validator's refusal, keeping its structured `details`.
+    ///
+    /// §7.0.7 requires an exceeded limit to name itself in `details.limit`;
+    /// rebuilding the envelope from `message` alone dropped that key. The
+    /// provider's own `field` stays authoritative and nothing is invented: a
+    /// validator that attaches no `limit` (e.g. a selection-shape refusal)
+    /// carries no limiter key either.
+    fn from_reject(reject: SpokeReject, field: &str) -> Self {
+        Self::InvalidInput {
+            field: field.to_owned(),
+            reason: reject.message,
+            details: reject.details,
+        }
+    }
+
+    /// The request member a published reflection validator refused: the
+    /// validator's own machine-readable `field` (e.g. `selection.context_ids`,
+    /// `filter.source_context_ids`, `limit`), cut to the top-level request
+    /// member a client repairs — the shape the `"limit"` exemplars publish, so
+    /// `details.field` and `details.limit` agree. A validator that attaches no
+    /// field keeps `"selection"`: every reflection validator refusal names
+    /// selection scope today.
+    fn validator_field(reject: &SpokeReject) -> String {
+        reject
+            .details
+            .as_ref()
+            .and_then(|details| details["field"].as_str())
+            .map_or_else(
+                || "selection".to_owned(),
+                |field| field.split('.').next().unwrap_or(field).to_owned(),
+            )
+    }
+
+    /// [`Self::from_reject`] over the field the validator actually named —
+    /// the reflection entry points' mapping (inspector round 2, may-fix).
+    fn from_validator(reject: SpokeReject) -> Self {
+        let field = Self::validator_field(&reject);
+        Self::from_reject(reject, &field)
+    }
+
+    const fn reject_code(&self) -> SpokeRejectCode {
+        match self {
+            Self::NotFound(_) => SpokeRejectCode::NotFound,
+            Self::NotAuthorized(_) | Self::ReadOnly(_) => SpokeRejectCode::NotAuthorized,
+            Self::SpaceFrozen(_) => SpokeRejectCode::SpaceFrozen,
+            Self::SubjectFenced { .. } => SpokeRejectCode::SubjectFenced,
+            Self::RevisionConflict { .. } | Self::StateConflict { .. } => {
+                SpokeRejectCode::RevisionConflict
+            }
+            Self::InsufficientData(_) => SpokeRejectCode::InsufficientData,
+            Self::IdempotencyConflict => SpokeRejectCode::IdempotencyConflict,
+            Self::ReceiptExpired { .. } => SpokeRejectCode::ReceiptExpired,
+            Self::CandidateConsumed(_) => SpokeRejectCode::CandidateConsumed,
+            Self::ProfileIncomplete { .. } => SpokeRejectCode::ProfileIncomplete,
+            Self::InvalidInput { .. } => SpokeRejectCode::InvalidInput,
+            Self::StatusTransition(_) => SpokeRejectCode::InvalidStatusTransition,
+            Self::CursorInvalid => SpokeRejectCode::CursorInvalid,
+            Self::OutcomeUncertain(_) => SpokeRejectCode::OutcomeUncertain,
+            Self::Unreconciled { .. }
+            | Self::ReceiptFailed { .. }
+            | Self::UnsettledPredecessor { .. }
+            | Self::Internal(_) => SpokeRejectCode::InternalError,
+        }
+    }
+
+    /// §14.2 retry class. `INTERNAL_ERROR` is retryable only because this
+    /// provider raises it strictly before the effect commits — which is exactly
+    /// the shape of an unsettled predecessor; an uncertain outcome is its own
+    /// class, and a quarantined intent stops being retryable once its receipt
+    /// recorded the failure (the journal re-drives it without the caller).
+    const fn retry_class(&self) -> &'static str {
+        match self {
+            Self::Internal(_) | Self::UnsettledPredecessor { .. } => "retryable",
+            Self::OutcomeUncertain(_) => "uncertain",
+            _ => "terminal",
+        }
+    }
+
+    /// The human-readable rendering a projection onto another error taxonomy
+    /// carries as its reason.
+    #[must_use]
+    pub fn message(&self) -> String {
+        match self {
+            Self::NotFound(target) => format!("{target} not found"),
+            Self::ProfileIncomplete {
+                subject_id,
+                missing,
+            } => format!(
+                "subject {subject_id} has not authored the required profile kinds ({}); author them with memory.profile.update",
+                missing.join(", ")
+            ),
+            Self::NotAuthorized(reason)
+            | Self::ReadOnly(reason)
+            | Self::SpaceFrozen(reason)
+            | Self::StatusTransition(reason)
+            | Self::CandidateConsumed(reason)
+            | Self::OutcomeUncertain(reason)
+            | Self::ReceiptFailed {
+                message: reason, ..
+            }
+            | Self::Internal(reason) => reason.clone(),
+            Self::UnsettledPredecessor { receipt_id, state } => format!(
+                "an earlier memory journal intent for this operation's file target is unsettled \
+                 (receipt {receipt_id}, state {state}); the journal recovery settles it, so repeat \
+                 this operation once that intent is resolved"
+            ),
+            Self::Unreconciled { subject_id } => format!(
+                "subject {subject_id} has an unresolved memory journal intent (quarantined); its objects are withheld from reads until that journal entry is settled"
+            ),
+            Self::SubjectFenced {
+                subject_id,
+                status,
+                context_id,
+            } => context_id.as_deref().map_or_else(
+                || format!("subject {subject_id} is {status}; its writes are rejected"),
+                |context_id| format!(
+                    "subject {subject_id} has context {context_id} fenced; writes placing content there are rejected"
+                ),
+            ),
+            Self::RevisionConflict { current } => format!(
+                "expected_revision does not match the stored revision ({current}); re-read and retry"
+            ),
+            Self::StateConflict { current } => format!(
+                "expected_state_digest does not match the current basis digest ({current}); \
+                 re-read memory.reflections.state and retry with the fresh digest"
+            ),
+            Self::InsufficientData(subject_id) => format!(
+                "the authorized basis of subject {subject_id} is insufficient for reflection \
+                 generation; capture or restore source records and retry"
+            ),
+            Self::IdempotencyConflict => {
+                "this idempotency key was already used with a different payload".to_string()
+            }
+            Self::ReceiptExpired { last_known_status } => format!(
+                "this receipt's body was evicted after its retention window and is no longer served; the recorded outcome was {last_known_status}, and the operation is not re-executed — the idempotency_key stays bound to that outcome until its dedup retention window ends, so repeating that key cannot reach a new effect; use a new idempotency_key to perform a new operation"
+            ),
+            Self::InvalidInput { field, reason, .. } => format!("{field}: {reason}"),
+            Self::CursorInvalid => {
+                "the pagination cursor is no longer valid (state or grant change); restart the listing"
+                    .to_string()
+            }
+        }
+    }
+
+    fn details(&self) -> Map<String, Value> {
+        let mut details = Map::new();
+        details.insert(
+            "retry_class".to_string(),
+            Value::String(self.retry_class().to_string()),
+        );
+        match self {
+            Self::InvalidInput {
+                field,
+                details: carried,
+                ..
+            } => {
+                if let Some(carried) = carried {
+                    for (key, value) in carried {
+                        if key != "retry_class" && key != "field" {
+                            details.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+                details.insert("field".to_string(), json!(field));
+            }
+            Self::RevisionConflict { current } => {
+                details.insert("current_revision".to_string(), json!(current));
+            }
+            Self::StateConflict { current } => {
+                details.insert("current_state_digest".to_string(), json!(current));
+            }
+            Self::ReceiptExpired { last_known_status } => {
+                details.insert("last_known_status".to_string(), json!(last_known_status));
+            }
+            Self::ProfileIncomplete { missing, .. } => {
+                details.insert("missing".to_string(), json!(missing));
+            }
+            Self::SubjectFenced {
+                subject_id,
+                status,
+                context_id,
+            } => {
+                details.insert("subject_id".to_string(), json!(subject_id));
+                details.insert("status".to_string(), json!(status));
+                details.insert(
+                    "scope".to_string(),
+                    json!(if context_id.is_some() {
+                        "context"
+                    } else {
+                        "subject"
+                    }),
+                );
+                if let Some(context_id) = context_id {
+                    details.insert("context_id".to_string(), json!(context_id));
+                }
+            }
+            Self::Unreconciled { subject_id } => {
+                details.insert("subject_id".to_string(), json!(subject_id));
+            }
+            Self::ReceiptFailed { receipt_id, .. } => {
+                details.insert("receipt_id".to_string(), json!(receipt_id));
+            }
+            Self::UnsettledPredecessor { receipt_id, state } => {
+                details.insert("receipt_id".to_string(), json!(receipt_id));
+                details.insert("state".to_string(), json!(state));
+            }
+            _ => {}
+        }
+        details
+    }
+}
+
+fn store_error(error: StoreError) -> ProviderError {
+    match error {
+        StoreError::NotFound(target) => ProviderError::NotFound(target),
+        StoreError::InvalidInput { field, reason } => ProviderError::InvalidInput {
+            field,
+            reason,
+            details: None,
+        },
+        StoreError::NotAuthorized(reason) => ProviderError::NotAuthorized(reason),
+        StoreError::SpaceFrozen(reason) => ProviderError::SpaceFrozen(reason),
+        StoreError::SubjectFenced {
+            subject_id,
+            status,
+            context_id,
+        } => ProviderError::SubjectFenced {
+            subject_id,
+            status,
+            context_id,
+        },
+        StoreError::RevisionConflict { current } => ProviderError::RevisionConflict { current },
+        StoreError::StateConflict { current } => ProviderError::StateConflict { current },
+        StoreError::GenerationLeaseLost { receipt_id } => ProviderError::OutcomeUncertain(format!(
+            "the pending receipt {receipt_id} was settled by another owner before this \
+                 terminal commit; the envelope was not published — resolve with the same \
+                 idempotency key or memory.receipts.get"
+        )),
+        StoreError::ProfileIncomplete {
+            subject_id,
+            missing,
+        } => ProviderError::ProfileIncomplete {
+            subject_id,
+            missing,
+        },
+        StoreError::InsufficientData { subject_id } => ProviderError::InsufficientData(format!(
+            "the authorized basis of subject {subject_id} is insufficient for reflection \
+             generation; capture or restore source records and retry"
+        )),
+        StoreError::IdempotencyConflict => ProviderError::IdempotencyConflict,
+        StoreError::ReceiptExpired { last_known_status } => {
+            ProviderError::ReceiptExpired { last_known_status }
+        }
+        StoreError::CandidateConsumed(reason) => ProviderError::CandidateConsumed(reason),
+        StoreError::StatusTransition(reason) => ProviderError::StatusTransition(reason),
+        StoreError::CommitUnknown(reason) => ProviderError::OutcomeUncertain(reason),
+        StoreError::Unreconciled { subject_id } => ProviderError::Unreconciled { subject_id },
+        StoreError::UnsettledPredecessor { receipt_id, state } => {
+            ProviderError::UnsettledPredecessor { receipt_id, state }
+        }
+        StoreError::Corrupt(reason) => ProviderError::Internal(reason),
+        StoreError::ReadOnly(reason) => ProviderError::ReadOnly(reason),
+        StoreError::Database(error) => ProviderError::Internal(error.to_string()),
+    }
+}
+
+/// A refusal is a reject, never a success value (§14.1).
+fn deny<T>(error: &ProviderError) -> SpokeResult<T> {
+    spoke_operations::spoke_reject(error.reject_code(), error.message(), Some(error.details()))
+}
+
+/// The sub-capability gated families: the dispatch-level denial shape for a
+/// family this provider instance does not serve — transfer always, reflection
+/// only in the deliberately-unadvertised shape (§4.1). A reject can only carry a
+/// [`SpokeRejectCode`], and the port
+/// vocabulary has no `op_unsupported` variant — upstream's responder answers an
+/// unimplemented port op with `CapabilityPortMissing` (`responder.rs:367-371`)
+/// and serializes `reject.code.as_str()` verbatim (`responder.rs:1506-1522`), so
+/// `CAPABILITY_PORT_MISSING` is the code the wire carries. The lowercase
+/// `op_unsupported` marker belongs to the receiving side of a dispatch deny
+/// (`remote_adapter.rs:296-299`); a provider that minted it would describe a
+/// code no reject can serialize.
+fn unsupported<T>(op: &str) -> SpokeResult<T> {
+    let mut details = Map::new();
+    details.insert(
+        "retry_class".to_string(),
+        Value::String("terminal".to_string()),
+    );
+    details.insert("op".to_string(), json!(op));
+    spoke_operations::spoke_reject(
+        SpokeRejectCode::CapabilityPortMissing,
+        format!("{op} is not served by this provider build"),
+        Some(details),
+    )
+}
+
+fn respond<T: DeserializeOwned>(body: Value) -> SpokeResult<T> {
+    match serde_json::from_value(body) {
+        Ok(response) => spoke_operations::spoke_ok(response),
+        Err(error) => deny(&ProviderError::Internal(format!(
+            "memory response projection: {error}"
+        ))),
+    }
+}
+
+/// Project a receipt that is already committed. A failure here is *after* the
+/// effect, so it is `OUTCOME_UNCERTAIN`, never a retryable `INTERNAL_ERROR`
+/// (§14.2/§14.3).
+fn settle_receipt<T: DeserializeOwned>(receipt: &ReceiptRow) -> SpokeResult<T> {
+    if let Some(error) = pending_receipt(receipt) {
+        return deny(&error);
+    }
+    if let Some(error) = failed_receipt(receipt) {
+        return deny(&error);
+    }
+    match receipt_body(receipt) {
+        Ok(body) => match serde_json::from_value(body) {
+            Ok(response) => spoke_operations::spoke_ok(response),
+            Err(error) => deny(&ProviderError::OutcomeUncertain(format!(
+                "memory response projection after commit: {error}"
+            ))),
+        },
+        Err(error) => deny(&ProviderError::OutcomeUncertain(error.message())),
+    }
+}
+
+/// §5.2 step 3: a receipt the journal settled as `failed` records a committed
+/// intent whose file effect could not be published. Repeating the key cannot
+/// settle it, so until the intent is re-driven both the replay channel and
+/// `memory.receipts.get` answer with the recorded failure. That answer is not
+/// permanent: once its target is resolved, the journal re-drives the intent
+/// without the caller and a successful re-drive replaces the `failed` receipt
+/// with a `committed` one carrying the published outcome, so the same key and
+/// the same receipt id then settle normally.
+fn failed_receipt(receipt: &ReceiptRow) -> Option<ProviderError> {
+    (receipt.status == RECEIPT_FAILED).then(|| {
+        let recorded = receipt_failure(receipt).ok().and_then(|envelope| {
+            envelope
+                .get("message")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+        ProviderError::ReceiptFailed {
+            receipt_id: receipt.receipt_id.clone(),
+            message: recorded.unwrap_or_else(|| {
+                format!(
+                    "receipt {} is failed: its committed file effect is quarantined",
+                    receipt.receipt_id
+                )
+            }),
+        }
+    })
+}
+
+/// The failure envelope a `failed` receipt recorded at quarantine time.
+fn receipt_failure(receipt: &ReceiptRow) -> Result<Value, ProviderError> {
+    let raw = receipt.error_json.as_deref().ok_or_else(|| {
+        ProviderError::Internal(format!(
+            "failed receipt {} carries no failure envelope",
+            receipt.receipt_id
+        ))
+    })?;
+    serde_json::from_str(raw)
+        .map_err(|e| ProviderError::Internal(format!("receipt failure envelope: {e}")))
+}
+
+/// §5.2 step 2: a journaled op's receipt is durable at the point of no return
+/// but terminal only once its file effect is consistent. Until then both the
+/// replay and `memory.receipts.get` answer the pending state as `uncertain`, so
+/// no caller is told an unsettled outcome is final.
+fn pending_receipt(receipt: &ReceiptRow) -> Option<ProviderError> {
+    (receipt.status == RECEIPT_PENDING).then(|| {
+        ProviderError::OutcomeUncertain(format!(
+            "receipt {} is committed but its journaled file effect is not published yet, so the \
+             outcome is not settled: repeat the same idempotency_key or read \
+             memory.receipts.get once the journal has been recovered",
+            receipt.receipt_id
+        ))
+    })
+}
+
+/// The §7.0.3 pending receipt body for the async reflection generate op: no
+/// result, no terminal stamp, no error — the poll answer while generation is
+/// still running. Journaled pending states never take this shape (their
+/// pending means an unpublished file effect, and they answer the uncertain
+/// error instead).
+fn pending_receipt_body(receipt: &ReceiptRow) -> Result<Value, ProviderError> {
+    let mut body = receipt_body(receipt)?;
+    let object = body
+        .as_object_mut()
+        .expect("a receipt projection is always a JSON object");
+    object.remove("result");
+    object.remove("completed_at");
+    Ok(body)
+}
+
+/// The generate flow's receipt projection (§7.0.3): a committed receipt
+/// settles as the response; a failed one replays its recorded failure — the
+/// only class a generation failure records is retryable `INTERNAL_ERROR` —
+/// and a still-pending one (observable only under the park hook) answers
+/// uncertain until its terminal outcome commits.
+fn settle_generation_receipt<T: DeserializeOwned>(receipt: &ReceiptRow) -> SpokeResult<T> {
+    match receipt.status.as_str() {
+        "committed" => settle_receipt(receipt),
+        RECEIPT_FAILED => {
+            let recorded = receipt_failure(receipt).ok().and_then(|envelope| {
+                envelope
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            });
+            deny(&ProviderError::Internal(recorded.unwrap_or_else(|| {
+                format!(
+                    "receipt {} is failed: reflection generation recorded no outcome; nothing \
+                     was charged, and a new idempotency_key starts a fresh generation",
+                    receipt.receipt_id
+                )
+            })))
+        }
+        _ => deny(&ProviderError::OutcomeUncertain(format!(
+            "receipt {} is pending: reflection generation has not settled yet, so the outcome \
+             is not final — repeat the same idempotency_key or read memory.receipts.get",
+            receipt.receipt_id
+        ))),
+    }
+}
+
+/// §6.1 `payload_digest`, bound to the operation as the plan's memory identity
+/// requires: SHA-256 over the JCS canonicalization of `{"op", "payload"}`.
+fn payload_digest<T: Serialize>(op: &str, request: &T) -> Result<String, ProviderError> {
+    let payload = serde_json::to_value(request)
+        .map_err(|e| ProviderError::Internal(format!("payload encode: {e}")))?;
+    match jcs_sha256_hex(&json!({ "op": op, "payload": payload })) {
+        SpokeResult::Ok(digest) => Ok(digest),
+        SpokeResult::Reject(reject) => Err(ProviderError::from_reject(reject, "payload")),
+    }
+}
+
+/// §7.1 `memory.describe`'s response, shared with nothing: it is the provider's
+/// declaration of its own surface. `reflections` is the instance's own switch,
+/// so the advertisement names `spoke-memory-reflection` exactly when the three
+/// reflection ops are served.
+fn describe_body(reflections: bool) -> Value {
+    let capabilities: &[&str] = if reflections {
+        &policy::CAPABILITIES
+    } else {
+        &policy::CAPABILITIES_WITHOUT_REFLECTION
+    };
+    json!({
+        "memory_protocol_version": policy::MEMORY_PROTOCOL_VERSION,
+        "capabilities": capabilities,
+        "limits": policy::limits(),
+        "required_profile_kinds": policy::REQUIRED_PROFILE_KINDS,
+        "engine_policy_version": policy::ENGINE_POLICY_VERSION,
+    })
+}
+
+/// §6.2 space projection.
+fn space_body(space: &SpaceRow) -> Value {
+    json!({
+        "schema_version": 1,
+        "space_id": space.space_id,
+        "display_name": space.display_name,
+        "authority_host_id": space.authority_host_id,
+        "authority_generation": space.authority_generation,
+        "status": space.status,
+        "pending_receipts": space.pending_receipts,
+        "created_at": space.created_at,
+        "revision": space.revision,
+        "extensions": {},
+    })
+}
+
+/// §6.3 subject projection.
+fn subject_body(subject: &SubjectRow) -> Result<Value, ProviderError> {
+    let kind = match (&subject.kind_ns, &subject.kind_id) {
+        (Some(ns), Some(id)) => json!({ "ns": ns, "id": id }),
+        _ => Value::Null,
+    };
+    Ok(json!({
+        "schema_version": 1,
+        "space_id": subject.space_id,
+        "subject_id": subject.subject_id,
+        "kind": kind,
+        "status": subject.status,
+        "fenced_contexts": subject.fenced_contexts().map_err(store_error)?,
+        "created_at": subject.created_at,
+        "revision": subject.revision,
+        "extensions": {},
+    }))
+}
+
+/// §6.5 grant projection. `context_ids` is present only on the restricted shape,
+/// which is what the generated `MemoryGrant` oneOf distinguishes.
+fn grant_body(grant: &GrantRow) -> Result<Value, ProviderError> {
+    let capabilities = grant.capabilities().map_err(store_error)?;
+    let context_ids = grant.context_ids().map_err(store_error)?;
+    let mut body = json!({
+        "schema_version": 1,
+        "grant_id": grant.grant_id,
+        "space_id": grant.space_id,
+        "subject_id": grant.subject_id,
+        "principal_id": grant.principal_id,
+        "capabilities": capabilities,
+        "created_at": grant.created_at,
+        "expires_at": grant.expires_at,
+        "revoked_at": grant.revoked_at,
+        "revision": grant.revision,
+        "extensions": {},
+    });
+    if !context_ids.is_empty() {
+        let map = body.as_object_mut().expect("grant projection is an object");
+        map.insert("context_ids".to_string(), json!(context_ids));
+        map.insert("shared_access".to_string(), json!(grant.shared_access != 0));
+    }
+    Ok(body)
+}
+
+fn grant_wire(grant: &GrantRow) -> Result<schemas::MemoryGrant, ProviderError> {
+    serde_json::from_value(grant_body(grant)?)
+        .map_err(|e| ProviderError::Internal(format!("grant projection: {e}")))
+}
+
+/// §6.5 coverage one reflection op needs for the §6.12 selection it names
+/// (§7.25–§7.27, N4-R): the `reflect` capability over that selection —
+/// unrestricted coverage for `subject_all` (C-075), every listed context, and
+/// shared access when shared rows are in scope. A `list` without a selection
+/// is a subject-wide read: it demands the same unrestricted coverage a
+/// `subject_all` selection does, matching the fixture's
+/// `ReflectionTarget::from_list(None)` (greptile P1#2 — fail closed, so a
+/// scoped grant can never list the whole subject by omitting the selection).
+fn reflect_requirement<'a>(
+    selection: Option<&'a Selection>,
+    subject_id: &'a str,
+) -> GrantRequirement<'a> {
+    let (context_ids, reads_shared, subject_all) = match selection {
+        Some(Selection::SubjectAll) => (Vec::new(), false, true),
+        Some(Selection::SharedOnly) => (Vec::new(), true, false),
+        Some(Selection::SelectedContexts {
+            context_ids,
+            include_shared,
+        }) => (context_ids.clone(), *include_shared, false),
+        None => (Vec::new(), true, true),
+    };
+    GrantRequirement {
+        capability: "reflect",
+        subject_id: Some(subject_id),
+        context_ids,
+        reads_shared,
+        subject_all,
+    }
+}
+
+/// §7.25 state digest shape: 64 lowercase hex, the exact form the `state` op
+/// publishes as its CAS token (locked D9 — the provider never widens the
+/// accepted token grammar).
+fn is_state_digest(token: &str) -> bool {
+    token.len() == 64
+        && token
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Locked D9: the provider serves no cognition family, so a present
+/// `cognition_filter` is refused outright on every reflection op — an honest
+/// refusal, never a silent widening of the selection.
+fn cognition_refusal(present: bool) -> Option<ProviderError> {
+    present.then(|| ProviderError::InvalidInput {
+        field: "cognition_filter".to_string(),
+        reason: "cognition_filter is not served by this provider; the selection is never widened \
+                 to cover it"
+            .to_string(),
+        details: None,
+    })
+}
+
+// ── Reflection read-time basis mechanism (§7.25–§7.27, N4-R) ────────────
+//
+// Staleness is computed, never stored (C-042/MEM-R013): every read recomposes
+// the canonical basis object over the *current* authorized set and compares
+// 64-hex digests. No eager invalidation writes exist — a basis-affecting
+// change (record create/update/delete/promote, profile update, any
+// authorization change altering the authorized set) is observed at the next
+// read, which is the whole mechanism. The storage layer owns the authorized
+// sets and runs the same compositions inside its read transaction.
+
+/// 64-hex over a canonical basis object. The error is the reject's message
+/// text: the composition runs on both sides of the module boundary (storage
+/// reads and this facade), and each wraps it in its own error type.
+fn digest_value(value: &Value) -> Result<String, String> {
+    match jcs_sha256_hex(value) {
+        SpokeResult::Ok(digest) => Ok(digest),
+        SpokeResult::Reject(reject) => Err(reject.message),
+    }
+}
+
+/// §7.27 `source_set_digest`: 64-hex over the authorized source record id +
+/// revision set — sorted `[record_id, revision]` pairs, the caller's contract.
+fn reflection_source_set_digest(records: &[(String, i64)]) -> Result<String, String> {
+    digest_value(&json!({ "records": records }))
+}
+
+/// §7.25 `state_digest`: the provider-composed canonical object of the
+/// current authorized basis — sorted record pairs, profile revisions, the
+/// selection/filter resolution, and the engine policy version. It is the
+/// shape both the `state` op publishes as its CAS token and a pinned basis
+/// carries, so the §7.26 staleness comparison is one recomputation.
+fn reflection_state_digest(
+    records: &[(String, i64)],
+    profile_revisions: &[(String, i64)],
+    selection: &Selection,
+    filter: Option<&[String]>,
+) -> Result<String, String> {
+    digest_value(&json!({
+        "engine_policy_version": policy::ENGINE_POLICY_VERSION,
+        "filter": filter_key(filter),
+        "profile_revisions": profile_revisions,
+        "records": records,
+        "selection": selection_key(selection),
+    }))
+}
+
+/// A pinned selection column parsed back into the §6.12 read selection. The
+/// column is verbatim wire JSON; anything else is a broken projection.
+fn pinned_selection(raw: &str) -> Result<Selection, String> {
+    let value = json_member(raw, "pinned selection").map_err(|error| error.message())?;
+    match value.get("mode").and_then(Value::as_str) {
+        Some("subject_all") => Ok(Selection::SubjectAll),
+        Some("shared_only") => Ok(Selection::SharedOnly),
+        Some("selected_contexts") => Ok(Selection::SelectedContexts {
+            context_ids: value
+                .get("context_ids")
+                .and_then(Value::as_array)
+                .map_or_default(|ids| {
+                    ids.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                }),
+            include_shared: value
+                .get("include_shared")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        _ => Err(format!("pinned selection: unknown selection mode in {raw}")),
+    }
+}
+
+/// Whether a request's selection scope covers a reflection pinned to
+/// `pinned` (§7.26: a present request selection restricts the listing to the
+/// reflections it covers; an absent one names no restriction beyond the
+/// caller's own coverage). Coverage is scope containment — a pin never
+/// reaches past its request's scope.
+fn selection_scope_covers(pinned: &Selection, requested: Option<&Selection>) -> bool {
+    let Some(requested) = requested else {
+        return true;
+    };
+    match (pinned, requested) {
+        (_, Selection::SubjectAll) | (Selection::SharedOnly, Selection::SharedOnly) => true,
+        (Selection::SharedOnly, Selection::SelectedContexts { include_shared, .. }) => {
+            *include_shared
+        }
+        (
+            Selection::SelectedContexts {
+                context_ids,
+                include_shared,
+            },
+            Selection::SelectedContexts {
+                context_ids: requested_ids,
+                include_shared: requested_shared,
+            },
+        ) => {
+            context_ids
+                .iter()
+                .all(|context_id| requested_ids.contains(context_id))
+                && (!*include_shared || *requested_shared)
+        }
+        // A pin reaching past its request's scope — `subject_all` under a
+        // restricted request, context pins under `shared_only` — is uncovered.
+        _ => false,
+    }
+}
+
+/// §7.25 provider policy verdict over the authorized basis: the protocol
+/// defines no numeric thresholds, so this provider calls an empty authorized
+/// basis insufficient and any non-empty one sufficient. Generation refuses
+/// `INSUFFICIENT_DATA` on exactly the same verdict.
+pub(crate) const fn data_sufficiency(record_count: usize) -> &'static str {
+    if record_count == 0 {
+        "insufficient"
+    } else {
+        "sufficient"
+    }
+}
+
+/// §7.27 envelope projection. The pinned `selection`/`filter`/`basis` columns
+/// are served verbatim (published array shapes preserved, absent optionals
+/// never `null`-substituted); `stale` is the read's own recomputation, never
+/// the stored write-time cache; `cost` and `generator.model` exist only when
+/// the row carries them.
+fn reflection_body(row: &ReflectionRow, stale: bool) -> Result<Value, ProviderError> {
+    let mut body = json!({
+        "reflection_id": row.reflection_id,
+        "space_id": row.space_id,
+        "subject_id": row.subject_id,
+        "revision": row.revision,
+        "schema_version": row.schema_version,
+        "created_at": row.created_at,
+        "selection": json_member(&row.selection_json, "reflection selection")?,
+        "basis": json_member(&row.basis_json, "reflection basis")?,
+        "body": { "body": row.body_text, "format": row.body_format },
+        "generator": { "engine_policy_version": row.engine_policy_version },
+        "extensions": json_member(&row.extensions_json, "reflection extensions")?,
+        "stale": stale,
+    });
+    let members = body
+        .as_object_mut()
+        .expect("reflection projection is an object");
+    if let Some(raw) = &row.filter_json {
+        members.insert("filter".to_string(), json_member(raw, "reflection filter")?);
+    }
+    if let Some(raw) = &row.cognition_filter_json {
+        members.insert(
+            "cognition_filter".to_string(),
+            json_member(raw, "reflection cognition_filter")?,
+        );
+    }
+    if let (Some(unit_kind), Some(units)) = (&row.cost_unit_kind, row.cost_units) {
+        members.insert(
+            "cost".to_string(),
+            json!({ "unit_kind": unit_kind, "units": units }),
+        );
+    }
+    if let Some(model) = &row.model {
+        if let Some(generator) = members.get_mut("generator").and_then(Value::as_object_mut) {
+            generator.insert("model".to_string(), json!(model));
+        }
+    }
+    Ok(body)
+}
+
+/// §6.10 receipt projection, as every mutating op returns it. A `failed` receipt
+/// carries the recorded failure envelope and no result — the wire schema's own
+/// failed branch (§5.2 step 3), which is the channel that reports a quarantined
+/// intent terminally.
+fn receipt_body(receipt: &ReceiptRow) -> Result<Value, ProviderError> {
+    let mut body = json!({
+        "schema_version": 1,
+        "receipt_id": receipt.receipt_id,
+        "op": receipt.op,
+        "space_id": receipt.space_id,
+        "requester_principal_id": receipt.requester_principal_id,
+        "idempotency_key": receipt.idempotency_key,
+        "payload_digest": receipt.payload_digest,
+        "status": receipt.status,
+        "created_at": receipt.created_at,
+        "completed_at": receipt.completed_at,
+        "extensions": {},
+    });
+    let object = body
+        .as_object_mut()
+        .expect("a receipt projection is always a JSON object");
+    if receipt.status == RECEIPT_FAILED {
+        object.insert("error".to_string(), receipt_failure(receipt)?);
+    } else {
+        let result = match receipt.result_json.as_deref() {
+            Some(raw) => serde_json::from_str::<Value>(raw)
+                .map_err(|e| ProviderError::Internal(format!("receipt result: {e}")))?,
+            None => Value::Null,
+        };
+        object.insert("result".to_string(), result);
+    }
+    Ok(body)
+}
+
+/// Opaque page cursor bound to principal + space + subject/filter + policy
+/// version + snapshot marker (§7.0.7, MEM-R026). It is plain JSON: cursors are
+/// opaque strings to clients, and JSON keeps the binding inspectable in tests.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PageCursor {
+    principal: String,
+    scope: String,
+    offset: u64,
+    marker: String,
+}
+
+/// The bound query a cursor belongs to: op, space, the subject and principal
+/// filters actually applied, and the engine policy version. Any other request
+/// under the same cursor is `CURSOR_INVALID` (MEM-R026).
+fn cursor_scope(
+    op: &str,
+    space_id: Option<&str>,
+    subject_id: Option<&str>,
+    principal_filter: Option<&str>,
+) -> String {
+    format!(
+        "{op}|space={}|subject={}|principal={}|policy={}",
+        space_id.unwrap_or("*"),
+        subject_id.unwrap_or("*"),
+        principal_filter.unwrap_or("*"),
+        policy::ENGINE_POLICY_VERSION,
+    )
+}
+
+fn encode_cursor(principal: &str, scope: &str, offset: u64, marker: &str) -> String {
+    let cursor = PageCursor {
+        principal: principal.to_string(),
+        scope: scope.to_string(),
+        offset,
+        marker: marker.to_string(),
+    };
+    serde_json::to_string(&cursor).expect("a page cursor always serializes")
+}
+
+/// The wire `cursor` newtypes are transparent over `String`; the decoder binds
+/// the text they carry.
+fn cursor_text<C: std::ops::Deref<Target = String>>(cursor: Option<&C>) -> Option<&str> {
+    cursor.map(|value| value.as_str())
+}
+
+fn decode_cursor(
+    raw: Option<&str>,
+    principal: &str,
+    scope: &str,
+    marker: &str,
+) -> Result<u64, ProviderError> {
+    let Some(raw) = raw else {
+        return Ok(0);
+    };
+    let cursor: PageCursor = serde_json::from_str(raw).map_err(|_| ProviderError::CursorInvalid)?;
+    if cursor.principal != principal || cursor.scope != scope || cursor.marker != marker {
+        return Err(ProviderError::CursorInvalid);
+    }
+    Ok(cursor.offset)
+}
+
+/// The offset a cursor claims, decoded **before** the page is cut, for reads
+/// whose scope is only known after the read resolves it (the grants page names
+/// the principal filter that read decides). The claim is verified afterwards by
+/// [`decode_cursor`] — an offset from a foreign or stale cursor only ever
+/// selects rows the caller could already read, and the mismatched response is
+/// refused.
+fn claimed_offset(raw: Option<&str>) -> Result<u64, ProviderError> {
+    let Some(raw) = raw else {
+        return Ok(0);
+    };
+    Ok(serde_json::from_str::<PageCursor>(raw)
+        .map_err(|_| ProviderError::CursorInvalid)?
+        .offset)
+}
+
+/// The cursor's offset and the snapshot marker it was issued against, decoded
+/// **before** the store reads the page: the offset is what selects the SQL page,
+/// while the marker is verified afterwards against that same snapshot, so a
+/// stale cursor still answers `CURSOR_INVALID` (§7.0.7/MEM-R026).
+fn cursor_page(
+    raw: Option<&str>,
+    principal: &str,
+    scope: &str,
+) -> Result<(u64, Option<String>), ProviderError> {
+    let Some(raw) = raw else {
+        return Ok((0, None));
+    };
+    let cursor: PageCursor = serde_json::from_str(raw).map_err(|_| ProviderError::CursorInvalid)?;
+    if cursor.principal != principal || cursor.scope != scope {
+        return Err(ProviderError::CursorInvalid);
+    }
+    Ok((cursor.offset, Some(cursor.marker)))
+}
+
+/// Refuse a page read against a different snapshot than the cursor was minted
+/// on — the visible set or its grants changed between pages.
+fn verify_cursor(claimed: Option<&str>, marker: &str) -> Result<(), ProviderError> {
+    if claimed.is_some_and(|claimed| claimed != marker) {
+        return Err(ProviderError::CursorInvalid);
+    }
+    Ok(())
+}
+
+fn page<T>(items: Vec<T>, limit: u64, offset: u64) -> (Vec<T>, Option<u64>) {
+    let total = items.len();
+    let start = usize::try_from(offset).unwrap_or(total).min(total);
+    let take = usize::try_from(limit).unwrap_or(total);
+    let page: Vec<T> = items.into_iter().skip(start).take(take).collect();
+    let consumed = start + page.len();
+    let next = (consumed < total).then_some(consumed as u64);
+    (page, next)
+}
+
+fn page_limit(limit: Option<NonZeroU64>) -> u64 {
+    limit.unwrap_or(policy::MAX_PAGE_SIZE_BOUND).get()
+}
+
+pub struct LocalMemoryProvider {
+    store: MemoryStore,
+    space_id: String,
+    /// Whether this instance serves the `spoke-memory-reflection` family: the
+    /// §4.1 advertisement and the §7.25–§7.27 op entry share this one switch, so
+    /// `describe` and the ops can never disagree. Production opens turn it on.
+    reflections: bool,
+}
+
+/// Exclusive per-bearer memory-disposition section
+/// ([`LocalMemoryProvider::review_disposition`]).
+///
+/// Held for the critical section and released on drop. It is not a writer
+/// admission and grants nothing on its own.
+pub struct MemoryDisposition {
+    _file: std::fs::File,
+}
+
+/// What one `creator memory migrate-legacy` pass did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyMigrationStatus {
+    /// The pass wrote the space's legacy content into provider storage.
+    Migrated,
+    /// The space was already migrated and its manifest still matches the source.
+    AlreadyComplete,
+}
+
+/// What one legacy-content migration pass moved (P5, compass D7).
+///
+/// The counts and the digest are the completion marker's own manifest, so a
+/// re-run reports exactly what the marker records.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LegacyContentMigration {
+    /// The provider space the pass migrated.
+    pub space_id: String,
+    /// Whether this pass wrote, or verified an earlier one.
+    pub status: LegacyMigrationStatus,
+    /// The source-snapshot digest the completion marker records.
+    pub digest: String,
+    /// Migrated `memory_records` rows.
+    pub records: u64,
+    /// Migrated `memory_candidates` rows.
+    pub candidates: u64,
+    /// Migrated `memory_profiles` rows (one per bearer's `SOUL.md`).
+    pub profiles: u64,
+    /// Object count per legacy family (including `SOUL.md`).
+    pub families: BTreeMap<String, u64>,
+}
+
+/// The lock file name for one bearer: a SHA-256 digest of the exact subject id
+/// under `<state db dir>/memory_locks/` (NXM-5 Task 2 fix round 4, finding
+/// R4-F2).
+///
+/// The digest is the identity: it distinguishes ids that differ only by ASCII
+/// case (unlike a readable encoding on a case-insensitive volume) and it is
+/// fixed-length, so any subject id maps to a name well inside the filesystem
+/// component limit. Confinement comes from the fixed prefix plus the digest's
+/// hex alphabet, so no id can name a path component, `..`, or another subject's
+/// lock.
+fn disposition_lock_file(subject_id: &str) -> Result<String, ProviderError> {
+    let digest = match jcs_sha256_hex(&Value::String(subject_id.to_owned())) {
+        SpokeResult::Ok(digest) => digest,
+        SpokeResult::Reject(reject) => return Err(ProviderError::Internal(reject.message)),
+    };
+    Ok(format!("subject-{digest}.lock"))
+}
+
+impl LocalMemoryProvider {
+    /// Close this provider's own pool, and with it its writer admission.
+    ///
+    /// Called by the binding when the open that pinned this provider ends. It
+    /// closes only this provider's pool: any other open's pool, and any raw
+    /// process-retained pool, is untouched. Idempotent.
+    pub async fn close(&self) {
+        self.store.close().await;
+    }
+
+    /// Open (or join) the workspace's admitted writer and provision the local
+    /// space plus its first `admin` grant (§7.0.6). Re-opening is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProviderError`] when the workspace directory cannot be created,
+    /// the writer admission or migration fails, or the provisioning write is
+    /// refused by the writer guard.
+    pub async fn open(
+        user_home: PathBuf,
+        creator_id: &str,
+        workspace_slug: &str,
+    ) -> Result<Self, ProviderError> {
+        let db_path =
+            nexus_home_layout::workspace_state_db_path(&user_home, creator_id, workspace_slug);
+        if let Some(parent) = db_path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|error| {
+                ProviderError::Internal(format!("memory provider workspace dir: {error}"))
+            })?;
+        }
+        let store = MemoryStore::open(&db_path, creator_id, &user_home)
+            .await
+            .map_err(store_error)?;
+        store
+            .provision(
+                DEFAULT_SPACE_ID,
+                LOCAL_AUTHORITY_HOST_ID,
+                creator_id,
+                &bootstrap_grant_id(creator_id),
+                Some(DEFAULT_SPACE_DISPLAY_NAME),
+                Utc::now(),
+            )
+            .await
+            .map_err(store_error)?;
+        Ok(Self {
+            store,
+            space_id: DEFAULT_SPACE_ID.to_string(),
+            reflections: true,
+        })
+    }
+
+    /// The space this provider serves.
+    #[must_use]
+    pub fn space_id(&self) -> &str {
+        &self.space_id
+    }
+
+    /// Open the provider over a **read-only** connection (NXM-5 Task 2 fix round
+    /// 1, finding F6).
+    ///
+    /// A read-only core access must keep serving memory reads, so this open
+    /// serves the same `MemoryPort` reads over `mode=ro` storage. It takes no
+    /// writer admission and performs no provisioning, journal recovery or
+    /// retention sweep: an open-pinned provider on that access mode must not
+    /// write. A write op reached through this handle is refused by the writer
+    /// protocol (the read-only connection rejects it), and `CoreService` refuses
+    /// the E4 write handlers before they get here.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProviderError`] when the workspace database cannot be read.
+    pub async fn open_read_only(
+        user_home: PathBuf,
+        creator_id: &str,
+        workspace_slug: &str,
+    ) -> Result<Self, ProviderError> {
+        let db_path =
+            nexus_home_layout::workspace_state_db_path(&user_home, creator_id, workspace_slug);
+        let store = MemoryStore::open_read_only(&db_path, creator_id, &user_home)
+            .await
+            .map_err(store_error)?;
+        Ok(Self {
+            store,
+            space_id: DEFAULT_SPACE_ID.to_string(),
+            reflections: true,
+        })
+    }
+
+    /// Open the same provider with the `spoke-memory-reflection` sub-capability
+    /// withheld: `describe` omits the flag and the three reflection ops answer
+    /// the not-served refusal, the deliberately-unadvertised shape staging spec
+    /// §4 N4-R keeps C-003 green on. Everything else is the writable open above.
+    ///
+    /// Compiled out of a production build: production builds always serve the
+    /// reflection family.
+    ///
+    /// # Errors
+    ///
+    /// The [`Self::open`] errors.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub async fn open_unadvertised(
+        user_home: PathBuf,
+        creator_id: &str,
+        workspace_slug: &str,
+    ) -> Result<Self, ProviderError> {
+        let mut provider = Self::open(user_home, creator_id, workspace_slug).await?;
+        provider.reflections = false;
+        Ok(provider)
+    }
+
+    /// Whether this provider may write (`false` for a read-only open).
+    #[must_use]
+    pub const fn is_writable(&self) -> bool {
+        self.store.writable()
+    }
+
+    /// P5: migrate every legacy table row and bearer file of this workspace into
+    /// the provider's own surfaces, in one guarded transaction, and publish the
+    /// completion marker the legacy read bridge then honours.
+    ///
+    /// Explicit and operator-invoked (MEM-R011): no open and no read calls this.
+    /// A space already migrated verifies its recorded manifest and writes
+    /// nothing; a space whose legacy sources changed since that pass refuses
+    /// `IDEMPOTENCY_CONFLICT` instead of silently re-entering or overwriting an
+    /// object the provider already owns.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderError::ReadOnly`] on a read-only provider, and the mapped
+    /// storage refusal (no `admin` grant, a frozen space, an adopted object
+    /// whose stored body differs from the legacy source).
+    pub async fn migrate_legacy(
+        &self,
+        principal: &schemas::Principal,
+    ) -> Result<LegacyContentMigration, ProviderError> {
+        if !self.is_writable() {
+            return Err(ProviderError::ReadOnly(
+                "memory: migrate-legacy needs the workspace writer".to_string(),
+            ));
+        }
+        let principal_id = principal_id(principal);
+        let payload = json!({ "space_id": self.space_id });
+        let digest = payload_digest(OP_LEGACY_MIGRATE, &payload)?;
+        let idempotency_key = format!("legacy-content-migration:{}", self.space_id);
+        let ctx = OpContext {
+            space_id: &self.space_id,
+            requester_principal_id: principal_id,
+            op: OP_LEGACY_MIGRATE,
+            idempotency_key: Some(&idempotency_key),
+            payload_digest: &digest,
+        };
+        let requirements = [GrantRequirement {
+            capability: "admin",
+            subject_id: None,
+            context_ids: Vec::new(),
+            reads_shared: false,
+            subject_all: false,
+        }];
+        let admission = Admission {
+            op: OP_LEGACY_MIGRATE,
+            space_id: &self.space_id,
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        let outcome = self
+            .store
+            .migrate_legacy(&ctx, &admission)
+            .await
+            .map_err(store_error)?;
+        let (status, manifest) = match outcome {
+            MigrationOutcome::Migrated(receipt) => {
+                let recorded = receipt.result_json.as_deref().ok_or_else(|| {
+                    ProviderError::Internal("migrated receipt carries no result".to_string())
+                })?;
+                let result: Value = serde_json::from_str(recorded)
+                    .map_err(|e| ProviderError::Internal(format!("migration receipt: {e}")))?;
+                (LegacyMigrationStatus::Migrated, result["manifest"].clone())
+            }
+            MigrationOutcome::Verified(manifest) => {
+                (LegacyMigrationStatus::AlreadyComplete, manifest)
+            }
+        };
+        migration_report(&self.space_id, status, &manifest)
+    }
+
+    /// The bearer's memory-disposition section (NXM-5 Task 2 fix round 2,
+    /// finding F1).
+    ///
+    /// A provider candidate consumption and the legacy review drain's
+    /// consumed-check plus classification are one decision in two halves, so
+    /// both take this exclusive OS lock for their whole critical section: a
+    /// dismissal can never commit between the check and the classify write.
+    /// One lock file per bearer under `<state db dir>/memory_locks/`, opened per
+    /// acquisition — descriptors in one process contend exactly like two
+    /// processes (the same primitive the Character activity fences use), so a
+    /// daemon drain and a CLI dismissal over one workspace serialize too.
+    ///
+    /// # Errors
+    /// [`ProviderError::ReadOnly`] under read-only access (a section that exists
+    /// to decide a write is not served) and [`ProviderError::Internal`] when the
+    /// lock file cannot be opened or locked.
+    pub async fn review_disposition(
+        &self,
+        subject_id: &str,
+    ) -> Result<MemoryDisposition, ProviderError> {
+        self.disposition(subject_id).await
+    }
+
+    /// [`Self::review_disposition`] as the provider's own error taxonomy.
+    async fn disposition(&self, subject_id: &str) -> Result<MemoryDisposition, ProviderError> {
+        if !self.is_writable() {
+            return Err(ProviderError::ReadOnly(
+                "memory: read-only core access".to_string(),
+            ));
+        }
+        let dir = self.store.disposition_dir();
+        let name = disposition_lock_file(subject_id)?;
+        let opened = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
+            std::fs::create_dir_all(&dir)?;
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(dir.join(name))
+        })
+        .await;
+        let file = match opened {
+            Ok(Ok(file)) => file,
+            Ok(Err(error)) => {
+                return Err(ProviderError::Internal(format!(
+                    "memory disposition lock: {error}"
+                )))
+            }
+            Err(error) => {
+                return Err(ProviderError::Internal(format!(
+                    "memory disposition lock task: {error}"
+                )))
+            }
+        };
+        // The attempt itself (fix round 4, finding R4-F3): the non-blocking
+        // probe decides whether this acquisition is contended, so a test can
+        // observe a real lock wait instead of a pre-lock rendezvous. The probe
+        // also takes the section when free, so the blocking `lock()` below runs
+        // only when another descriptor really holds it.
+        #[cfg(feature = "test-hooks")]
+        let wait_report = self.store.take_disposition_wait_report();
+        let locked = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
+            match file.try_lock() {
+                Ok(()) => {}
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    #[cfg(feature = "test-hooks")]
+                    if let Some(report) = wait_report.as_ref() {
+                        report.notify_one();
+                    }
+                    file.lock()?;
+                }
+                Err(std::fs::TryLockError::Error(error)) => return Err(error),
+            }
+            Ok(file)
+        })
+        .await;
+        match locked {
+            Ok(Ok(file)) => Ok(MemoryDisposition { _file: file }),
+            Ok(Err(error)) => Err(ProviderError::Internal(format!(
+                "memory disposition lock: {error}"
+            ))),
+            Err(error) => Err(ProviderError::Internal(format!(
+                "memory disposition lock task: {error}"
+            ))),
+        }
+    }
+
+    /// §14.2 proof seam: whether the bearer's disposition section is free right
+    /// now. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn disposition_available(&self, subject_id: &str) -> bool {
+        let Ok(name) = disposition_lock_file(subject_id) else {
+            return false;
+        };
+        let path = self.store.disposition_dir().join(name);
+        let Ok(file) = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)
+        else {
+            return false;
+        };
+        let free = file.try_lock().is_ok();
+        if free {
+            let _ = file.unlock();
+        }
+        free
+    }
+
+    /// NXM-5 Task 2 fix round 4 (finding R4-F3) proof seam: notify `waiter`
+    /// from inside the lock attempt of the next disposition acquisition whose
+    /// non-blocking probe finds the section held, i.e. only after the caller has
+    /// really reached the contended lock. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn report_disposition_waits(&self, waiter: std::sync::Arc<tokio::sync::Notify>) {
+        self.store.report_disposition_waits(waiter);
+    }
+
+    /// NXM-5 Task 2 fix round 3 (finding F5) proof seam: entries that passed the
+    /// read-only gate and reached the admission or publication machinery.
+    /// Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn lock_attempts(&self) -> usize {
+        self.store.lock_attempts()
+    }
+
+    /// MEM-R005 profile admission gate: the authored content kinds a subject
+    /// has, or the typed `PROFILE_INCOMPLETE` refusal.
+    ///
+    /// An absent *optional* kind is honest-empty (§7.23) and simply not listed.
+    /// A missing §4.2 required kind is the fail-closed state an
+    /// admission-relevant consumer acts on, so it leaves on the reject channel
+    /// with `details.missing`, never as a success value that could be read as an
+    /// empty success. Capability absence is decided at provider selection
+    /// (`CAPABILITY_PORT_MISSING`) and never reaches this gate.
+    ///
+    /// # Errors
+    ///
+    /// `PROFILE_INCOMPLETE` when a required authored kind is absent.
+    /// `NOT_AUTHORIZED` when the principal holds no profile-visible grant on the
+    /// subject (§7.23).
+    pub async fn profile_admission(
+        &self,
+        principal: &schemas::Principal,
+        space_id: &str,
+        subject_id: &str,
+    ) -> SpokeResult<profile::ProfileAdmission> {
+        let rows = match self
+            .store
+            .profiles(space_id, subject_id, principal_id(principal))
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => return deny(&store_error(error)),
+        };
+        let Some(rows) = rows else {
+            return deny(&ProviderError::NotAuthorized(format!(
+                "principal {} holds no profile-visible grant on subject {subject_id}",
+                principal_id(principal)
+            )));
+        };
+        match profile::admission(&rows, &policy::REQUIRED_PROFILE_KINDS) {
+            Ok(admission) => spoke_operations::spoke_ok(admission),
+            Err(missing) => deny(&ProviderError::ProfileIncomplete {
+                subject_id: subject_id.to_string(),
+                missing,
+            }),
+        }
+    }
+
+    /// Dismiss a legacy-derived candidate: adopt the projection under the
+    /// bridge's deterministic id and consume it **in one guarded transaction**
+    /// (NXM-5 Task 2 fix round 1, finding F4).
+    ///
+    /// The adoption is not a separate step a caller can interleave with: a
+    /// failure of either half leaves neither effect, so an adopted pending row
+    /// can never be left behind by a dismissal that did not commit. There is no
+    /// standalone adoption entry point at all (fix round 3, finding F1): every
+    /// provider adoption happens inside the mutation that consumes the row, and
+    /// every candidate-consuming provider op holds the bearer's disposition
+    /// section. The departure from the wire request shape is deliberate — the E4
+    /// dismissal has no caller-supplied revision (`expected_revision: None`
+    /// consumes the revision the transaction reads) and it names the bearer's
+    /// subject, which only this seam knows.
+    ///
+    /// # Refusals
+    /// The same reject codes `memory.candidates.dismiss` answers: `NOT_FOUND`
+    /// when nothing resolves to the id, `CANDIDATE_CONSUMED`/
+    /// `REVISION_CONFLICT` when the CAS cannot land, and the admission codes.
+    /// A stored candidate owned by another subject is `INVALID_REQUEST`: the
+    /// dismissal names the bearer whose section it takes, and only the row's
+    /// owner is that bearer (fix round 4, finding R4-F1). Authorization runs
+    /// before that answer is chosen (fix round 5, finding R5-F1): a principal
+    /// the candidate's `review` coverage does not admit is `NOT_FOUND`, the same
+    /// refusal an id this store never held produces, so no caller without
+    /// coverage can learn the candidate exists or who owns it.
+    pub async fn dismiss_legacy_candidate(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        candidate_id: &str,
+        expected_revision: Option<i64>,
+        idempotency_key: &str,
+    ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
+        // The section must belong to the row's owner, not to whatever subject the
+        // caller named (fix round 4, finding R4-F1): resolving the stored owner
+        // before locking means a caller can never consume A while holding B's
+        // section, interleaving A's review drain. The probe authorizes the
+        // caller first (fix round 5, finding R5-F1): the owner is the only thing
+        // the mismatch refusal would disclose, so a principal the candidate's
+        // coverage does not admit never learns it exists. A projected-only id has
+        // no provider row (`None`), so the supplied subject is the only owner it
+        // can adopt under, and the store's own adoption refuses a legacy row of
+        // another subject.
+        let owner = match self
+            .store
+            .reviewable_candidate_subject(&self.space_id, candidate_id, principal_id(principal))
+            .await
+        {
+            Ok(owner) => owner,
+            Err(error) => return deny(&store_error(error)),
+        };
+        let subject_id = match owner.as_deref() {
+            Some(owner) if owner != subject_id => {
+                return deny(&ProviderError::InvalidInput {
+                    field: "subject_id".to_string(),
+                    reason: format!(
+                        "candidate {candidate_id} belongs to subject {owner}, not {subject_id}"
+                    ),
+                    details: None,
+                })
+            }
+            Some(owner) => owner,
+            None => subject_id,
+        };
+        // The consumption decision holds the bearer's disposition section (fix
+        // round 2, finding F1): a legacy review drain holds the same section
+        // across its consumed-check, classification and persistence, so a
+        // dismissal can never commit in between.
+        let _disposition = match self.disposition(subject_id).await {
+            Ok(section) => section,
+            Err(error) => return deny(&error),
+        };
+        let principal_id = principal_id(principal);
+        let op = OP_CANDIDATES_DISMISS;
+        let digest = match jcs_sha256_hex(&json!({
+            "candidate_id": candidate_id,
+            "expected_revision": expected_revision,
+            "idempotency_key": idempotency_key,
+        })) {
+            SpokeResult::Ok(digest) => digest,
+            SpokeResult::Reject(reject) => {
+                return deny(&ProviderError::Internal(reject.message));
+            }
+        };
+        let ctx = OpContext {
+            space_id: &self.space_id,
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(idempotency_key),
+            payload_digest: &digest,
+        };
+        let admission = Admission {
+            op,
+            space_id: &self.space_id,
+            principal_id,
+            coverage: Coverage::Candidate {
+                candidate_id,
+                capabilities: &["review"],
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        match self
+            .store
+            .dismiss_legacy_candidate(
+                &ctx,
+                &admission,
+                candidate_id,
+                subject_id,
+                expected_revision,
+            )
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    /// NXM-8: review one bearer's candidate while the caller already holds that
+    /// bearer's memory-disposition section.
+    ///
+    /// The review drain is the caller: it takes [`MemoryDisposition`] once for
+    /// the whole batch ([`Self::review_disposition`]) and keeps it across its
+    /// check, classification and persistence, so this seam must not re-take the
+    /// same section — a `flock` contends per open file description, so a second
+    /// acquisition in the same task would deadlock against itself. The section
+    /// parameter is the proof that it is held.
+    ///
+    /// A legacy-derived id has no provider row; the store adopts the projection
+    /// under the bridge's deterministic id inside the same guarded transaction
+    /// that consumes it (NXM-5 D13's mutation-time adoption), so no adopted
+    /// pending row can be left behind. A row the provider already owns is
+    /// consumed as it is. `subject_id` is the bearer whose section the caller
+    /// holds: a candidate owned by another subject is `NOT_AUTHORIZED`.
+    pub async fn review_legacy_candidate(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        request: schemas::MemoryCandidatesReviewRequest,
+        _section: &MemoryDisposition,
+    ) -> SpokeResult<schemas::MemoryCandidatesReviewResponse> {
+        if let SpokeResult::Reject(reject) = validate_memory_candidates_review(&request) {
+            return deny(&ProviderError::from_reject(reject, "decision"));
+        }
+        self.review_committed(principal_id(principal), &request, Some(subject_id))
+            .await
+    }
+
+    /// §7.15 admission and decision projection, shared by the wire review (which
+    /// took the candidate's section) and the bearer drain's review (which holds
+    /// the bearer's own section and names the subject it may adopt under).
+    async fn review_committed(
+        &self,
+        principal_id: &str,
+        request: &schemas::MemoryCandidatesReviewRequest,
+        adopt_subject: Option<&str>,
+    ) -> SpokeResult<schemas::MemoryCandidatesReviewResponse> {
+        use schemas::memory_candidates_review_request::Decision;
+
+        let op = OP_CANDIDATES_REVIEW;
+        let digest = match payload_digest(op, request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        // §7.15: `review` *and* `records_write`, both covering the candidate's
+        // capture scope — created records inherit that placement verbatim.
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Candidate {
+                candidate_id: request.candidate_id.as_str(),
+                capabilities: &["review", "records_write"],
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        let override_content = match &request.decision {
+            Decision::Promote {
+                content_override: Some(content),
+                ..
+            } => match to_json(content, "decision content_override") {
+                Ok(content) => Some(content),
+                Err(error) => return deny(&error),
+            },
+            _ => None,
+        };
+        let fragments: Vec<(String, Value)> = match &request.decision {
+            Decision::Fragment { fragments } => {
+                let mut built = Vec::with_capacity(fragments.len());
+                for fragment in fragments {
+                    match to_json(&fragment.content, "fragment content") {
+                        Ok(content) => built.push((fragment.kind.as_str().to_string(), content)),
+                        Err(error) => return deny(&error),
+                    }
+                }
+                built
+            }
+            _ => Vec::new(),
+        };
+        let decision = match &request.decision {
+            Decision::Promote { kind, .. } => ReviewDecision::Promote {
+                kind: kind.as_ref().map(|kind| kind.as_str()),
+                content: override_content.as_ref(),
+            },
+            Decision::Fragment { .. } => ReviewDecision::Fragment { items: &fragments },
+            Decision::Drop { .. } => ReviewDecision::Drop,
+        };
+        let revision = expected_revision(request.expected_revision);
+        let candidate_id = request.candidate_id.as_str();
+        let consumed = match adopt_subject {
+            Some(subject_id) => {
+                self.store
+                    .review_legacy_candidate(
+                        &ctx,
+                        &admission,
+                        candidate_id,
+                        subject_id,
+                        revision,
+                        &decision,
+                    )
+                    .await
+            }
+            None => {
+                self.store
+                    .review_candidate(&ctx, &admission, candidate_id, revision, &decision)
+                    .await
+            }
+        };
+        match consumed {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    /// The disposition section of the bearer that owns one provider-native
+    /// candidate, or `None` when this store holds no such row (NXM-5 Task 2 fix
+    /// round 3, finding F1).
+    ///
+    /// Every candidate consumption takes the owning bearer's section, so the
+    /// ordinary wire dismissal/review cannot consume a legacy-derived row behind
+    /// a review drain's back. A projected legacy id has no provider row: there
+    /// is nothing for the wire path to consume and its own read answers the
+    /// absence, so no section is taken. A failed probe fails the operation
+    /// rather than proceeding unsectioned.
+    async fn candidate_disposition(
+        &self,
+        space_id: &str,
+        candidate_id: &str,
+    ) -> Result<Option<MemoryDisposition>, ProviderError> {
+        let Some(subject) = self
+            .store
+            .candidate_subject(space_id, candidate_id)
+            .await
+            .map_err(store_error)?
+        else {
+            return Ok(None);
+        };
+        self.disposition(&subject).await.map(Some)
+    }
+
+    /// §14.2/§14.3 proof seam: force the next committing transaction to fail at
+    /// the commit boundary (`after_commit: false` → before `COMMIT`, no effect;
+    /// `true` → after `COMMIT`, effect committed). Compiled out of a production
+    /// build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn inject_commit_fault(&self, after_commit: bool) {
+        self.store.inject_commit_fault(after_commit);
+    }
+
+    /// §5.2/C-113 proof seam: force the next journal publish to stop at a crash
+    /// window (`after_publish: false` → after the hidden staged write, before
+    /// the rename; `true` → after the publish rename, before the applied mark).
+    /// Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn inject_file_fault(&self, after_publish: bool) {
+        self.store.inject_file_fault(after_publish);
+    }
+
+    /// §5.2 proof seam: the provider's markdown projection root. Compiled out of
+    /// a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn file_root(&self) -> std::path::PathBuf {
+        self.store.file_root().to_path_buf()
+    }
+
+    /// §14.3 proof seam: force the next post-commit journal settlement to fail
+    /// (`before_write: true` → its transaction never opens; `false` → its write
+    /// fails). Both are failures after the journal COMMIT. Compiled out of a
+    /// production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn inject_settle_fault(&self, before_write: bool) {
+        self.store.inject_settle_fault(before_write);
+    }
+
+    /// §6.5/§6.10 proof seam: move the provider clock forward so grant expiries
+    /// and the receipt retention windows elapse. Compiled out of a production
+    /// build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn advance_clock(&self, seconds: i64) {
+        self.store.advance_clock(seconds);
+    }
+
+    /// §6.5/§7.28 proof seam: park the next read once it holds its connection
+    /// (`entered` signals it is parked, `release` frees it), so a test can move
+    /// the clock while the read is queued and only after it has parked. Compiled
+    /// out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn park_next_read(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Barrier>,
+    ) {
+        self.store.park_next_read(entered, release);
+    }
+
+    /// Proof seam: park the next write once it has entered the write-admission
+    /// machinery and before its writer transaction, so a competing transition can
+    /// be observed at the contested boundary. `entered` signals the arrival,
+    /// `release` frees it. Single next use. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn park_next_admission(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Barrier>,
+    ) -> u64 {
+        self.store.park_next_admission(entered, release)
+    }
+
+    /// Disarm exactly the admission arm `token` owns; a stale handle cannot clear
+    /// a newer arm. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn disarm_next_admission(&self, token: u64) {
+        self.store.disarm_next_admission(token);
+    }
+
+    /// §5.2 step 2 proof seam: park the next publication while it holds the
+    /// workspace publication section — cross-process flock and in-process gate —
+    /// (`entered` signals it, `release` frees it). Test only.
+    #[cfg(feature = "test-hooks")]
+    pub fn park_next_publish(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Barrier>,
+    ) {
+        self.store.park_next_publish(entered, release);
+    }
+
+    /// D15 proof seam: park the next capture once its write transaction holds
+    /// the lock and has validated the caller's binding (`entered` signals it,
+    /// `release` frees it), so a test can show a concurrent `remove_binding`
+    /// cannot interleave. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn park_next_capture(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Barrier>,
+    ) {
+        self.store.park_next_capture(entered, release);
+    }
+
+    /// §7.0.3/C-015/C-070 proof seam: park the next reflection generate after
+    /// its pending receipt committed and before its terminal commit (`entered`
+    /// signals the pending receipt is published, `release` frees the
+    /// generation), so a test can observe the published pending receipt
+    /// through `memory.receipts.get`. One-shot. Compiled out of a production
+    /// build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn park_next_generation(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Barrier>,
+    ) {
+        self.store.park_next_generation(entered, release);
+    }
+
+    /// §7.27/C-078 proof seam: fail the next reflection generation step so its
+    /// transaction 2 commits an honest `failed` receipt with no cost. One-shot:
+    /// a replay never runs a generation, so an armed fault stays armed across
+    /// one. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn inject_generation_fault(&self) {
+        self.store.inject_generation_fault();
+    }
+
+    /// §5.2 step 2 proof seam: have every workspace flock **wait** report from
+    /// its blocking task just before it blocks, so a test can cancel callers that
+    /// have really reached the wait. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn report_flock_waits(&self, report: std::sync::mpsc::Sender<()>) {
+        self.store.report_flock_waits(report);
+    }
+
+    /// §7.3/§7.4. The space lifecycle ops define their own freeze admission
+    /// (§7.3 names re-freezing a frozen space a no-op success, and §8.2 admits
+    /// `unfreeze`), so `freeze_gated` is false for them.
+    async fn change_space_status<T: DeserializeOwned>(
+        &self,
+        principal: &schemas::Principal,
+        transition: SpaceTransition,
+        space_id: &str,
+        expected_revision: i64,
+        idempotency_key: Option<&str>,
+        request: &(impl Serialize + Sync),
+    ) -> SpokeResult<T> {
+        let principal_id = principal_id(principal);
+        let op = transition.op();
+        let digest = match payload_digest(op, request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let ctx = OpContext {
+            space_id,
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key,
+            payload_digest: &digest,
+        };
+        let requirements = [admin_requirement(None)];
+        let admission = Admission {
+            op,
+            space_id,
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: false,
+        };
+        match self
+            .store
+            .set_space_status(&ctx, &admission, expected_revision, transition.status())
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    /// §7.21 explicit promotion of one Character fragment addressed by the id the
+    /// E4 DTO serves.
+    ///
+    /// A listed legacy fragment's id is the legacy column, not a provider record
+    /// id: the bridge indexes that row under its deterministic external id
+    /// (`lgc:character_memory_fragments:<id>`), so the promotion resolves the id
+    /// through the bridge and, when the row is still a projection, adopts it
+    /// inside the promotion's own guarded transaction (R4-F1; NXM-5 D13's
+    /// mutation-time adoption, reused for records). `subject_id` is the bearer
+    /// whose activity lease the caller holds: a record owned by another subject,
+    /// or one that is not a `fact` fragment, is refused before any write
+    /// (R4-F2).
+    ///
+    /// # Refusals
+    /// `NOT_FOUND` when nothing resolves to the id, `NOT_AUTHORIZED` when the
+    /// record belongs to another subject or is not a fragment, `REVISION_CONFLICT`
+    /// when the CAS cannot land, and the admission codes otherwise.
+    pub async fn promote_character_fragment(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        record_id: &str,
+        expected_revision: u64,
+        idempotency_key: &str,
+    ) -> SpokeResult<schemas::MemoryRecordsPromoteResponse> {
+        let principal_id = principal_id(principal);
+        let op = OP_RECORDS_PROMOTE;
+        let digest = match jcs_sha256_hex(&json!({
+            "record_id": record_id,
+            "expected_revision": expected_revision,
+            "idempotency_key": idempotency_key,
+        })) {
+            SpokeResult::Ok(digest) => digest,
+            SpokeResult::Reject(reject) => {
+                return deny(&ProviderError::Internal(reject.message));
+            }
+        };
+        let ctx = OpContext {
+            space_id: &self.space_id,
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(idempotency_key),
+            payload_digest: &digest,
+        };
+        let target = Placement {
+            visibility: Placement::SHARED,
+            context_id: None,
+        };
+        // §7.21: `promote` + `records_write` over BOTH placements.
+        let admission = Admission {
+            op,
+            space_id: &self.space_id,
+            principal_id,
+            coverage: Coverage::Record {
+                record_id,
+                capabilities: &["promote", "records_write"],
+                target: Some(target),
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        match self
+            .store
+            .promote_record(
+                &ctx,
+                &admission,
+                record_id,
+                i64::try_from(expected_revision).unwrap_or(i64::MAX),
+                target,
+                Some(subject_id),
+            )
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    /// R4-F3 round 2: the placement a committed Character-fragment promotion
+    /// left behind, while the caller's SOUL-narrative invalidation has not
+    /// succeeded yet.
+    ///
+    /// The promotion's own transaction wrote it ([`Self::promote_character_fragment`]),
+    /// so a retry reads the scope the record actually left instead of inferring
+    /// one from the record (its scope is the target now) or its provenance (a
+    /// client claim). Cleared by [`Self::finish_soul_invalidation`].
+    ///
+    /// # Errors
+    /// [`ProviderError::Internal`] when the workspace database cannot be read.
+    pub async fn soul_invalidation_binding(
+        &self,
+        record_id: &str,
+    ) -> Result<Option<String>, ProviderError> {
+        self.store
+            .soul_invalidation_binding(&self.space_id, record_id)
+            .await
+            .map_err(store_error)
+    }
+
+    /// Clear the recovery row once the invalidation it names ran; a repeated
+    /// clear is a no-op.
+    ///
+    /// # Errors
+    /// [`ProviderError::Internal`] when the workspace database cannot be written.
+    pub async fn finish_soul_invalidation(&self, record_id: &str) -> Result<(), ProviderError> {
+        self.store
+            .clear_soul_invalidation(&self.space_id, record_id)
+            .await
+            .map_err(store_error)
+    }
+}
+
+/// The facts both `memory.grants.grant` request shapes name (§7.9); the restricted
+/// shape adds the placement-context restriction (§6.5).
+struct GrantFacts<'a> {
+    space_id: &'a str,
+    grantee: &'a str,
+    capabilities: Vec<String>,
+    context_ids: Vec<String>,
+    shared_access: bool,
+    subject_id: Option<&'a str>,
+    expires_at: Option<DateTime<Utc>>,
+    idempotency_key: &'a str,
+}
+
+fn grant_facts(request: &schemas::MemoryGrantsGrantRequest) -> GrantFacts<'_> {
+    match request {
+        schemas::MemoryGrantsGrantRequest::Variant0 {
+            capabilities,
+            context_ids,
+            expires_at,
+            idempotency_key,
+            principal_id: grantee,
+            shared_access,
+            space_id,
+            subject_id,
+            ..
+        } => GrantFacts {
+            space_id: space_id.as_str(),
+            grantee: grantee.as_str(),
+            capabilities: capabilities.clone(),
+            context_ids: context_ids.clone(),
+            shared_access: shared_access.unwrap_or(false),
+            subject_id: subject_id.as_ref().map(|value| value.as_str()),
+            expires_at: *expires_at,
+            idempotency_key: idempotency_key.as_str(),
+        },
+        schemas::MemoryGrantsGrantRequest::Variant1 {
+            capabilities,
+            expires_at,
+            idempotency_key,
+            principal_id: grantee,
+            space_id,
+            subject_id,
+            ..
+        } => GrantFacts {
+            space_id: space_id.as_str(),
+            grantee: grantee.as_str(),
+            capabilities: capabilities.clone(),
+            context_ids: Vec::new(),
+            shared_access: false,
+            subject_id: subject_id.as_ref().map(|value| value.as_str()),
+            expires_at: expires_at.as_ref().map(|value| **value),
+            idempotency_key: idempotency_key.as_str(),
+        },
+    }
+}
+
+/// The §7 `admin` requirement for a space- or subject-scoped admin op.
+pub(crate) const fn admin_requirement(subject_id: Option<&str>) -> GrantRequirement<'_> {
+    GrantRequirement {
+        capability: "admin",
+        subject_id,
+        context_ids: Vec::new(),
+        reads_shared: false,
+        subject_all: false,
+    }
+}
+
+fn bootstrap_grant_id(creator_id: &str) -> String {
+    format!("grt_bootstrap_{creator_id}")
+}
+
+/// Project the completion marker's manifest onto the public migration report.
+fn migration_report(
+    space_id: &str,
+    status: LegacyMigrationStatus,
+    manifest: &Value,
+) -> Result<LegacyContentMigration, ProviderError> {
+    let invalid = |field: &str| {
+        ProviderError::Internal(format!("legacy migration manifest: missing {field}"))
+    };
+    let digest = manifest["digest"]
+        .as_str()
+        .ok_or_else(|| invalid("digest"))?
+        .to_string();
+    let counts = &manifest["counts"];
+    let count = |field: &str| counts[field].as_u64().ok_or_else(|| invalid(field));
+    let families = manifest["families"]
+        .as_object()
+        .ok_or_else(|| invalid("families"))?;
+    let mut family_counts = BTreeMap::new();
+    for (family, value) in families {
+        family_counts.insert(
+            family.clone(),
+            value.as_u64().ok_or_else(|| invalid("families"))?,
+        );
+    }
+    Ok(LegacyContentMigration {
+        space_id: space_id.to_string(),
+        status,
+        digest,
+        records: count("records")?,
+        candidates: count("candidates")?,
+        profiles: count("profiles")?,
+        families: family_counts,
+    })
+}
+
+fn principal_id(principal: &schemas::Principal) -> &str {
+    principal.principal_id.as_str()
+}
+
+/// `expected_revision` as the stored integer. A wire revision above `i64::MAX`
+/// cannot be stored, so it saturates and can only ever fail the CAS.
+fn expected_revision(value: NonZeroU64) -> i64 {
+    i64::try_from(value.get()).unwrap_or(i64::MAX)
+}
+
+// ── Content-family projections and requirements (§6.6–§6.8) ────────────
+
+/// §6.6/§6.7 placement projection: `context_id` is present iff the visibility is
+/// `context` — the conditional both the table CHECK and the wire shape carry.
+fn placement_body(placement: Placement<'_>) -> Value {
+    placement.context_id.map_or_else(
+        || json!({ "visibility": placement.visibility }),
+        |context_id| json!({ "visibility": placement.visibility, "context_id": context_id }),
+    )
+}
+
+fn json_member(raw: &str, what: &str) -> Result<Value, ProviderError> {
+    serde_json::from_str(raw).map_err(|e| ProviderError::Internal(format!("{what}: {e}")))
+}
+
+fn to_json<T: Serialize>(value: &T, what: &str) -> Result<Value, ProviderError> {
+    serde_json::to_value(value).map_err(|e| ProviderError::Internal(format!("{what}: {e}")))
+}
+
+/// §6.5 requirement for one named placement: a `context` placement needs
+/// coverage of that context, a `shared` placement needs shared access.
+fn placement_requirement<'a>(
+    capability: &'a str,
+    subject_id: &'a str,
+    placement: Placement<'_>,
+) -> GrantRequirement<'a> {
+    GrantRequirement {
+        capability,
+        subject_id: Some(subject_id),
+        context_ids: placement
+            .context_id
+            .map(str::to_string)
+            .into_iter()
+            .collect(),
+        reads_shared: placement.visibility == Placement::SHARED,
+        subject_all: false,
+    }
+}
+
+/// D-7: a Nexus authoring kind keeps its own name inside the namespaced record
+/// kind; any other hint is an open-vocabulary product kind and is used verbatim.
+fn candidate_kind(hint: Option<&str>) -> String {
+    match hint {
+        None => policy::namespaced_record_kind("custom"),
+        Some(hint) if policy::NEXUS_MEMORY_KINDS.contains(&hint) => {
+            policy::namespaced_record_kind(hint)
+        }
+        Some(hint) => hint.to_string(),
+    }
+}
+
+/// The wire list selection mapped onto the provider-internal one.
+fn wire_read_selection(
+    selection: &schemas::memory_reflections_list_request::ReadSelection,
+) -> Selection {
+    match selection {
+        schemas::memory_reflections_list_request::ReadSelection::SubjectAll => {
+            Selection::SubjectAll
+        }
+        schemas::memory_reflections_list_request::ReadSelection::SharedOnly => {
+            Selection::SharedOnly
+        }
+        schemas::memory_reflections_list_request::ReadSelection::SelectedContexts {
+            context_ids,
+            include_shared,
+        } => Selection::SelectedContexts {
+            context_ids: context_ids.clone(),
+            include_shared: include_shared.unwrap_or(false),
+        },
+    }
+}
+
+/// The generate request's selection mapped onto the provider-internal one.
+fn wire_generate_selection(
+    selection: &schemas::memory_reflections_generate_request::ReadSelection,
+) -> Selection {
+    match selection {
+        schemas::memory_reflections_generate_request::ReadSelection::SubjectAll => {
+            Selection::SubjectAll
+        }
+        schemas::memory_reflections_generate_request::ReadSelection::SharedOnly => {
+            Selection::SharedOnly
+        }
+        schemas::memory_reflections_generate_request::ReadSelection::SelectedContexts {
+            context_ids,
+            include_shared,
+        } => Selection::SelectedContexts {
+            context_ids: context_ids.clone(),
+            include_shared: include_shared.unwrap_or(false),
+        },
+    }
+}
+
+/// The verbatim pins the generate columns stage: the wire selection/filter
+/// shapes serialized unaltered, an absent filter staying `None` — never
+/// null-substituted.
+fn pinned_request_shapes(
+    request: &schemas::MemoryReflectionsGenerateRequest,
+) -> Result<(String, Option<String>), ProviderError> {
+    let selection_json = serde_json::to_string(&request.selection)
+        .map_err(|error| ProviderError::Internal(format!("selection pin: {error}")))?;
+    let filter_json = request
+        .filter
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| ProviderError::Internal(format!("filter pin: {error}")))?;
+    Ok((selection_json, filter_json))
+}
+
+/// §9.2/§9.3, cut out of the wire method: score every authorized row, order
+/// by (score, recency, id) — deterministic for identical state, request and
+/// policy — apply the byte/item budget after the cursor, and project the
+/// kept bodies. Returns the bodies, the offset they consumed and the id the
+/// budget overflowed on, if any.
+fn recall_ranked_bodies(
+    rows: &[RecordRow],
+    terms: &[String],
+    start: usize,
+    max_items: u64,
+    max_bytes: Option<u64>,
+) -> Result<(Vec<Value>, usize, Option<String>), ProviderError> {
+    let mut ranked: Vec<(usize, &RecordRow)> = rows
+        .iter()
+        .map(|row| (policy::recall_score(&record_text(row), terms), row))
+        .collect();
+    ranked.sort_by(|(left_score, left), (right_score, right)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| created_at_cmp(&right.created_at, &left.created_at))
+            .then_with(|| left.record_id.cmp(&right.record_id))
+    });
+    let remaining = &ranked[start..];
+    let sizes: Vec<(String, usize)> = remaining
+        .iter()
+        .map(|(_, row)| (row.record_id.clone(), row.content_json.len()))
+        .collect();
+    let outcome = policy::apply_budget(&sizes, max_items, max_bytes);
+    let mut bodies = Vec::with_capacity(outcome.kept.len());
+    for index in &outcome.kept {
+        let Some((_, row)) = remaining.get(*index) else {
+            return Err(ProviderError::Internal(
+                "recall budget selected an out-of-range item".to_string(),
+            ));
+        };
+        bodies.push(record_body(row)?);
+    }
+    let consumed = start + bodies.len();
+    Ok((bodies, consumed, outcome.overflow_record_id))
+}
+
+/// A subject's profile kinds and the required ones it misses — the same
+/// projection the `state` op publishes and the generate gate refuses on.
+fn profile_projection(profile_revisions: &[(String, i64)]) -> (Vec<String>, Vec<String>) {
+    let kinds: Vec<String> = profile_revisions
+        .iter()
+        .map(|(kind, _)| kind.clone())
+        .collect();
+    let missing: Vec<String> = policy::REQUIRED_PROFILE_KINDS
+        .iter()
+        .filter(|required| !kinds.iter().any(|kind| kind == *required))
+        .map(|required| (*required).to_string())
+        .collect();
+    (kinds, missing)
+}
+
+/// The request's id set canonicalized for every place that treats it as a
+/// set (bound-query keys, digests, list narrowing): sorted, de-duplicated.
+pub(crate) fn canonical_ids(ids: &[String]) -> Vec<String> {
+    let mut ids = ids.to_vec();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// The bound query a content page belongs to (MEM-R026): everything that
+/// changes which rows the page was cut from. The ids render canonically —
+/// two requests naming the same context/filter set in different orders or
+/// with duplicates are the same bound query and the same state digest.
+fn selection_key(selection: &Selection) -> String {
+    match selection {
+        Selection::SubjectAll => "subject_all".to_string(),
+        Selection::SharedOnly => "shared_only".to_string(),
+        Selection::SelectedContexts {
+            context_ids,
+            include_shared,
+        } => format!(
+            "selected_contexts({}){}",
+            canonical_ids(context_ids).join(","),
+            if *include_shared { "+shared" } else { "" }
+        ),
+    }
+}
+
+/// The provenance filter rendered into the bound-query/digest keys, the same
+/// set canonicalization as [`selection_key`].
+fn filter_key(filter: Option<&[String]>) -> String {
+    filter.map_or_else(
+        || "*".to_string(),
+        |sources| canonical_ids(sources).join(","),
+    )
+}
+
+/// §9.2 ranking input: the record's untrusted text, never re-interpreted.
+fn record_text(row: &RecordRow) -> String {
+    json_member(&row.content_json, "record content")
+        .ok()
+        .and_then(|content| {
+            content
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_default()
+}
+
+/// §6.7 candidate projection. The pending shape carries the proposed body; the
+/// consumed shell replaces it with the digest and the outcome (§8.1 scrub), and
+/// `expires_at` belongs to the pending shape alone.
+fn candidate_body(row: &CandidateRow) -> Result<Value, ProviderError> {
+    let mut body = json!({
+        "schema_version": 1,
+        "candidate_id": row.candidate_id,
+        "space_id": row.space_id,
+        "subject_id": row.subject_id,
+        "capture_scope": placement_body(row.scope()),
+        "classification": json_member(&row.classification_json, "candidate classification")?,
+        "provenance": json_member(&row.provenance_json, "candidate provenance")?,
+        "status": row.status,
+        "created_at": row.created_at,
+        "revision": row.revision,
+        "extensions": {},
+    });
+    let members = body
+        .as_object_mut()
+        .expect("candidate projection is an object");
+    if let Some(occurred_at) = &row.occurred_at {
+        members.insert("occurred_at".to_string(), json!(occurred_at));
+    }
+    if row.status == "pending" {
+        let content = json_member(
+            row.content_json.as_deref().unwrap_or("null"),
+            "candidate content",
+        )?;
+        members.insert(
+            "proposed".to_string(),
+            json!({ "kind": row.kind, "content": content }),
+        );
+        if let Some(expires_at) = &row.expires_at {
+            members.insert("expires_at".to_string(), json!(expires_at));
+        }
+    } else {
+        members.insert("proposed".to_string(), json!({ "kind": row.kind }));
+        members.insert(
+            "consumed_by".to_string(),
+            json_member(
+                row.consumed_by_json.as_deref().unwrap_or("null"),
+                "candidate outcome",
+            )?,
+        );
+        members.insert("content_digest".to_string(), json!(row.content_digest));
+    }
+    Ok(body)
+}
+
+/// §6.6 record projection. A tombstoned record carries its scrubbed content and
+/// the deletion marker instead of `import_ref` (MEM-R014).
+fn record_body(row: &RecordRow) -> Result<Value, ProviderError> {
+    let mut body = json!({
+        "schema_version": 1,
+        "record_id": row.record_id,
+        "space_id": row.space_id,
+        "subject_id": row.subject_id,
+        "kind": row.kind,
+        "content": json_member(&row.content_json, "record content")?,
+        "scope": placement_body(row.scope()),
+        "provenance": json_member(&row.provenance_json, "record provenance")?,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "revision": row.revision,
+        "extensions": {},
+    });
+    let members = body
+        .as_object_mut()
+        .expect("record projection is an object");
+    if let Some(occurred_at) = &row.occurred_at {
+        members.insert("occurred_at".to_string(), json!(occurred_at));
+    }
+    match &row.tombstone_json {
+        Some(raw) => {
+            members.insert(
+                "tombstone".to_string(),
+                json_member(raw, "record tombstone")?,
+            );
+        }
+        None => {
+            if let Some(raw) = &row.import_ref_json {
+                members.insert(
+                    "import_ref".to_string(),
+                    json_member(raw, "record import ref")?,
+                );
+            }
+        }
+    }
+    Ok(body)
+}
+
+/// §6.8 profile projection.
+fn profile_body(row: &ProfileRow) -> Result<Value, ProviderError> {
+    Ok(json!({
+        "schema_version": 1,
+        "space_id": row.space_id,
+        "subject_id": row.subject_id,
+        "profile_kind": row.profile_kind,
+        "document": json_member(&row.document_json, "profile document")?,
+        "updated_by": row.updated_by,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "revision": row.revision,
+        "extensions": {},
+    }))
+}
+
+/// §7.18/§7.19 with mutation-time adoption (NXM-6 fix round 1, finding F2).
+///
+/// The E4 adapter addresses a Creator or Character memory by the id its DTO
+/// serves, which for an unmigrated item is the bridge's projection: no provider
+/// row exists yet, so the plain wire mutations answer `NOT_FOUND` for content
+/// the user can read. These entry points name the bearer the adapter speaks for;
+/// the store adopts the projection under its deterministic external id inside
+/// the mutation's own guarded transaction (NXM-5 D13's adoption, reused for
+/// records) and re-authorizes the mutation against the adopted row. Nothing is
+/// written to the legacy surface (D6).
+impl LocalMemoryProvider {
+    /// Materialize one still-projected legacy candidate on the provider without
+    /// consuming it: the Character capture adopts its own retained queue row in
+    /// the same call, so the row stays visible after the migration's marker
+    /// turns the legacy queue reads off (fix round 1, Greptile `legacy.rs:318`).
+    pub async fn adopt_legacy_candidate(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        candidate_id: &str,
+    ) -> SpokeResult<()> {
+        let principal_id = principal_id(principal);
+        let ids = [candidate_id.to_string()];
+        match self
+            .store
+            .adopt_legacy_candidates(DEFAULT_SPACE_ID, principal_id, subject_id, &ids)
+            .await
+        {
+            Ok(()) => SpokeResult::Ok(()),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    /// §7.11 capture under a caller-fixed candidate id.
+    ///
+    /// The Character capture writes its provider candidate under the bridge's
+    /// deterministic id for the same `pending_id`, so the candidate still aligns
+    /// with an existing legacy row the bridge projects under that id, and the
+    /// capture is one authoritative provider write instead of a legacy insert
+    /// followed by an adoption (fix round 5, B1).
+    ///
+    /// `binding` is the provenance obligation checked inside that same write
+    /// transaction (compass D15). Its failure is returned outside the port
+    /// vocabulary — the Character capture answered it with the legacy-domain
+    /// 403 before, and that answer does not change just because the check moved.
+    ///
+    /// # Errors
+    ///
+    /// A [`LocalDbError`] when the binding rows cannot be read on the capture
+    /// transaction; every protocol refusal travels the `SpokeResult` channel.
+    pub async fn capture_identified(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryCaptureRequest,
+        candidate_id: &str,
+        binding: Option<&CaptureBinding<'_>>,
+    ) -> Result<SpokeResult<schemas::MemoryCaptureResponse>, LocalDbError> {
+        self.capture_request(principal, request, Some(candidate_id), binding)
+            .await
+    }
+
+    /// The §7.11 capture every entry point above runs; `candidate_id` fixes the
+    /// candidate's identity (and makes a repeat a no-op on the stored row),
+    /// `None` mints one.
+    async fn capture_request(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryCaptureRequest,
+        candidate_id: Option<&str>,
+        binding: Option<&CaptureBinding<'_>>,
+    ) -> Result<SpokeResult<schemas::MemoryCaptureResponse>, LocalDbError> {
+        let principal_id = principal_id(principal);
+        if let SpokeResult::Reject(reject) =
+            validate_memory_capture(&request, policy::max_content_bytes())
+        {
+            return Ok(deny(&ProviderError::from_reject(reject, "content")));
+        }
+        let op = OP_CAPTURE;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return Ok(deny(&error)),
+        };
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        let subject_id = request.subject_id.as_str();
+        // §7.11: `capture_scope` is the admitted placement and becomes the
+        // candidate's immutable authorization fence.
+        let placement = match &request.capture_scope {
+            schemas::memory_capture_request::PlacementScope::Shared => Placement {
+                visibility: Placement::SHARED,
+                context_id: None,
+            },
+            schemas::memory_capture_request::PlacementScope::Context(context_id) => Placement {
+                visibility: Placement::CONTEXT,
+                context_id: Some(context_id.as_str()),
+            },
+        };
+        let requirements = [placement_requirement("capture", subject_id, placement)];
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: Some(subject_id),
+            placement_gate: Some(placement),
+            freeze_gated: true,
+        };
+        let now = Utc::now();
+        let kind = candidate_kind(request.kind_hint.as_ref().map(|hint| hint.as_str()));
+        let classification = policy::classify(
+            request.content.text.as_str(),
+            request.kind_hint.as_ref().map(|hint| hint.as_str()),
+        );
+        let content = match to_json(&request.content, "capture content") {
+            Ok(content) => content,
+            Err(error) => return Ok(deny(&error)),
+        };
+        // spoke-schemas 0.16.0: capture-request anchors became Option<...>
+        // (absent = None, serialized as null); the stored provenance must stay
+        // the published `anchors` array shape (may be empty), never null.
+        let anchors = match to_json(&request.anchors, "capture anchors") {
+            Ok(Value::Null) => json!([]),
+            Ok(anchors) => anchors,
+            Err(error) => return Ok(deny(&error)),
+        };
+        let provenance = json!({
+            "source_context_ids": request.source_context_ids.unwrap_or_default(),
+            "anchors": anchors,
+            "captured_by": principal_id,
+            "captured_at": storage::timestamp(now),
+        });
+        let classification_json = json!({
+            "disposition": classification.disposition,
+            "rationale_codes": classification.rationale_codes,
+        });
+        let occurred_at = request.occurred_at.map(storage::timestamp);
+        // §7.11/§6.7: the advisory classifier can leave a capture with no
+        // candidate at all; that is a committed outcome with its count recorded.
+        let keep_existing = candidate_id.is_some();
+        let candidate_id = candidate_id.map_or_else(storage::mint_candidate_id, str::to_string);
+        let candidates: Vec<NewCandidate<'_>> = if classification.disposition == "drop" {
+            Vec::new()
+        } else {
+            vec![NewCandidate {
+                candidate_id: candidate_id.as_str(),
+                subject_id,
+                placement,
+                kind: kind.as_str(),
+                content: &content,
+                provenance: &provenance,
+                classification: &classification_json,
+                occurred_at: occurred_at.as_deref(),
+                expires_at: None,
+            }]
+        };
+        match self
+            .store
+            .capture(&ctx, &admission, &candidates, keep_existing, binding)
+            .await
+        {
+            Ok(receipt) => Ok(settle_receipt(&receipt)),
+            Err(CaptureError::Store(error)) => Ok(deny(&store_error(error))),
+            Err(CaptureError::Binding(error)) => Err(error),
+        }
+    }
+
+    /// One §7.18 edit, adopting a still-projected record inside the edit.
+    pub async fn update_legacy_record(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        request: schemas::MemoryRecordsUpdateRequest,
+    ) -> SpokeResult<schemas::MemoryRecordsUpdateResponse> {
+        self.update_record_with(principal, request, Some(subject_id))
+            .await
+    }
+
+    /// One §7.19 tombstone, adopting a still-projected record inside the delete.
+    pub async fn delete_legacy_record(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        request: schemas::MemoryRecordsDeleteRequest,
+    ) -> SpokeResult<schemas::MemoryRecordsDeleteResponse> {
+        self.delete_record_with(principal, request, Some(subject_id))
+            .await
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn update_record_with(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryRecordsUpdateRequest,
+        adopt_subject: Option<&str>,
+    ) -> SpokeResult<schemas::MemoryRecordsUpdateResponse> {
+        use schemas::memory_records_update_request::MemoryRecordsUpdateRequest as UpdateRequest;
+
+        let principal_id = principal_id(principal);
+        if let SpokeResult::Reject(reject) =
+            validate_memory_records_update(&request, policy::max_content_bytes())
+        {
+            return deny(&ProviderError::from_reject(reject, "content"));
+        }
+        let (space_id, record_id, expected, content, kind) = match &request {
+            UpdateRequest::Variant0 {
+                content,
+                expected_revision,
+                record_id,
+                space_id,
+                ..
+            } => match to_json(content, "record content") {
+                Ok(content) => (
+                    space_id.as_str(),
+                    record_id.as_str(),
+                    *expected_revision,
+                    Some(content),
+                    None,
+                ),
+                Err(error) => return deny(&error),
+            },
+            UpdateRequest::Variant1 {
+                content,
+                expected_revision,
+                kind,
+                record_id,
+                space_id,
+                ..
+            } => {
+                let content = match content {
+                    Some(content) => match to_json(content, "record content") {
+                        Ok(content) => Some(content),
+                        Err(error) => return deny(&error),
+                    },
+                    None => None,
+                };
+                (
+                    space_id.as_str(),
+                    record_id.as_str(),
+                    *expected_revision,
+                    content,
+                    Some(kind.as_str()),
+                )
+            }
+        };
+        let op = OP_RECORDS_UPDATE;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let ctx = OpContext {
+            space_id,
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(match &request {
+                UpdateRequest::Variant0 {
+                    idempotency_key, ..
+                }
+                | UpdateRequest::Variant1 {
+                    idempotency_key, ..
+                } => idempotency_key.as_str(),
+            }),
+            payload_digest: &digest,
+        };
+        let admission = Admission {
+            op,
+            space_id,
+            principal_id,
+            coverage: Coverage::Record {
+                record_id,
+                capabilities: &["records_write"],
+                target: None,
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        let stored = match adopt_subject {
+            Some(subject_id) => {
+                self.store
+                    .update_legacy_record(
+                        &ctx,
+                        &admission,
+                        subject_id,
+                        record_id,
+                        expected_revision(expected),
+                        content.as_ref(),
+                        kind,
+                    )
+                    .await
+            }
+            None => {
+                self.store
+                    .update_record(
+                        &ctx,
+                        &admission,
+                        record_id,
+                        expected_revision(expected),
+                        content.as_ref(),
+                        kind,
+                    )
+                    .await
+            }
+        };
+        match stored {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    async fn delete_record_with(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryRecordsDeleteRequest,
+        adopt_subject: Option<&str>,
+    ) -> SpokeResult<schemas::MemoryRecordsDeleteResponse> {
+        let principal_id = principal_id(principal);
+        let op = OP_RECORDS_DELETE;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Record {
+                record_id: request.record_id.as_str(),
+                capabilities: &["records_write"],
+                target: None,
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        let stored = match adopt_subject {
+            Some(subject_id) => {
+                self.store
+                    .delete_legacy_record(
+                        &ctx,
+                        &admission,
+                        subject_id,
+                        request.record_id.as_str(),
+                        expected_revision(request.expected_revision),
+                        request.reason.as_deref(),
+                        principal_id,
+                    )
+                    .await
+            }
+            None => {
+                self.store
+                    .delete_record(
+                        &ctx,
+                        &admission,
+                        request.record_id.as_str(),
+                        expected_revision(request.expected_revision),
+                        request.reason.as_deref(),
+                        principal_id,
+                    )
+                    .await
+            }
+        };
+        match stored {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+}
+
+/// The §7.20 record list with the legacy bridge's projection made optional.
+///
+/// A provider-native read (`project_legacy = false`) serves the provider's own
+/// rows only: resolving a promoted memory by its authored slug must not parse
+/// an unrelated bearer file, because one malformed memory would then break the
+/// read of another (fix round 5, B2). Authorization, paging and the cursor are
+/// the list op's own either way.
+impl LocalMemoryProvider {
+    pub async fn list_records_scoped(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryRecordsListRequest,
+        project_legacy: bool,
+    ) -> SpokeResult<schemas::MemoryRecordsListResponse> {
+        use schemas::memory_records_list_request::ReadSelection;
+
+        let principal_id = principal_id(principal);
+        if let SpokeResult::Reject(reject) =
+            validate_memory_records_list(&request, policy::MAX_PAGE_SIZE_BOUND)
+        {
+            return deny(&ProviderError::from_reject(reject, "selection"));
+        }
+        let selection = match &request.selection {
+            ReadSelection::SubjectAll => Selection::SubjectAll,
+            ReadSelection::SharedOnly => Selection::SharedOnly,
+            ReadSelection::SelectedContexts {
+                context_ids,
+                include_shared,
+            } => Selection::SelectedContexts {
+                context_ids: context_ids.clone(),
+                include_shared: include_shared.unwrap_or(false),
+            },
+        };
+        let filter: Option<Vec<String>> = request
+            .filter
+            .as_ref()
+            .map(|filter| filter.source_context_ids.clone());
+        let scope = format!(
+            "{}|sel={}|filter={}|kinds={}|tombstoned={}",
+            cursor_scope(
+                OP_RECORDS_LIST,
+                Some(request.space_id.as_str()),
+                Some(request.subject_id.as_str()),
+                None,
+            ),
+            selection_key(&selection),
+            filter_key(filter.as_deref()),
+            request.kinds.join(","),
+            request.include_tombstoned
+        );
+        // §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its marker
+        // is verified against the snapshot the page was read in.
+        let (offset, claimed) =
+            match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
+                Ok(page) => page,
+                Err(error) => return deny(&error),
+            };
+        let (rows, marker, total) = match self
+            .store
+            .records(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                &selection,
+                filter.as_deref(),
+                &request.kinds,
+                request.include_tombstoned,
+                RecordRead::List,
+                principal_id,
+                Some((page_limit(request.limit), offset)),
+                project_legacy,
+            )
+            .await
+        {
+            Ok(page) => page,
+            Err(error) => return deny(&store_error(error)),
+        };
+        if let Err(error) = verify_cursor(claimed.as_deref(), &marker) {
+            return deny(&error);
+        }
+        let consumed = offset.saturating_add(u64::try_from(rows.len()).unwrap_or(u64::MAX));
+        let next = (consumed < total).then_some(consumed);
+        let mut bodies = Vec::with_capacity(rows.len());
+        for row in &rows {
+            match record_body(row) {
+                Ok(body) => bodies.push(body),
+                Err(error) => return deny(&error),
+            }
+        }
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
+        respond(json!({
+            "records": bodies,
+            "total_authorized": total,
+            "next_cursor": next_cursor,
+        }))
+    }
+}
+
+impl LocalMemoryProvider {
+    /// §7.25–§7.27 reflection admission (N4-R Task 2): current `reflect`
+    /// coverage over the selection (§6.5 — one grant, never unioned). The
+    /// caller's grant set is read fresh (`grants_page_for`), so a revocation
+    /// or expiry that landed before this call is observed here — the
+    /// reflection surface never answers from a stale grant snapshot, and a
+    /// refusal discloses nothing but the refusal (no existence oracle for
+    /// foreign ids).
+    ///
+    /// The §8.2 freeze classification is not part of this facade check: it
+    /// lives in the store's transaction gate behind replay resolution, so an
+    /// authorized same-key retry discloses an already-committed receipt even
+    /// while the space is frozen (§7.0.5/MEM-R021/C-036).
+    ///
+    /// `simplify:` this provider-level coverage check samples the wall clock,
+    /// not the store's proof-seam clock; the authoritative store-clock
+    /// authorization lands with the reflection read/generate flows (plan
+    /// Tasks 3–4), which also move it inside the effect transaction. Upgrade:
+    /// when Task 4's transactional recheck lands, this pre-store gate either
+    /// moves with it or is superseded by it.
+    async fn reflect_admission(
+        &self,
+        principal: &schemas::Principal,
+        space_id: &str,
+        subject_id: &str,
+        selection: Option<&Selection>,
+    ) -> Result<(), ProviderError> {
+        let principal_id = principal_id(principal);
+        let (rows, ..) = self
+            .store
+            .grants_page_for(principal_id, space_id, None, None, None)
+            .await
+            .map_err(store_error)?;
+        let mut grants = Vec::with_capacity(rows.len());
+        for row in &rows {
+            grants.push(grant_wire(row)?);
+        }
+        let requirement = reflect_requirement(selection, subject_id);
+        let now = Utc::now();
+        if !grants
+            .iter()
+            .any(|grant| grant_covers(grant, principal_id, space_id, now, &requirement))
+        {
+            return Err(ProviderError::NotAuthorized(format!(
+                "principal {principal_id} holds no reflect grant covering the selection \
+                 in space {space_id}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl MemoryPort for LocalMemoryProvider {
+    async fn describe(
+        &self,
+        _principal: &schemas::Principal,
+        _request: schemas::MemoryDescribeRequest,
+    ) -> SpokeResult<schemas::MemoryDescribeResponse> {
+        respond(describe_body(self.reflections))
+    }
+
+    async fn list_spaces(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemorySpacesListRequest,
+    ) -> SpokeResult<schemas::MemorySpacesListResponse> {
+        let principal_id = principal_id(principal);
+        if let SpokeResult::Reject(reject) =
+            validate_memory_spaces_list(&request, policy::MAX_PAGE_SIZE_BOUND)
+        {
+            return deny(&ProviderError::from_reject(reject, "limit"));
+        }
+        let (spaces, marker) = match self.store.visible_spaces(principal_id).await {
+            Ok(page) => page,
+            Err(error) => return deny(&store_error(error)),
+        };
+        let scope = cursor_scope("memory.spaces.list", None, None, None);
+        let offset = match decode_cursor(
+            cursor_text(request.cursor.as_ref()),
+            principal_id,
+            &scope,
+            &marker,
+        ) {
+            Ok(offset) => offset,
+            Err(error) => return deny(&error),
+        };
+        let (page, next) = page(spaces, page_limit(request.limit), offset);
+        let bodies: Vec<Value> = page.iter().map(space_body).collect();
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
+        respond(json!({ "spaces": bodies, "next_cursor": next_cursor }))
+    }
+
+    async fn freeze_space(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemorySpacesFreezeRequest,
+    ) -> SpokeResult<schemas::MemorySpacesFreezeResponse> {
+        self.change_space_status(
+            principal,
+            SpaceTransition::Freeze,
+            request.space_id.as_str(),
+            expected_revision(request.expected_revision),
+            Some(request.idempotency_key.as_str()),
+            &request,
+        )
+        .await
+    }
+
+    async fn unfreeze_space(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemorySpacesUnfreezeRequest,
+    ) -> SpokeResult<schemas::MemorySpacesUnfreezeResponse> {
+        self.change_space_status(
+            principal,
+            SpaceTransition::Unfreeze,
+            request.space_id.as_str(),
+            expected_revision(request.expected_revision),
+            Some(request.idempotency_key.as_str()),
+            &request,
+        )
+        .await
+    }
+
+    async fn ensure_subject(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemorySubjectsEnsureRequest,
+    ) -> SpokeResult<schemas::MemorySubjectsEnsureResponse> {
+        let principal_id = principal_id(principal);
+        let op = OP_ENSURE_SUBJECT;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let kind = request
+            .kind
+            .as_ref()
+            .map(|kind| (kind.ns.as_str(), kind.id.as_str()));
+        // The sole `idempotency_key` exemption (§7.0.5): a keyless receipt sits
+        // outside the dedup namespace, so every ensure records its own outcome.
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: None,
+            payload_digest: &digest,
+        };
+        let requirements = [GrantRequirement {
+            capability: "capture",
+            subject_id: Some(request.subject_id.as_str()),
+            context_ids: Vec::new(),
+            reads_shared: false,
+            subject_all: false,
+        }];
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            // §7.5: a fenced or archived subject rejects its writes, checked in
+            // the same transaction as the get-or-create.
+            subject_gate: Some(request.subject_id.as_str()),
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        match self
+            .store
+            .ensure_subject(&ctx, &admission, request.subject_id.as_str(), kind)
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    async fn get_subject(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemorySubjectsGetRequest,
+    ) -> SpokeResult<schemas::MemorySubjectsGetResponse> {
+        let principal_id = principal_id(principal);
+        // §7.6/S-4: the "any live grant" test and the subject row are one read
+        // transaction on the store's clock.
+        match self
+            .store
+            .subject_for_read(
+                principal_id,
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+            )
+            .await
+        {
+            Ok(subject) => match subject_body(&subject) {
+                Ok(body) => respond(json!({ "subject": body })),
+                Err(error) => deny(&error),
+            },
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    async fn fence_subject(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemorySubjectsFenceRequest,
+    ) -> SpokeResult<schemas::MemorySubjectsFenceResponse> {
+        let principal_id = principal_id(principal);
+        if let SpokeResult::Reject(reject) = validate_memory_subjects_fence(&request) {
+            return deny(&ProviderError::from_reject(reject, "target"));
+        }
+        let op = OP_FENCE_SUBJECT;
+        let target = match &request.target {
+            schemas::memory_subjects_fence_request::Target::Subject => FenceTarget::Subject,
+            schemas::memory_subjects_fence_request::Target::Context(context_id) => {
+                FenceTarget::Context(context_id.as_str())
+            }
+        };
+        let action = match request.action {
+            schemas::memory_subjects_fence_request::Action::Fence => FenceAction::Fence,
+            schemas::memory_subjects_fence_request::Action::Unfence => FenceAction::Unfence,
+            schemas::memory_subjects_fence_request::Action::Archive => FenceAction::Archive,
+        };
+        // §6.5/§7.7: authorization is bound to what the op actually touches — a
+        // context fence needs coverage of THAT context, and a whole-subject
+        // fence/archive needs unrestricted coverage of the subject.
+        let mut requirement = admin_requirement(Some(request.subject_id.as_str()));
+        match &target {
+            FenceTarget::Subject => requirement.subject_all = true,
+            FenceTarget::Context(context_id) => {
+                requirement.context_ids = vec![(*context_id).to_string()];
+            }
+        }
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        let requirements = [requirement];
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        let fence = Fence {
+            subject_id: request.subject_id.as_str(),
+            target,
+            action,
+            expected_revision: expected_revision(request.expected_revision),
+        };
+        match self.store.fence_subject(&ctx, &admission, fence).await {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    async fn list_grants(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryGrantsListRequest,
+    ) -> SpokeResult<schemas::MemoryGrantsListResponse> {
+        let principal_id = principal_id(principal);
+        if let SpokeResult::Reject(reject) =
+            validate_memory_grants_list(&request, policy::MAX_PAGE_SIZE_BOUND)
+        {
+            return deny(&ProviderError::from_reject(reject, "limit"));
+        }
+        let principal_filter = request.principal_id.as_ref().map(|value| value.as_str());
+        let subject_filter = request.subject_id.as_ref().map(|value| value.as_str());
+        let limit = page_limit(request.limit);
+        // §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its claim is
+        // verified after the read, because the scope names the principal filter
+        // that read resolves.
+        let page_offset = match claimed_offset(cursor_text(request.cursor.as_ref())) {
+            Ok(offset) => offset,
+            Err(error) => return deny(&error),
+        };
+        // §7.0.7/§7.8/S-4: the `admin` verdict, the page and its invalidation
+        // marker are ONE read transaction on the store's clock, and the returned
+        // filter is the one that read actually applied.
+        let (rows, marker, filter, more) = match self
+            .store
+            .grants_page_for(
+                principal_id,
+                request.space_id.as_str(),
+                subject_filter,
+                principal_filter,
+                Some((limit, page_offset)),
+            )
+            .await
+        {
+            Ok(page) => page,
+            Err(error) => return deny(&store_error(error)),
+        };
+        let scope = cursor_scope(
+            "memory.grants.list",
+            Some(request.space_id.as_str()),
+            subject_filter,
+            filter.as_deref(),
+        );
+        let offset = match decode_cursor(
+            cursor_text(request.cursor.as_ref()),
+            principal_id,
+            &scope,
+            &marker,
+        ) {
+            Ok(offset) => offset,
+            Err(error) => return deny(&error),
+        };
+        let next = more.then(|| offset.saturating_add(limit));
+        let mut bodies = Vec::with_capacity(rows.len());
+        for row in &rows {
+            match grant_body(row) {
+                Ok(body) => bodies.push(body),
+                Err(error) => return deny(&error),
+            }
+        }
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
+        respond(json!({ "grants": bodies, "next_cursor": next_cursor }))
+    }
+
+    async fn grant(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryGrantsGrantRequest,
+    ) -> SpokeResult<schemas::MemoryGrantsGrantResponse> {
+        let principal_id = principal_id(principal);
+        if let SpokeResult::Reject(reject) = validate_memory_grants_grant(&request) {
+            return deny(&ProviderError::from_reject(reject, "capabilities"));
+        }
+        let GrantFacts {
+            space_id,
+            grantee,
+            capabilities,
+            context_ids,
+            shared_access,
+            subject_id,
+            expires_at,
+            idempotency_key,
+        } = grant_facts(&request);
+        let capability_refs: Vec<&str> = capabilities.iter().map(String::as_str).collect();
+        let issued = IssuedGrant {
+            capabilities: &capability_refs,
+            subject_id,
+            context_ids: &context_ids,
+            shared_access,
+            expires_at,
+        };
+        let digest = match payload_digest(OP_GRANT, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let grant_id = format!("grt_{}", uuid::Uuid::new_v4().simple());
+        let ctx = OpContext {
+            space_id,
+            requester_principal_id: principal_id,
+            op: OP_GRANT,
+            idempotency_key: Some(idempotency_key),
+            payload_digest: &digest,
+        };
+        let new_grant = NewGrant {
+            grant_id: &grant_id,
+            space_id,
+            subject_id,
+            principal_id: grantee,
+            capabilities: &capabilities,
+            context_ids: &context_ids,
+            shared_access,
+            expires_at,
+        };
+        // §7.9: admission uses the ISSUED grant's scope — a subject-scoped admin
+        // delegates within its own subject — and non-amplification is evaluated
+        // on the same grant set, inside the transaction that inserts the grant.
+        let requirements = [admin_requirement(subject_id)];
+        let admission = Admission {
+            op: OP_GRANT,
+            space_id,
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: Some(&issued),
+            subject_gate: subject_id,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        match self.store.insert_grant(&ctx, &admission, &new_grant).await {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    async fn revoke_grant(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryGrantsRevokeRequest,
+    ) -> SpokeResult<schemas::MemoryGrantsRevokeResponse> {
+        let principal_id = principal_id(principal);
+        let op = OP_REVOKE_GRANT;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        // `memory.grants.revoke` is on the §8.2 allowlist, so an incident can be
+        // contained while the space is frozen.
+        let requirements = [admin_requirement(None)];
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        match self
+            .store
+            .revoke_grant(
+                &ctx,
+                &admission,
+                request.grant_id.as_str(),
+                expected_revision(request.expected_revision),
+            )
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    // ── Content families ───────────────────────────────────────────────
+    //
+    // Every mutating op here follows the same §7.0 discipline as the control
+    // families:
+    // validate the request against the protocol's own rules, bind the payload
+    // digest, run admission (coverage → dedup probe → lifecycle gates) inside
+    // the effect transaction, and answer with the committed receipt whose
+    // `result` is content-free (MEM-R022). Reads authorize first and page what
+    // authorization left (MEM-R006).
+
+    async fn capture(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryCaptureRequest,
+    ) -> SpokeResult<schemas::MemoryCaptureResponse> {
+        match self.capture_request(principal, request, None, None).await {
+            Ok(result) => result,
+            // Only a named binding can fail this way, and this entry point
+            // names none.
+            Err(error) => deny(&store_error(StoreError::Database(error))),
+        }
+    }
+
+    async fn list_candidates(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryCandidatesListRequest,
+    ) -> SpokeResult<schemas::MemoryCandidatesListResponse> {
+        let principal_id = principal_id(principal);
+        if let SpokeResult::Reject(reject) =
+            validate_memory_candidates_list(&request, policy::MAX_PAGE_SIZE_BOUND)
+        {
+            return deny(&ProviderError::from_reject(reject, "limit"));
+        }
+        let status = request.status.map(|status| status.to_string());
+        let scope = format!(
+            "{}|status={}",
+            cursor_scope(
+                OP_CANDIDATES_LIST,
+                Some(request.space_id.as_str()),
+                Some(request.subject_id.as_str()),
+                None,
+            ),
+            status.as_deref().unwrap_or("*")
+        );
+        // §7.0.7/MEM-R026: the cursor's offset selects the authorized page; its
+        // marker is verified against the snapshot the page was read in.
+        let (offset, claimed) =
+            match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
+                Ok(page) => page,
+                Err(error) => return deny(&error),
+            };
+        let limit = page_limit(request.limit);
+        let (rows, marker, more) = match self
+            .store
+            .candidates(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                status.as_deref(),
+                principal_id,
+                Some((limit, offset)),
+            )
+            .await
+        {
+            Ok(page) => page,
+            Err(error) => return deny(&store_error(error)),
+        };
+        if let Err(error) = verify_cursor(claimed.as_deref(), &marker) {
+            return deny(&error);
+        }
+        let next = more.then(|| offset.saturating_add(limit));
+        let mut bodies = Vec::with_capacity(rows.len());
+        for row in &rows {
+            match candidate_body(row) {
+                Ok(body) => bodies.push(body),
+                Err(error) => return deny(&error),
+            }
+        }
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
+        respond(json!({ "candidates": bodies, "next_cursor": next_cursor }))
+    }
+
+    async fn get_candidate(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryCandidatesGetRequest,
+    ) -> SpokeResult<schemas::MemoryCandidatesGetResponse> {
+        let row = match self
+            .store
+            .candidate_for_read(
+                request.space_id.as_str(),
+                request.candidate_id.as_str(),
+                principal_id(principal),
+            )
+            .await
+        {
+            Ok(row) => row,
+            Err(error) => return deny(&store_error(error)),
+        };
+        match row {
+            Some(row) => match candidate_body(&row) {
+                Ok(body) => respond(json!({ "candidate": body })),
+                Err(error) => deny(&error),
+            },
+            None => deny(&ProviderError::NotFound(format!(
+                "candidate {}",
+                request.candidate_id.as_str()
+            ))),
+        }
+    }
+
+    async fn dismiss_candidate(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryCandidatesDismissRequest,
+    ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
+        // Whichever op consumes a candidate, it holds the owning bearer's
+        // disposition section (fix round 3, finding F1): the legacy review drain
+        // holds the same section across its consumed-check and classification.
+        let _disposition = match self
+            .candidate_disposition(request.space_id.as_str(), request.candidate_id.as_str())
+            .await
+        {
+            Ok(section) => section,
+            Err(error) => return deny(&error),
+        };
+        let principal_id = principal_id(principal);
+        let op = OP_CANDIDATES_DISMISS;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        // §7.14: `review` covering the candidate's immutable `capture_scope`.
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Candidate {
+                candidate_id: request.candidate_id.as_str(),
+                capabilities: &["review"],
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        match self
+            .store
+            .dismiss_candidate(
+                &ctx,
+                &admission,
+                request.candidate_id.as_str(),
+                expected_revision(request.expected_revision),
+            )
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    async fn review_candidate(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryCandidatesReviewRequest,
+    ) -> SpokeResult<schemas::MemoryCandidatesReviewResponse> {
+        if let SpokeResult::Reject(reject) = validate_memory_candidates_review(&request) {
+            return deny(&ProviderError::from_reject(reject, "decision"));
+        }
+        // A review consumes the candidate exactly as a dismissal does, so it
+        // takes the owning bearer's disposition section too (fix round 3,
+        // finding F1).
+        let _disposition = match self
+            .candidate_disposition(request.space_id.as_str(), request.candidate_id.as_str())
+            .await
+        {
+            Ok(section) => section,
+            Err(error) => return deny(&error),
+        };
+        self.review_committed(principal_id(principal), &request, None)
+            .await
+    }
+
+    async fn create_record(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryRecordsCreateRequest,
+    ) -> SpokeResult<schemas::MemoryRecordsCreateResponse> {
+        let principal_id = principal_id(principal);
+        if let SpokeResult::Reject(reject) =
+            validate_memory_records_create(&request, policy::max_content_bytes())
+        {
+            return deny(&ProviderError::from_reject(reject, "content"));
+        }
+        let op = OP_RECORDS_CREATE;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        let subject_id = request.subject_id.as_str();
+        let placement = match &request.scope {
+            schemas::memory_records_create_request::PlacementScope::Shared => Placement {
+                visibility: Placement::SHARED,
+                context_id: None,
+            },
+            schemas::memory_records_create_request::PlacementScope::Context(context_id) => {
+                Placement {
+                    visibility: Placement::CONTEXT,
+                    context_id: Some(context_id.as_str()),
+                }
+            }
+        };
+        let requirements = [placement_requirement(
+            "records_write",
+            subject_id,
+            placement,
+        )];
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: Some(subject_id),
+            placement_gate: Some(placement),
+            freeze_gated: true,
+        };
+        let content = match to_json(&request.content, "record content") {
+            Ok(content) => content,
+            Err(error) => return deny(&error),
+        };
+        // spoke-schemas 0.16.0: request anchors became Option<...> (serialized
+        // null when absent); the stored provenance keeps the published array
+        // shape (may be empty), not null.
+        let anchors = match to_json(&request.anchors, "record anchors") {
+            Ok(Value::Null) => json!([]),
+            Ok(anchors) => anchors,
+            Err(error) => return deny(&error),
+        };
+        // §6.6/§10: `captured_by`/`captured_at` are provider-populated; the
+        // context claims are recorded verbatim and never authorize anything.
+        let provenance = json!({
+            "source_context_ids": request.source_context_ids.unwrap_or_default(),
+            "anchors": anchors,
+            "captured_by": principal_id,
+            "captured_at": storage::timestamp(Utc::now()),
+        });
+        match self
+            .store
+            .create_record(
+                &ctx,
+                &admission,
+                subject_id,
+                placement,
+                request.kind.as_str(),
+                &content,
+                &provenance,
+            )
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    async fn get_record(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryRecordsGetRequest,
+    ) -> SpokeResult<schemas::MemoryRecordsGetResponse> {
+        let row = match self
+            .store
+            .record_for_read(
+                request.space_id.as_str(),
+                request.record_id.as_str(),
+                principal_id(principal),
+            )
+            .await
+        {
+            Ok(row) => row,
+            Err(error) => return deny(&store_error(error)),
+        };
+        match row {
+            Some(row) => match record_body(&row) {
+                Ok(body) => respond(json!({ "record": body })),
+                Err(error) => deny(&error),
+            },
+            None => deny(&ProviderError::NotFound(format!(
+                "record {}",
+                request.record_id.as_str()
+            ))),
+        }
+    }
+
+    async fn update_record(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryRecordsUpdateRequest,
+    ) -> SpokeResult<schemas::MemoryRecordsUpdateResponse> {
+        self.update_record_with(principal, request, None).await
+    }
+
+    async fn delete_record(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryRecordsDeleteRequest,
+    ) -> SpokeResult<schemas::MemoryRecordsDeleteResponse> {
+        self.delete_record_with(principal, request, None).await
+    }
+
+    async fn list_records(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryRecordsListRequest,
+    ) -> SpokeResult<schemas::MemoryRecordsListResponse> {
+        self.list_records_scoped(principal, request, true).await
+    }
+
+    async fn promote_record(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryRecordsPromoteRequest,
+    ) -> SpokeResult<schemas::MemoryRecordsPromoteResponse> {
+        let principal_id = principal_id(principal);
+        let op = OP_RECORDS_PROMOTE;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        let target = match &request.target_scope {
+            schemas::memory_records_promote_request::PlacementScope::Shared => Placement {
+                visibility: Placement::SHARED,
+                context_id: None,
+            },
+            schemas::memory_records_promote_request::PlacementScope::Context(context_id) => {
+                Placement {
+                    visibility: Placement::CONTEXT,
+                    context_id: Some(context_id.as_str()),
+                }
+            }
+        };
+        // §7.21: `promote` + `records_write` over BOTH placements.
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Record {
+                record_id: request.record_id.as_str(),
+                capabilities: &["promote", "records_write"],
+                target: Some(target),
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        match self
+            .store
+            .promote_record(
+                &ctx,
+                &admission,
+                request.record_id.as_str(),
+                expected_revision(request.expected_revision),
+                target,
+                None,
+            )
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn recall(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryRecallRequest,
+    ) -> SpokeResult<schemas::MemoryRecallResponse> {
+        use schemas::memory_recall_request::ReadSelection;
+
+        let principal_id = principal_id(principal);
+        if let SpokeResult::Reject(reject) =
+            validate_memory_recall(&request, policy::MAX_PAGE_SIZE_BOUND)
+        {
+            return deny(&ProviderError::from_reject(reject, "budget"));
+        }
+        let selection = match &request.selection {
+            ReadSelection::SubjectAll => Selection::SubjectAll,
+            ReadSelection::SharedOnly => Selection::SharedOnly,
+            ReadSelection::SelectedContexts {
+                context_ids,
+                include_shared,
+            } => Selection::SelectedContexts {
+                context_ids: context_ids.clone(),
+                include_shared: include_shared.unwrap_or(false),
+            },
+        };
+        let filter: Option<Vec<String>> = request
+            .filter
+            .as_ref()
+            .map(|filter| filter.source_context_ids.clone());
+        // §9.1: authorization + selection + filter are applied by the read path,
+        // so the authorized set — never the raw table — is what gets ranked.
+        let (rows, marker, total) = match self
+            .store
+            .records(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                &selection,
+                filter.as_deref(),
+                &[],
+                false,
+                RecordRead::Recall,
+                principal_id,
+                None,
+                true,
+            )
+            .await
+        {
+            Ok(page) => page,
+            Err(error) => return deny(&store_error(error)),
+        };
+        // The recall budget is a byte/item bound over a Rust-ranked list.
+        let total = usize::try_from(total).unwrap_or(usize::MAX);
+        // §9.2: the query decides the ordering, so a cursor continues only the
+        // ranking it was minted under (MEM-R026).
+        let terms = policy::query_terms(request.query.as_deref().unwrap_or_default());
+        let scope = format!(
+            "{}|sel={}|filter={}|query={}",
+            cursor_scope(
+                OP_RECALL,
+                Some(request.space_id.as_str()),
+                Some(request.subject_id.as_str()),
+                None,
+            ),
+            selection_key(&selection),
+            filter_key(filter.as_deref()),
+            terms.join(",")
+        );
+        let offset = match decode_cursor(
+            cursor_text(request.cursor.as_ref()),
+            principal_id,
+            &scope,
+            &marker,
+        ) {
+            Ok(offset) => offset,
+            Err(error) => return deny(&error),
+        };
+        let (bodies, consumed, overflow_record_id) = match recall_ranked_bodies(
+            &rows,
+            &terms,
+            usize::try_from(offset).unwrap_or(total).min(total),
+            request.budget.max_items.get(),
+            request.budget.max_bytes.map(std::num::NonZero::get),
+        ) {
+            Ok(kept) => kept,
+            Err(error) => return deny(&error),
+        };
+        let next_cursor = (consumed < total)
+            .then(|| encode_cursor(principal_id, &scope, consumed as u64, &marker));
+        respond(json!({
+            "records": bodies,
+            "total_authorized": total,
+            "truncated": consumed < total,
+            "overflow_record_id": overflow_record_id,
+            "next_cursor": next_cursor,
+            "engine_policy_version": policy::ENGINE_POLICY_VERSION,
+        }))
+    }
+
+    async fn get_profile(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryProfileGetRequest,
+    ) -> SpokeResult<schemas::MemoryProfileGetResponse> {
+        let rows = match self
+            .store
+            .profiles(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                principal_id(principal),
+            )
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => return deny(&store_error(error)),
+        };
+        let Some(rows) = rows else {
+            return deny(&ProviderError::NotAuthorized(format!(
+                "principal {} holds no profile-visible grant on subject {}",
+                principal_id(principal),
+                request.subject_id.as_str()
+            )));
+        };
+        // §7.23: absent kinds are honest-empty, never invented and never an error.
+        let mut bodies = Vec::new();
+        for row in profile::select(rows, &request.profile_kinds) {
+            match profile_body(&row) {
+                Ok(body) => bodies.push(body),
+                Err(error) => return deny(&error),
+            }
+        }
+        respond(json!({ "profiles": bodies }))
+    }
+
+    async fn update_profile(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryProfileUpdateRequest,
+    ) -> SpokeResult<schemas::MemoryProfileUpdateResponse> {
+        let principal_id = principal_id(principal);
+        let op = OP_PROFILE_UPDATE;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let subject_id = request.subject_id.as_str();
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        let requirements = [GrantRequirement {
+            capability: "profile_write",
+            subject_id: Some(subject_id),
+            context_ids: Vec::new(),
+            reads_shared: false,
+            subject_all: false,
+        }];
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: Some(subject_id),
+            // Profiles are subject-level documents with no placement (§6.8).
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        let document = match to_json(&request.document, "profile document") {
+            Ok(document) => document,
+            Err(error) => return deny(&error),
+        };
+        match self
+            .store
+            .upsert_profile(
+                &ctx,
+                &admission,
+                subject_id,
+                request.profile_kind.as_str(),
+                request.expected_revision.map(expected_revision),
+                &document,
+                principal_id,
+            )
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    async fn get_receipt(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryReceiptsGetRequest,
+    ) -> SpokeResult<schemas::MemoryReceiptsGetResponse> {
+        // §7.28: the sole uncertainty-resolution channel (MEM-R010). Read-only
+        // (MEM-R011), content-free (§6.10/MEM-R022), and admissible only under the
+        // caller's *current* authorization (MEM-R018/R021).
+        let stored = match self
+            .store
+            .receipt(
+                principal_id(principal),
+                request.space_id.as_str(),
+                request.receipt_id.as_str(),
+            )
+            .await
+        {
+            Ok(stored) => stored,
+            Err(error) => return deny(&store_error(error)),
+        };
+        // §7.0.3 async receipts (reflection generate): a pending receipt IS the
+        // poll answer — generation in progress, no effect and no cost yet
+        // (C-015/C-070). Journaled pending states keep the uncertain-error
+        // answer below: their pending means an unpublished file effect, not
+        // work in progress.
+        if stored.status == RECEIPT_PENDING && stored.op == OP_REFLECTIONS_GENERATE {
+            return match pending_receipt_body(&stored) {
+                Ok(body) => respond(json!({ "receipt": body })),
+                Err(error) => deny(&error),
+            };
+        }
+        pending_receipt(&stored).map_or_else(
+            || match receipt_body(&stored) {
+                Ok(body) => respond(json!({ "receipt": body })),
+                Err(error) => deny(&error),
+            },
+            // §5.2 step 2: durable but not consistent yet — the channel answers
+            // the pending state instead of a terminal receipt.
+            |error| deny(&error),
+        )
+    }
+
+    // ── Sub-capability gated (N4-R reflection family) ──────────────────
+
+    async fn get_reflection_state(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryReflectionsStateRequest,
+    ) -> SpokeResult<schemas::MemoryReflectionsStateResponse> {
+        use schemas::memory_reflections_state_request::ReadSelection;
+        if !self.reflections {
+            return unsupported(OP_REFLECTIONS_STATE);
+        }
+        let selection = match &request.selection {
+            ReadSelection::SubjectAll => Selection::SubjectAll,
+            ReadSelection::SharedOnly => Selection::SharedOnly,
+            ReadSelection::SelectedContexts {
+                context_ids,
+                include_shared,
+            } => Selection::SelectedContexts {
+                context_ids: context_ids.clone(),
+                include_shared: include_shared.unwrap_or(false),
+            },
+        };
+        if let SpokeResult::Reject(reject) = validate_memory_reflections_state(&request) {
+            return deny(&ProviderError::from_validator(reject));
+        }
+        if let Some(error) = cognition_refusal(request.cognition_filter.is_some()) {
+            return deny(&error);
+        }
+        if let Err(error) = self
+            .reflect_admission(
+                principal,
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                Some(&selection),
+            )
+            .await
+        {
+            return deny(&error);
+        }
+        let principal_id = principal_id(principal);
+        let filter = request
+            .filter
+            .as_ref()
+            .map(|filter| filter.source_context_ids.clone());
+        // §7.25: the basis is published content-free and its digest is composed
+        // over the *current* authorized basis (C-042 — no eager invalidation
+        // writes exist), so every basis-affecting fact shows up at the next
+        // read. The basis and the visible reflections come from ONE store
+        // read — one snapshot (inspector round 2) — so `state_digest`,
+        // `stale` and `last_reflection_id` can never disagree about which
+        // basis a caller is looking at.
+        let (snapshot, rows) = match self
+            .store
+            .reflection_state_snapshot(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                &selection,
+                filter.as_deref(),
+                principal_id,
+            )
+            .await
+        {
+            Ok(parts) => parts,
+            Err(error) => return deny(&store_error(error)),
+        };
+        let state_digest = match reflection_state_digest(
+            &snapshot.records,
+            &snapshot.profile_revisions,
+            &selection,
+            filter.as_deref(),
+        ) {
+            Ok(digest) => digest,
+            Err(error) => {
+                return deny(&ProviderError::Internal(format!(
+                    "{OP_REFLECTIONS_STATE} basis digest: {error}"
+                )));
+            }
+        };
+        let (profile_kinds, missing_required_profile_kinds) =
+            profile_projection(&snapshot.profile_revisions);
+        // The read-side narrowing is the same one `list` uses: the newest
+        // envelope this caller may see under this selection and provenance
+        // filter, excluding tombstoned-basis rows (C-077) — read in the same
+        // snapshot as the basis above. With no envelope to compare against,
+        // `stale` is honestly false — there is no pinned basis that could
+        // have gone stale.
+        let last = rows.first();
+        let stale = last.is_some_and(|visible| visible.stale);
+        respond(json!({
+            "basis": {
+                "profile_kinds": profile_kinds,
+                "record_count": snapshot.records.len(),
+            },
+            "data_sufficiency": data_sufficiency(snapshot.records.len()),
+            "missing_required_profile_kinds": missing_required_profile_kinds,
+            "stale": stale,
+            "state_digest": state_digest,
+            "last_reflection_id": last.map(|visible| visible.row.reflection_id.clone()),
+        }))
+    }
+
+    async fn list_reflections(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryReflectionsListRequest,
+    ) -> SpokeResult<schemas::MemoryReflectionsListResponse> {
+        if !self.reflections {
+            return unsupported(OP_REFLECTIONS_LIST);
+        }
+        // An absent selection is a subject-wide listing, so its admission
+        // demands the same unrestricted grant an explicit `subject_all` does;
+        // a present one is covered like any other read selection (C-075).
+        let selection = request.selection.as_ref().map(wire_read_selection);
+        if let SpokeResult::Reject(reject) =
+            validate_memory_reflections_list(&request, policy::MAX_PAGE_SIZE_BOUND)
+        {
+            return deny(&ProviderError::from_validator(reject));
+        }
+        if let Some(error) = cognition_refusal(request.cognition_filter.is_some()) {
+            return deny(&error);
+        }
+        if let Err(error) = self
+            .reflect_admission(
+                principal,
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                selection.as_ref(),
+            )
+            .await
+        {
+            return deny(&error);
+        }
+        let principal_id = principal_id(principal);
+        let filter = request
+            .filter
+            .as_ref()
+            .map(|filter| filter.source_context_ids.clone());
+        // MEM-R026: the cursor binds everything that decides the page — the
+        // op, space, subject, the selection/filter resolution actually applied
+        // and the engine policy version. Any other request under it is
+        // `CURSOR_INVALID`.
+        let scope = format!(
+            "{}|sel={}|filter={}",
+            cursor_scope(
+                OP_REFLECTIONS_LIST,
+                Some(request.space_id.as_str()),
+                Some(request.subject_id.as_str()),
+                None,
+            ),
+            selection
+                .as_ref()
+                .map_or_else(|| "*".to_string(), selection_key),
+            filter_key(filter.as_deref()),
+        );
+        let (offset, claimed) =
+            match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
+                Ok(page) => page,
+                Err(error) => return deny(&error),
+            };
+        // §7.26: every envelope this caller may see under this selection,
+        // staleness recomputed per row against its pinned basis (the stored
+        // write-time cache is never served), tombstoned-basis rows excluded
+        // (C-077). The marker covers the whole visible set plus every record
+        // identity of the subject and the grant revisions, so any state or
+        // grant change invalidates the cursor with `CURSOR_INVALID`.
+        let (rows, marker, ..) = match self
+            .store
+            .reflections(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                selection.as_ref(),
+                filter.as_deref(),
+                principal_id,
+            )
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => return deny(&store_error(error)),
+        };
+        if let Err(error) = verify_cursor(claimed.as_deref(), &marker) {
+            return deny(&error);
+        }
+        let (page_rows, next) = page(rows, page_limit(request.limit), offset);
+        let mut bodies = Vec::with_capacity(page_rows.len());
+        for visible in &page_rows {
+            match reflection_body(&visible.row, visible.stale) {
+                Ok(body) => bodies.push(body),
+                Err(error) => return deny(&error),
+            }
+        }
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
+        respond(json!({
+            "reflections": bodies,
+            "next_cursor": next_cursor,
+        }))
+    }
+
+    async fn generate_reflection(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryReflectionsGenerateRequest,
+    ) -> SpokeResult<schemas::MemoryReflectionsGenerateResponse> {
+        if !self.reflections {
+            return unsupported(OP_REFLECTIONS_GENERATE);
+        }
+        let selection = wire_generate_selection(&request.selection);
+        if let SpokeResult::Reject(reject) = validate_memory_reflections_generate(&request) {
+            return deny(&ProviderError::from_validator(reject));
+        }
+        if let Some(error) = cognition_refusal(request.cognition_filter.is_some()) {
+            return deny(&error);
+        }
+        if !is_state_digest(request.expected_state_digest.as_str()) {
+            return deny(&ProviderError::InvalidInput {
+                field: "expected_state_digest".to_string(),
+                reason:
+                    "expected_state_digest must be the 64 lowercase hex digest the state op published"
+                        .to_string(),
+                details: None,
+            });
+        }
+        // Generate is the cost-bearing mutation: its admission checks current
+        // coverage before any receipt disclosure, but the §8.2 freeze gate
+        // does not run here — the store's transaction gate applies freeze to
+        // fresh work only, after replay resolution (§7.0.5/MEM-R021/C-036),
+        // so an already-committed generation's same-key retry stays
+        // recoverable while the space is frozen.
+        if let Err(error) = self
+            .reflect_admission(
+                principal,
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                Some(&selection),
+            )
+            .await
+        {
+            return deny(&error);
+        }
+        // The §7.0.3 two-transaction flow: the store commits the pending
+        // receipt (transaction 1 — the point of no return) inside the same
+        // transaction that rechecks authorization, the §7.25 CAS and the
+        // sufficiency verdicts, then generation runs deterministically over
+        // the pinned basis and transaction 2 commits exactly one terminal
+        // receipt. Every refusal below is pre-effect: no receipt, no cost.
+        let principal_id = principal_id(principal);
+        let subject_id = request.subject_id.as_str();
+        let op = OP_REFLECTIONS_GENERATE;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let requirements = [reflect_requirement(Some(&selection), subject_id)];
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: Some(subject_id),
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        // Verbatim pins for the columns Task 1 staged (see
+        // [`pinned_request_shapes`]).
+        let (selection_json, filter_json) = match pinned_request_shapes(&request) {
+            Ok(pins) => pins,
+            Err(error) => return deny(&error),
+        };
+        let filter = request
+            .filter
+            .as_ref()
+            .map(|filter| filter.source_context_ids.clone());
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        match self
+            .store
+            .generate_reflection(
+                &ctx,
+                &admission,
+                subject_id,
+                &selection,
+                filter.as_deref(),
+                &selection_json,
+                filter_json.as_deref(),
+                request.expected_state_digest.as_str(),
+            )
+            .await
+        {
+            Ok(receipt) => settle_generation_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    async fn create_export(
+        &self,
+        _principal: &schemas::Principal,
+        _request: schemas::MemoryExportsCreateRequest,
+    ) -> SpokeResult<schemas::MemoryExportsCreateResponse> {
+        unsupported("memory.exports.create")
+    }
+
+    async fn get_export(
+        &self,
+        _principal: &schemas::Principal,
+        _request: schemas::MemoryExportsGetRequest,
+    ) -> SpokeResult<schemas::MemoryExportsGetResponse> {
+        unsupported("memory.exports.get")
+    }
+
+    async fn stage_import(
+        &self,
+        _principal: &schemas::Principal,
+        _request: schemas::MemoryImportsStageRequest,
+    ) -> SpokeResult<schemas::MemoryImportsStageResponse> {
+        unsupported("memory.imports.stage")
+    }
+
+    async fn activate_import(
+        &self,
+        _principal: &schemas::Principal,
+        _request: schemas::MemoryImportsActivateRequest,
+    ) -> SpokeResult<schemas::MemoryImportsActivateResponse> {
+        unsupported("memory.imports.activate")
+    }
+
+    async fn discard_import(
+        &self,
+        _principal: &schemas::Principal,
+        _request: schemas::MemoryImportsDiscardRequest,
+    ) -> SpokeResult<schemas::MemoryImportsDiscardResponse> {
+        unsupported("memory.imports.discard")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        created_at_cmp, describe_body, policy, schemas, validate_memory_reflections_generate,
+        validate_memory_reflections_list, validate_memory_reflections_state, ProviderError,
+    };
+    use serde_json::json;
+    use spoke_operations::{SpokeReject, SpokeRejectCode, SpokeResult};
+    use std::cmp::Ordering;
+
+    fn dto<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
+        serde_json::from_value(value).expect("request payload deserializes")
+    }
+
+    /// The top-level request member a validator refusal publishes as
+    /// `details.field` (inspector round 2, may-fix): the provider maps the
+    /// member the validator actually refused, never a hardcoded
+    /// `"selection"`.
+    fn mapped_field(result: SpokeResult<()>) -> String {
+        let mapped = match result {
+            SpokeResult::Ok(()) => panic!("the malformed request must be refused"),
+            SpokeResult::Reject(reject) => ProviderError::from_validator(reject),
+        };
+        match mapped {
+            ProviderError::InvalidInput { field, .. } => field,
+            other => panic!("a validator refusal maps onto INVALID_INPUT: {other:?}"),
+        }
+    }
+
+    /// Per-entry-point mapping: over-bound `limit` → `limit` (agreeing with
+    /// `details.limit`, §7.0.7 and the `validate_memory_spaces_list`
+    /// exemplar); an empty selected-contexts selection → `selection`; an
+    /// empty provenance filter → `filter`.
+    #[test]
+    fn reflection_validator_refusals_name_the_refused_field() {
+        assert_eq!(
+            mapped_field(validate_memory_reflections_list(
+                &dto(json!({
+                    "space_id": "sp",
+                    "subject_id": "sbj",
+                    "limit": 101,
+                })),
+                policy::MAX_PAGE_SIZE_BOUND,
+            )),
+            "limit"
+        );
+        assert_eq!(
+            mapped_field(validate_memory_reflections_state(&dto(json!({
+                "space_id": "sp",
+                "subject_id": "sbj",
+                "selection": { "mode": "selected_contexts", "context_ids": [] },
+            })))),
+            "selection"
+        );
+        assert_eq!(
+            mapped_field(validate_memory_reflections_list(
+                &dto(json!({
+                    "space_id": "sp",
+                    "subject_id": "sbj",
+                    "filter": { "source_context_ids": [] },
+                })),
+                policy::MAX_PAGE_SIZE_BOUND,
+            )),
+            "filter"
+        );
+        assert_eq!(
+            mapped_field(validate_memory_reflections_generate(&dto(json!({
+                "space_id": "sp",
+                "subject_id": "sbj",
+                "selection": { "mode": "selected_contexts", "context_ids": [] },
+                "expected_state_digest":
+                    "a7b4c2d0e9f183726554433f2e1d0c9b8a7968594a3b2c1d0e9f887766554433",
+                "idempotency_key": "k",
+            })))),
+            "selection"
+        );
+    }
+
+    /// A validator reject that attaches no machine-readable field keeps the
+    /// `"selection"` default — the only shape reflection validators can
+    /// refuse without one today.
+    #[test]
+    fn validator_field_defaults_to_selection() {
+        let mapped = ProviderError::from_validator(SpokeReject {
+            code: SpokeRejectCode::InvalidInput,
+            message: "no field attached".to_owned(),
+            details: None,
+        });
+        assert!(matches!(
+            mapped,
+            ProviderError::InvalidInput { ref field, .. } if field == "selection"
+        ));
+    }
+
+    /// The wire request types accept the shapes the mapping tests build (a
+    /// deserialization regression guard for the tests above).
+    #[test]
+    fn reflection_request_shapes_deserialize() {
+        let _: schemas::MemoryReflectionsStateRequest = dto(json!({
+            "space_id": "sp",
+            "subject_id": "sbj",
+            "selection": { "mode": "subject_all" },
+        }));
+        let _: schemas::MemoryReflectionsListRequest = dto(json!({
+            "space_id": "sp",
+            "subject_id": "sbj",
+        }));
+    }
+
+    /// §4.1: the advertisement names the reflection sub-capability exactly when
+    /// the instance serves the three reflection ops — the same switch the
+    /// `memory.reflections.*` entry guard reads, so both shapes stay honest and
+    /// `spoke-memory-transfer` is never advertised.
+    #[test]
+    fn describe_advertises_reflection_exactly_when_it_is_served() {
+        for (reflections, capabilities) in [
+            (
+                true,
+                serde_json::json!(["spoke-memory", "spoke-memory-reflection"]),
+            ),
+            (false, serde_json::json!(["spoke-memory"])),
+        ] {
+            let body = describe_body(reflections);
+            assert_eq!(
+                body["capabilities"], capabilities,
+                "reflections served: {reflections}: {body}"
+            );
+            assert_eq!(body["engine_policy_version"], "nexus-local-memory-v1");
+        }
+    }
+
+    /// NXM-5 QC1-F1 fix round 2: the merged-read comparator must be a total
+    /// order for every supported legacy timestamp format. The reported cycle —
+    /// RFC 3339 second `A < B` (fractional RFC 3339) by parse, `B < C` and
+    /// `C < A` by pairwise text fallback — must not be expressible.
+    #[test]
+    fn created_at_cmp_is_a_total_order_for_mixed_legacy_formats() {
+        let values = [
+            "2026-01-01T00:00:00Z",     // A: RFC 3339, whole second
+            "2026-01-01T00:00:00.900Z", // B: RFC 3339 with fraction
+            "2026-01-01T00:00:00.950",  // C: bare-T form (no offset)
+            "2026-01-01 00:00:00.950",  // the same instant in the SQLite form
+            "2026-01-01T00:00:01Z",     // D: one second later
+            "not a timestamp",          // unparseable class
+            "also not a timestamp",     // unparseable class
+        ];
+
+        for left in values {
+            assert_eq!(created_at_cmp(left, left), Ordering::Equal);
+            for right in values {
+                assert_eq!(
+                    created_at_cmp(left, right),
+                    created_at_cmp(right, left).reverse(),
+                    "antisymmetry: {left} vs {right}"
+                );
+            }
+        }
+        for a in values {
+            for b in values {
+                for c in values {
+                    if created_at_cmp(a, b) == Ordering::Less
+                        && created_at_cmp(b, c) == Ordering::Less
+                    {
+                        assert_eq!(
+                            created_at_cmp(a, c),
+                            Ordering::Less,
+                            "transitivity: {a} < {b} < {c}"
+                        );
+                    }
+                }
+            }
+        }
+
+        // The reported triple now ranks by instant: A < B < C and therefore
+        // A < C, with no cycle.
+        assert_eq!(
+            created_at_cmp("2026-01-01T00:00:00Z", "2026-01-01T00:00:00.900Z"),
+            Ordering::Less
+        );
+        assert_eq!(
+            created_at_cmp("2026-01-01T00:00:00.900Z", "2026-01-01T00:00:00.950"),
+            Ordering::Less
+        );
+        assert_eq!(
+            created_at_cmp("2026-01-01T00:00:00Z", "2026-01-01T00:00:00.950"),
+            Ordering::Less
+        );
+
+        // One sort yields exactly one ranking, parseable instants first and
+        // the unparseable class last in raw-text order.
+        let mut sorted = values;
+        sorted.sort_by(|left, right| created_at_cmp(left, right));
+        assert_eq!(
+            sorted,
+            [
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00.900Z",
+                "2026-01-01T00:00:00.950",
+                "2026-01-01 00:00:00.950",
+                "2026-01-01T00:00:01Z",
+                "also not a timestamp",
+                "not a timestamp",
+            ]
+        );
+    }
+}

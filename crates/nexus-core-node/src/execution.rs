@@ -83,7 +83,7 @@ use nexus_contracts::{
     StrategyPatchStateRequest, StrategyPatchTransitionRequest, StrategySimulationRequest,
     UpdatePresetRequest, UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
 };
-use nexus_core::execution::ExecutionOpenError;
+use nexus_core::ExecutionOpenError;
 use nexus_core::{ComposeDiagnostic, CoreError};
 
 use crate::core_error;

@@ -1,0 +1,139 @@
+{
+  "assets": [
+    {
+      "content_hash": "396a9711201d3e3f8e2f813774c65ffa1e31ef7aa4e26414f795c150b359f3e6",
+      "id": "prompts/load-chapter.md",
+      "kind": "template",
+      "path": "prompts/load-chapter.md"
+    },
+    {
+      "content_hash": "6751700dc7651ea1fccc61adc869c9eefd9fe9d7f66971f8f4c091465432fc8e",
+      "id": "prompts/review-report.md",
+      "kind": "template",
+      "path": "prompts/review-report.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "load_chapter",
+      "id": "load_chapter->review",
+      "kind": "linear",
+      "to": "review"
+    },
+    {
+      "from": "review",
+      "id": "review->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "load_chapter",
+  "id": "novel-chapter-review",
+  "ir_version": 0,
+  "meta": {
+    "description": "FL-E review stage: novel/work/chapter-aware 五问 review that persists findings via the supervisor terminal hook",
+    "gates": [
+      {
+        "field": "work_profile",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "novel"
+      },
+      {
+        "field": "work_ref",
+        "kind": "work_field",
+        "op": "required"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt"
+    ],
+    "run_intents": [
+      "work_continue"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/load-chapter.md",
+            "vars": {
+              "body_path": "{{preset.input.body_path}}",
+              "chapter": "{{preset.input.chapter}}",
+              "chapter_label": "{{preset.input.chapter_label}}",
+              "creative_brief": "{{preset.input.creative_brief}}",
+              "inspiration_log": "{{preset.input.inspiration_log}}",
+              "outline_path": "{{preset.input.outline_path}}",
+              "rules_content": "{{preset.input.rules_content}}",
+              "slug": "{{preset.input.slug}}",
+              "work_id": "{{preset.input.work_id}}",
+              "work_ref": "{{preset.input.work_ref}}",
+              "world_kb_block": "{{preset.input.world_kb_block}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "load_chapter",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Surface chapter body + outline + rules + World KB context to the review agent"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/review-report.md",
+            "vars": {
+              "chapter": "{{preset.input.chapter}}",
+              "chapter_label": "{{preset.input.chapter_label}}",
+              "rules_content": "{{preset.input.rules_content}}",
+              "slug": "{{preset.input.slug}}",
+              "work_id": "{{preset.input.work_id}}",
+              "work_ref": "{{preset.input.work_ref}}",
+              "world_kb_block": "{{preset.input.world_kb_block}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "review",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Run structured 五问 review and write report under Logs/review/"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}

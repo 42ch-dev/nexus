@@ -16,8 +16,8 @@
 //! types are reachable through its `spoke_schemas` re-export, so this crate
 //! keeps exactly one spoke dependency edge.
 
-use nexus_core::memory_provider::LocalMemoryProvider;
 use nexus_creator_memory::bearer::MemoryBearerRef;
+use nexus_memory_provider::LocalMemoryProvider;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use spoke_operations::spoke_schemas as schemas;
@@ -3270,7 +3270,7 @@ async fn profile_admission_and_honest_empty_reads() {
 /// vocabulary losslessly — both directions, and nothing else is claimed.
 #[tokio::test]
 async fn nexus_kinds_round_trip_through_the_namespaced_mapping() {
-    use nexus_core::memory_provider::policy;
+    use nexus_memory_provider::policy;
 
     let mut seen = Vec::new();
     for kind in policy::NEXUS_MEMORY_KINDS {

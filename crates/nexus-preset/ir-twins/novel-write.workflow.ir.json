@@ -1,0 +1,101 @@
+{
+  "assets": [
+    {
+      "content_hash": "3b8b306ca98406eddede542008fb87b58074abd7cd5e97f74c98f63a08dc3421",
+      "id": "prompts/compose-exit.md",
+      "kind": "template",
+      "path": "prompts/compose-exit.md"
+    },
+    {
+      "content_hash": "b98a360210bf9b3b5447c9b93a3caa35aa11719fea8db1fa576ee32b06f4aaac",
+      "id": "prompts/compose.md",
+      "kind": "template",
+      "path": "prompts/compose.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "compose",
+      "id": "compose->done",
+      "kind": "default",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "compose",
+  "id": "novel-write",
+  "ir_version": 0,
+  "meta": {
+    "description": "Cron-triggered writing nudge: compose a focused prompt for the active Work without direct text write",
+    "gates": [
+      {
+        "field": "work_profile",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "novel"
+      },
+      {
+        "field": "work_ref",
+        "kind": "work_field",
+        "op": "required"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt",
+      "judge.llm"
+    ],
+    "run_intents": [
+      "work_continue"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/compose.md",
+            "vars": {
+              "current_chapter": "{{preset.input.current_chapter}}",
+              "topic": "{{preset.input.topic}}",
+              "work_id": "{{preset.input.work_id}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT1H",
+        "template": "prompts/compose-exit.md"
+      },
+      "id": "compose",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Compose a focused writing prompt from the active Work context"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}

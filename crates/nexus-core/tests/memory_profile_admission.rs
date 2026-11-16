@@ -15,8 +15,8 @@
 
 use std::path::PathBuf;
 
-use nexus_core::memory_provider::profile::SOUL_PROFILE_KIND;
-use nexus_core::memory_provider::LocalMemoryProvider;
+use nexus_memory_provider::profile::SOUL_PROFILE_KIND;
+use nexus_memory_provider::LocalMemoryProvider;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{json, Value};

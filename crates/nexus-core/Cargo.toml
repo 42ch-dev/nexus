@@ -18,7 +18,7 @@ default = []
 # v1.190 architecture §Cohorts — optional edges. The default/domain cohort
 # pulls none of these; each `dep:` edge stays inert until its feature is
 # requested. `compute` is never enabled by default/domain/Connect-host.
-provider-host = ["dep:nexus-agent-host", "dep:nexus-acp-host", "dep:nexus-provider-ports", "dep:futures-util"]
+provider-host = ["dep:nexus-agent-host", "dep:nexus-acp-host", "dep:nexus-provider-ports", "dep:futures-util", "nexus-execution?/provider-host"]
 # v1.207 P3-T1 (spec §B.1): the stable durable operation id layer alone. It
 # needs only the hashing edge, and the Connect host — which links neither
 # `execution` nor `compute` — resolves ids through it, so it is its own
@@ -43,13 +43,23 @@ execution = [
     # the atomic file apply. The rest are execution-only edges.
     "dep:base64",
     "dep:nix",
+    # v1.245 extraction: the durable run engine. The owner half composes it;
+    # nothing in `nexus-execution` names core.
+    "dep:nexus-execution",
 ]
 # The crash/rendezvous seams the workspace-commit recovery proofs drive. They
 # are compiled out of a production build and enabled by this package's own
 # dev-dependency self-reference, exactly as the daemon did before the move.
 # `nexus-local-db` carries the binding-removal write-contention report the D15
 # ordering proof waits on, so its seam rides the same switch.
-test-hooks = ["nexus-local-db/test-hooks"]
+test-hooks = [
+    "nexus-local-db/test-hooks",
+    "nexus-execution?/test-hooks",
+    # The provider's commit-boundary and publish-barrier seams: its own proofs
+    # live in its crate, but the integration targets here arm them on a pinned
+    # provider.
+    "nexus-memory-provider/test-hooks",
+]
 compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute"]
 # Connect-host product cohort (v1.207 P2): the WS accept loop, per-session
 # monitoring and the peer-tools event lane the shipped `nexus-runtime` /
@@ -96,8 +106,16 @@ nexus-spoke-adapter = { path = "../nexus-spoke-adapter", default-features = fals
 # v1.244 extraction: the Connect protocol stack. The edge runs
 # `nexus-core → nexus-connect` only; nothing inside the new crate names core.
 nexus-connect = { path = "../nexus-connect", optional = true }
+# v1.245 extraction: the durable run engine. The edge runs
+# `nexus-core → nexus-execution` only.
+nexus-execution = { path = "../nexus-execution", optional = true }
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
+# v1.245 extraction: the in-process memory provider. The edge runs
+# `nexus-core → nexus-memory-provider` only, and it is not optional — the
+# provider is opened on every core open (`service.rs` pins it), so the default
+# cohort resolves it permanently.
+nexus-memory-provider = { path = "../nexus-memory-provider" }
 nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }
 nexus-orchestration = { path = "../nexus-orchestration", optional = true }
 # Pattern registry reader + the candidate IR the Simulate walk reads.

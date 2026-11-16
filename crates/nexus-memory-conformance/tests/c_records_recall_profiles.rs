@@ -19,8 +19,8 @@ mod support;
 use std::sync::Arc;
 use std::time::Instant;
 
-use nexus_core::memory_provider::legacy;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
+use nexus_memory_provider::legacy;
 use serde_json::{json, Value};
 use tokio::net::{TcpListener, TcpStream};
 

@@ -31,9 +31,20 @@ pub struct RunDescriptorV1 {
     pub workspace_root: PathBuf,
     /// Preset identifier.
     pub preset_id: String,
-    /// Preset schema version.
+    /// Preset schema version of the **bundle** admission resolved.
+    ///
+    /// Provenance, not the executed identity: an applied run executes its IR
+    /// document, and the identity that governs it is `applied` (I-000443).
+    /// Kept required — and never nullable — because a no-apply run's frozen
+    /// source proof is these two fields, child runs inherit them, and the
+    /// `preset_version` column is `NOT NULL`; an applied run reads neither.
     pub preset_version: u32,
-    /// Content-addressed preset source identity (A2/A7).
+    /// Content-addressed **bundle** source identity (A2/A7).
+    ///
+    /// Provenance for an applied run, for the same reason as
+    /// [`Self::preset_version`]: admission did resolve this bundle, and only a
+    /// user bundle can carry the apply, but the bytes the run executes are the
+    /// applied document's. Recovery reads it on the no-apply arm only.
     pub source: PresetSourceIdentity,
     /// Frozen preset input map.
     pub input: serde_json::Map<String, serde_json::Value>,
@@ -45,6 +56,10 @@ pub struct RunDescriptorV1 {
     pub graph_name: Option<String>,
     /// Applied identity the run was admitted under: `None` when admission saw
     /// no apply, and for any row persisted before this field existed.
+    ///
+    /// When `Some`, THIS is the run's frozen source — the document it executes
+    /// — and `preset_version`/`source` beside it are the bundle admission
+    /// resolved (provenance), not the executed identity (I-000443).
     ///
     /// Frozen here for the same reason `preset_version`/`source` are: recovery
     /// resolves the strategy's **current** apply, so without this a re-apply

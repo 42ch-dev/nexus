@@ -1827,8 +1827,8 @@ fn transition_request(
 // read, the projected ids are deterministic, and nothing is written to the
 // legacy surfaces by a read.
 
-use nexus_core::memory_provider::legacy;
-use nexus_core::memory_provider::LocalMemoryProvider;
+use nexus_memory_provider::legacy;
+use nexus_memory_provider::LocalMemoryProvider;
 use spoke_operations::spoke_schemas as bridge_schemas;
 use spoke_operations::{MemoryPort, SpokeResult};
 

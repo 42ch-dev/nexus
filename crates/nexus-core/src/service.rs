@@ -24,10 +24,10 @@ use crate::actor_fence::ActorFenceTable;
 use crate::changes::read_changes;
 use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::memory_binding::MemoryProviderBinding;
-use crate::memory_provider::LocalMemoryProvider;
 use crate::memory_selection::MemoryProviderSelection;
 use crate::principal::Principal;
 use crate::world_kb::{candidates, graph, patch};
+use nexus_memory_provider::LocalMemoryProvider;
 
 /// Refuse an open whose config-resolved database is not the caller's bound one.
 ///
@@ -165,12 +165,12 @@ pub struct CoreInner {
     /// `start_execution` succeeds.
     ///
     /// The authoritative single-owner fence is NOT this slot — it is the
-    /// process-wide registry in `execution::lifecycle`, keyed by the
+    /// process-wide registry in `owner::lifecycle`, keyed by the
     /// workspace DB, because `CoreService::open` under `EngineOwner` joins
     /// this process's retained engine admission and would otherwise let a
     /// second core over the same file build a second engine.
     #[cfg(feature = "execution")]
-    pub(crate) execution: std::sync::Mutex<Option<Arc<crate::execution::ExecutionHandle>>>,
+    pub(crate) execution: std::sync::Mutex<Option<Arc<crate::owner::ExecutionHandle>>>,
     /// Per-service start fence (v1.195 P1-T2): the retained start task holds a
     /// SHARED guard for its whole start, and the close drain takes the EXCLUSIVE
     /// guard before it takes the execution slot and releases the pool, the
@@ -1044,7 +1044,7 @@ async fn close_drain(inner: Arc<CoreInner>) {
     // per-DB fence so a later open of the same DB can claim it.
     #[cfg(feature = "execution")]
     if let Some(handle) = execution_handle {
-        crate::execution::lifecycle::release_owner_slot(&inner.db_path, &handle);
+        crate::owner::lifecycle::release_owner_slot(&inner.db_path, &handle);
     }
     publish_close_report(&inner, settled_close_report());
 }

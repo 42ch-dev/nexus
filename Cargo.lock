@@ -3751,9 +3751,11 @@ dependencies = [
  "nexus-contracts",
  "nexus-core",
  "nexus-creator-memory",
+ "nexus-execution",
  "nexus-home-layout",
  "nexus-knowledge",
  "nexus-local-db",
+ "nexus-memory-provider",
  "nexus-moment-context-assembly",
  "nexus-narrative",
  "nexus-orchestration",
@@ -3857,6 +3859,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-execution"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "chrono",
+ "futures-util",
+ "graph-flow",
+ "hex",
+ "nexus-agent-host",
+ "nexus-contracts",
+ "nexus-creator-memory",
+ "nexus-execution",
+ "nexus-home-layout",
+ "nexus-local-db",
+ "nexus-orchestration",
+ "nexus-preset",
+ "nix 0.31.3",
+ "parking_lot 0.13.0",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2 0.11.1",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-home-layout"
 version = "0.1.0"
 dependencies = [
@@ -3927,6 +3962,7 @@ dependencies = [
  "nexus-contracts",
  "nexus-core",
  "nexus-home-layout",
+ "nexus-memory-provider",
  "nexus-provider-ports",
  "serde",
  "serde_jcs",
@@ -3938,6 +3974,25 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-memory-provider"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "nexus-creator-memory",
+ "nexus-home-layout",
+ "nexus-local-db",
+ "serde",
+ "serde_json",
+ "spoke-operations",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -4160,6 +4215,7 @@ dependencies = [
  "nexus-knowledge",
  "nexus-local-db",
  "nexus-memory-conformance",
+ "nexus-memory-provider",
  "nexus-module-manifest",
  "nexus-moment-context-assembly",
  "nexus-narrative",

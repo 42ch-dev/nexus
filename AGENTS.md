@@ -61,6 +61,7 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `crates/nexus-core/` | Transport-neutral World KB service + stored Actor/holder admission authority | [`crates/nexus-core/AGENTS.md`](crates/nexus-core/AGENTS.md) |
 | `crates/nexus-core-node/` | Thin Node-API cdylib composing core + provider ports; audited FFI boundary | [`crates/nexus-core-node/AGENTS.md`](crates/nexus-core-node/AGENTS.md) |
 | `crates/nexus-embedding/` | Embedding readiness contract (RN-OGA-3) — provider trait seam, identity tuple, fail-closed derived-index protocol; no OSS execution | [`crates/nexus-embedding/AGENTS.md`](crates/nexus-embedding/AGENTS.md) |
+| `crates/nexus-execution/` | Port-driven durable run engine — run driver/coordinator, scheduler ownership, run-event rings, workspace session/commit primitives | [`crates/nexus-execution/AGENTS.md`](crates/nexus-execution/AGENTS.md) |
 | `crates/nexus-home-layout/` | `~/.nexus42/` path layout | [`crates/nexus-home-layout/AGENTS.md`](crates/nexus-home-layout/AGENTS.md) |
 | `crates/nexus-local-db/` | Local database layer | [`crates/nexus-local-db/AGENTS.md`](crates/nexus-local-db/AGENTS.md) |
 | `crates/nexus-memory-conformance/` | Independent durable SPOKE memory provider fixture; test-only N3 conformance | [`crates/nexus-memory-conformance/AGENTS.md`](crates/nexus-memory-conformance/AGENTS.md) |
@@ -142,16 +143,17 @@ Releases are a **standalone process, fully decoupled from development**:
 
 **Rust `target/` disk hygiene:** `target/debug` is gitignored but grows without bound on macOS/Linux when the workspace is rebuilt often. Stale `.o` files under `target/debug/deps` and old `target/debug/incremental/*` hashes (e.g. after `pnpm run codegen`, crate renames, or repeated `cargo * --all`) are the usual cause — not a single bug. CI uses ephemeral runners + `rust-cache`; **local developers and agents must not mirror CI’s `--all` cadence during iteration.**
 
-**Preferred layout — repo [`.envrc`](.envrc) + [direnv](https://direnv.net/):** this is the supported way to relocate and share the Rust build cache. The `.envrc` auto-detects context: the **main checkout** and the **integration worktree** share the canonical `~/.cache/nexus-target` (no suffix); each **feature worktree** (`.worktrees/v1190-*`) gets an **isolated** `~/.cache/nexus-target-<dirname>` that is cleaned after merge.
+**Preferred layout — repo [`.envrc`](.envrc) + [direnv](https://direnv.net/):** this is the supported way to relocate and scope the Rust build cache. The `.envrc` auto-detects context: only the **main checkout** owns the canonical `~/.cache/nexus-target` (no suffix); **every worktree** — feature (`.worktrees/v1190-*`) and integration (`.worktrees/iteration-*`) alike — gets its **own isolated** `~/.cache/nexus-target-<dirname>`, cleaned after its own merge. No two checkouts share a target dir: cargo's fingerprint records the target dir and the package, never which checkout wrote the bytes, so a shared dir serves one checkout's fresh-looking `rmeta` to another's build.
 
 ```bash
 # After clone or `git worktree add` (once per checkout root):
 direnv allow
+# Preflight: fail loudly if this shell's CARGO_TARGET_DIR is not this checkout's:
+tooling/check-target-dir.sh
 # Confirm cargo sees the correct scoped dir:
 #
-#   main checkout:            ~/.cache/nexus-target
-#   integration worktree:     ~/.cache/nexus-target
-#   feature worktree <name>:  ~/.cache/nexus-target-<name>
+#   main checkout:                  ~/.cache/nexus-target
+#   worktree <name> (feature or integration): ~/.cache/nexus-target-<name>
 cargo metadata --no-deps --format-version 1 | jq -r .target_directory
 ```
 
@@ -187,13 +189,12 @@ rm -rf ~/.cache/nexus-target-<dirname>
 
 Then reclaim the worktree itself — non-forcibly, after the reviewed merge and the ownership release. See **Worktrees** below and [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) → **Worktree lifecycle and reclamation** for the full ordering and the two measured non-forced refusal routes.
 
-Integration verification (`cargo check --workspace`) runs from the integration worktree with the canonical `~/.cache/nexus-target` — it does not depend on any feature's cache.
+Integration verification (`cargo check --workspace`) runs from the integration worktree with its own `~/.cache/nexus-target-iteration-<id>` — it does not depend on, and never shares, any feature's cache.
 
 **Quick stats:** `du -sh ~/.cache/nexus-target-*` shows every feature's cache size at a glance.
 
 
-- **Cleanup (repo root; with direnv this is `$CARGO_TARGET_DIR` → `~/.cache/nexus-target`):**
-- **Anti-patterns:** Building without `CARGO_TARGET_DIR` / direnv (fills a per-checkout `target/` and breaks worktree sharing); running `cargo test --all` / `cargo clippy --all` on every small edit; skipping cleanup for months while agents run full-workspace builds; treating `target/` bloat as safe to commit (it is always gitignored — clean locally instead); merging a feature branch without cleaning its scoped target dir first; storing feature target dirs inside the worktree itself (they belong in `~/.cache/nexus-target-<name>` for centralized cleanup and statistics).
+- **Anti-patterns:** Building without `CARGO_TARGET_DIR` / direnv (fills a per-checkout `target/` inside the worktree); exporting the canonical `~/.cache/nexus-target` by hand in a worktree, or letting any two checkouts share one target dir (serves another checkout's `rmeta` to this build — `tooling/check-target-dir.sh` refuses it); running `cargo test --all` / `cargo clippy --all` on every small edit; skipping cleanup for months while agents run full-workspace builds; treating `target/` bloat as safe to commit (it is always gitignored — clean locally instead); merging a feature branch without cleaning its scoped target dir first; storing feature target dirs inside the worktree itself (they belong in `~/.cache/nexus-target-<name>` for centralized cleanup and statistics).
 
 ### Git & repository hygiene
 
@@ -241,8 +242,8 @@ Running the raw command in place of the initializer is not equivalent: the initi
 
   | Checkout | `CARGO_TARGET_DIR` |
   |----------|--------------------|
-  | main / integration worktree | `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target` — canonical, shared, and **never** a feature's removal target |
-  | feature worktree `<name>` | `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target-<dirname>` |
+  | main checkout | `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target` — canonical, and **never** a worktree's removal target |
+  | worktree `<name>` (feature or integration) | `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target-<dirname>` — that checkout's own, never another's |
 
 - **Reclaim inside your own slice.** Remove only the owned feature target before merging (with its temporary build products, in the same task/track slice); after the reviewed merge and the lawful release, remove that owned worktree non-forcibly and prune safely. Do not park a finished track for a later task. Six concurrent targets once consumed 98 GiB — that mandates immediate reclamation, not suppressed concurrency.
 - **Exit gates.** Each completed slice proves its own worktree/target/temp footprint is absent with raw command output; failed reclamation fails that exit gate. At final development convergence, when no peer feature remains, `git worktree list` shows only main + integration; after authorized integration cleanup, only main.

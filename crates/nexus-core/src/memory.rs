@@ -63,12 +63,12 @@ use nexus_creator_memory::bearer::MemoryBearerRef;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::memory_provider::legacy;
-use crate::memory_provider::policy;
-use crate::memory_provider::profile;
-use crate::memory_provider::{CaptureBinding, LegacyContentMigration, MemoryDisposition};
 use crate::principal::Principal;
 use crate::service::CoreService;
+use nexus_memory_provider::legacy;
+use nexus_memory_provider::policy;
+use nexus_memory_provider::profile;
+use nexus_memory_provider::{CaptureBinding, LegacyContentMigration, MemoryDisposition};
 use spoke_operations::{spoke_schemas, SpokeReject, SpokeRejectCode, SpokeResult};
 
 /// Per-Character review-call budget (mirrors the Creator review handler — the
@@ -1920,6 +1920,7 @@ impl MemoryAdapter {
             .local()?
             .soul_invalidation_binding(record_id)
             .await
+            .map_err(CoreError::from)
     }
 
     /// Clear that recovery row once the invalidation ran; a remote binding has
@@ -1932,6 +1933,7 @@ impl MemoryAdapter {
             .local()?
             .finish_soul_invalidation(record_id)
             .await
+            .map_err(CoreError::from)
     }
 }
 
@@ -5717,7 +5719,10 @@ impl CoreService {
             "principal_id": principal.creator_id(),
             "extensions": {},
         }))?;
-        provider.migrate_legacy(&spoke_principal).await
+        provider
+            .migrate_legacy(&spoke_principal)
+            .await
+            .map_err(CoreError::from)
     }
 }
 

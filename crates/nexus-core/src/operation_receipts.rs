@@ -32,7 +32,7 @@ fn receipt_internal(what: &str, e: impl std::fmt::Display) -> CoreError {
 /// The frozen `uncertain` refusal code (spec §C).
 ///
 /// Gated on the cohort that renders it today: the compute Run receipt
-/// recovery entry ([`crate::execution::compute::recover_stuck_compute_runs`]).
+/// recovery entry ([`crate::owner::compute::recover_stuck_compute_runs`]).
 /// The Connect write surface is the other intended consumer; the gate moves
 /// with that wiring.
 #[cfg(feature = "compute")]

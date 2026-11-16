@@ -10,7 +10,7 @@
 //! `legacy_unverified`) into a resumable verdict via the shared
 //! `nexus_orchestration::resume_rules` module; the in-memory half
 //! (`engine.has_runner`, runner reconstruction — the caller's job, e.g. the
-//! retained `nexus_core::execution::resume_driven_sessions` driver) is
+//! retained `nexus_execution::workflow::resume_driven_sessions` driver) is
 //! carried as the separate `runner_check` caveat, never folded into the
 //! verdict. v0 rows fall back to the conservative four-rule legacy cascade
 //! (`classify_resumability`) — terminal status, context readability, typed

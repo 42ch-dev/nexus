@@ -84,13 +84,13 @@ use nexus_contracts::daemon_api::characters::memory::capture_character_pending_r
 use nexus_contracts::daemon_api::characters::memory::review_character_memory_request::ReviewCharacterMemoryRequest;
 use nexus_contracts::generated::core::CoreCharacterTransitionRequest;
 use nexus_contracts::{CoreRegisterCreatorRequest, SetActiveWorkspaceRequest};
-use nexus_core::memory_provider::legacy;
 use nexus_core::{
     CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreResult, CoreService,
     MemoryProviderRefusal, MemoryProviderSelection, MemoryRevision, Principal,
     RemoteMemoryProviderSelection,
 };
 use nexus_memory_conformance::{FixtureMemoryProvider, PeerDirectory};
+use nexus_memory_provider::legacy;
 use serde_json::{json, Value};
 use spoke_connect::core::derive_peer_id_from_ed25519_pubkey;
 use spoke_connect::remote::{

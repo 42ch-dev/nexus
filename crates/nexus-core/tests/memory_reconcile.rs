@@ -23,7 +23,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use nexus_core::memory_provider::LocalMemoryProvider;
+use nexus_memory_provider::LocalMemoryProvider;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use spoke_operations::spoke_schemas as schemas;

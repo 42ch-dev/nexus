@@ -598,10 +598,13 @@ function cacheRootFrom(environment) {
   return { path: join(homedir(), '.cache') };
 }
 
-/** Exact `.envrc` mapping: `iteration-*` shares the canonical target, every feature gets `nexus-target-<dirname>`. */
+/**
+ * Exact `.envrc` mapping: every checkout with a worktree path owns `nexus-target-<dirname>`. The main
+ * checkout's canonical `nexus-target` is spelled by the callers that mean it, so no checkout is ever
+ * mapped onto another's cache — not even `iteration-*`.
+ */
 function expectedTargetFor(cacheRoot, worktreePath) {
-  const name = basename(worktreePath);
-  return join(cacheRoot, name.startsWith(INTEGRATION_CHECKOUT_PREFIX) ? CANONICAL_TARGET_NAME : `${FEATURE_TARGET_PREFIX}${name}`);
+  return join(cacheRoot, `${FEATURE_TARGET_PREFIX}${basename(worktreePath)}`);
 }
 
 // --- git facts ---------------------------------------------------------------------------
@@ -2176,11 +2179,13 @@ export async function sweepWorktreeInventory(options, environment = process.env)
     });
   refusals.push(...reconciliation.refusals);
 
-  // Protected checkouts: the main checkout plus the snapshot-recorded integration checkout.
+  // Protected checkouts: the main checkout plus the snapshot-recorded integration checkout. Each
+  // owns the target `.envrc` resolves for IT — the main checkout the canonical cache, the
+  // integration checkout its own `nexus-target-<basename>`. No two checkouts share a cache.
   const canonicalTarget = join(cacheRoot, CANONICAL_TARGET_NAME);
   const protectedCheckouts = [];
   if (mainRoot !== null) {
-    protectedCheckouts.push({ role: 'main', path: worktrees[0].path, branch: worktrees[0].branch, target: canonicalTarget, shared_canonical: true });
+    protectedCheckouts.push({ role: 'main', path: worktrees[0].path, branch: worktrees[0].branch, target: canonicalTarget });
   }
   if (declaration !== null) {
     if (declaration.type === 'iteration' && declaration.integration_worktree_path === undefined) {
@@ -2191,21 +2196,23 @@ export async function sweepWorktreeInventory(options, environment = process.env)
         role: 'integration',
         path: declaration.integration_worktree_path,
         branch: declaration.integration_branch ?? null,
-        target: canonicalTarget,
-        shared_canonical: true,
+        target: expectedTargetFor(cacheRoot, declaration.integration_worktree_path),
       });
     }
   }
-  const canonical = await pathBytes(canonicalTarget);
-  if (canonical.unreadable !== null) refuse('sweeper.refuse.path-unreadable', `canonical shared target ${canonicalTarget} cannot be read (${canonical.unreadable})`);
-  if (canonical.is_symlink) refuse('sweeper.refuse.canonical-symlink', `the canonical shared target ${canonicalTarget} is a symlink`);
-  protectedCheckouts.forEach((checkout, index) => {
-    checkout.target_present = canonical.exists;
-    checkout.target_is_symlink = canonical.is_symlink;
-    // Shared canonical occupancy is counted once, on the first protected checkout.
-    checkout.target_bytes = index === 0 ? canonical.bytes : null;
-    if (index > 0) checkout.target_bytes_counted_by = protectedCheckouts[0].role;
-  });
+  for (const checkout of protectedCheckouts) {
+    const measured = await pathBytes(checkout.target);
+    if (measured.unreadable !== null) refuse('sweeper.refuse.path-unreadable', `protected target ${checkout.target} of the ${checkout.role} checkout cannot be read (${measured.unreadable})`);
+    if (measured.is_symlink) {
+      refuse(
+        checkout.role === 'main' ? 'sweeper.refuse.canonical-symlink' : 'sweeper.refuse.symlink-path',
+        `the protected target ${checkout.target} of the ${checkout.role} checkout is a symlink`,
+      );
+    }
+    checkout.target_present = measured.exists;
+    checkout.target_is_symlink = measured.is_symlink;
+    checkout.target_bytes = measured.bytes;
+  }
 
   // Track facts.
   const trackFacts = [];
@@ -2229,7 +2236,12 @@ export async function sweepWorktreeInventory(options, environment = process.env)
       refuse('sweeper.refuse.cache-unreadable', `cache root ${cacheRoot} unreadable (${cacheEntries.error})`);
     }
   }
-  const ownedTargetKeys = new Set(await Promise.all(trackFacts.map(fact => pathKey(fact.target.path))));
+  // Every owned cache: each track's `.envrc` target AND every protected checkout's (the integration
+  // checkout now owns its own suffixed cache, so it is claimed, not an unclaimed footprint).
+  const ownedTargetKeys = new Set(await Promise.all([
+    ...trackFacts.map(fact => pathKey(fact.target.path)),
+    ...protectedCheckouts.map(checkout => pathKey(checkout.target)),
+  ]));
   for (const name of cacheEntries.names) {
     if (!name.startsWith(FEATURE_TARGET_PREFIX)) continue;
     const path = join(cacheRoot, name);
@@ -2249,10 +2261,11 @@ export async function sweepWorktreeInventory(options, environment = process.env)
       bytes: measured.bytes,
       is_symlink: measured.is_symlink,
       // `verdict` says what this tool may DO with the entry, `leftover` whether the convergence
-      // reasons must COUNT it. An iteration checkout shares the unsuffixed canonical cache, so an
-      // unclaimed `nexus-target-iteration-*` directory is never a deletion candidate — but it is
-      // still an unclaimed footprint, and reporting it as `protected` must not read as evidence
-      // that the cache converged. Both spellings are leftovers; neither is proposed.
+      // reasons must COUNT it. This integration checkout's own cache is claimed above; an unclaimed
+      // `nexus-target-iteration-*` names a checkout this workflow does not record — another
+      // iteration's live integration cache, or one left behind — so it is never a deletion
+      // candidate, but it is still an unclaimed footprint, and reporting it as `protected` must not
+      // read as evidence that the cache converged. Both spellings are leftovers; neither is proposed.
       verdict: integrationNamed ? 'protected' : 'unknown',
       leftover: true,
       reason: integrationNamed ? 'sweeper.unknown.integration-named' : 'sweeper.unknown.unclaimed-feature-target',

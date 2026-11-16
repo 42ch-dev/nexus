@@ -26,10 +26,10 @@ use nexus_contracts::generated::daemon_api::compute::{
 };
 use nexus_contracts::CreateWorkRequest;
 use nexus_contracts::ToolsApi;
-use nexus_core::execution::capabilities::{
+use nexus_core::owner::capabilities::{
     execute_tool, host_tool_registry, ToolContext, ToolRuntimeFacts,
 };
-use nexus_core::execution::compute::{
+use nexus_core::owner::compute::{
     accept_compute_run, clear_compute_runs, compute_run, discard_compute_run, get_compute_run,
     list_compute_runs, recover_stuck_compute_runs, ComputeContext, ComputeRunRecoveryOutcome,
 };
@@ -294,7 +294,7 @@ async fn run_succeeded(f: &Fixture, context: &ComputeContext) -> String {
         "invocation_params": { "attacker_id": "kb_atk", "defender_id": "kb_def" },
     }))
     .unwrap();
-    let response = nexus_core::execution::compute::compute_run(&f.core, context, request)
+    let response = nexus_core::owner::compute::compute_run(&f.core, context, request)
         .await
         .expect("compute run succeeds");
     // The generated status enum carries Display but not PartialEq.
@@ -349,7 +349,7 @@ async fn accept_happy_path_applies_atomically_and_creates_events() {
 
     let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
     let response =
-        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+        nexus_core::owner::compute::accept_compute_run(&f.core, &principal, &run_id, request)
             .await
             .expect("accept succeeds");
 
@@ -374,19 +374,14 @@ async fn accept_is_refused_twice_and_double_apply_is_impossible() {
     let principal = f.core.active_principal().await.unwrap();
 
     let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
-    nexus_core::execution::compute::accept_compute_run(
-        &f.core,
-        &principal,
-        &run_id,
-        request.clone(),
-    )
-    .await
-    .expect("first accept succeeds");
+    nexus_core::owner::compute::accept_compute_run(&f.core, &principal, &run_id, request.clone())
+        .await
+        .expect("first accept succeeds");
     let hp_after_first = defender_hp(f.core.pool(), "kb_def").await;
     let events_after_first = timeline_event_count(f.core.pool()).await;
 
     let second =
-        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+        nexus_core::owner::compute::accept_compute_run(&f.core, &principal, &run_id, request)
             .await
             .unwrap_err();
     assert!(
@@ -451,7 +446,7 @@ async fn accept_writes_new_key_blocks_through_the_store_seam() {
 
     let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
     let response =
-        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+        nexus_core::owner::compute::accept_compute_run(&f.core, &principal, &run_id, request)
             .await
             .expect("accept succeeds");
     assert_eq!(response.applied.new_entries_created, 1);
@@ -525,7 +520,7 @@ async fn accept_settles_a_governance_carrying_block_as_shared() {
 
     let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
     let response =
-        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+        nexus_core::owner::compute::accept_compute_run(&f.core, &principal, &run_id, request)
             .await
             .expect("accept succeeds");
     assert_eq!(response.applied.new_entries_created, 1);
@@ -564,10 +559,9 @@ async fn accept_refuses_a_store_invalid_block_as_invalid_input() {
 
     let rows_before = kb_block_rows(f.core.pool()).await;
     let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
-    let err =
-        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
-            .await
-            .expect_err("a store-refused block must refuse the accept");
+    let err = nexus_core::owner::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+        .await
+        .expect_err("a store-refused block must refuse the accept");
     assert!(
         matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "invalid_input"),
         "a store validation refusal must be coded invalid_input, got {err:?}"
@@ -588,10 +582,9 @@ async fn accept_refuses_a_foreign_world_block_before_any_write() {
 
     let rows_before = kb_block_rows(f.core.pool()).await;
     let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
-    let err =
-        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
-            .await
-            .expect_err("foreign-World block must refuse");
+    let err = nexus_core::owner::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+        .await
+        .expect_err("foreign-World block must refuse");
     assert!(
         matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "invalid_input"),
         "a foreign-World block must be an invalid_input refusal, got {err:?}"
@@ -629,10 +622,9 @@ async fn aborted_accept_rolls_back_key_block_inserts() {
 
     let rows_before = kb_block_rows(f.core.pool()).await;
     let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
-    let err =
-        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
-            .await
-            .expect_err("the zero-row CAS must abort the accept");
+    let err = nexus_core::owner::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+        .await
+        .expect_err("the zero-row CAS must abort the accept");
 
     // The inserted block is gone and the pre-existing id set is unchanged:
     // the insert (and the trigger's update) stayed inside the rolled-back
@@ -662,7 +654,7 @@ async fn unknown_tool_is_refused_with_zero_domain_effect() {
         request_id: None,
         caller_kind: None,
     };
-    let err = nexus_core::execution::capabilities::execute_tool(&f.context, &request)
+    let err = nexus_core::owner::capabilities::execute_tool(&f.context, &request)
         .await
         .unwrap_err();
     assert!(
@@ -793,7 +785,7 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
         request_id: None,
         caller_kind: None,
     };
-    let err = nexus_core::execution::capabilities::execute_tool(&context, &request)
+    let err = nexus_core::owner::capabilities::execute_tool(&context, &request)
         .await
         .unwrap_err();
     assert!(
@@ -1009,7 +1001,7 @@ async fn compute_without_an_engine_reports_a_real_error() {
         cache: None,
         serializer: Arc::new(tokio::sync::Semaphore::new(1)),
     };
-    let err = nexus_core::execution::compute::compute_run(&f.core, &bare, request)
+    let err = nexus_core::owner::compute::compute_run(&f.core, &bare, request)
         .await
         .unwrap_err();
     assert!(
@@ -1041,9 +1033,9 @@ async fn execute_tool_refuses_a_principal_from_another_core() {
         .core
         .start_execution(
             Arc::new(NullProvider) as Arc<dyn nexus_provider_ports::ProviderPort>,
-            nexus_core::execution::RunnerDeps {
+            nexus_core::owner::RunnerDeps {
                 nexus_home: Some(f.tmp.path().join(".nexus42")),
-                ..nexus_core::execution::RunnerDeps::default()
+                ..nexus_core::owner::RunnerDeps::default()
             },
         )
         .await
@@ -1118,9 +1110,9 @@ async fn execute_tool_accepts_the_owners_own_principal() {
         .core
         .start_execution(
             Arc::new(NullProvider) as Arc<dyn nexus_provider_ports::ProviderPort>,
-            nexus_core::execution::RunnerDeps {
+            nexus_core::owner::RunnerDeps {
                 nexus_home: Some(f.tmp.path().join(".nexus42")),
-                ..nexus_core::execution::RunnerDeps::default()
+                ..nexus_core::owner::RunnerDeps::default()
             },
         )
         .await
@@ -1159,7 +1151,7 @@ async fn reference_refresh_is_not_admitted() {
         request_id: None,
         caller_kind: None,
     };
-    let err = nexus_core::execution::capabilities::execute_tool(&f.context, &request)
+    let err = nexus_core::owner::capabilities::execute_tool(&f.context, &request)
         .await
         .unwrap_err();
     assert!(
@@ -2688,20 +2680,20 @@ async fn accept_subsets_events_and_treats_explicit_null_as_all() {
 #[tokio::test]
 #[serial_test::serial]
 async fn compute_module_registry_lists_embedded_modules() {
-    let modules = nexus_core::execution::compute::list_compute_modules()
+    let modules = nexus_core::owner::compute::list_compute_modules()
         .expect("the compiled-in registry is readable");
     assert!(
         modules.iter().any(|m| m.module_id == MODULE),
         "{MODULE} must appear in the registry list: {modules:?}"
     );
 
-    let detail = nexus_core::execution::compute::get_compute_module(MODULE)
+    let detail = nexus_core::owner::compute::get_compute_module(MODULE)
         .expect("the embedded module has detail");
     assert_eq!(detail.module_id, MODULE);
     assert_eq!(detail.name, "Basic Combat");
     assert_eq!(detail.nexus_abi_version, 1);
 
-    let unknown = nexus_core::execution::compute::get_compute_module("no-such-module");
+    let unknown = nexus_core::owner::compute::get_compute_module("no-such-module");
     assert!(
         matches!(unknown, Err(CoreError::NotFound { .. })),
         "an unknown module must be not_found, got {unknown:?}"
@@ -2913,16 +2905,16 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
 /// Establish the real execution owner over the fixture's core, with compute
 /// wired from the SAME engine, cache and serializer the free authority uses —
 /// so a facade call and a direct authority call are two doors into ONE owner.
-async fn open_compute_handle(f: &Fixture) -> Arc<nexus_core::execution::ExecutionHandle> {
+async fn open_compute_handle(f: &Fixture) -> Arc<nexus_core::owner::ExecutionHandle> {
     f.core
         .start_execution(
             Arc::new(NullProvider) as Arc<dyn nexus_provider_ports::ProviderPort>,
-            nexus_core::execution::RunnerDeps {
+            nexus_core::owner::RunnerDeps {
                 nexus_home: Some(f.tmp.path().join(".nexus42")),
                 compute_engine: f.compute.engine.clone(),
                 compute_cache: f.compute.cache.clone(),
                 compute_serializer: Some(Arc::clone(&f.compute.serializer)),
-                ..nexus_core::execution::RunnerDeps::default()
+                ..nexus_core::owner::RunnerDeps::default()
             },
         )
         .await
@@ -2951,7 +2943,7 @@ async fn compute_facade_discovery_serves_the_real_module_registry() {
         "the embedded registry is one complete page, never a truncated one"
     );
 
-    let authority = nexus_core::execution::compute::list_compute_modules().expect("registry");
+    let authority = nexus_core::owner::compute::list_compute_modules().expect("registry");
     let row = listed
         .items
         .iter()
@@ -2975,7 +2967,7 @@ async fn compute_facade_discovery_serves_the_real_module_registry() {
         .get_compute_module(&principal, MODULE)
         .expect("the facade returns the module detail");
     let expected_detail =
-        nexus_core::execution::compute::get_compute_module(MODULE).expect("authority detail");
+        nexus_core::owner::compute::get_compute_module(MODULE).expect("authority detail");
     assert_eq!(detail.module_id, expected_detail.module_id);
     assert_eq!(detail.nexus_abi_version, expected_detail.nexus_abi_version);
     assert_eq!(
@@ -3282,7 +3274,7 @@ async fn compute_run_receipt_shadows_the_run_transitions() {
         receipt.error_json.is_none(),
         "a finished receipt carries a result, never an error: {receipt:?}"
     );
-    nexus_core::execution::operation_id::validate_operation_id(&receipt.operation_id)
+    nexus_core::operation_id::validate_operation_id(&receipt.operation_id)
         .expect("the shadowed receipt carries a wire-shaped operation id");
     let row = nexus_local_db::compute_runs::get_run(f.core.pool(), &succeeded)
         .await
@@ -3765,7 +3757,7 @@ async fn finished_receipt_replay_survives_clearing_the_run_history() {
 /// row settled `failed` (never left `running`).
 #[tokio::test]
 async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
-    use nexus_core::execution::test_hooks::{set_compute_begin_gate, ComputeBeginGate};
+    use nexus_execution::test_hooks::{set_compute_begin_gate, ComputeBeginGate};
 
     let f = fixture().await;
     let op = format!("op_{}", "b".repeat(32));
@@ -3851,7 +3843,7 @@ const GATE_WAIT: Duration = Duration::from_secs(30);
 
 /// Await a `ComputeInFlightGate` registration signal, failing loudly when it
 /// never arrives.
-async fn await_registered(gate: &nexus_core::execution::test_hooks::ComputeInFlightGate) {
+async fn await_registered(gate: &nexus_execution::test_hooks::ComputeInFlightGate) {
     if tokio::time::timeout(GATE_WAIT, gate.registered.notified())
         .await
         .is_err()
@@ -3872,7 +3864,7 @@ async fn await_registered(gate: &nexus_core::execution::test_hooks::ComputeInFli
 #[tokio::test]
 #[serial_test::serial]
 async fn retry_against_a_live_owner_is_busy_and_never_reruns() {
-    use nexus_core::execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
+    use nexus_execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
 
     let f = fixture().await;
     let op = format!("op_{}", "d".repeat(32));
@@ -3917,7 +3909,7 @@ async fn retry_against_a_live_owner_is_busy_and_never_reruns() {
 #[tokio::test]
 #[serial_test::serial]
 async fn retry_after_its_owner_is_gone_is_uncertain_and_never_reruns() {
-    use nexus_core::execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
+    use nexus_execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
 
     let f = fixture().await;
     let op = format!("op_{}", "e".repeat(32));
@@ -3990,7 +3982,7 @@ async fn retry_after_its_owner_is_gone_is_uncertain_and_never_reruns() {
 #[tokio::test]
 #[serial_test::serial]
 async fn in_flight_ownership_is_scoped_to_the_receipt_store() {
-    use nexus_core::execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
+    use nexus_execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
 
     // Two independent homes served by ONE process.
     let a = fixture().await;
@@ -4058,7 +4050,7 @@ async fn in_flight_ownership_is_scoped_to_the_receipt_store() {
 #[tokio::test]
 #[serial_test::serial]
 async fn in_flight_claim_drops_are_store_scoped() {
-    use nexus_core::execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
+    use nexus_execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
 
     let a = fixture().await;
     let b = fixture().await;

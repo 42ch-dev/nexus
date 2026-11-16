@@ -21,9 +21,6 @@ use crate::error::{CoreError, CoreResult};
 use crate::memory::{record_keywords, CharacterTomService, MemoryAdapter};
 use crate::memory_binding::MemoryProviderBinding;
 use crate::memory_pipeline::{internal_err, map_local_db_error, sqlx_internal, MemoryPipelineCtx};
-#[cfg(feature = "test-hooks")]
-use crate::memory_provider::LocalMemoryProvider;
-use crate::memory_provider::{created_at_cmp, legacy, policy};
 use crate::principal::Principal;
 use crate::service::CoreService;
 use nexus_contracts::generated::daemon_api::characters::soul::character_soul_narrative_request::CharacterSoulNarrativeRequest;
@@ -35,6 +32,9 @@ use nexus_creator_memory::errors::MemoryError;
 use nexus_creator_memory::long_term_memory::{LongTermMemory, LongTermMemoryFrontmatter};
 use nexus_creator_memory::soul_narrative::{SoulNarrativeSynthesisInput, SoulNarrativeSynthesizer};
 use nexus_local_db::SoulNarrativeFragmentStats;
+#[cfg(feature = "test-hooks")]
+use nexus_memory_provider::LocalMemoryProvider;
+use nexus_memory_provider::{created_at_cmp, legacy, policy};
 use nexus_moment_context_assembly::recall::{
     memory_display_id, memory_document, memory_slug, partition, FragmentMemory, FACT_KIND,
 };

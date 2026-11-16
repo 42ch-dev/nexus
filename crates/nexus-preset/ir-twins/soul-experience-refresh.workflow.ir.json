@@ -1,0 +1,65 @@
+{
+  "assets": [],
+  "edges": [
+    {
+      "from": "aggregate",
+      "id": "aggregate->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "aggregate",
+  "id": "soul-experience-refresh",
+  "ir_version": 0,
+  "meta": {
+    "description": "Aggregate long-term memories into the SOUL ## Experience section (deterministic, no LLM)",
+    "kind": "creator",
+    "requires_capabilities": [
+      "soul.experience.aggregate"
+    ],
+    "run_intents": [
+      "work_maintenance"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "creator_id": "{{preset.input.creator_id}}",
+            "home_dir": "{{preset.input.home_dir}}"
+          },
+          "kind": "capability",
+          "name": "soul.experience.aggregate"
+        }
+      ],
+      "exit_when": {
+        "kind": "rule"
+      },
+      "id": "aggregate",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Aggregate experience-kind memories into SOUL ## Experience section"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}
