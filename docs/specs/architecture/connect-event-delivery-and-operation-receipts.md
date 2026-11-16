@@ -44,7 +44,7 @@ workflow rings.
 
 - **Ring**: new module `crates/nexus-connect/src/events.rs` — a
   bounded Connect event ring following the `RunEventRegistry` design
-  (`crates/nexus-execution/src/run_events.rs:802` `subscribe_live`:
+  (`crates/nexus-execution/src/run_events.rs:817` `subscribe_live`:
   atomic replay-then-live-tail; `:936-948` bounded-page + `resync_required`
   semantics). Connect-scoped (per peer session), not per workflow run.
 - **Transport**: the existing spoke-connect WebSocket lane
@@ -670,8 +670,8 @@ beyond this table.
 - `crates/nexus-spoke-adapter/src/manifest.rs:62` — `ConnectHelloManifest`;
   `:279` `LOCAL_SERVED_OPS`; `:310` `build_local_host_manifest`; `:382` /
   `:419` hello conversions.
-- `crates/nexus-execution/src/run_events.rs:157` — `SseFrame`;
-  `:802-851` — `subscribe_live` replay + cursor parse; `:936-948` —
+- `crates/nexus-execution/src/run_events.rs:167` — `SseFrame`;
+  `:817-851` — `subscribe_live` replay + cursor parse; `:936-948` —
   bounded page + `resync_required`.
 - `crates/nexus-contracts/src/generated/core/core_workflow_subscribe_request.rs:5`
   — cursor syntax `<UUID epoch>:<decimal sequence>`;

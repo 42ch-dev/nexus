@@ -259,8 +259,8 @@ named item; the `:line` locates that item in the current tree.
 
 | Site | Verdict |
 | --- | --- |
-| `crates/nexus-core/src/owner/handle_ops.rs:1450` `freeze_descriptor` (`applied: None`, `:1565`) | **Inert** — this is a schedule admission *payload*, not a run descriptor: `admit_schedule_inner` re-reads only `work_id`, `input`, `agent_bindings` and `source` from it (`workflow.rs:2974`) and resolves the apply itself (`workflow.rs:3035`) |
-| `crates/nexus-execution/src/workflow.rs:2551` `prepare_legacy_row` (`applied: None`, `:2652`) | **Inert** — the same payload write, read back by the same four fields |
+| `crates/nexus-core/src/owner/handle_ops.rs:1448` `freeze_descriptor` (`applied: None`, `:1562`) | **Inert** — this is a schedule admission *payload*, not a run descriptor: `admit_schedule_inner` re-reads only `work_id`, `input`, `agent_bindings` and `source` from it (`workflow.rs:3000`) and resolves the apply itself (`workflow.rs:3056`) |
+| `crates/nexus-execution/src/workflow.rs:2577` `prepare_legacy_row` (`applied: None`, `:2678`) | **Inert** — the same payload write, read back by the same four fields |
 | `crates/nexus-orchestration/src/auto_chain.rs:1383` `enqueue_descriptor_json` (`applied: None`, `:1420`) | **Unreachable with a user apply** — it requires `embedded_source_identity` (`:1399`), so the source is never `Directory` and `is_user_preset` is false |
 | `crates/nexus-orchestration/src/storage/sqlite.rs:473` `child_descriptor` (`applied`, `:489`) | **Already correct** — `applied: root.applied.clone()`; a child run inherits the root's identity |
 | `crates/nexus-orchestration/src/engine.rs:4727` `start_session_with_creator` (`applied: None`, `:4763`) | **Callable, no known production caller** — `GraphFlowEngine::start_session` forwards here unconditionally (`:4723`) and `OrchestrationEngine::start_session_with_graph` (`:4939`) exposes that route, so a store-backed engine started this way writes `applied: None`; no in-repo production caller holds a store (the callers are `start_session` and the two `workflow_store == None` fallbacks, `:4354` and `:4565`) |
