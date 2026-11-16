@@ -68,19 +68,16 @@ pub use crate::operation_id;
 // needs both the execution layer and that factory's Host edge.
 #[cfg(all(feature = "execution", feature = "provider-host"))]
 pub mod production;
-// v1.193 P2-T2: the production `PromptExecutor` over the existing Host plane
-// moved here from the deleted daemon composition (technical contracts §4).
-// It needs the Host facade edge, so it compiles only with `provider-host`.
+// v1.245 extraction: the production `PromptExecutor` over the Host plane now
+// lives in `nexus-execution`, behind its own `provider-host` feature.
 #[cfg(feature = "provider-host")]
-pub mod prompt_executor;
+pub use nexus_execution::prompt_executor;
 // v1.245 extraction: the run event rings and the scheduler ownership live in
 // `nexus-execution`.
 pub use nexus_execution::{run_events, schedules};
-// v1.193 P2-T2: the production ACP-backed `SoulNarrativeSynthesizer` moved
-// here from the deleted daemon composition (technical contracts §4). It
-// consumes the orchestration `CapabilityRegistry`, so it rides `execution`.
-pub mod soul_narrative_synthesizer;
-pub mod state_provider;
+// v1.245 extraction: the workspace state provider and the production
+// ACP-backed `SoulNarrativeSynthesizer` live in `nexus-execution`.
+pub use nexus_execution::{soul_narrative_synthesizer, state_provider};
 // Test-only crash/rendezvous seams, owned by `nexus-execution` and compiled
 // only for a consumer's tests or its `test-hooks` feature.
 #[cfg(any(test, feature = "test-hooks"))]
