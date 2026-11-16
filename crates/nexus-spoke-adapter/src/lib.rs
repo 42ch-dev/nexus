@@ -215,6 +215,6 @@ pub use adapter::knowledge_entry_port::put_knowledge_entry_in_tx;
 pub use adapter::rule_query_port::orchestrate_check_world_scoped;
 
 // K2 §5.1 P0 — the in-memory `KnowledgeEntryPort` stub (mutation log included).
-// `ToolContext::new_simulated` binds it for the tool-dispatch plane, so a
-// simulated `nexus.kb_snapshot.write` records the put and writes no row.
+// `ToolContext::new_simulated` selects it, so a context built through that twin
+// records a `nexus.kb_snapshot.write` put and writes no row.
 pub use adapter::knowledge_entry_stub::{StubKnowledgeEntryMutation, StubKnowledgeEntryPort};
