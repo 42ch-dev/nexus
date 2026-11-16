@@ -4423,30 +4423,59 @@ mod tests {
         }
     }
 
-    /// Every `kb_key_blocks` row exactly as stored, one JSON array of `quote()`
-    /// values per row, ordered by primary key.
+    /// Every `kb_key_blocks` row exactly as stored, one JSON array per row,
+    /// ordered by primary key.
     ///
     /// The column list is read from the schema, so every persisted column takes
-    /// part; `quote()` keeps `NULL` (`NULL`) apart from an empty string (`''`).
-    /// Any insert, update or delete changes this comparison.
+    /// part. Each column contributes its `typeof` tag plus `hex` of the raw
+    /// bytes, which is lossless: `NULL`, the empty string, a string with an
+    /// embedded NUL and a BLOB sharing that prefix all render differently, and
+    /// no text conversion can truncate the value. Any insert, update or delete
+    /// changes this comparison.
     async fn kb_rows(pool: &SqlitePool) -> Vec<String> {
         let columns: Vec<String> =
             sqlx::query_scalar("SELECT name FROM pragma_table_info('kb_key_blocks') ORDER BY cid")
                 .fetch_all(pool)
                 .await
                 .expect("kb columns");
-        let quoted = columns
+        let rendered = columns
             .iter()
-            .map(|column| format!("quote({column})"))
+            .map(|column| format!("typeof({column}), hex(CAST({column} AS BLOB))"))
             .collect::<Vec<_>>()
             .join(", ");
-        let sql = format!("SELECT json_array({quoted}) FROM kb_key_blocks ORDER BY key_block_id");
+        let sql = format!("SELECT json_array({rendered}) FROM kb_key_blocks ORDER BY key_block_id");
         // Every interpolated fragment is a column name read from the schema, not
         // caller input — the only reason a statically-typed query is unavailable.
         sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql))
             .fetch_all(pool)
             .await
             .expect("kb rows")
+    }
+
+    /// The world the simulated knowledge tests write into, plus one known
+    /// `kb_key_blocks` row.
+    async fn seed_kb_fixture(pool: &SqlitePool) {
+        nexus_local_db::ensure_creator_row(pool, CREATOR, "Test")
+            .await
+            .expect("creator row");
+        sqlx::query(
+            "INSERT INTO narrative_worlds (world_id, workspace_id, owner_creator_id, title, \
+             slug, status, visibility, time_policy, metadata_json) \
+             VALUES ('wld_sim', 'wrk', ?, 't', 's', 'active', 'private', 'manual', '{}')",
+        )
+        .bind(CREATOR)
+        .execute(pool)
+        .await
+        .expect("world row");
+        sqlx::query(
+            "INSERT INTO kb_key_blocks (key_block_id, world_id, block_type, canonical_name, \
+             status, revision, created_at, updated_at) \
+             VALUES ('kb_sim_existing', 'wld_sim', 'character', 'existing_entry', 'confirmed', 3, \
+             datetime('now'), datetime('now'))",
+        )
+        .execute(pool)
+        .await
+        .expect("known kb row");
     }
 
     /// The knowledge stub is selected by `ToolContext::new_simulated`: a preview
@@ -4459,27 +4488,7 @@ mod tests {
         use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 
         let fixture = fixture(false).await;
-        nexus_local_db::ensure_creator_row(&fixture.pool, CREATOR, "Test")
-            .await
-            .expect("creator row");
-        sqlx::query(
-            "INSERT INTO narrative_worlds (world_id, workspace_id, owner_creator_id, title, \
-             slug, status, visibility, time_policy, metadata_json) \
-             VALUES ('wld_sim', 'wrk', ?, 't', 's', 'active', 'private', 'manual', '{}')",
-        )
-        .bind(CREATOR)
-        .execute(&fixture.pool)
-        .await
-        .expect("world row");
-        sqlx::query(
-            "INSERT INTO kb_key_blocks (key_block_id, world_id, block_type, canonical_name, \
-             status, revision, created_at, updated_at) \
-             VALUES ('kb_sim_existing', 'wld_sim', 'character', 'existing_entry', 'confirmed', 3, \
-             datetime('now'), datetime('now'))",
-        )
-        .execute(&fixture.pool)
-        .await
-        .expect("known kb row");
+        seed_kb_fixture(&fixture.pool).await;
 
         let mut block = KnowledgeEntryRecord::new("wld_sim", BlockType::Character, "sim_probe");
         block.entry_id = "kb_sim_probe".to_string();
@@ -4496,8 +4505,8 @@ mod tests {
         let before = kb_rows(&fixture.pool).await;
         assert_eq!(before.len(), 1, "the fixture seeds one known row");
         assert!(
-            before[0].contains("existing_entry"),
-            "the snapshot carries the seeded row: {}",
+            before[0].contains(&hex::encode("existing_entry").to_uppercase()),
+            "the snapshot carries the seeded row's bytes: {}",
             before[0]
         );
 
@@ -4569,6 +4578,36 @@ mod tests {
             "a production write carries no suppression report"
         );
         assert_eq!(kb_rows(&fixture.pool).await.len(), before.len() + 1);
+    }
+
+    /// The snapshot must see every stored byte: `quote(TEXT)` stops at an
+    /// embedded NUL, so a text column that gains a suffix after one would leave
+    /// a `quote`-rendered snapshot unchanged. This is the renderer's own check —
+    /// the type tag plus hex of the raw bytes must distinguish the two values.
+    #[tokio::test]
+    async fn kb_rows_sees_a_suffix_after_an_embedded_nul() {
+        let fixture = fixture(false).await;
+        seed_kb_fixture(&fixture.pool).await;
+        let before = kb_rows(&fixture.pool).await;
+
+        sqlx::query(
+            "UPDATE kb_key_blocks SET canonical_name = ? WHERE key_block_id = 'kb_sim_existing'",
+        )
+        .bind("existing_entry\0changed")
+        .execute(&fixture.pool)
+        .await
+        .expect("mutate the name after a NUL");
+
+        let after = kb_rows(&fixture.pool).await;
+        assert_ne!(
+            after, before,
+            "a suffix after an embedded NUL changes the stored bytes and must change the snapshot"
+        );
+        assert!(
+            after[0].contains(&hex::encode("existing_entry\0changed").to_uppercase()),
+            "the whole value, NUL included, reaches the snapshot: {}",
+            after[0]
+        );
     }
 
     #[tokio::test]
