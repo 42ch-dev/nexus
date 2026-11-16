@@ -233,7 +233,7 @@ in `nexus-core`; the former daemon host kept only compositions and was
 deleted in v1.193 P2. Current facts:
 
 - **Peer tool registry.** The process-level registry of admitted peer tools
-  is `nexus_core::execution::peer_tools::peer_tool_registry()` (P3). The
+  is `nexus_connect::peer_tools::peer_tool_registry()` (P3; the registry moved from `nexus-core` into the `nexus-connect` crate in v1.244). The
   connect stack admits into it and never keeps a second registry; collision
   policy, reserved tool ids and evictions are registry semantics.
 - **Peer/MCP sessions, transport, watchers.** The WS transport

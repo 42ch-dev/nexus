@@ -105,8 +105,8 @@ match WasmEngine::new() {
 
 ## Evidence
 
-- The conditioned bundle and its reasoning comments — `crates/nexus-core/src/execution/production.rs` (`start_hosted_execution` compute block).
-- Handles carried on the owner and handed to the invocation path — `crates/nexus-core/src/execution/lifecycle.rs` (`RunnerDeps::{compute_engine, compute_cache, compute_serializer}`, `ExecutionHandle::{compute_engine, compute_cache, compute_serializer}`), `crates/nexus-core/src/execution/handle_ops.rs` (`compute_context`).
+- The conditioned bundle and its reasoning comments — `crates/nexus-core/src/owner/production.rs` (`start_hosted_execution` compute block).
+- Handles carried on the owner and handed to the invocation path — `crates/nexus-core/src/owner/lifecycle.rs` (`RunnerDeps::{compute_engine, compute_cache, compute_serializer}`, `ExecutionHandle::{compute_engine, compute_cache, compute_serializer}`), `crates/nexus-core/src/owner/handle_ops.rs` (`compute_context`).
 - Cohort selection — `crates/nexus-core-node/Cargo.toml` (`nexus-core` with `["execution", "provider-host", "compute"]`), asserted per cohort by `tooling/check-graph-pins.sh` (see [graph-pin-honesty-discipline.md](../conventions/graph-pin-honesty-discipline.md)).
 - Invocation-path behaviour — `apps/nexus-service/tests/compute-http.test.mjs`: real module schema with zero World effect until accept, a schema-invalid run persisted as an inspectable failed row, ownership/malformed-query refusals, and World-scoped terminal clear that keeps accepted effects.
 

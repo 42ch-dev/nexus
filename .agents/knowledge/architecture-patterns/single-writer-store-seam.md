@@ -16,9 +16,9 @@ applies_when:
 related_components:
   - crates/nexus-local-db/src/kb_store.rs
   - crates/nexus-local-db/src/actor_knowledge_store.rs
-  - crates/nexus-core/src/execution/compute.rs
-  - crates/nexus-core/src/execution/work_artifact.rs
-  - crates/nexus-core/src/execution/executor.rs
+  - crates/nexus-core/src/owner/compute.rs
+  - crates/nexus-core/src/owner/work_artifact.rs
+  - crates/nexus-core/src/owner/executor.rs
   - crates/nexus-orchestration/src/capability/builtins/work_commit.rs
   - crates/nexus-orchestration/src/capability/builtins/world.rs
 tags:
@@ -83,9 +83,9 @@ The same seam argument applies when the durable artifact is a file tree instead 
 
 ### Evidence
 
-- `crates/nexus-core/src/execution/work_artifact.rs` — classification, port, adapter, boundary re-check.
+- `crates/nexus-core/src/owner/work_artifact.rs` — classification, port, adapter, boundary re-check.
 - `crates/nexus-local-db/src/runtime_lock.rs` — conditional acquisition bound to `(holder, acquired_at)`.
-- `crates/nexus-core/src/execution/capabilities.rs` — the `fs/write_text_file` branch; the `NonWork` branch is unchanged.
+- `crates/nexus-core/src/owner/capabilities.rs` — the `fs/write_text_file` branch; the `NonWork` branch is unchanged.
 
 ## Reaching a core-private port from another crate
 

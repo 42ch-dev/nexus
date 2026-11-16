@@ -330,7 +330,7 @@ The served endpoints (control surface served by [`apps/nexus-service`](../../../
 | PATCH  | `/v1/daemon/orchestration/schedules/{schedule_id}/core-context`        | Apply `EditOp` (user edit)                                  |
 | POST   | `/v1/daemon/orchestration/schedules/{schedule_id}/signal`              | `{signal: pause\|resume\|cancel}`                           |
 
-**Not served:** `GET .../{schedule_id}/core-context`, `GET .../{schedule_id}/core-context-history`, `DELETE .../{schedule_id}` and the schedule label mutation are not routed; they keep the truthful `501 route_not_migrated` refusal (`apps/nexus-service/src/server.ts`) rather than a degraded fake. The signal route does not serve `start` / `advance` / `continue` either — the core signal seam refuses them as `InvalidInput` (`crates/nexus-core/src/execution/handle_ops.rs`), and no other served route accepts them. A successful signal returns `{schedule_id, status, current_wait_id?}`.
+**Not served:** `GET .../{schedule_id}/core-context`, `GET .../{schedule_id}/core-context-history`, `DELETE .../{schedule_id}` and the schedule label mutation are not routed; they keep the truthful `501 route_not_migrated` refusal (`apps/nexus-service/src/server.ts`) rather than a degraded fake. The signal route does not serve `start` / `advance` / `continue` either — the core signal seam refuses them as `InvalidInput` (`crates/nexus-core/src/owner/handle_ops.rs`), and no other served route accepts them. A successful signal returns `{schedule_id, status, current_wait_id?}`.
 
 Per [schemas-external-consumer-boundary.md](../architecture/schemas-external-consumer-boundary.md) §2, these request/response types are **local** (platform never observes them). Request/response Rust types live in `crates/nexus-contracts/src/local/schedule/http.rs` — hand-written, no JSON Schema file.
 
@@ -442,7 +442,7 @@ The normative constraints for this surface are stated in §Current state; a chan
 - `crates/nexus-contracts/src/local/schedule/`
 - `apps/nexus-service`
 - `apps/nexus-service/src/server.ts`
-- `crates/nexus-core/src/execution/handle_ops.rs`
+- `crates/nexus-core/src/owner/handle_ops.rs`
 - `crates/nexus-contracts/src/local/schedule/http.rs`
 - `crates/nexus-local-db/migrations/`
 - `crates/nexus-orchestration/src/capabilities/context_summarize.rs`

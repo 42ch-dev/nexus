@@ -127,15 +127,17 @@ match arm, struct field or table row — and that name is authoritative; a `:lin
 the current tree, so formatting may move it while the claim stays with the name.
 
 **One rule, four admission entries.** Schedule admission (`WorkflowRunCoordinator::admit_schedule_inner`,
-`crates/nexus-core/src/execution/workflow.rs`), `WorkflowRunCoordinator::start_session`
+`crates/nexus-execution/src/workflow.rs`), `WorkflowRunCoordinator::start_session`
 (`workflow.rs`) and both preset trait entries — `start_session_with_preset` and
 `start_session_with_preset_for_creator`, which share `start_preset_entry`
 (`crates/nexus-orchestration/src/engine.rs`) — ask the same question before they build: which document does
-this strategy run? All four answer it through `resolve_applied_document`
-(`crates/nexus-core/src/execution/applied_documents.rs`), the one route through `is_user_preset`,
-`current_apply` and `verified_apply_document` (`crates/nexus-core/src/apply.rs`). The two trait entries
-reach that route through the installed `AppliedDocumentSource` (`start_preset_entry` in `engine.rs`; the
-daemon installs the Creator-backed source in `crates/nexus-core/src/execution/lifecycle.rs`).
+this strategy run? All four resolve it through `resolve_applied_document`
+(`crates/nexus-core/src/owner/applied_documents.rs` — the only place that function exists), the one
+route through `is_user_preset`, `current_apply` and `verified_apply_document`
+(`crates/nexus-core/src/apply.rs`). The two coordinator entries reach it through the
+`AppliedAdmissionPort` their owner installs; the two trait entries reach it through the installed
+`AppliedDocumentSource` (`start_preset_entry` in `engine.rs`). One `CreatorAppliedDocuments` answers
+both ports, and the daemon installs it in `crates/nexus-core/src/owner/lifecycle.rs`.
 
 **The rule.** When the answer is a document, the entry builds the graph from that document with
 `IrTemplateSource::OwnSource` and freezes the `AppliedRunIdentity` the answer carries on the run descriptor
@@ -156,9 +158,9 @@ entries resolve before the binding gate, so the roles validated are the roles th
 
 | Entry | Resolves through | Applied graph | Descriptor write |
 | --- | --- | --- | --- |
-| schedule admission (`admit_schedule_inner`) | `resolve_applied_document` (`workflow.rs:3035`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:3079`) | `admit_schedule_run_with_input` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4626`) |
-| `start_session` | `resolve_applied_document` (`workflow.rs:1633`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:1685`) | `start_preset_run_with_input` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4512`) |
-| `start_session_with_preset` | `start_preset_entry` reads `AppliedDocumentSource::applied_document` (`crates/nexus-orchestration/src/engine.rs:4411`) | `start_preset_entry` builds with `build_wired_outer_graph_from_ir(.., OwnSource)` (`crates/nexus-orchestration/src/engine.rs:4440`) | `start_preset_run` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4314`) |
+| schedule admission (`admit_schedule_inner`) | `AppliedAdmissionPort::admit` (`workflow.rs:3056`), answered by `resolve_applied_document` in `crates/nexus-core/src/owner/applied_documents.rs` | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:3095`) | `admit_schedule_run_with_input` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4655`) |
+| `start_session` | `AppliedAdmissionPort::admit` (`workflow.rs:1661`), answered by `resolve_applied_document` in `crates/nexus-core/src/owner/applied_documents.rs` | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:1711`) | `start_preset_run_with_input` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4555`) |
+| `start_session_with_preset` | `start_preset_entry` reads `AppliedDocumentSource::applied_document` (`crates/nexus-orchestration/src/engine.rs:4476`) | `start_preset_entry` builds with `build_wired_outer_graph_from_ir(.., OwnSource)` (`crates/nexus-orchestration/src/engine.rs:4503`) | `start_preset_run` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4370`) |
 | `start_session_with_preset_for_creator` | the same `start_preset_entry` call | the same `start_preset_entry` build | the same `start_preset_run` write |
 
 **Precedence.** The document a run is built from follows from the loader's classification and that apply
@@ -188,7 +190,7 @@ selects which document a **user bundle** runs; `strategy_intake_mode`
 (`crates/nexus-home-layout/src/strategy_intake.rs`) reads it per new admission. A missing file, table or
 key — and an engine with no configured home, which has no key to read — defaults to `ir-only`. An
 unreadable document or an unknown mode value is a refusal: `RunControlError::InvalidIntakeConfig` at the
-two coordinator entries, which `map_run_control_error` (`crates/nexus-core/src/execution/handle_ops.rs`)
+two coordinator entries, which `map_run_control_error` (`crates/nexus-core/src/owner/handle_ops.rs`)
 renders as the coded `intake_config_invalid`, and at the two preset trait entries an
 `EngineError::GraphFlow(GraphError::StorageError)` whose message begins with that code. **The code does not
 cross the trait boundary** — `start_preset_entry` wraps the reason in a storage error, so there is no
@@ -198,7 +200,7 @@ above are where the code is a contract. Embedded and `_system.` presets never co
 classification is `is_user_strategy_bundle` (`strategy_intake.rs`), the same decision `is_user_preset`
 (`crates/nexus-core/src/apply.rs`) delegates to, so both sides of the gate agree.
 
-- **New admissions** (`intake_mode_for_admission` in `crates/nexus-core/src/execution/applied_documents.rs`
+- **New admissions** (`intake_mode_for_admission` in `crates/nexus-core/src/owner/applied_documents.rs`
   gates `admit_schedule_inner` and `start_session`; the same gate inlined in `start_preset_entry` in
   `crates/nexus-orchestration/src/engine.rs` covers both preset trait entries): under `ir-only` a current
   apply runs through `resolve_applied_document` and a user bundle with none refuses with
@@ -259,8 +261,8 @@ named item; the `:line` locates that item in the current tree.
 
 | Site | Verdict |
 | --- | --- |
-| `crates/nexus-core/src/execution/handle_ops.rs:1450` `freeze_descriptor` (`applied: None`, `:1565`) | **Inert** — this is a schedule admission *payload*, not a run descriptor: `admit_schedule_inner` re-reads only `work_id`, `input`, `agent_bindings` and `source` from it (`workflow.rs:2974`) and resolves the apply itself (`workflow.rs:3035`) |
-| `crates/nexus-core/src/execution/workflow.rs:2551` `prepare_legacy_row` (`applied: None`, `:2652`) | **Inert** — the same payload write, read back by the same four fields |
+| `crates/nexus-core/src/owner/handle_ops.rs:1448` `freeze_descriptor` (`applied: None`, `:1562`) | **Inert** — this is a schedule admission *payload*, not a run descriptor: `admit_schedule_inner` re-reads only `work_id`, `input`, `agent_bindings` and `source` from it (`workflow.rs:3000`) and resolves the apply itself (`workflow.rs:3056`) |
+| `crates/nexus-execution/src/workflow.rs:2577` `prepare_legacy_row` (`applied: None`, `:2678`) | **Inert** — the same payload write, read back by the same four fields |
 | `crates/nexus-orchestration/src/auto_chain.rs:1383` `enqueue_descriptor_json` (`applied: None`, `:1420`) | **Unreachable with a user apply** — it requires `embedded_source_identity` (`:1399`), so the source is never `Directory` and `is_user_preset` is false |
 | `crates/nexus-orchestration/src/storage/sqlite.rs:473` `child_descriptor` (`applied`, `:489`) | **Already correct** — `applied: root.applied.clone()`; a child run inherits the root's identity |
 | `crates/nexus-orchestration/src/engine.rs:4727` `start_session_with_creator` (`applied: None`, `:4763`) | **Callable, no known production caller** — `GraphFlowEngine::start_session` forwards here unconditionally (`:4723`) and `OrchestrationEngine::start_session_with_graph` (`:4939`) exposes that route, so a store-backed engine started this way writes `applied: None`; no in-repo production caller holds a store (the callers are `start_session` and the two `workflow_store == None` fallbacks, `:4354` and `:4565`) |

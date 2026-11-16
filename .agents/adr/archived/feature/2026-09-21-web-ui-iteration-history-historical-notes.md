@@ -405,6 +405,8 @@ The authoring surface consumes new chapter-content schemas (additive, owned by T
 *Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup); V1.65 §13 Content-Authoring stage amendment promotes at V1.65 P-last. Design tokens: `apps/web/DESIGN.md` (V1.64 Standard + V1.65 Standard+ editor/table/context-menu increment); design intent input: [web-ui-design-requirements.md](../../proposed/surfaces/web-ui-design-requirements.md).*
 ```
 
+> **Note on the quoted `web-ui-design-requirements.md` link**: that relative target was never filed — no `proposed/surfaces/` document of that name existed before the freeze. The brief itself lived at `.mstar/knowledge/specs/web-ui-design-requirements.md` and was retired, and its surviving record is [2026-10-22-web-ui-design-requirements-historical-notes.md](2026-10-22-web-ui-design-requirements-historical-notes.md). The quoted line stays verbatim, broken link included.
+
 #### at pre-freeze line ~237
 
 ```markdown

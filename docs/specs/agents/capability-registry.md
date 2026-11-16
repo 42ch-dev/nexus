@@ -23,7 +23,7 @@ Non-overlap rule: **catalog = ID + one-liner**; **registry = handler + wire + fa
 
 #### 0.1 Current implementation authority
 
-[`nexus_core::execution::capabilities`](../../../crates/nexus-core/src/execution/capabilities.rs) owns `host_tool_registry()` and its process-global `LazyLock<CapabilityRegistry>`. `execute_tool` runs admission, calls that registry's `dispatch`, then audits success or refusal. The allowlist uses `spine_resolves`: static builtin → admitted peer → admitted user capability. Unknown IDs fail with `not_supported`; callers must not maintain a second lookup/allowlist table.
+[`nexus_core::owner::capabilities`](../../../crates/nexus-core/src/owner/capabilities.rs) owns `host_tool_registry()` and its process-global `LazyLock<CapabilityRegistry>`. `execute_tool` runs admission, calls that registry's `dispatch`, then audits success or refusal. The allowlist uses `spine_resolves`: static builtin → admitted peer → admitted user capability. Unknown IDs fail with `not_supported`; callers must not maintain a second lookup/allowlist table.
 
 The static registry contains **28 rows: 26 `nexus.*` and 2 `fs/*`**. `build_registry` is the row authority; [`capability_compute.rs`](../../../crates/nexus-core/tests/capability_compute.rs), `host_tool_registry_roster_is_the_declared_nexus_surface`, pins the same set and excludes `nexus.profile.*` grouping metadata. Dynamic peer/user entries are additional spine resolutions, not part of this static count.
 

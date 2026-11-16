@@ -102,7 +102,7 @@ The three profile-set IDs (`nexus.profile.minimal`, `nexus.profile.writer`, `nex
 ### 4. Capability roster (V1.60)
 
 > **Roster governance:** This table is the logical catalog and V1.60 delivery record, not the current executable allowlist.
-> Host-tool binding and dispatch are owned by `nexus_core::execution::capabilities::host_tool_registry()` in [`crates/nexus-core/src/execution/capabilities.rs`](../../../crates/nexus-core/src/execution/capabilities.rs): `execute_tool` dispatches through it, and `admission_pipeline` uses the same `spine_resolves` authority.
+> Host-tool binding and dispatch are owned by `nexus_core::owner::capabilities::host_tool_registry()` in [`crates/nexus-core/src/owner/capabilities.rs`](../../../crates/nexus-core/src/owner/capabilities.rs): `execute_tool` dispatches through it, and `admission_pipeline` uses the same `spine_resolves` authority.
 > The [`nexus-orchestration` `CapabilityRegistry`](../../../crates/nexus-orchestration/src/capability/mod.rs) is a **separate** registry of orchestration `Capability` implementations, not the owner of the core's static host-tool table. Its admitted user capabilities can participate in the core dispatch spine after builtin and peer lookup.
 > The retained core registry has **28 static host tools: 26 `nexus.*` + 2 `fs/*`**; [`capability_compute.rs`](../../../crates/nexus-core/tests/capability_compute.rs) pins that roster and excludes `nexus.profile.*` grouping metadata. The retired `nexus.reference.refresh` and `nexus.research.query` ids were removed with the reference store (V1.231, ADR K1) and are **not** in today's registry. The retained ID `nexus.observability.daemon.health` does not restore the deleted daemon host.
 > Cross-references: [`agent-nexus-tool-bridge.md`](agent-nexus-tool-bridge.md) (retained admission/execution boundary and historical agent transport), [`capability-registry.md`](capability-registry.md) (Master — current runtime dispatch contract).
@@ -248,7 +248,7 @@ If handshake succeeds but capability set is incomplete:
 - `apps/desktop-electron`
 - `apps/nexus-service/src/index.ts`
 - `crates/nexus-core-node/src/lifecycle.rs`
-- `crates/nexus-core/src/execution/capabilities.rs`
+- `crates/nexus-core/src/owner/capabilities.rs`
 
 ## Change obligations
 

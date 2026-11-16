@@ -937,7 +937,7 @@ This is the pattern adopted for Nexus `AutoToolRiskClassifier` (§7.2).
 | Auto tool-risk classification | `AutoToolRiskClassifier` (§7.2) |
 | Centralized permission policy | ACP permission delegation via `PermissionPolicy` (§4.1.3) |
 | Per-provider stream normalization | Native CLI adapter pattern (§4.2.2) |
-| Tool execution via host mediation | core tool execution (`crates/nexus-core/src/execution/capabilities.rs`) |
+| Tool execution via host mediation | core tool execution (`crates/nexus-core/src/owner/capabilities.rs`) |
 | One process per managed provider session | `ManagedSessionHandle` + session state machine |
 
 ---
@@ -1029,7 +1029,7 @@ The normative constraints for this surface are stated in §Current state; a chan
 - `apps/nexus-service/src/routes.ts`
 - `apps/nexus-service/src/provider.ts`
 - `apps/nexus-service/tests/actor-http.test.mjs`
-- `crates/nexus-core/src/execution/capabilities.rs`
+- `crates/nexus-core/src/owner/capabilities.rs`
 
 ## Change obligations
 
