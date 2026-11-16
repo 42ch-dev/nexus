@@ -84,9 +84,9 @@
  *   * the submodule non-force route re-measures the checkout immediately before its own `rm -rf`, so
  *     a tracked modification or an untracked non-ignored path that arrived after the engine refused
  *     that worktree stops the removal with zero mutation;
- *   * an unclaimed `nexus-target-iteration-*` cache is a leftover the convergence check counts (it
- *     fails with `sweeper.check.unknown-path`) while staying `protected`, and so outside every
- *     deletion path.
+ *   * an unclaimed `nexus-target-iteration-*` cache — one no protected integration checkout of this
+ *     workflow owns — is a leftover the convergence check counts (it fails with
+ *     `sweeper.check.unknown-path`) while staying `protected`, and so outside every deletion path.
  */
 import { strict as assert } from 'node:assert';
 import { execFile } from 'node:child_process';
@@ -172,8 +172,11 @@ async function makeFixture(options = {}) {
   const ownerTarget = join(cache, 'nexus-target-fixture-owner');
   const peerTarget = join(cache, 'nexus-target-fixture-peer');
   const canonicalTarget = join(cache, 'nexus-target');
+  // The integration checkout owns its own suffixed cache, exactly like every other worktree: no
+  // checkout shares the canonical target (`.envrc`'s one-mapping rule).
+  const integrationTarget = join(cache, 'nexus-target-iteration-fixture');
   const detachedTarget = join(cache, 'nexus-target-fixture-detached');
-  const paths = { root, main, cache, worktreesRoot, ownerWorktree, peerWorktree, integrationWorktree, ownerTarget, peerTarget, canonicalTarget };
+  const paths = { root, main, cache, worktreesRoot, ownerWorktree, peerWorktree, integrationWorktree, integrationTarget, ownerTarget, peerTarget, canonicalTarget };
 
   await mkdir(main, { recursive: true });
   await mkdir(cache, { recursive: true });
@@ -278,6 +281,8 @@ async function makeFixture(options = {}) {
 
   await mkdir(canonicalTarget, { recursive: true });
   await writeFile(join(canonicalTarget, 'canonical.bin'), 'canonical\n');
+  await mkdir(integrationTarget, { recursive: true });
+  await writeFile(join(integrationTarget, 'target.bin'), 'integration target\n');
   await mkdir(ownerTarget, { recursive: true });
   await writeFile(join(ownerTarget, 'target.bin'), 'owner target\n');
   await mkdir(peerTarget, { recursive: true });
@@ -361,6 +366,7 @@ async function makeFixture(options = {}) {
     ownerTarget,
     peerTarget,
     canonicalTarget,
+    integrationTarget,
     detachedWorktree,
     detachedTarget,
     env: { ...process.env, HOME: home, XDG_CACHE_HOME: cache },
@@ -654,21 +660,25 @@ test('inventory protects active and shared paths', async t => {
   assert.equal(run.document.ok, true);
   assert.deepEqual(run.document.refusals, []);
 
-  // The main checkout and the snapshot-recorded integration checkout stay protected, and the
-  // shared canonical target occupancy is reported once.
+  // The main checkout and the snapshot-recorded integration checkout stay protected, and each is
+  // reported against the cache it actually owns: the canonical one for main, its own suffixed one
+  // for the integration checkout — never main's.
   assert.deepEqual(run.document.protected_checkouts.map(checkout => checkout.role), ['main', 'integration']);
+  assert.deepEqual(run.document.protected_checkouts.map(checkout => checkout.target), [
+    leased.canonicalTarget,
+    leased.integrationTarget,
+  ]);
   for (const checkout of run.document.protected_checkouts) {
-    assert.equal(checkout.target, leased.canonicalTarget);
     assert.equal(checkout.target_present, true);
     assert.equal(checkout.target_is_symlink, false);
+    assert.ok(checkout.target_bytes > 0);
+    assert.equal(checkout.target_bytes_counted_by, undefined);
   }
-  assert.ok(run.document.protected_checkouts[0].target_bytes > 0);
-  assert.equal(run.document.protected_checkouts[1].target_bytes, null);
-  assert.equal(run.document.protected_checkouts[1].target_bytes_counted_by, 'main');
 
   // Nothing protected is ever proposed: not the canonical cache, not the active peer, not main.
   const proposed = proposedRefs(run.document);
   assert.equal(proposed.includes(leased.canonicalTarget), false);
+  assert.equal(proposed.includes(leased.integrationTarget), false, 'the integration checkout owns its own cache');
   assert.equal(proposed.includes(leased.peerWorktree), false);
   assert.equal(proposed.includes(leased.peerTarget), false);
 
@@ -700,9 +710,11 @@ test('inventory protects active and shared paths', async t => {
   assert.equal(run.document.commands[0].spawn_error, null);
   assert.match(run.document.commands[0].stdout, /\nrefuse \| worktree \| /);
 
-  // Unclaimed footprints are reported, owned ones are not, and the canonical cache is never one.
+  // Unclaimed footprints are reported, owned ones are not, and neither the canonical cache nor the
+  // integration checkout's own cache is ever one.
   const unknown = run.document.unknown_paths.map(entry => entry.path);
   assert.equal(unknown.includes(leased.canonicalTarget), false);
+  assert.equal(unknown.includes(leased.integrationTarget), false);
   assert.equal(unknown.includes(leased.integrationWorktree), false);
   assert.equal(unknown.includes(leased.ownerWorktree), false);
   assert.equal(unknown.includes(leased.peerWorktree), false);
@@ -828,12 +840,13 @@ test('capacity watermarks require reclamation before new tracks', async t => {
   assert.equal(capacity.units, 'bytes');
   assert.ok(capacity.root_free_bytes > 0);
   assert.equal(capacity.cores, cpus().length);
-  // Measured aggregate covers every feature target and excludes the protected canonical cache.
-  const expected = ['nexus-target-fixture-owner', 'nexus-target-fixture-peer', 'nexus-target-orphan-leftover']
+  // Measured aggregate covers every feature target — the integration checkout's own suffixed cache
+  // included — and excludes the protected canonical cache.
+  const expected = ['nexus-target-fixture-owner', 'nexus-target-fixture-peer', 'nexus-target-iteration-fixture', 'nexus-target-orphan-leftover']
     .reduce((total, name) => total + directoryBytes(join(fixture.cache, name)), 0);
   assert.equal(capacity.aggregate_feature_target_bytes, expected);
   assert.ok(capacity.aggregate_feature_target_bytes < directoryBytes(fixture.cache));
-  assert.equal(capacity.feature_target_count, 3);
+  assert.equal(capacity.feature_target_count, 4);
   assert.equal(capacity.configured_disk_budget_bytes, BUDGET);
   assert.equal(capacity.per_track_target_estimate_bytes, ESTIMATE);
   assert.equal(capacity.watermarks.root_free_min_bytes, 90 * GIB);
@@ -2714,11 +2727,12 @@ test('the submodule fallback re-measures the checkout before its own removal', a
 });
 
 test('an unclaimed iteration-named cache is a leftover the convergence check reports', async t => {
-  // Greptile P2 on `scripts/worktree-sweep.mjs:2160-2167`: an integration checkout uses the
-  // unsuffixed canonical `nexus-target` cache, so an unclaimed `nexus-target-iteration-*` directory
-  // is a leftover — but marking it `protected` excluded it from the convergence failure reasons and
-  // the check could report success while it remained. It is now counted as a leftover while staying
-  // outside every deletion path.
+  // Greptile P2 on `scripts/worktree-sweep.mjs:2160-2167`: an unclaimed `nexus-target-iteration-*`
+  // directory is a leftover — but marking it `protected` excluded it from the convergence failure
+  // reasons and the check could report success while it remained. The profile's own integration
+  // checkout now owns its suffixed cache, so ownership is what decides: a cache no protected
+  // checkout claims (here `iteration-orphan` belongs to no checkout this workflow records) is
+  // counted as a leftover while staying outside every deletion path.
   const fixture = await makeFixture({ shape: 'released', orphans: false });
   t.after(() => fixture.teardown());
   const orphan = join(fixture.cache, 'nexus-target-iteration-orphan');
