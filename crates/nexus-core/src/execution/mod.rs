@@ -40,13 +40,15 @@
 //! and never builds a second engine.
 
 pub mod applied_documents;
-pub mod authority;
+// v1.245 extraction: the filesystem/OCC primitives live in
+// `nexus-execution`; the re-export keeps the in-crate paths stable while the
+// owner module still forwards them.
+pub use nexus_execution::{authority, commit_fs};
 pub mod bounds;
 // Capability dispatch and compute (v1.190 P3-T3). The protocol-neutral peer
 // registry it consults is `nexus_connect::peer_tools` (v1.244 extraction);
 // `compute` additionally requires the WASM edge, so it is gated separately.
 pub mod capabilities;
-pub mod commit_fs;
 #[cfg(feature = "compute")]
 pub mod compute;
 pub mod executor;
@@ -79,10 +81,10 @@ pub mod session_commit;
 // consumes the orchestration `CapabilityRegistry`, so it rides `execution`.
 pub mod soul_narrative_synthesizer;
 pub mod state_provider;
-// Test-only crash/rendezvous seams. Compiled only for this package's tests or
-// with the `test-hooks` feature, exactly as in the daemon before the move.
+// Test-only crash/rendezvous seams, owned by `nexus-execution` and compiled
+// only for a consumer's tests or its `test-hooks` feature.
 #[cfg(any(test, feature = "test-hooks"))]
-pub mod test_hooks;
+pub use nexus_execution::test_hooks;
 // v1.234 P0+P1 (ADR #485 §4.4): the single byte-write port for Work artifacts;
 // `fs/write_text_file` commits every `Works/<work_ref>/…` path through it.
 pub mod work_artifact;
