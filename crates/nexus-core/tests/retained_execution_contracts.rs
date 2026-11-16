@@ -73,10 +73,7 @@ use nexus_contracts::{
     CoreWorkspaceCommitRequestChangesItem, CoreWorkspaceCommitRequestChangesItemOp, ProviderCall,
     ProviderEventBatch, ProviderReply,
 };
-use nexus_core::owner::{
-    drive_preset_run, resume_driven_sessions, ExecutionHandle, PresetRunConfig, PresetRunOutcome,
-    ResumeDecision, RunControlError, RunnerDeps,
-};
+use nexus_core::owner::{ExecutionHandle, RunnerDeps};
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, Principal};
 use nexus_execution::authority::WorkspaceAuthorityLease;
 use nexus_execution::prompt_executor::HostPromptExecutor;
@@ -91,7 +88,10 @@ use nexus_execution::schedules::stale_findings::run_one_sweep;
 use nexus_execution::session::{SessionError, SessionId, WorkspaceSessionManager};
 #[cfg(feature = "test-hooks")]
 use nexus_execution::test_hooks;
-use nexus_execution::workflow::{RunEventPort, WorkflowRunCoordinator};
+use nexus_execution::workflow::{
+    drive_preset_run, resume_driven_sessions, PresetRunConfig, PresetRunOutcome, ResumeDecision,
+    RunControlError, RunEventPort, WorkflowRunCoordinator,
+};
 use nexus_local_db::findings::{create_finding, Finding};
 use nexus_local_db::works::{create_work_atomic, WorkRecord};
 use nexus_local_db::writer_protocol::init_guarded_pool;

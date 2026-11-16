@@ -121,11 +121,7 @@ pub use memory_provider::{LegacyContentMigration, LegacyMigrationStatus};
 pub use memory_selection::{MemoryProviderSelection, RemoteMemoryProviderSelection};
 pub use nexus_home_layout::MemoryProviderConfig;
 #[cfg(feature = "execution")]
-pub use owner::{
-    CancelOutcome, DriveDisposition, ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError,
-    PresetRunConfig, PresetRunOutcome, ResumeDecision, RunControlError, RunControlResult,
-    RunSignal, RunnerDeps, WorkflowRunCoordinator,
-};
+pub use owner::{ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError, RunnerDeps};
 pub use presets::PresetError;
 pub use principal::Principal;
 // Provider-owned memory contract objects (spoke §6): the E1/E2 direct-core
