@@ -14,14 +14,14 @@
 #![allow(clippy::unwrap_used)]
 
 use base64::Engine;
-use nexus_core::execution::commit_fs::hash_bytes;
-use nexus_core::execution::executor::WorkspaceCommitExecutor;
-use nexus_core::execution::session::{
+use nexus_core::owner::executor::WorkspaceCommitExecutor;
+use nexus_execution::commit_fs::hash_bytes;
+use nexus_execution::session::{
     compute_content_hashes, occ_conflict_total, ChangeEntry, ChangeOp, SessionError, SessionId,
     WorkspaceSessionManager,
 };
-use nexus_core::execution::state_provider::CoreWorkspaceStateProvider;
-use nexus_core::execution::test_hooks::{
+use nexus_execution::state_provider::CoreWorkspaceStateProvider;
+use nexus_execution::test_hooks::{
     set_after_delete_capture_hook, set_crash_point, set_owner_gate, OwnerGate,
 };
 use nexus_orchestration::capability::{
@@ -386,7 +386,7 @@ async fn executor_matches_manager_authority() {
     use nexus_contracts::local::orchestration::{
         WorkspaceChangeEntry, WorkspaceChangeOp, WorkspaceCommitInput, WorkspaceOpenInput,
     };
-    use nexus_core::execution::executor::WorkspaceCommitExecutor;
+    use nexus_core::owner::executor::WorkspaceCommitExecutor;
 
     let (pool, db_dir) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);

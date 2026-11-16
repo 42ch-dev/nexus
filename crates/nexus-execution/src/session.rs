@@ -13,7 +13,7 @@ use nexus_contracts::local::orchestration::{WorkspaceChangeEntry, WorkspaceChang
 use nexus_local_db as db;
 use sqlx::SqlitePool;
 
-use super::authority::WorkspaceAuthorityLease;
+use crate::authority::WorkspaceAuthorityLease;
 use tracing;
 
 // ── OCC metrics (V1.58 P0 T6 — R-V156P0-M006) ──────────────────────────────
@@ -583,7 +583,7 @@ impl WorkspaceSessionManager {
     /// authority: every later admission fails closed, and every mutation
     /// admitted before it is still drained by
     /// [`Self::wait_for_admitted_commits`].
-    pub(crate) fn close_commit_admission(&self) {
+    pub fn close_commit_admission(&self) {
         if let Some(cfg) = &self.recoverable {
             cfg.admissions.close();
         }
@@ -594,7 +594,7 @@ impl WorkspaceSessionManager {
     /// The owner's close calls this before it releases the workspace
     /// authority, so the released lease can never outlive a mutation that is
     /// still applying or rolling back through it.
-    pub(crate) async fn wait_for_admitted_commits(&self) {
+    pub async fn wait_for_admitted_commits(&self) {
         if let Some(cfg) = &self.recoverable {
             cfg.admissions.wait_idle().await;
         }
@@ -718,14 +718,14 @@ impl WorkspaceSessionManager {
         session_id: &SessionId,
         changes: &[WorkspaceChangeEntry],
     ) -> Result<(), SessionError> {
-        super::session_commit::validate_manifest(changes)?;
+        crate::session_commit::validate_manifest(changes)?;
         let row = self.validate_session(session_id).await?;
         let stored_hashes = parse_snapshot_hashes(&row.file_hashes_json)?;
         let canonical_root = Path::new(&row.workspace_root);
-        let scope_dir = super::scope::scope_directory(canonical_root, &row.relative_path)?;
+        let scope_dir = crate::scope::scope_directory(canonical_root, &row.relative_path)?;
 
         for change in changes {
-            let file_path = super::scope::resolve_in_scope(&scope_dir, &change.path)?;
+            let file_path = crate::scope::resolve_in_scope(&scope_dir, &change.path)?;
             if file_path.exists() {
                 let meta = tokio::fs::symlink_metadata(&file_path)
                     .await
@@ -1100,7 +1100,7 @@ impl WorkspaceSessionManager {
         session_id: &SessionId,
         changes: &[ChangeEntry],
         active_workspace_root: &str,
-    ) -> Result<super::session_commit::CommitOutcome, SessionError> {
+    ) -> Result<crate::session_commit::CommitOutcome, SessionError> {
         if self.recoverable.is_none() {
             return Err(SessionError::Internal(
                 "recoverable workspace authority required".into(),
@@ -1137,8 +1137,8 @@ impl WorkspaceSessionManager {
         session_id: SessionId,
         changes: Vec<ChangeEntry>,
         active_workspace_root: String,
-    ) -> Result<super::session_commit::CommitOutcome, SessionError> {
-        super::session_commit::commit_recoverable_owned(
+    ) -> Result<crate::session_commit::CommitOutcome, SessionError> {
+        crate::session_commit::commit_recoverable_owned(
             self_arc,
             session_id,
             changes,
@@ -1163,9 +1163,9 @@ impl WorkspaceSessionManager {
     /// `session_commit::startup_recovery_all` reports; a corrupt intent row is
     /// surfaced rather than skipped.
     pub async fn startup_recovery(self: &Arc<Self>) -> Result<(), SessionError> {
-        super::session_commit::startup_recovery_owned(
+        crate::session_commit::startup_recovery_owned(
             Arc::clone(self),
-            super::session_commit::RecoveryScope::All,
+            crate::session_commit::RecoveryScope::All,
         )
         .await
     }
@@ -1191,9 +1191,9 @@ impl WorkspaceSessionManager {
         self: &Arc<Self>,
         workspace_root: &str,
     ) -> Result<(), SessionError> {
-        super::session_commit::startup_recovery_owned(
+        crate::session_commit::startup_recovery_owned(
             Arc::clone(self),
-            super::session_commit::RecoveryScope::Root(workspace_root.to_string()),
+            crate::session_commit::RecoveryScope::Root(workspace_root.to_string()),
         )
         .await
     }

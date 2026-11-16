@@ -2,7 +2,7 @@
 //! (v1.190 P3-T2; moved from the daemon's `workspace::executor`).
 //!
 //! Binds the orchestration `WorkspaceExecutor` capability surface to the SAME
-//! shared [`super::session::WorkspaceSessionManager`] the durable commit path
+//! shared [`nexus_execution::session::WorkspaceSessionManager`] the durable commit path
 //! writes through, so a preset's `workspace.commit` observes real durable
 //! workspace state.
 
@@ -17,7 +17,6 @@ use nexus_contracts::local::orchestration::{
 use nexus_home_layout;
 use nexus_orchestration::capability::{CapabilityError, WorkspaceExecutor};
 
-use super::session::{SessionError, SessionId, WorkspaceSessionManager};
 use super::work_artifact::{
     FsWorkArtifactPort, RecordedMutation, RecordingWorkArtifactPort, WorkArtifactPort,
     WorkArtifactWrite,
@@ -25,6 +24,7 @@ use super::work_artifact::{
 use crate::error::CoreError as NexusApiError;
 use crate::error::CoreResult;
 use crate::service::CoreService;
+use nexus_execution::session::{SessionError, SessionId, WorkspaceSessionManager};
 
 /// Production workspace executor bound to one canonical workspace root.
 pub struct WorkspaceCommitExecutor {
@@ -244,7 +244,7 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
             .validate_session(&session_id)
             .await
             .map_err(map_session_error)?;
-        let file_hashes = super::session::parse_snapshot_hashes(&row.file_hashes_json)
+        let file_hashes = nexus_execution::session::parse_snapshot_hashes(&row.file_hashes_json)
             .map_err(map_session_error)?;
         Ok(WorkspaceOpenOutput {
             session_id: session_id.to_string(),

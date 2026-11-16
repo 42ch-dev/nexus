@@ -25,7 +25,7 @@ use nexus_contracts::local::schedule::http::{
 use nexus_contracts::{
     CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply,
 };
-use nexus_core::execution::ExecutionHandle;
+use nexus_core::owner::ExecutionHandle;
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, RunnerDeps};
 use nexus_orchestration::capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,

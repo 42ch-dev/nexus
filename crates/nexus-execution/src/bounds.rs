@@ -1,6 +1,6 @@
 //! Manifest and metadata bounds (v1.188 P3 L2).
 
-use super::session::SessionError;
+use crate::session::SessionError;
 
 /// Max relative path length (bytes).
 pub const MAX_PATH_LEN: usize = 4096;

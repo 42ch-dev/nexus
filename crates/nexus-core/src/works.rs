@@ -2,7 +2,7 @@
 //! HTTP envelopes stay in adapters; these projections are owned domain values.
 
 #[cfg(feature = "execution")]
-use crate::execution::work_artifact::{FsWorkArtifactPort, WorkArtifactPort, WorkReconcile};
+use crate::owner::work_artifact::{FsWorkArtifactPort, WorkArtifactPort, WorkReconcile};
 use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 use nexus_contracts::{
     AppendInspirationRequest, AppendInspirationResponse, CoreWorkSelection, CreateWorkRequest,
@@ -871,9 +871,9 @@ fn selected_canonical_workspace_root(
 /// Valid UTF-8 path bytes pass through unchanged: `to_str` neither allocates
 /// nor normalizes, so an accepted root is byte-identical to the canonical one.
 ///
-/// [`WorkspaceCommitExecutor`]: crate::execution::executor::WorkspaceCommitExecutor
-/// [`CoreWorkspaceStateProvider`]: crate::execution::state_provider::CoreWorkspaceStateProvider
-/// [`WorkspaceCommitAuthority`]: crate::execution::workspace::WorkspaceCommitAuthority
+/// [`WorkspaceCommitExecutor`]: crate::owner::executor::WorkspaceCommitExecutor
+/// [`CoreWorkspaceStateProvider`]: nexus_execution::state_provider::CoreWorkspaceStateProvider
+/// [`WorkspaceCommitAuthority`]: crate::owner::workspace::WorkspaceCommitAuthority
 #[cfg(feature = "execution")]
 pub fn lossless_root_str(canonical: &std::path::Path) -> CoreResult<&str> {
     canonical.to_str().ok_or_else(|| CoreError::Internal {
@@ -2461,7 +2461,7 @@ fn is_valid_work_ref(s: &str) -> bool {
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-// Crate-internal despite the private module: `crate::execution::work_artifact`
+// Crate-internal despite the private module: `crate::owner::work_artifact`
 // runs reconcile under this one lock implementation.
 #[allow(clippy::redundant_pub_crate)]
 pub(crate) struct RuntimeLockGuard {

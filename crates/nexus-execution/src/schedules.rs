@@ -31,7 +31,7 @@
 //!   is best-effort (a failed tick logs and continues), and exits cleanly on
 //!   the supplied shutdown [`tokio::sync::Notify`];
 //! - [`hosted_scheduler`] is OWNED, not detached: the v1.195 hosted execution
-//!   owner RETAINS its `JoinHandle` on the [`crate::execution::ExecutionHandle`]
+//!   owner RETAINS its `JoinHandle` on the owner's `ExecutionHandle`
 //!   and `ExecutionHandle::close` fires its shutdown notify and JOINS it, so no
 //!   scheduler tick can outlive the owner's drain.
 //!

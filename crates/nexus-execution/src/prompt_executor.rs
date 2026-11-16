@@ -95,7 +95,7 @@ pub struct HostPromptExecutor {
     /// request cannot race a successor's launch. The future P2 coordinator
     /// shares this mechanism as its per-run operation admission lock.
     op_locks: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    run_event_sinks: Option<crate::execution::run_events::RunEventSinkMap>,
+    run_event_sinks: Option<crate::run_events::RunEventSinkMap>,
 }
 
 impl HostPromptExecutor {
@@ -114,7 +114,7 @@ impl HostPromptExecutor {
         host: Arc<dyn HostFacade>,
         workflow_store: Arc<dyn WorkflowStateStore>,
         timeouts: TimeoutConfig,
-        run_event_sinks: Option<crate::execution::run_events::RunEventSinkMap>,
+        run_event_sinks: Option<crate::run_events::RunEventSinkMap>,
     ) -> Self {
         Self {
             host,
@@ -730,7 +730,7 @@ impl PromptExecutor for HostPromptExecutor {
         // the driven ROOT run — resolve through the owning root so the
         // OpStarted/content/OpFinished lifecycle lands on that ring.
         let run_event_sink = if let Some(sinks) = &self.run_event_sinks {
-            crate::execution::run_events::sink_for_run(sinks, &request.run_id).await
+            crate::run_events::sink_for_run(sinks, &request.run_id).await
         } else {
             None
         };

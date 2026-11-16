@@ -57,7 +57,7 @@ fn is_safe_basename(name: &str) -> bool {
 /// Fire the gated after-delete-capture seam.
 #[cfg(any(test, feature = "test-hooks"))]
 fn run_after_delete_capture_hook() {
-    super::test_hooks::run_after_delete_capture_hook();
+    crate::test_hooks::run_after_delete_capture_hook();
 }
 
 /// Production no-op: the capture/finalize injection point is test-only.

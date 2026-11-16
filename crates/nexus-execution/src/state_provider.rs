@@ -11,7 +11,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use nexus_orchestration::capability::WorkspaceStateProvider;
 
-use super::session::WorkspaceSessionManager;
+use crate::session::WorkspaceSessionManager;
 
 /// Resolves workspace state from the core workspace session authority.
 pub struct CoreWorkspaceStateProvider {

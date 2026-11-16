@@ -2,8 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use super::bounds::validate_relative_path;
-use super::session::{enforce_path_boundary, SessionError};
+use crate::bounds::validate_relative_path;
+use crate::session::{enforce_path_boundary, SessionError};
 
 /// Canonical scope directory for a session (`relative_path` may be empty).
 ///
@@ -54,10 +54,10 @@ pub async fn enforce_active_workspace_root(
     active_workspace_root: &str,
 ) -> Result<(), SessionError> {
     let session_canonical =
-        super::session::canonicalize_workspace_root(std::path::Path::new(session_workspace_root))
+        crate::session::canonicalize_workspace_root(std::path::Path::new(session_workspace_root))
             .await?;
     let active_canonical =
-        super::session::canonicalize_workspace_root(std::path::Path::new(active_workspace_root))
+        crate::session::canonicalize_workspace_root(std::path::Path::new(active_workspace_root))
             .await?;
     if session_canonical != active_canonical {
         return Err(SessionError::ActiveWorkspaceMismatch {

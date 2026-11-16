@@ -300,7 +300,7 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
     // The static half of the peer admission reserved set: this composition's
     // own host-tool roster (the protocol crate names no core registry).
     let builtin_tool_ids: std::collections::HashSet<String> =
-        nexus_core::execution::capabilities::host_tool_registry()
+        nexus_core::owner::capabilities::host_tool_registry()
             .ids()
             .map(ToOwned::to_owned)
             .collect();

@@ -3751,6 +3751,7 @@ dependencies = [
  "nexus-contracts",
  "nexus-core",
  "nexus-creator-memory",
+ "nexus-execution",
  "nexus-home-layout",
  "nexus-knowledge",
  "nexus-local-db",
@@ -3854,6 +3855,39 @@ dependencies = [
  "async-trait",
  "thiserror 2.0.21",
  "tokio",
+]
+
+[[package]]
+name = "nexus-execution"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "chrono",
+ "futures-util",
+ "graph-flow",
+ "hex",
+ "nexus-agent-host",
+ "nexus-contracts",
+ "nexus-creator-memory",
+ "nexus-execution",
+ "nexus-home-layout",
+ "nexus-local-db",
+ "nexus-orchestration",
+ "nexus-preset",
+ "nix 0.31.3",
+ "parking_lot 0.13.0",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2 0.11.1",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

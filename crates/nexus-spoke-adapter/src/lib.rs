@@ -171,8 +171,9 @@ pub use spoke_operations::{
 };
 
 // v1.190 P3-T3 — the peer-tool spine's spoke primitives. The peer registry
-// moved into `nexus-core::execution` (one registry for every host), so a
-// consumer needs the tool-grammar and manifest validators WITHOUT taking a
+// lives in `nexus-connect::peer_tools` (v1.244; `nexus-core::execution`
+// before that), so a consumer needs the tool-grammar and manifest validators
+// WITHOUT taking a
 // direct `spoke-operations` edge. Re-exported here rather than widening the
 // registry's own dependency set: the adapter stays the single spoke import
 // boundary (call-boundary invariant above).

@@ -1,0 +1,63 @@
+[package]
+name = "nexus-execution"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The durable run engine: graph-flow run driving, workspace sessions and their commit authority, snapshot/OCC filesystem primitives, per-run event rings, and the background scheduler ownership"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+# The production `PromptExecutor` over the Host facade. Mirrors core's
+# `provider-host`: nothing else in this crate links the agent runtime.
+provider-host = ["dep:nexus-agent-host", "dep:futures-util"]
+# The crash/rendezvous seams the workspace-commit recovery proofs drive. Off in
+# a production build; enabled by a consumer's own test self-reference.
+test-hooks = ["nexus-local-db/test-hooks"]
+
+[dependencies]
+nexus-contracts = { path = "../nexus-contracts" }
+nexus-local-db = { path = "../nexus-local-db" }
+nexus-orchestration = { path = "../nexus-orchestration" }
+nexus-home-layout = { path = "../nexus-home-layout" }
+nexus-preset = { path = "../nexus-preset" }
+nexus-creator-memory = { path = "../nexus-creator-memory" }
+nexus-agent-host = { path = "../nexus-agent-host", optional = true }
+# The engine's session backend: the run driver names `SessionStorage` directly.
+graph-flow = { version = "=0.8.1", default-features = false }
+tokio.workspace = true
+tokio-util.workspace = true
+sqlx.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+# Content-addressed OCC hashes, their lowercase-hex rendering and the manifest
+# body decode of the durable workspace commit authority.
+sha2.workspace = true
+hex = "0.4"
+base64 = "0.23"
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+futures-util = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+# Descriptor-relative atomic mutation (openat/renameat/linkat/unlinkat) and the
+# advisory workspace-authority lease. Every use site is `cfg(unix)`-gated.
+nix = { version = "0.31.3", features = ["fs"] }
+
+[dev-dependencies]
+serial_test = "4"
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+parking_lot = "0.13"
+# Enable the gated seams and the provider-host lane for this crate's own tests.
+nexus-execution = { path = ".", features = ["provider-host", "test-hooks"] }

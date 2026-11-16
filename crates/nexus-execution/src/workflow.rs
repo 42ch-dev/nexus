@@ -37,7 +37,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::execution::applied_documents::{intake_mode_for_admission, resolve_applied_document};
+use crate::admission::{AppliedAdmissionError, AppliedAdmissionPort};
 use async_trait::async_trait;
 use graph_flow::SessionStorage;
 use nexus_orchestration::engine::{
@@ -89,10 +89,7 @@ pub trait RunEventPort: Send + Sync {
         run_id: &str,
         last_event_id: Option<&str>,
         inspect_url: String,
-    ) -> Result<
-        crate::execution::run_events::LiveSubscription,
-        crate::execution::run_events::SubscribeError,
-    >;
+    ) -> Result<crate::run_events::LiveSubscription, crate::run_events::SubscribeError>;
     /// Read a bounded page of the run's retained frames.
     ///
     /// The ring's item/byte caps and the explicit-gap semantics are the
@@ -101,14 +98,14 @@ pub trait RunEventPort: Send + Sync {
     /// retention-trimmed cursor sets `resync_required` on the returned page.
     ///
     /// # Errors
-    /// Returns [`crate::execution::run_events::PageError::UnknownRun`] when no
+    /// Returns [`crate::run_events::PageError::UnknownRun`] when no
     /// live or terminal ring is retained for `run_id`.
     fn read_page(
         &self,
         run_id: &str,
         after_sequence: Option<u64>,
         limit: usize,
-    ) -> Result<crate::execution::run_events::RunPage, crate::execution::run_events::PageError>;
+    ) -> Result<crate::run_events::RunPage, crate::run_events::PageError>;
 }
 
 /// Provider catalog used to validate agent-binding provider references
@@ -1055,8 +1052,13 @@ pub enum RunControlError {
     /// document at all). The refusal already names the strategy and the
     /// apply and is a coded refusal, not an internal fault; nothing was
     /// admitted and nothing ran.
-    #[error(transparent)]
-    AppliedIdentityInvalid(crate::CoreError),
+    #[error("{code}: {message}")]
+    AppliedIdentityInvalid {
+        /// Stable lowercase wire code of the applied-identity refusal.
+        code: String,
+        /// The sentence naming the strategy and the apply.
+        message: String,
+    },
 
     /// `[strategy_intake]` in the home config is unreadable or names a mode
     /// outside `ir-only`/`yaml-only`. A mistyped key fails closed here
@@ -1163,6 +1165,26 @@ fn classify_cancel_outcome(
     }
 }
 
+/// Map an admission refusal to the calling site's control error.
+///
+/// `store` names the variant the site owns for a store read failure — session
+/// admission and schedule admission report it differently, while the refusal
+/// families themselves must stay byte-identical at both.
+fn admission_refusal(
+    error: AppliedAdmissionError,
+    store: fn(String) -> RunControlError,
+) -> RunControlError {
+    match error {
+        AppliedAdmissionError::Store(message) => store(message),
+        AppliedAdmissionError::InvalidIntakeConfig(reason) => {
+            RunControlError::InvalidIntakeConfig { reason }
+        }
+        AppliedAdmissionError::AppliedIdentity { code, message } => {
+            RunControlError::AppliedIdentityInvalid { code, message }
+        }
+    }
+}
+
 /// One cancellation/join owner per (Creator DB identity, session) (A3).
 ///
 /// The coordinator is the SINGLE production owner of the bounded
@@ -1235,6 +1257,11 @@ pub struct WorkflowRunCoordinator {
     /// Bounded per-run SSE rings (P4 §6.3). `None` when the transport
     /// supplies no ring registry (tests, core-only callers).
     run_events: Option<Arc<dyn RunEventPort>>,
+    /// The applied-identity admission every run starts from.
+    ///
+    /// Mandatory: admission must resolve the strategy's current apply before
+    /// it builds a graph, and only the owner half can read the Creator store.
+    applied_admission: Arc<dyn AppliedAdmissionPort>,
 }
 
 /// An in-flight (or completed) drive owner for one session.
@@ -1407,6 +1434,7 @@ impl WorkflowRunCoordinator {
                 std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
             >,
         >,
+        applied_admission: Arc<dyn AppliedAdmissionPort>,
     ) -> Self {
         let workflow_store: Arc<dyn WorkflowStateStore> =
             Arc::new(nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(pool.clone()));
@@ -1424,6 +1452,7 @@ impl WorkflowRunCoordinator {
             config: PresetRunConfig::default(),
             schedule_supervisor: std::sync::Arc::new(std::sync::RwLock::new(None)),
             run_events: None,
+            applied_admission,
         }
     }
 
@@ -1531,7 +1560,7 @@ impl WorkflowRunCoordinator {
     /// The attached schedule supervisor, if one exists.
     ///
     /// `None` for a standalone coordinator (tests, core-only callers) — the
-    /// typed schedule operations on [`crate::execution::ExecutionHandle`]
+    /// typed schedule operations on the owner's `ExecutionHandle`
     /// report `NotFound` rather than fabricating a supervisor.
     #[must_use]
     pub fn schedule_supervisor(
@@ -1621,19 +1650,19 @@ impl WorkflowRunCoordinator {
         let loaded = nexus_preset::resolve_preset(preset_id, nexus_home, &registry)
             .map_err(|e| RunControlError::PresetLoad(preset_id.to_string(), e.to_string()))?;
 
-        // P6 condition 6 (intake mode), same gate as schedule admission: the key
-        // governs user bundles only; `yaml-only` runs the YAML bundle without
-        // reading the apply; `ir-only` resolves it below and refuses a user
-        // bundle with none before graph construction.
-        let intake_mode = intake_mode_for_admission(nexus_home, preset_id, &loaded)
-            .map_err(|reason| RunControlError::InvalidIntakeConfig { reason })?;
-        let applied = match intake_mode {
-            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
-            _ => resolve_applied_document(&self.pool, nexus_home, preset_id, Some(&loaded))
-                .await
-                .map_err(|error| RunControlError::Admission(error.to_string()))?
-                .map_err(|refusal| RunControlError::AppliedIdentityInvalid(refusal.into_error()))?,
-        };
+        // P6 condition 6 (intake mode), same gate as schedule admission: the
+        // key governs user bundles only; `yaml-only` runs the YAML bundle
+        // without reading the apply; the default `ir-only` resolves the apply
+        // below and refuses a user bundle with none before graph construction.
+        // The resolution itself is the admission port's: only the owner half
+        // reads the Creator store, and recovery re-enters through the same one.
+        let admission = self
+            .applied_admission
+            .admit(nexus_home, preset_id, &loaded)
+            .await
+            .map_err(|error| admission_refusal(error, RunControlError::Admission))?;
+        let intake_mode = admission.intake_mode;
+        let applied = admission.applied;
         if intake_mode == Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
             && applied.is_none()
         {
@@ -3007,8 +3036,9 @@ impl WorkflowRunCoordinator {
         // classification. `locate_preset` checks embedded first, so a user bundle shadowing an
         // embedded id would be read as `embedded` and its current apply silently skipped; only
         // `resolve_preset` (user → system → embedded) knows which bundle actually loaded. The
-        // predicate is `crate::apply::is_user_preset`, the same one apply refuses on, so the two
-        // sides cannot disagree about which schedules have an applied identity.
+        // predicate is `nexus_home_layout::strategy_intake::is_user_strategy_bundle` — the rule
+        // the apply gate's `is_user_preset` delegates to — so the two sides cannot disagree about
+        // which schedules have an applied identity.
         //
         // Resolved BEFORE the binding gate so the roles validated are the roles the run will
         // execute, not the descriptor's. The resolved identity is also carried into the run's
@@ -3021,24 +3051,13 @@ impl WorkflowRunCoordinator {
         // the current apply; the default `ir-only` resolves as P3.5 states
         // and refuses a user bundle with no current apply before any graph
         // is built (never a YAML fallback).
-        let intake_mode = crate::execution::applied_documents::intake_mode_for_admission(
-            nexus_home,
-            &row.preset_id,
-            &loaded,
-        )
-        .map_err(|reason| RunControlError::InvalidIntakeConfig { reason })?;
-        let applied = match intake_mode {
-            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
-            _ => crate::execution::applied_documents::resolve_applied_document(
-                pool,
-                nexus_home,
-                &row.preset_id,
-                Some(&loaded),
-            )
+        let admission = self
+            .applied_admission
+            .admit(nexus_home, &row.preset_id, &loaded)
             .await
-            .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?
-            .map_err(|refusal| RunControlError::AppliedIdentityInvalid(refusal.into_error()))?,
-        };
+            .map_err(|error| admission_refusal(error, RunControlError::ScheduleUpdate))?;
+        let intake_mode = admission.intake_mode;
+        let applied = admission.applied;
         if intake_mode == Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
             && applied.is_none()
         {
@@ -3639,9 +3658,8 @@ async fn schedule_eligible(
 /// refusal is returned to the supervisor verbatim and the row stays pending
 /// for a later tick or an explicit start.
 ///
-/// Constructed once per hosted owner, before recovery runs, by
-/// [`crate::execution::lifecycle::CoreService::start_execution`] through
-/// [`RunnerDeps::hosted_scheduler`](crate::execution::lifecycle::RunnerDeps)
+/// Constructed once per hosted owner, before recovery runs, by the owner's
+/// `CoreService::start_execution` through `RunnerDeps::hosted_scheduler`
 /// — the same place the supervisor and its clock task are installed.
 pub struct CoordinatorScheduleRunStarter {
     /// The ONE coordinator that owns admission and drive single-flight.
@@ -3824,6 +3842,30 @@ mod tests {
 
     const CREATOR: &str = "test_creator";
     const SLUG: &str = "default";
+
+    /// Admission double for the coordinator's unit tests.
+    ///
+    /// Every preset these tests drive carries no current apply, so the
+    /// resolution answers "not a user bundle, no applied document" — what a
+    /// home with no `[strategy_intake]` key answers for a non-user preset.
+    /// The applied-identity and intake-config families are asserted end to end
+    /// against the real adapter in `tests/execution_lifecycle.rs`.
+    struct NoAppliedAdmission;
+
+    #[async_trait]
+    impl AppliedAdmissionPort for NoAppliedAdmission {
+        async fn admit(
+            &self,
+            _nexus_home: &std::path::Path,
+            _preset_id: &str,
+            _loaded: &nexus_preset::LoadedPreset,
+        ) -> Result<crate::admission::AppliedAdmission, AppliedAdmissionError> {
+            Ok(crate::admission::AppliedAdmission {
+                intake_mode: None,
+                applied: None,
+            })
+        }
+    }
 
     /// Seed an admitted engine-owner workspace DB, mirroring the daemon's own
     /// `create_test_workspace` fixture (same admission path, so the
@@ -6386,6 +6428,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
 
         // Start a v1 run and park it at a durable human wait.
@@ -6583,6 +6626,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
 
         let race_graph = Arc::new(
@@ -6741,6 +6785,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
 
         let race_graph = Arc::new(
@@ -6894,6 +6939,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
 
         let race_graph = Arc::new(
@@ -7021,6 +7067,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -7137,6 +7184,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(fault_store);
         let session_id = engine
@@ -7219,6 +7267,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -7555,6 +7604,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(fault_store);
         let session_id = engine
@@ -7677,6 +7727,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(fault_store.clone());
         let session_id = engine
@@ -7802,6 +7853,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -7921,6 +7973,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(fault_store);
         let session_id = engine
@@ -8048,6 +8101,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -8140,6 +8194,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = SessionId("v0:recovery".to_string());
 
@@ -8397,6 +8452,7 @@ mod tests {
             real_storage.clone(),
             pool.clone(),
             Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            Arc::new(NoAppliedAdmission),
         );
         assert!(
             !coordinator
@@ -8601,6 +8657,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -8728,6 +8785,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -8856,6 +8914,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -8958,6 +9017,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let summary = SessionSummary {
             session_id: SessionId("v0:typed-failed".to_string()),
@@ -9247,6 +9307,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(barrier_store.clone());
         let session_id = engine
@@ -9371,6 +9432,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -9476,6 +9538,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(fault_store);
         let session_id = engine
@@ -9750,6 +9813,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(barrier_store.clone());
         let session_id = engine
@@ -9892,32 +9956,23 @@ mod tests {
                 run_id: &str,
                 _last_event_id: Option<&str>,
                 inspect_url: String,
-            ) -> Result<
-                crate::execution::run_events::LiveSubscription,
-                crate::execution::run_events::SubscribeError,
-            > {
+            ) -> Result<crate::run_events::LiveSubscription, crate::run_events::SubscribeError>
+            {
                 // No ring is ever registered by this double.
-                Err(
-                    crate::execution::run_events::SubscribeError::HistoryUnavailable(
-                        crate::execution::run_events::HistoryUnavailableWire {
-                            run_id: run_id.to_string(),
-                            inspect_url,
-                        },
-                    ),
-                )
+                Err(crate::run_events::SubscribeError::HistoryUnavailable(
+                    crate::run_events::HistoryUnavailableWire {
+                        run_id: run_id.to_string(),
+                        inspect_url,
+                    },
+                ))
             }
             fn read_page(
                 &self,
                 run_id: &str,
                 _after_sequence: Option<u64>,
                 _limit: usize,
-            ) -> Result<
-                crate::execution::run_events::RunPage,
-                crate::execution::run_events::PageError,
-            > {
-                Err(crate::execution::run_events::PageError::UnknownRun(
-                    run_id.to_string(),
-                ))
+            ) -> Result<crate::run_events::RunPage, crate::run_events::PageError> {
+                Err(crate::run_events::PageError::UnknownRun(run_id.to_string()))
             }
         }
 
@@ -10152,6 +10207,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels.clone(),
+            Arc::new(NoAppliedAdmission),
         )
         .with_workflow_store(walk_store.clone())
         .with_run_events(Arc::new(GatedAdmissionPort {
@@ -10320,32 +10376,25 @@ mod tests {
             run_id: &str,
             _last_event_id: Option<&str>,
             inspect_url: String,
-        ) -> Result<
-            crate::execution::run_events::LiveSubscription,
-            crate::execution::run_events::SubscribeError,
-        > {
+        ) -> Result<crate::run_events::LiveSubscription, crate::run_events::SubscribeError>
+        {
             // The quota-refused port never registered a ring.
-            Err(
-                crate::execution::run_events::SubscribeError::HistoryUnavailable(
-                    crate::execution::run_events::HistoryUnavailableWire {
-                        run_id: run_id.to_string(),
-                        inspect_url,
-                    },
-                ),
-            )
+            Err(crate::run_events::SubscribeError::HistoryUnavailable(
+                crate::run_events::HistoryUnavailableWire {
+                    run_id: run_id.to_string(),
+                    inspect_url,
+                },
+            ))
         }
         fn read_page(
             &self,
             run_id: &str,
             _after_sequence: Option<u64>,
             _limit: usize,
-        ) -> Result<crate::execution::run_events::RunPage, crate::execution::run_events::PageError>
-        {
+        ) -> Result<crate::run_events::RunPage, crate::run_events::PageError> {
             // This double models the quota-refused port: no ring was ever
             // registered, so a read has nothing to serve.
-            Err(crate::execution::run_events::PageError::UnknownRun(
-                run_id.to_string(),
-            ))
+            Err(crate::run_events::PageError::UnknownRun(run_id.to_string()))
         }
     }
 
@@ -10406,6 +10455,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_run_events(Arc::new(FullQuotaPort));
 
@@ -10477,30 +10527,25 @@ mod tests {
             run_id: &str,
             _last_event_id: Option<&str>,
             inspect_url: String,
-        ) -> Result<
-            crate::execution::run_events::LiveSubscription,
-            crate::execution::run_events::SubscribeError,
-        > {
+        ) -> Result<crate::run_events::LiveSubscription, crate::run_events::SubscribeError>
+        {
             // This double only records publishes; it owns no ring to replay.
-            Err(
-                crate::execution::run_events::SubscribeError::HistoryUnavailable(
-                    crate::execution::run_events::HistoryUnavailableWire {
-                        run_id: run_id.to_string(),
-                        inspect_url,
-                    },
-                ),
-            )
+            Err(crate::run_events::SubscribeError::HistoryUnavailable(
+                crate::run_events::HistoryUnavailableWire {
+                    run_id: run_id.to_string(),
+                    inspect_url,
+                },
+            ))
         }
         fn read_page(
             &self,
             _run_id: &str,
             after_sequence: Option<u64>,
             _limit: usize,
-        ) -> Result<crate::execution::run_events::RunPage, crate::execution::run_events::PageError>
-        {
+        ) -> Result<crate::run_events::RunPage, crate::run_events::PageError> {
             // This double only records publishes; it retains no frames, so a
             // read is an empty, non-terminal, non-resyncing page.
-            Ok(crate::execution::run_events::RunPage {
+            Ok(crate::run_events::RunPage {
                 frames: Vec::new(),
                 next_sequence: after_sequence.unwrap_or(0),
                 terminal: false,
@@ -10565,6 +10610,7 @@ mod tests {
             storage.clone(),
             pool.clone(),
             session_cancels,
+            Arc::new(NoAppliedAdmission),
         )
         .with_run_events(Arc::clone(&port) as Arc<dyn RunEventPort>);
 

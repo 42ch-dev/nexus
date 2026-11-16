@@ -7,14 +7,14 @@ use nexus_contracts::local::orchestration::{WorkspaceChangeEntry, WorkspaceChang
 use nexus_local_db as db;
 use sha2::{Digest, Sha256};
 
-use super::bounds::{
+use crate::bounds::{
     validate_encoded_body, validate_entries_json_len, validate_hash_hex, validate_relative_path,
 };
-use super::commit_fs::{
+use crate::commit_fs::{
     decode_base64, hash_bytes, require_parent_exists, ScopeMutation, CREATE_FILE_MODE, MAX_CHANGES,
     MAX_FILE_BYTES, MAX_TOTAL_BYTES,
 };
-use super::session::{
+use crate::session::{
     canonicalize_workspace_root, enforce_path_boundary, SessionError, SessionId,
     WorkspaceSessionManager,
 };
@@ -28,8 +28,8 @@ macro_rules! test_crash_if {
     ($point:expr) => {
         #[cfg(any(test, feature = "test-hooks"))]
         {
-            if $crate::execution::test_hooks::crash_point_is($point) {
-                return Err($crate::execution::session::SessionError::Internal(format!(
+            if $crate::test_hooks::crash_point_is($point) {
+                return Err($crate::session::SessionError::Internal(format!(
                     "test_crash:{}",
                     $point
                 )));
@@ -51,13 +51,13 @@ fn is_simulated_test_crash(err: &SessionError) -> bool {
 /// never-awaiting async wrapper exists there.
 #[cfg(any(test, feature = "test-hooks"))]
 async fn test_owner_gate_admitted(session_id: &str) {
-    super::test_hooks::owner_gate_admitted(session_id).await;
+    crate::test_hooks::owner_gate_admitted(session_id).await;
 }
 
 /// Signal that the retained owner task has settled, when a gate is armed.
 #[cfg(any(test, feature = "test-hooks"))]
 fn test_owner_gate_settled(session_id: &str) {
-    super::test_hooks::owner_gate_settled(session_id);
+    crate::test_hooks::owner_gate_settled(session_id);
 }
 
 /// Production no-op for the gated settle signal.
@@ -70,13 +70,13 @@ const fn test_owner_gate_settled(_session_id: &str) {}
 /// never-awaiting async wrapper exists there.
 #[cfg(any(test, feature = "test-hooks"))]
 async fn test_recovery_gate_admitted() {
-    super::test_hooks::recovery_gate_admitted().await;
+    crate::test_hooks::recovery_gate_admitted().await;
 }
 
 /// Signal that the retained recovery owner task has settled, when a gate is armed.
 #[cfg(any(test, feature = "test-hooks"))]
 fn test_recovery_gate_settled() {
-    super::test_hooks::recovery_gate_settled();
+    crate::test_hooks::recovery_gate_settled();
 }
 
 /// Production no-op for the gated recovery settle signal.
@@ -84,7 +84,7 @@ fn test_recovery_gate_settled() {
 const fn test_recovery_gate_settled() {}
 
 #[cfg(any(test, feature = "test-hooks"))]
-use super::test_hooks::clear_crash_point;
+use crate::test_hooks::clear_crash_point;
 
 /// Clear an inherited crash point at owner spawn.
 #[cfg(any(test, feature = "test-hooks"))]
@@ -328,7 +328,7 @@ async fn rollback_intent_locked(
     };
 
     let canonical_root = canonicalize_workspace_root(Path::new(workspace_root)).await?;
-    let scope_dir = super::scope::scope_directory(&canonical_root, &row.relative_path)?;
+    let scope_dir = crate::scope::scope_directory(&canonical_root, &row.relative_path)?;
     let scope = match ScopeMutation::open(&canonical_root, &row.relative_path) {
         Ok(s) => s,
         Err(e) => {
@@ -416,7 +416,7 @@ async fn rollback_intent_locked(
 /// # Errors
 ///
 /// Returns [`SessionError::ManifestInvalid`] for a path that fails
-/// [`commit_fs::split_relative`](super::commit_fs::split_relative), for a
+/// [`commit_fs::split_relative`](crate::commit_fs::split_relative), for a
 /// duplicate normalized path, or for two paths where one is a prefix of the
 /// other.
 pub fn normalize_changes(
@@ -424,7 +424,7 @@ pub fn normalize_changes(
 ) -> Result<Vec<WorkspaceChangeEntry>, SessionError> {
     let mut normalized = Vec::with_capacity(changes.len());
     for change in changes {
-        let components = super::commit_fs::split_relative(&change.path)
+        let components = crate::commit_fs::split_relative(&change.path)
             .map_err(|e| SessionError::ManifestInvalid(e.to_string()))?;
         let mut cloned = change.clone();
         cloned.path = components.join("/");
@@ -457,7 +457,7 @@ pub fn normalize_changes(
 /// # Errors
 ///
 /// Returns [`SessionError::ManifestInvalid`] when the manifest is empty,
-/// exceeds [`commit_fs::MAX_CHANGES`](super::commit_fs::MAX_CHANGES), carries an
+/// exceeds [`commit_fs::MAX_CHANGES`](crate::commit_fs::MAX_CHANGES), carries an
 /// invalid op or path, or exceeds the per-file/total byte bounds.
 pub fn validate_manifest(changes: &[WorkspaceChangeEntry]) -> Result<(), SessionError> {
     if changes.is_empty() {
@@ -582,7 +582,7 @@ fn plan_commit_entries(
     let rev_tag = revision.replace("rev_", "");
     let mut entries_json = Vec::with_capacity(changes.len());
     for (idx, change) in changes.iter().enumerate() {
-        let target = super::scope::resolve_in_scope(scope_dir, &change.path)?;
+        let target = crate::scope::resolve_in_scope(scope_dir, &change.path)?;
         enforce_path_boundary(&target, canonical_root)?;
         require_parent_exists(&target).map_err(|e| SessionError::ManifestInvalid(e.to_string()))?;
         let stage_basename = format!(".nexus-stage-{rev_tag}-{idx}");
@@ -748,7 +748,7 @@ pub(crate) async fn commit_recoverable(
         .map_err(|e| SessionError::Database(e.to_string()))?
         .ok_or_else(|| SessionError::NotFound(session_id.clone()))?;
 
-    super::scope::enforce_active_workspace_root(&row.workspace_root, active_workspace_root).await?;
+    crate::scope::enforce_active_workspace_root(&row.workspace_root, active_workspace_root).await?;
 
     // Canonical form first: the digest and the mutation order below are both
     // derived from it, so a reordered-equivalent retry is identical.
@@ -784,7 +784,7 @@ pub(crate) async fn commit_recoverable(
 
     let canonical_root = canonicalize_workspace_root(Path::new(&row.workspace_root)).await?;
     let workspace_root = canonical_root.to_string_lossy().into_owned();
-    let scope_dir = super::scope::scope_directory(&canonical_root, &row.relative_path)?;
+    let scope_dir = crate::scope::scope_directory(&canonical_root, &row.relative_path)?;
 
     if db::workspace_has_recovery_conflict(mgr.pool().as_ref(), &workspace_root)
         .await
@@ -1064,7 +1064,7 @@ async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager, root_filter: O
         if let Some(active_root) = root_filter {
             // A bundle admitted for one root must not unlink another root's
             // artifacts, even dead ones.
-            if super::scope::enforce_active_workspace_root(&workspace_root, active_root)
+            if crate::scope::enforce_active_workspace_root(&workspace_root, active_root)
                 .await
                 .is_err()
             {
