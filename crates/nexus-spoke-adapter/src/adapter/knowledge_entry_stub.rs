@@ -89,8 +89,7 @@ impl KnowledgeEntryPort for StubKnowledgeEntryPort {
     // No CAS: the production write below this stub is a plain INSERT, not a
     // revision compare, so there is no revision expectation for a preview to
     // carry. And this stub applies no store rule of its own — it records the
-    // intent. A caller that needs to know whether the store would refuse asks
-    // the store (`SqliteKbStore::would_refuse_insert`) before putting.
+    // intent; whether the store would accept it is not a question it answers.
     async fn put_knowledge_entry(
         &self,
         entry: KnowledgeEntry,
