@@ -28,7 +28,7 @@ pub fn clear_crash_point() {
     set_crash_point(None);
 }
 
-pub fn crash_point_is(point: &str) -> bool {
+pub(crate) fn crash_point_is(point: &str) -> bool {
     *CRASH_POINT.lock().expect("crash point lock") == Some(point)
 }
 
@@ -45,7 +45,7 @@ pub fn set_after_delete_capture_hook(hook: Option<Arc<dyn Fn() + Send + Sync>>) 
     *AFTER_DELETE_CAPTURE.lock().expect("hook lock") = hook;
 }
 
-pub fn run_after_delete_capture_hook() {
+pub(crate) fn run_after_delete_capture_hook() {
     let hook = AFTER_DELETE_CAPTURE.lock().expect("hook lock").clone();
     if let Some(hook) = hook {
         hook();
@@ -109,14 +109,14 @@ fn current_owner_gate(session_id: &str) -> Option<Arc<OwnerGate>> {
     }
 }
 
-pub async fn owner_gate_admitted(session_id: &str) {
+pub(crate) async fn owner_gate_admitted(session_id: &str) {
     if let Some(gate) = current_owner_gate(session_id) {
         gate.admitted.notify_one();
         gate.proceed.notified().await;
     }
 }
 
-pub fn owner_gate_settled(session_id: &str) {
+pub(crate) fn owner_gate_settled(session_id: &str) {
     if let Some(gate) = current_owner_gate(session_id) {
         gate.settled.notify_one();
     }
@@ -169,14 +169,14 @@ fn current_recovery_gate() -> Option<Arc<RecoveryGate>> {
         .map(Arc::clone)
 }
 
-pub async fn recovery_gate_admitted() {
+pub(crate) async fn recovery_gate_admitted() {
     if let Some(gate) = current_recovery_gate() {
         gate.admitted.notify_one();
         gate.proceed.notified().await;
     }
 }
 
-pub fn recovery_gate_settled() {
+pub(crate) fn recovery_gate_settled() {
     if let Some(gate) = current_recovery_gate() {
         gate.settled.notify_one();
     }

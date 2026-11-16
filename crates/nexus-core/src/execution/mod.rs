@@ -44,7 +44,9 @@ pub mod applied_documents;
 // `nexus-execution`; the re-export keeps the in-crate paths stable while the
 // owner module still forwards them.
 pub use nexus_execution::{authority, commit_fs};
-pub mod bounds;
+// v1.245 extraction: the session layer and its path bounds live in
+// `nexus-execution` too.
+pub use nexus_execution::{bounds, scope, session, session_commit};
 // Capability dispatch and compute (v1.190 P3-T3). The protocol-neutral peer
 // registry it consults is `nexus_connect::peer_tools` (v1.244 extraction);
 // `compute` additionally requires the WASM edge, so it is gated separately.
@@ -73,9 +75,6 @@ pub mod production;
 pub mod prompt_executor;
 pub mod run_events;
 pub mod schedules;
-pub mod scope;
-pub mod session;
-pub mod session_commit;
 // v1.193 P2-T2: the production ACP-backed `SoulNarrativeSynthesizer` moved
 // here from the deleted daemon composition (technical contracts §4). It
 // consumes the orchestration `CapabilityRegistry`, so it rides `execution`.

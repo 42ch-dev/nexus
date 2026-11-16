@@ -472,7 +472,7 @@ impl ScopeMutation {
 /// Split a validated relative path into its components.
 ///
 /// Rejects absolute paths, `..`, `.`, path prefixes, and empty segments.
-pub fn split_relative(rel_path: &str) -> io::Result<Vec<String>> {
+pub(crate) fn split_relative(rel_path: &str) -> io::Result<Vec<String>> {
     let path = Path::new(rel_path);
     let mut out = Vec::new();
     for comp in path.components() {
