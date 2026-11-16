@@ -83,13 +83,15 @@ strategy_applies` (`apply.rs:526`). The limits that remain on the applied path (
 I-000462–I-000465) are recorded there rather than here. P4's **third** exit criterion — the IR→Graph
 mapping compared against the IR→Task table in orchestration-engine §8.2.1 — is satisfied: the
 comparison sheet (`.mstar/iterations/v1.246-adr-complete/specs/ir-to-task-comparison.md`) classified
-30 rows — 27 `match`, 7 `table-stale`, 1 `table-omission`, **0 `code-divergent`** — and the eight
-§8.2.1 amendments landed in `8e6f22225`. What the comparison established, beyond that it ran:
+34 entries — 25 `match`, 8 `table-stale`, 1 `table-omission`, **0 `code-divergent`** — with nine
+§8.2.1 amendments (`8e6f22225` plus the QC correction round). What the comparison established, beyond that it ran:
 node-type coverage is closed in both directions, the one real omission found — the inner-graph
 synthetic `end` task (`preset_runtime.rs:1150-1169`) — now being in the table; edge semantics were
-corrected in three places (conditional routing is in-task `resolve_expression_target` → `GoTo` with
+corrected in four places (conditional routing is in-task `resolve_expression_target` → `GoTo` with
 no builder edge, pinned at `preset_runtime.rs:4040`; `default` is the family fallback, not an edge;
-`edges[kind=depends_on]` is a phantom with no producer and no reader); and no third mapping exists —
+`edges[kind=depends_on]` is a phantom with no producer and no reader; and the judge's no-go routes
+rather than waits on every routed `next` form, pinned at `preset_runtime.rs:3844-3868`); and no
+third mapping exists —
 the five `NextTarget` forms all trace to table rows, and refusal names are generated from the
 table's own row names (`preset_runtime.rs:344`). The zero `code-divergent` count is a result, not an
 absence of effort: every rule-1 and rule-2 row diverged with the table as the stale side — what a

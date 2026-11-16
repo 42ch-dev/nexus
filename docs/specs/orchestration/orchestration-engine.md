@@ -858,14 +858,14 @@ one above, buildability, and the prompt-role and recovery limits — are
 | IR document concept | Task / graph-flow execution counterpart |
 | --- | --- |
 | `entry` | Selects the initial outer `Task`; the target node id is its `Task::id()`. |
-| `nodes[kind=outer_state]` | `StateCompositeTask`, carrying the node's enter actions, exit condition and routing. The node's `context_update` rides the projected state and is fired by the engine's core-context assembly on state exit — not by this task. |
+| `nodes[kind=outer_state]` | `StateCompositeTask`, carrying the node's enter actions, exit condition and routing. The node's `context_update` rides the projected state; the task neither carries nor runs it, and no production site fires the hook today — the core-context manager's `apply_preset_hook` (`schedule/derivation.rs`) has test-only callers. |
 | `outer_state.enter[kind=capability]` | `CapabilityTask`, invoked by the owning `StateCompositeTask`. |
 | `outer_state.enter[kind=host_tool]` | `HostToolCallTask`, invoked inline by the owning `StateCompositeTask`; requires the injected daemon tool dispatch and fails closed when unset. It is not added as a graph node. |
 | `outer_state.enter[kind=inner_graph]` | `InnerGraphTask`, launching the referenced inner graph in a child session. |
 | `nodes[kind=inner_step]` with `step_kind=acp_prompt` | `InnerGraphNodeTask`, delegating to `AcpPromptTask` when the production prompt executor is injected. The builder also adds a synthetic terminal `end` task wiring every inner-graph sink — a graph-flow termination need shared with the YAML intake, with no IR concept of its own. |
 | `exit_when.kind=rule` | `RuleCheckTask` semantics within the outer state lifecycle. |
 | `nodes[kind=outer_state]` carrying `exit_when.kind=manual` | The `StateCompositeTask` manual branch (`ManualWaitTask` semantics, inlined — the standalone type is not constructed on this path), returning `NextAction::WaitForInput`. |
-| `nodes[kind=outer_state]` carrying `exit_when.kind=llm_judge` | `JudgeTask` semantics after enter actions; go continues and no-go waits. |
+| `nodes[kind=outer_state]` carrying `exit_when.kind=llm_judge` | `LlmJudgeTask` semantics after enter actions. With a linear or absent `next`, go continues and no-go waits; with go/nogo, labeled or branch routing both verdicts advance — the branch edge or label match selects the target, so a no-go routes rather than waits. |
 | `exit_when.kind=graph_complete` | `InnerGraphTask` completion lets the outer task return `NextAction::Continue`. |
 | `exit_when.kind=timer` | The `StateCompositeTask` timer branch, returning `WaitForInput` until resumed. No clock signal is scheduled yet (DR-12). |
 | `nodes[kind=outer_state]` carrying `merge`, `converge`, `timeout_ms`, `on_timeout` | The `StateCompositeTask` join gate, including arrival tracking and bounded-timeout handling. |
