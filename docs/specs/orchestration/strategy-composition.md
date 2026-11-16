@@ -131,11 +131,13 @@ the current tree, so formatting may move it while the claim stays with the name.
 (`workflow.rs`) and both preset trait entries — `start_session_with_preset` and
 `start_session_with_preset_for_creator`, which share `start_preset_entry`
 (`crates/nexus-orchestration/src/engine.rs`) — ask the same question before they build: which document does
-this strategy run? All four answer it through `resolve_applied_document`
-(`crates/nexus-core/src/owner/applied_documents.rs`), the one route through `is_user_preset`,
-`current_apply` and `verified_apply_document` (`crates/nexus-core/src/apply.rs`). The two trait entries
-reach that route through the installed `AppliedDocumentSource` (`start_preset_entry` in `engine.rs`; the
-daemon installs the Creator-backed source in `crates/nexus-core/src/owner/lifecycle.rs`).
+this strategy run? All four resolve it through `resolve_applied_document`
+(`crates/nexus-core/src/owner/applied_documents.rs` — the only place that function exists), the one
+route through `is_user_preset`, `current_apply` and `verified_apply_document`
+(`crates/nexus-core/src/apply.rs`). The two coordinator entries reach it through the
+`AppliedAdmissionPort` their owner installs; the two trait entries reach it through the installed
+`AppliedDocumentSource` (`start_preset_entry` in `engine.rs`). One `CreatorAppliedDocuments` answers
+both ports, and the daemon installs it in `crates/nexus-core/src/owner/lifecycle.rs`.
 
 **The rule.** When the answer is a document, the entry builds the graph from that document with
 `IrTemplateSource::OwnSource` and freezes the `AppliedRunIdentity` the answer carries on the run descriptor
@@ -156,9 +158,9 @@ entries resolve before the binding gate, so the roles validated are the roles th
 
 | Entry | Resolves through | Applied graph | Descriptor write |
 | --- | --- | --- | --- |
-| schedule admission (`admit_schedule_inner`) | `resolve_applied_document` (`workflow.rs:3035`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:3079`) | `admit_schedule_run_with_input` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4626`) |
-| `start_session` | `resolve_applied_document` (`workflow.rs:1633`) | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:1685`) | `start_preset_run_with_input` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4512`) |
-| `start_session_with_preset` | `start_preset_entry` reads `AppliedDocumentSource::applied_document` (`crates/nexus-orchestration/src/engine.rs:4411`) | `start_preset_entry` builds with `build_wired_outer_graph_from_ir(.., OwnSource)` (`crates/nexus-orchestration/src/engine.rs:4440`) | `start_preset_run` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4314`) |
+| schedule admission (`admit_schedule_inner`) | `AppliedAdmissionPort::admit` (`workflow.rs:3056`), answered by `resolve_applied_document` in `crates/nexus-core/src/owner/applied_documents.rs` | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:3095`) | `admit_schedule_run_with_input` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4655`) |
+| `start_session` | `AppliedAdmissionPort::admit` (`workflow.rs:1661`), answered by `resolve_applied_document` in `crates/nexus-core/src/owner/applied_documents.rs` | `build_wired_outer_graph_from_ir(.., OwnSource)` (`workflow.rs:1711`) | `start_preset_run_with_input` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4555`) |
+| `start_session_with_preset` | `start_preset_entry` reads `AppliedDocumentSource::applied_document` (`crates/nexus-orchestration/src/engine.rs:4476`) | `start_preset_entry` builds with `build_wired_outer_graph_from_ir(.., OwnSource)` (`crates/nexus-orchestration/src/engine.rs:4503`) | `start_preset_run` sets `descriptor.applied` (`crates/nexus-orchestration/src/engine.rs:4370`) |
 | `start_session_with_preset_for_creator` | the same `start_preset_entry` call | the same `start_preset_entry` build | the same `start_preset_run` write |
 
 **Precedence.** The document a run is built from follows from the loader's classification and that apply
