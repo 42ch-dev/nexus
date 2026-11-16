@@ -3978,21 +3978,14 @@ impl GraphFlowEngine {
         // resolved before anything the bundle says.
         //
         // The reload below is the no-apply path's frozen-source proof (A7). An
-        // applied run executes its document instead, so there the bundle is an
-        // admission input only: one edited, moved or deleted between admission
-        // and this restart must not make such a run non-replayable.
+        // applied run executes its document instead, so it never reads the
+        // bundle: one edited, moved or deleted between admission and this
+        // restart must not make such a run non-replayable, and the frozen
+        // applied identity already encodes the user-preset classification a
+        // reload would only re-establish — resolving it to then pass `None`
+        // anyway cost one preset load plus content hash per recovery.
         let bundle = match &descriptor.applied {
-            Some(_) => match self.reload_frozen_bundle(&descriptor, session_id) {
-                Ok(loaded) => Some(loaded),
-                Err(error) => {
-                    tracing::info!(
-                        session = %session_id.0,
-                        "R6: no bundle to reload for an applied run; recovering from the applied \
-                         identity: {error}"
-                    );
-                    None
-                }
-            },
+            Some(_) => None,
             None => Some(self.reload_frozen_bundle(&descriptor, session_id)?),
         };
 
@@ -4273,7 +4266,7 @@ impl GraphFlowEngine {
             .insert(session_id.0.clone(), runner);
 
         tracing::info!(
-            "R6: reconstructed runner for session {} (preset: {}, version: {}, applied: {})",
+            "R6: reconstructed runner for session {} (preset: {}, bundle version: {}, applied: {})",
             session_id.0,
             descriptor.preset_id,
             descriptor.preset_version,
@@ -4339,10 +4332,14 @@ impl GraphFlowEngine {
     /// admission layer freezes them before driving (P2 owns that).
     /// `intake_mode` is the mode arm the admission layer selected; the
     /// descriptor records it so recovery follows the recorded arm.
+    /// `applied` is the identity the caller resolved this run under (I-000443):
+    /// frozen here, at construction, so no seam can persist a descriptor whose
+    /// bundle claim and applied identity were assembled at different times.
     fn build_descriptor(
         &self,
         loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
+        applied: Option<crate::run_state::AppliedRunIdentity>,
         intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
     ) -> Result<RunDescriptorV1, EngineError> {
         let source = loaded.source_identity.clone().ok_or_else(|| {
@@ -4363,9 +4360,7 @@ impl GraphFlowEngine {
             agent_bindings: HashMap::new(),
             parent_session_id: None,
             graph_name: None,
-            // Filled by the admission layer when the schedule's strategy has a
-            // current apply; this seam never resolves one.
-            applied: None,
+            applied,
             intake_mode,
         })
     }
@@ -4381,10 +4376,7 @@ impl GraphFlowEngine {
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
         if let Some(store) = &self.state.workflow_store {
-            let mut descriptor = self.build_descriptor(loaded, creator_id, intake_mode)?;
-            // The identity the caller resolved this run under, so a restart can
-            // tell whether the strategy's current apply is still that one.
-            descriptor.applied = applied;
+            let descriptor = self.build_descriptor(loaded, creator_id, applied, intake_mode)?;
             let session_id = format!("{}:{}", loaded.id, uuid::Uuid::new_v4());
             let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
             let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
@@ -4574,13 +4566,10 @@ impl GraphFlowEngine {
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
         if let Some(store) = &self.state.workflow_store {
-            let mut descriptor = self.build_descriptor(loaded, creator_id, intake_mode)?;
+            let mut descriptor = self.build_descriptor(loaded, creator_id, applied, intake_mode)?;
             descriptor.work_id = work_id.filter(|id| !id.is_empty());
             descriptor.input = input.clone();
             descriptor.agent_bindings = agent_bindings;
-            // The identity the caller resolved this run under, so a restart can
-            // tell whether the strategy's current apply is still that one.
-            descriptor.applied = applied;
             let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
             let session =
                 graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
@@ -4688,13 +4677,10 @@ impl GraphFlowEngine {
                 ),
             ));
         };
-        let mut descriptor = self.build_descriptor(loaded, creator_id, intake_mode)?;
+        let mut descriptor = self.build_descriptor(loaded, creator_id, applied, intake_mode)?;
         descriptor.work_id = work_id;
         descriptor.input = input.clone();
         descriptor.agent_bindings = agent_bindings;
-        // P4 Task 4: freeze the apply the caller resolved this run under, so a
-        // restart can tell whether the strategy's current apply is still that one.
-        descriptor.applied = applied;
         // N-5/N-5b: the runner is built from the FROZEN source identity
         // persisted with the schedule, never by resolving current registry
         // precedence and discarding the stored identity. The stored identity
