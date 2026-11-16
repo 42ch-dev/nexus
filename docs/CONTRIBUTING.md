@@ -40,19 +40,16 @@ pnpm install --frozen-lockfile
 git submodule update --init --recursive
 ```
 
-### Shared Rust build cache (recommended)
+### Scoped Rust build cache (recommended)
 
-To share `target/` across checkouts and worktrees, use [direnv](https://direnv.net/) with the repo-root [`.envrc`](../.envrc):
+To keep `target/` out of the checkout and give each checkout its own cache, use [direnv](https://direnv.net/) with the repo-root [`.envrc`](../.envrc):
 
 ```bash
 direnv allow
+tooling/check-target-dir.sh   # fails when this shell's CARGO_TARGET_DIR is not this checkout's
 ```
 
-Without direnv, for the current shell session:
-
-```bash
-export CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target"
-```
+Without direnv, export the dir this checkout owns — the canonical `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target` for the main checkout, `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target-<name>` for a worktree — and confirm it with `tooling/check-target-dir.sh`. No two checkouts share one target dir: cargo reuses a fresh-looking `rmeta` from whatever checkout wrote it into that dir.
 
 Do **not** set `target-dir` in `~/.cargo/config.toml` — that applies to every Rust project on the machine.
 
@@ -75,7 +72,7 @@ Then activate the checkout's [`.envrc`](../.envrc) (`direnv allow`) and confirm 
 cargo metadata --no-deps --format-version 1 | jq -r .target_directory
 ```
 
-The main checkout and the integration checkout share the canonical `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target`; a feature worktree gets the isolated `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target-<name>`. See [Worktree lifecycle and reclamation](#worktree-lifecycle-and-reclamation) for the concurrency budget and the exit checklist.
+Only the main checkout uses the canonical `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target`; every worktree — feature and integration alike — gets its own `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target-<name>`. See [Worktree lifecycle and reclamation](#worktree-lifecycle-and-reclamation) for the concurrency budget and the exit checklist.
 
 ## Day-to-day development
 
@@ -176,13 +173,13 @@ The sweeper is driven by a version-1 inventory: a non-authoritative ownership re
 }
 ```
 
-`active_plan_ids` must name every claimed non-Done plan (and every leased plan) from the snapshot; a track's `worktree` must be the canonical `<repo>/.worktrees/<name>` linked checkout of this repository on its declared branch; `target` must be exactly the `.envrc`-derived directory for that checkout, and the shared canonical `nexus-target` is never a track's target; `temporary_paths` are exact absolute receipt paths, never globs; `state` is `active` or `completed`, and `producer_stopped` is a required boolean.
+`active_plan_ids` must name every claimed non-Done plan (and every leased plan) from the snapshot; a track's `worktree` must be the canonical `<repo>/.worktrees/<name>` linked checkout of this repository on its declared branch; `target` must be exactly the `.envrc`-derived directory for that checkout — `nexus-target-<name>` — and the canonical `nexus-target` is never a track's target; `temporary_paths` are exact absolute receipt paths, never globs; `state` is `active` or `completed`, and `producer_stopped` is a required boolean.
 
 ### Checklist
 
 1. **Create and record.** Add the worktree under `.worktrees/<name>/` and initialize it (see [Worktrees](#worktrees)). Record the track's ownership receipt: owner/track id, the exact feature worktree path, the exact target to reclaim, and every temporary build path the task will create.
 2. **Stop the producer.** No build, codegen step or agent may still be writing into the target or the temporary paths when reclamation starts; the receipt's `producer_stopped` must be true.
-3. **Remove the owned feature target before the merge**, together with its temporary build products, in the same task/track slice — only that track's `nexus-target-<name>`, never the shared canonical cache.
+3. **Remove the owned feature target before the merge**, together with its temporary build products, in the same task/track slice — only that track's `nexus-target-<name>`, never the canonical cache or a peer's.
 4. **Merge under review, then release ownership.** The merge and the ownership release are proven separately, and the worktree is reclaimed only after both.
 5. **Sweep first — dry run.** The sweeper proposes; without `--apply` it deletes nothing. Run it from the repository's **main** checkout (`--repo` must be the main worktree, exit `2` otherwise), and pass `--harness`, the control directory that holds `workflows/<id>/snapshot.json` for the workflow being swept:
 

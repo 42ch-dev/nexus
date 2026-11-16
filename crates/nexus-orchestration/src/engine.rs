@@ -3139,11 +3139,10 @@ fn validate_descendant_position(
 
 /// The inner graph a manifest state enters, if any.
 fn inner_graph_entered_by_state<'a>(
-    loaded: &'a nexus_preset::LoadedPreset,
+    manifest: &'a nexus_preset::manifest::PresetManifest,
     state_id: &str,
 ) -> Option<&'a str> {
-    loaded
-        .manifest
+    manifest
         .states
         .iter()
         .find(|state| state.id == state_id)
@@ -3841,6 +3840,90 @@ impl GraphFlowEngine {
             .unwrap_or_else(|| Arc::new(CapabilityRegistry::empty()))
     }
 
+    /// Reload a run's bundle from the FROZEN source identity and enforce the
+    /// frozen-source guards (A7 / Important 5).
+    ///
+    /// A directory source is reloaded from its persisted root, an embedded
+    /// source from the compiled-in preset id — never the current
+    /// higher-precedence bytes. The reloaded identity must equal the frozen one
+    /// and the frozen version must still be the bundle's, so a changed or moved
+    /// bundle refuses reconstruction instead of running different bytes.
+    ///
+    /// This proves the source of a run that executes its bundle: the no-apply
+    /// path and the `yaml-only` arm. An applied run executes the applied
+    /// document and never calls this — its bundle is an admission input, and
+    /// its frozen proof is the applied identity on the descriptor.
+    fn reload_frozen_bundle(
+        &self,
+        descriptor: &RunDescriptorV1,
+        session_id: &SessionId,
+    ) -> Result<nexus_preset::LoadedPreset, EngineError> {
+        let caps = self.current_caps();
+        let loaded = match &descriptor.source {
+            PresetSourceIdentity::Embedded { preset_id, .. } => {
+                match nexus_preset::load_embedded_preset(preset_id, &caps) {
+                    Ok(loaded) => loaded,
+                    Err(e) => {
+                        return Err(EngineError::GraphFlow(
+                            graph_flow::GraphError::StorageError(format!(
+                                "R6: embedded preset '{preset_id}' is missing for session {}: {} \
+                                 (reconstruction_unavailable, non-replayable)",
+                                session_id.0, e
+                            )),
+                        ));
+                    }
+                }
+            }
+            PresetSourceIdentity::Directory { root, .. } => {
+                match nexus_preset::load_preset(root, &caps) {
+                    Ok(loaded) => loaded,
+                    Err(e) => {
+                        return Err(EngineError::GraphFlow(
+                            graph_flow::GraphError::StorageError(format!(
+                                "R6: directory preset at '{}' is missing/invalid for session {}: {} \
+                                 (reconstruction_unavailable, non-replayable)",
+                                root.display(),
+                                session_id.0,
+                                e
+                            )),
+                        ));
+                    }
+                }
+            }
+        };
+
+        // The reloaded identity reflects the actual resolved bytes.
+        let reloaded_identity = loaded.source_identity.as_ref().ok_or_else(|| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "R6: reloaded preset '{}' for session {} has no source identity \
+                 (reconstruction_unavailable, non-replayable)",
+                loaded.id, session_id.0
+            )))
+        })?;
+        if reloaded_identity != &descriptor.source {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "R6: preset source identity mismatch for session {} (frozen {:?} != reloaded {:?}) \
+                     — source changed or moved; reconstruction_unavailable (non-replayable)",
+                    session_id.0, descriptor.source, reloaded_identity
+                )),
+            ));
+        }
+
+        // The frozen version from the persisted descriptor, not the current
+        // embed — Important 5.
+        if descriptor.preset_version != loaded.version {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "R6: preset version mismatch for session {} (frozen {} != current {}) \
+                     — reconstruction_unavailable (non-replayable)",
+                    session_id.0, descriptor.preset_version, loaded.version
+                )),
+            ));
+        }
+        Ok(loaded)
+    }
+
     #[allow(clippy::too_many_lines, clippy::significant_drop_tightening)] // sequential descriptor→validate→rebuild path; guard spans await loop
     async fn reconstruct_runner(&self, session_id: &SessionId) -> Result<(), EngineError> {
         // Load the durable descriptor (frozen at admission) so we honour the
@@ -3890,210 +3973,29 @@ impl GraphFlowEngine {
             }
         };
 
-        // Resolve and reload the preset from the FROZEN source identity —
-        // never the current higher-precedence embedded/current bytes (A7).
-        // A directory source is reloaded from its persisted root; an
-        // embedded source from the compiled-in preset id.
-        let caps = self.current_caps();
-        let loaded = match &descriptor.source {
-            PresetSourceIdentity::Embedded { preset_id, .. } => {
-                match nexus_preset::load_embedded_preset(preset_id, &caps) {
-                    Ok(loaded) => loaded,
-                    Err(e) => {
-                        return Err(EngineError::GraphFlow(
-                            graph_flow::GraphError::StorageError(format!(
-                                "R6: embedded preset '{preset_id}' is missing for session {}: {} \
-                                 (reconstruction_unavailable, non-replayable)",
-                                session_id.0, e
-                            )),
-                        ));
-                    }
-                }
-            }
-            PresetSourceIdentity::Directory { root, .. } => {
-                match nexus_preset::load_preset(root, &caps) {
-                    Ok(loaded) => loaded,
-                    Err(e) => {
-                        return Err(EngineError::GraphFlow(
-                            graph_flow::GraphError::StorageError(format!(
-                                "R6: directory preset at '{}' is missing/invalid for session {}: {} \
-                                 (reconstruction_unavailable, non-replayable)",
-                                root.display(),
-                                session_id.0,
-                                e
-                            )),
-                        ));
-                    }
-                }
-            }
+        // P4 (I-000443): the applied identity frozen on the descriptor — not the
+        // bundle — is the source an applied run executes, so this arm is
+        // resolved before anything the bundle says.
+        //
+        // The reload below is the no-apply path's frozen-source proof (A7). An
+        // applied run executes its document instead, so it never reads the
+        // bundle: one edited, moved or deleted between admission and this
+        // restart must not make such a run non-replayable, and the frozen
+        // applied identity already encodes the user-preset classification a
+        // reload would only re-establish — resolving it to then pass `None`
+        // anyway cost one preset load plus content hash per recovery.
+        let bundle = match &descriptor.applied {
+            Some(_) => None,
+            None => Some(self.reload_frozen_bundle(&descriptor, session_id)?),
         };
 
-        // Verify the frozen manifest/template content hash matches the
-        // reloaded preset's source identity — a changed template or manifest
-        // must refuse reconstruction rather than fall back to current bytes
-        // (A7). `loaded.source_identity` reflects the actual resolved bytes.
-        let reloaded_identity = loaded.source_identity.as_ref().ok_or_else(|| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                "R6: reloaded preset '{}' for session {} has no source identity \
-                 (reconstruction_unavailable, non-replayable)",
-                loaded.id, session_id.0
-            )))
-        })?;
-        if reloaded_identity != &descriptor.source {
-            return Err(EngineError::GraphFlow(
-                graph_flow::GraphError::StorageError(format!(
-                    "R6: preset source identity mismatch for session {} (frozen {:?} != reloaded {:?}) \
-                     — source changed or moved; reconstruction_unavailable (non-replayable)",
-                    session_id.0, descriptor.source, reloaded_identity
-                )),
-            ));
-        }
-
-        // Take the preset version from the persisted descriptor (the frozen
-        // version, not the current embed) — Important 5.
-        let version = descriptor.preset_version;
-        if version != loaded.version {
-            return Err(EngineError::GraphFlow(
-                graph_flow::GraphError::StorageError(format!(
-                    "R6: preset version mismatch for session {} (frozen {} != current {}) \
-                     — reconstruction_unavailable (non-replayable)",
-                    session_id.0, version, loaded.version
-                )),
-            ));
-        }
-
-        // P3 T1 rereview-3/4 P1 (A7 rule 2): every persisted descendant's
-        // `graph_name` must name an inner graph the frozen preset actually
-        // defines, and every NON-TERMINAL child must additionally name the
-        // inner graph entered by its parent's CURRENT task position. A
-        // parseable but tampered graph_name (unknown, or valid-but-wrong
-        // position) would otherwise miss the reattachment lookup and make
-        // `InnerGraphTask` spawn a fresh child and replay the work.
-        {
-            let valid_inner: std::collections::HashSet<&str> = loaded
-                .manifest
-                .inner_graphs
-                .iter()
-                .flat_map(|graphs| graphs.keys())
-                .map(String::as_str)
-                .collect();
-            // Snapshot the closure first so no children-map lock is held
-            // across the storage awaits below.
-            let snapshot: Vec<(SessionId, Vec<crate::run_state::ChildCheckpoint>)> = {
-                let children_map = self.state.children.read().await;
-                let mut queue: std::collections::VecDeque<SessionId> =
-                    std::collections::VecDeque::new();
-                let mut visited: std::collections::HashSet<String> =
-                    std::collections::HashSet::new();
-                queue.push_back(session_id.clone());
-                visited.insert(session_id.0.clone());
-                let mut collected = Vec::new();
-                while let Some(parent) = queue.pop_front() {
-                    let Some(children) = children_map.get(&parent.0) else {
-                        continue;
-                    };
-                    for child in children {
-                        if visited.insert(child.session.id.clone()) {
-                            queue.push_back(SessionId(child.session.id.clone()));
-                        }
-                    }
-                    collected.push((parent, children.clone()));
-                }
-                collected
-            };
-            for (parent, children) in snapshot {
-                let parent_session = self
-                    .state
-                    .storage
-                    .get(&parent.0)
-                    .await
-                    .map_err(EngineError::GraphFlow)?;
-                let parent_task = parent_session
-                    .as_ref()
-                    .map_or_default(|session| session.current_task_id.clone());
-                let parent_is_root = parent.0 == session_id.0;
-                let expected_inner = if parent_is_root {
-                    inner_graph_entered_by_state(&loaded, &parent_task)
-                } else {
-                    // Inner graph nodes cannot enter inner graphs.
-                    None
-                };
-                // Root context records the child session id per inner-graph
-                // state that owns it (`_inner_child_session_<state>`); a
-                // non-terminal child past the inner-graph position is only
-                // replayable when that record names it consistently.
-                let recorded: std::collections::HashMap<
-                    String,
-                    std::collections::HashSet<Option<String>>,
-                > = if parent_is_root {
-                    let data = parent_session
-                        .as_ref()
-                        .and_then(|session| serde_json::to_value(&session.context).ok())
-                        .and_then(|value| crate::resume_rules::context_data(&value).cloned());
-                    let mut map: std::collections::HashMap<
-                        String,
-                        std::collections::HashSet<Option<String>>,
-                    > = std::collections::HashMap::new();
-                    if let Some(data) = data {
-                        for (key, value) in data {
-                            let Some(state) = key.strip_prefix("_inner_child_session_") else {
-                                continue;
-                            };
-                            let Some(child_id) = value.as_str() else {
-                                continue;
-                            };
-                            map.entry(child_id.to_string()).or_default().insert(
-                                inner_graph_entered_by_state(&loaded, state).map(str::to_owned),
-                            );
-                        }
-                    }
-                    map
-                } else {
-                    std::collections::HashMap::new()
-                };
-                for child in children {
-                    // All markers naming this child must agree on one inner
-                    // graph (duplicate/conflicting markers are tampering).
-                    let recorded_graph: Option<&str> = recorded
-                        .get(&child.session.id)
-                        .filter(|set| set.len() == 1)
-                        .and_then(|set| set.iter().next())
-                        .and_then(|entry| entry.as_deref());
-                    validate_descendant_position(
-                        &loaded.id,
-                        &valid_inner,
-                        expected_inner,
-                        parent_is_root,
-                        recorded_graph,
-                        &parent.0,
-                        &parent_task,
-                        &child.session.id,
-                        child.graph_name.as_deref(),
-                        child.status.is_terminal(),
-                    )?;
-                }
-            }
-        }
-
-        // Build the wired outer graph using EngineProxy + capabilities.
-        let proxy = Arc::new(EngineProxy {
-            state: self.state.clone(),
-        });
-        let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
-        // P4: an applied run executes the strategy's applied document, and a
-        // restart re-enters through the SAME resolution admission uses — the
-        // source owns the whole route (classification, current apply, content
-        // hash), so there is no second reader of the approved bytes. The
-        // bundle checks above stay the frozen-source proof for the no-apply
-        // path and for every applied run's descriptor bundle.
-        //
         // P6 condition 6: recovery follows the RECORDED intake mode, never the
         // current config. A `yaml-only` run rebuilds the YAML bundle and never
         // reads the current apply — a config flip cannot retcon an in-flight
-        // run onto a document it never ran. An `ir-only` run without a
-        // recorded applied identity is the no-apply admission refusal
-        // resurfaced: never rebuilt from YAML. A legacy row (no recorded
-        // mode) keeps the pre-existing resolution below.
+        // run onto a document it never ran. An `ir-only` run without a recorded
+        // applied identity is the no-apply admission refusal resurfaced: never
+        // rebuilt from YAML. A legacy row (no recorded mode) keeps the
+        // pre-existing resolution.
         let applied = match descriptor.intake_mode {
             Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
             Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
@@ -4110,7 +4012,7 @@ impl GraphFlowEngine {
             }
             _ => match &self.state.applied_document_source {
                 Some(source) => source
-                    .applied_document(&descriptor.preset_id, &loaded)
+                    .applied_document(&descriptor.preset_id, bundle.as_ref())
                     .await
                     .map_err(|error| {
                         EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -4158,11 +4060,165 @@ impl GraphFlowEngine {
                 ));
             }
         };
-        let wired = match &applied {
-            // Same rule admission states: an applied user document's id is not a
-            // bundle id, so reading the embedded bundle could serve a colliding
-            // preset's bytes.
-            Some(document) => crate::preset_runtime::build_wired_outer_graph_from_ir(
+
+        // The run's own projection. An applied document projects itself; a
+        // no-apply run's source is the bundle reloaded below. Descendant
+        // validation and graph construction both read this ONE projection, so a
+        // persisted child is never judged against a bundle the run did not run.
+        let applied_manifest = match &applied {
+            Some(document) => Some(nexus_preset::export_preset(document).map_err(|error| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "R6: applied document of session {} does not project to a preset manifest: \
+                     {error} (reconstruction_unavailable, non-replayable)",
+                    session_id.0
+                )))
+            })?),
+            None => None,
+        };
+
+        let caps = self.current_caps();
+        let loaded = bundle;
+
+        // P3 T1 rereview-3/4 P1 (A7 rule 2): every persisted descendant's
+        // `graph_name` must name an inner graph the frozen preset actually
+        // defines, and every NON-TERMINAL child must additionally name the
+        // inner graph entered by its parent's CURRENT task position. A
+        // parseable but tampered graph_name (unknown, or valid-but-wrong
+        // position) would otherwise miss the reattachment lookup and make
+        // `InnerGraphTask` spawn a fresh child and replay the work.
+        {
+            // The same projection the graph is built from: an applied run's
+            // children name ITS inner graphs, not a bundle's.
+            let run_manifest = match (&applied_manifest, &loaded) {
+                (Some(manifest), _) => manifest,
+                (None, Some(loaded)) => &loaded.manifest,
+                (None, None) => {
+                    return Err(EngineError::GraphFlow(
+                        graph_flow::GraphError::StorageError(format!(
+                            "R6: session {} has neither an applied document nor a reloadable \
+                             bundle; its descendants cannot be validated (non-replayable)",
+                            session_id.0
+                        )),
+                    ));
+                }
+            };
+            let valid_inner: std::collections::HashSet<&str> = run_manifest
+                .inner_graphs
+                .iter()
+                .flat_map(|graphs| graphs.keys())
+                .map(String::as_str)
+                .collect();
+            // Snapshot the closure first so no children-map lock is held
+            // across the storage awaits below.
+            let snapshot: Vec<(SessionId, Vec<crate::run_state::ChildCheckpoint>)> = {
+                let children_map = self.state.children.read().await;
+                let mut queue: std::collections::VecDeque<SessionId> =
+                    std::collections::VecDeque::new();
+                let mut visited: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                queue.push_back(session_id.clone());
+                visited.insert(session_id.0.clone());
+                let mut collected = Vec::new();
+                while let Some(parent) = queue.pop_front() {
+                    let Some(children) = children_map.get(&parent.0) else {
+                        continue;
+                    };
+                    for child in children {
+                        if visited.insert(child.session.id.clone()) {
+                            queue.push_back(SessionId(child.session.id.clone()));
+                        }
+                    }
+                    collected.push((parent, children.clone()));
+                }
+                collected
+            };
+            for (parent, children) in snapshot {
+                let parent_session = self
+                    .state
+                    .storage
+                    .get(&parent.0)
+                    .await
+                    .map_err(EngineError::GraphFlow)?;
+                let parent_task = parent_session
+                    .as_ref()
+                    .map_or_default(|session| session.current_task_id.clone());
+                let parent_is_root = parent.0 == session_id.0;
+                let expected_inner = if parent_is_root {
+                    inner_graph_entered_by_state(run_manifest, &parent_task)
+                } else {
+                    // Inner graph nodes cannot enter inner graphs.
+                    None
+                };
+                // Root context records the child session id per inner-graph
+                // state that owns it (`_inner_child_session_<state>`); a
+                // non-terminal child past the inner-graph position is only
+                // replayable when that record names it consistently.
+                let recorded: std::collections::HashMap<
+                    String,
+                    std::collections::HashSet<Option<String>>,
+                > = if parent_is_root {
+                    let data = parent_session
+                        .as_ref()
+                        .and_then(|session| serde_json::to_value(&session.context).ok())
+                        .and_then(|value| crate::resume_rules::context_data(&value).cloned());
+                    let mut map: std::collections::HashMap<
+                        String,
+                        std::collections::HashSet<Option<String>>,
+                    > = std::collections::HashMap::new();
+                    if let Some(data) = data {
+                        for (key, value) in data {
+                            let Some(state) = key.strip_prefix("_inner_child_session_") else {
+                                continue;
+                            };
+                            let Some(child_id) = value.as_str() else {
+                                continue;
+                            };
+                            map.entry(child_id.to_string()).or_default().insert(
+                                inner_graph_entered_by_state(run_manifest, state)
+                                    .map(str::to_owned),
+                            );
+                        }
+                    }
+                    map
+                } else {
+                    std::collections::HashMap::new()
+                };
+                for child in children {
+                    // All markers naming this child must agree on one inner
+                    // graph (duplicate/conflicting markers are tampering).
+                    let recorded_graph: Option<&str> = recorded
+                        .get(&child.session.id)
+                        .filter(|set| set.len() == 1)
+                        .and_then(|set| set.iter().next())
+                        .and_then(|entry| entry.as_deref());
+                    validate_descendant_position(
+                        &descriptor.preset_id,
+                        &valid_inner,
+                        expected_inner,
+                        parent_is_root,
+                        recorded_graph,
+                        &parent.0,
+                        &parent_task,
+                        &child.session.id,
+                        child.graph_name.as_deref(),
+                        child.status.is_terminal(),
+                    )?;
+                }
+            }
+        }
+
+        // Build the wired outer graph using EngineProxy + capabilities.
+        let proxy = Arc::new(EngineProxy {
+            state: self.state.clone(),
+        });
+        let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
+        // The graph comes from the SAME source that decided the run's
+        // projection above: the applied document when the descriptor froze an
+        // apply, the bundle otherwise. An applied user document's id is not a
+        // bundle id, so reading the embedded bundle for one could serve a
+        // colliding preset's bytes — it is never read on that arm.
+        let wired = match (&applied, &loaded) {
+            (Some(document), _) => crate::preset_runtime::build_wired_outer_graph_from_ir(
                 document,
                 crate::preset_runtime::IrTemplateSource::OwnSource,
                 &engine_proxy,
@@ -4178,14 +4234,23 @@ impl GraphFlowEngine {
                     session_id.0
                 )))
             })?,
-            None => crate::preset_runtime::build_wired_outer_graph(
-                &loaded,
+            (None, Some(loaded)) => crate::preset_runtime::build_wired_outer_graph(
+                loaded,
                 &engine_proxy,
                 &caps,
                 self.daemon_tool_dispatch.clone(),
                 self.prompt_executor.clone(),
                 self.session_cancels.clone(),
             )?,
+            (None, None) => {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "R6: session {} has neither an applied document nor a reloadable bundle; \
+                         its graph cannot be rebuilt (non-replayable)",
+                        session_id.0
+                    )),
+                ));
+            }
         };
 
         // Create FlowRunner with the wired graph and existing storage.
@@ -4201,10 +4266,11 @@ impl GraphFlowEngine {
             .insert(session_id.0.clone(), runner);
 
         tracing::info!(
-            "R6: reconstructed runner for session {} (preset: {}, version: {})",
+            "R6: reconstructed runner for session {} (preset: {}, bundle version: {}, applied: {})",
             session_id.0,
-            loaded.id,
-            version
+            descriptor.preset_id,
+            descriptor.preset_version,
+            descriptor.applied.is_some()
         );
 
         Ok(())
@@ -4266,10 +4332,14 @@ impl GraphFlowEngine {
     /// admission layer freezes them before driving (P2 owns that).
     /// `intake_mode` is the mode arm the admission layer selected; the
     /// descriptor records it so recovery follows the recorded arm.
+    /// `applied` is the identity the caller resolved this run under (I-000443):
+    /// frozen here, at construction, so no seam can persist a descriptor whose
+    /// bundle claim and applied identity were assembled at different times.
     fn build_descriptor(
         &self,
         loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
+        applied: Option<crate::run_state::AppliedRunIdentity>,
         intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
     ) -> Result<RunDescriptorV1, EngineError> {
         let source = loaded.source_identity.clone().ok_or_else(|| {
@@ -4290,9 +4360,7 @@ impl GraphFlowEngine {
             agent_bindings: HashMap::new(),
             parent_session_id: None,
             graph_name: None,
-            // Filled by the admission layer when the schedule's strategy has a
-            // current apply; this seam never resolves one.
-            applied: None,
+            applied,
             intake_mode,
         })
     }
@@ -4308,10 +4376,7 @@ impl GraphFlowEngine {
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
         if let Some(store) = &self.state.workflow_store {
-            let mut descriptor = self.build_descriptor(loaded, creator_id, intake_mode)?;
-            // The identity the caller resolved this run under, so a restart can
-            // tell whether the strategy's current apply is still that one.
-            descriptor.applied = applied;
+            let descriptor = self.build_descriptor(loaded, creator_id, applied, intake_mode)?;
             let session_id = format!("{}:{}", loaded.id, uuid::Uuid::new_v4());
             let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
             let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
@@ -4407,14 +4472,12 @@ impl GraphFlowEngine {
             // yaml-only runs the YAML bundle without reading the current apply.
             Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
             _ => match &self.state.applied_document_source {
-                Some(source) => {
-                    source
-                        .applied_document(&loaded.id, loaded)
-                        .await
-                        .map_err(|error| {
-                            EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
-                        })?
-                }
+                Some(source) => source
+                    .applied_document(&loaded.id, Some(loaded))
+                    .await
+                    .map_err(|error| {
+                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
+                    })?,
                 None => None,
             },
         };
@@ -4503,13 +4566,10 @@ impl GraphFlowEngine {
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
         if let Some(store) = &self.state.workflow_store {
-            let mut descriptor = self.build_descriptor(loaded, creator_id, intake_mode)?;
+            let mut descriptor = self.build_descriptor(loaded, creator_id, applied, intake_mode)?;
             descriptor.work_id = work_id.filter(|id| !id.is_empty());
             descriptor.input = input.clone();
             descriptor.agent_bindings = agent_bindings;
-            // The identity the caller resolved this run under, so a restart can
-            // tell whether the strategy's current apply is still that one.
-            descriptor.applied = applied;
             let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
             let session =
                 graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
@@ -4617,13 +4677,10 @@ impl GraphFlowEngine {
                 ),
             ));
         };
-        let mut descriptor = self.build_descriptor(loaded, creator_id, intake_mode)?;
+        let mut descriptor = self.build_descriptor(loaded, creator_id, applied, intake_mode)?;
         descriptor.work_id = work_id;
         descriptor.input = input.clone();
         descriptor.agent_bindings = agent_bindings;
-        // P4 Task 4: freeze the apply the caller resolved this run under, so a
-        // restart can tell whether the strategy's current apply is still that one.
-        descriptor.applied = applied;
         // N-5/N-5b: the runner is built from the FROZEN source identity
         // persisted with the schedule, never by resolving current registry
         // precedence and discarding the stored identity. The stored identity

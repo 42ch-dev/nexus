@@ -6938,7 +6938,7 @@ impl AppliedDocumentSource for FakeAppliedDocuments {
     async fn applied_document(
         &self,
         preset_id: &str,
-        _loaded: &nexus_preset::LoadedPreset,
+        _loaded: Option<&nexus_preset::LoadedPreset>,
     ) -> Result<Option<AppliedDocument>, String> {
         Ok((preset_id == self.preset_id).then(|| AppliedDocument {
             identity: self.identity.clone(),
@@ -7009,6 +7009,69 @@ async fn preset_entries_freeze_and_run_the_strategy_apply() {
         .await
         .expect("start_session_with_preset_for_creator");
     assert_applied_entry(&storage, &sid, &identity).await;
+}
+
+/// A restart during an applied run re-enters through the applied identity, not
+/// the strategy bundle: with the bundle deleted between admission and restart
+/// the run still recovers, because the graph it executes is the applied
+/// document.
+///
+/// Mutation this fails on: reloading the bundle and enforcing its frozen-source
+/// identity/version guards before resolving the applied arm — the deleted
+/// bundle then reports `reconstruction_unavailable` for a run that needs nothing
+/// from it. One step past recovery lands on `applied_only_probe`, a node id the
+/// admitted bundle never declared, so survival alone is not the assertion.
+#[tokio::test]
+async fn applied_run_recovers_after_its_bundle_is_deleted() {
+    let (pool, _db) = fresh_pool().await;
+    let home = tempfile::tempdir().unwrap();
+    let loaded = user_bundle_preset(home.path(), "applied-restart");
+    let identity = AppliedRunIdentity {
+        apply_id: "apl_restart".to_string(),
+        content_hash: "blake3:restart".to_string(),
+    };
+
+    let (storage, mut engine) = fresh_engine(pool.clone());
+    engine.set_nexus_home(home.path().to_path_buf());
+    engine.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "applied-restart",
+        identity: identity.clone(),
+        document: applied_probe_document("applied-restart"),
+    }));
+    let sid = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .expect("start_session_with_preset");
+    assert_applied_entry(&storage, &sid, &identity).await;
+
+    // The bundle the strategy came from is gone; the applied document is not.
+    std::fs::remove_dir_all(home.path().join("presets").join("applied-restart"))
+        .expect("delete the strategy bundle");
+
+    let (_, mut restarted) = fresh_engine(pool.clone());
+    restarted.set_nexus_home(home.path().to_path_buf());
+    restarted.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "applied-restart",
+        identity: identity.clone(),
+        document: applied_probe_document("applied-restart"),
+    }));
+    restarted
+        .ensure_recovered_runner_inner(&sid)
+        .await
+        .expect("an applied run must recover without the bundle it never ran");
+    restarted
+        .run_step(&sid)
+        .await
+        .expect("run_step on the recovered runner");
+    let session = storage
+        .get(&sid.0)
+        .await
+        .expect("session read")
+        .expect("row");
+    assert_eq!(
+        session.current_task_id, APPLIED_ONLY_PROBE,
+        "the recovered graph must be the applied document's, not the deleted bundle's"
+    );
 }
 
 /// Write a minimal valid user bundle under `home` and resolve it, asserting the

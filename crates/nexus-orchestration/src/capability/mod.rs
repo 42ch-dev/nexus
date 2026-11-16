@@ -12,6 +12,7 @@ pub mod watch;
 
 use async_trait::async_trait;
 use serde_json::Value;
+use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -240,6 +241,17 @@ pub trait DaemonToolDispatch: Send + Sync {
     ) -> Result<serde_json::Value, CapabilityError>;
 }
 
+/// Whether `path` names an already occupied filesystem entry, without
+/// following a symlink.
+///
+/// `Path::exists` is `metadata().is_ok()`, and `metadata` follows the link: a
+/// dangling symlink answers `false`, so an ownership check built on it decides
+/// the name is free, writes through it and later rolls back a name the user
+/// owns. `symlink_metadata` answers the question the bookkeeping actually asks.
+pub(crate) fn path_is_occupied(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok()
+}
+
 /// Provider trait for production workspace open/commit (v1.188 P3).
 #[async_trait]
 pub trait WorkspaceExecutor: Send + Sync {
@@ -332,8 +344,10 @@ pub trait WorkspaceStateProvider: Send + Sync {
 ///
 /// `preset_id` is the run's strategy id and `loaded` is the bundle the frozen
 /// descriptor named (the classification reads the source identity the loader
-/// recorded, never a fresh preset lookup). `Ok(None)` is "this strategy has no
-/// current apply", the common case.
+/// recorded, never a fresh preset lookup). `None` is a re-entry that holds no
+/// bundle: an applied run's recovery, whose frozen applied identity already
+/// encodes the classification admission made (only a user bundle can have an
+/// apply). `Ok(None)` is "this strategy has no current apply", the common case.
 #[async_trait]
 pub trait AppliedDocumentSource: Send + Sync {
     /// The current apply of `preset_id` — its frozen identity plus the verified
@@ -350,7 +364,7 @@ pub trait AppliedDocumentSource: Send + Sync {
     async fn applied_document(
         &self,
         preset_id: &str,
-        loaded: &nexus_preset::LoadedPreset,
+        loaded: Option<&nexus_preset::LoadedPreset>,
     ) -> Result<Option<AppliedDocument>, String>;
 }
 

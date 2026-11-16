@@ -37,6 +37,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::execution::applied_documents::{intake_mode_for_admission, resolve_applied_document};
 use async_trait::async_trait;
 use graph_flow::SessionStorage;
 use nexus_orchestration::engine::{
@@ -1620,22 +1621,18 @@ impl WorkflowRunCoordinator {
         let loaded = nexus_preset::resolve_preset(preset_id, nexus_home, &registry)
             .map_err(|e| RunControlError::PresetLoad(preset_id.to_string(), e.to_string()))?;
 
-        // P6 condition 6 (intake mode), same gate as schedule admission: the
-        // key governs user bundles only; `yaml-only` runs the YAML bundle
-        // without reading the apply; the default `ir-only` resolves the apply
-        // below and refuses a user bundle with none before graph construction.
-        let intake_mode = crate::execution::applied_documents::intake_mode_for_admission(
-            nexus_home, preset_id, &loaded,
-        )
-        .map_err(|reason| RunControlError::InvalidIntakeConfig { reason })?;
+        // P6 condition 6 (intake mode), same gate as schedule admission: the key
+        // governs user bundles only; `yaml-only` runs the YAML bundle without
+        // reading the apply; `ir-only` resolves it below and refuses a user
+        // bundle with none before graph construction.
+        let intake_mode = intake_mode_for_admission(nexus_home, preset_id, &loaded)
+            .map_err(|reason| RunControlError::InvalidIntakeConfig { reason })?;
         let applied = match intake_mode {
             Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
-            _ => crate::execution::applied_documents::resolve_applied_document(
-                &self.pool, nexus_home, preset_id, &loaded,
-            )
-            .await
-            .map_err(|error| RunControlError::Admission(error.to_string()))?
-            .map_err(|refusal| RunControlError::AppliedIdentityInvalid(refusal.into_error()))?,
+            _ => resolve_applied_document(&self.pool, nexus_home, preset_id, Some(&loaded))
+                .await
+                .map_err(|error| RunControlError::Admission(error.to_string()))?
+                .map_err(|refusal| RunControlError::AppliedIdentityInvalid(refusal.into_error()))?,
         };
         if intake_mode == Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
             && applied.is_none()
@@ -3036,7 +3033,7 @@ impl WorkflowRunCoordinator {
                 pool,
                 nexus_home,
                 &row.preset_id,
-                &loaded,
+                Some(&loaded),
             )
             .await
             .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?
