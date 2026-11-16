@@ -85,8 +85,10 @@ impl KnowledgeEntryPort for StubKnowledgeEntryPort {
         result
     }
 
-    // shortcut: no CAS — a put always replaces by `entry_id`. Upgrade when P2
-    // binds the stub somewhere a revision conflict must be observable.
+    // shortcut: no CAS — a put always replaces by `entry_id`; a preview only
+    // records the caller's expectation, so a revision conflict is reported from
+    // the record, never enforced here. Upgrade when a caller must observe the
+    // conflict itself (the store's real CAS lives in `SqliteKbStore`).
     async fn put_knowledge_entry(
         &self,
         entry: KnowledgeEntry,
