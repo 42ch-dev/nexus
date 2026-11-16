@@ -237,7 +237,7 @@ Every preset node compiles into one of these Rust `Task` impls:
 | `CapabilityTask`     | `capability`             | Resolves to a registered `Capability`, calls its `run(ctx)`, stores output |
 | `AcpPromptTask`      | `acp_prompt`             | Calls the injected `PromptExecutor`; stores typed Host output in `Context` |
 | `InnerGraphTask`     | `inner_graph`            | Launches a child `Session` over a named inner graph; awaits completion    |
-| `JudgeTask`          | `llm_judge` exit_when    | Calls the declared judge capability (default `judge.llm`) through the same `PromptExecutor` |
+| `LlmJudgeTask`       | `llm_judge` exit_when    | Calls the declared judge capability (default `judge.llm`) through the same `PromptExecutor` |
 | `ManualWaitTask`     | `manual` exit_when       | Returns `NextAction::WaitForInput`; CLI `advance` resumes                 |
 | `RuleCheckTask`      | rule-based exit_when     | Pure function over `Context`; no external calls                           |
 | `TimerWaitTask`      | `timer` exit_when (opt.) | Returns `WaitForInput` plus schedules a clock signal                       |
@@ -807,7 +807,7 @@ CLI and daemon `POST /v1/daemon/presets:validate` call these functions directly 
 | `states[].id`                                         | a `Task`'s `id()`                                                                 |
 | `states[].enter[*].kind=capability`                   | wrapped in `CapabilityTask`                                                       |
 | `states[].enter[*].kind=inner_graph`                  | wrapped in `InnerGraphTask` (holds handle to inner graph by name)                 |
-| `states[].exit_when.kind=llm_judge`                   | `JudgeTask` inserted after `enter` tasks; `NextAction::Continue` on go, `WaitForInput` on no-go + retry-after-`min_interval` |
+| `states[].exit_when.kind=llm_judge`                   | `LlmJudgeTask` inserted after `enter` tasks; `NextAction::Continue` on go, `WaitForInput` on no-go + retry-after-`min_interval` |
 | `states[].exit_when.kind=manual`                      | `ManualWaitTask` → `NextAction::WaitForInput`                                     |
 | `states[].exit_when.kind=graph_complete`              | inner-graph's terminal → outer task returns `NextAction::Continue`                |
 | `states[].exit_when.kind=rule`                        | `RuleCheckTask`                                                                   |
