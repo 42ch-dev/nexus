@@ -22,8 +22,6 @@ mod content;
 mod context;
 mod creators;
 mod error;
-#[cfg(feature = "execution")]
-pub mod execution;
 mod findings;
 mod forks;
 mod home;
@@ -31,6 +29,8 @@ mod home;
 pub mod host;
 mod knowledge;
 mod memory;
+#[cfg(feature = "execution")]
+pub mod owner;
 // v1.229 N3 Task 3: the one provider authority an open pins.
 mod memory_binding;
 mod memory_credentials;
@@ -100,12 +100,6 @@ pub use error::{
     CoreError, CoreResult, MemoryProviderRefusal, StrategyAlreadyApprovedError,
     StrategyCandidateConflictError, MEMORY_INTERNAL_CODES,
 };
-#[cfg(feature = "execution")]
-pub use execution::{
-    CancelOutcome, DriveDisposition, ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError,
-    PresetRunConfig, PresetRunOutcome, ResumeDecision, RunControlError, RunControlResult,
-    RunSignal, RunnerDeps, WorkflowRunCoordinator,
-};
 pub use findings::{
     format_routing_hint, CreateFindingRequest, ListFindingsQuery, ListFindingsResponse,
     PruneFindingsOutcome, StaleFindingEntry, StaleFindingsResponse,
@@ -126,6 +120,12 @@ pub use memory_credentials::MemoryCredential;
 pub use memory_provider::{LegacyContentMigration, LegacyMigrationStatus};
 pub use memory_selection::{MemoryProviderSelection, RemoteMemoryProviderSelection};
 pub use nexus_home_layout::MemoryProviderConfig;
+#[cfg(feature = "execution")]
+pub use owner::{
+    CancelOutcome, DriveDisposition, ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError,
+    PresetRunConfig, PresetRunOutcome, ResumeDecision, RunControlError, RunControlResult,
+    RunSignal, RunnerDeps, WorkflowRunCoordinator,
+};
 pub use presets::PresetError;
 pub use principal::Principal;
 // Provider-owned memory contract objects (spoke §6): the E1/E2 direct-core

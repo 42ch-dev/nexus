@@ -53,18 +53,18 @@ use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use nexus_provider_ports::ProviderPort;
 
 use crate::error::{CoreError, CoreResult};
-use crate::execution::executor::WorkspaceCommitExecutor;
-use crate::execution::lifecycle::{ExecutionHandle, ExecutionOpenError, RunnerDeps};
-use crate::execution::prompt_executor::HostPromptExecutor;
-use crate::execution::run_events::{
+use crate::owner::executor::WorkspaceCommitExecutor;
+use crate::owner::lifecycle::{ExecutionHandle, ExecutionOpenError, RunnerDeps};
+use crate::owner::workspace::WorkspaceCommitAuthority;
+use crate::service::{CoreAccess, CoreService};
+use nexus_execution::prompt_executor::HostPromptExecutor;
+use nexus_execution::run_events::{
     LiveSubscription, PageError, RunEventRegistry, RunEventSinkMap, RunPage, SubscribeError,
 };
-use crate::execution::schedules::HostedSchedulerConfig;
-use crate::execution::session::{SessionError, WorkspaceSessionManager};
-use crate::execution::state_provider::CoreWorkspaceStateProvider;
-use crate::execution::workflow::{ProviderCatalogPort, RunEventPort};
-use crate::execution::workspace::WorkspaceCommitAuthority;
-use crate::service::{CoreAccess, CoreService};
+use nexus_execution::schedules::HostedSchedulerConfig;
+use nexus_execution::session::{SessionError, WorkspaceSessionManager};
+use nexus_execution::state_provider::CoreWorkspaceStateProvider;
+use nexus_execution::workflow::{ProviderCatalogPort, RunEventPort};
 
 impl CoreService {
     /// Start the ONE hosted execution owner for this core (v1.195 P0-T2).
@@ -89,9 +89,9 @@ impl CoreService {
     ///    [`nexus_wasm_host::ModuleCache`] warmed against it, and the ONE
     ///    engine-global invocation serializer (P2-T3);
     /// 6. the hosted scheduler (through
-    ///    [`RunnerDeps::hosted_scheduler`](crate::execution::lifecycle::RunnerDeps)):
+    ///    [`RunnerDeps::hosted_scheduler`](crate::owner::lifecycle::RunnerDeps)):
     ///    the production supervisor with the coordinator-backed
-    ///    [`crate::execution::workflow::CoordinatorScheduleRunStarter`], plus
+    ///    [`nexus_execution::workflow::CoordinatorScheduleRunStarter`], plus
     ///    the ONE clock task — installed before recovery, started after it.
     ///
     /// Callers cannot override the creator, the canonical workspace root or the
@@ -493,9 +493,9 @@ mod tests {
     };
     use serial_test::serial;
 
-    use crate::execution::session::{ChangeEntry, ChangeOp, SessionId};
-    use crate::execution::test_hooks;
     use crate::service::{CoreAccess, CoreOpenOptions};
+    use nexus_execution::session::{ChangeEntry, ChangeOp, SessionId};
+    use nexus_execution::test_hooks;
 
     const CREATOR: &str = "test_creator";
     const SLUG: &str = "default";
@@ -1377,7 +1377,7 @@ mod tests {
     #[tokio::test]
     async fn settled_hosted_composition_is_released_when_the_owner_is_dropped() {
         let fx = fixture().await;
-        let coordinator_probe: std::sync::Weak<crate::execution::workflow::WorkflowRunCoordinator>;
+        let coordinator_probe: std::sync::Weak<nexus_execution::workflow::WorkflowRunCoordinator>;
         let manager_probe: std::sync::Weak<WorkspaceSessionManager>;
         {
             let core = open_core(&fx).await;

@@ -5,7 +5,7 @@
 //! ## Role
 //!
 //! Reusable logic layer for per-Work volume auto-advance on finish. The
-//! `nexus_core::execution::schedules::chronology` task calls [`run_one_tick`]
+//! `nexus_execution::schedules::chronology` task calls [`run_one_tick`]
 //! on a 5-min interval (auto path); the CLI `creator works chronology advance`
 //! calls [`advance_manual`] directly (manual override path).
 //!

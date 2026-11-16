@@ -29,11 +29,11 @@ use nexus_provider_ports::ProviderPort;
 use sqlx::SqlitePool;
 
 use crate::error::CoreResult;
-use crate::execution::schedules::HostedSchedulerConfig;
-use crate::execution::workflow::{
+use crate::service::{CoreAccess, CoreService};
+use nexus_execution::schedules::HostedSchedulerConfig;
+use nexus_execution::workflow::{
     CoordinatorScheduleRunStarter, ProviderCatalogPort, RunEventPort, WorkflowRunCoordinator,
 };
-use crate::service::{CoreAccess, CoreService};
 
 /// Why an execution handle could not be established.
 ///
@@ -121,7 +121,7 @@ pub struct RunnerDeps {
     /// such facts leaves this `None` and the tools report the defaults
     /// honestly rather than a fabricated running daemon.
     #[cfg(feature = "execution")]
-    pub runtime_facts: Option<crate::execution::capabilities::ToolRuntimeFacts>,
+    pub runtime_facts: Option<crate::owner::capabilities::ToolRuntimeFacts>,
     /// The compiled WASM module cache (P3-T3, compute only).
     #[cfg(feature = "compute")]
     pub compute_cache: Option<Arc<nexus_wasm_host::ModuleCache>>,
@@ -137,7 +137,7 @@ pub struct RunnerDeps {
     /// bound to its active canonical root. When absent the handle's
     /// `commit_workspace` reports `NotFound` rather than committing through an
     /// unbound root.
-    pub workspace_commit: Option<crate::execution::workspace::WorkspaceCommitAuthority>,
+    pub workspace_commit: Option<crate::owner::workspace::WorkspaceCommitAuthority>,
     /// Frozen workspace root written into every v1 run descriptor.
     pub workspace_root: Option<std::path::PathBuf>,
     /// Nexus home used to resolve directory presets for source identity.
@@ -226,7 +226,7 @@ pub struct ExecutionHandle {
     ///
     /// Bound at establishment so `commit_workspace` cannot be routed to a
     /// root the owner was not admitted for.
-    workspace_commit: Option<crate::execution::workspace::WorkspaceCommitAuthority>,
+    workspace_commit: Option<crate::owner::workspace::WorkspaceCommitAuthority>,
     /// The nexus home this owner resolves presets against.
     ///
     /// Retained so a schedule insert can freeze the preset's content-addressed
@@ -241,7 +241,7 @@ pub struct ExecutionHandle {
     workspace_root: Option<PathBuf>,
     /// Process-level facts the tool health surface reports (P3-T3).
     #[cfg(feature = "execution")]
-    runtime_facts: crate::execution::capabilities::ToolRuntimeFacts,
+    runtime_facts: crate::owner::capabilities::ToolRuntimeFacts,
     /// The compiled WASM module cache (P3-T3).
     #[cfg(feature = "compute")]
     compute_cache: Option<Arc<nexus_wasm_host::ModuleCache>>,
@@ -259,7 +259,7 @@ pub struct ExecutionHandle {
     /// refused as `uncertain`. No entry ever records a re-apply — recovery
     /// cannot perform one.
     #[cfg(feature = "compute")]
-    compute_run_recoveries: Vec<crate::execution::compute::ComputeRunRecovery>,
+    compute_run_recoveries: Vec<crate::owner::compute::ComputeRunRecovery>,
     /// The boot recovery pass's read failure, when it could not read the
     /// stuck-run set (v1.214 S3).
     ///
@@ -318,7 +318,7 @@ pub struct ExecutionHandle {
     ///
     /// Owner-scoped, never process-global: the tokens die with the generation
     /// that minted them, and `close` wakes and withdraws every one of them.
-    pub(crate) workflow_subscriptions: crate::execution::run_events::WorkflowSubscriptionRegistry,
+    pub(crate) workflow_subscriptions: nexus_execution::run_events::WorkflowSubscriptionRegistry,
     /// Optional diagnostic barrier held across a subscription's durable-owner
     /// check and its ring attachment (see [`RunnerDeps::subscription_observer`]).
     subscription_observer: Option<Arc<dyn ExecutionSubscriptionObserver>>,
@@ -393,7 +393,7 @@ impl ExecutionHandle {
     #[must_use]
     pub const fn workspace_commit_authority(
         &self,
-    ) -> Option<&crate::execution::workspace::WorkspaceCommitAuthority> {
+    ) -> Option<&crate::owner::workspace::WorkspaceCommitAuthority> {
         self.workspace_commit.as_ref()
     }
 
@@ -426,7 +426,7 @@ impl ExecutionHandle {
     /// The process-level facts the tool health surface reports.
     #[must_use]
     #[cfg(feature = "execution")]
-    pub const fn runtime_facts(&self) -> &crate::execution::capabilities::ToolRuntimeFacts {
+    pub const fn runtime_facts(&self) -> &crate::owner::capabilities::ToolRuntimeFacts {
         &self.runtime_facts
     }
 
@@ -461,7 +461,7 @@ impl ExecutionHandle {
     /// [`Self::compute_run_recovery_error`] distinguishes (v1.214 S3).
     #[must_use]
     #[cfg(feature = "compute")]
-    pub fn compute_run_recoveries(&self) -> &[crate::execution::compute::ComputeRunRecovery] {
+    pub fn compute_run_recoveries(&self) -> &[crate::owner::compute::ComputeRunRecovery] {
         &self.compute_run_recoveries
     }
 
@@ -1132,9 +1132,9 @@ impl CoreService {
         // mid-run rebuilds the applied graph, not the descriptor's. ONE adapter
         // serves both the engine's recovery source and the coordinator's
         // admission port, so the two can never resolve different documents.
-        let applied_documents: Arc<crate::execution::applied_documents::CreatorAppliedDocuments> =
+        let applied_documents: Arc<crate::owner::applied_documents::CreatorAppliedDocuments> =
             Arc::new(
-                crate::execution::applied_documents::CreatorAppliedDocuments::new(
+                crate::owner::applied_documents::CreatorAppliedDocuments::new(
                     Arc::new(pool.clone()),
                     self.inner.nexus_home.clone(),
                 ),
@@ -1194,7 +1194,7 @@ impl CoreService {
                 coordinator.set_schedule_supervisor(Arc::clone(&supervisor));
                 let start = Arc::new(tokio::sync::Notify::new());
                 let shutdown = Arc::new(tokio::sync::Notify::new());
-                let task = crate::execution::schedules::hosted_scheduler::spawn(
+                let task = nexus_execution::schedules::hosted_scheduler::spawn(
                     supervisor,
                     Arc::clone(&start),
                     Arc::clone(&shutdown),
@@ -1224,7 +1224,7 @@ impl CoreService {
         // mistaken for "nothing was stuck".
         #[cfg(feature = "compute")]
         let (compute_run_recoveries, compute_run_recovery_error) =
-            match crate::execution::compute::recover_stuck_compute_runs(&pool).await {
+            match crate::owner::compute::recover_stuck_compute_runs(&pool).await {
                 Ok(recovered) => {
                     for run in &recovered {
                         tracing::info!(
@@ -1299,7 +1299,7 @@ impl CoreService {
             scheduler_shutdown,
             #[cfg(feature = "connect-host")]
             peer_control: std::sync::Mutex::new(None),
-            workflow_subscriptions: crate::execution::run_events::WorkflowSubscriptionRegistry::new(
+            workflow_subscriptions: nexus_execution::run_events::WorkflowSubscriptionRegistry::new(
             ),
             subscription_observer: deps.subscription_observer,
         }))

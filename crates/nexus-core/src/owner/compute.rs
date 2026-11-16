@@ -48,7 +48,7 @@
 use crate::actor_knowledge::ActorKnowledgeViewService;
 use crate::actors::AdmittedActor;
 use crate::error::{CoreError, CoreResult};
-use crate::execution::lifecycle::ExecutionHandle;
+use crate::owner::lifecycle::ExecutionHandle;
 use crate::principal::Principal;
 use crate::service::CoreService;
 use nexus_contracts::generated::daemon_api::compute::{
@@ -81,7 +81,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 
-use crate::execution::operation_id::{self, OperationScope};
+use crate::operation_id::{self, OperationScope};
 
 /// The `action` component of a compute run's durable operation scope (spec
 /// §B.1).
@@ -381,7 +381,7 @@ pub async fn compute_run(
     // insert and the receipt pre-check before either reaches `begin_operation`,
     // so the post-insert first-writer-wins conflict is deterministic.
     #[cfg(any(test, feature = "test-hooks"))]
-    crate::execution::test_hooks::compute_begin_gate_wait(&operation_id).await;
+    nexus_execution::test_hooks::compute_begin_gate_wait(&operation_id).await;
     let begin_outcome = match begin_operation(
         pool,
         &operation_id,
@@ -453,7 +453,7 @@ pub async fn compute_run(
     // builds): the registered owner parks here so a test can issue a retry
     // against a KNOWN live owner deterministically.
     #[cfg(any(test, feature = "test-hooks"))]
-    crate::execution::test_hooks::compute_in_flight_gate_wait(&operation_id).await;
+    nexus_execution::test_hooks::compute_in_flight_gate_wait(&operation_id).await;
 
     let engine = context.engine()?;
     let permit = context
@@ -1016,7 +1016,7 @@ impl ExecutionHandle {
     pub fn list_compute_modules(&self, principal: &Principal) -> CoreResult<ListModulesResponse> {
         self.ensure_admitting()?;
         self.linked_core()?.verify_principal(principal)?;
-        let items = crate::execution::compute::list_compute_modules()?
+        let items = crate::owner::compute::list_compute_modules()?
             .into_iter()
             .map(module_summary_row)
             .collect();
@@ -1041,7 +1041,7 @@ impl ExecutionHandle {
     ) -> CoreResult<ModuleDetail> {
         self.ensure_admitting()?;
         self.linked_core()?.verify_principal(principal)?;
-        crate::execution::compute::get_compute_module(module_id)
+        crate::owner::compute::get_compute_module(module_id)
     }
 
     /// Read one run's detail: its proposals, or the recorded failure (C4).
@@ -1060,7 +1060,7 @@ impl ExecutionHandle {
         self.ensure_admitting()?;
         let core = self.linked_core()?;
         core.verify_principal(principal)?;
-        crate::execution::compute::get_compute_run(core.as_ref(), principal, &run_id).await
+        crate::owner::compute::get_compute_run(core.as_ref(), principal, &run_id).await
     }
 
     /// List the principal creator's runs, cursor-paginated (C5).
@@ -1077,7 +1077,7 @@ impl ExecutionHandle {
         self.ensure_admitting()?;
         let core = self.linked_core()?;
         core.verify_principal(principal)?;
-        crate::execution::compute::list_compute_runs(core.as_ref(), principal, query).await
+        crate::owner::compute::list_compute_runs(core.as_ref(), principal, query).await
     }
 
     /// Discard a succeeded run's proposals; the World is left untouched (C7).
@@ -1096,7 +1096,7 @@ impl ExecutionHandle {
         self.ensure_admitting()?;
         let core = self.linked_core()?;
         core.verify_principal(principal)?;
-        crate::execution::compute::discard_compute_run(core.as_ref(), principal, &run_id).await?;
+        crate::owner::compute::discard_compute_run(core.as_ref(), principal, &run_id).await?;
         Ok(DiscardRunResponse {
             run_id,
             status: DiscardRunResponseStatus::Discarded,
@@ -1119,7 +1119,7 @@ impl ExecutionHandle {
         self.ensure_admitting()?;
         let core = self.linked_core()?;
         core.verify_principal(principal)?;
-        crate::execution::compute::clear_compute_runs(core.as_ref(), principal, query).await
+        crate::owner::compute::clear_compute_runs(core.as_ref(), principal, query).await
     }
 }
 

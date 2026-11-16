@@ -447,7 +447,7 @@ async fn create_world_rule(
 /// Test-only rendezvous at the rule write path's write-lock boundary
 /// (`test-hooks`; the production build contains none of this).
 ///
-/// Mirrors `execution::test_hooks::OwnerGate`: the gate names the rule whose
+/// Mirrors `nexus_execution::test_hooks::OwnerGate`: the gate names the rule whose
 /// write request participates, so a gate armed by one test never parks another
 /// test's write (the integration tests run in parallel). The request signals
 /// [`RuleWriteGate::boundary`] once all of its pre-lock work is done and it is

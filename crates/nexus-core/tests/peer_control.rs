@@ -38,7 +38,7 @@ use nexus_contracts::generated::core::{
 use nexus_contracts::{
     CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply,
 };
-use nexus_core::execution::{ExecutionHandle, RunnerDeps};
+use nexus_core::owner::{ExecutionHandle, RunnerDeps};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use nexus_spoke_adapter::HostCapabilityManifest;
@@ -714,7 +714,7 @@ async fn peer_control_allow_grants_the_named_operation() {
 #[tokio::test]
 #[serial]
 async fn peer_control_acts_on_the_lane_installed_when_it_resolves() {
-    use nexus_core::execution::test_hooks::{set_peer_control_gate, PeerControlGate};
+    use nexus_execution::test_hooks::{set_peer_control_gate, PeerControlGate};
 
     let f = lane_fixture().await;
     let principal = f.core.active_principal().await.expect("active principal");

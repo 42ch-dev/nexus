@@ -73,25 +73,25 @@ use nexus_contracts::{
     CoreWorkspaceCommitRequestChangesItem, CoreWorkspaceCommitRequestChangesItemOp, ProviderCall,
     ProviderEventBatch, ProviderReply,
 };
-use nexus_core::execution::authority::WorkspaceAuthorityLease;
-use nexus_core::execution::prompt_executor::HostPromptExecutor;
-use nexus_core::execution::run_events::{MAX_RECORDS_PER_RUN, MAX_SUBSCRIBERS_PER_RUN};
-use nexus_core::execution::schedules::chronology::{
-    parse_interval_secs, run_one_tick as chronology_run_one_tick, AutoChronologyConfig,
-    DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS, ENV_AUTO_CHRONOLOGY_INTERVAL_MIN,
-};
-use nexus_core::execution::schedules::cron;
-use nexus_core::execution::schedules::stale_findings::run_one_sweep;
-#[cfg(feature = "test-hooks")]
-use nexus_core::execution::session::{SessionError, SessionId, WorkspaceSessionManager};
-#[cfg(feature = "test-hooks")]
-use nexus_core::execution::test_hooks;
-use nexus_core::execution::workflow::{RunEventPort, WorkflowRunCoordinator};
-use nexus_core::execution::{
+use nexus_core::owner::{
     drive_preset_run, resume_driven_sessions, ExecutionHandle, PresetRunConfig, PresetRunOutcome,
     ResumeDecision, RunControlError, RunnerDeps,
 };
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, Principal};
+use nexus_execution::authority::WorkspaceAuthorityLease;
+use nexus_execution::prompt_executor::HostPromptExecutor;
+use nexus_execution::run_events::{MAX_RECORDS_PER_RUN, MAX_SUBSCRIBERS_PER_RUN};
+use nexus_execution::schedules::chronology::{
+    parse_interval_secs, run_one_tick as chronology_run_one_tick, AutoChronologyConfig,
+    DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS, ENV_AUTO_CHRONOLOGY_INTERVAL_MIN,
+};
+use nexus_execution::schedules::cron;
+use nexus_execution::schedules::stale_findings::run_one_sweep;
+#[cfg(feature = "test-hooks")]
+use nexus_execution::session::{SessionError, SessionId, WorkspaceSessionManager};
+#[cfg(feature = "test-hooks")]
+use nexus_execution::test_hooks;
+use nexus_execution::workflow::{RunEventPort, WorkflowRunCoordinator};
 use nexus_local_db::findings::{create_finding, Finding};
 use nexus_local_db::works::{create_work_atomic, WorkRecord};
 use nexus_local_db::writer_protocol::init_guarded_pool;
@@ -2850,7 +2850,7 @@ async fn hosted_schedule_drives_once_and_closes() {
         .coordinator()
         .schedule_supervisor()
         .expect("the factory attaches the production supervisor");
-    nexus_core::execution::schedules::hosted_scheduler::run_one_tick(&supervisor)
+    nexus_execution::schedules::hosted_scheduler::run_one_tick(&supervisor)
         .await
         .expect("a repeated clock tick is a no-op for an already-owned row");
     let starter = supervisor
@@ -2966,7 +2966,7 @@ async fn non_owned_running_schedule_is_refused_without_minting_a_run() {
         starter_message.contains("no owned run"),
         "the starter refusal must carry the same typed reason: {starter_message}"
     );
-    nexus_core::execution::schedules::hosted_scheduler::run_one_tick(&supervisor)
+    nexus_execution::schedules::hosted_scheduler::run_one_tick(&supervisor)
         .await
         .expect("a clock tick is a no-op for a non-owned running row");
 
@@ -5669,7 +5669,7 @@ fn frame_revision(item: &CoreWorkflowEventBatchEventsItem) -> u64 {
 #[tokio::test]
 #[serial_test::serial]
 async fn authorized_subscription_preserves_epoch_and_gap() {
-    use nexus_core::execution::run_events::MAX_PULL_FRAMES;
+    use nexus_execution::run_events::MAX_PULL_FRAMES;
     use std::num::NonZeroU64;
     use std::time::Duration;
 
@@ -6175,7 +6175,7 @@ struct SubscribeRaceGate {
 }
 
 #[async_trait]
-impl nexus_core::execution::ExecutionSubscriptionObserver for SubscribeRaceGate {
+impl nexus_core::owner::ExecutionSubscriptionObserver for SubscribeRaceGate {
     async fn owner_resolved(&self) {
         self.at_gate.store(true, Ordering::SeqCst);
         while !self.release.load(Ordering::SeqCst) {
@@ -6197,8 +6197,8 @@ impl nexus_core::execution::ExecutionSubscriptionObserver for SubscribeRaceGate 
 #[tokio::test]
 #[serial_test::serial]
 async fn subscribe_racing_owner_close_never_leaks_a_token_or_ring_permit() {
-    use nexus_core::execution::production::CoreRunEventPort;
-    use nexus_core::execution::run_events::RunEventRegistry;
+    use nexus_core::owner::production::CoreRunEventPort;
+    use nexus_execution::run_events::RunEventRegistry;
     use std::time::Duration;
 
     const RACE_RUN: &str = "run-subscribe-race";
@@ -6217,7 +6217,7 @@ async fn subscribe_racing_owner_close_never_leaks_a_token_or_ring_permit() {
     // The REAL production port over a REAL registry, so the permit this case
     // counts is the one a subscription actually takes.
     let registry = Arc::new(RunEventRegistry::new());
-    let sinks: nexus_core::execution::run_events::RunEventSinkMap =
+    let sinks: nexus_execution::run_events::RunEventSinkMap =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     let gate = Arc::new(SubscribeRaceGate::default());
     let handle = core

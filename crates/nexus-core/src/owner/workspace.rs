@@ -8,20 +8,20 @@
 //!
 //! Module map:
 //!
-//! - [`crate::execution::session`] — the DB-backed
-//!   [`WorkspaceSessionManager`](crate::execution::session::WorkspaceSessionManager):
+//! - [`nexus_execution::session`] — the DB-backed
+//!   [`WorkspaceSessionManager`](nexus_execution::session::WorkspaceSessionManager):
 //!   sessions, snapshots, OCC hashing and the recoverable-commit configuration.
-//! - [`crate::execution::session_commit`] — the recoverable multi-file commit,
+//! - [`nexus_execution::session_commit`] — the recoverable multi-file commit,
 //!   intent/digest idempotence and the crash-recovery classification.
-//! - [`crate::execution::commit_fs`] — descriptor-relative atomic mutation
+//! - [`nexus_execution::commit_fs`] — descriptor-relative atomic mutation
 //!   (`openat`/`renameat`/`linkat`/`unlinkat`) with capture-and-verify CAS.
-//! - [`crate::execution::authority`] — the cross-process workspace authority
+//! - [`nexus_execution::authority`] — the cross-process workspace authority
 //!   lease guarding the commit root.
-//! - [`crate::execution::bounds`] — manifest/body/hash/path bounds.
-//! - [`crate::execution::scope`] — scope-coordinate resolution.
-//! - [`crate::execution::executor`] — the orchestration `WorkspaceExecutor`
+//! - [`nexus_execution::bounds`] — manifest/body/hash/path bounds.
+//! - [`nexus_execution::scope`] — scope-coordinate resolution.
+//! - [`crate::owner::executor`] — the orchestration `WorkspaceExecutor`
 //!   adapter over the shared manager.
-//! - [`crate::execution::state_provider`] — `_context.workspace.*` resolution.
+//! - [`nexus_execution::state_provider`] — `_context.workspace.*` resolution.
 //!
 //! Type gaps are REPORTED, never filled with a hand-written parallel shape:
 //! the wire DTOs for the commit request/response are the P5-owned generated
@@ -37,8 +37,8 @@ use nexus_contracts::{
 };
 
 use crate::error::{CoreError, CoreResult};
-use crate::execution::session::{SessionError, SessionId, WorkspaceSessionManager};
-use crate::execution::session_commit::CommitOutcome;
+use nexus_execution::session::{SessionError, SessionId, WorkspaceSessionManager};
+use nexus_execution::session_commit::CommitOutcome;
 
 /// The workspace commit authority one handle owns: the shared session manager
 /// plus the active canonical root it was opened against.

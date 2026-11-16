@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use nexus_contracts::{
     CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply,
 };
-use nexus_core::execution::{ExecutionOpenError, RunControlError};
+use nexus_core::owner::{ExecutionOpenError, RunControlError};
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, ExecutionBuildObserver, RunnerDeps};
 use nexus_orchestration::capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,
@@ -1218,13 +1218,13 @@ async fn a_restart_after_a_re_apply_refuses_instead_of_rebuilding_the_newer_docu
         .coordinator()
         .signal_run(
             &nexus_orchestration::SessionId(session_id.clone()),
-            nexus_core::execution::RunSignal::Continue {
+            nexus_core::owner::RunSignal::Continue {
                 wait_id: "irrelevant".to_string(),
             },
         )
         .await
         .expect_err("a run whose admitted apply is no longer current must not be recovered");
-    let nexus_core::execution::RunControlError::ReconstructionUnavailable { reason, .. } = refusal
+    let nexus_core::owner::RunControlError::ReconstructionUnavailable { reason, .. } = refusal
     else {
         panic!("expected reconstruction_unavailable, got {refusal:?}");
     };
@@ -1345,7 +1345,7 @@ async fn a_restart_after_a_pinned_body_moved_refuses_naming_the_pin() {
         .coordinator()
         .signal_run(
             &nexus_orchestration::SessionId(session_id.clone()),
-            nexus_core::execution::RunSignal::Continue {
+            nexus_core::owner::RunSignal::Continue {
                 wait_id: "irrelevant".to_string(),
             },
         )
@@ -1434,7 +1434,7 @@ async fn a_restart_with_a_hashless_carrier_and_no_recorded_pin_refuses() {
         .coordinator()
         .signal_run(
             &nexus_orchestration::SessionId(session_id.clone()),
-            nexus_core::execution::RunSignal::Continue {
+            nexus_core::owner::RunSignal::Continue {
                 wait_id: "irrelevant".to_string(),
             },
         )
@@ -1831,7 +1831,7 @@ async fn an_ir_only_descriptor_without_an_apply_refuses_recovery() {
         .coordinator()
         .signal_run(
             &nexus_orchestration::SessionId(session_id.clone()),
-            nexus_core::execution::RunSignal::Continue {
+            nexus_core::owner::RunSignal::Continue {
                 wait_id: "irrelevant".to_string(),
             },
         )
@@ -1906,7 +1906,7 @@ async fn a_restart_after_a_successor_apply_refuses_the_admitted_run() {
         .coordinator()
         .signal_run(
             &session_id,
-            nexus_core::execution::RunSignal::Continue {
+            nexus_core::owner::RunSignal::Continue {
                 wait_id: wait_id.clone(),
             },
         )
@@ -1993,7 +1993,7 @@ async fn a_restart_of_an_admitted_applied_run_recovers_the_applied_document() {
         .coordinator()
         .signal_run(
             &session_id,
-            nexus_core::execution::RunSignal::Continue { wait_id },
+            nexus_core::owner::RunSignal::Continue { wait_id },
         )
         .await
         .expect("an unchanged apply must reconstruct the admitted document");

@@ -72,16 +72,16 @@ use nexus_orchestration::preset_gates::{
 use nexus_orchestration::schedule::supervisor::ScheduleCancelDisposition;
 
 use crate::error::{CoreError, CoreResult};
-use crate::execution::capabilities::ToolContext;
+use crate::owner::capabilities::ToolContext;
 #[cfg(feature = "compute")]
-use crate::execution::compute::ComputeContext;
-use crate::execution::lifecycle::ExecutionHandle;
-use crate::execution::run_events::{PageError, PullOutcome, SubscribeError, WorkflowSubscription};
-use crate::execution::workflow::{RunControlError, RunEventPort, RunSignal};
+use crate::owner::compute::ComputeContext;
+use crate::owner::lifecycle::ExecutionHandle;
 use crate::principal::Principal;
 use crate::PresetError;
 use nexus_contracts::generated::core::core_tool_execute_response::CoreToolExecuteResponse;
 use nexus_contracts::ToolsApi;
+use nexus_execution::run_events::{PageError, PullOutcome, SubscribeError, WorkflowSubscription};
+use nexus_execution::workflow::{RunControlError, RunEventPort, RunSignal};
 
 /// Default page size for a cursorless run-event read.
 const DEFAULT_RUN_EVENT_LIMIT: usize = 64;
@@ -820,7 +820,7 @@ impl ExecutionHandle {
         // would be independently obtainable.
         self.linked_core()?.verify_principal(principal)?;
         let context = self.tool_context()?;
-        let value = crate::execution::capabilities::execute_tool(&context, &request).await?;
+        let value = crate::owner::capabilities::execute_tool(&context, &request).await?;
         Ok(CoreToolExecuteResponse {
             success: true,
             result: value,
@@ -844,8 +844,7 @@ impl ExecutionHandle {
         // authorizes against must be the one THIS service was opened for.
         self.linked_core()?.verify_principal(principal)?;
         let context = self.compute_context(principal)?;
-        crate::execution::compute::compute_run(self.linked_core()?.as_ref(), &context, request)
-            .await
+        crate::owner::compute::compute_run(self.linked_core()?.as_ref(), &context, request).await
     }
 
     /// Accept a succeeded compute run's proposals, atomically.
@@ -863,7 +862,7 @@ impl ExecutionHandle {
     > {
         self.ensure_admitting()?;
         self.linked_core()?.verify_principal(principal)?;
-        crate::execution::compute::accept_compute_run(
+        crate::owner::compute::accept_compute_run(
             self.linked_core()?.as_ref(),
             principal,
             &run_id,
@@ -2412,7 +2411,7 @@ impl ExecutionHandle {
         let core = self.linked_core()?;
         core.verify_principal(principal)?;
         #[cfg(feature = "test-hooks")]
-        crate::execution::test_hooks::peer_control_gate_wait().await;
+        nexus_execution::test_hooks::peer_control_gate_wait().await;
         // One guard spans resolve → gate → mutation → snapshot: a concurrent
         // `start_peer_control` must never swap the lane between the operation
         // reading it and applying its effect, or the grant lands on the
