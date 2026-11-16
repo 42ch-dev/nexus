@@ -25,8 +25,10 @@ impl From<ProviderError> for CoreError {
     fn from(error: ProviderError) -> Self {
         match error {
             ProviderError::Internal(reason) => Self::Internal { category: reason },
-            // A read-only provider refuses the review-disposition section with
-            // the resource that section names: the retained `Forbidden` shape.
+            // `ReadOnly` carries the provider's own refusal sentence naming the
+            // entry point (`memory: migrate-legacy needs the workspace writer`),
+            // which is what the retained 403 `Forbidden` slot renders; the
+            // variant has no separate resource id to split out.
             ProviderError::ReadOnly(reason) => Self::Forbidden { resource: reason },
             ProviderError::NotAuthorized(reason) => Self::ForbiddenReason {
                 resource: "memory: migrate-legacy".to_string(),
@@ -36,9 +38,10 @@ impl From<ProviderError> for CoreError {
                 code: IDEMPOTENCY_CONFLICT_CODE.to_string(),
                 message: error.message(),
             },
-            ProviderError::NotFound(_) => Self::NotFound {
-                resource: error.message(),
-            },
+            // `NotFound`'s payload is the bare target (`space abc`); its
+            // `message()` already appends "not found" for the wire, so routing
+            // it here would render `not found: space abc not found`.
+            ProviderError::NotFound(target) => Self::NotFound { resource: target },
             other => Self::Internal {
                 category: other.message(),
             },

@@ -70,10 +70,14 @@ pub async fn resolve_applied_document(
     loaded: Option<&LoadedPreset>,
 ) -> CoreResult<Result<Option<AppliedDocument>, ApplyLoadRefusal>> {
     // The loader's own classification, exactly as admission reads it: only a
-    // user bundle with a current apply has an applied identity. A caller with no
-    // bundle to hand already established it — an applied run's re-entry carries
-    // the frozen applied identity, and only a user bundle can have one — so the
-    // current-apply read is the only question left for it.
+    // user bundle with a current apply has an applied identity. `None` is the
+    // applied re-entry (I-000443: the run's bundle may be gone), and it cannot
+    // skip a refusal a `Some` would raise — `Some` of a NON-user bundle answers
+    // `Ok(None)` (an accept, never a refusal), and every other `Some` runs this
+    // same `current_apply` + `verified_apply_document` pair, so `None` only
+    // ever ADDS verification. Nor can an identity resolved here under the
+    // looser classification widen acceptance: `reconstruct_runner` rebuilds a
+    // run only when this identity equals the one the descriptor froze.
     if loaded.is_some_and(|loaded| !crate::apply::is_user_preset(preset_id, loaded)) {
         return Ok(Ok(None));
     }

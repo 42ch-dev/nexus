@@ -2185,7 +2185,7 @@ export async function sweepWorktreeInventory(options, environment = process.env)
   const canonicalTarget = join(cacheRoot, CANONICAL_TARGET_NAME);
   const protectedCheckouts = [];
   if (mainRoot !== null) {
-    protectedCheckouts.push({ role: 'main', path: worktrees[0].path, branch: worktrees[0].branch, target: canonicalTarget, shared_canonical: true });
+    protectedCheckouts.push({ role: 'main', path: worktrees[0].path, branch: worktrees[0].branch, target: canonicalTarget });
   }
   if (declaration !== null) {
     if (declaration.type === 'iteration' && declaration.integration_worktree_path === undefined) {
@@ -2197,7 +2197,6 @@ export async function sweepWorktreeInventory(options, environment = process.env)
         path: declaration.integration_worktree_path,
         branch: declaration.integration_branch ?? null,
         target: expectedTargetFor(cacheRoot, declaration.integration_worktree_path),
-        shared_canonical: false,
       });
     }
   }

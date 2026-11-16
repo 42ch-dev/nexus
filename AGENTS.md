@@ -194,7 +194,6 @@ Integration verification (`cargo check --workspace`) runs from the integration w
 **Quick stats:** `du -sh ~/.cache/nexus-target-*` shows every feature's cache size at a glance.
 
 
-- **Cleanup (repo root; with direnv this is `$CARGO_TARGET_DIR` → `~/.cache/nexus-target`):**
 - **Anti-patterns:** Building without `CARGO_TARGET_DIR` / direnv (fills a per-checkout `target/` inside the worktree); exporting the canonical `~/.cache/nexus-target` by hand in a worktree, or letting any two checkouts share one target dir (serves another checkout's `rmeta` to this build — `tooling/check-target-dir.sh` refuses it); running `cargo test --all` / `cargo clippy --all` on every small edit; skipping cleanup for months while agents run full-workspace builds; treating `target/` bloat as safe to commit (it is always gitignored — clean locally instead); merging a feature branch without cleaning its scoped target dir first; storing feature target dirs inside the worktree itself (they belong in `~/.cache/nexus-target-<name>` for centralized cleanup and statistics).
 
 ### Git & repository hygiene
