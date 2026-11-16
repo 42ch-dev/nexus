@@ -1658,7 +1658,7 @@ impl WorkflowRunCoordinator {
         // reads the Creator store, and recovery re-enters through the same one.
         let admission = self
             .applied_admission
-            .admit(preset_id, &loaded)
+            .admit(nexus_home, preset_id, &loaded)
             .await
             .map_err(|error| admission_refusal(error, RunControlError::Admission))?;
         let intake_mode = admission.intake_mode;
@@ -3053,7 +3053,7 @@ impl WorkflowRunCoordinator {
         // is built (never a YAML fallback).
         let admission = self
             .applied_admission
-            .admit(&row.preset_id, &loaded)
+            .admit(nexus_home, &row.preset_id, &loaded)
             .await
             .map_err(|error| admission_refusal(error, RunControlError::ScheduleUpdate))?;
         let intake_mode = admission.intake_mode;
@@ -3856,6 +3856,7 @@ mod tests {
     impl AppliedAdmissionPort for NoAppliedAdmission {
         async fn admit(
             &self,
+            _nexus_home: &std::path::Path,
             _preset_id: &str,
             _loaded: &nexus_preset::LoadedPreset,
         ) -> Result<crate::admission::AppliedAdmission, AppliedAdmissionError> {
