@@ -4423,17 +4423,30 @@ mod tests {
         }
     }
 
-    /// Every `kb_key_blocks` row, ordered, as one string per row: byte-identical
-    /// snapshots compare equal only when no insert, update or delete landed.
+    /// Every `kb_key_blocks` row exactly as stored, one JSON array of `quote()`
+    /// values per row, ordered by primary key.
+    ///
+    /// The column list is read from the schema, so every persisted column takes
+    /// part; `quote()` keeps `NULL` (`NULL`) apart from an empty string (`''`).
+    /// Any insert, update or delete changes this comparison.
     async fn kb_rows(pool: &SqlitePool) -> Vec<String> {
-        sqlx::query_scalar::<_, String>(
-            "SELECT key_block_id || '|' || world_id || '|' || block_type || '|' \
-             || canonical_name || '|' || status || '|' || COALESCE(revision, -1) || '|' \
-             || COALESCE(body_json, '') FROM kb_key_blocks ORDER BY key_block_id",
-        )
-        .fetch_all(pool)
-        .await
-        .expect("kb rows")
+        let columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('kb_key_blocks') ORDER BY cid")
+                .fetch_all(pool)
+                .await
+                .expect("kb columns");
+        let quoted = columns
+            .iter()
+            .map(|column| format!("quote({column})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!("SELECT json_array({quoted}) FROM kb_key_blocks ORDER BY key_block_id");
+        // Every interpolated fragment is a column name read from the schema, not
+        // caller input — the only reason a statically-typed query is unavailable.
+        sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql))
+            .fetch_all(pool)
+            .await
+            .expect("kb rows")
     }
 
     /// The knowledge stub is selected by `ToolContext::new_simulated`: a preview
@@ -4482,6 +4495,11 @@ mod tests {
         );
         let before = kb_rows(&fixture.pool).await;
         assert_eq!(before.len(), 1, "the fixture seeds one known row");
+        assert!(
+            before[0].contains("existing_entry"),
+            "the snapshot carries the seeded row: {}",
+            before[0]
+        );
 
         let result = execute_kb_snapshot_write(
             &kb_write_request(&serde_json::json!([block.clone()])),
@@ -4491,6 +4509,15 @@ mod tests {
         .await
         .expect("the simulated write succeeds");
 
+        // The store comparison comes before every response-shape assertion on
+        // purpose: it is the claim this test exists to prove, so a run that
+        // writes must fail HERE. Select `recording_knowledge_entry: None` and
+        // this is the assertion that goes red, not the `written` count.
+        assert_eq!(
+            kb_rows(&fixture.pool).await,
+            before,
+            "a dry run must leave every persisted kb_key_blocks row byte-identical"
+        );
         assert_eq!(
             result["written"],
             serde_json::json!(0),
@@ -4500,11 +4527,6 @@ mod tests {
             result["suppressed_writes"],
             serde_json::json!([{ "entry_id": "kb_sim_probe", "expected_base_revision": null }]),
             "the preview names the write it suppressed, with the record's own fields"
-        );
-        assert_eq!(
-            kb_rows(&fixture.pool).await,
-            before,
-            "a dry run must leave kb_key_blocks byte-identical"
         );
         assert_eq!(
             simulated.recorded_knowledge_entry_mutations(),
