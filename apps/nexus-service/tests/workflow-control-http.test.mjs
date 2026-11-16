@@ -213,10 +213,7 @@ async function observe(service) {
  * I-000436 is closed.
  */
 const SIGSEGV_EXCLUSION =
-  process.platform === 'linux' &&
-  process.env.GITHUB_ACTIONS === 'true' &&
-  // TEMPORARY I-000436 experiment: defeat the exclusion so the block runs here.
-  process.env.I000436_RUN_EXCLUDED !== '1'
+  process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true'
     ? 'excluded, not absent: I-000436 — the P0-T6 block SIGSEGVs this process on the ' +
       'GitHub linux runner ~58 s in, after P0-T5 had already run to completion ' +
       '(run 43489148101, ubuntu-latest, Node 22); P0-T5 still runs on CI, and ' +
@@ -1221,8 +1218,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
 
   test('control ownership: foreign and absent ids close, foreign filters refuse, malformed input is typed', async () => {
     const home = seededHome(acpProviderConfig());
-    // TEMPORARY I-000436 experiment: the seeder-replacement arm.
-    if (process.env.I000436_SKIP_PY_SEED !== '1') seedForeignControlRows(home);
+    seedForeignControlRows(home);
     const service = await startServiceOn(home);
     try {
       const base = service.url;

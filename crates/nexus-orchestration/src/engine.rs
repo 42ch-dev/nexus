@@ -3974,22 +3974,13 @@ impl GraphFlowEngine {
         };
 
         // P4 (I-000443): the applied identity frozen on the descriptor — not the
-        // bundle — is the source an applied run executes. Resolve that arm
-        // FIRST and without the bundle: the bundle is an INPUT of admission, so
-        // a bundle edited, moved or deleted between admission and this restart
-        // must not make a run non-replayable whose graph needs nothing from it.
+        // bundle — is the source an applied run executes, so this arm is
+        // resolved before anything the bundle says.
         //
-        // P6 condition 6: recovery follows the RECORDED intake mode, never the
-        // current config. A `yaml-only` run rebuilds the YAML bundle and never
-        // reads the current apply — a config flip cannot retcon an in-flight
-        // run onto a document it never ran. An `ir-only` run without a recorded
-        // applied identity is the no-apply admission refusal resurfaced: never
-        // rebuilt from YAML. A legacy row (no recorded mode) keeps the
-        // pre-existing resolution below.
-        // The bundle reload is the no-apply path's frozen-source proof (A7).
-        // An applied run executes its document instead, so there the bundle is
-        // an admission input only: one edited, moved or deleted between
-        // admission and this restart must not make such a run non-replayable.
+        // The reload below is the no-apply path's frozen-source proof (A7). An
+        // applied run executes its document instead, so there the bundle is an
+        // admission input only: one edited, moved or deleted between admission
+        // and this restart must not make such a run non-replayable.
         let bundle = match &descriptor.applied {
             Some(_) => match self.reload_frozen_bundle(&descriptor, session_id) {
                 Ok(loaded) => Some(loaded),
@@ -4005,6 +3996,13 @@ impl GraphFlowEngine {
             None => Some(self.reload_frozen_bundle(&descriptor, session_id)?),
         };
 
+        // P6 condition 6: recovery follows the RECORDED intake mode, never the
+        // current config. A `yaml-only` run rebuilds the YAML bundle and never
+        // reads the current apply — a config flip cannot retcon an in-flight
+        // run onto a document it never ran. An `ir-only` run without a recorded
+        // applied identity is the no-apply admission refusal resurfaced: never
+        // rebuilt from YAML. A legacy row (no recorded mode) keeps the
+        // pre-existing resolution.
         let applied = match descriptor.intake_mode {
             Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
             Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
@@ -4183,7 +4181,8 @@ impl GraphFlowEngine {
                                 continue;
                             };
                             map.entry(child_id.to_string()).or_default().insert(
-                                inner_graph_entered_by_state(run_manifest, state).map(str::to_owned),
+                                inner_graph_entered_by_state(run_manifest, state)
+                                    .map(str::to_owned),
                             );
                         }
                     }
@@ -4481,14 +4480,12 @@ impl GraphFlowEngine {
             // yaml-only runs the YAML bundle without reading the current apply.
             Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
             _ => match &self.state.applied_document_source {
-                Some(source) => {
-                    source
-                        .applied_document(&loaded.id, Some(loaded))
-                        .await
-                        .map_err(|error| {
-                            EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
-                        })?
-                }
+                Some(source) => source
+                    .applied_document(&loaded.id, Some(loaded))
+                    .await
+                    .map_err(|error| {
+                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
+                    })?,
                 None => None,
             },
         };
