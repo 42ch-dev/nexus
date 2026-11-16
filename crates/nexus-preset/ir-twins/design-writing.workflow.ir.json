@@ -1,0 +1,161 @@
+{
+  "assets": [
+    {
+      "content_hash": "18f55160ca1f13d3939beb9ae269632f4f63ad9ef32289872a88d28a37fb18ec",
+      "id": "prompts/design-review-exit.md",
+      "kind": "template",
+      "path": "prompts/design-review-exit.md"
+    },
+    {
+      "content_hash": "5efa4e6826048ca58df39de9d3beb7393ed6318cc59637bfb0f8bf863797be86",
+      "id": "prompts/design-section.md",
+      "kind": "template",
+      "path": "prompts/design-section.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "draft_section",
+      "id": "draft_section->review_section",
+      "kind": "default",
+      "to": "review_section"
+    },
+    {
+      "from": "review_section",
+      "id": "review_section->auto_update_status",
+      "kind": "default",
+      "to": "auto_update_status"
+    },
+    {
+      "from": "auto_update_status",
+      "id": "auto_update_status->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "draft_section",
+  "id": "design-writing",
+  "ir_version": 0,
+  "meta": {
+    "description": "LLM-driven per-section drafting + design 五问 review loop for game-bible Design sections (V1.56: section_status auto-transition on review pass)",
+    "gates": [
+      {
+        "field": "work_profile",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "game_bible"
+      },
+      {
+        "field": "work_ref",
+        "kind": "work_field",
+        "op": "required"
+      },
+      {
+        "field": "intake_status",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "complete"
+      },
+      {
+        "kind": "filesystem",
+        "must_exist": true,
+        "path": "Works/{{work_ref}}/Design/"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt",
+      "judge.llm",
+      "game_bible.section_status.update"
+    ],
+    "run_intents": [
+      "work_continue"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/design-section.md",
+            "vars": {
+              "section": "{{preset.input.section}}",
+              "section_comment": "{{preset.input.section_comment}}",
+              "section_title": "{{preset.input.section_title}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT1H",
+        "template": "prompts/design-review-exit.md"
+      },
+      "id": "draft_section",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Draft the selected Design section with an LLM-driven ACP prompt"
+      }
+    },
+    {
+      "effect_class": "external",
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "template": "prompts/design-review-exit.md"
+      },
+      "id": "review_section",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Design 五问 review: the LLM judge evaluates the drafted section against the design rubric"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "new_status": "reviewed",
+            "reason": "auto-transition after design-writing review pass",
+            "section_path": "{{preset.input.section}}",
+            "work_ref": "{{preset.input.work_ref}}"
+          },
+          "kind": "capability",
+          "name": "game_bible.section_status.update"
+        }
+      ],
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "auto_update_status",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Auto-transition section_status after review: draft → reviewed"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}

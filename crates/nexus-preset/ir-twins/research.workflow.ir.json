@@ -1,0 +1,256 @@
+{
+  "assets": [
+    {
+      "content_hash": "3baf4cb777172b7b4f4373751c036e9afa8a0b3916b009b60869a3067b37bcac",
+      "id": "prompts/analyst-system.md",
+      "kind": "template",
+      "path": "prompts/analyst-system.md"
+    },
+    {
+      "content_hash": "bd27a6466e8085787b450034e3d2094cf53199d201bf110f40b4a338a50912ed",
+      "id": "prompts/extract-metadata.md",
+      "kind": "template",
+      "path": "prompts/extract-metadata.md"
+    },
+    {
+      "content_hash": "c7970dec67fe0cf7156de8d910169e42f0941f5d45d7dd0de74ec0a7492de757",
+      "id": "prompts/extract-text.md",
+      "kind": "template",
+      "path": "prompts/extract-text.md"
+    },
+    {
+      "content_hash": "0f04d89fe4b10abbfd8b97e34b0115901269f2a570fc0ac6906a6e6cb4beb7ea",
+      "id": "prompts/researcher-system.md",
+      "kind": "template",
+      "path": "prompts/researcher-system.md"
+    },
+    {
+      "content_hash": "aa43d201a275f67f0054ccedc6f1634c5ef610a83dbbae08667980c2e9b7000b",
+      "id": "prompts/scanning-exit.md",
+      "kind": "template",
+      "path": "prompts/scanning-exit.md"
+    },
+    {
+      "content_hash": "bdc8f1758ade07b5bca6ea8dced713e902cc581a38742b0b48a2822dc8ca0b20",
+      "id": "prompts/scanning.md",
+      "kind": "template",
+      "path": "prompts/scanning.md"
+    },
+    {
+      "content_hash": "a70cf8fdfe999487c8500ffb8ae3516f8dfd0cfbad0311637f4a4224b9146b2d",
+      "id": "prompts/synthesizing-ctx-update.md",
+      "kind": "template",
+      "path": "prompts/synthesizing-ctx-update.md"
+    },
+    {
+      "content_hash": "66a3f54e7c1d970e4356f97a6ad1656c3d9751f65d1c01fa76d97888bc98e28f",
+      "id": "prompts/synthesizing-exit.md",
+      "kind": "template",
+      "path": "prompts/synthesizing-exit.md"
+    },
+    {
+      "content_hash": "6a10bd7d492f2e22ba334f6038c26bc96b5721929e266a07e1ff5738008130a8",
+      "id": "prompts/synthesizing.md",
+      "kind": "template",
+      "path": "prompts/synthesizing.md"
+    },
+    {
+      "content_hash": "1e78f19c2eac74154cb102724e511f666e55951f75796a4c26456015c7ad92af",
+      "id": "prompts/validate-extraction.md",
+      "kind": "template",
+      "path": "prompts/validate-extraction.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "scanning",
+      "id": "scanning->extracting",
+      "kind": "default",
+      "to": "extracting"
+    },
+    {
+      "from": "extracting",
+      "id": "extracting->synthesizing",
+      "kind": "linear",
+      "to": "synthesizing"
+    },
+    {
+      "from": "synthesizing",
+      "id": "synthesizing->done",
+      "kind": "default",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "scanning",
+  "id": "research",
+  "ir_version": 0,
+  "meta": {
+    "description": "A research workflow: scan references, extract content, and produce structured reports",
+    "gates": [
+      {
+        "field": "intake_status",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "complete"
+      },
+      {
+        "field": "work_ref",
+        "kind": "work_field",
+        "op": "required"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt",
+      "judge.llm"
+    ],
+    "run_intents": [
+      "knowledge_ingest",
+      "work_continue"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/scanning.md",
+            "vars": {
+              "references_dir": "{{preset.input.references_dir}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT1H",
+        "template": "prompts/scanning-exit.md"
+      },
+      "id": "scanning",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Scan workspace References/ directory for reference sources"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "extraction_graph"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "extracting",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Extract content from discovered reference sources"
+      }
+    },
+    {
+      "context_update": {
+        "body": "",
+        "op": "append",
+        "template": "prompts/synthesizing-ctx-update.md"
+      },
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/synthesizing.md",
+            "vars": {
+              "output_dir": "{{preset.input.output_dir}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "template": "prompts/synthesizing-exit.md"
+      },
+      "id": "synthesizing",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Synthesize extracted content into a structured research report"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    },
+    {
+      "effect_class": "external",
+      "id": "extraction_graph/extract_text",
+      "kind": "inner_step",
+      "role": "researcher",
+      "step_kind": "acp_prompt",
+      "template": "prompts/extract-text.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "extraction_graph/extract_text"
+      ],
+      "effect_class": "external",
+      "id": "extraction_graph/extract_metadata",
+      "kind": "inner_step",
+      "role": "researcher",
+      "step_kind": "acp_prompt",
+      "template": "prompts/extract-metadata.md",
+      "tool_policy": "auto_grant_read_only"
+    },
+    {
+      "depends_on": [
+        "extraction_graph/extract_metadata"
+      ],
+      "effect_class": "external",
+      "id": "extraction_graph/validate",
+      "kind": "inner_step",
+      "output_binding": "validate.text",
+      "role": "analyst",
+      "step_kind": "acp_prompt",
+      "template": "prompts/validate-extraction.md"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [
+    {
+      "description": "Primary researcher for scanning and extracting reference materials",
+      "id": "researcher",
+      "recommended_skills": [
+        "novel-writing-assistant"
+      ],
+      "system_prompt_file": "prompts/researcher-system.md"
+    },
+    {
+      "description": "Data analyst for structuring and summarizing extracted content",
+      "id": "analyst",
+      "recommended_skills": [
+        "novel-writing-assistant"
+      ],
+      "system_prompt_file": "prompts/analyst-system.md"
+    }
+  ],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 2
+}

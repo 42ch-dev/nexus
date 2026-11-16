@@ -1,0 +1,290 @@
+{
+  "assets": [
+    {
+      "content_hash": "f6048026ec3970f0e046bb4f0b693acd40c56f386e74ff8615dff76b9cbc4aad",
+      "id": "prompts/draft-chapter.md",
+      "kind": "template",
+      "path": "prompts/draft-chapter.md"
+    },
+    {
+      "content_hash": "ce2662006f69950c30c288b380d07e937733c445d1d71d3806fa0740396ce95a",
+      "id": "prompts/finalize-exit.md",
+      "kind": "template",
+      "path": "prompts/finalize-exit.md"
+    },
+    {
+      "content_hash": "f6b541f43dd954a207ea52cd9bc41758dac8e32f8179e6233f2a01f69bd1b388",
+      "id": "prompts/outline-chapter.md",
+      "kind": "template",
+      "path": "prompts/outline-chapter.md"
+    },
+    {
+      "content_hash": "cdef6a86614a1006543fc52f2bf42fc48b3d15347b4e2d9740d1e563b001eb5a",
+      "id": "prompts/outline-exit.md",
+      "kind": "template",
+      "path": "prompts/outline-exit.md"
+    },
+    {
+      "content_hash": "bd7e877006c829eabc83be771432a9c45a7e7ffc86d8d634721ae09e45a88030",
+      "id": "prompts/reviewer-system.md",
+      "kind": "template",
+      "path": "prompts/reviewer-system.md"
+    },
+    {
+      "content_hash": "213436ad41dba2d329c546ac8b0c3f01da37c41a0252140aae1f769f7b435ff4",
+      "id": "prompts/writer-system.md",
+      "kind": "template",
+      "path": "prompts/writer-system.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "outline_chapter",
+      "id": "outline_chapter->outline_review",
+      "kind": "linear",
+      "to": "outline_review"
+    },
+    {
+      "from": "outline_review",
+      "id": "outline_review->draft_chapter",
+      "kind": "default",
+      "to": "draft_chapter"
+    },
+    {
+      "from": "draft_chapter",
+      "id": "draft_chapter->finalize",
+      "kind": "linear",
+      "to": "finalize"
+    },
+    {
+      "from": "finalize",
+      "id": "finalize->finalize_commit",
+      "kind": "default",
+      "to": "finalize_commit"
+    },
+    {
+      "from": "finalize_commit",
+      "id": "finalize_commit->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "outline_chapter",
+  "id": "novel-writing",
+  "ir_version": 0,
+  "meta": {
+    "description": "Per-chapter outline → draft → finalize pipeline; gated by llm_judge 五問 quality checks at outline and finalize",
+    "gates": [
+      {
+        "field": "work_profile",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "novel"
+      },
+      {
+        "field": "work_ref",
+        "kind": "work_field",
+        "op": "required"
+      },
+      {
+        "field": "intake_status",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "complete"
+      },
+      {
+        "kind": "filesystem",
+        "must_exist": true,
+        "path": "Works/{{work_ref}}/"
+      },
+      {
+        "kind": "filesystem",
+        "must_exist": true,
+        "path": "Works/{{work_ref}}/Outlines/"
+      },
+      {
+        "kind": "filesystem",
+        "must_exist": true,
+        "path": "Works/{{work_ref}}/Stories/"
+      },
+      {
+        "kind": "previous_preset",
+        "preset": "novel-project-init",
+        "scope": "work",
+        "status": "complete"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt",
+      "judge.llm",
+      "novel.chapter_transition"
+    ],
+    "run_intents": [
+      "work_continue"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/outline-chapter.md",
+            "vars": {
+              "chapter": "{{preset.input.chapter}}",
+              "chapter_label": "{{preset.input.chapter_label}}",
+              "foreshadowing_summary": "{{preset.input.foreshadowing_summary}}",
+              "open_findings_block": "{{preset.input.open_findings_block}}",
+              "outline_path": "{{preset.input.outline_path}}",
+              "slug": "{{preset.input.slug}}",
+              "topic": "{{preset.input.topic}}",
+              "vibe": "{{preset.input.vibe}}",
+              "work_id": "{{preset.input.work_id}}",
+              "work_ref": "{{preset.input.work_ref}}",
+              "world_kb_block": "{{preset.input.world_kb_block}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "outline_chapter",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Write chapter outline (uses chapter-outline.md template)"
+      }
+    },
+    {
+      "effect_class": "external",
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT6H",
+        "template": "prompts/outline-exit.md"
+      },
+      "id": "outline_review",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Run outline 五问 quality gate; NOGO returns WaitForInput (no state mutation in enter)"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/draft-chapter.md",
+            "vars": {
+              "body_path": "{{preset.input.body_path}}",
+              "chapter": "{{preset.input.chapter}}",
+              "chapter_label": "{{preset.input.chapter_label}}",
+              "foreshadowing_summary": "{{preset.input.foreshadowing_summary}}",
+              "open_findings_block": "{{preset.input.open_findings_block}}",
+              "outline_path": "{{preset.input.outline_path}}",
+              "slug": "{{preset.input.slug}}",
+              "topic": "{{preset.input.topic}}",
+              "vibe": "{{preset.input.vibe}}",
+              "work_id": "{{preset.input.work_id}}",
+              "work_ref": "{{preset.input.work_ref}}",
+              "world_kb_block": "{{preset.input.world_kb_block}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        },
+        {
+          "args": {
+            "chapter": "{{preset.input.chapter}}",
+            "from_status": "outlined",
+            "to_status": "draft",
+            "work_id": "{{preset.input.work_id}}"
+          },
+          "kind": "capability",
+          "name": "novel.chapter_transition"
+        }
+      ],
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "draft_chapter",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Draft chapter body (uses chapter-body.md template; frontmatter status: draft)"
+      }
+    },
+    {
+      "effect_class": "external",
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT6H",
+        "template": "prompts/finalize-exit.md"
+      },
+      "id": "finalize",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Run llm_judge 五問 quality gate on the draft; NOGO returns WaitForInput (no state mutation in enter)"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "chapter": "{{preset.input.chapter}}",
+            "from_status": "draft",
+            "to_status": "finalized",
+            "work_id": "{{preset.input.work_id}}"
+          },
+          "kind": "capability",
+          "name": "novel.chapter_transition"
+        }
+      ],
+      "id": "finalize_commit",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Chapter 五問 gate passed; flip work_chapters row + frontmatter to finalized"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [
+    {
+      "description": "Primary content writer for drafting narrative text",
+      "id": "writer",
+      "recommended_skills": [
+        "novel-writing-assistant"
+      ],
+      "system_prompt_file": "prompts/writer-system.md"
+    },
+    {
+      "description": "Editor/reviewer for quality assessment and refinement",
+      "id": "reviewer",
+      "recommended_skills": [
+        "novel-writing-assistant"
+      ],
+      "system_prompt_file": "prompts/reviewer-system.md"
+    }
+  ],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 9
+}

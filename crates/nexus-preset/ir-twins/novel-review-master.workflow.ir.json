@@ -1,0 +1,175 @@
+{
+  "assets": [
+    {
+      "content_hash": "5900b3b55cef9adb12bfb4084d3edd9615a1282a27fc684b46f73735611f5965",
+      "id": "prompts/await-decision.md",
+      "kind": "template",
+      "path": "prompts/await-decision.md"
+    },
+    {
+      "content_hash": "087ecaaa3d5d1d1ba4ade6d0fdd77aa4640de1c0b24421e66c955e9102efe887",
+      "id": "prompts/present-findings.md",
+      "kind": "template",
+      "path": "prompts/present-findings.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "present",
+      "id": "present->await_decision",
+      "kind": "linear",
+      "to": "await_decision"
+    },
+    {
+      "from": "await_decision",
+      "id": "await_decision->sync_world_kb",
+      "kind": "linear",
+      "to": "sync_world_kb"
+    },
+    {
+      "from": "sync_world_kb",
+      "id": "sync_world_kb->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "present",
+  "id": "novel-review-master",
+  "ir_version": 0,
+  "meta": {
+    "cli_args": [
+      {
+        "description": "Filter to a specific finding ID for targeted review",
+        "name": "finding-id",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "default": false,
+        "description": "Skip interactive confirmation and auto-schedule immediately",
+        "name": "auto-schedule",
+        "required": false,
+        "type": "boolean"
+      }
+    ],
+    "description": "Surface open findings for human master review; interactive approval/reject/wont_fix decisions; V1.40 syncs World KB after review; V1.51 review-time extraction uses nexus.llm.extract",
+    "gates": [
+      {
+        "field": "work_profile",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "novel"
+      },
+      {
+        "field": "work_ref",
+        "kind": "work_field",
+        "op": "required"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt",
+      "nexus.llm.extract"
+    ],
+    "run_intents": [
+      "work_continue"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/present-findings.md",
+            "vars": {
+              "open_findings": "{{preset.input.open_findings}}",
+              "topic": "{{preset.input.topic}}",
+              "work_id": "{{preset.input.work_id}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "present",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Present all open findings requiring master review, organized by severity"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/await-decision.md",
+            "vars": {
+              "open_findings": "{{preset.input.open_findings}}",
+              "work_id": "{{preset.input.work_id}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "await_decision",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Wait for human master to review findings and record decisions (approve/reject/wont_fix)"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "creator_id": "{{preset.input.creator_id}}",
+            "profile_hint": "novel",
+            "source_kind": "work_chapter",
+            "source_locator": "{{preset.input.body_path}}",
+            "work_id": "{{preset.input.work_id}}",
+            "world_id": "{{preset.input.world_id}}"
+          },
+          "kind": "capability",
+          "name": "kb.extract_work"
+        }
+      ],
+      "exit_when": {
+        "kind": "rule"
+      },
+      "id": "sync_world_kb",
+      "kind": "outer_state",
+      "ui": {
+        "description": "V1.40 P3: invoke kb.extract_work for World-bound Works. Returns skip no-op for worldless (empty world_id)."
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 3
+}

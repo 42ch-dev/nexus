@@ -84,6 +84,46 @@ fn refuse(reason: impl Into<String>) -> WorkflowIrError {
     }
 }
 
+/// Canonical bytes of a committed IR twin: `document` as pretty JSON with every object key sorted,
+/// plus one trailing newline.
+///
+/// The sort is what makes a twin reproducible. `serde_json::Map` keeps insertion order whenever
+/// anything in the build enables `serde_json/preserve_order` (the `nexus42` graph does, through
+/// `agent-client-protocol`); without it a `serde_json::Value` carrier such as an `enter` step's
+/// `args` would serialize to different bytes in the CLI than in this crate's own tests. Values are
+/// untouched — only key order is normalized — so a twin still carries exactly the imported
+/// document.
+///
+/// # Errors
+///
+/// Returns the `serde_json` error when the document cannot be converted or serialized.
+pub fn canonical_twin_json(document: &WorkflowDocument) -> Result<String, serde_json::Error> {
+    let value = sort_object_keys(&serde_json::to_value(document)?);
+    let mut json = serde_json::to_string_pretty(&value)?;
+    json.push('\n');
+    Ok(json)
+}
+
+/// Recursively sort every object's keys (arrays keep their order, scalars are untouched).
+fn sort_object_keys(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(members) => {
+            let mut entries: Vec<_> = members.iter().collect();
+            entries.sort_by(|left, right| left.0.cmp(right.0));
+            serde_json::Value::Object(
+                entries
+                    .into_iter()
+                    .map(|(key, member)| (key.clone(), sort_object_keys(member)))
+                    .collect(),
+            )
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(sort_object_keys).collect())
+        }
+        scalar => scalar.clone(),
+    }
+}
+
 /// An imported document plus the referenced asset bytes it hashed.
 #[derive(Debug, Clone)]
 pub struct PresetIrImport {

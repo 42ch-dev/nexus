@@ -1,0 +1,304 @@
+{
+  "assets": [
+    {
+      "content_hash": "b0ffe2a95ed4e37a65d021c2dd5090ee305ef0a8552c4d598b542e89898120e9",
+      "id": "prompts/draft.md",
+      "kind": "template",
+      "path": "prompts/draft.md"
+    },
+    {
+      "content_hash": "6d15d2444e47eef0b50744a883cade1cee7975eec3e5fa724ce619643937ab17",
+      "id": "prompts/finalize-exit.md",
+      "kind": "template",
+      "path": "prompts/finalize-exit.md"
+    },
+    {
+      "content_hash": "a3f9ce5ce7bcf51c572e9751d6809bf4561eaa43f31ee8b9c88c9f0b2a40bf71",
+      "id": "prompts/finalize.md",
+      "kind": "template",
+      "path": "prompts/finalize.md"
+    },
+    {
+      "content_hash": "388e35288259dd7a9ed1c99397ce8fb222ccd8269c935c1af9439afddde7b129",
+      "id": "prompts/intake.md",
+      "kind": "template",
+      "path": "prompts/intake.md"
+    },
+    {
+      "content_hash": "ee7dc8167f46ecbbe19cadc4ef4384e77b46eb9e0f35c1c676746841f986c925",
+      "id": "prompts/outline.md",
+      "kind": "template",
+      "path": "prompts/outline.md"
+    },
+    {
+      "content_hash": "7d6a15d6f61d69bc11eb441e03100723057a4d5cbe0d55a09f12fbe48b204c8f",
+      "id": "prompts/revise.md",
+      "kind": "template",
+      "path": "prompts/revise.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "intake",
+      "id": "intake->outline",
+      "kind": "default",
+      "to": "outline"
+    },
+    {
+      "from": "outline",
+      "id": "outline->draft",
+      "kind": "default",
+      "to": "draft"
+    },
+    {
+      "from": "draft",
+      "id": "draft->revise",
+      "kind": "default",
+      "to": "revise"
+    },
+    {
+      "from": "revise",
+      "id": "revise->finalize",
+      "kind": "default",
+      "to": "finalize"
+    },
+    {
+      "from": "finalize",
+      "id": "finalize->finalize_commit",
+      "kind": "default",
+      "to": "finalize_commit"
+    },
+    {
+      "from": "finalize_commit",
+      "id": "finalize_commit->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "intake",
+  "id": "essay-writing",
+  "ir_version": 0,
+  "meta": {
+    "description": "LLM-driven essay drafting + 4-dimension quality rubric (thesis clarity, evidence support, coherence, ending takeaway) for essay Works (V1.63: Depth 3.5)",
+    "gates": [
+      {
+        "field": "work_profile",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "essay"
+      },
+      {
+        "field": "work_ref",
+        "kind": "work_field",
+        "op": "required"
+      },
+      {
+        "field": "intake_status",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "complete"
+      },
+      {
+        "kind": "filesystem",
+        "must_exist": true,
+        "path": "Works/{{work_ref}}/Drafts/"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt",
+      "judge.llm",
+      "essay.draft_status.finalize"
+    ],
+    "run_intents": [
+      "work_continue"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/intake.md",
+            "vars": {
+              "audience": "{{preset.input.audience}}",
+              "thesis": "{{preset.input.thesis}}",
+              "title": "{{preset.input.title}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT1H",
+        "template": "prompts/finalize-exit.md"
+      },
+      "id": "intake",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Review creative brief and intake context; prepare writing direction"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/outline.md",
+            "vars": {
+              "audience": "{{preset.input.audience}}",
+              "structure": "{{preset.input.structure}}",
+              "thesis": "{{preset.input.thesis}}",
+              "title": "{{preset.input.title}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT1H",
+        "template": "prompts/finalize-exit.md"
+      },
+      "id": "outline",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Generate a structured essay outline with thesis, evidence, and takeaway"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/draft.md",
+            "vars": {
+              "audience": "{{preset.input.audience}}",
+              "thesis": "{{preset.input.thesis}}",
+              "title": "{{preset.input.title}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT1H",
+        "template": "prompts/finalize-exit.md"
+      },
+      "id": "draft",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Write the full essay draft from the outline"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/revise.md",
+            "vars": {
+              "audience": "{{preset.input.audience}}",
+              "thesis": "{{preset.input.thesis}}",
+              "title": "{{preset.input.title}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "min_interval": "PT1H",
+        "template": "prompts/finalize-exit.md"
+      },
+      "id": "revise",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Apply review feedback to the draft; strengthen argument and prose"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/finalize.md",
+            "vars": {
+              "audience": "{{preset.input.audience}}",
+              "thesis": "{{preset.input.thesis}}",
+              "title": "{{preset.input.title}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "judge_capability": "judge.llm",
+        "kind": "llm_judge",
+        "template": "prompts/finalize-exit.md"
+      },
+      "id": "finalize",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Polish essay + KB extraction hint + 4-dim rubric exit judgment"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "word_count": "auto",
+            "work_ref": "{{preset.input.work_ref}}"
+          },
+          "kind": "capability",
+          "name": "essay.draft_status.finalize"
+        }
+      ],
+      "exit_when": {
+        "kind": "rule"
+      },
+      "id": "finalize_commit",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Write frontmatter status: finalized after rubric GO; triggers completion"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}

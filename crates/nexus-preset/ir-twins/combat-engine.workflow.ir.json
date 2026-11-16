@@ -1,0 +1,111 @@
+{
+  "assets": [],
+  "edges": [
+    {
+      "from": "load_world",
+      "id": "load_world->apply_delta",
+      "kind": "linear",
+      "to": "apply_delta"
+    },
+    {
+      "from": "apply_delta",
+      "id": "apply_delta->advance_timeline",
+      "kind": "linear",
+      "to": "advance_timeline"
+    },
+    {
+      "from": "advance_timeline",
+      "id": "advance_timeline->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "load_world",
+  "id": "combat-engine",
+  "ir_version": 0,
+  "meta": {
+    "description": "WASM-powered combat resolution: load computable characters, run combat module, apply state deltas, record battle events",
+    "gates": [
+      {
+        "field": "world_id",
+        "kind": "work_field",
+        "op": "required"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "narrative.compute",
+      "nexus.timeline.event.append"
+    ],
+    "run_intents": [
+      "work_init"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "creator_id": "{{preset.input.creator_id}}",
+            "invocation_params": {
+              "rounds": "{{preset.input.rounds}}"
+            },
+            "module_id": "{{preset.input.module_id}}",
+            "world_id": "{{preset.input.world_id}}"
+          },
+          "kind": "capability",
+          "name": "narrative.compute"
+        }
+      ],
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "load_world",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Read computable KnowledgeEntries and narrative position from the world"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "apply_delta",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Apply state deltas returned by the compute module to character state"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "advance_timeline",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Advance the narrative timeline: append battle events and update position"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}

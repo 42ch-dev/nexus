@@ -1,0 +1,116 @@
+{
+  "assets": [
+    {
+      "content_hash": "ff5c6443a3ece8c05cfbcbb92325e02ad73356683773ded840ecb86303555cba",
+      "id": "prompts/extract.md",
+      "kind": "template",
+      "path": "prompts/extract.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "loading",
+      "id": "loading->extracting",
+      "kind": "linear",
+      "to": "extracting"
+    },
+    {
+      "from": "extracting",
+      "id": "extracting->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "loading",
+  "id": "kb-extract",
+  "ir_version": 0,
+  "meta": {
+    "description": "Extract structured KnowledgeEntries from work-scope KB entries into world knowledge",
+    "kind": "creator",
+    "requires_capabilities": [
+      "kb.extract_work",
+      "acp.prompt"
+    ],
+    "run_intents": [
+      "knowledge_ingest"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "creator_id": "{{preset.input.creator_id}}",
+            "job_id": "{{preset.input.job_id}}",
+            "work_content": "{{preset.input.work_content}}"
+          },
+          "kind": "capability",
+          "name": "kb.extract_work"
+        }
+      ],
+      "exit_when": {
+        "kind": "rule"
+      },
+      "id": "loading",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Load and claim the next queued extract job"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "kind": "inner_graph",
+          "name": "extraction_graph"
+        },
+        {
+          "args": {
+            "creator_id": "{{preset.input.creator_id}}",
+            "job_id": "{{loading.output.job_id}}",
+            "llm_response": "{{extraction_graph.output}}",
+            "work_content": "{{preset.input.work_content}}"
+          },
+          "kind": "capability",
+          "name": "kb.extract_work"
+        }
+      ],
+      "exit_when": {
+        "kind": "graph_complete"
+      },
+      "id": "extracting",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Run extraction prompt via inner graph, then finalize with kb.extract_work"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    },
+    {
+      "effect_class": "external",
+      "id": "extraction_graph/extract",
+      "kind": "inner_step",
+      "output_binding": "extract.text",
+      "step_kind": "acp_prompt",
+      "template": "prompts/extract.md",
+      "tool_policy": "auto_grant_read_only"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 3
+}

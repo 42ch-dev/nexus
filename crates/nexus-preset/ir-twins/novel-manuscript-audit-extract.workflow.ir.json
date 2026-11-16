@@ -1,0 +1,139 @@
+{
+  "assets": [
+    {
+      "content_hash": "aa54f73af461939f0b029ad3388d4e4160f70cdafa4e6ebe7081a41da67692fa",
+      "id": "prompts/load-chapter.md",
+      "kind": "template",
+      "path": "prompts/load-chapter.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "load_chapter",
+      "id": "load_chapter->extract_sync",
+      "kind": "linear",
+      "to": "extract_sync"
+    },
+    {
+      "from": "extract_sync",
+      "id": "extract_sync->done",
+      "kind": "linear",
+      "to": "done"
+    }
+  ],
+  "effect_summary": "external",
+  "entry": "load_chapter",
+  "id": "novel-manuscript-audit-extract",
+  "ir_version": 0,
+  "meta": {
+    "cli_args": [
+      {
+        "description": "Chapter number to extract",
+        "name": "chapter",
+        "required": true,
+        "type": "integer"
+      },
+      {
+        "default": 1,
+        "description": "Volume number (default 1)",
+        "name": "volume",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "description": "On-demand chapter KB extract: synchronous kb.extract_work for World-bound Works (no FL-E auto-chain, no queue ceremony)",
+    "gates": [
+      {
+        "field": "work_profile",
+        "kind": "work_field",
+        "op": "equals",
+        "value": "novel"
+      },
+      {
+        "field": "work_ref",
+        "kind": "work_field",
+        "op": "required"
+      }
+    ],
+    "kind": "creator",
+    "requires_capabilities": [
+      "creator.inject_prompt",
+      "acp.prompt",
+      "kb.extract_work"
+    ],
+    "run_intents": [
+      "work_continue"
+    ]
+  },
+  "nests": [],
+  "nodes": [
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "prompt_file": "prompts/load-chapter.md",
+            "vars": {
+              "body_path": "{{preset.input.body_path}}",
+              "chapter": "{{preset.input.chapter}}",
+              "volume": "{{preset.input.volume}}",
+              "work_id": "{{preset.input.work_id}}",
+              "work_ref": "{{preset.input.work_ref}}"
+            }
+          },
+          "kind": "capability",
+          "name": "creator.inject_prompt"
+        }
+      ],
+      "exit_when": {
+        "kind": "manual"
+      },
+      "id": "load_chapter",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Load chapter body from resolved path for KB extraction"
+      }
+    },
+    {
+      "effect_class": "external",
+      "enter": [
+        {
+          "args": {
+            "creator_id": "{{preset.input.creator_id}}",
+            "profile_hint": "novel",
+            "source_kind": "work_chapter",
+            "source_locator": "{{preset.input.body_path}}",
+            "work_id": "{{preset.input.work_id}}",
+            "world_id": "{{preset.input.world_id}}"
+          },
+          "kind": "capability",
+          "name": "kb.extract_work"
+        }
+      ],
+      "exit_when": {
+        "kind": "rule"
+      },
+      "id": "extract_sync",
+      "kind": "outer_state",
+      "ui": {
+        "description": "Extract mode: synchronous kb.extract_work for World-bound Works (no queue ceremony)"
+      }
+    },
+    {
+      "effect_class": "pure",
+      "id": "done",
+      "kind": "terminal"
+    }
+  ],
+  "provenance": {
+    "source": "import_preset"
+  },
+  "revision": 0,
+  "roles": [],
+  "signals": [],
+  "state": "candidate",
+  "terminal": [
+    "done"
+  ],
+  "version": 1
+}
