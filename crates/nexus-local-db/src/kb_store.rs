@@ -358,6 +358,17 @@ pub mod seed {
 /// its own pagination on top of this.
 pub const LIST_BY_WORLD_LIMIT: i64 = 500;
 
+/// The refusal for a write that takes `kb`'s key: the same
+/// [`KbStoreError::Duplicate`] the INSERT's unique-violation mapping produces.
+#[must_use]
+pub fn duplicate_refusal(kb: &KnowledgeEntryRecord) -> KbStoreError {
+    KbStoreError::Duplicate {
+        owner: kb.owner.clone(),
+        name: kb.canonical_name.clone(),
+        block_type: kb.block_type,
+    }
+}
+
 /// SQLite-backed KB store.
 ///
 /// Holds an `Arc<SqlitePool>` shared per active workspace. Construct once
@@ -432,6 +443,61 @@ impl SqliteKbStore {
         .map_err(|e| db_err(&e))?;
 
         row.as_ref().map(KeyBlockRow::to_record).transpose()
+    }
+
+    /// The record-level gates [`Self::insert_key_block_with_extensions_in_tx`]
+    /// applies before its INSERT: `canonical_name` format, the retired legacy
+    /// extension key, body semantics under this store's validation mode, and the
+    /// native governance pair — in that order, which is the order a block that
+    /// fails more than one gate reports.
+    ///
+    /// Public because a caller that must establish these preconditions before
+    /// it converts the record (`nexus-core`'s simulated `kb_snapshot.write`
+    /// branch, whose conversion asserts them with `.expect`) must run the same
+    /// gates rather than re-implement them. `extensions_nexus_json` is the
+    /// opaque document the INSERT would receive; a caller with none passes
+    /// `None`.
+    ///
+    /// # Errors
+    ///
+    /// [`KbStoreError::Validation`] on the `canonical_name` format or the body
+    /// semantics, [`KbStoreError::ValidationLegacy`] on a legacy extension key
+    /// in `extensions_nexus_json` or on the native governance pair.
+    pub fn validate_key_block(
+        &self,
+        kb: &KnowledgeEntryRecord,
+        extensions_nexus_json: Option<&str>,
+    ) -> Result<(), KbStoreError> {
+        // Validate canonical_name format/safety (same as trait impl).
+        validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
+
+        // v1.191 P1 T3 (durable §5.4): a caller-supplied extension document may
+        // not re-introduce the retired legacy visibility key. The wrapper path
+        // builds the document itself (and never emits the key); the opaque
+        // primitive is the raw-input boundary and refuses it explicitly. Kept
+        // between the canonical-name and body gates: an extension refusal
+        // outranks a body refusal, as it did before this gate was shared.
+        if let Some(extensions_nexus_json) = extensions_nexus_json {
+            reject_legacy_creator_only_extension(extensions_nexus_json)?;
+        }
+
+        // Validate body semantics before persisting (same as trait impl).
+        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
+            .map_err(validation_err)?;
+
+        // v1.191 P1 T3: the native governance pair is validated with the domain
+        // rule (durable §3): a disclosure requires its nonempty holder, empty
+        // strings are invalid, and only `owner-private` is native. The SQLite
+        // CHECK/FK are defense in depth; the explicit check keeps the invariant
+        // identical across the domain / memory / storage boundaries. Mapped to
+        // `ValidationLegacy` (not the `validation_err` fallback, which would
+        // mislabel it `MissingBody`).
+        nexus_knowledge::world_kb::knowledge_entry::validate_native_governance(
+            kb.holder_entry_id.as_deref(),
+            kb.disclosure.as_deref(),
+        )
+        .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
+        Ok(())
     }
 
     /// Transaction-aware variant of [`KbStore::insert_knowledge_entry`] (R-V150KBED-03).
@@ -511,31 +577,7 @@ impl SqliteKbStore {
         kb: KnowledgeEntryRecord,
         extensions_nexus_json: String,
     ) -> Result<KbInsertResult, KbStoreError> {
-        // Validate canonical_name format/safety (same as trait impl).
-        validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
-
-        // v1.191 P1 T3 (durable §5.4): a caller-supplied extension document may
-        // not re-introduce the retired legacy visibility key. The wrapper path
-        // builds the document itself (and never emits the key); this opaque
-        // primitive is the raw-input boundary and refuses it explicitly.
-        reject_legacy_creator_only_extension(&extensions_nexus_json)?;
-
-        // Validate body semantics before persisting (same as trait impl).
-        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
-            .map_err(validation_err)?;
-
-        // v1.191 P1 T3: the native governance pair is validated with the domain
-        // rule (durable §3): a disclosure requires its nonempty holder, empty
-        // strings are invalid, and only `owner-private` is native. The SQLite
-        // CHECK/FK are defense in depth; the explicit check keeps the invariant
-        // identical across the domain / memory / storage boundaries. Mapped to
-        // `ValidationLegacy` (not the `validation_err` fallback, which would
-        // mislabel it `MissingBody`).
-        nexus_knowledge::world_kb::knowledge_entry::validate_native_governance(
-            kb.holder_entry_id.as_deref(),
-            kb.disclosure.as_deref(),
-        )
-        .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
+        self.validate_key_block(&kb, Some(&extensions_nexus_json))?;
 
         let key_block_id = kb.entry_id.clone();
         let owner = kb.owner.clone();
@@ -573,7 +615,6 @@ impl SqliteKbStore {
         let holder_entry_id = kb.holder_entry_id.clone();
         let disclosure = kb.disclosure.clone();
         let cname = kb.canonical_name.clone();
-        let btype = kb.block_type;
         let insert_outcome = sqlx::query(
             r"INSERT INTO kb_key_blocks
                 (key_block_id, owner_kind, world_id, character_id,
@@ -639,11 +680,7 @@ impl SqliteKbStore {
                 _ => false,
             };
             if duplicate {
-                return Err(KbStoreError::Duplicate {
-                    owner,
-                    name: cname,
-                    block_type: btype,
-                });
+                return Err(duplicate_refusal(&kb));
             }
             return Err(db_err(&e));
         }
@@ -4514,6 +4551,51 @@ mod tests {
             .expect("unknown keys survive the opaque-JSON INSERT path");
         assert_eq!(extras["edition"], "alpha");
         assert_eq!(extras["priority"], 7);
+    }
+
+    /// The INSERT's gate order — `canonical_name`, the retired legacy extension
+    /// key, body, governance — is what a block failing more than one gate
+    /// reports. Sharing those gates must not reorder them: a caller migrating
+    /// off `creator_only` still learns the key is refused even when its body is
+    /// also invalid.
+    #[tokio::test]
+    async fn insert_gate_order_reports_the_legacy_extension_before_a_body_refusal() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        let store = SqliteKbStore::new(pool.clone());
+        let mut tx = pool.begin().await.unwrap();
+        let legacy_doc = r#"{"creator_only":false}"#.to_string();
+        let invalid_body = KnowledgeEntryBody {
+            attributes: Some(json!("not an object")),
+            ..KnowledgeEntryBody::default()
+        };
+
+        let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
+        kb.body = Some(invalid_body.clone());
+        let err = store
+            .insert_key_block_with_extensions_in_tx(&mut tx, kb, legacy_doc.clone())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                KbStoreError::ValidationLegacy(msg) if msg.contains("legacy_creator_only_unsupported")
+            ),
+            "the extension refusal outranks the body gate, got: {err:?}"
+        );
+
+        // The canonical-name gate still runs first: an empty name is reported
+        // without the extension document being read.
+        let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "");
+        kb.body = Some(invalid_body);
+        let err = store
+            .insert_key_block_with_extensions_in_tx(&mut tx, kb, legacy_doc)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, KbStoreError::Validation(ValidationError { .. })),
+            "the canonical-name gate precedes the extension gate, got: {err:?}"
+        );
     }
 
     #[tokio::test]

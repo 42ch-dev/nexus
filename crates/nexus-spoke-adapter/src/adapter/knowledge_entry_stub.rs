@@ -16,7 +16,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 pub enum StubKnowledgeEntryMutation {
     /// A `get_knowledge_entry` call.
     Get { entry_id: String },
-    /// A `put_knowledge_entry` call, with the caller's CAS expectation.
+    /// A `put_knowledge_entry` call, with the revision the caller pinned
+    /// (`None` on the `kb_snapshot.write` preview path).
     Put {
         entry_id: String,
         expected_base_revision: Option<u64>,
@@ -85,8 +86,10 @@ impl KnowledgeEntryPort for StubKnowledgeEntryPort {
         result
     }
 
-    // shortcut: no CAS — a put always replaces by `entry_id`. Upgrade when P2
-    // binds the stub somewhere a revision conflict must be observable.
+    // No CAS: the production write below this stub is a plain INSERT, not a
+    // revision compare, so there is no revision expectation for a preview to
+    // carry. And this stub applies no store rule of its own — it records the
+    // intent; whether the store would accept it is not a question it answers.
     async fn put_knowledge_entry(
         &self,
         entry: KnowledgeEntry,

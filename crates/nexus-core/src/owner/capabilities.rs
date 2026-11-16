@@ -68,7 +68,10 @@ use nexus_contracts::{FindingsApi, ToolsApi};
 use nexus_home_layout::active_context::{read_active_creator_id, read_active_workspace_slug};
 use nexus_local_db::works;
 use nexus_narrative::NarrativeGateway;
-use nexus_spoke_adapter::{parse_tool_capability_id, SpokeResult};
+use nexus_spoke_adapter::{
+    parse_tool_capability_id, KnowledgeEntryPort, SpokeResult, StubKnowledgeEntryMutation,
+    StubKnowledgeEntryPort,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -179,6 +182,12 @@ pub struct ToolContext {
     /// [`FsWorkArtifactPort`]. `Some` records the intended writes instead, so a
     /// dry run leaves the `Works/` tree byte-identical.
     pub(crate) recording_work_artifact: Option<Arc<RecordingWorkArtifactPort>>,
+    /// The Simulate plane's knowledge port, when this context is one.
+    ///
+    /// `None` is production: knowledge writes commit through `SqliteKbStore`.
+    /// `Some` records the intended writes instead, so a dry run leaves
+    /// `kb_key_blocks` byte-identical.
+    pub(crate) recording_knowledge_entry: Option<Arc<StubKnowledgeEntryPort>>,
 }
 
 impl ToolContext {
@@ -206,6 +215,7 @@ impl ToolContext {
             core,
             user_capabilities,
             recording_work_artifact: None,
+            recording_knowledge_entry: None,
         }
     }
 
@@ -214,6 +224,9 @@ impl ToolContext {
     /// A dry run over a workspace whose `Works/` tree already holds real
     /// chapter bytes must not rewrite them; selecting the recording port here is
     /// what makes that true for every Work write this context can reach.
+    ///
+    /// The knowledge stub is selected by the same call for the same reason: a
+    /// preview that reaches `nexus.kb_snapshot.write` must not insert rows.
     #[must_use]
     pub fn new_simulated(
         pool: sqlx::SqlitePool,
@@ -225,6 +238,7 @@ impl ToolContext {
     ) -> Self {
         Self {
             recording_work_artifact: Some(Arc::new(RecordingWorkArtifactPort::new())),
+            recording_knowledge_entry: Some(Arc::new(StubKnowledgeEntryPort::new())),
             ..Self::new(
                 pool,
                 nexus_home,
@@ -244,6 +258,19 @@ impl ToolContext {
     #[must_use]
     pub fn recorded_work_artifact_mutations(&self) -> Option<Vec<RecordedMutation>> {
         self.recording_work_artifact
+            .as_ref()
+            .map(|port| port.mutations())
+    }
+
+    /// The knowledge port intents this context recorded, or `None` for a
+    /// production one.
+    ///
+    /// `None` is not an empty log: a production context commits real rows
+    /// through `SqliteKbStore` and records nothing, so reporting `Some(vec![])`
+    /// would claim a plane that does not exist.
+    #[must_use]
+    pub fn recorded_knowledge_entry_mutations(&self) -> Option<Vec<StubKnowledgeEntryMutation>> {
+        self.recording_knowledge_entry
             .as_ref()
             .map(|port| port.mutations())
     }
@@ -1659,7 +1686,30 @@ pub(crate) fn registry_registry_refresh<'a>(
 
 // ─── V1.54 P0: DF-46 write tool handlers ──────────────────────────────────
 
+/// The refusal a kb store gate reports — the one shape both the production
+/// INSERT and the simulated pre-check answer with.
+fn kb_store_refusal(e: &nexus_knowledge::world_kb::store::KbStoreError) -> NexusApiError {
+    NexusApiError::Internal {
+        category: format!("KB_STORE_ERROR: {e}"),
+    }
+}
+
 /// `nexus.kb_snapshot.write` — upsert key blocks for a world.
+///
+/// A production context commits every block through `SqliteKbStore`. A
+/// simulated one hands each block to the context's `KnowledgeEntryPort` stub,
+/// which records the `Put` intent and writes nothing.
+///
+/// Its response carries `written: 0` and `suppressed_writes` — one object per
+/// recorded `Put`, in input order. Each block must first pass the store's own
+/// record gates (`SqliteKbStore::validate_key_block`) and is refused with the
+/// store's refusal otherwise: `knowledge_record_to_spoke` asserts those gates,
+/// so converting first panics on caller input that production refuses. The
+/// preview is still not a prediction of store acceptance — it runs no
+/// uniqueness predicate, so a block that passes the record gates may yet
+/// collide at apply time. Zero blocks yield the explicit empty list, `Get`
+/// never appears (a read mutates nothing), and a production context carries
+/// neither the list nor an empty-state claim.
 async fn execute_kb_snapshot_write(
     req: &ToolsApi,
     context: &ToolContext,
@@ -1685,12 +1735,7 @@ async fn execute_kb_snapshot_write(
                 reason: "must be an array of key blocks".into(),
             })?;
 
-    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-    let mut written: usize = 0;
-    let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
-        category: format!("DATABASE_ERROR: {e}"),
-    })?;
-
+    let mut records = Vec::with_capacity(blocks.len());
     for block_val in blocks {
         let kb: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord =
             serde_json::from_value(block_val.clone()).map_err(|e| NexusApiError::InvalidInput {
@@ -1713,12 +1758,46 @@ async fn execute_kb_snapshot_write(
                 ),
             });
         }
+        records.push(kb);
+    }
+
+    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+
+    if let Some(port) = context.recording_knowledge_entry.as_deref() {
+        let mut suppressed = Vec::with_capacity(records.len());
+        for kb in records {
+            // The conversion asserts the store's record gates with `.expect`; a
+            // simulation that never writes still has to establish them, or it
+            // panics on the caller input production refuses. No extension
+            // document exists on this path (nothing is built or inserted).
+            kb_store
+                .validate_key_block(&kb, None)
+                .map_err(|e| kb_store_refusal(&e))?;
+            let entry = nexus_spoke_adapter::conversion::knowledge_record_to_spoke(&kb);
+            if let SpokeResult::Reject(reject) = port.put_knowledge_entry(entry, None).await {
+                return Err(NexusApiError::Internal {
+                    category: format!("KB_PORT_ERROR: {reject:?}"),
+                });
+            }
+            suppressed.push(serde_json::json!({ "entry_id": kb.entry_id }));
+        }
+        return Ok(serde_json::json!({
+            "written": 0,
+            "world_id": world_id,
+            "suppressed_writes": suppressed,
+        }));
+    }
+
+    let mut written: usize = 0;
+    let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
+        category: format!("DATABASE_ERROR: {e}"),
+    })?;
+
+    for kb in records {
         kb_store
             .insert_key_block_in_tx(&mut tx, kb)
             .await
-            .map_err(|e| NexusApiError::Internal {
-                category: format!("KB_STORE_ERROR: {e}"),
-            })?;
+            .map_err(|e| kb_store_refusal(&e))?;
         written += 1;
     }
 
@@ -3737,14 +3816,14 @@ pub fn build_registry() -> CapabilityRegistry {
                 r#"{"type":"object","properties":{"world_id":{"type":"string"},"blocks":{"type":"array","items":{"type":"object","properties":{"schema_version":{"type":"integer"},"entry_id":{"type":"string"},"world_id":{"type":"string"},"block_type":{"type":"string","enum":["character","ability","scene","organization","item","conflict","info_point","event","species","faction","magic_system","technology","deity","level","economy_tier","dialogue","beat","act","era"]},"canonical_name":{"type":"string"},"status":{"type":"string"},"revision":{"type":"integer"},"body":{"type":"object"},"source_anchor":{"type":"object"},"created_from_command_id":{"type":"string"},"created_at":{"type":"string"},"updated_at":{"type":"string"},"source_work_id":{"type":"string"},"source_chapter":{"type":"integer"},"source_provenance_kind":{"type":"string"},"extensions_nexus_extras":{"type":"object"},"modules":{"type":"object"}},"required":["schema_version","entry_id","world_id","block_type","canonical_name","status","created_at"]}}},"required":["world_id","blocks"]}"#,
             ),
             output_schema: Some(
-                r#"{"type":"object","properties":{"written":{"type":"integer"},"world_id":{"type":"string"}},"required":["written","world_id"]}"#,
+                r#"{"type":"object","properties":{"written":{"type":"integer"},"world_id":{"type":"string"},"suppressed_writes":{"type":"array","items":{"type":"object","properties":{"entry_id":{"type":"string"}},"required":["entry_id"]}}},"required":["written","world_id"]}"#,
             ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
             description: "kb snapshot write upserts key blocks for owned world",
             expected_outcome: "success",
-            test_fn_name: "kb_snapshot_write_upserts_key_blocks",
+            test_fn_name: "simulated_knowledge_write_records_and_preserves_the_store",
         },
     });
 
@@ -4349,6 +4428,347 @@ mod tests {
         assert!(
             fixture.context.recorded_work_artifact_mutations().is_none(),
             "a production context reports no log rather than an empty one"
+        );
+    }
+
+    fn kb_write_request(blocks: &serde_json::Value) -> ToolsApi {
+        ToolsApi {
+            caller_kind: None,
+            parameters: serde_json::json!({ "world_id": "wld_sim", "blocks": blocks }),
+            request_id: None,
+            session_id: None,
+            tool_name: "nexus.kb_snapshot.write".to_string(),
+        }
+    }
+
+    /// Every `kb_key_blocks` row exactly as stored, one JSON array per row,
+    /// ordered by primary key.
+    ///
+    /// The column list is read from the schema, so every persisted column takes
+    /// part. Each column contributes its `typeof` tag plus a lossless rendering:
+    /// `printf('%!.17g')` for `real` (17 significant digits round-trip a double,
+    /// where `CAST(real AS BLOB)` truncates through 15-digit text), and `hex` of
+    /// the raw bytes otherwise. `NULL`, the empty string, a string with an
+    /// embedded NUL and a BLOB sharing that prefix all render differently, and no
+    /// text conversion can truncate the value. Any insert, update or delete
+    /// changes this comparison.
+    async fn kb_rows(pool: &SqlitePool) -> Vec<String> {
+        let columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('kb_key_blocks') ORDER BY cid")
+                .fetch_all(pool)
+                .await
+                .expect("kb columns");
+        let rendered = columns
+            .iter()
+            .map(|column| {
+                format!(
+                    "typeof({column}), CASE typeof({column}) WHEN 'real' \
+                     THEN printf('%!.17g', {column}) ELSE hex(CAST({column} AS BLOB)) END"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!("SELECT json_array({rendered}) FROM kb_key_blocks ORDER BY key_block_id");
+        // Every interpolated fragment is a column name read from the schema, not
+        // caller input — the only reason a statically-typed query is unavailable.
+        sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql))
+            .fetch_all(pool)
+            .await
+            .expect("kb rows")
+    }
+
+    /// The world the simulated knowledge tests write into, plus one known
+    /// `kb_key_blocks` row.
+    async fn seed_kb_fixture(pool: &SqlitePool) {
+        nexus_local_db::ensure_creator_row(pool, CREATOR, "Test")
+            .await
+            .expect("creator row");
+        sqlx::query(
+            "INSERT INTO narrative_worlds (world_id, workspace_id, owner_creator_id, title, \
+             slug, status, visibility, time_policy, metadata_json) \
+             VALUES ('wld_sim', 'wrk', ?, 't', 's', 'active', 'private', 'manual', '{}')",
+        )
+        .bind(CREATOR)
+        .execute(pool)
+        .await
+        .expect("world row");
+        sqlx::query(
+            "INSERT INTO kb_key_blocks (key_block_id, world_id, block_type, canonical_name, \
+             status, revision, created_at, updated_at) \
+             VALUES ('kb_sim_existing', 'wld_sim', 'character', 'existing_entry', 'confirmed', 3, \
+             datetime('now'), datetime('now'))",
+        )
+        .execute(pool)
+        .await
+        .expect("known kb row");
+    }
+
+    /// The knowledge stub is selected by `ToolContext::new_simulated`: a preview
+    /// that reaches `nexus.kb_snapshot.write` records the intended put and leaves
+    /// `kb_key_blocks` byte-identical. Removing that selection inserts the row for
+    /// real, so this test is the negative control for it.
+    #[tokio::test]
+    async fn simulated_knowledge_write_records_and_preserves_the_store() {
+        use nexus_contracts::BlockType;
+        use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+
+        let fixture = fixture(false).await;
+        seed_kb_fixture(&fixture.pool).await;
+
+        let mut block = KnowledgeEntryRecord::new("wld_sim", BlockType::Character, "sim_probe");
+        block.entry_id = "kb_sim_probe".to_string();
+        let block = serde_json::to_value(&block).expect("serialize the block");
+
+        let simulated = ToolContext::new_simulated(
+            fixture.pool.clone(),
+            fixture.context.nexus_home.clone(),
+            fixture.context.workspace_path(),
+            ToolRuntimeFacts::default(),
+            None,
+            None,
+        );
+        let before = kb_rows(&fixture.pool).await;
+        assert_eq!(before.len(), 1, "the fixture seeds one known row");
+        assert!(
+            before[0].contains(&hex::encode("existing_entry").to_uppercase()),
+            "the snapshot carries the seeded row's bytes: {}",
+            before[0]
+        );
+
+        let result = execute_kb_snapshot_write(
+            &kb_write_request(&serde_json::json!([block.clone()])),
+            &simulated,
+            CREATOR,
+        )
+        .await
+        .expect("the simulated write succeeds");
+
+        // The store comparison comes before every response-shape assertion on
+        // purpose: it is the claim this test exists to prove, so a run that
+        // writes must fail HERE. Select `recording_knowledge_entry: None` and
+        // this is the assertion that goes red, not the `written` count.
+        assert_eq!(
+            kb_rows(&fixture.pool).await,
+            before,
+            "a dry run must leave every persisted kb_key_blocks row byte-identical"
+        );
+        assert_eq!(
+            result["written"],
+            serde_json::json!(0),
+            "a preview commits nothing"
+        );
+        assert_eq!(
+            result["suppressed_writes"],
+            serde_json::json!([{ "entry_id": "kb_sim_probe" }]),
+            "the preview names the written intent, with the record's own fields"
+        );
+        assert_eq!(
+            simulated.recorded_knowledge_entry_mutations(),
+            Some(vec![StubKnowledgeEntryMutation::Put {
+                entry_id: "kb_sim_probe".to_string(),
+                expected_base_revision: None,
+            }]),
+            "the attempt is recorded, not swallowed"
+        );
+
+        // Zero puts still yield the explicit empty state rather than silence.
+        let empty = execute_kb_snapshot_write(
+            &kb_write_request(&serde_json::json!([])),
+            &simulated,
+            CREATOR,
+        )
+        .await
+        .expect("the empty simulated write succeeds");
+        assert_eq!(empty["written"], serde_json::json!(0));
+        assert_eq!(empty["suppressed_writes"], serde_json::json!([]));
+
+        // A production context records nothing and still commits for real.
+        assert!(
+            fixture
+                .context
+                .recorded_knowledge_entry_mutations()
+                .is_none(),
+            "a production context reports no log rather than an empty one"
+        );
+        let live = execute_kb_snapshot_write(
+            &kb_write_request(&serde_json::json!([block])),
+            &fixture.context,
+            CREATOR,
+        )
+        .await
+        .expect("the production write succeeds");
+        assert_eq!(live["written"], serde_json::json!(1));
+        assert!(
+            live.get("suppressed_writes").is_none(),
+            "a production write carries no suppression report"
+        );
+        assert_eq!(kb_rows(&fixture.pool).await.len(), before.len() + 1);
+    }
+
+    /// A simulated write must answer the refusal production would give for the
+    /// same block: these fields are `Option<String>`/`String` on the wire, so
+    /// `{"disclosure": ""}` or `{"canonical_name": ""}` deserializes and reaches
+    /// the store. Only the store's record gates refuse them — and
+    /// `knowledge_record_to_spoke` asserts those gates with `.expect`, so a
+    /// simulated branch that converts without running them panics inside the
+    /// request path where production returns a refusal.
+    #[tokio::test]
+    async fn simulated_knowledge_write_refuses_what_production_refuses() {
+        use nexus_contracts::BlockType;
+        use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+
+        let fixture = fixture(false).await;
+        seed_kb_fixture(&fixture.pool).await;
+        let simulated = ToolContext::new_simulated(
+            fixture.pool.clone(),
+            fixture.context.nexus_home.clone(),
+            fixture.context.workspace_path(),
+            ToolRuntimeFacts::default(),
+            None,
+            None,
+        );
+        let before = kb_rows(&fixture.pool).await;
+
+        // (field, value, the store gate's own reason — asserted, because "did not
+        // panic" alone would let the next refactor reintroduce the panic.)
+        let cases = [
+            (
+                "disclosure",
+                "",
+                "disclosure must be a nonempty stored value",
+            ),
+            (
+                "holder_entry_id",
+                "",
+                "holder_entry_id must be a nonempty resolved holder id",
+            ),
+            ("canonical_name", "", "canonical_name must not be empty"),
+            (
+                "disclosure",
+                "shared",
+                "unknown disclosure vocabulary \"shared\"; only \"owner-private\" is native",
+            ),
+        ];
+
+        for (field, value, reason) in cases {
+            let mut block =
+                KnowledgeEntryRecord::new("wld_sim", BlockType::Character, "sim_refused");
+            block.entry_id = "kb_sim_refused".to_string();
+            let mut payload = serde_json::to_value(&block).expect("serialize the block");
+            payload[field] = serde_json::json!(value);
+
+            let live = execute_kb_snapshot_write(
+                &kb_write_request(&serde_json::json!([payload.clone()])),
+                &fixture.context,
+                CREATOR,
+            )
+            .await
+            .expect_err("production refuses this block");
+
+            let refused = execute_kb_snapshot_write(
+                &kb_write_request(&serde_json::json!([payload])),
+                &simulated,
+                CREATOR,
+            )
+            .await
+            .expect_err("the simulation refuses what production refuses");
+
+            assert_eq!(
+                format!("{refused:?}"),
+                format!("{live:?}"),
+                "{field}={value:?} must be refused exactly as production refuses it"
+            );
+            match &refused {
+                NexusApiError::Internal { category } => assert!(
+                    category.starts_with("KB_STORE_ERROR: validation error: ")
+                        && category.contains(reason),
+                    "the refusal must carry the store's own reason {reason:?}: {category}"
+                ),
+                other => {
+                    panic!("expected the store's refusal for {field}={value:?}, got {other:?}")
+                }
+            }
+        }
+
+        assert_eq!(
+            simulated.recorded_knowledge_entry_mutations(),
+            Some(vec![]),
+            "a refused block never reaches the port"
+        );
+        assert_eq!(
+            kb_rows(&fixture.pool).await,
+            before,
+            "a refused batch writes nothing, in either branch"
+        );
+    }
+
+    /// The snapshot must see every stored byte: `quote(TEXT)` stops at an
+    /// embedded NUL, so a text column that gains a suffix after one would leave
+    /// a `quote`-rendered snapshot unchanged. This is the renderer's own check —
+    /// the type tag plus hex of the raw bytes must distinguish the two values.
+    #[tokio::test]
+    async fn kb_rows_sees_a_suffix_after_an_embedded_nul() {
+        let fixture = fixture(false).await;
+        seed_kb_fixture(&fixture.pool).await;
+        let before = kb_rows(&fixture.pool).await;
+
+        sqlx::query(
+            "UPDATE kb_key_blocks SET canonical_name = ? WHERE key_block_id = 'kb_sim_existing'",
+        )
+        .bind("existing_entry\0changed")
+        .execute(&fixture.pool)
+        .await
+        .expect("mutate the name after a NUL");
+
+        let after = kb_rows(&fixture.pool).await;
+        assert_ne!(
+            after, before,
+            "a suffix after an embedded NUL changes the stored bytes and must change the snapshot"
+        );
+        assert!(
+            after[0].contains(&hex::encode("existing_entry\0changed").to_uppercase()),
+            "the whole value, NUL included, reaches the snapshot: {}",
+            after[0]
+        );
+    }
+
+    /// The real branch must be lossless too: `CAST(REAL AS BLOB)` renders through
+    /// 15-digit decimal text, so two doubles that differ past that precision share
+    /// their encoding. `revision` is INTEGER-declared but this table is not
+    /// `STRICT`, so a REAL is an admissible stored value — exactly the shape that
+    /// would slip through a `CAST`-only snapshot.
+    #[tokio::test]
+    async fn kb_rows_sees_two_reals_that_differ_past_text_precision() {
+        let fixture = fixture(false).await;
+        seed_kb_fixture(&fixture.pool).await;
+
+        let set_revision = |value: f64| {
+            let pool = fixture.pool.clone();
+            async move {
+                sqlx::query(
+                    "UPDATE kb_key_blocks SET revision = ? \
+                     WHERE key_block_id = 'kb_sim_existing'",
+                )
+                .bind(value)
+                .execute(&pool)
+                .await
+                .expect("set revision");
+            }
+        };
+
+        set_revision(1.000_000_000_000_001).await;
+        let first = kb_rows(&fixture.pool).await;
+        set_revision(1.000_000_000_000_002).await;
+        let second = kb_rows(&fixture.pool).await;
+
+        assert!(
+            first[0].contains("real"),
+            "the seeded value reaches the real branch: {}",
+            first[0]
+        );
+        assert_ne!(
+            second, first,
+            "doubles that differ past 15-digit text precision must change the snapshot"
         );
     }
 

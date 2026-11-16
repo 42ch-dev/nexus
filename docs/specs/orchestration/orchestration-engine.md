@@ -9,7 +9,7 @@ Retained orchestration/preset contracts in `crates/nexus-orchestration` and `cra
 **Status**: Shipped — orchestration engine SSOT: preset loader, Host-mediated prompts, capability registry, recoverable workspace execution and settle-once cancellation (§15), `narrative.compute` + `combat-engine` (§8.4), DR-06 bounded joins (§7.5)  
 **Document class**: Master  
 **Pillar**: **Harness** — this spec is the control-strategy engine contract for the [Harness](../../../STRATEGY.md) pillar (orchestration engine + agent host + capability registry + presets). The user-visible pillar label is **Harness**; internal identifiers remain `strategy`/`preset` (architect LOCKED)
-**Date**: 2026-04-17; **Last updated**: 2026-09-29  
+**Date**: 2026-04-17; **Last updated**: 2026-11-16 — §8.2.1 IR → Task mapping rewritten (34-entry IR/task comparison; `ir_unmappable`/`ir_unprojected`/`ir_unresolved_template` refusal rows; applied-path narrowing)  
 **Scope**: Retained orchestration/preset contracts in `crates/nexus-orchestration` and `crates/nexus-preset`, their `crates/nexus-acp-host` boundary, and preset bundle format under the ordinary direct-core `cli` cohort. Current CLI entry authority: [cli-spec.md](../cli/cli-spec.md) §6.0B (`apps/nexus42/src/cli.rs`; retained crate/cohort edges in `apps/nexus42/Cargo.toml`). The retired daemon host restores no daemon group and no CLI preset runner.
 **Supersedes**: — (new topic)
 **Coordinates with**:
@@ -237,10 +237,9 @@ Every preset node compiles into one of these Rust `Task` impls:
 | `CapabilityTask`     | `capability`             | Resolves to a registered `Capability`, calls its `run(ctx)`, stores output |
 | `AcpPromptTask`      | `acp_prompt`             | Calls the injected `PromptExecutor`; stores typed Host output in `Context` |
 | `InnerGraphTask`     | `inner_graph`            | Launches a child `Session` over a named inner graph; awaits completion    |
-| `JudgeTask`          | `llm_judge` exit_when    | Calls the declared judge capability (default `judge.llm`) through the same `PromptExecutor` |
+| `LlmJudgeTask`       | `llm_judge` exit_when    | Calls the declared judge capability (default `judge.llm`) through the same `PromptExecutor` |
 | `ManualWaitTask`     | `manual` exit_when       | Returns `NextAction::WaitForInput`; CLI `advance` resumes                 |
 | `RuleCheckTask`      | rule-based exit_when     | Pure function over `Context`; no external calls                           |
-| `TimerWaitTask`      | `timer` exit_when (opt.) | Returns `WaitForInput` plus schedules a clock signal                       |
 
 All impls live in `crates/nexus-orchestration/src/tasks/`. Task implementations are **pure** over `Context` + well-typed capability handles — no global state.
 
@@ -807,7 +806,7 @@ CLI and daemon `POST /v1/daemon/presets:validate` call these functions directly 
 | `states[].id`                                         | a `Task`'s `id()`                                                                 |
 | `states[].enter[*].kind=capability`                   | wrapped in `CapabilityTask`                                                       |
 | `states[].enter[*].kind=inner_graph`                  | wrapped in `InnerGraphTask` (holds handle to inner graph by name)                 |
-| `states[].exit_when.kind=llm_judge`                   | `JudgeTask` inserted after `enter` tasks; `NextAction::Continue` on go, `WaitForInput` on no-go + retry-after-`min_interval` |
+| `states[].exit_when.kind=llm_judge`                   | `LlmJudgeTask` inserted after `enter` tasks; `NextAction::Continue` on go, `WaitForInput` on no-go + retry-after-`min_interval` |
 | `states[].exit_when.kind=manual`                      | `ManualWaitTask` → `NextAction::WaitForInput`                                     |
 | `states[].exit_when.kind=graph_complete`              | inner-graph's terminal → outer task returns `NextAction::Continue`                |
 | `states[].exit_when.kind=rule`                        | `RuleCheckTask`                                                                   |
@@ -858,21 +857,21 @@ one above, buildability, and the prompt-role and recovery limits — are
 | IR document concept | Task / graph-flow execution counterpart |
 | --- | --- |
 | `entry` | Selects the initial outer `Task`; the target node id is its `Task::id()`. |
-| `nodes[kind=outer_state]` | `StateCompositeTask`, carrying the node's enter actions, exit condition, routing, and context update. |
+| `nodes[kind=outer_state]` | `StateCompositeTask`, carrying the node's enter actions, exit condition and routing. The node's `context_update` rides the projected state; the task neither carries nor runs it, and no production site fires the hook today — the core-context manager's `apply_preset_hook` (`schedule/derivation.rs`) has test-only callers. |
 | `outer_state.enter[kind=capability]` | `CapabilityTask`, invoked by the owning `StateCompositeTask`. |
 | `outer_state.enter[kind=host_tool]` | `HostToolCallTask`, invoked inline by the owning `StateCompositeTask`; requires the injected daemon tool dispatch and fails closed when unset. It is not added as a graph node. |
 | `outer_state.enter[kind=inner_graph]` | `InnerGraphTask`, launching the referenced inner graph in a child session. |
-| `nodes[kind=inner_step]` with `step_kind=acp_prompt` | `AcpPromptTask` in the inner graph. |
+| `nodes[kind=inner_step]` with `step_kind=acp_prompt` | `InnerGraphNodeTask`, delegating to `AcpPromptTask` when the production prompt executor is injected. The builder also adds a synthetic terminal `end` task wiring every inner-graph sink — a graph-flow termination need shared with the YAML intake, with no IR concept of its own. |
 | `exit_when.kind=rule` | `RuleCheckTask` semantics within the outer state lifecycle. |
-| `nodes[kind=outer_state]` carrying `exit_when.kind=manual` | `ManualWaitTask`, returning `NextAction::WaitForInput`. |
-| `nodes[kind=outer_state]` carrying `exit_when.kind=llm_judge` | `JudgeTask` semantics after enter actions; go continues and no-go waits. |
+| `nodes[kind=outer_state]` carrying `exit_when.kind=manual` | The `StateCompositeTask` manual branch (`ManualWaitTask` semantics, inlined — the standalone type is not constructed on this path), returning `NextAction::WaitForInput`. |
+| `nodes[kind=outer_state]` carrying `exit_when.kind=llm_judge` | `LlmJudgeTask` semantics after enter actions. With a linear or absent `next`, go continues and no-go waits; with go/nogo, labeled or branch routing both verdicts advance — the branch edge or label match selects the target, so a no-go routes rather than waits. |
 | `exit_when.kind=graph_complete` | `InnerGraphTask` completion lets the outer task return `NextAction::Continue`. |
-| `exit_when.kind=timer` | `TimerWaitTask`, returning `WaitForInput` and scheduling a clock signal (optional, DR-12). |
+| `exit_when.kind=timer` | The `StateCompositeTask` timer branch, returning `WaitForInput` until resumed. No clock signal is scheduled yet (DR-12). |
 | `nodes[kind=outer_state]` carrying `merge`, `converge`, `timeout_ms`, `on_timeout` | The `StateCompositeTask` join gate, including arrival tracking and bounded-timeout handling. |
 | `terminal[]` or `nodes[kind=terminal]` | The terminal `StateCompositeTask` returns `NextAction::End`. |
-| `edges[kind=linear|go|nogo|default]` | Outer-graph edges and the source task's corresponding `NextAction` routing. |
-| `edges[kind=conditional]` | `add_conditional_edge` and the runtime conditional-edge evaluator; the source task supplies `_state_result` but does not evaluate the edge. |
-| `edges[kind=depends_on]` or `inner_step.depends_on` | Inner-graph dependency edges (`add_edge(dependency, step)`). |
+| `edges[kind=linear|go|nogo]` | Outer-graph edges (`add_edge`; the go/nogo pair takes `add_conditional_edge` on `_judge_result`) and the source task's corresponding `NextAction` routing. A judged node's single `default` edge projects back to `linear` and takes an edge. |
+| `edges[kind=conditional]` and the same family's `default` edge | The projection folds them into the state's branch list (`NextTarget::Branches`); the source task evaluates the branch expressions itself (`resolve_expression_target`) and routes via `NextAction::GoTo`. The builder adds no conditional edge, and `_state_result` is a context key expressions may read — not one this path writes. |
+| `inner_step.depends_on` (the node field) | Inner-graph dependency edges (`add_edge(dependency, step)`). An `edges[kind=depends_on]` entry has no producer and no reader on this path: dependencies are authored on the step and projected from the field. |
 | `output_binding` | `InnerGraphTask` post-run export to the named outer-state output. |
 | `initial_action` | Engine initialization before the first `Task`; it seeds the initial context rather than adding a node. |
 | `signals[]` | Engine signal handling around task execution; no additional graph `Task` is created. |
@@ -881,9 +880,11 @@ one above, buildability, and the prompt-role and recovery limits — are
 | `nodes[].effect_class` and `effect_summary` | Schema-required effect-fence metadata for validation and approval; neither creates a `Task` or changes graph execution. |
 | `meta.run_intents`, `meta.requires_capabilities`, `meta.cli_args`, `meta.gates` | Admission, loader, enqueue-time gate, and CLI-argument inputs checked before or while constructing tasks; they do not create graph nodes. |
 
-`pattern_slot`, `nest_group`, and `nests[]` are composition concepts, not executable tasks. They
-require deterministic expansion into the concrete nodes and edges above before intake can construct
-a graph, and a document carrying them today is refused `ir_unmappable`.
+`pattern_slot` and `nest_group` are composition concepts, not executable tasks: a document whose
+nodes still carry either kind is refused `ir_unmappable` — they must be expanded into the concrete
+nodes and edges above before intake can construct a graph. `nests[]` is the composition *binding
+record*: the projection does not read it, and an applied document may carry non-empty `nests[]`;
+what runs is always its `nodes` and `edges`.
 
 The standalone `nodes[kind=judge]`, `nodes[kind=manual_wait]` and `nodes[kind=join]` spellings have
 no row in this table and never will: their semantics are carried by `nodes[kind=outer_state]`, so a

@@ -1,6 +1,6 @@
 # ADR: Strategy Simulation Fence — Simulate Before Approve
 
-Status: implemented — P2 simulator shipped in `v1.237-p2-simulator`; simulation is the standing safety fence before graph approval
+Status: implemented — P2 simulator shipped in `v1.237-p2-simulator`; simulation is the standing safety fence before graph approval as a capability (`approve_strategy` refuses a missing, stale or mismatched trajectory, `crates/nexus-core/src/approve.rs:406-450`).
 Date: 2026-11-10
 Scope: Simulate-before-approve for Workflow IR: the trajectory contract, static reachability with stubbed judges, declared fidelity limits, deterministic output, effect rollup, and the requirement that Approve never renders as an enabled no-op.
 Source: split from the archived Canvas + Workflow IR redesign and Dynamic Workflow Generation and Orchestration Simulation records
