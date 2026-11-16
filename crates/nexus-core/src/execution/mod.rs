@@ -88,7 +88,8 @@ pub use nexus_execution::test_hooks;
 // v1.234 P0+P1 (ADR #485 §4.4): the single byte-write port for Work artifacts;
 // `fs/write_text_file` commits every `Works/<work_ref>/…` path through it.
 pub mod work_artifact;
-pub mod workflow;
+// v1.245 extraction: the run driver lives in `nexus-execution`.
+pub use nexus_execution::workflow;
 pub mod workspace;
 
 pub use handle_ops::run_event_page;
