@@ -1382,6 +1382,126 @@ async fn a_restart_after_a_pinned_body_moved_refuses_naming_the_pin() {
     owner.close().await.unwrap();
 }
 
+/// I-000506: BOTH routes compare the pins in the OWNER's home, never a caller's.
+///
+/// The pins are compared against `<nexus_home>/patterns`. Admission once took
+/// the home from its caller while recovery could only read the home
+/// `CreatorAppliedDocuments` was built with — two values kept equal by wiring
+/// alone. The dangerous direction is the accepting one: a home whose pinned
+/// body moved while the other's had not would let recovery clear a run that
+/// the admitting home refuses as non-replayable.
+///
+/// `caller` is a second registry answering the same pin id with different
+/// bytes, so any resolution that read it refuses before a run row exists.
+/// Admission runs through it; recovery must read the owner home.
+///
+/// Mutation this fails on: admission resolving the pins against the home its
+/// caller passed (refuses generation 1 with `applied_pin_changed`), and
+/// recovery re-comparing against a home other than the owner's (accepts
+/// generation 2, whose owner-home pin has moved).
+#[tokio::test]
+async fn a_restart_compares_pins_in_the_owners_home_not_the_callers() {
+    let f = fixture().await;
+    let owner_home = f.tmp.path().join(".nexus42");
+    let caller_home = f.tmp.path().join("caller").join(".nexus42");
+    write_restart_bundle(&owner_home, RESTART_PRESET);
+    write_restart_bundle(&caller_home, RESTART_PRESET);
+    write_restart_package(&owner_home, "owner bytes");
+    write_restart_package(&caller_home, "caller bytes");
+    let recorded = restart_package_hash(&owner_home, RESTART_PINNED_PACKAGE);
+    let caller_hash = restart_package_hash(&caller_home, RESTART_PINNED_PACKAGE);
+    assert_ne!(
+        caller_hash, recorded,
+        "the fixture must give the two homes different bytes under the same pin"
+    );
+
+    let seed = open_seed_pool(&f.db_path).await;
+    let admitted = seed_pinned_restart_apply(seed.pool(), RESTART_PRESET, &recorded).await;
+    close_seed_pool(&f.db_path, seed).await;
+
+    // ── Generation 1: admit with the OTHER home as the caller home. The pin
+    //    still matches in the owner home, so the run admits. ──
+    let (session_id, _wait_id) = admit_and_park(&f, &caller_home, &admitted).await;
+
+    // ── Generation 2: the owner home's pinned body moved. Recovery must refuse
+    //    naming the hash the apply froze, not the caller home's untouched one. ──
+    write_restart_package(&owner_home, "owner bytes moved");
+    assert_ne!(
+        restart_package_hash(&owner_home, RESTART_PINNED_PACKAGE),
+        recorded,
+        "the fixture must actually move the owner home's pinned bytes"
+    );
+    let (refusal, position) = restart_pin_refusal(&f, &session_id).await;
+    assert!(
+        refusal.contains("applied_pin_changed"),
+        "the refusal keeps the coded reason: {refusal}"
+    );
+    assert!(
+        refusal.contains(&recorded),
+        "the refusal must name the hash the apply froze: {refusal}"
+    );
+    assert!(
+        refusal.contains(RESTART_PINNED_PACKAGE),
+        "the refusal must name the pinned package: {refusal}"
+    );
+    assert!(
+        !refusal.contains(&caller_hash),
+        "the caller home's registry must not enter the decision: {refusal}"
+    );
+    assert_eq!(
+        position.as_deref(),
+        Some(APPLIED_ONLY_NODE),
+        "a refused reconstruction must not advance the run past its applied wait"
+    );
+
+    // ── Generation 3: moving the CALLER home's pin changes nothing — the same
+    //    run over a fresh owner is refused for the same reason. ──
+    write_restart_package(&caller_home, "caller bytes moved");
+    let (again, _) = restart_pin_refusal(&f, &session_id).await;
+    assert_eq!(
+        again, refusal,
+        "a caller home's pin state must not change the recovery verdict"
+    );
+}
+
+/// Boot one owner generation and signal a parked applied run at it: the
+/// reconstruction refusal reason plus the position the run was left on.
+async fn restart_pin_refusal(
+    f: &Fixture,
+    session_id: &nexus_orchestration::SessionId,
+) -> (String, Option<String>) {
+    let owner = open_engine_owner(f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    // Reconstruction refuses before the wait is resolved; the neighbouring
+    // moved-pin test signals the same placeholder for that reason.
+    let refusal = handle
+        .coordinator()
+        .signal_run(
+            session_id,
+            RunSignal::Continue {
+                wait_id: "irrelevant".to_string(),
+            },
+        )
+        .await
+        .expect_err("a run whose pinned body moved must not be recovered");
+    let RunControlError::ReconstructionUnavailable { reason, .. } = refusal else {
+        panic!("expected reconstruction_unavailable, got {refusal:?}");
+    };
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+    let position = read_restart_session(&pool, &session_id.0)
+        .await
+        .map(|session| session.current_task_id);
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+    (reason, position)
+}
+
 /// P6: an empty pin snapshot cannot clear a carrier whose body it never recorded.
 ///
 /// The applied document names the carrier by id and version with no

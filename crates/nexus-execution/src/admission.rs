@@ -49,12 +49,13 @@ pub enum AppliedAdmissionError {
 /// Resolve the applied identity one run admission runs under.
 #[async_trait]
 pub trait AppliedAdmissionPort: Send + Sync {
-    /// Resolve the intake mode and the applied document for `preset_id` in
-    /// `nexus_home`.
+    /// Resolve the intake mode and the applied document for `preset_id`.
     ///
-    /// `nexus_home` is the home the caller resolved the preset from, passed in
-    /// rather than held by the port: the intake key and the pin re-comparison
-    /// must read the same workspace as the bundle the run is admitted with.
+    /// The port takes no home: the workspace whose `[strategy_intake]` key and
+    /// pattern pins this resolution reads is the one the implementation holds,
+    /// which is also the home recovery re-compares those pins against. A
+    /// caller-supplied home would be a second value that only convention keeps
+    /// equal, and recovery has no caller to take it from.
     ///
     /// # Errors
     ///
@@ -62,7 +63,6 @@ pub trait AppliedAdmissionPort: Send + Sync {
     /// config is invalid, or the current apply no longer replays.
     async fn admit(
         &self,
-        nexus_home: &std::path::Path,
         preset_id: &str,
         loaded: &LoadedPreset,
     ) -> Result<AppliedAdmission, AppliedAdmissionError>;

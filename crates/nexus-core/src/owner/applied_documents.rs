@@ -57,7 +57,7 @@ pub fn intake_mode_for_admission(
 /// admitted while the strategy had no current apply resolves `None` and
 /// therefore freezes no identity — that case is recovery's, not this route's.
 ///
-/// `nexus_home` is the workspace home the strategy's bundle was resolved from; the pin
+/// `nexus_home` is the workspace home the pins are re-compared against; the pin
 /// re-comparison runs against `<nexus_home>/patterns`, so no caller can skip it.
 ///
 /// # Errors
@@ -93,6 +93,16 @@ pub async fn resolve_applied_document(
 }
 
 /// Reads the current apply of a strategy out of the Creator DB.
+///
+/// ONE home serves both routes: [`AppliedAdmissionPort::admit`] and
+/// [`AppliedDocumentSource::applied_document`] both re-compare the frozen pins
+/// against [`Self::nexus_home`] (I-000506). Admission once took the home from
+/// its caller while recovery could only read this field — two values that only
+/// wiring kept equal. A caller home that had moved its pinned pattern while
+/// this one had not let recovery verify against stale bytes and ACCEPT an
+/// applied run the admitting home would refuse as non-replayable: the same
+/// accepting direction as the applied-identity defect, so the second value is
+/// gone rather than policed.
 pub struct CreatorAppliedDocuments {
     pool: Arc<sqlx::SqlitePool>,
     nexus_home: std::path::PathBuf,
@@ -100,12 +110,9 @@ pub struct CreatorAppliedDocuments {
 
 impl CreatorAppliedDocuments {
     /// Bind the source to the Creator DB pool admission resolves applies on, and
-    /// to the workspace home recovery re-enters through — the engine's own
-    /// `nexus_home`, so a restart re-compares the reserved pin against the same
-    /// workspace the run was admitted under.
-    ///
-    /// Admission does not read this field: [`AppliedAdmissionPort::admit`] takes
-    /// the home from its caller, which is the home that resolved the preset.
+    /// to the workspace home BOTH admission and recovery read — the engine's own
+    /// `nexus_home`, so an admission resolves the pins against the same
+    /// workspace a restart re-compares them against.
     #[must_use]
     pub const fn new(pool: Arc<sqlx::SqlitePool>, nexus_home: std::path::PathBuf) -> Self {
         Self { pool, nexus_home }
@@ -116,17 +123,16 @@ impl CreatorAppliedDocuments {
 impl AppliedAdmissionPort for CreatorAppliedDocuments {
     async fn admit(
         &self,
-        nexus_home: &std::path::Path,
         preset_id: &str,
         loaded: &LoadedPreset,
     ) -> Result<AppliedAdmission, AppliedAdmissionError> {
         // The intake key governs user bundles only; `yaml-only` runs the YAML
         // bundle without reading the apply at all.
-        let intake_mode = intake_mode_for_admission(nexus_home, preset_id, loaded)
+        let intake_mode = intake_mode_for_admission(&self.nexus_home, preset_id, loaded)
             .map_err(AppliedAdmissionError::InvalidIntakeConfig)?;
         let applied = match intake_mode {
             Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
-            _ => resolve_applied_document(&self.pool, nexus_home, preset_id, Some(loaded))
+            _ => resolve_applied_document(&self.pool, &self.nexus_home, preset_id, Some(loaded))
                 .await
                 .map_err(|error| AppliedAdmissionError::Store(error.to_string()))?
                 .map_err(|refusal| AppliedAdmissionError::AppliedIdentity {
