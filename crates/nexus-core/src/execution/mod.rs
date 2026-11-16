@@ -73,8 +73,9 @@ pub mod production;
 // It needs the Host facade edge, so it compiles only with `provider-host`.
 #[cfg(feature = "provider-host")]
 pub mod prompt_executor;
-pub mod run_events;
-pub mod schedules;
+// v1.245 extraction: the run event rings and the scheduler ownership live in
+// `nexus-execution`.
+pub use nexus_execution::{run_events, schedules};
 // v1.193 P2-T2: the production ACP-backed `SoulNarrativeSynthesizer` moved
 // here from the deleted daemon composition (technical contracts §4). It
 // consumes the orchestration `CapabilityRegistry`, so it rides `execution`.
