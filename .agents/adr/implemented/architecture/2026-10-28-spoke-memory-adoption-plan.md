@@ -190,7 +190,9 @@ v1.227–v1.230; transfer (N4-T) remains unconsumed.)
 #### 4.1 Providers
 
 - **Default local provider — `LocalMemoryProvider` (new, in-process).**
-  Implements `MemoryPort` inside `nexus-core` with **provider-private**
+  Implements `MemoryPort` in `crates/nexus-memory-provider`
+  (`crates/nexus-memory-provider/src/lib.rs:3157`), the crate the v1.245
+  extraction (#528) moved out of `nexus-core`, with **provider-private**
   storage/transaction code over the existing SQLite tables and bearer
   markdown files, enforcing all MEM-R invariants in its own transaction
   layer and running **Nexus-owned** algorithm policy (classification,
