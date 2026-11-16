@@ -80,9 +80,26 @@ must share (I-000448) — landed after this record was written, in `da84c588f`: 
 refuses an unbuildable document through the same `validate_ir_buildability` the intake runs
 (`crates/nexus-orchestration/src/preset_runtime.rs:559`), and it does so before the `INSERT INTO
 strategy_applies` (`apply.rs:526`). The limits that remain on the applied path (I-000449,
-I-000462–I-000465) are recorded there rather than here. What P4 still owes is its **third** exit
-criterion — the IR→Graph mapping compared against the IR→Task table in orchestration-engine §8.2.1 —
-not I-000448.
+I-000462–I-000465) are recorded there rather than here. P4's **third** exit criterion — the IR→Graph
+mapping compared against the IR→Task table in orchestration-engine §8.2.1 — is satisfied: the
+comparison sheet (`.mstar/iterations/v1.246-adr-complete/specs/ir-to-task-comparison.md`) classified
+34 entries — 25 `match`, 8 `table-stale`, 1 `table-omission`, **0 `code-divergent`** — with nine
+§8.2.1 amendments (`8e6f22225` plus the QC correction round). What the comparison established, beyond that it ran:
+node-type coverage is closed in both directions, the one real omission found — the inner-graph
+synthetic `end` task (`preset_runtime.rs:1150-1169`) — now being in the table; edge semantics were
+corrected in four places (conditional routing is in-task `resolve_expression_target` → `GoTo` with
+no builder edge, pinned at `preset_runtime.rs:4040`; `default` is the family fallback, not an edge;
+`edges[kind=depends_on]` is a phantom with no producer and no reader; and the judge's no-go routes
+rather than waits on every routed `next` form, pinned at `preset_runtime.rs:3844-3868`); and no
+third mapping exists —
+the five `NextTarget` forms all trace to table rows, and refusal names are generated from the
+table's own row names (`preset_runtime.rs:344`). The zero `code-divergent` count is a result, not an
+absence of effort: every rule-1 and rule-2 row diverged with the table as the stale side — what a
+spec-only plan should expect — and the refusal and carrier rows matched symbol-for-symbol. The
+criterion is tracked by I-000508. One hole the comparison surfaced stays open: the old §8.2.1 prose
+promised an `ir_unmappable` refusal for `nests[]` that no guard enforces — the amended table now
+states the truth (the projection does not read `nests[]`), the behaviour is unchanged, and the
+hardening is filed as an issue rather than closed here.
 
 | Phase | Change | Exit criteria |
 | --- | --- | --- |
