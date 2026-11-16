@@ -358,6 +358,37 @@ pub mod seed {
 /// its own pagination on top of this.
 pub const LIST_BY_WORLD_LIMIT: i64 = 500;
 
+/// The `idx_kb_key_blocks_active_unique` key `kb` occupies, or `None` when it
+/// occupies none.
+///
+/// That index is partial —
+/// `ON kb_key_blocks (world_id, block_type, canonical_name)
+///  WHERE status NOT IN ('deleted', 'merged', 'deprecated')` — so a
+/// terminal-status row is not indexed and cannot collide, and `world_id` is
+/// `NULL` for character and binding owners. Every caller that predicts a
+/// collision asks here, so none of them answers for a different index subset
+/// than the write takes.
+#[must_use]
+pub fn active_unique_index_key(kb: &KnowledgeEntryRecord) -> Option<(&str, BlockType, &str)> {
+    let world_id = kb.owner.world_id()?;
+    (!matches!(kb.status.as_str(), "deleted" | "merged" | "deprecated")).then_some((
+        world_id,
+        kb.block_type,
+        kb.canonical_name.as_str(),
+    ))
+}
+
+/// The refusal for a write that takes `kb`'s key: the same
+/// [`KbStoreError::Duplicate`] the INSERT's unique-violation mapping produces.
+#[must_use]
+pub fn duplicate_refusal(kb: &KnowledgeEntryRecord) -> KbStoreError {
+    KbStoreError::Duplicate {
+        owner: kb.owner.clone(),
+        name: kb.canonical_name.clone(),
+        block_type: kb.block_type,
+    }
+}
+
 /// SQLite-backed KB store.
 ///
 /// Holds an `Arc<SqlitePool>` shared per active workspace. Construct once
@@ -466,12 +497,20 @@ impl SqliteKbStore {
     /// Would [`Self::insert_key_block_in_tx`] refuse `kb`? Answers with the same
     /// [`KbStoreError`] the INSERT would return, without writing anything.
     ///
-    /// Runs [`Self::validate_key_block`] and the `idx_kb_key_blocks_active_unique`
-    /// predicate through [`Self::get_active_by_unique_key`] — the store's own
-    /// gates, so the prediction and the INSERT share one definition of each rule.
+    /// Runs [`Self::validate_key_block`] and the
+    /// [`active_unique_index_key`] predicate through
+    /// [`Self::get_active_by_unique_key`] — the store's own gates, so the
+    /// prediction and the INSERT share one definition of each rule, including
+    /// which rows the partial unique index covers (a terminal-status block is
+    /// not indexed and so is never a duplicate).
     ///
     /// A non-World-owned record cannot collide on that index: the index keys on
     /// `world_id`, which is `NULL` for character and binding owners.
+    ///
+    /// One refusal the INSERT would raise is invisible here: this reads the
+    /// store as it stands, so a key an earlier block of the same request
+    /// already took collides only against that block. A caller previewing a
+    /// batch tracks those keys itself.
     ///
     /// shortcut: a `key_block_id` primary-key collision is not predicted; the
     /// INSERT still reports it as [`KbStoreError::Duplicate`] at apply time.
@@ -483,19 +522,15 @@ impl SqliteKbStore {
     /// [`KbStoreError::Storage`] when the predicate cannot be read.
     pub async fn would_refuse_insert(&self, kb: &KnowledgeEntryRecord) -> Result<(), KbStoreError> {
         self.validate_key_block(kb)?;
-        let Some(world_id) = kb.owner.world_id() else {
+        let Some((world_id, block_type, canonical_name)) = active_unique_index_key(kb) else {
             return Ok(());
         };
         if self
-            .get_active_by_unique_key(world_id, &kb.canonical_name, kb.block_type)
+            .get_active_by_unique_key(world_id, canonical_name, block_type)
             .await?
             .is_some()
         {
-            return Err(KbStoreError::Duplicate {
-                owner: kb.owner.clone(),
-                name: kb.canonical_name.clone(),
-                block_type: kb.block_type,
-            });
+            return Err(duplicate_refusal(kb));
         }
         Ok(())
     }
@@ -621,7 +656,6 @@ impl SqliteKbStore {
         let holder_entry_id = kb.holder_entry_id.clone();
         let disclosure = kb.disclosure.clone();
         let cname = kb.canonical_name.clone();
-        let btype = kb.block_type;
         let insert_outcome = sqlx::query(
             r"INSERT INTO kb_key_blocks
                 (key_block_id, owner_kind, world_id, character_id,
@@ -687,11 +721,7 @@ impl SqliteKbStore {
                 _ => false,
             };
             if duplicate {
-                return Err(KbStoreError::Duplicate {
-                    owner,
-                    name: cname,
-                    block_type: btype,
-                });
+                return Err(duplicate_refusal(&kb));
             }
             return Err(db_err(&e));
         }
