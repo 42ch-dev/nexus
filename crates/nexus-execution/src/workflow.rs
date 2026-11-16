@@ -1165,6 +1165,26 @@ fn classify_cancel_outcome(
     }
 }
 
+/// Map an admission refusal to the calling site's control error.
+///
+/// `store` names the variant the site owns for a store read failure — session
+/// admission and schedule admission report it differently, while the refusal
+/// families themselves must stay byte-identical at both.
+fn admission_refusal(
+    error: AppliedAdmissionError,
+    store: fn(String) -> RunControlError,
+) -> RunControlError {
+    match error {
+        AppliedAdmissionError::Store(message) => store(message),
+        AppliedAdmissionError::InvalidIntakeConfig(reason) => {
+            RunControlError::InvalidIntakeConfig { reason }
+        }
+        AppliedAdmissionError::AppliedIdentity { code, message } => {
+            RunControlError::AppliedIdentityInvalid { code, message }
+        }
+    }
+}
+
 /// One cancellation/join owner per (Creator DB identity, session) (A3).
 ///
 /// The coordinator is the SINGLE production owner of the bounded
@@ -1640,15 +1660,7 @@ impl WorkflowRunCoordinator {
             .applied_admission
             .admit(preset_id, &loaded)
             .await
-            .map_err(|error| match error {
-                AppliedAdmissionError::Store(message) => RunControlError::Admission(message),
-                AppliedAdmissionError::InvalidIntakeConfig(reason) => {
-                    RunControlError::InvalidIntakeConfig { reason }
-                }
-                AppliedAdmissionError::AppliedIdentity { code, message } => {
-                    RunControlError::AppliedIdentityInvalid { code, message }
-                }
-            })?;
+            .map_err(|error| admission_refusal(error, RunControlError::Admission))?;
         let intake_mode = admission.intake_mode;
         let applied = admission.applied;
         if intake_mode == Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
@@ -3043,15 +3055,7 @@ impl WorkflowRunCoordinator {
             .applied_admission
             .admit(&row.preset_id, &loaded)
             .await
-            .map_err(|error| match error {
-                AppliedAdmissionError::Store(message) => RunControlError::ScheduleUpdate(message),
-                AppliedAdmissionError::InvalidIntakeConfig(reason) => {
-                    RunControlError::InvalidIntakeConfig { reason }
-                }
-                AppliedAdmissionError::AppliedIdentity { code, message } => {
-                    RunControlError::AppliedIdentityInvalid { code, message }
-                }
-            })?;
+            .map_err(|error| admission_refusal(error, RunControlError::ScheduleUpdate))?;
         let intake_mode = admission.intake_mode;
         let applied = admission.applied;
         if intake_mode == Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
