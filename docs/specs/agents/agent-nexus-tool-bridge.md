@@ -34,7 +34,7 @@ Preset orchestration drives **multi-step** creative work via schedules and capab
 
 ### 2. Current execution authority
 
-The retained execution authority is [`crates/nexus-core/src/execution/capabilities.rs`](../../../crates/nexus-core/src/execution/capabilities.rs):
+The retained execution authority is [`crates/nexus-core/src/owner/capabilities.rs`](../../../crates/nexus-core/src/owner/capabilities.rs):
 
 - `execute_tool(&ToolContext, &ToolExecuteRequest)` runs admission, calls `host_tool_registry().dispatch(...)`, and audits both success and refusal. `ToolContext` supplies resolved core/domain inputs.
 - The allowlist is derived from the **same dispatch spine**: static builtin row → admitted peer tool → admitted user capability from the live orchestration registry. `spine_resolves` and `dispatch` share that order; unresolved IDs return lowercase `not_supported` without invoking a handler. Builtin creator/workspace/permission gates and per-handler ownership checks remain enforced; peer/user tools retain their own admission boundaries.
@@ -47,7 +47,7 @@ The normative constraints for this surface are stated in §Current state; a chan
 
 ## Where it lives
 
-- `crates/nexus-core/src/execution/capabilities.rs`
+- `crates/nexus-core/src/owner/capabilities.rs`
 
 ## Change obligations
 
