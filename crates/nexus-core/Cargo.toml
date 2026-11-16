@@ -104,6 +104,11 @@ nexus-connect = { path = "../nexus-connect", optional = true }
 nexus-execution = { path = "../nexus-execution", optional = true }
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
+# v1.245 extraction: the in-process memory provider. The edge runs
+# `nexus-core → nexus-memory-provider` only, and it is not optional — the
+# provider is opened on every core open (`service.rs` pins it), so the default
+# cohort resolves it permanently.
+nexus-memory-provider = { path = "../nexus-memory-provider" }
 nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }
 nexus-orchestration = { path = "../nexus-orchestration", optional = true }
 # Pattern registry reader + the candidate IR the Simulate walk reads.

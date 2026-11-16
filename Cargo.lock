@@ -3755,6 +3755,7 @@ dependencies = [
  "nexus-home-layout",
  "nexus-knowledge",
  "nexus-local-db",
+ "nexus-memory-provider",
  "nexus-moment-context-assembly",
  "nexus-narrative",
  "nexus-orchestration",
@@ -3972,6 +3973,24 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-memory-provider"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "nexus-creator-memory",
+ "nexus-home-layout",
+ "nexus-local-db",
+ "serde",
+ "serde_json",
+ "spoke-operations",
+ "sqlx",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 

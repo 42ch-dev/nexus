@@ -13,6 +13,7 @@ members = [
     "crates/nexus-home-layout",
     "crates/nexus-knowledge",
     "crates/nexus-memory-conformance",
+    "crates/nexus-memory-provider",
     "crates/nexus-moment-context-assembly",
     "crates/nexus-narrative",
     "crates/nexus-orchestration",
