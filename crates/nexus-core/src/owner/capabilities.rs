@@ -64,7 +64,7 @@ use crate::{ArchivePoolRequest, PromotePoolRequest, WorkDetails, WorkPatchReques
 // DTO (the schema lane's authority, item 3); the daemon's handwritten copy it was
 // moved from — plus its response envelope — is deleted, not shadowed.
 use nexus_connect::peer_tools;
-use nexus_contracts::{FindingsApi, ToolsApi};
+use nexus_contracts::{BlockType, FindingsApi, ToolsApi};
 use nexus_home_layout::active_context::{read_active_creator_id, read_active_workspace_slug};
 use nexus_local_db::works;
 use nexus_narrative::NarrativeGateway;
@@ -1699,7 +1699,10 @@ pub(crate) fn registry_registry_refresh<'a>(
 /// * `suppressed_writes` — one object per intended `Put`: the block would be
 ///   written.
 /// * `refused_write` — the block the store would refuse, with the store's own
-///   error text (`entry_id` + `reason`); `null` when nothing is refused.
+///   error text (`entry_id` + `reason`); `null` when nothing is refused. A
+///   block whose key an earlier block of the same request already took is
+///   refused here too: the production loop inserts the batch into one
+///   transaction, so the repeat collides against that earlier block.
 /// * `unattempted_writes` — the `entry_id`s after the refusal, which the
 ///   preview never put because the production loop stops at the first error
 ///   and its transaction rolls back.
@@ -1761,12 +1764,32 @@ async fn execute_kb_snapshot_write(
         let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
         let mut suppressed = Vec::with_capacity(records.len());
         let mut refused = None;
+        // The predicate reads the store as it stands, but the production loop
+        // inserts the whole batch into one transaction: a block repeating a key
+        // an earlier block of the request took collides only against that
+        // block, so the preview remembers what the batch accepted.
+        let mut accepted: Vec<(String, BlockType, String)> = Vec::new();
         let mut blocks = records.into_iter();
         for kb in blocks.by_ref() {
-            if let Err(error) = kb_store.would_refuse_insert(&kb).await {
+            let key = nexus_local_db::kb_store::active_unique_index_key(&kb).map(
+                |(world_id, block_type, canonical_name)| {
+                    (world_id.to_owned(), block_type, canonical_name.to_owned())
+                },
+            );
+            let verdict = kb_store
+                .would_refuse_insert(&kb)
+                .await
+                .and_then(|()| match &key {
+                    Some(key) if accepted.contains(key) => {
+                        Err(nexus_local_db::kb_store::duplicate_refusal(&kb))
+                    }
+                    _ => Ok(()),
+                });
+            if let Err(error) = verdict {
                 refused = Some((kb.entry_id.clone(), error));
                 break;
             }
+            accepted.extend(key);
             let entry = nexus_spoke_adapter::conversion::knowledge_record_to_spoke(&kb);
             if let SpokeResult::Reject(reject) = port.put_knowledge_entry(entry, None).await {
                 return Err(NexusApiError::Internal {
@@ -4721,6 +4744,161 @@ mod tests {
         );
         assert_eq!(refused["suppressed_writes"], serde_json::json!([]));
         assert_eq!(kb_rows(&fixture.pool).await, before);
+    }
+
+    /// A batch inserts into one transaction, so two blocks carrying the same
+    /// `(world_id, block_type, canonical_name)` collide against each other: the
+    /// write takes the first, refuses the second and rolls the batch back.
+    /// Delete the batch tracking in the preview loop and the repeat comes back
+    /// as a suppressed write — the exact outcome the preview promised would not
+    /// happen.
+    #[tokio::test]
+    async fn simulated_knowledge_write_refuses_a_repeat_within_the_batch() {
+        use nexus_contracts::BlockType;
+        use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+        use nexus_knowledge::world_kb::store::KbStoreError;
+
+        let fixture = fixture(false).await;
+        seed_kb_fixture(&fixture.pool).await;
+        let before = kb_rows(&fixture.pool).await;
+
+        // One key, three blocks; the name is absent from the store, so only a
+        // sibling block of this request can collide.
+        let block = |entry_id: &str| {
+            let mut kb =
+                KnowledgeEntryRecord::new("wld_sim", BlockType::Character, "batched_entry");
+            kb.entry_id = entry_id.to_string();
+            kb
+        };
+        let first = block("kb_batch_first");
+        let repeat = block("kb_batch_repeat");
+        let tail = block("kb_batch_tail");
+        let simulated = ToolContext::new_simulated(
+            fixture.pool.clone(),
+            fixture.context.nexus_home.clone(),
+            fixture.context.workspace_path(),
+            ToolRuntimeFacts::default(),
+            None,
+            None,
+        );
+        let requested = serde_json::json!([
+            serde_json::to_value(&first).expect("serialize"),
+            serde_json::to_value(&repeat).expect("serialize"),
+            serde_json::to_value(&tail).expect("serialize"),
+        ]);
+
+        let result = execute_kb_snapshot_write(&kb_write_request(&requested), &simulated, CREATOR)
+            .await
+            .expect("a refused preview still answers");
+
+        assert_eq!(
+            result["suppressed_writes"],
+            serde_json::json!([{ "entry_id": "kb_batch_first" }]),
+            "only the block that takes the key would be written"
+        );
+        assert_eq!(
+            result["refused_write"]["entry_id"],
+            serde_json::json!("kb_batch_repeat"),
+            "the repeat is refused, not reported as a write"
+        );
+        assert!(
+            result["refused_write"]["reason"]
+                .as_str()
+                .expect("a reason string")
+                .contains("duplicate"),
+            "the reason is the store's own: {}",
+            result["refused_write"]["reason"]
+        );
+        assert_eq!(
+            result["unattempted_writes"],
+            serde_json::json!(["kb_batch_tail"]),
+            "the remainder of the batch is never put"
+        );
+        assert_eq!(
+            simulated.recorded_knowledge_entry_mutations(),
+            Some(vec![StubKnowledgeEntryMutation::Put {
+                entry_id: "kb_batch_first".to_string(),
+                expected_base_revision: None,
+            }]),
+            "the repeat never reaches the port"
+        );
+        assert_eq!(
+            kb_rows(&fixture.pool).await,
+            before,
+            "predicting a refusal writes nothing"
+        );
+
+        // The claim the preview makes is the store's: in one transaction the
+        // first block writes and the second is refused by the INSERT.
+        let store = nexus_local_db::kb_store::SqliteKbStore::new(fixture.pool.clone());
+        let mut tx = fixture.pool.begin().await.expect("begin");
+        store
+            .insert_key_block_in_tx(&mut tx, first)
+            .await
+            .expect("the block that took the key writes");
+        let inserted = store.insert_key_block_in_tx(&mut tx, repeat).await;
+        assert!(
+            matches!(inserted, Err(KbStoreError::Duplicate { .. })),
+            "the store refuses the repeat the preview reported: {inserted:?}"
+        );
+        drop(tx);
+    }
+
+    /// `idx_kb_key_blocks_active_unique` is partial —
+    /// `WHERE status NOT IN ('deleted', 'merged', 'deprecated')` — so a block
+    /// arriving with a terminal status is not indexed and cannot collide.
+    /// Predicting `Duplicate` for it refuses a write the INSERT accepts.
+    #[tokio::test]
+    async fn simulated_knowledge_write_does_not_refuse_a_terminal_status_block() {
+        use nexus_contracts::BlockType;
+        use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+
+        let fixture = fixture(false).await;
+        seed_kb_fixture(&fixture.pool).await;
+        let before = kb_rows(&fixture.pool).await;
+
+        // `existing_entry` is the fixture's seeded active row: the key the
+        // index holds, taken again by a row the index does not cover.
+        let mut kb = KnowledgeEntryRecord::new("wld_sim", BlockType::Character, "existing_entry");
+        kb.entry_id = "kb_sim_terminal".to_string();
+        kb.status = "deleted".to_string();
+        let simulated = ToolContext::new_simulated(
+            fixture.pool.clone(),
+            fixture.context.nexus_home.clone(),
+            fixture.context.workspace_path(),
+            ToolRuntimeFacts::default(),
+            None,
+            None,
+        );
+        let requested = serde_json::json!([serde_json::to_value(&kb).expect("serialize")]);
+
+        let result = execute_kb_snapshot_write(&kb_write_request(&requested), &simulated, CREATOR)
+            .await
+            .expect("a simulated write succeeds");
+
+        assert_eq!(
+            result["refused_write"],
+            serde_json::Value::Null,
+            "a terminal-status block is outside the partial index, so nothing collides"
+        );
+        assert_eq!(
+            result["suppressed_writes"],
+            serde_json::json!([{ "entry_id": "kb_sim_terminal" }]),
+            "the block would be written"
+        );
+        assert_eq!(result["unattempted_writes"], serde_json::json!([]));
+        assert_eq!(kb_rows(&fixture.pool).await, before);
+
+        // The prediction is the store's: the same record inserted for real is
+        // accepted rather than refused.
+        let store = nexus_local_db::kb_store::SqliteKbStore::new(fixture.pool.clone());
+        let mut tx = fixture.pool.begin().await.expect("begin");
+        let inserted = store.insert_key_block_in_tx(&mut tx, kb).await;
+        assert!(
+            inserted.is_ok(),
+            "the store accepts the block the preview reported as written: {inserted:?}"
+        );
+        drop(tx);
     }
 
     /// The snapshot must see every stored byte: `quote(TEXT)` stops at an
