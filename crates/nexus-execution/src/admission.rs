@@ -57,6 +57,11 @@ pub trait AppliedAdmissionPort: Send + Sync {
     /// caller-supplied home would be a second value that only convention keeps
     /// equal, and recovery has no caller to take it from.
     ///
+    /// Admission and recovery both read the owner's pins. That is not the same
+    /// as requiring the pin home to equal the preset lookup home — a caller's
+    /// home still chooses which bundle is resolved, and the applied arm reads
+    /// the owner's document rather than the caller's bundle.
+    ///
     /// # Errors
     ///
     /// Returns [`AppliedAdmissionError`] when the store read fails, the intake
