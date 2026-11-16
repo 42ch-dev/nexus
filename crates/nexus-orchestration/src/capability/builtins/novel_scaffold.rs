@@ -6,7 +6,7 @@
 
 use super::novel_scaffold_sanitize::{validate_total_chapters, validate_work_ref};
 use super::work_commit::{claim_work_ref, commit_work_bytes, require_executor, resolve_works_dirs};
-use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
+use crate::capability::{Capability, CapabilityError, WorkspaceExecutor, path_is_occupied};
 use async_trait::async_trait;
 use nexus_local_db::{work_chapters, works};
 use serde::Deserialize;
@@ -808,8 +808,8 @@ async fn write_file_idem(
     files_created: &mut Vec<PathBuf>,
 ) -> Result<bool, CapabilityError> {
     let path = workspace_root.join("Works").join(work_ref).join(rel_child);
-    if path.exists() {
-        info!(path = %path.display(), "write_file_idem: skip (exists)");
+    if path_is_occupied(&path) {
+        info!(path = %path.display(), "write_file_idem: skip (occupied)");
         return Ok(false);
     }
     commit_work_bytes(executor, workspace_root, work_ref, rel_child, content).await?;
@@ -863,7 +863,7 @@ impl ScaffoldTransaction {
         if self.recording {
             return Ok(());
         }
-        let pre_existed = path.exists();
+        let pre_existed = path_is_occupied(path);
         std::fs::create_dir_all(path)
             .map_err(|e| CapabilityError::Internal(format!("mkdir {}: {e}", path.display())))?;
         if !pre_existed {
@@ -1199,6 +1199,46 @@ mod tests {
         assert!(
             !work_dir.join("Outlines/volume-outline.md").exists(),
             "committed outlines rolled back"
+        );
+    }
+
+    #[tokio::test]
+    async fn scaffold_keeps_a_preexisting_dangling_symlink_on_rollback() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let link = root.join("novel-symlink").join("README.md");
+        std::fs::create_dir_all(link.parent().expect("link has a parent")).expect("mkdir");
+        std::os::unix::fs::symlink(tmp.path().join("absent-target.md"), &link).expect("symlink");
+        let executor = RecordingExecutor::refusing_at(tmp.path(), "AGENTS.md");
+        let cap = NovelProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: Some(executor),
+        };
+
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_novel_symlink",
+                "work_ref": "novel-symlink",
+                "title": "Novel Symlink",
+                "world_id": "wld_symlink",
+                "total_planned_chapters": 1,
+            }))
+            .await
+            .expect_err("missing work row must refuse the write");
+        assert!(
+            matches!(err, CapabilityError::Forbidden(_)),
+            "expected the port refusal to propagate, got: {err}"
+        );
+
+        assert!(
+            std::fs::symlink_metadata(&link).is_ok(),
+            "rollback unlinked a symlink this run never created"
+        );
+        assert!(
+            std::fs::symlink_metadata(tmp.path().join("absent-target.md")).is_err(),
+            "the run wrote through the user's dangling link"
         );
     }
 }

@@ -12,6 +12,7 @@ pub mod watch;
 
 use async_trait::async_trait;
 use serde_json::Value;
+use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -238,6 +239,17 @@ pub trait DaemonToolDispatch: Send + Sync {
         args: &serde_json::Value,
         request_id: &str,
     ) -> Result<serde_json::Value, CapabilityError>;
+}
+
+/// Whether `path` names an already occupied filesystem entry, without
+/// following a symlink.
+///
+/// `Path::exists` is `metadata().is_ok()`, and `metadata` follows the link: a
+/// dangling symlink answers `false`, so an ownership check built on it decides
+/// the name is free, writes through it and later rolls back a name the user
+/// owns. `symlink_metadata` answers the question the bookkeeping actually asks.
+pub(crate) fn path_is_occupied(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok()
 }
 
 /// Provider trait for production workspace open/commit (v1.188 P3).
