@@ -1,9 +1,9 @@
-//! `LocalMemoryProvider` — the in-process `spoke_operations::MemoryPort` over
-//! the workspace's existing local storage (v1.227 NXM-1).
+//! The in-process `spoke_operations::MemoryPort` provider (v1.245 extraction).
 //!
-//! The provider is the single `MemoryPort` boundary inside `nexus-core`; it owns
-//! admission (freeze allowlist, grant coverage, revision CAS, idempotent replay)
-//! and delegates the protocol-free parts to:
+//! `LocalMemoryProvider` is the single `MemoryPort` boundary over the
+//! workspace's existing local storage (v1.227 NXM-1); it owns admission (freeze
+//! allowlist, grant coverage, revision CAS, idempotent replay) and delegates the
+//! protocol-free parts to:
 //!
 //! * [`storage`] — the provider-private transaction layer inside the core writer
 //!   guard (never a second storage protocol),
@@ -11,6 +11,15 @@
 //!   required profile kinds),
 //! * `spoke_operations` — the protocol's own validators, digest helpers and grant
 //!   evaluation, so no protocol rule is re-implemented here.
+//!
+//! What this crate deliberately does NOT own: the core error taxonomy its
+//! refusals project onto. [`ProviderError`] is the crate's public error, and the
+//! projection onto that taxonomy lives in `nexus-core` as a `From<ProviderError>`
+//! impl on the core error type, so nothing here names a core type.
+//! The workspace binding, the service handle, the transports and the daemon stay
+//! where they were.
+//!
+//! Dependency direction: `nexus-core → nexus-memory-provider`, never back.
 //!
 //! **Error shape.** Refusals travel the port's own `SpokeResult::Reject` channel,
 //! never the success channel: the memory error codes are ops-layer reject codes
@@ -60,7 +69,6 @@ use spoke_operations::{
     GrantRequirement, IssuedGrant, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult,
 };
 
-use crate::error::{CoreError, CoreResult};
 use nexus_local_db::LocalDbError;
 use storage::{
     Admission, CandidateRow, CaptureError, Coverage, Fence, FenceAction, FenceTarget, GrantRow,
@@ -75,7 +83,7 @@ use storage::{
 /// the binding rows on that connection before inserting the candidate, so the
 /// check and the write are never separated by a `remove_binding`.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct CaptureBinding<'a> {
+pub struct CaptureBinding<'a> {
     pub owner_creator: &'a str,
     pub character: &'a str,
     pub binding: &'a str,
@@ -126,9 +134,11 @@ const OP_LEGACY_ADOPT: &str = "memory.legacy.adopt";
 /// every other guarded write uses.
 const OP_LEGACY_MIGRATE: &str = "memory.legacy.migrate";
 
-/// Time order for a merged read: a provider row renders whole seconds, while a
-/// projected legacy row keeps the precision its legacy column carried, so the
-/// two renderings are not comparable as text (NXM-5 QC1-F1).
+/// Time order for a merged read.
+///
+/// A provider row renders whole seconds, while a projected legacy row keeps the
+/// precision its legacy column carried, so the two renderings are not
+/// comparable as text (NXM-5 QC1-F1).
 ///
 /// Both sides order through [`legacy::parse_timestamp`] — the parser the legacy
 /// projection itself uses, which accepts RFC 3339 and the SQLite/bare-`T`
@@ -137,7 +147,8 @@ const OP_LEGACY_MIGRATE: &str = "memory.legacy.migrate";
 /// ordered by its raw text; the class assignment never depends on the pair
 /// being compared, which is what makes this comparator transitive and gives
 /// `sort_by` the total order it requires (NXM-5 QC1-F1 fix round 2).
-pub(crate) fn created_at_cmp(left: &str, right: &str) -> std::cmp::Ordering {
+#[must_use]
+pub fn created_at_cmp(left: &str, right: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     match (
         legacy::parse_timestamp(left),
@@ -178,8 +189,14 @@ impl SpaceTransition {
 ///
 /// Every variant maps onto a wire `code` plus its §14.2 retry class, so the
 /// mapping lives in one place and cannot drift between ops.
+///
+/// This is the crate's public error: the entry points that are not wire ops
+/// ([`LocalMemoryProvider::open`] and its siblings, the migration pass, the
+/// review-disposition section) return it, and `nexus-core` projects it onto its
+/// own taxonomy through a `From<ProviderError>` impl. It is deliberately
+/// narrower than that taxonomy.
 #[derive(Debug)]
-enum ProviderError {
+pub enum ProviderError {
     NotFound(String),
     NotAuthorized(String),
     SpaceFrozen(String),
@@ -336,7 +353,10 @@ impl ProviderError {
         }
     }
 
-    fn message(&self) -> String {
+    /// The human-readable rendering a projection onto another error taxonomy
+    /// carries as its reason.
+    #[must_use]
+    pub fn message(&self) -> String {
         match self {
             Self::NotFound(target) => format!("{target} not found"),
             Self::ProfileIncomplete {
@@ -942,7 +962,7 @@ fn selection_scope_covers(pinned: &Selection, requested: Option<&Selection>) -> 
 /// defines no numeric thresholds, so this provider calls an empty authorized
 /// basis insufficient and any non-empty one sufficient. Generation refuses
 /// `INSUFFICIENT_DATA` on exactly the same verdict.
-pub(super) const fn data_sufficiency(record_count: usize) -> &'static str {
+pub(crate) const fn data_sufficiency(record_count: usize) -> &'static str {
     if record_count == 0 {
         "insufficient"
     } else {
@@ -1222,7 +1242,7 @@ impl LocalMemoryProvider {
     /// Called by the binding when the open that pinned this provider ends. It
     /// closes only this provider's pool: any other open's pool, and any raw
     /// process-retained pool, is untouched. Idempotent.
-    pub(crate) async fn close(&self) {
+    pub async fn close(&self) {
         self.store.close().await;
     }
 
@@ -1231,27 +1251,24 @@ impl LocalMemoryProvider {
     ///
     /// # Errors
     ///
-    /// Returns [`CoreError`] when the workspace directory cannot be created, the
-    /// writer admission or migration fails, or the provisioning write is refused
-    /// by the writer guard.
+    /// Returns [`ProviderError`] when the workspace directory cannot be created,
+    /// the writer admission or migration fails, or the provisioning write is
+    /// refused by the writer guard.
     pub async fn open(
         user_home: PathBuf,
         creator_id: &str,
         workspace_slug: &str,
-    ) -> CoreResult<Self> {
+    ) -> Result<Self, ProviderError> {
         let db_path =
             nexus_home_layout::workspace_state_db_path(&user_home, creator_id, workspace_slug);
         if let Some(parent) = db_path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|error| CoreError::Internal {
-                    category: format!("memory provider workspace dir: {error}"),
-                })?;
+            tokio::fs::create_dir_all(parent).await.map_err(|error| {
+                ProviderError::Internal(format!("memory provider workspace dir: {error}"))
+            })?;
         }
         let store = MemoryStore::open(&db_path, creator_id, &user_home)
             .await
-            .map_err(store_error)
-            .map_err(to_core_error)?;
+            .map_err(store_error)?;
         store
             .provision(
                 DEFAULT_SPACE_ID,
@@ -1262,8 +1279,7 @@ impl LocalMemoryProvider {
                 Utc::now(),
             )
             .await
-            .map_err(store_error)
-            .map_err(to_core_error)?;
+            .map_err(store_error)?;
         Ok(Self {
             store,
             space_id: DEFAULT_SPACE_ID.to_string(),
@@ -1290,18 +1306,17 @@ impl LocalMemoryProvider {
     ///
     /// # Errors
     ///
-    /// Returns [`CoreError`] when the workspace database cannot be read.
+    /// Returns [`ProviderError`] when the workspace database cannot be read.
     pub async fn open_read_only(
         user_home: PathBuf,
         creator_id: &str,
         workspace_slug: &str,
-    ) -> CoreResult<Self> {
+    ) -> Result<Self, ProviderError> {
         let db_path =
             nexus_home_layout::workspace_state_db_path(&user_home, creator_id, workspace_slug);
         let store = MemoryStore::open_read_only(&db_path, creator_id, &user_home)
             .await
-            .map_err(store_error)
-            .map_err(to_core_error)?;
+            .map_err(store_error)?;
         Ok(Self {
             store,
             space_id: DEFAULT_SPACE_ID.to_string(),
@@ -1326,7 +1341,7 @@ impl LocalMemoryProvider {
         user_home: PathBuf,
         creator_id: &str,
         workspace_slug: &str,
-    ) -> CoreResult<Self> {
+    ) -> Result<Self, ProviderError> {
         let mut provider = Self::open(user_home, creator_id, workspace_slug).await?;
         provider.reflections = false;
         Ok(provider)
@@ -1350,22 +1365,21 @@ impl LocalMemoryProvider {
     ///
     /// # Errors
     ///
-    /// [`CoreError::Forbidden`] on a read-only provider, and the mapped storage
-    /// refusal (no `admin` grant, a frozen space, an adopted object whose stored
-    /// body differs from the legacy source).
+    /// [`ProviderError::ReadOnly`] on a read-only provider, and the mapped
+    /// storage refusal (no `admin` grant, a frozen space, an adopted object
+    /// whose stored body differs from the legacy source).
     pub async fn migrate_legacy(
         &self,
         principal: &schemas::Principal,
-    ) -> CoreResult<LegacyContentMigration> {
+    ) -> Result<LegacyContentMigration, ProviderError> {
         if !self.is_writable() {
-            return Err(CoreError::Forbidden {
-                resource: "memory: migrate-legacy needs the workspace writer".to_string(),
-            });
+            return Err(ProviderError::ReadOnly(
+                "memory: migrate-legacy needs the workspace writer".to_string(),
+            ));
         }
         let principal_id = principal_id(principal);
         let payload = json!({ "space_id": self.space_id });
-        let digest = payload_digest(OP_LEGACY_MIGRATE, &payload)
-            .map_err(|error| migration_core_error(&error))?;
+        let digest = payload_digest(OP_LEGACY_MIGRATE, &payload)?;
         let idempotency_key = format!("legacy-content-migration:{}", self.space_id);
         let ctx = OpContext {
             space_id: &self.space_id,
@@ -1395,20 +1409,14 @@ impl LocalMemoryProvider {
             .store
             .migrate_legacy(&ctx, &admission)
             .await
-            .map_err(store_error)
-            .map_err(|error| migration_core_error(&error))?;
+            .map_err(store_error)?;
         let (status, manifest) = match outcome {
             MigrationOutcome::Migrated(receipt) => {
                 let recorded = receipt.result_json.as_deref().ok_or_else(|| {
-                    migration_core_error(&ProviderError::Internal(
-                        "migrated receipt carries no result".to_string(),
-                    ))
+                    ProviderError::Internal("migrated receipt carries no result".to_string())
                 })?;
-                let result: Value = serde_json::from_str(recorded).map_err(|e| {
-                    migration_core_error(&ProviderError::Internal(format!(
-                        "migration receipt: {e}"
-                    )))
-                })?;
+                let result: Value = serde_json::from_str(recorded)
+                    .map_err(|e| ProviderError::Internal(format!("migration receipt: {e}")))?;
                 (LegacyMigrationStatus::Migrated, result["manifest"].clone())
             }
             MigrationOutcome::Verified(manifest) => {
@@ -1416,7 +1424,6 @@ impl LocalMemoryProvider {
             }
         };
         migration_report(&self.space_id, status, &manifest)
-            .map_err(|error| migration_core_error(&error))
     }
 
     /// The bearer's memory-disposition section (NXM-5 Task 2 fix round 2,
@@ -1432,16 +1439,14 @@ impl LocalMemoryProvider {
     /// daemon drain and a CLI dismissal over one workspace serialize too.
     ///
     /// # Errors
-    /// [`CoreError::Forbidden`] under read-only access (a section that exists to
-    /// decide a write is not served) and [`CoreError::Internal`] when the lock
-    /// file cannot be opened or locked.
-    pub async fn review_disposition(&self, subject_id: &str) -> CoreResult<MemoryDisposition> {
-        self.disposition(subject_id)
-            .await
-            .map_err(|error| match error {
-                ProviderError::ReadOnly(reason) => CoreError::Forbidden { resource: reason },
-                other => to_core_error(other),
-            })
+    /// [`ProviderError::ReadOnly`] under read-only access (a section that exists
+    /// to decide a write is not served) and [`ProviderError::Internal`] when the
+    /// lock file cannot be opened or locked.
+    pub async fn review_disposition(
+        &self,
+        subject_id: &str,
+    ) -> Result<MemoryDisposition, ProviderError> {
+        self.disposition(subject_id).await
     }
 
     /// [`Self::review_disposition`] as the provider's own error taxonomy.
@@ -2152,26 +2157,27 @@ impl LocalMemoryProvider {
     /// client claim). Cleared by [`Self::finish_soul_invalidation`].
     ///
     /// # Errors
-    /// [`CoreError::Internal`] when the workspace database cannot be read.
-    pub async fn soul_invalidation_binding(&self, record_id: &str) -> CoreResult<Option<String>> {
+    /// [`ProviderError::Internal`] when the workspace database cannot be read.
+    pub async fn soul_invalidation_binding(
+        &self,
+        record_id: &str,
+    ) -> Result<Option<String>, ProviderError> {
         self.store
             .soul_invalidation_binding(&self.space_id, record_id)
             .await
             .map_err(store_error)
-            .map_err(to_core_error)
     }
 
     /// Clear the recovery row once the invalidation it names ran; a repeated
     /// clear is a no-op.
     ///
     /// # Errors
-    /// [`CoreError::Internal`] when the workspace database cannot be written.
-    pub async fn finish_soul_invalidation(&self, record_id: &str) -> CoreResult<()> {
+    /// [`ProviderError::Internal`] when the workspace database cannot be written.
+    pub async fn finish_soul_invalidation(&self, record_id: &str) -> Result<(), ProviderError> {
         self.store
             .clear_soul_invalidation(&self.space_id, record_id)
             .await
             .map_err(store_error)
-            .map_err(to_core_error)
     }
 }
 
@@ -2232,7 +2238,7 @@ fn grant_facts(request: &schemas::MemoryGrantsGrantRequest) -> GrantFacts<'_> {
 }
 
 /// The §7 `admin` requirement for a space- or subject-scoped admin op.
-pub(super) const fn admin_requirement(subject_id: Option<&str>) -> GrantRequirement<'_> {
+pub(crate) const fn admin_requirement(subject_id: Option<&str>) -> GrantRequirement<'_> {
     GrantRequirement {
         capability: "admin",
         subject_id,
@@ -2244,48 +2250,6 @@ pub(super) const fn admin_requirement(subject_id: Option<&str>) -> GrantRequirem
 
 fn bootstrap_grant_id(creator_id: &str) -> String {
     format!("grt_bootstrap_{creator_id}")
-}
-
-/// Round A's error taxonomy is deliberately narrower than `CoreError`: opening
-/// maps it onto the core taxonomy, while op refusals travel the `SpokeResult`
-/// reject channel, so only the open path needs this bridge.
-fn to_core_error(error: ProviderError) -> CoreError {
-    match error {
-        ProviderError::Internal(reason) => CoreError::Internal { category: reason },
-        other => CoreError::Internal {
-            category: other.message(),
-        },
-    }
-}
-
-/// The conflict code a migration pass reports when its recorded manifest no
-/// longer matches the legacy source, or when an adopted object's stored body
-/// differs from it.
-const IDEMPOTENCY_CONFLICT_CODE: &str = "idempotency_conflict";
-
-/// [`to_core_error`] for the migration pass, which is not a wire op: its
-/// refusals keep the retained taxonomy — a missing `admin` grant reads
-/// `forbidden`, a conflicting adopted body reads `idempotency_conflict` — so an
-/// operator can act on them instead of seeing one flat internal error.
-fn migration_core_error(error: &ProviderError) -> CoreError {
-    match error {
-        ProviderError::NotAuthorized(_) | ProviderError::ReadOnly(_) => {
-            CoreError::ForbiddenReason {
-                resource: "memory: migrate-legacy".to_string(),
-                reason: error.message(),
-            }
-        }
-        ProviderError::IdempotencyConflict => CoreError::ActorConflict {
-            code: IDEMPOTENCY_CONFLICT_CODE.to_string(),
-            message: error.message(),
-        },
-        ProviderError::NotFound(_) => CoreError::NotFound {
-            resource: error.message(),
-        },
-        _ => CoreError::Internal {
-            category: error.message(),
-        },
-    }
 }
 
 /// Project the completion marker's manifest onto the public migration report.
@@ -2502,7 +2466,7 @@ fn profile_projection(profile_revisions: &[(String, i64)]) -> (Vec<String>, Vec<
 
 /// The request's id set canonicalized for every place that treats it as a
 /// set (bound-query keys, digests, list narrowing): sorted, de-duplicated.
-pub(super) fn canonical_ids(ids: &[String]) -> Vec<String> {
+pub(crate) fn canonical_ids(ids: &[String]) -> Vec<String> {
     let mut ids = ids.to_vec();
     ids.sort();
     ids.dedup();
@@ -2702,7 +2666,12 @@ impl LocalMemoryProvider {
     /// transaction (compass D15). Its failure is returned outside the port
     /// vocabulary — the Character capture answered it with the legacy-domain
     /// 403 before, and that answer does not change just because the check moved.
-    pub(crate) async fn capture_identified(
+    ///
+    /// # Errors
+    ///
+    /// A [`LocalDbError`] when the binding rows cannot be read on the capture
+    /// transaction; every protocol refusal travels the `SpokeResult` channel.
+    pub async fn capture_identified(
         &self,
         principal: &schemas::Principal,
         request: schemas::MemoryCaptureRequest,
@@ -3043,7 +3012,7 @@ impl LocalMemoryProvider {
 /// read of another (fix round 5, B2). Authorization, paging and the cursor are
 /// the list op's own either way.
 impl LocalMemoryProvider {
-    pub(crate) async fn list_records_scoped(
+    pub async fn list_records_scoped(
         &self,
         principal: &schemas::Principal,
         request: schemas::MemoryRecordsListRequest,

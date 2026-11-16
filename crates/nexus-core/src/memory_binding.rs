@@ -11,7 +11,7 @@ use std::sync::Arc;
 use spoke_operations::MemoryPort;
 
 use crate::error::{CoreError, CoreResult};
-use crate::memory_provider::{LocalMemoryProvider, LOCAL_AUTHORITY_HOST_ID};
+use nexus_memory_provider::{LocalMemoryProvider, LOCAL_AUTHORITY_HOST_ID};
 
 /// The local provider provisions its one space at generation `1`
 /// (`storage.rs::provision` inserts it with `INSERT OR IGNORE` and never bumps
@@ -52,7 +52,7 @@ impl MemoryProviderBinding {
             space_id: provider.space_id().to_string(),
             authority_host_id: LOCAL_AUTHORITY_HOST_ID.to_string(),
             authority_generation: LOCAL_AUTHORITY_GENERATION,
-            max_page_size: crate::memory_provider::policy::MAX_PAGE_SIZE_BOUND,
+            max_page_size: nexus_memory_provider::policy::MAX_PAGE_SIZE_BOUND,
             port: Arc::clone(&provider) as Arc<dyn MemoryPort + Send + Sync>,
             local: Some(provider),
             #[cfg(feature = "memory-remote")]
@@ -86,7 +86,7 @@ impl MemoryProviderBinding {
             // The advertised value is a maximum, not permission to enlarge a
             // request: the original client ceiling still bounds every page, so
             // a wider provider never makes this client ask for more.
-            max_page_size: max_page_size.min(crate::memory_provider::policy::MAX_PAGE_SIZE_BOUND),
+            max_page_size: max_page_size.min(nexus_memory_provider::policy::MAX_PAGE_SIZE_BOUND),
             port: Arc::clone(&adapter) as Arc<dyn MemoryPort + Send + Sync>,
             local: None,
             remote: Some(adapter),

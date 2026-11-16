@@ -13,12 +13,12 @@
 use nexus_contracts::daemon_api::characters::create_character_request::CreateCharacterRequest;
 use nexus_contracts::daemon_api::characters::memory::review_character_memory_request::ReviewCharacterMemoryRequest;
 use nexus_contracts::daemon_api::memory::review_request::ReviewRequest;
-use nexus_core::memory_provider::legacy;
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use nexus_local_db::{
     create_character_with_initial_binding, ensure_creator_row, CreateCharacterParams,
 };
+use nexus_memory_provider::legacy;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 use tempfile::TempDir;

@@ -23,7 +23,7 @@
 
 use serde_json::Value;
 
-use crate::memory_provider::storage::ProfileRow;
+use crate::storage::ProfileRow;
 
 /// D-12: SOUL.md ↔ the authored `personality` content kind.
 pub const SOUL_PROFILE_KIND: &str = "personality";

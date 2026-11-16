@@ -214,6 +214,9 @@ async-trait = { workspace = true }
 # workspace pin; the fixture crate is a test crate and depends on no app. No
 # libp2p/rmcp/product edge is added and the default graph stays unchanged.
 nexus-memory-conformance = { path = "../../crates/nexus-memory-conformance" }
+# v1.245 extraction: the C-111 leg's legacy projections come from the provider
+# crate, which `nexus-core` no longer hosts.
+nexus-memory-provider = { path = "../../crates/nexus-memory-provider" }
 spoke-connect = { workspace = true, features = ["remote-adapter"] }
 spoke-operations = { workspace = true }
 # The host half of the signed session signs with the fixture's Ed25519 identity;

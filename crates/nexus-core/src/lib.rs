@@ -35,13 +35,15 @@ pub mod owner;
 mod memory_binding;
 mod memory_credentials;
 mod memory_pipeline;
+// v1.245 extraction: the provider's own error taxonomy projected onto the
+// core's. The provider crate names no core type, so this `From` impl is the
+// whole boundary between them.
+mod memory_provider_error;
 // v1.229 N3 Task 1: the signed Connect open of a selected remote provider.
 #[cfg(feature = "memory-remote")]
 mod memory_remote;
 // v1.229 NXM-9: the validated `[memory_provider]` selection an open resolves.
 mod memory_selection;
-// v1.227 NXM-1: the in-process `spoke_operations::MemoryPort` provider.
-pub mod memory_provider;
 mod operation_receipts;
 pub mod slug;
 // v1.207 P3-T1 (spec §B.1): the stable durable operation id every receipt
@@ -117,9 +119,11 @@ pub use memory::{
 #[cfg(feature = "test-hooks")]
 pub use memory::{MemoryReviewPause, MemoryReviewRendezvous};
 pub use memory_credentials::MemoryCredential;
-pub use memory_provider::{LegacyContentMigration, LegacyMigrationStatus};
 pub use memory_selection::{MemoryProviderSelection, RemoteMemoryProviderSelection};
 pub use nexus_home_layout::MemoryProviderConfig;
+// The migration report the legacy pass returns; the provider crate owns both
+// types, and `nexus_core` keeps the path its callers already name.
+pub use nexus_memory_provider::{LegacyContentMigration, LegacyMigrationStatus};
 #[cfg(feature = "execution")]
 pub use owner::{ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError, RunnerDeps};
 pub use presets::PresetError;

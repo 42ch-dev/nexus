@@ -107,7 +107,6 @@ use nexus_contracts::{
     CoreRegisterCreatorRequest, ProviderCall, ProviderEventBatch, ProviderReply,
     SetActiveWorkspaceRequest,
 };
-use nexus_core::memory_provider::legacy;
 use nexus_core::{
     CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreResult, CoreService,
     MemoryProviderRefusal, MemoryProviderSelection, Principal, RemoteMemoryProviderSelection,
@@ -116,6 +115,7 @@ use nexus_memory_conformance::{
     FixtureFaults, FixtureMemoryProvider, PeerDirectory, RetentionSweep, DEDUP_RETENTION_SECONDS,
     IDEMPOTENCY_RETENTION_SECONDS, RECEIPT_RETENTION_SECONDS,
 };
+use nexus_memory_provider::legacy;
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use spoke_connect::core::derive_peer_id_from_ed25519_pubkey;
 use spoke_connect::remote::{

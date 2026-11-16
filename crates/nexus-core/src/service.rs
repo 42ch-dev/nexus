@@ -24,10 +24,10 @@ use crate::actor_fence::ActorFenceTable;
 use crate::changes::read_changes;
 use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::memory_binding::MemoryProviderBinding;
-use crate::memory_provider::LocalMemoryProvider;
 use crate::memory_selection::MemoryProviderSelection;
 use crate::principal::Principal;
 use crate::world_kb::{candidates, graph, patch};
+use nexus_memory_provider::LocalMemoryProvider;
 
 /// Refuse an open whose config-resolved database is not the caller's bound one.
 ///

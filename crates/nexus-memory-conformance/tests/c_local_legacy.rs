@@ -26,9 +26,9 @@ use nexus_contracts::{
     CoreRegisterCreatorRequest, ProviderCall, ProviderEventBatch, ProviderReply,
     SetActiveWorkspaceRequest,
 };
-use nexus_core::memory_provider::{legacy, LocalMemoryProvider};
 use nexus_core::{CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreService, Principal};
 use nexus_home_layout::{creator_soul_md_path, operational_workspace_dir, workspace_state_db_path};
+use nexus_memory_provider::{legacy, LocalMemoryProvider};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use serde_json::{json, Value};
 use spoke_operations::spoke_schemas as schemas;

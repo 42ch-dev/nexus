@@ -25,11 +25,11 @@
 use crate::actor_fence::ActorActivityLease;
 use crate::error::{CoreError, CoreResult};
 use crate::memory::MemoryAdapter;
-use crate::memory_provider::MemoryDisposition;
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use nexus_creator_memory::errors::MemoryError;
 use nexus_creator_memory::review::{ReviewAction, SessionDigestSummarizer};
 use nexus_local_db::LocalDbError;
+use nexus_memory_provider::MemoryDisposition;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
@@ -466,7 +466,7 @@ async fn promote_decision(
     })?;
     Ok(json!({
         "action": "promote",
-        "kind": crate::memory_provider::policy::namespaced_record_kind(memory_kind),
+        "kind": nexus_memory_provider::policy::namespaced_record_kind(memory_kind),
         "content_override": {
             "text": body,
             "structured": { "nexus_legacy": {

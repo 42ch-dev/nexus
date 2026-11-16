@@ -34,9 +34,9 @@ pub const FACT_KIND: &str = "fact";
 const DEFAULT_MEMORY_VERSION: u32 = 1;
 
 /// Prefix of a namespaced Nexus `MemoryKind`. The provider-side source of this
-/// string is `nexus_core::memory_provider::policy::NEXUS_KIND_PREFIX`; it is
-/// repeated here because this crate is a dependency of `nexus-core`, never the
-/// reverse.
+/// string is `nexus_memory_provider::policy::NEXUS_KIND_PREFIX`; it is repeated
+/// here because this crate is a dependency of `nexus-core`, never the reverse,
+/// and the provider sits behind that edge.
 const NEXUS_KIND_PREFIX: &str = "nexus.";
 
 /// One recall `fact` record as E6 renders a fragment line.

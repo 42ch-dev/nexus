@@ -2,7 +2,7 @@
 //!
 //! Two provider legs, one protocol surface:
 //!
-//! - [`Kind::Local`]: the real `nexus_core::memory_provider::LocalMemoryProvider`
+//! - [`Kind::Local`]: the real `nexus_memory_provider::LocalMemoryProvider`
 //!   over its own workspace state database and workspace home.
 //! - [`Kind::Remote`]: the independent, durable `FixtureMemoryProvider` over its
 //!   own SQLite file, sharing no storage or policy with the local provider.
@@ -48,12 +48,12 @@ use sqlx::Connection as _;
 
 use nexus_connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_contracts::{CoreRegisterCreatorRequest, SetActiveWorkspaceRequest};
-use nexus_core::memory_provider::LocalMemoryProvider;
 use nexus_core::{CoreAccess, CoreHomeService, CoreOpenOptions, CoreService};
 use nexus_memory_conformance::{
     FaultHold, FaultHoldLost, FaultPoint, FixtureFaults, FixtureMemoryProvider, PeerDirectory,
     RetentionSweep, TargetHold,
 };
+use nexus_memory_provider::LocalMemoryProvider;
 use spoke_connect::core::{
     derive_peer_id_from_ed25519_pubkey, sign_hello_ed25519, verify_hello_ed25519, CoreError,
 };

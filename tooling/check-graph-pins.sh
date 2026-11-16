@@ -308,6 +308,21 @@ assert_empty nexus-connect "--no-default-features" nexus-orchestration
 # extraction direction reversed.
 assert_empty nexus-execution "--no-default-features" nexus-core
 
+# --- nexus-memory-provider default graph -----------------------------------
+# v1.245: the extracted in-process memory provider must not depend back on the
+# crate that opens it, nor on the orchestration layer. The edge runs
+# `nexus-core → nexus-memory-provider` only.
+#
+# The forward half is the opposite shape from `nexus-execution`'s: the provider
+# is NOT optional (`service.rs` pins it on every core open, and `lib.rs`
+# declared the module ungated before the move), so "absent from core's default
+# graph" is false by construction here. What this pin asserts instead is that
+# the default graph resolves it exactly once — no version split between the
+# worked edge and the dev-time self-reference.
+assert_empty nexus-memory-provider "--no-default-features" nexus-core
+assert_empty nexus-memory-provider "--no-default-features" nexus-orchestration
+assert_exactly_one nexus-core "--no-default-features" nexus-memory-provider
+
 # --- native/TS host (nexus-core-node) ---------------------------------------
 
 # v1.195 P0-T5: the native cohort resolves the hosted production factory's

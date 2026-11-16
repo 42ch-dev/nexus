@@ -3,7 +3,7 @@
 //!
 //! This is the **single** module that renders the legacy memory surfaces — the
 //! Creator/Character bearer tables and the bearer files on disk — as
-//! provider-native rows, so one [`MemoryStore`](super::storage::MemoryStore) read
+//! provider-native rows, so one [`MemoryStore`](crate::storage::MemoryStore) read
 //! path serves both the provider's own content and content that has not been
 //! migrated yet (iteration compass D6: legacy tables/files stay write-idle).
 //!
@@ -63,8 +63,8 @@ use nexus_creator_memory::memory_io;
 use nexus_creator_memory::MemoryBearerRef;
 use spoke_operations::{jcs_sha256_hex, SpokeResult};
 
-use super::policy;
-use super::storage::{
+use crate::policy;
+use crate::storage::{
     timestamp, CandidateRow, Placement, ProfileRow, RecordRow, Selection, StoreError, StoreResult,
     SubjectRow, SUBJECT_COLUMNS,
 };
@@ -121,7 +121,7 @@ const PENDING_REVIEW_DISPOSITION: &str = "fragment";
 /// (P5's migration key is `(space, source family, source primary key)`), so they
 /// name both the projected family and the id segment.
 const FAMILY_MEMORY_PENDING_REVIEW: &str = "memory_pending_review";
-pub(crate) const FAMILY_CHARACTER_PENDING_REVIEW: &str = "character_memory_pending_review";
+pub const FAMILY_CHARACTER_PENDING_REVIEW: &str = "character_memory_pending_review";
 const FAMILY_MEMORY_FRAGMENTS: &str = "memory_fragments";
 const FAMILY_CHARACTER_FRAGMENTS: &str = "character_memory_fragments";
 const FAMILY_MEMORY_NARRATIVES: &str = "memory_soul_narratives";
@@ -687,7 +687,7 @@ async fn subject_of(
 
 // ── Predicate parity with the provider's own page ───────────────────────
 
-/// The Rust rendering of [`super::storage`]'s `record_predicate` selection
+/// The Rust rendering of [`crate::storage`]'s `record_predicate` selection
 /// term, so a projected row is admitted or excluded by exactly the rule the
 /// SQL page applies to a provider row.
 fn selection_admits(selection: &Selection, row: &RecordRow) -> bool {
@@ -1838,7 +1838,7 @@ fn keywords_json(raw: &str) -> StoreResult<Vec<String>> {
 /// The provider's own [`timestamp`] renders whole seconds, and truncating a
 /// legacy value to that loses both the value an E4 DTO serves and the order two
 /// rows in one second must keep (NXM-5 QC1-F1). Ordering compares parsed times
-/// ([`super::created_at_cmp`]); only a written column uses the provider
+/// ([`crate::created_at_cmp`]); only a written column uses the provider
 /// rendering ([`provider_timestamp`]).
 fn normalize_timestamp(raw: &str) -> String {
     parse_timestamp(raw).map_or_else(
