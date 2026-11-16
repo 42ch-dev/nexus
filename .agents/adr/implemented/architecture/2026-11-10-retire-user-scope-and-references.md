@@ -60,7 +60,7 @@ Masters at the time: [reference-store-layout.md](../../../../docs/specs/runtime/
 | Domain + Core | `nexus-knowledge` reference types; `CoreService::{register,list,get}_reference` | Register wrote the row and `body.md`; list/get read. |
 | CLI | `nexus42 creator reference register\|list\|show` | Direct-core seam. Deliberately **no** `reference refresh` leaf (retired V1.58 entrance). |
 | HTTP | `GET /v1/daemon/references`, `GET /v1/daemon/references/{id}` | Read-only daemon-api + generated contracts. The web `browser-client` exposed `listReferences` / get, but no in-tree web page called them. |
-| Refresh | `nexus-orchestration` builtin `reference_refresh` + `crates/nexus-core/src/execution/schedules/refresh.rs` | Could update `body.md` and `content_hash` for `refreshable` sources. |
+| Refresh | `nexus-orchestration` builtin `reference_refresh` + `crates/nexus-core/src/execution/schedules/refresh.rs` (deleted with this retirement) | Could update `body.md` and `content_hash` for `refreshable` sources. |
 | Schemas | `schemas/core/references/*` | Wire envelopes for the GET routes. |
 
 References were **source material**, not narrative KnowledgeEntries. Nothing in the inventory promoted a reference body into World KB automatically, which is one reason they were not folded into Knowledge IR.

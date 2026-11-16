@@ -174,7 +174,7 @@ Generated wire request/response DTOs remain the transport contract; `AdmittedAct
 - Identity carrier — `crates/nexus-core/src/actors.rs` (`AdmittedActor` with no serde impls, `AdmittedActorContext`, `classify_pair`, `CoreService::{admit_actor, acquire_actor_activity, acquire_character_transition, commit_character_transition, transition_character}`).
 - Two-layer fence — `crates/nexus-core/src/actor_fence.rs` (`ActorFenceTable`, `ActorActivityLease`, `CharacterTransitionLease`, `OsSharedLock::try_acquire`, `OsExclusiveLock::try_acquire`, `Drop` unlocking explicitly).
 - Fence behaviour pins — `crates/nexus-core/tests/actor_services.rs` (`transition_races_admitted_activity`, `activity_admission_is_busy_while_a_transition_lease_is_held`, `foreign_owner_routes_are_not_found_and_do_not_mutate`, `admission_deny_matrix_world_character_binding_mismatches`).
-- Single-owner reservation — `crates/nexus-core/src/execution/lifecycle.rs` (`OWNERS`, `OwnerReservation`, `claim`/`install`/`Drop`, `release_owner_slot` with `Arc::ptr_eq`).
+- Single-owner reservation — `crates/nexus-core/src/owner/lifecycle.rs` (`OWNERS`, `OwnerReservation`, `claim`/`install`/`Drop`, `release_owner_slot` with `Arc::ptr_eq`).
 - Established-owner slot — `crates/nexus-core/src/host.rs` (`open_host` admission, failure-clears-slot, confirmed-close release); duplicate-open refusal covered by `crates/nexus-core/tests/host_actor_lifecycle.rs`.
 - Single session-index owner — `crates/nexus-core/src/actor_sessions.rs` (`ActorSessionRegistry` delegating activity admission to the P2 lease rather than keeping a second fence table).
 - Durable semantics this implements — [specs/active/architecture/actor-product-model.md](../../../docs/specs/architecture/actor-product-model.md) §11.

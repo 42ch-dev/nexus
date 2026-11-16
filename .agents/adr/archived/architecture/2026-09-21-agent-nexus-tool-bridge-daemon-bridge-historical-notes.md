@@ -21,7 +21,7 @@ Not recorded in the ledger; the retirement pass preserved removed text instead o
 ## Consequences
 
 **Provenance**: frozen from [`specs/active/agents/agent-nexus-tool-bridge.md`](../../../../docs/specs/agents/agent-nexus-tool-bridge.md) on 2026-10-13 during the **v1.216** de-historicization pass.
-**Evidenced supersession date**: 2026-09-21 — v1.193 P2 deleted the integrated daemon and its `HostToolExecutor` wrappers (the live spec's §0 states the retained authority is `crates/nexus-core/src/execution/capabilities.rs`); every section frozen here is self-declared historical in the source file. Nothing here is current authority.
+**Evidenced supersession date**: 2026-09-21 — v1.193 P2 deleted the integrated daemon and its `HostToolExecutor` wrappers (the live spec's §0 states the retained authority is `crates/nexus-core/src/owner/capabilities.rs`); every section frozen here is self-declared historical in the source file. Nothing here is current authority.
 **Freeze date**: 2026-10-13
 
 ---

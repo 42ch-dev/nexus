@@ -109,7 +109,7 @@ Not recorded in the ledger; the retirement pass preserved removed text instead o
   Connect host's no-engine-ownership lock (untouched by the ruling);
   `invoke.rs:432-435` / `:451` / `:898-975` — the Connect write routes
   (the `LiveWrite` dispatch the receipt lifecycle wires into).
-  `crates/nexus-core/src/execution/compute.rs:254-263` — receipt begun
+  `crates/nexus-core/src/owner/compute.rs:254-263` — receipt begun
   before the effect; `:1287-1303` — `compute_run_operation_id`
   (`session = run_id`); `:1357-1397` — `recover_stuck_compute_runs`
   asking by `subject_id`; `capabilities.rs:91` —

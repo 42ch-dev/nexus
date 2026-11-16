@@ -22,7 +22,7 @@ A Work's creative output is a workspace tree plus SQLite metadata pointers. Chap
 
 | Surface | Original owner and behavior |
 | --- | --- |
-| Chapter body | Agent tool `fs/write_text_file` → `execute_write_file` in `crates/nexus-core/src/execution/capabilities.rs`; guarded path followed by bare `std::fs::write` |
+| Chapter body | Agent tool `fs/write_text_file` → `execute_write_file` in `crates/nexus-core/src/owner/capabilities.rs`; guarded path followed by bare `std::fs::write` |
 | Chapter HTTP/Core API | `crates/nexus-core/src/content.rs`; body read-only, metadata patch only, under `WorkLock` |
 | Outline | `crates/nexus-core/src/outline.rs`; temp + fsync + rename + final-file and parent-dir fsync under `WorkLock` |
 | Scaffold | Novel/essay/script/game-bible builtins with local direct filesystem helpers and rollback |
@@ -306,4 +306,4 @@ The open costs and design sensitivities are explicit:
 8. Scaffold rollback and mixed FS+DB transaction ordering must remain atomic around IR revision changes; the three exact rollback exemptions are the bounded residue.
 9. `WorkLock` holder-kind conventions distinguish tool, HTTP, and CLI acquisitions without weakening serialization.
 
-References for the implementation anchors and sibling contracts are [orchestration-engine.md](../../../../docs/specs/orchestration/orchestration-engine.md), the profile/specification documents linked above, and the Work Artifact IR implementation under `crates/nexus-core/src/execution/`, `crates/nexus-orchestration/src/`, and `crates/nexus-local-db/src/work_chapters.rs`.
+References for the implementation anchors and sibling contracts are [orchestration-engine.md](../../../../docs/specs/orchestration/orchestration-engine.md), the profile/specification documents linked above, and the Work Artifact IR implementation under `crates/nexus-core/src/owner/`, `crates/nexus-orchestration/src/`, and `crates/nexus-local-db/src/work_chapters.rs`.

@@ -257,7 +257,7 @@ Work carries the stage fields:
 | `current_stage` | enum | `intake` \| `research` \| `produce` \| `review` \| `persist` |
 | `stage_status` | enum or map | Per-stage `pending` \| `active` \| `complete` \| `skipped` \| `failed` |
 
-Stage progression is **explicit** — schedule admission (`add_schedule`, `crates/nexus-core/src/execution/handle_ops.rs:115`) checks the preset's gate policy and inserts a **pending** schedule with no CLI dispatch entry, and it does **not** itself set the Work stage. The stage writers are the auto-chain scheduler (`crates/nexus-orchestration/src/auto_chain.rs` — `update_checkpoint`:869, `mark_work_completed`:904, `set_driver`:1054, `enqueue_auto_chain_schedule_in_tx`:1583, all via the local-db `works::patch_work*`) and the `nexus.manuscript.phase.set` tool (`execute_manuscript_phase_set`, `crates/nexus-core/src/execution/capabilities.rs:2707` → `works::update_work_stage`, `crates/nexus-local-db/src/works.rs:1220`).
+Stage progression is **explicit** — schedule admission (`add_schedule`, `crates/nexus-core/src/owner/handle_ops.rs:115`) checks the preset's gate policy and inserts a **pending** schedule with no CLI dispatch entry, and it does **not** itself set the Work stage. The stage writers are the auto-chain scheduler (`crates/nexus-orchestration/src/auto_chain.rs` — `update_checkpoint`:869, `mark_work_completed`:904, `set_driver`:1054, `enqueue_auto_chain_schedule_in_tx`:1583, all via the local-db `works::patch_work*`) and the `nexus.manuscript.phase.set` tool (`execute_manuscript_phase_set`, `crates/nexus-core/src/owner/capabilities.rs:2707` → `works::update_work_stage`, `crates/nexus-local-db/src/works.rs:1220`).
 
 ---
 
@@ -277,9 +277,9 @@ Stage progression is **explicit** — schedule admission (`add_schedule`, `crate
 - `apps/nexus-service`
 - `crates/nexus-creator/src/creator.rs`
 - `crates/nexus-core/src/works.rs`
-- `crates/nexus-core/src/execution/handle_ops.rs`
+- `crates/nexus-core/src/owner/handle_ops.rs`
 - `crates/nexus-orchestration/src/auto_chain.rs`
-- `crates/nexus-core/src/execution/capabilities.rs`
+- `crates/nexus-core/src/owner/capabilities.rs`
 - `crates/nexus-local-db/src/works.rs`
 
 ## Change obligations

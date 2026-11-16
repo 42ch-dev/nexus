@@ -137,11 +137,11 @@ Same-plan counter-example for §1's "decide first whether the finding is real": 
 
 The v1.190 core-into-daemon extraction created a coherent set of these sites. All are fn-level with the same reason string, and each holds its guard across a whole operation deliberately:
 
-- `crates/nexus-core/src/execution/lifecycle.rs` — `OwnerReservation::claim` / `install` (the process-wide owner-slot registry guard spans the whole reservation).
+- `crates/nexus-core/src/owner/lifecycle.rs` — `OwnerReservation::claim` / `install` (the process-wide owner-slot registry guard spans the whole reservation).
 - `crates/nexus-connect/src/peer_tools.rs` — `evict_peer` (registry inner lock spans session lookup, identity check, removal and eviction accounting).
 - `crates/nexus-core/src/host.rs` — `HostHandle::execute` (carries both the fn-level drop allow and `too_many_lines`).
 - `crates/nexus-core/src/memory.rs` — `list_character_pending_reviews`, count and fragment-list readers (guard spans the owned-Character read plus projection).
-- `crates/nexus-core/src/execution/run_events.rs` — `try_register_live` and the atomic-section site, with the cap invariant stated in a preceding comment.
+- `crates/nexus-execution/src/run_events.rs` — `try_register_live` and the atomic-section site, with the cap invariant stated in a preceding comment.
 - Test-side precedent — module-level `#![allow(clippy::significant_drop_tightening)]` on test modules whose fixtures hold guards across the visible test scope (`nexus-agent-host` provider test modules), with the reason inline.
 
 ### Before — statement-level allow (lint survives)

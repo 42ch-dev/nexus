@@ -662,7 +662,7 @@ with quoted command evidence live in that audit guide (control-tree
    `MemoryPort`; zero direct memory table/file bypass remains (grep-audited) —
    **delivered for the audited surfaces**: zero production
    `nexus_creator_memory::memory_io`/`soul_io` caller outside the adapter seam
-   (`crates/nexus-core/src/memory_provider/legacy.rs`); one open residual, the
+   (`crates/nexus-memory-provider/src/legacy.rs`); one open residual, the
    dual-meaning `MemoryPipelineCtx.scope_id` in-memory field (audit item R6).
 2. Default local provider passes the full 04 conformance matrix; the loopback
    independent remote provider passes the same matrix — **not claimed**:

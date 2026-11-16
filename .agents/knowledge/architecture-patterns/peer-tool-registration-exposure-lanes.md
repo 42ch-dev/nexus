@@ -221,7 +221,7 @@ chain keeps all policy daemon-side.
 
 ## Examples
 
-- Spine + admission: `crates/nexus-core/src/execution/capabilities.rs`
+- Spine + admission: `crates/nexus-core/src/owner/capabilities.rs`
   (`dispatch_peer_tool` / `dispatch_user_cap` / `user_cap_catalog_admission`);
   the peer registry itself is `crates/nexus-connect/src/peer_tools.rs`
   (`PeerToolRegistry`, registry/admission).

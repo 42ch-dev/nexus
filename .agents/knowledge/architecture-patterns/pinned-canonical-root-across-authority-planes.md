@@ -115,9 +115,9 @@ let probe_owner = if access == CoreAccess::EngineOwner {
 ## Evidence
 
 - Pin, drift comparison and the shared reader — `crates/nexus-core/src/works.rs` (`canonical_selected_workspace_root`, `selection_matches_pinned_root`, `selected_canonical_workspace_root`, `lossless_root_str`).
-- Factory re-check and pin-based drift refusal — `crates/nexus-core/src/execution/production.rs` (lossless re-check before any port; the bundle composes from the pinned path).
+- Factory re-check and pin-based drift refusal — `crates/nexus-core/src/owner/production.rs` (lossless re-check before any port; the bundle composes from the pinned path).
 - Probe owner from the pin only — `crates/nexus-core-node/src/lifecycle.rs` (`open_core`'s `probe_owner` block, `admission_creative_root`).
-- Regressions — `a_canonical_root_without_a_lossless_utf8_form_is_refused_at_the_pin`, `a_root_without_a_lossless_utf8_form_is_refused_by_the_port_seam`, `a_moved_selection_to_a_non_utf8_root_is_refused_as_stale`, `only_the_filesystems_own_refusal_skips_the_non_utf8_fixture` (`crates/nexus-core/src/execution/production.rs`).
+- Regressions — `a_canonical_root_without_a_lossless_utf8_form_is_refused_at_the_pin`, `a_root_without_a_lossless_utf8_form_is_refused_by_the_port_seam`, `a_moved_selection_to_a_non_utf8_root_is_refused_as_stale`, `only_the_filesystems_own_refusal_skips_the_non_utf8_fixture` (`crates/nexus-core/src/owner/production.rs`).
 - Observability contract for the refusal classes — the service maps these through its existing typed error surface; no new status code is invented for them.
 
 ## Coverage gaps
