@@ -1,6 +1,6 @@
 # ADR: Canvas Composition and Pattern Packages — Strategy Orchestration Cutover
 
-Status: proposed — P4 and P5 are complete and P6 is four of seven conditions in. P3 shipped in v1.239 (#515), P3.5 Apply/Execute in v1.241 (#520), the applied-identity half of P4 in v1.242 and the rest of P4 with P5 in v1.243; P6 conditions 3, 5, 6 and 7 shipped in v1.243 (a committed `preset export` generator, a CI byte gate, the pin re-comparison at Apply and recovery, a partner-bundle import path with its deprecation note, and the `yaml-only` kill-switch), condition 1 shipped in v1.245 (#528) — twenty `crates/nexus-preset/ir-twins/<id>.workflow.ir.json` twins produced by `nexus42 preset export-ir` through one key-sorted serializer, gated by `crates/nexus-preset/tests/embedded_ir_twins.rs` on stale, missing, orphan and non-canonical drift — while conditions 2 and 4 remain: `parsePresetYaml` confined to an import wizard that does not exist, and a Generate entry point. All shipped parts are governed by the composition spec, not by this record, which carries only what is still open.
+Status: proposed — P4 and P5 are complete and P6 is five of seven conditions in. P3 shipped in v1.239 (#515), P3.5 Apply/Execute in v1.241 (#520), the applied-identity half of P4 in v1.242 and the rest of P4 with P5 in v1.243; P6 conditions 3, 5, 6 and 7 shipped in v1.243 (a committed `preset export` generator, a CI byte gate, the pin re-comparison at Apply and recovery, a partner-bundle import path with its deprecation note, and the `yaml-only` kill-switch), condition 1 shipped in v1.245 (#528) — twenty `crates/nexus-preset/ir-twins/<id>.workflow.ir.json` twins produced by `nexus42 preset export-ir` through one key-sorted serializer, gated by `crates/nexus-preset/tests/embedded_ir_twins.rs` on stale, missing, orphan and non-canonical drift — while conditions 2 and 4 remain: `parsePresetYaml` confined to an import wizard that does not exist, and a Generate entry point. All shipped parts are governed by the composition spec, not by this record, which carries only what is still open.
 Date: 2026-11-10
 Scope: The still-unshipped part of the cutover — the dual-read loader, IR-primary authoring, and retirement of the hand-authored YAML main path while retaining `preset.yaml` import/export. The Canvas composition surface, the compose operations, the pattern packages, the candidate lifecycle **up to Approve** (v1.239) and **Apply/Execute** (v1.241) shipped and are owned by the composition spec.
 Source: split from the archived Canvas + Workflow IR redesign and Dynamic Workflow Generation and Orchestration Simulation records
@@ -75,9 +75,14 @@ it builds anything, so a re-apply during an in-flight run is a refused restart r
 from one document and a graph from another.
 The composition spec owns the resulting precedence: a user bundle with a current apply runs
 from the applied document, embedded and system presets have no apply branch, and every other
-strategy keeps the YAML descriptor. What P4 still owes is its other half — the buildability
-predicate apply and intake must share (I-000448) — and the limits that remain on the applied path
-(I-000449, I-000462–I-000465) are recorded there rather than here.
+strategy keeps the YAML descriptor. P4's other half — the buildability predicate apply and intake
+must share (I-000448) — landed after this record was written, in `da84c588f`: `crates/nexus-core/src/apply.rs`
+refuses an unbuildable document through the same `validate_ir_buildability` the intake runs
+(`crates/nexus-orchestration/src/preset_runtime.rs:559`), and it does so before the `INSERT INTO
+strategy_applies` (`apply.rs:526`). The limits that remain on the applied path (I-000449,
+I-000462–I-000465) are recorded there rather than here. What P4 still owes is its **third** exit
+criterion — the IR→Graph mapping compared against the IR→Task table in orchestration-engine §8.2.1 —
+not I-000448.
 
 | Phase | Change | Exit criteria |
 | --- | --- | --- |
