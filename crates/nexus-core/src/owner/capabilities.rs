@@ -1686,6 +1686,14 @@ pub(crate) fn registry_registry_refresh<'a>(
 
 // ─── V1.54 P0: DF-46 write tool handlers ──────────────────────────────────
 
+/// The refusal a kb store gate reports — the one shape both the production
+/// INSERT and the simulated pre-check answer with.
+fn kb_store_refusal(e: &nexus_knowledge::world_kb::store::KbStoreError) -> NexusApiError {
+    NexusApiError::Internal {
+        category: format!("KB_STORE_ERROR: {e}"),
+    }
+}
+
 /// `nexus.kb_snapshot.write` — upsert key blocks for a world.
 ///
 /// A production context commits every block through `SqliteKbStore`. A
@@ -1693,12 +1701,15 @@ pub(crate) fn registry_registry_refresh<'a>(
 /// which records the `Put` intent and writes nothing.
 ///
 /// Its response carries `written: 0` and `suppressed_writes` — one object per
-/// recorded `Put`, in input order. The field names what the preview did, not
-/// what the store would do: a preview records an intent without knowing
-/// whether the INSERT would accept it, so `suppressed_writes` must not be read
-/// as a prediction that those writes would succeed. Zero blocks yield the
-/// explicit empty list, `Get` never appears (a read mutates nothing), and a
-/// production context carries neither the list nor an empty-state claim.
+/// recorded `Put`, in input order. Each block must first pass the store's own
+/// record gates (`SqliteKbStore::validate_key_block`) and is refused with the
+/// store's refusal otherwise: `knowledge_record_to_spoke` asserts those gates,
+/// so converting first panics on caller input that production refuses. The
+/// preview is still not a prediction of store acceptance — it runs no
+/// uniqueness predicate, so a block that passes the record gates may yet
+/// collide at apply time. Zero blocks yield the explicit empty list, `Get`
+/// never appears (a read mutates nothing), and a production context carries
+/// neither the list nor an empty-state claim.
 async fn execute_kb_snapshot_write(
     req: &ToolsApi,
     context: &ToolContext,
@@ -1750,9 +1761,18 @@ async fn execute_kb_snapshot_write(
         records.push(kb);
     }
 
+    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+
     if let Some(port) = context.recording_knowledge_entry.as_deref() {
         let mut suppressed = Vec::with_capacity(records.len());
         for kb in records {
+            // The conversion asserts the store's record gates with `.expect`; a
+            // simulation that never writes still has to establish them, or it
+            // panics on the caller input production refuses. No extension
+            // document exists on this path (nothing is built or inserted).
+            kb_store
+                .validate_key_block(&kb, None)
+                .map_err(|e| kb_store_refusal(&e))?;
             let entry = nexus_spoke_adapter::conversion::knowledge_record_to_spoke(&kb);
             if let SpokeResult::Reject(reject) = port.put_knowledge_entry(entry, None).await {
                 return Err(NexusApiError::Internal {
@@ -1768,7 +1788,6 @@ async fn execute_kb_snapshot_write(
         }));
     }
 
-    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
     let mut written: usize = 0;
     let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
         category: format!("DATABASE_ERROR: {e}"),
@@ -1778,9 +1797,7 @@ async fn execute_kb_snapshot_write(
         kb_store
             .insert_key_block_in_tx(&mut tx, kb)
             .await
-            .map_err(|e| NexusApiError::Internal {
-                category: format!("KB_STORE_ERROR: {e}"),
-            })?;
+            .map_err(|e| kb_store_refusal(&e))?;
         written += 1;
     }
 
@@ -4586,6 +4603,103 @@ mod tests {
             "a production write carries no suppression report"
         );
         assert_eq!(kb_rows(&fixture.pool).await.len(), before.len() + 1);
+    }
+
+    /// A simulated write must answer the refusal production would give for the
+    /// same block: these fields are `Option<String>`/`String` on the wire, so
+    /// `{"disclosure": ""}` or `{"canonical_name": ""}` deserializes and reaches
+    /// the store. Only the store's record gates refuse them — and
+    /// `knowledge_record_to_spoke` asserts those gates with `.expect`, so a
+    /// simulated branch that converts without running them panics inside the
+    /// request path where production returns a refusal.
+    #[tokio::test]
+    async fn simulated_knowledge_write_refuses_what_production_refuses() {
+        use nexus_contracts::BlockType;
+        use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+
+        let fixture = fixture(false).await;
+        seed_kb_fixture(&fixture.pool).await;
+        let simulated = ToolContext::new_simulated(
+            fixture.pool.clone(),
+            fixture.context.nexus_home.clone(),
+            fixture.context.workspace_path(),
+            ToolRuntimeFacts::default(),
+            None,
+            None,
+        );
+        let before = kb_rows(&fixture.pool).await;
+
+        // (field, value, the store gate's own reason — asserted, because "did not
+        // panic" alone would let the next refactor reintroduce the panic.)
+        let cases = [
+            (
+                "disclosure",
+                "",
+                "disclosure must be a nonempty stored value",
+            ),
+            (
+                "holder_entry_id",
+                "",
+                "holder_entry_id must be a nonempty resolved holder id",
+            ),
+            ("canonical_name", "", "canonical_name must not be empty"),
+            (
+                "disclosure",
+                "shared",
+                "unknown disclosure vocabulary \"shared\"; only \"owner-private\" is native",
+            ),
+        ];
+
+        for (field, value, reason) in cases {
+            let mut block =
+                KnowledgeEntryRecord::new("wld_sim", BlockType::Character, "sim_refused");
+            block.entry_id = "kb_sim_refused".to_string();
+            let mut payload = serde_json::to_value(&block).expect("serialize the block");
+            payload[field] = serde_json::json!(value);
+
+            let live = execute_kb_snapshot_write(
+                &kb_write_request(&serde_json::json!([payload.clone()])),
+                &fixture.context,
+                CREATOR,
+            )
+            .await
+            .expect_err("production refuses this block");
+
+            let refused = execute_kb_snapshot_write(
+                &kb_write_request(&serde_json::json!([payload])),
+                &simulated,
+                CREATOR,
+            )
+            .await
+            .expect_err("the simulation refuses what production refuses");
+
+            assert_eq!(
+                format!("{refused:?}"),
+                format!("{live:?}"),
+                "{field}={value:?} must be refused exactly as production refuses it"
+            );
+            match &refused {
+                NexusApiError::Internal { category } => assert!(
+                    category.starts_with("KB_STORE_ERROR: validation error: ")
+                        && category.contains(reason),
+                    "the refusal must carry the store's own reason {reason:?}: {category}"
+                ),
+                other => {
+                    panic!("expected the store's refusal for {field}={value:?}, got {other:?}")
+                }
+            }
+        }
+
+        assert_eq!(
+            simulated.recorded_knowledge_entry_mutations(),
+            Some(vec![]),
+            "a refused block never reaches the port"
+        );
+        assert_eq!(
+            kb_rows(&fixture.pool).await,
+            before,
+            "a refused batch writes nothing, in either branch"
+        );
     }
 
     /// The snapshot must see every stored byte: `quote(TEXT)` stops at an
