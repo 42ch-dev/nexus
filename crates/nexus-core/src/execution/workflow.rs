@@ -1631,7 +1631,10 @@ impl WorkflowRunCoordinator {
         let applied = match intake_mode {
             Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
             _ => crate::execution::applied_documents::resolve_applied_document(
-                &self.pool, nexus_home, preset_id, &loaded,
+                &self.pool,
+                nexus_home,
+                preset_id,
+                Some(&loaded),
             )
             .await
             .map_err(|error| RunControlError::Admission(error.to_string()))?
@@ -3036,7 +3039,7 @@ impl WorkflowRunCoordinator {
                 pool,
                 nexus_home,
                 &row.preset_id,
-                &loaded,
+                Some(&loaded),
             )
             .await
             .map_err(|error| RunControlError::ScheduleUpdate(error.to_string()))?

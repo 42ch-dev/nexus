@@ -66,11 +66,14 @@ pub async fn resolve_applied_document(
     pool: &sqlx::SqlitePool,
     nexus_home: &std::path::Path,
     preset_id: &str,
-    loaded: &LoadedPreset,
+    loaded: Option<&LoadedPreset>,
 ) -> CoreResult<Result<Option<AppliedDocument>, ApplyLoadRefusal>> {
     // The loader's own classification, exactly as admission reads it: only a
-    // user bundle with a current apply has an applied identity.
-    if !crate::apply::is_user_preset(preset_id, loaded) {
+    // user bundle with a current apply has an applied identity. A caller with no
+    // bundle to hand already established it — an applied run's re-entry carries
+    // the frozen applied identity, and only a user bundle can have one — so the
+    // current-apply read is the only question left for it.
+    if loaded.is_some_and(|loaded| !crate::apply::is_user_preset(preset_id, loaded)) {
         return Ok(Ok(None));
     }
     let Some(apply) = crate::apply::current_apply(pool, preset_id).await? else {
@@ -110,7 +113,7 @@ impl AppliedDocumentSource for CreatorAppliedDocuments {
     async fn applied_document(
         &self,
         preset_id: &str,
-        loaded: &LoadedPreset,
+        loaded: Option<&LoadedPreset>,
     ) -> Result<Option<AppliedDocument>, String> {
         resolve_applied_document(&self.pool, &self.nexus_home, preset_id, loaded)
             .await

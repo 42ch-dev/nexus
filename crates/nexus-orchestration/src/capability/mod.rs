@@ -344,8 +344,10 @@ pub trait WorkspaceStateProvider: Send + Sync {
 ///
 /// `preset_id` is the run's strategy id and `loaded` is the bundle the frozen
 /// descriptor named (the classification reads the source identity the loader
-/// recorded, never a fresh preset lookup). `Ok(None)` is "this strategy has no
-/// current apply", the common case.
+/// recorded, never a fresh preset lookup). `None` is a re-entry that holds no
+/// bundle: an applied run's recovery, whose frozen applied identity already
+/// encodes the classification admission made (only a user bundle can have an
+/// apply). `Ok(None)` is "this strategy has no current apply", the common case.
 #[async_trait]
 pub trait AppliedDocumentSource: Send + Sync {
     /// The current apply of `preset_id` — its frozen identity plus the verified
@@ -362,7 +364,7 @@ pub trait AppliedDocumentSource: Send + Sync {
     async fn applied_document(
         &self,
         preset_id: &str,
-        loaded: &nexus_preset::LoadedPreset,
+        loaded: Option<&nexus_preset::LoadedPreset>,
     ) -> Result<Option<AppliedDocument>, String>;
 }
 
