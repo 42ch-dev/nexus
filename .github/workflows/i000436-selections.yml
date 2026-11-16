@@ -1,0 +1,120 @@
+name: I-000436 selections (temporary)
+
+# TEMPORARY experiment for I-000436 — delete this file once the results are
+# recorded on the issue.
+#
+# The P0-T6 block of apps/nexus-service/tests/workflow-control-http.test.mjs
+# SIGSEGVs the whole `node --test` process on GitHub's ubuntu-latest / Node 22
+# runner (run 43489148101, 58.1 s in, after P0-T5 and P0-T6's build step). The
+# same file passes 19/19 on darwin/arm64, and the exclusion in the file only
+# fires inside GitHub Actions, so nothing reproduces it locally.
+#
+# Four name-pattern selections localise which block — and which prerequisite —
+# carries the crash. `P0-T5` / `P0-T6` match the blocking describe, and a matched
+# suite runs all of its children, so each selection runs exactly one block.
+# `I000436_RUN_EXCLUDED=1` defeats the in-file exclusion (otherwise P0-T6 is
+# skipped here and nothing is measured); `I000436_SKIP_PY_SEED=1` is the
+# seeder-replacement arm.
+
+on:
+  push:
+    branches: [feat/v1.245-highd, feat/i000436-repro]
+  workflow_dispatch:
+
+concurrency:
+  group: i000436-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  selections:
+    name: workflow-control-http selections (linux, Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      RUST_BACKTRACE: "1"
+      # A SIGSEGV leaves no assertion to read; the diagnostic report carries the
+      # native stack and loaded modules of the dying thread.
+      NODE_OPTIONS: "--report-on-fatalerror --report-directory=${{ github.workspace }}/crash-reports"
+      TEST_FILE: apps/nexus-service/tests/workflow-control-http.test.mjs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          filter: blob:none
+      - uses: ./.github/actions/free-disk-space
+      - uses: ./.github/actions/setup-monorepo
+        with:
+          # nexus-core-node's graph pulls nexus-wasm-host, whose build.rs
+          # compiles the embedded modules from source.
+          rust-targets: wasm32-unknown-unknown
+      - name: Read workspace version for cargo cache key
+        id: workspace-version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+        with:
+          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-service-native
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+      - name: Build workspace type dependencies
+        run: |
+          pnpm --filter @42ch/nexus-contracts run build
+          pnpm --filter @42ch/nexus-native run build
+          pnpm --filter @42ch/nexus-provider-acp run build
+      - name: Stage the native addon
+        run: |
+          node packages/nexus-native/scripts/build.mjs
+          test -s packages/nexus-native-linux-x64-gnu/native/nexus_core_node.node
+      - name: A — whole file, exclusion defeated
+        continue-on-error: true
+        env:
+          I000436_RUN_EXCLUDED: "1"
+        run: |
+          node --test --test-concurrency=1 --test-timeout=180000 "$TEST_FILE" 2>&1 | tee /tmp/A.log
+      - name: B — P0-T6 only, exclusion defeated
+        continue-on-error: true
+        env:
+          I000436_RUN_EXCLUDED: "1"
+        run: |
+          node --test --test-concurrency=1 --test-timeout=180000 --test-name-pattern='P0-T6' "$TEST_FILE" 2>&1 | tee /tmp/B.log
+      - name: C — P0-T5 only
+        continue-on-error: true
+        run: |
+          node --test --test-concurrency=1 --test-timeout=180000 --test-name-pattern='P0-T5' "$TEST_FILE" 2>&1 | tee /tmp/C.log
+      - name: D — P0-T6 only, python seeder skipped
+        continue-on-error: true
+        env:
+          I000436_RUN_EXCLUDED: "1"
+          I000436_SKIP_PY_SEED: "1"
+        run: |
+          node --test --test-concurrency=1 --test-timeout=180000 --test-name-pattern='P0-T6' "$TEST_FILE" 2>&1 | tee /tmp/D.log
+      - name: Record the matrix
+        if: always()
+        run: |
+          for arm in A B C D; do
+            log="/tmp/$arm.log"
+            echo "===== $arm ====="
+            if [ ! -s "$log" ]; then echo "no log"; continue; fi
+            grep -E '^(ℹ (tests|suites|pass|fail|cancelled|skipped|duration_ms)|# (Subtest|fail|pass))' "$log" | tail -12
+            if grep -qi 'signal:.*SIGSEGV\|SIGSEGV\|Segmentation fault' "$log"; then echo "CRASH: SIGSEGV"; else echo "no SIGSEGV in the log"; fi
+          done | tee /tmp/matrix.txt
+      - name: Upload logs and crash reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: i000436-selections
+          path: |
+            /tmp/A.log
+            /tmp/B.log
+            /tmp/C.log
+            /tmp/D.log
+            /tmp/matrix.txt
+            crash-reports/*.json
+          if-no-files-found: warn
