@@ -46,9 +46,12 @@ use nexus_orchestration::engine::{
     StepOutcome,
 };
 use nexus_orchestration::resume_rules;
-use nexus_session_storage::{run_state::{RunRecord, WorkflowStateStore}, StorageError};
 use nexus_orchestration::schedule::supervisor::{ScheduleRunStarter, SupervisorError};
 use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
+use nexus_session_storage::{
+    run_state::{RunRecord, WorkflowStateStore},
+    StorageError,
+};
 use tokio_util::sync::CancellationToken;
 
 /// Per-run live-ring registry (v1.188 P4 §6.3).
@@ -1434,8 +1437,9 @@ impl WorkflowRunCoordinator {
         >,
         applied_admission: Arc<dyn AppliedAdmissionPort>,
     ) -> Self {
-        let workflow_store: Arc<dyn WorkflowStateStore> =
-            Arc::new(nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(pool.clone()));
+        let workflow_store: Arc<dyn WorkflowStateStore> = Arc::new(
+            nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(pool.clone()),
+        );
         Self {
             engine,
             storage,
@@ -9184,7 +9188,8 @@ mod tests {
                 checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
                 next_state: &nexus_session_storage::run_state::RunStateV1,
                 terminal_target: nexus_session_storage::run_state::TerminalSettlementTarget,
-            ) -> Result<nexus_session_storage::run_state::SettlementResult, StorageError> {
+            ) -> Result<nexus_session_storage::run_state::SettlementResult, StorageError>
+            {
                 self.inner
                     .settle_run(
                         session_id,
@@ -9261,7 +9266,8 @@ mod tests {
             async fn load_children(
                 &self,
                 parent_session_id: &SessionId,
-            ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError> {
+            ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError>
+            {
                 self.inner.load_children(parent_session_id).await
             }
         }
@@ -9685,7 +9691,8 @@ mod tests {
                 checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
                 next_state: &nexus_session_storage::run_state::RunStateV1,
                 terminal_target: nexus_session_storage::run_state::TerminalSettlementTarget,
-            ) -> Result<nexus_session_storage::run_state::SettlementResult, StorageError> {
+            ) -> Result<nexus_session_storage::run_state::SettlementResult, StorageError>
+            {
                 let n = self.arrived.fetch_add(1, Ordering::SeqCst) + 1;
                 if n == 1 {
                     tokio::time::timeout(std::time::Duration::from_secs(2), async {
@@ -9770,7 +9777,8 @@ mod tests {
             async fn load_children(
                 &self,
                 parent_session_id: &SessionId,
-            ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError> {
+            ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError>
+            {
                 self.inner.load_children(parent_session_id).await
             }
         }
@@ -10076,7 +10084,8 @@ mod tests {
                 checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
                 next_state: &nexus_session_storage::run_state::RunStateV1,
                 terminal_target: nexus_session_storage::run_state::TerminalSettlementTarget,
-            ) -> Result<nexus_session_storage::run_state::SettlementResult, StorageError> {
+            ) -> Result<nexus_session_storage::run_state::SettlementResult, StorageError>
+            {
                 self.inner
                     .settle_run(
                         session_id,
@@ -10148,7 +10157,8 @@ mod tests {
             async fn load_children(
                 &self,
                 parent_session_id: &SessionId,
-            ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError> {
+            ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError>
+            {
                 if self.armed.swap(false, Ordering::SeqCst) {
                     self.at_gate.store(true, Ordering::SeqCst);
                     while !self.release.load(Ordering::SeqCst) {

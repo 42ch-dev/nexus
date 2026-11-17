@@ -24,12 +24,12 @@ use thiserror::Error;
 #[cfg(test)]
 use crate::capability::CapabilityError;
 use crate::capability::CapabilityRegistry;
+use nexus_contracts::local::schedule::CoreContextPayload;
+use nexus_preset::source_identity::PresetSourceIdentity;
 use nexus_session_storage::run_state::{
     ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord, RunStateV1,
     SettlementResult, TerminalSettlementTarget, WorkflowStateStore,
 };
-use nexus_contracts::local::schedule::CoreContextPayload;
-use nexus_preset::source_identity::PresetSourceIdentity;
 use nexus_session_storage::StorageError;
 
 /// Context key that effectful tasks set when they perform an external effect
@@ -3130,13 +3130,13 @@ fn embedded_applied_document(
 ) -> Result<crate::capability::AppliedDocument, String> {
     let document = nexus_preset::embedded_workflow_document(loaded)
         .map_err(|error| format!("embedded_document_unavailable: {error}"))?;
-    let (apply_id, content_hash) =
-        nexus_preset::embedded_applied_identity(&loaded.id, &document).map_err(|error| {
-            format!(
-                "embedded_document_unavailable: document of `{}` cannot be hashed: {error}",
-                loaded.id
-            )
-        })?;
+    let (apply_id, content_hash) = nexus_preset::embedded_applied_identity(&loaded.id, &document)
+        .map_err(|error| {
+        format!(
+            "embedded_document_unavailable: document of `{}` cannot be hashed: {error}",
+            loaded.id
+        )
+    })?;
     Ok(crate::capability::AppliedDocument {
         identity: nexus_session_storage::run_state::AppliedRunIdentity {
             apply_id,
@@ -4155,7 +4155,10 @@ impl GraphFlowEngine {
                 .collect();
             // Snapshot the closure first so no children-map lock is held
             // across the storage awaits below.
-            let snapshot: Vec<(SessionId, Vec<nexus_session_storage::run_state::ChildCheckpoint>)> = {
+            let snapshot: Vec<(
+                SessionId,
+                Vec<nexus_session_storage::run_state::ChildCheckpoint>,
+            )> = {
                 let children_map = self.state.children.read().await;
                 let mut queue: std::collections::VecDeque<SessionId> =
                     std::collections::VecDeque::new();
@@ -4548,9 +4551,7 @@ impl GraphFlowEngine {
         let applied = self
             .resolve_applied(&loaded.id, Some(loaded))
             .await
-            .map_err(|error| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
-            })?;
+            .map_err(|error| EngineError::GraphFlow(graph_flow::GraphError::StorageError(error)))?;
         // ir-only is the only arm: a user bundle with no current apply refuses
         // before graph construction — never a YAML fallback.
         if user_bundle && applied.is_none() {
@@ -4629,7 +4630,10 @@ impl GraphFlowEngine {
         work_id: Option<String>,
         input: serde_json::Map<String, serde_json::Value>,
         core_context: Option<&CoreContextPayload>,
-        agent_bindings: std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>,
+        agent_bindings: std::collections::HashMap<
+            String,
+            nexus_session_storage::run_state::AgentBinding,
+        >,
         applied: Option<nexus_session_storage::run_state::AppliedRunIdentity>,
         intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
         graph: Arc<Graph>,
@@ -4732,7 +4736,10 @@ impl GraphFlowEngine {
         core_context: Option<&CoreContextPayload>,
         core_context_version: u32,
         expected_core_context_version: u32,
-        agent_bindings: std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>,
+        agent_bindings: std::collections::HashMap<
+            String,
+            nexus_session_storage::run_state::AgentBinding,
+        >,
         frozen_source: Option<PresetSourceIdentity>,
         applied: Option<nexus_session_storage::run_state::AppliedRunIdentity>,
         intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
@@ -5981,8 +5988,8 @@ mod tests {
     #![allow(clippy::significant_drop_tightening)] // tests read state snapshots; early-drop noise without contention value
 
     use super::*;
-    use nexus_session_storage::storage::SqliteSessionStorage;
     use graph_flow::InMemorySessionStorage;
+    use nexus_session_storage::storage::SqliteSessionStorage;
 
     /// Helper: create a test engine with in-memory storage and built-in caps.
     fn test_engine() -> GraphFlowEngine {

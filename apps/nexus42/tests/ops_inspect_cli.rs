@@ -14,8 +14,8 @@
 //! Run with: `cargo test -p nexus42 --test ops_inspect_cli`
 
 use assert_cmd::Command;
-use nexus_session_storage::run_state::RunDescriptorV1;
 use nexus_preset::source_identity::PresetSourceIdentity;
+use nexus_session_storage::run_state::RunDescriptorV1;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::future::Future;

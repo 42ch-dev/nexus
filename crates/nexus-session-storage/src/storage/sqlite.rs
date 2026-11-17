@@ -36,11 +36,11 @@ use graph_flow::{Session, SessionStorage};
 use std::sync::Arc;
 
 use super::inspect::{CheckpointRow, CheckpointSummary};
-use crate::{SessionId, SessionStatus, SessionSummary, StorageError};
 use crate::run_state::{
     ChildCheckpoint, PromptAttempt, RunCheckpoint, RunDescriptorV1, RunRecord, RunStateV1,
     SettlementResult, TerminalSettlementTarget, WorkflowStateStore,
 };
+use crate::{SessionId, SessionStatus, SessionSummary, StorageError};
 
 /// SQLite-backed session storage sharing `nexus-local-db`'s pool.
 pub struct SqliteSessionStorage {
@@ -1047,11 +1047,13 @@ async fn classify_transition_fence_miss(
                 session_id.0, row.execution_version
             )))
         }
-        Some(row) if row.state_revision != expected_revision_i64 => StorageError::RevisionMismatch {
-            session_id: session_id.0.clone(),
-            expected: expected_revision,
-            found: u64::try_from(row.state_revision).unwrap_or(0),
-        },
+        Some(row) if row.state_revision != expected_revision_i64 => {
+            StorageError::RevisionMismatch {
+                session_id: session_id.0.clone(),
+                expected: expected_revision,
+                found: u64::try_from(row.state_revision).unwrap_or(0),
+            }
+        }
         // Graph-clock fence loss with an intact workflow revision: a
         // graph-only winner owns the session clock — the same typed
         // ownership loss as a revision mismatch, never a mutation.
@@ -1439,11 +1441,13 @@ async fn classify_restore_fence_miss(
                 session_id.0, row.status
             )))
         }
-        Some(row) if row.state_revision != expected_revision_i64 => StorageError::RevisionMismatch {
-            session_id: session_id.0.clone(),
-            expected: expected_revision,
-            found: u64::try_from(row.state_revision).unwrap_or(0),
-        },
+        Some(row) if row.state_revision != expected_revision_i64 => {
+            StorageError::RevisionMismatch {
+                session_id: session_id.0.clone(),
+                expected: expected_revision,
+                found: u64::try_from(row.state_revision).unwrap_or(0),
+            }
+        }
         // A known, non-steppable status on the fence is a genuine
         // terminal/waiting winner.
         Some(_) => StorageError::TerminalState(session_id.0.clone()),
@@ -1494,11 +1498,13 @@ async fn classify_mark_fence_miss(
                 session_id.0, row.status
             )))
         }
-        Some(row) if row.state_revision != expected_revision_i64 => StorageError::RevisionMismatch {
-            session_id: session_id.0.clone(),
-            expected: expected_revision,
-            found: u64::try_from(row.state_revision).unwrap_or(0),
-        },
+        Some(row) if row.state_revision != expected_revision_i64 => {
+            StorageError::RevisionMismatch {
+                session_id: session_id.0.clone(),
+                expected: expected_revision,
+                found: u64::try_from(row.state_revision).unwrap_or(0),
+            }
+        }
         // Graph-clock fence loss with an intact workflow revision: a
         // graph-only winner owns the session clock — the same typed
         // ownership loss as a revision mismatch, never an overwrite.
@@ -1653,11 +1659,13 @@ async fn classify_prompt_attempt_miss(
         )))
     })?;
     Ok(match current {
-        Some(row) if row.state_revision != expected_revision_i64 => StorageError::RevisionMismatch {
-            session_id: session_id.0.clone(),
-            expected: expected_revision,
-            found: u64::try_from(row.state_revision).unwrap_or(0),
-        },
+        Some(row) if row.state_revision != expected_revision_i64 => {
+            StorageError::RevisionMismatch {
+                session_id: session_id.0.clone(),
+                expected: expected_revision,
+                found: u64::try_from(row.state_revision).unwrap_or(0),
+            }
+        }
         // The revision still matches but the step marker moved (or is absent
         // while `expected_step` named one): a newer step superseded this
         // prompt's admission — same linearization boundary, same typed

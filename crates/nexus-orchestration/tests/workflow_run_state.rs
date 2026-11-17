@@ -23,14 +23,14 @@ use graph_flow::{Session, SessionStorage};
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument;
 use nexus_orchestration::capability::{AppliedDocument, AppliedDocumentSource};
 use nexus_orchestration::engine::{SessionId, SessionStatus};
-use nexus_session_storage::StorageError as EngineError;
+use nexus_orchestration::OrchestrationEngine;
+use nexus_preset::source_identity::PresetSourceIdentity;
 use nexus_session_storage::run_state::{
     AgentBinding, AppliedRunIdentity, ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunStateV1,
     TerminalSettlementTarget, WorkflowStateStore,
 };
 use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
-use nexus_orchestration::OrchestrationEngine;
-use nexus_preset::source_identity::PresetSourceIdentity;
+use nexus_session_storage::StorageError as EngineError;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -441,10 +441,7 @@ async fn commit_transition_after_terminal_fails() {
         .expect_err("transition after terminal must be refused");
 
     assert!(
-        matches!(
-            err,
-            EngineError::TerminalState(_)
-        ),
+        matches!(err, EngineError::TerminalState(_)),
         "expected TerminalState, got {err:?}"
     );
 }
@@ -1081,7 +1078,10 @@ async fn engine_wait_produces_durable_wait_token() {
         !wait.wait_id.is_empty(),
         "wait token must be a fresh UUID, not empty"
     );
-    assert_eq!(wait.kind, nexus_session_storage::run_state::WaitKind::Manual);
+    assert_eq!(
+        wait.kind,
+        nexus_session_storage::run_state::WaitKind::Manual
+    );
 
     let wait_id = wait.wait_id;
     let revision = record.state_revision;
@@ -1191,10 +1191,7 @@ async fn in_flight_marker_fences_control_signals_and_stale_transition() {
         )
         .await
         .expect_err("transition loaded before the marker must lose its CAS");
-    assert!(matches!(
-        stale,
-        EngineError::RevisionMismatch { .. }
-    ));
+    assert!(matches!(stale, EngineError::RevisionMismatch { .. }));
     let after = storage
         .load_run(&sid)
         .await
@@ -1771,10 +1768,7 @@ async fn child_cas_stale_revision_rolls_back_root() {
         .expect_err("stale child revision must fail the root transition");
 
     assert!(
-        matches!(
-            err,
-            EngineError::RevisionMismatch { .. }
-        ),
+        matches!(err, EngineError::RevisionMismatch { .. }),
         "expected RevisionMismatch for stale child, got {err:?}"
     );
 
@@ -1913,10 +1907,7 @@ async fn child_cas_terminal_child_rolls_back_root() {
         .expect_err("terminal child at a stale revision must fail the root transition");
 
     assert!(
-        matches!(
-            err,
-            EngineError::TerminalState(_)
-        ),
+        matches!(err, EngineError::TerminalState(_)),
         "expected TerminalState for terminal child at stale revision, got {err:?}"
     );
 
@@ -4580,10 +4571,7 @@ async fn restore_pre_step_is_single_atomic_revision_fence() {
         .await
         .expect_err("restore must refuse when a concurrent transition advanced the revision");
     assert!(
-        matches!(
-            err,
-            EngineError::RevisionMismatch { expected: 1, .. }
-        ),
+        matches!(err, EngineError::RevisionMismatch { expected: 1, .. }),
         "expected RevisionMismatch(expected=1), got {err:?}"
     );
 
@@ -5316,10 +5304,7 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
         .expect_err("restore_pre_step must refuse a human-wait row");
     // Revision matches, so the refusal is TerminalState (waiting is excluded).
     assert!(
-        matches!(
-            err,
-            EngineError::TerminalState(_)
-        ),
+        matches!(err, EngineError::TerminalState(_)),
         "expected TerminalState for a waiting_for_input restore, got {err:?}"
     );
 
@@ -5713,7 +5698,10 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
         !wait.wait_id.is_empty(),
         "the wait token must be a fresh UUID, not empty"
     );
-    assert_eq!(wait.kind, nexus_session_storage::run_state::WaitKind::Manual);
+    assert_eq!(
+        wait.kind,
+        nexus_session_storage::run_state::WaitKind::Manual
+    );
     let token = wait.wait_id.clone();
 
     // Reopen the SAME DB file (daemon restart boundary): the token must
@@ -6488,9 +6476,8 @@ async fn force_db_graph_version(pool: &sqlx::SqlitePool, session_id: &str, versi
 /// concurrency (revision/terminal/conflict) outcome.
 fn assert_hard_storage_error(err: &nexus_session_storage::StorageError, what: &str) {
     match err {
-        nexus_session_storage::StorageError::GraphFlow(
-            graph_flow::GraphError::StorageError(_),
-        ) => {}
+        nexus_session_storage::StorageError::GraphFlow(graph_flow::GraphError::StorageError(_)) => {
+        }
         other => panic!("{what}: expected hard GraphError::StorageError, got {other:?}"),
     }
 }

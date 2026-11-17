@@ -1078,7 +1078,8 @@ impl ScheduleSupervisor {
         &self,
         stage: &str,
         work_id: &str,
-    ) -> Option<std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>> {
+    ) -> Option<std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>>
+    {
         let preset_id = crate::stage_gates::preset_for_stage(stage)?;
         if let Some(provider_id) = self.binding_provider.as_ref().as_ref() {
             crate::preset_runtime::default_bindings_for_preset(preset_id, provider_id).map_or_else(
@@ -1560,7 +1561,8 @@ impl ScheduleSupervisor {
         // descriptor).
         let descriptor_work_id: Option<String> = execution_descriptor
             .and_then(|bytes| {
-                serde_json::from_slice::<nexus_session_storage::run_state::RunDescriptorV1>(bytes).ok()
+                serde_json::from_slice::<nexus_session_storage::run_state::RunDescriptorV1>(bytes)
+                    .ok()
             })
             .and_then(|d| d.work_id)
             .filter(|id| !id.is_empty());
@@ -1781,7 +1783,8 @@ impl ScheduleSupervisor {
         .fetch_all(&*self.pool)
         .await?;
 
-        let store = nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(self.pool.clone());
+        let store =
+            nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(self.pool.clone());
         let mut reconciled = 0usize;
         for (schedule_id, session_id) in rows {
             let record = match store
@@ -3443,7 +3446,8 @@ mod tests_t9 {
         // retried and settles from the durable terminal — paused rows are
         // inside the reconcile scan and errors never permanently exclude.
         let good_state =
-            serde_json::to_vec(&nexus_session_storage::run_state::RunStateV1::default()).expect("run state json");
+            serde_json::to_vec(&nexus_session_storage::run_state::RunStateV1::default())
+                .expect("run state json");
         sqlx::query("UPDATE orchestration_sessions SET run_state_json = ? WHERE session_id = ?")
             .bind(&good_state)
             .bind("SES-P1-1")

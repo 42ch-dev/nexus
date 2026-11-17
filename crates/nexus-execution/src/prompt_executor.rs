@@ -50,8 +50,11 @@ use nexus_agent_host::{HostFacade, HostOperationId, ProviderId};
 use nexus_orchestration::capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,
 };
-use nexus_session_storage::{run_state::{PromptAttempt, PromptPhase, WorkflowStateStore}, StorageError};
 use nexus_orchestration::SessionId;
+use nexus_session_storage::{
+    run_state::{PromptAttempt, PromptPhase, WorkflowStateStore},
+    StorageError,
+};
 
 /// Key for a lazily-reused Host session: the same run+role reuses its
 /// session serially; another run/Creator never shares it (A5).
@@ -1018,8 +1021,8 @@ mod tests {
         HostStartConfig, OperationFinishedEvent, SessionOwner,
     };
     use nexus_agent_host::{HostFacade, HostResult, HostSession, ProviderCatalog, SessionState};
-    use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
     use nexus_orchestration::OrchestrationEngine;
+    use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Mutex;
