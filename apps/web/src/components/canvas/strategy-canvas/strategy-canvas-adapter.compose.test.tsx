@@ -159,6 +159,38 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
     expect(client.strategyPatchState).not.toHaveBeenCalled();
   });
 
+  it('keeps the prompt editor writable on a compose candidate', () => {
+    const client = { strategyPatchPromptTemplate: vi.fn() } as unknown as NexusClient;
+    const adapter = createStrategyCanvasAdapter(
+      ctxRef({
+        appliedView: false,
+        selectedState: {
+          id: 'draft',
+          next: 'done',
+          context_update: { template_file: 'prompts/draft.md' },
+        } as PresetState,
+        promptTemplateRef: 'prompts/draft.md',
+        form: { label: '', description: '', nextTarget: '', promptBody: '# edited prompt' },
+        compose: {
+          isComposing: false,
+          onToggleSlotExpanded: () => {},
+          onBindSlot: () => Promise.resolve(),
+          onReplaceSubtree: () => Promise.resolve(),
+          onUnnest: () => Promise.resolve(),
+        },
+      }),
+    );
+
+    renderInApp(<>{adapter.renderInspector?.(null as never)}</>, { client });
+
+    // A prompt body on the candidate is content its author still owns; only the
+    // read-only applied view disables it.
+    const prompt = screen.getByRole('region', { name: 'Prompt inspector' });
+    expect(within(prompt).queryByTestId('prompt-structural-disabled')).toBeNull();
+    expect(within(prompt).getByRole('textbox')).not.toBeDisabled();
+    expect(within(prompt).getByRole('button', { name: 'Save' })).not.toBeDisabled();
+  });
+
   it('keeps the applied view read-only: every YAML editor refuses its write and names Compose', () => {
     const client = {
       strategyPatchState: vi.fn(),
