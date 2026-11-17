@@ -35,24 +35,10 @@ vi.mock('@/components/canvas/canvas-shell', () => ({
   useNodeChangeHandler: () => () => {},
 }));
 
-const strategyState = vi.hoisted(() => ({
-  graphQuery: {
-    isLoading: false,
-    isError: false,
-    refetch: vi.fn(),
-    data: {
-      revision: 1,
-      parsed: {
-        manifest: { preset: { id: 'novel-writing' }, states: [] },
-        problems: [],
-      },
-    },
-  },
-}));
-
 vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => ({
   useStrategyCanvas: () => ({
-    graphQuery: strategyState.graphQuery,
+    parsed: undefined,
+    revision: 1,
     activeSession: null,
     creatorId: 'c1',
     baseRevision: 1,
@@ -473,6 +459,10 @@ describe('StrategyCanvas — compose path (flag on)', () => {
         HttpResponse.json({
           current_apply: live,
           newest_approval: approvals[0] ?? null,
+          // The applied preset is what the Canvas renders; the identity alone
+          // would read as D16(c) "document no longer verifies".
+          applied_document: SEED,
+          applied_document_refusal: null,
         }),
       ),
       http.get(APPROVALS_PATH, () => HttpResponse.json({ items: approvals })),
@@ -740,7 +730,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
 });
 
 describe('StrategyCanvas — flag-off parity (T7)', () => {
-  it('renders exactly as today: no compose reads, no Staging, disabled reason-bearing Approve', async () => {
+  it('renders the applied preset: no compose reads, no Staging, disabled reason-bearing Approve', async () => {
     window.localStorage.removeItem(COMPOSE_FLAG_STORAGE_KEY);
     let irReads = 0;
     let patternReads = 0;
@@ -750,6 +740,20 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
         irReads += 1;
         return HttpResponse.json(SEED);
       }),
+      http.get(APPLIED_PATH, () =>
+        HttpResponse.json({
+          current_apply: {
+            apply_id: 'app_1',
+            approval_id: 'apr_42',
+            content_hash: 'hash-1',
+            applied_at: '2026-11-13T01:00:00Z',
+            supersedes_apply_id: null,
+          },
+          newest_approval: null,
+          applied_document: SEED,
+          applied_document_refusal: null,
+        }),
+      ),
       http.get(PATTERNS_PATH, () => {
         patternReads += 1;
         return HttpResponse.json({ items: [], pagination: { limit: 100, has_more: false } });
@@ -762,6 +766,8 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
     );
 
     renderCanvas();
+    // The applied read is async; wait for the rendered preset before asserting.
+    await screen.findByRole('button', { name: 'Simulate…' });
 
     // No Staging badge, no Add pattern entry point.
     expect(screen.queryByTestId('strategy-staging')).not.toBeInTheDocument();
@@ -770,10 +776,12 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
     expect(irReads).toBe(0);
     expect(patternReads).toBe(0);
 
-    // The legacy transition author and both connection gestures stay exactly where they were.
-    expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
-    expect(typeof shellProps.current.onConnect).toBe('function');
-    expect(typeof shellProps.current.onReconnect).toBe('function');
+    // The applied view is read-only (P6 condition 2): the YAML transition author
+    // and both connection gestures write the preset file, which is not the
+    // document on canvas, so neither is offered — editing goes through Compose.
+    expect(screen.queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
+    expect(shellProps.current.onConnect).toBeUndefined();
+    expect(shellProps.current.onReconnect).toBeUndefined();
 
     // Today's Simulate behaviour: resolve the installed preset IR and walk it.
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));

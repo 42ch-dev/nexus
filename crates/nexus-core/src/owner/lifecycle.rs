@@ -222,6 +222,12 @@ pub struct ExecutionHandle {
     session_cancels: Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
+    /// The prompt executor the transport composed onto this owner, if any.
+    ///
+    /// Retained so a spine tool that needs a model (`nexus.strategy.generate`) passes the SAME
+    /// executor the engine drives, instead of building a second Host client the provider
+    /// selection does not know about. `None` is a transport that attached no model.
+    prompt_executor: Option<Arc<dyn PromptExecutor>>,
     /// The durable workspace commit authority this owner commits through.
     ///
     /// Bound at establishment so `commit_workspace` cannot be routed to a
@@ -349,6 +355,12 @@ impl ExecutionHandle {
     #[must_use]
     pub fn capability_holder(&self) -> CapabilityRegistryHolder {
         self.capability_holder.clone()
+    }
+
+    /// The prompt executor this owner drives, or `None` when the transport attached no model.
+    #[must_use]
+    pub fn prompt_executor(&self) -> Option<Arc<dyn PromptExecutor>> {
+        self.prompt_executor.clone()
     }
 
     /// Attach the schedule supervisor once it exists.
@@ -1287,6 +1299,7 @@ impl CoreService {
             coordinator,
             capability_holder,
             session_cancels,
+            prompt_executor: deps.prompt_executor.clone(),
             workspace_commit,
             nexus_home,
             workspace_root,

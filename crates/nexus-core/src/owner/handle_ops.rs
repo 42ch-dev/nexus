@@ -898,7 +898,8 @@ impl ExecutionHandle {
             self.runtime_facts().clone(),
             self.linked_core().ok(),
             Some(self.capability_holder()),
-        ))
+        )
+        .with_prompt_executor(self.prompt_executor()))
     }
 
     /// Build the compute context for this owner.
@@ -2286,8 +2287,8 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
             code: "yaml_intake_disabled".to_string(),
             message: format!(
                 "yaml intake is disabled for user preset '{preset_id}' under [strategy_intake] \
-                 mode 'ir-only': the strategy has no current apply (apply a strategy, or set \
-                 mode to 'yaml-only' for the v1.243 compatibility arm)"
+                 mode 'ir-only': the strategy has no current apply — apply a strategy before \
+                 running it (the 'yaml-only' compatibility arm was removed at v1.244.0)"
             ),
         },
         // The applied identity's own refusal, already carrying the coded

@@ -1,15 +1,16 @@
 //! Operator strategy-intake mode (composition ADR P6 condition 6).
 //!
 //! `[strategy_intake] mode` in `config.toml` selects which document a
-//! **user-bundle** run executes: `ir-only` (the default) runs the strategy's
-//! current apply and refuses a bundle with none, `yaml-only` is the emergency
-//! compatibility arm that runs the YAML manifest without reading the apply.
+//! **user-bundle** run executes: `ir-only` (the default, and the only arm)
+//! runs the strategy's current apply and refuses a bundle with none.
 //! Embedded and `_system.` presets never consult the key.
 //!
 //! The mode is read per new admission and frozen on the run descriptor, so
-//! recovery follows the recorded mode, not the current config. `yaml-only`
-//! is supported for the v1.243 minor line and removed at v1.244.0; the
-//! import/export surface has no removal boundary.
+//! recovery follows the recorded mode, not the current config. The `yaml-only`
+//! kill-switch that re-enabled YAML intake for one minor release after
+//! default-off was removed at v1.244.0 (I-000509): a config that still names it
+//! is refused with the replacement named, never mapped silently onto `ir-only`.
+//! The import/export surface has no removal boundary.
 
 use std::path::Path;
 
@@ -19,13 +20,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum StrategyIntakeMode {
-    /// IR-primary (the default): a current apply runs its document through
-    /// the shared applied-document resolution; a user bundle with no current
-    /// apply refuses before graph construction — never a YAML fallback.
+    /// IR-primary (the default and only arm): a current apply runs its
+    /// document through the shared applied-document resolution; a user bundle
+    /// with no current apply refuses before graph construction — never a YAML
+    /// fallback.
     IrOnly,
-    /// Emergency compatibility arm: the YAML manifest and graph run without
-    /// reading the current apply. Removed at v1.244.0.
-    YamlOnly,
 }
 
 /// Whether `preset_id` resolved to a user bundle — the only source intake
@@ -49,8 +48,11 @@ pub fn is_user_strategy_bundle(preset_id: &str, source_is_directory: bool) -> bo
 /// A missing file, a missing `[strategy_intake]` table, or a missing `mode`
 /// key all default to [`StrategyIntakeMode::IrOnly`]. An unreadable or
 /// unparseable document, a non-table `[strategy_intake]`, or a `mode` value
-/// outside `ir-only`/`yaml-only` is an error: a mistyped key must fail
-/// closed with the operator-visible refusal, never silently select an arm.
+/// outside `ir-only` is an error: a mistyped key must fail closed with the
+/// operator-visible refusal, never silently select an arm. The removed
+/// `yaml-only` arm is such a value — it refuses with `ir-only` named as the
+/// replacement, because an operator still writing it is mid-incident and a
+/// silent switch of the document their bundles run is the worst outcome.
 ///
 /// The read takes no lock: `write_cli_config` publishes the whole document
 /// atomically, so a lock-free reader never observes a truncated file
@@ -59,7 +61,7 @@ pub fn is_user_strategy_bundle(preset_id: &str, source_is_directory: bool) -> bo
 /// # Errors
 /// The `intake_config_invalid`-prefixed reason when the document is
 /// unreadable or unparseable, `[strategy_intake]` is not a table, `mode` is
-/// not a string, or the value is outside `ir-only`/`yaml-only`.
+/// not a string, or the value is outside `ir-only`.
 pub fn strategy_intake_mode(nexus_home: &Path) -> Result<StrategyIntakeMode, String> {
     let config_path = nexus_home.join("config.toml");
     let content = match std::fs::read_to_string(&config_path) {
@@ -97,10 +99,14 @@ pub fn strategy_intake_mode(nexus_home: &Path) -> Result<StrategyIntakeMode, Str
     })?;
     match value {
         "ir-only" => Ok(StrategyIntakeMode::IrOnly),
-        "yaml-only" => Ok(StrategyIntakeMode::YamlOnly),
+        "yaml-only" => Err(
+            "intake_config_invalid: [strategy_intake].mode is 'yaml-only', which was removed at \
+             v1.244.0; set mode to 'ir-only' — a user bundle runs its current apply, and one with \
+             no apply is refused"
+                .to_string(),
+        ),
         other => Err(format!(
-            "intake_config_invalid: [strategy_intake].mode is '{other}', expected 'ir-only' or \
-             'yaml-only'"
+            "intake_config_invalid: [strategy_intake].mode is '{other}', expected 'ir-only'"
         )),
     }
 }
@@ -156,10 +162,24 @@ mod tests {
             strategy_intake_mode(home.path()),
             Ok(StrategyIntakeMode::IrOnly)
         );
+    }
+
+    /// The removed `yaml-only` arm is refused, and the refusal names the
+    /// replacement: an operator still carrying the key is mid-incident, so a
+    /// silent fall-through to `ir-only` would change which document their
+    /// bundles run without saying so (I-000509).
+    #[test]
+    fn yaml_only_refuses_naming_the_replacement() {
         let home = home_with_config("[strategy_intake]\nmode = \"yaml-only\"\n");
-        assert_eq!(
-            strategy_intake_mode(home.path()),
-            Ok(StrategyIntakeMode::YamlOnly)
+        let error = strategy_intake_mode(home.path()).expect_err("the removed arm refuses");
+        assert!(error.contains("intake_config_invalid"), "{error}");
+        assert!(
+            error.contains("'yaml-only'"),
+            "the refusal names the key: {error}"
+        );
+        assert!(
+            error.contains("'ir-only'"),
+            "the refusal names the replacement: {error}"
         );
     }
 

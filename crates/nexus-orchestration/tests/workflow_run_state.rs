@@ -545,8 +545,8 @@ fn descriptor_serializes_the_applied_identity_only_when_present() {
 }
 
 /// The intake mode is frozen on the descriptor only when an admission recorded
-/// one, both arms round-trip under their kebab-case spellings, and a legacy
-/// descriptor keeps its exact bytes.
+/// one, the one remaining arm round-trips under its kebab-case spelling, and a
+/// legacy descriptor keeps its exact bytes.
 #[test]
 fn descriptor_round_trips_intake_mode_and_legacy_bytes_hold() {
     use nexus_home_layout::strategy_intake::StrategyIntakeMode;
@@ -562,28 +562,17 @@ fn descriptor_round_trips_intake_mode_and_legacy_bytes_hold() {
         "a legacy descriptor must not gain a key: {legacy_value}"
     );
 
-    for mode in [StrategyIntakeMode::IrOnly, StrategyIntakeMode::YamlOnly] {
-        let mut descriptor = test_descriptor("sess");
-        descriptor.intake_mode = Some(mode);
-        let value = serde_json::to_value(&descriptor).expect("descriptor serializes");
-        let back: RunDescriptorV1 =
-            serde_json::from_value(value.clone()).expect("descriptor decodes");
-        assert_eq!(back.intake_mode, Some(mode));
-        assert!(
-            value.get("intake_mode").is_some(),
-            "a recorded mode must serialize a key: {value}"
-        );
-    }
-
-    // The exact kebab-case spellings the config file and the descriptor share.
     let mut descriptor = test_descriptor("sess");
-    descriptor.intake_mode = Some(StrategyIntakeMode::YamlOnly);
-    let json = serde_json::to_string(&descriptor).expect("descriptor serializes");
-    assert!(
-        json.contains(r#""intake_mode":"yaml-only""#),
-        "yaml-only must serialize kebab-case: {json}"
-    );
     descriptor.intake_mode = Some(StrategyIntakeMode::IrOnly);
+    let value = serde_json::to_value(&descriptor).expect("descriptor serializes");
+    let back: RunDescriptorV1 = serde_json::from_value(value.clone()).expect("descriptor decodes");
+    assert_eq!(back.intake_mode, Some(StrategyIntakeMode::IrOnly));
+    assert!(
+        value.get("intake_mode").is_some(),
+        "a recorded mode must serialize a key: {value}"
+    );
+
+    // The exact kebab-case spelling the config file and the descriptor share.
     let json = serde_json::to_string(&descriptor).expect("descriptor serializes");
     assert!(
         json.contains(r#""intake_mode":"ir-only""#),
@@ -7190,8 +7179,8 @@ async fn preset_entry_does_not_gate_an_embedded_preset() {
 ///
 /// Mutation this fails on: passing `Path::new("")` for a missing home — the
 /// read then joins onto the process CWD, where an unrelated `config.toml` can
-/// select `yaml-only` (admitting the YAML bundle this test expects refused) or
-/// refuse with `intake_config_invalid` naming a file the operator never set.
+/// refuse with `intake_config_invalid` (the `yaml-only` value below no longer
+/// parses) naming a file the operator never set.
 #[tokio::test]
 async fn preset_entry_without_a_home_takes_ir_only() {
     let (pool, _db) = fresh_pool().await;

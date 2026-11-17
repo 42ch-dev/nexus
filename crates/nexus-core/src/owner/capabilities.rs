@@ -188,6 +188,14 @@ pub struct ToolContext {
     /// `Some` records the intended writes instead, so a dry run leaves
     /// `kb_key_blocks` byte-identical.
     pub(crate) recording_knowledge_entry: Option<Arc<StubKnowledgeEntryPort>>,
+    /// The prompt executor this process composed onto its execution owner.
+    ///
+    /// `None` is every context whose transport attached no model — a core-only
+    /// caller, a Simulate plane, a daemon with no provider selected. A spine
+    /// tool that needs a model passes exactly this, so the tool cannot reach a
+    /// second Host client the engine does not know about, and cannot invent a
+    /// heuristic substitute when the transport supplied none.
+    pub(crate) prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
 }
 
 impl ToolContext {
@@ -216,7 +224,21 @@ impl ToolContext {
             user_capabilities,
             recording_work_artifact: None,
             recording_knowledge_entry: None,
+            prompt_executor: None,
         }
+    }
+
+    /// The same context with the transport's prompt executor attached.
+    ///
+    /// The executor is the one the engine drives, so a tool's model round and a
+    /// preset's model round use one Host client and one provider selection.
+    #[must_use]
+    pub fn with_prompt_executor(
+        mut self,
+        prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+    ) -> Self {
+        self.prompt_executor = prompt_executor;
+        self
     }
 
     /// The same context, with Work artifact writes recorded instead of landed.
@@ -351,6 +373,12 @@ impl ToolContext {
         self.user_capabilities
             .as_ref()
             .and_then(nexus_orchestration::CapabilityRegistryHolder::get)
+    }
+
+    /// The prompt executor this context's transport attached, if any.
+    #[must_use]
+    pub fn prompt_executor(&self) -> Option<&dyn nexus_orchestration::capability::PromptExecutor> {
+        self.prompt_executor.as_deref()
     }
 }
 
@@ -536,6 +564,8 @@ fn check_nexus_tool_permission(
         "nexus.manuscript.write",
         // Mutates the Work's persisted stage/stage_status.
         "nexus.manuscript.phase.set",
+        // Commits a strategy candidate row through the generate kernel's CAS.
+        "nexus.strategy.generate",
     ];
 
     let allowed = if NEXUS_WRITE_TOOLS.contains(&tool_name) {
@@ -847,6 +877,66 @@ async fn execute_schedule_status(
         "schedule_ids": schedule_ids,
         "count": schedule_ids.len()
     }))
+}
+
+/// `nexus.strategy.generate` — one committed candidate for `parameters.strategy_id`.
+///
+/// The tool surface of the generate kernel and nothing more: it decodes the two address fields a
+/// tool call has to name, parses `parameters.request` into the SAME [`GenerateRequest`] the CLI
+/// parses arguments into and the HTTP body deserializes, and passes the context's executor as the
+/// corrector. Lint exhaustion comes back as the D20 payload (`code: lint_exhausted`) rather than a
+/// bare refusal, because the model reads `correction` and the spine's error surface carries no
+/// `details`: a refusal here would hand the model less than the payload it needs to act on.
+async fn execute_strategy_generate(
+    req: &ToolsApi,
+    context: &ToolContext,
+    _creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let strategy_id =
+        req.parameters["strategy_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.strategy_id".into(),
+                reason: "must be a string".into(),
+            })?;
+    let base_revision =
+        req.parameters["base_revision"]
+            .as_u64()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.base_revision".into(),
+                reason: "must be an unsigned integer".into(),
+            })?;
+    let request: crate::GenerateRequest = serde_json::from_value(req.parameters["request"].clone())
+        .map_err(|error| NexusApiError::InvalidInput {
+            field: "parameters.request".into(),
+            reason: error.to_string(),
+        })?;
+
+    let core = context.core()?;
+    // The spine admitted this call for the ACTIVE creator, which is the same
+    // creator the service hands out as its principal; no caller-supplied
+    // identity crosses this seam.
+    let principal = core.active_principal().await?;
+    let outcome = core
+        .generate_strategy_candidate(
+            &principal,
+            strategy_id,
+            base_revision,
+            request,
+            context.prompt_executor(),
+        )
+        .await;
+    match outcome {
+        Ok(outcome) => Ok(outcome.wire()),
+        // Exhaustion is the one payload the caller acts on, so it travels as the
+        // tool's result. Anything else is a refusal and stays one.
+        Err(CoreError::InputValidation { details })
+            if details.get("code").and_then(Value::as_str) == Some("lint_exhausted") =>
+        {
+            Ok(details)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// `nexus.context.assemble` — local assemble-moment or `POLICY_BLOCKED` (spec §4.1).
@@ -1578,6 +1668,15 @@ pub(crate) fn registry_schedule_status<'a>(
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
     Box::pin(execute_schedule_status(req, context, creator_id))
+}
+
+/// Registry wrapper: `nexus.strategy.generate` — async passthrough.
+pub(crate) fn registry_strategy_generate<'a>(
+    req: &'a ToolsApi,
+    context: &'a ToolContext,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_strategy_generate(req, context, creator_id))
 }
 
 /// Registry wrapper: `nexus.context.assemble` — async passthrough.
@@ -3132,7 +3231,7 @@ pub const NAMED_PLACEHOLDER_INPUT: &str =
 
 /// Registry-source ledger of builtin ids whose input schema is not yet
 /// authored. Lockstep pin: `row.catalog.input_schema.is_none() ⇔ id ∈ LEDGER`
-/// (unit-tested both directions). Task 2 converted all 30 static rows, so
+/// (unit-tested both directions). Task 2 converted all static rows, so
 /// the ledger is empty — the pin stays as the guard against future rows
 /// being added without a schema. Test-only: the catalog route reads
 /// `NAMED_PLACEHOLDER_INPUT`, never this ledger.
@@ -3560,8 +3659,9 @@ const ADMISSION_POOL_WRITE: &[AdmissionGate] = &[
     AdmissionGate::AuditLog,
 ];
 
-/// Create a registry pre-populated with all 30 host tools (28 `nexus.*` + 2
-/// `fs/*`; V1.34 + V1.53 P1 + V1.54 P0 + V1.56 P1 + V1.58 P3 + V1.59 P0).
+/// Create a registry pre-populated with all 31 host tools (29 `nexus.*` + 2
+/// `fs/*`; V1.34 + V1.53 P1 + V1.54 P0 + V1.56 P1 + V1.58 P3 + V1.59 P0, plus
+/// `nexus.strategy.generate` at v1.247 P6).
 ///
 /// V1.54 P0 T5: Converted to `LazyLock` singleton to eliminate per-dispatch
 /// allocation. All admission gates are `&'static [AdmissionGate]` references.
@@ -3683,6 +3783,32 @@ pub fn build_registry() -> CapabilityRegistry {
             description: "schedule status returns schedule ids for work",
             expected_outcome: "success",
             test_fn_name: "schedule_status_happy_path",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.strategy.generate",
+        access: Access::Write,
+        admission: ADMISSION_WRITE_WORKSPACE,
+        handler: registry_strategy_generate,
+        catalog: CatalogDescriptor {
+            description: "Generate one committed strategy candidate from a declarative request \
+                          (nodes, edges, nests, meta) through the same lint-correct kernel the CLI \
+                          and HTTP surfaces use. Success means structurally legal and nothing \
+                          more: the candidate still has to be simulated and approved. On lint \
+                          exhaustion the result is the `lint_exhausted` payload with one \
+                          actionable correction per violation, and nothing was persisted.",
+            // The rendered `GenerateRequest` contract (D8): the tool description IS the schema.
+            input_schema: Some(crate::generate::tool_input_schema()),
+            // Omitted: the success shape is the WorkflowDocument contract, which is authored as
+            // its own `$ref`-addressed schema and cannot be carried here verbatim.
+            output_schema: None,
+        },
+        failure_mode: FailureMode::Forbidden,
+        handler_test_vector: TestVector {
+            description: "the tool commits the requested candidate through the generate kernel",
+            expected_outcome: "success",
+            test_fn_name: "strategy_generate_tool_and_cli_and_http_reach_one_kernel",
         },
     });
 

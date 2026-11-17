@@ -1061,18 +1061,16 @@ pub enum RunControlError {
     },
 
     /// `[strategy_intake]` in the home config is unreadable or names a mode
-    /// outside `ir-only`/`yaml-only`. A mistyped key fails closed here
-    /// instead of silently selecting an intake arm.
+    /// outside `ir-only` (including the removed `yaml-only` arm). A mistyped
+    /// key fails closed here instead of silently selecting an intake arm.
     #[error("intake_config_invalid: {reason}")]
     InvalidIntakeConfig {
         /// What could not be read or parsed.
         reason: String,
     },
 
-    /// The default intake (`ir-only`): a user bundle with no current apply
-    /// refuses before graph construction — never a YAML fallback. Apply a
-    /// strategy or set `[strategy_intake] mode = "yaml-only"` (supported for
-    /// the v1.243 minor line, removed at v1.244.0).
+    /// The intake gate: a user bundle with no current apply refuses before
+    /// graph construction — never a YAML fallback. Apply a strategy first.
     #[error(
         "yaml_intake_disabled: user preset '{preset_id}' has no current apply under \
          [strategy_intake] mode 'ir-only'"
@@ -1651,9 +1649,9 @@ impl WorkflowRunCoordinator {
             .map_err(|e| RunControlError::PresetLoad(preset_id.to_string(), e.to_string()))?;
 
         // P6 condition 6 (intake mode), same gate as schedule admission: the
-        // key governs user bundles only; `yaml-only` runs the YAML bundle
-        // without reading the apply; the default `ir-only` resolves the apply
-        // below and refuses a user bundle with none before graph construction.
+        // key governs user bundles only; the one arm `ir-only` resolves the
+        // apply below and refuses a user bundle with none before graph
+        // construction.
         // The resolution itself is the admission port's: only the owner half
         // reads the Creator store, and recovery re-enters through the same one.
         let admission = self
@@ -3022,8 +3020,7 @@ impl WorkflowRunCoordinator {
         // P3.5 precedence, stated once (compass D3):
         //
         //   strategy has current apply    →  build from document_json (IR)
-        //   otherwise, `yaml-only`        →  build from `preset_id` (YAML)
-        //   otherwise, `ir-only` (default) →  refuse before graph construction — a user
+        //   otherwise, `ir-only`          →  refuse before graph construction — a user
         //                                     bundle with no apply never falls back to YAML
         //
         // For a user-preset schedule `preset_id` IS the strategy id (compass D10), so no second
@@ -3047,8 +3044,7 @@ impl WorkflowRunCoordinator {
         //
         // P6 condition 6 (intake mode): the mode governs user bundles only —
         // embedded and `_system.` presets keep the resolution below and
-        // record no mode. `yaml-only` runs the YAML bundle without reading
-        // the current apply; the default `ir-only` resolves as P3.5 states
+        // record no mode. The one arm `ir-only` resolves as P3.5 states
         // and refuses a user bundle with no current apply before any graph
         // is built (never a YAML fallback).
         let admission = self

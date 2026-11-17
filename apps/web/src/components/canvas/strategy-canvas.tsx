@@ -42,6 +42,7 @@ import {
   type StrategySurfaceGraph,
 } from './strategy-canvas/strategy-canvas-adapter';
 import { ApproveDisclosure } from './strategy-canvas/approve-disclosure';
+import { StrategyAppliedState } from './strategy-canvas/applied-state';
 import { ComposeConflictDialog } from './strategy-canvas/compose-conflict-dialog';
 import { PatternPickerDialog } from './strategy-canvas/pattern-picker-dialog';
 import { InspectorPanel, StrategyConflictModal } from './strategy-canvas/inspector-panel';
@@ -72,16 +73,40 @@ export interface StrategyCanvasProps {
 export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: StrategyCanvasProps) {
   const { t } = useTranslation('canvas');
   // v239-p3-canvas-compose-ui: per-surface flag (compass D14/D18). Off → the
-  // canvas renders exactly as today (YAML projection, disabled Approve).
-  const composeEnabled = useStrategyCanvasComposeFlag();
-  // With the flag on the candidate is the one structural authority, so a draft
-  // authored while it was off cannot commit through the YAML path.
-  const strategyState = useStrategyCanvas(presetId, composeEnabled);
+  // Canvas renders the applied preset with no composition surface.
+  const composeFlag = useStrategyCanvasComposeFlag();
+  // D16(a): Compose is the never-applied state's one action, so it must be
+  // reachable for a creator whose entrance defaults the flag off.
+  const [composeByUser, setComposeByUser] = useState(false);
+  const composeEnabled = composeFlag || composeByUser;
+  // D18: one status read carries the identity, the frozen applied document and
+  // the refusal that separates "nothing applied" from "unreadable". It is the
+  // Canvas's document source — the Canvas parses no YAML (P6 condition 2).
+  const applied = useStrategyApplied(presetId, true);
+  const appliedDocument = applied.data?.applied_document ?? null;
+  const currentApply = applied.data?.current_apply ?? null;
+  const refusal = applied.data?.applied_document_refusal ?? null;
   const compose = useStrategyCompose(presetId, composeEnabled);
+  // The document being rendered: the candidate while composing, else the
+  // applied preset. Both are IR.
+  const document = composeEnabled
+    ? (compose.workingDocument ?? appliedDocument)
+    : appliedDocument;
+  // The document being rendered is the applied (running) strategy: it is what
+  // apply/approve produced, so this view is read-only and editing goes through
+  // Compose (P6 condition 2, D18).
+  const appliedView = document === appliedDocument;
+  // No rendered document is authored in place — the applied view is the running
+  // strategy and a compose candidate is written through compose ops — so the
+  // preset-YAML structural author is never offered and never dispatched.
+  const yamlWritesDisabled = appliedView || composeEnabled;
+  const strategyState = useStrategyCanvas(
+    presetId,
+    { document, refetch: () => applied.refetch() },
+    yamlWritesDisabled,
+  );
   const approval = useApproveStrategy(presetId);
   const application = useApplyStrategy(presetId);
-  // T3: which apply is live + newest approval, for the live block and badge.
-  const appliedStatus = useStrategyApplied(presetId, composeEnabled);
   // T4: every approval, so Apply can be aimed at a superseded one (rollback).
   const approvals = useStrategyApprovals(presetId, composeEnabled);
   // The compose path simulates the working candidate it holds in hand; the
@@ -118,56 +143,50 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     onDismiss: () => {},
     danglingTargets: [],
     localEdges: [],
+    appliedView,
   });
 
   const adapter = useMemo(() => createStrategyCanvasAdapter(ctxRef), []);
 
+  // `useCanvasSurface` only calls this from an error state, but its identity is
+  // part of the payload: a value that changed per render would re-project the
+  // graph every render (the surface syncs the projection into its node state).
+  const refetchApplied = useRef<() => void>(() => {});
+  refetchApplied.current = () => void applied.refetch();
+  const refetchSurface = useCallback(() => refetchApplied.current(), []);
+
   const surfaceQuery = useMemo<CanvasSurfaceQueryResult<StrategySurfaceGraph>>(() => {
-    const data = strategyState.graphQuery.data;
-    if (!data) {
+    if (!document) {
       return {
         data: undefined,
-        isLoading: strategyState.graphQuery.isLoading,
-        isError: strategyState.graphQuery.isError,
-        error: strategyState.graphQuery.error,
-        refetch: strategyState.graphQuery.refetch,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: refetchSurface,
       };
     }
-    // V1.115 P0 T2: the adapter projects from `parsed` (not a pre-projected
-    // graph). The hook's draft edges are merged via ctxRef.localEdges inside
-    // the adapter's projectGraph — no graph field in the surface payload.
+    // The payload carries the document only: the adapter projects it from IR
+    // and merges draft edges via ctxRef.localEdges.
     return {
       data: {
-        revision: data.revision,
-        parsed: data.parsed,
+        revision: document.revision,
         activeSession: strategyState.activeSession,
         trajectory: simulation.trajectory,
-        // Compose path only: the working candidate + slot chrome. Absent with
-        // the flag off, so the adapter projects from YAML exactly as today.
-        ...(composeEnabled
-          ? {
-              document: compose.workingDocument ?? undefined,
-              patterns: compose.patternsQuery.data?.items,
-              expandedSlots: compose.expandedSlots,
-              containment: new Map(Object.entries(compose.containment)),
-            }
-          : {}),
+        document,
+        patterns: compose.patternsQuery.data?.items,
+        expandedSlots: compose.expandedSlots,
+        containment: new Map(Object.entries(compose.containment)),
       },
-      isLoading: strategyState.graphQuery.isLoading,
-      isError: strategyState.graphQuery.isError,
-      error: strategyState.graphQuery.error,
-      refetch: strategyState.graphQuery.refetch,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: refetchSurface,
     };
   }, [
-    strategyState.graphQuery.data,
-    strategyState.graphQuery.isLoading,
-    strategyState.graphQuery.isError,
-    strategyState.graphQuery.error,
-    strategyState.graphQuery.refetch,
+    document,
+    refetchSurface,
     strategyState.activeSession,
     simulation.trajectory,
-    composeEnabled,
-    compose.workingDocument,
     compose.patternsQuery.data,
     compose.expandedSlots,
     compose.containment,
@@ -179,8 +198,8 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     const node = surface.selectedNode;
     if (!node) return undefined;
     const stateId = (node.data as StrategyNodeData).stateId;
-    return strategyState.graphQuery.data?.parsed.manifest.states.find((s) => s.id === stateId);
-  }, [surface.selectedNode, strategyState.graphQuery.data]);
+    return strategyState.parsed?.manifest.states.find((s) => s.id === stateId);
+  }, [surface.selectedNode, strategyState.parsed]);
 
   const promptTemplateRef = useMemo(() => {
     return selectedState ? templateRefOf(selectedState) : undefined;
@@ -293,7 +312,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   function handleUseCurrent() {
     strategyState.setConflict(null);
     setIsEditing(false);
-    void strategyState.graphQuery.refetch();
+    void applied.refetch();
   }
 
   // Update the mutable adapter context every render. The adapter object is
@@ -315,12 +334,13 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     selectedState,
     promptTemplateRef,
     selectedNode: surface.selectedNode as unknown as Node<StrategyNodeData> | null,
-    parsed: strategyState.graphQuery.data?.parsed,
+    parsed: strategyState.parsed,
     onUseCurrent: handleUseCurrent,
     onReapply: strategyState.handleReapply,
     onDismiss: () => strategyState.setConflict(null),
     danglingTargets: ctxRef.current.danglingTargets,
     localEdges: strategyState.draftEdges as Edge<StrategyEdgeData>[],
+    appliedView,
     patterns: compose.patternsQuery.data?.items,
     ...(composeEnabled
       ? {
@@ -364,9 +384,9 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       'strategy.create-transition.keywords.link-states',
     ],
     handler: () => setCreateDialogOpen(true),
-    // Compose path: the candidate is the one structural authority, so the YAML
-    // transition author stays out of the palette (D: one writer per path).
-    available: () => !composeEnabled,
+    // The YAML transition author writes the preset file, which is never the
+    // document on canvas — neither the applied view nor a compose candidate.
+    available: () => !yamlWritesDisabled,
   });
 
   useEffect(() => {
@@ -386,10 +406,22 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     [strategyState.onConnect],
   );
 
-  if (strategyState.graphQuery.isLoading) return <LoadingState label={t('strategy.loading')} />;
+  // D16(c): an apply is recorded but its document no longer verifies. This is
+  // not an empty state — presenting it as "not yet applied" would invite an
+  // apply that overwrites a live ledger — so it wins over every other view and
+  // carries no import or apply action.
+  if (currentApply && !appliedDocument) {
+    return (
+      <StrategyAppliedState
+        state="unreadable"
+        reason={refusal?.message ?? refusal?.reason ?? ''}
+        onRecheck={() => void applied.refetch()}
+      />
+    );
+  }
   // Compose path: the working candidate seeds from the one IR read the wire
   // serves; until it lands there is nothing to project.
-  if (composeEnabled && compose.seedQuery.isError) {
+  if (!document && composeEnabled && compose.seedQuery.isError) {
     return (
       <ErrorState
         title={t('strategy.loadErrorTitle')}
@@ -398,16 +430,17 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       />
     );
   }
-  if (composeEnabled && !compose.workingDocument) {
+  if (!document && composeEnabled) {
     return <LoadingState label={t('strategy.composeLoading')} />;
   }
-  if (strategyState.graphQuery.isError) {
-    if (isOrchestrationEngineUnavailable(strategyState.graphQuery.error)) {
+  if (!document && applied.isLoading) return <LoadingState label={t('strategy.loading')} />;
+  if (!document && applied.isError) {
+    if (isOrchestrationEngineUnavailable(applied.error)) {
       return (
         <UnavailableState
           title={t('strategy.engineUnavailableTitle')}
           description={t('strategy.engineUnavailableDescription')}
-          onRetry={() => strategyState.graphQuery.refetch()}
+          onRetry={() => void applied.refetch()}
         />
       );
     }
@@ -415,12 +448,29 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       <ErrorState
         title={t('strategy.loadErrorTitle')}
         description={t('strategy.loadError')}
-        onRetry={() => strategyState.graphQuery.refetch()}
+        onRetry={() => void applied.refetch()}
       />
     );
   }
+  // D16(b): an approved candidate with no live version — apply leads, Compose
+  // does not. D16(a): neither — Compose is the only action.
+  if (!document) {
+    const newest = applied.data?.newest_approval ?? null;
+    if (newest) {
+      return (
+        <StrategyAppliedState
+          state="approved-unapplied"
+          refusal={application.application?.kind === 'refused' ? application.application.message : null}
+          onApplyLatest={() => handleApply(newest)}
+        />
+      );
+    }
+    return (
+      <StrategyAppliedState state="never-applied" onOpenCompose={() => setComposeByUser(true)} />
+    );
+  }
 
-  const parsed = strategyState.graphQuery.data?.parsed;
+  const parsed = strategyState.parsed;
   const problems = parsed?.problems ?? [];
   // V1.115 T2: danglingTargets is a projection byproduct written by the
   // adapter's projectGraph into ctxRef.current.danglingTargets.
@@ -429,12 +479,12 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   return (
     <div className="flex flex-col gap-4">
       <CanvasHeader
-        revision={composeEnabled ? compose.revision : strategyState.baseRevision}
+        revision={strategyState.revision}
         status={revisionStatus}
         activeSession={strategyState.activeSession}
         showAlt={surface.showAlt}
         setShowAlt={surface.setShowAlt}
-        onOpenCreateTransition={composeEnabled ? undefined : () => setCreateDialogOpen(true)}
+        onOpenCreateTransition={yamlWritesDisabled ? undefined : () => setCreateDialogOpen(true)}
         onSimulate={handleSimulate}
         staging={composeEnabled}
         onAddPattern={composeEnabled ? () => setPatternPickerOpen(true) : undefined}
@@ -448,10 +498,11 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
           edges={surface.edges}
           nodeTypes={surface.nodeTypes}
           onNodesChange={surface.onNodesChange}
-          // Compose path: a displayed edge is never authored through the YAML
-          // authority — connect/reconnect write the preset, not the candidate.
-          onConnect={composeEnabled ? undefined : onConnect}
-          onReconnect={composeEnabled ? undefined : strategyState.onReconnect}
+          // A displayed edge is never authored through the YAML authority: the
+          // applied view is read-only and connect/reconnect write the preset,
+          // not the candidate, so neither gesture is offered.
+          onConnect={yamlWritesDisabled ? undefined : onConnect}
+          onReconnect={yamlWritesDisabled ? undefined : strategyState.onReconnect}
           summaryText={surface.summaryText}
           ariaLabel={t('strategy.graphAriaLabel')}
           relayout={surface.relayout}
@@ -478,7 +529,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
                 isCommitting={strategyState.isCommittingDraft}
                 onCommit={strategyState.commitDraft}
                 onCancel={strategyState.cancelDraft}
-                structuralWritesDisabled={composeEnabled}
+                structuralWritesDisabled={yamlWritesDisabled}
               />
             </aside>
           ) : null}
@@ -503,9 +554,9 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         onSelectApplyTarget={setApplyTargetId}
         approvalsError={composeEnabled ? (approvals.error?.message ?? null) : null}
         application={composeEnabled ? application.application : null}
-        appliedStatus={composeEnabled ? (appliedStatus.data ?? null) : null}
-        appliedStatusPending={composeEnabled ? appliedStatus.isPending : false}
-        appliedStatusError={composeEnabled ? (appliedStatus.error?.message ?? null) : null}
+        appliedStatus={composeEnabled ? (applied.data ?? null) : null}
+        appliedStatusPending={composeEnabled ? applied.isPending : false}
+        appliedStatusError={composeEnabled ? (applied.error?.message ?? null) : null}
       />
 
       <ComposeConflictDialog

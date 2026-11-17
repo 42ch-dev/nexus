@@ -1,16 +1,13 @@
 /**
- * Strategy graph adapter — projection tests (V1.115 P0 T2 / W001).
+ * Strategy graph — YAML projection tests (V1.115 P0 T2 / W001).
  *
- * Verifies that `adapter.projectGraph({ parsed })` produces identical nodes,
- * edges, and `parentId` nesting to the canonical `buildStrategyGraph` function.
- * The adapter is the single projection path — these tests target the adapter,
- * not the function directly (AC-P0-2: tests target adapter).
- *
- * Also verifies: danglingTargets byproduct is written to ctxRef, and the
- * projection is deterministic (same input → same output).
+ * The Canvas no longer runs this projection (P6 condition 2: it renders the
+ * applied IR document through `buildStrategyGraphFromIr`); `buildStrategyGraph`
+ * and `parsePresetYaml` stay exported for the import surface that does not
+ * exist yet. These tests are their contract: nodes, edges, `parentId` nesting,
+ * the trajectory overlay and the dangling-target byproduct.
  */
 import { describe, expect, it } from 'vitest';
-import type { MutableRefObject } from 'react';
 
 import type { SimulationTrajectory } from '@42ch/nexus-contracts';
 
@@ -18,10 +15,7 @@ import { simulationTrajectory } from '@/test/simulation-fixture';
 
 import { parsePresetYaml } from './preset-yaml';
 import { buildStrategyGraph } from './strategy-graph';
-import {
-  createStrategyCanvasAdapter,
-  type StrategyCanvasAdapterContext,
-} from '@/components/canvas/strategy-canvas/strategy-canvas-adapter';
+import { applyTrajectoryOverlay } from '@/components/canvas/strategy-canvas/simulation-overlay';
 
 /** A representative preset exercising outer states, inner graph, and converge. */
 const SAMPLE_YAML = `
@@ -88,29 +82,16 @@ inner_graphs:
 `;
 
 // ---------------------------------------------------------------------------
-// Adapter helpers — minimal ctxRef for projection tests
+// Projection helper
 // ---------------------------------------------------------------------------
 
-function makeCtxRef() {
-  // Minimal ctxRef — projectGraph only reads/writes danglingTargets and localEdges.
-  // Cast through unknown because the full StrategyCanvasAdapterContext has many
-  // fields used only by renderInspector/adaptConflict, not by projectGraph.
-  return { current: { danglingTargets: [], localEdges: [] } } as unknown as MutableRefObject<
-    StrategyCanvasAdapterContext
-  >;
-}
-
 function project(yaml: string, trajectory: SimulationTrajectory | null = null) {
-  const ctxRef = makeCtxRef();
-  const adapter = createStrategyCanvasAdapter(ctxRef);
   const parsed = parsePresetYaml(yaml);
-  const result = adapter.projectGraph({
+  const graph = buildStrategyGraph(parsed);
+  return {
+    result: { ...graph, nodes: applyTrajectoryOverlay(graph.nodes, trajectory) },
     parsed,
-    revision: parsed.revision ?? 0,
-    activeSession: null,
-    trajectory,
-  });
-  return { result, ctxRef, parsed };
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -144,13 +125,12 @@ states:
   });
 });
 
-describe('StrategyCanvasAdapter.projectGraph — projection equivalence', () => {
-  it('produces identical nodes/edges to buildStrategyGraph (adapter owns projection)', () => {
-    const parsed = parsePresetYaml(SAMPLE_YAML);
+describe('buildStrategyGraph — YAML projection contract', () => {
+  it('projects the parsed manifest into the canonical graph', () => {
     const { result } = project(SAMPLE_YAML);
-    const direct = buildStrategyGraph(parsed);
-    expect(result.nodes).toEqual(direct.nodes);
-    expect(result.edges).toEqual(direct.edges);
+    expect(result.nodes.length).toBeGreaterThan(0);
+    expect(result.edges.length).toBeGreaterThan(0);
+    expect(result.danglingTargets).toEqual([]);
   });
 
   it('overlays predicted waits and stubbed judges from the trajectory', () => {
@@ -243,11 +223,11 @@ describe('StrategyCanvasAdapter.projectGraph — projection equivalence', () => 
   });
 });
 
-describe('StrategyCanvasAdapter.projectGraph — validation tolerance', () => {
-  it('does not crash on a dangling `next` target and surfaces it via ctxRef.danglingTargets', () => {
+describe('buildStrategyGraph — validation tolerance', () => {
+  it('does not crash on a dangling `next` target and surfaces it via danglingTargets', () => {
     // Typo'd target — `outlinig` does not exist. The BFS should skip the
-    // dangling id at dequeue time and the adapter surfaces the warning via
-    // ctxRef.current.danglingTargets for the ValidationPanel.
+    // dangling id at dequeue time and the projection surfaces the warning via
+    // danglingTargets for the ValidationPanel.
     const yaml = `
 preset:
   id: typo-preset
@@ -260,10 +240,10 @@ states:
     next: outlinig
   - id: done
 `;
-    const { result, ctxRef } = project(yaml);
+    const { result } = project(yaml);
     expect(result.nodes.find((n) => n.id === 'gathering')).toBeDefined();
-    expect(ctxRef.current.danglingTargets.length).toBeGreaterThan(0);
-    expect(ctxRef.current.danglingTargets[0]).toContain('outlinig');
+    expect(result.danglingTargets.length).toBeGreaterThan(0);
+    expect(result.danglingTargets[0]).toContain('outlinig');
     // The dangling edge is NOT pushed (pushOuterEdge drops missing targets),
     // so the edges array has no synthetic edge for the dangling next.
     expect(result.edges.length).toBe(0);

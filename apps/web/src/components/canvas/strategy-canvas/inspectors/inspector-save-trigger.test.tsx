@@ -227,5 +227,9 @@ describe('inspector save trigger replay guard (R-V172P1-QC3-001)', () => {
     );
 
     await waitFor(() => expect(client.strategyPatchPromptTemplate).toHaveBeenCalledTimes(1));
+    // The component's enabled path must write the document it displays: the
+    // response's revision is the one the editor carries next. (The canvas never
+    // enables it — no canvas document is the preset YAML this writer targets.)
+    await waitFor(() => expect(workingRevisionRef.current).toBe(2));
   });
 });

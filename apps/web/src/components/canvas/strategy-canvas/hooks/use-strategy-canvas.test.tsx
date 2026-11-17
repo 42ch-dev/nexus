@@ -21,42 +21,56 @@ import { ClientProvider } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
 import type { NexusClient } from '@/lib/nexus';
 import { ToastProvider } from '@/lib/use-toast';
-import { usePresetGraph } from '@/lib/canvas/use-strategy-data';
 
-import { useStrategyCanvas } from './use-strategy-canvas';
+import { useStrategyCanvas, type StrategyDocumentSource } from './use-strategy-canvas';
 
 const mocks = vi.hoisted(() => {
   const refetch = vi.fn(() => Promise.resolve({ data: undefined }));
-  const graphQuery = {
-    data: {
-      revision: 1,
-      parsed: {
-        manifest: {
-          preset: { id: 'preset-1' },
-          states: [
-            { id: 's1', description: 'Original', next: 's2' },
-            { id: 's2', description: 'Second' },
-          ],
-        },
-      },
-    },
-    isLoading: false,
-    isError: false,
-    refetch,
-  };
-  return { refetch, graphQuery };
+  return { refetch };
 });
 
 vi.mock('@/lib/canvas/use-strategy-data', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/canvas/use-strategy-data')>();
   return {
     ...actual,
-    usePresetGraph: () => mocks.graphQuery as unknown as ReturnType<typeof usePresetGraph>,
     useActiveSession: () => undefined as unknown as ReturnType<typeof actual.useActiveSession>,
     usePresetSchedules: () => ({ data: [] }) as unknown as ReturnType<typeof actual.usePresetSchedules>,
     useDerivedCreatorId: () => 'creator-1',
   };
 });
+
+/** The document source the Canvas hands the hook: two states at revision 1. */
+function documentSource(): StrategyDocumentSource {
+  return {
+    document: {
+      ir_version: 0,
+      id: 'preset-1',
+      version: 1,
+      revision: 1,
+      state: 'candidate',
+      meta: {
+        description: 'Preset under test',
+        kind: 'creator',
+        run_intents: ['work_init'],
+        requires_capabilities: [],
+      },
+      entry: 's1',
+      terminal: [],
+      nodes: [
+        { id: 's1', kind: 'outer_state', effect_class: 'pure', ui: { description: 'Original' } },
+        { id: 's2', kind: 'outer_state', effect_class: 'pure', ui: { description: 'Second' } },
+      ],
+      edges: [{ id: 's1->s2', from: 's1', to: 's2', kind: 'linear' }],
+      nests: [],
+      assets: [],
+      signals: [],
+      roles: [],
+      effect_summary: 'pure',
+      provenance: { source: 'compose' },
+    },
+    refetch: mocks.refetch,
+  };
+}
 
 function wrapper({ children }: { children: ReactNode }) {
   const client = {
@@ -94,13 +108,11 @@ function makeCommitWrapper(client: NexusClient) {
 
 describe('useStrategyCanvas edit-save-refetch (R-V171P0-QC1-008 B7)', () => {
   it('refetches on conflict + reapply and replays the save trigger', async () => {
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), { wrapper });
-
-    expect(result.current.graphQuery.refetch).toBe(mocks.refetch);
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), { wrapper });
 
     act(() => {
-      // Use the same revision as the mocked graph so the auto-clear effect does
-      // not immediately dismiss the conflict before reapply is exercised.
+      // Use the document's own revision so the auto-clear effect does not
+      // immediately dismiss the conflict before reapply is exercised.
       result.current.handleConflict(1, 'state');
     });
     expect(mocks.refetch).toHaveBeenCalledTimes(1);
@@ -117,7 +129,7 @@ describe('useStrategyCanvas edit-save-refetch (R-V171P0-QC1-008 B7)', () => {
 
 describe('useStrategyCanvas onConnect draft edge (FB-SE-000)', () => {
   it('creates a draft transition edge when connecting two different states', () => {
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), { wrapper });
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), { wrapper });
 
     expect(result.current.draftEdges).toHaveLength(0);
     expect(typeof result.current.onConnect).toBe('function');
@@ -136,7 +148,7 @@ describe('useStrategyCanvas onConnect draft edge (FB-SE-000)', () => {
   });
 
   it('does not create a draft edge for a self-loop', () => {
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), { wrapper });
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), { wrapper });
 
     act(() => {
       result.current.onConnect({ source: 's1', target: 's1', sourceHandle: null, targetHandle: null });
@@ -146,7 +158,7 @@ describe('useStrategyCanvas onConnect draft edge (FB-SE-000)', () => {
   });
 
   it('does not call the daemon on connect (local-only draft)', () => {
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), { wrapper });
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), { wrapper });
 
     act(() => {
       result.current.onConnect({ source: 's1', target: 's2', sourceHandle: null, targetHandle: null });
@@ -159,7 +171,7 @@ describe('useStrategyCanvas onConnect draft edge (FB-SE-000)', () => {
   it('preserves the draft edge across re-renders (V1.115 T2: adapter owns base projection)', () => {
     // V1.115 T2: the hook manages only drafts; base edges are projected by the
     // adapter. A re-render (e.g. query refetch) does not touch draftEdges.
-    const { result, rerender } = renderHook(() => useStrategyCanvas('preset-1'), { wrapper });
+    const { result, rerender } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), { wrapper });
 
     act(() => {
       result.current.onConnect({ source: 's1', target: 's2', sourceHandle: null, targetHandle: null });
@@ -193,7 +205,7 @@ describe('useStrategyCanvas draft transition commit (FB-SE-002)', () => {
       side_effects: [],
     });
     const client = makeClient(patch);
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), {
       wrapper: makeCommitWrapper(client),
     });
 
@@ -227,7 +239,7 @@ describe('useStrategyCanvas draft transition commit (FB-SE-002)', () => {
     // the legacy path is covered by inspector-save-trigger.test.tsx.
     const patch = vi.fn().mockResolvedValue({ new_revision: 3 });
     const client = makeClient(patch);
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), {
       wrapper: makeCommitWrapper(client),
     });
 
@@ -245,7 +257,7 @@ describe('useStrategyCanvas draft transition commit (FB-SE-002)', () => {
   });
 
   it('opens the conflict modal when the daemon returns strategy_conflict (409)', async () => {
-    // The mocked graphQuery reports revision 1; the conflict's current_revision
+    // The document reports revision 1; the conflict's current_revision
     // is set to match so the existing auto-clear effect (which dismisses a
     // conflict once the refetched revision differs) does not race the
     // assertion. This mirrors the established pattern in this file's
@@ -258,7 +270,7 @@ describe('useStrategyCanvas draft transition commit (FB-SE-002)', () => {
     );
     const patch = vi.fn().mockRejectedValue(conflictError);
     const client = makeClient(patch);
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), {
       wrapper: makeCommitWrapper(client),
     });
 
@@ -286,7 +298,7 @@ describe('useStrategyCanvas draft transition commit (FB-SE-002)', () => {
     const client = makeClient(patch);
     const { result, rerender } = renderHook(
       ({ structuralWritesDisabled }: { structuralWritesDisabled: boolean }) =>
-        useStrategyCanvas('preset-1', structuralWritesDisabled),
+        useStrategyCanvas('preset-1', documentSource(), structuralWritesDisabled),
       { wrapper: makeCommitWrapper(client), initialProps: { structuralWritesDisabled: false } },
     );
 
@@ -310,7 +322,7 @@ describe('useStrategyCanvas draft transition commit (FB-SE-002)', () => {
   it('cancelDraft removes the draft edge without a daemon call', () => {
     const patch = vi.fn();
     const client = makeClient(patch as () => Promise<unknown>);
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), {
       wrapper: makeCommitWrapper(client),
     });
 
@@ -344,7 +356,7 @@ describe('useStrategyCanvas keyboard create (FB-SE-004)', () => {
       side_effects: [],
     });
     const client = makeClient(patch);
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), {
       wrapper: makeCommitWrapper(client),
     });
 
@@ -378,7 +390,7 @@ describe('useStrategyCanvas keyboard create (FB-SE-004)', () => {
     );
     const patch = vi.fn().mockRejectedValue(conflictError);
     const client = makeClient(patch);
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), {
       wrapper: makeCommitWrapper(client),
     });
 
@@ -409,7 +421,7 @@ describe('useStrategyCanvas keyboard create (FB-SE-004)', () => {
       .mockRejectedValueOnce(conflictError)
       .mockResolvedValueOnce({ new_revision: 2 });
     const client = makeClient(patch);
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), {
       wrapper: makeCommitWrapper(client),
     });
 
@@ -478,7 +490,7 @@ describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
   it('reconnects via a single patch_transition with old_target + new_target (op: update)', async () => {
     const patch = vi.fn().mockResolvedValue({ new_revision: 2 });
     const client = makeReconnClient(patch);
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), {
       wrapper: makeCommitWrapper(client),
     });
 
@@ -516,7 +528,7 @@ describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
 
     const patch = vi.fn().mockResolvedValue({ new_revision: 2 });
     const client = makeReconnClient(patch);
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), {
       wrapper: makeCommitWrapper(client),
     });
 
@@ -550,7 +562,7 @@ describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
     );
     const patch = vi.fn().mockRejectedValue(conflictError);
     const client = makeReconnClient(patch);
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), {
       wrapper: makeCommitWrapper(client),
     });
 
@@ -574,7 +586,7 @@ describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
   it('does not reconnect onto the same source (self-loop guard)', () => {
     const patch = vi.fn();
     const client = makeReconnClient(patch as () => Promise<unknown>);
-    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource()), {
       wrapper: makeCommitWrapper(client),
     });
 
@@ -603,7 +615,7 @@ describe('useStrategyCanvas structural write authority', () => {
   it('refuses every structural channel while the candidate owns the document', async () => {
     const patch = vi.fn().mockResolvedValue({ new_revision: 2 });
     const client = makeClient(patch);
-    const { result } = renderHook(() => useStrategyCanvas('preset-1', true), {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1', documentSource(), true), {
       wrapper: makeCommitWrapper(client),
     });
 

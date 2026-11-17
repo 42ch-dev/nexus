@@ -34,10 +34,10 @@
 //!   (the executor's moved module keeps its own cancel/cleanup cases)
 //!
 //! Exception, not a migration: the trailing `Applied-identity intake` section is
-//! new coverage from `.mstar/plans/v241-p35-intake-branch.md` (T4/T5) — that a
-//! schedule with no apply runs its YAML graph on the `yaml-only` intake arm
-//! (the default `ir-only` refuses it — P6 condition 6), and that one with an
-//! apply runs the applied document instead.
+//! new coverage from `.mstar/plans/v241-p35-intake-branch.md` (T5) — that a
+//! schedule runs the document its strategy's current apply installed, and that
+//! a user bundle with no apply is the `yaml_intake_disabled` refusal (P6
+//! condition 6).
 //!
 //! No case here talks HTTP, boots a router, or launches a provider process:
 //! the prompt port is the production [`HostPromptExecutor`] over a
@@ -663,21 +663,56 @@ fn write_preset_bundle(nexus_home: &Path, preset_id: &str, yaml: &str, prompt_bo
     std::fs::write(bundle.join("prompts/generate.md"), prompt_body).expect("prompt template");
 }
 
-/// Pin the `yaml-only` compatibility arm on a fixture home.
+/// Freeze an applied document for `preset_id` so its user bundle runs.
 ///
 /// These cases pin the YAML transport contracts — cancel, uncertain effect,
-/// workspace commit projection, resume — not the intake policy. The default
-/// `ir-only` refuses a user bundle with no current apply before graph
-/// construction, so each case selects the arm its graph was written against,
-/// the same pin `a_schedule_with_no_apply_runs_the_yaml_graph_the_untouched_builder_builds`
-/// applies. `yaml-only` is the v1.243 compatibility arm; removed at v1.244.0.
-fn select_yaml_only(nexus_home: &Path) {
-    let config_path = nexus_home.join("config.toml");
-    let mut config = std::fs::read_to_string(&config_path).unwrap_or_default();
-    // The leading newline keeps the table on its own line whatever the fixture
-    // config ends with.
-    config.push_str("\n[strategy_intake]\nmode = \"yaml-only\"\n");
-    std::fs::write(&config_path, config).expect("write the yaml-only config");
+/// workspace-commit projection, resume, restart — not the intake policy. The
+/// `yaml-only` arm that admitted a user bundle with no apply was removed at
+/// v1.244.0 (I-000509), so each case applies the bundle's own import candidate
+/// instead: same topology, same capability args, one document.
+///
+/// Prompt steps lose their `template` path: an applied user document carries no
+/// bundle root, so `IrTemplateSource::OwnSource` resolves no bundle template
+/// and a named one is refused at load. A transport case only needs the step to
+/// reach the prompt port and park there, which a template-less step does.
+async fn apply_bundle_candidate(
+    core: &CoreService,
+    principal: &Principal,
+    pool: &sqlx::SqlitePool,
+    preset_id: &str,
+) {
+    // An apply needs the strategy to own a schedule. This inert row is that
+    // precondition only: admission fails closed on a pre-seed row (it carries
+    // no version-0 core-context record, so no clock tick can admit it), and the
+    // rows that actually run are added through the public path AFTER the apply.
+    sqlx::query(
+        "INSERT INTO creator_schedules \
+         (schedule_id, creator_id, preset_id, preset_version, status, concurrency_kind, \
+          current_core_context_version, created_at, updated_at) \
+         VALUES (?, ?, ?, 1, 'pending', 'serial', 0, 0, 0)",
+    )
+    .bind(format!("SCH-precondition-{preset_id}"))
+    .bind(CREATOR)
+    .bind(preset_id)
+    .execute(pool)
+    .await
+    .expect("the apply precondition row");
+
+    let mut document = core
+        .read_strategy_candidate(principal, preset_id)
+        .await
+        .expect("the strategy's import candidate")
+        .document;
+    for node in &mut document.nodes {
+        node.template = None;
+        if let Some(exit) = node.exit_when.as_mut() {
+            exit.template = None;
+        }
+    }
+    let hash = seed_intake_approval(core, principal, preset_id, &document).await;
+    core.apply_strategy(principal, preset_id, &hash)
+        .await
+        .expect("the bundle's own candidate applies");
 }
 
 fn signal(name: &str) -> nexus_contracts::local::schedule::http::SignalScheduleRequest {
@@ -2607,22 +2642,17 @@ states:
     exit_when: {{ kind: rule }}
     next: generate
   - id: generate
+    description: "one prompt through the Host plane, so a transport case can park mid-run"
     enter:
-      - kind: inner_graph
-        name: generate_graph
-    exit_when: {{ kind: graph_complete }}
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "park the run at the prompt port"
+          tool_policy: deny_all
+    exit_when: {{ kind: rule }}
     next: done
   - id: done
     terminal: true
-
-inner_graphs:
-  generate_graph:
-    nodes:
-      - id: hosted_prompt
-        kind: acp_prompt
-        template_file: prompts/generate.md
-        tool_policy: deny_all
-    output_binding: hosted_prompt.text
 "#
     )
 }
@@ -2778,8 +2808,9 @@ async fn add_hosted_schedule(fixture: &HostedFixture) -> String {
 #[serial_test::serial]
 async fn hosted_schedule_drives_once_and_closes() {
     let fixture = hosted_fixture().await;
-    select_yaml_only(&fixture.tmp.path().join(".nexus42"));
     let pool = fixture.handle.coordinator().pool();
+    let principal = fixture.core.active_principal().await.unwrap();
+    apply_bundle_candidate(&fixture.core, &principal, pool.as_ref(), HOSTED_PRESET).await;
 
     // ── The factory installed ONE live background task (the supervisor
     //    wake/clock) before any row exists. ──
@@ -3656,6 +3687,83 @@ async fn public_schedule_reads_and_context_are_owned() {
 // Public cancel/resume closure (v1.195 P0-T4)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// The commit-last fixtures: prompt, workspace open, then the declared commit
+/// LAST.
+///
+/// The detail projection reports the run's LATEST capability output, so a
+/// checkpoint is only projected while its commit is the last capability the run
+/// wrote; a graph that prompts after committing hides its own commit. `park`
+/// adds a trailing manual wait, so the run stays non-terminal while still
+/// exposing the commit — the projection matrix needs that shape, while the
+/// restart journey needs a run that settles terminal with the commit last.
+const COMMIT_PARK_PRESET: &str = "projection-commit-park";
+const COMMIT_LAST_PRESET: &str = "hosted-commit-last";
+
+fn commit_last_preset_yaml(preset_id: &str, park: bool) -> String {
+    let (next_after_commit, wait_state) = if park {
+        (
+            "human_wait",
+            r#"  - id: human_wait
+    description: "manual wait: the run stays non-terminal with the commit last"
+    exit_when: { kind: manual }
+    next: done
+"#,
+        )
+    } else {
+        ("done", "")
+    };
+    format!(
+        r#"
+preset:
+  id: {preset_id}
+  version: 1
+  kind: creator
+  description: "commit-last fixture — prompt, commit, then the graph's tail"
+  requires_capabilities:
+    - workspace.open
+    - workspace.commit
+    - acp.prompt
+  initial: parked_prompt
+  terminal: done
+states:
+  - id: parked_prompt
+    description: "prompt the parked host so the run is mid-step first"
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "park the run at the prompt port"
+          tool_policy: deny_all
+    exit_when: {{ kind: rule }}
+    next: open_scope
+  - id: open_scope
+    description: "open a scope inside the factory-resolved creative root"
+    enter:
+      - kind: capability
+        name: workspace.open
+        args:
+          path: notes
+    exit_when: {{ kind: rule }}
+    next: commit_scope
+  - id: commit_scope
+    description: "one declared create through the bound commit authority"
+    enter:
+      - kind: capability
+        name: workspace.commit
+        args:
+          sessionId: "{{{{_capability_output.sessionId}}}}"
+          changes:
+            - path: hosted.txt
+              op: create
+              contentBase64: "{HOSTED_PAYLOAD_B64}"
+    exit_when: {{ kind: rule }}
+    next: {next_after_commit}
+{wait_state}  - id: done
+    terminal: true
+"#
+    )
+}
+
 /// Owner-fixture preset for the cancel/resume seam: one prompt (so an
 /// admission can be parked mid-step) followed by a MANUAL human wait (so the
 /// run can never reach `Completed` on its own, and a plain resume has a real
@@ -3678,9 +3786,12 @@ states:
   - id: parked_prompt
     description: "prompt the parked host so the run is mid-step"
     enter:
-      - kind: inner_graph
-        name: prompt_graph
-    exit_when: {{ kind: graph_complete }}
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "park the run at the prompt port"
+          tool_policy: deny_all
+    exit_when: {{ kind: rule }}
     next: human_wait
   - id: human_wait
     description: "manual wait: only its exact wait token may continue it"
@@ -3688,15 +3799,6 @@ states:
     next: done
   - id: done
     terminal: true
-
-inner_graphs:
-  prompt_graph:
-    nodes:
-      - id: guarded_prompt
-        kind: acp_prompt
-        template_file: prompts/generate.md
-        tool_policy: deny_all
-    output_binding: guarded_prompt.text
 "#
     )
 }
@@ -3729,9 +3831,12 @@ states:
   - id: parked_prompt
     description: "prompt the parked host so the run is mid-step before any effect"
     enter:
-      - kind: inner_graph
-        name: prompt_graph
-    exit_when: {{ kind: graph_complete }}
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "park the run at the prompt port"
+          tool_policy: deny_all
+    exit_when: {{ kind: rule }}
     next: open_scope
   - id: open_scope
     description: "open a scope inside the factory-resolved creative root"
@@ -3757,15 +3862,6 @@ states:
     next: done
   - id: done
     terminal: true
-
-inner_graphs:
-  prompt_graph:
-    nodes:
-      - id: guarded_prompt
-        kind: acp_prompt
-        template_file: prompts/generate.md
-        tool_policy: deny_all
-    output_binding: guarded_prompt.text
 "#
     )
 }
@@ -3795,7 +3891,6 @@ async fn public_cancel_fences_late_workspace_commit() {
     let coordinator = fixture.coordinator();
     let caps = fixture.handle.capability_holder();
     let home = fixture.nexus_home();
-    select_yaml_only(&home);
     let executor =
         fixture.executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>;
     write_preset_bundle(
@@ -3804,6 +3899,7 @@ async fn public_cancel_fences_late_workspace_commit() {
         &cancel_wait_preset_yaml(),
         "Summarize the retained topic: {{preset.input.topic}}\n",
     );
+    apply_bundle_candidate(&fixture.core, &principal, pool.as_ref(), CANCEL_WAIT_PRESET).await;
 
     // ── 1. A pending row that owns NO run: the cancel is the fence, the row is
     //       durably cancelled with nothing behind it, and the LATER admission
@@ -4050,13 +4146,19 @@ async fn public_cancel_fences_late_workspace_commit() {
     let principal = hosted.core.active_principal().await.unwrap();
     let pool = hosted.handle.coordinator().pool();
     let nexus_home = hosted.tmp.path().join(".nexus42");
-    select_yaml_only(&nexus_home);
     write_preset_bundle(
         &nexus_home,
         CANCEL_EFFECT_PRESET,
         &cancel_effect_preset_yaml(),
         "Summarize the hosted topic: {{preset.input.topic}}\n",
     );
+    apply_bundle_candidate(
+        &hosted.core,
+        &principal,
+        pool.as_ref(),
+        CANCEL_EFFECT_PRESET,
+    )
+    .await;
 
     // ── 4. Cancel/effect race: the cancel lands while the prompt is in flight,
     //       so the LAST step — the authorized workspace commit — never runs. ──
@@ -4391,7 +4493,6 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
     let coordinator = fixture.coordinator();
     let caps = fixture.handle.capability_holder();
     let home = fixture.nexus_home();
-    select_yaml_only(&home);
     let executor =
         fixture.executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>;
     write_preset_bundle(
@@ -4400,6 +4501,7 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
         &resume_park_preset_yaml(),
         "unused by this preset\n",
     );
+    apply_bundle_candidate(&fixture.core, &principal, pool.as_ref(), RESUME_PARK_PRESET).await;
 
     // ── 1. Stage the C1 state through PUBLIC paths: an admitted schedule that
     //       owns its parked run, then `pause` — the row reads `paused` while
@@ -6588,7 +6690,6 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
     let fixture = hosted_fixture().await;
     let home = fixture.tmp.path().to_path_buf();
     let nexus_home = home.join(".nexus42");
-    select_yaml_only(&nexus_home);
     let principal = fixture.core.active_principal().await.unwrap();
     let pool = fixture.handle.coordinator().pool();
     let epoch_a = fixture.handle.engine_epoch();
@@ -6604,15 +6705,36 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
         &cancel_wait_preset_yaml(),
         "Summarize the retained topic: {{preset.input.topic}}\n",
     );
+    write_preset_bundle(
+        &nexus_home,
+        COMMIT_LAST_PRESET,
+        &commit_last_preset_yaml(COMMIT_LAST_PRESET, false),
+        "unused by this preset\n",
+    );
+    apply_bundle_candidate(&fixture.core, &principal, pool.as_ref(), COMMIT_LAST_PRESET).await;
+    apply_bundle_candidate(
+        &fixture.core,
+        &principal,
+        pool.as_ref(),
+        CANCEL_EFFECT_PRESET,
+    )
+    .await;
+    apply_bundle_candidate(&fixture.core, &principal, pool.as_ref(), CANCEL_WAIT_PRESET).await;
 
     // ── 1. The COMPLETED run: its one declared commit is applied inside the
     //       factory-resolved root, then the prompt releases and the run
-    //       settles terminal. ──
-    let completed_schedule = add_hosted_schedule(&fixture).await;
+    //       settles terminal with the commit as its LAST capability output. ──
+    let completed_schedule = add_parallel_any_schedule(
+        &fixture.handle,
+        &principal,
+        COMMIT_LAST_PRESET,
+        "restart-completed",
+    )
+    .await;
+    let completed_run = wait_for_schedule_run(pool.as_ref(), &completed_schedule).await;
     wait_for_prompt_count(&fixture.host, 1).await;
-    let (status, owned) = schedule_row(pool.as_ref(), &completed_schedule).await;
-    assert_eq!(status, "running", "the owned clock claimed the row's run");
-    let completed_run = owned.expect("the admitted schedule owns its run");
+    fixture.host.release_parked();
+    wait_for_run_status(pool.as_ref(), &completed_run, "completed").await;
     assert_eq!(
         std::fs::read(fixture.root.join("notes/hosted.txt")).expect("the committed bytes"),
         HOSTED_PAYLOAD,
@@ -6625,8 +6747,6 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
         "exactly one commit may have settled: {settled:?}"
     );
     let committed_revision = settled[0].clone();
-    fixture.host.release_parked();
-    wait_for_run_status(pool.as_ref(), &completed_run, "completed").await;
     let completed_before = durable_record(pool.as_ref(), &completed_run).await;
 
     // ── 2. The CANCELLED run: the cancel lands while the prompt is in flight,
@@ -6742,11 +6862,21 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
     fixture.host.release_parked();
     let wait_id = wait_for_human_wait(pool.as_ref(), &wait_run).await;
 
-    // ── The process boundary. A changed/missing frozen source is
+    // ── The process boundary. A frozen source that no longer verifies is
     //    reconstruction unavailability for the waited run, never a fresh
-    //    schedule. ──
-    std::fs::remove_dir_all(nexus_home.join("presets").join(CANCEL_WAIT_PRESET))
-        .expect("remove the waited run's frozen preset source");
+    //    schedule: the run executes its applied document, so the approval row
+    //    that document came from is what recovery re-verifies — and it no
+    //    longer parses. (The row is tampered rather than deleted: the apply
+    //    holds the foreign key.) ──
+    sqlx::query(
+        "UPDATE strategy_approvals \
+            SET document_json = json_set(document_json, '$.entry', 'tampered-entry') \
+          WHERE strategy_id = ?",
+    )
+    .bind(CANCEL_WAIT_PRESET)
+    .execute(pool.as_ref())
+    .await
+    .expect("tamper the waited run's frozen applied document");
     let report = fixture.handle.close().await.expect("owner close");
     assert!(
         report.cleanup_confirmed,
@@ -7013,7 +7143,6 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
     let fixture = hosted_fixture().await;
     let home = fixture.tmp.path().to_path_buf();
     let nexus_home = home.join(".nexus42");
-    select_yaml_only(&nexus_home);
     let principal = fixture.core.active_principal().await.unwrap();
     let pool = fixture.handle.coordinator().pool();
     let epoch_a = fixture.handle.engine_epoch();
@@ -7029,13 +7158,29 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
         &failed_commit_preset_yaml(),
         "unused by this preset\n",
     );
+    write_preset_bundle(
+        &nexus_home,
+        COMMIT_PARK_PRESET,
+        &commit_last_preset_yaml(COMMIT_PARK_PRESET, true),
+        "unused by this preset\n",
+    );
+    for preset_id in [COMMIT_PARK_PRESET, CANCEL_WAIT_PRESET, FAILED_COMMIT_PRESET] {
+        apply_bundle_candidate(&fixture.core, &principal, pool.as_ref(), preset_id).await;
+    }
 
     // ── A committed run exposes its own settled revision — while it is still
-    //    parked (non-terminal) at its prompt. ──
-    let committed_schedule = add_hosted_schedule(&fixture).await;
+    //    parked (non-terminal) at its manual wait. ──
+    let committed_schedule = add_parallel_any_schedule(
+        &fixture.handle,
+        &principal,
+        COMMIT_PARK_PRESET,
+        "projection-committed",
+    )
+    .await;
+    let committed_run = wait_for_schedule_run(pool.as_ref(), &committed_schedule).await;
     wait_for_prompt_count(&fixture.host, 1).await;
-    let (_, owned) = schedule_row(pool.as_ref(), &committed_schedule).await;
-    let committed_run = owned.expect("the clock claimed the committed schedule's run");
+    fixture.host.release_parked();
+    wait_for_human_wait(pool.as_ref(), &committed_run).await;
     let settled = committed_intent_revisions(pool.as_ref()).await;
     assert_eq!(
         settled.len(),
@@ -7066,8 +7211,6 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
         Some((committed_revision.clone(), true)),
         "the committed run exposes its own durable revision"
     );
-    fixture.host.release_parked();
-    wait_for_run_status(pool.as_ref(), &committed_run, "completed").await;
 
     // ── A run with NO commit checkpoint exposes nothing. ──
     let wait_schedule = add_parallel_any_schedule(
@@ -7141,6 +7284,13 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
         &double_commit_preset_yaml(),
         "unused by this preset\n",
     );
+    apply_bundle_candidate(
+        &fixture.core,
+        &principal,
+        pool.as_ref(),
+        DOUBLE_COMMIT_PRESET,
+    )
+    .await;
     let settled_before_double = committed_intent_revisions(pool.as_ref()).await;
     let double_schedule = add_parallel_any_schedule(
         &fixture.handle,
@@ -7367,27 +7517,13 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Applied-identity intake (`.mstar/plans/v241-p35-intake-branch.md` T4/T5)
+// Applied-identity intake (`.mstar/plans/v241-p35-intake-branch.md` T5)
 //
-// Every schedule admission now asks whether its strategy has a current apply.
-// These two cases pin the two answers from the OUTSIDE: what the run executed,
-// never how the branch was written.
-//
-// T4 — no apply: the schedule must run the graph `build_wired_outer_graph`
-// builds from the same preset, so the reference side is a real run of the
-// untouched builder's graph, not a hand-written expectation.
-//
-// T5 — an apply: the run must execute the applied document's tasks, not the
-// preset's.
+// Every schedule admission asks whether its strategy has a current apply.
+// This case pins the answer from the OUTSIDE: what the run executed, never how
+// the branch was written. The no-apply answer is the `yaml_intake_disabled`
+// refusal, pinned at both coordinator and trait entries.
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// The user preset T4 schedules. It carries ONE prompt whose template exists
-/// only in this on-disk bundle: the YAML builder resolves it from the frozen
-/// source identity, while the applied-IR builder resolves no template at all
-/// (a document carries no bundle root, and the embedded bundle is never read for
-/// it) — so a no-apply schedule cannot silently start running through the IR
-/// path and still reach its prompt.
-const NO_APPLY_PRESET: &str = "intake-no-apply";
 
 /// The user preset T5 applies over. Capability-only: a user document has no
 /// bundle root, so an applied document that names an instruction template is
@@ -7401,53 +7537,13 @@ const APPLIED_PRESET: &str = "intake-applied";
 /// encoding).
 const PRESET_MARKER: &str = "preset-side.txt";
 const PRESET_MARKER_B64: &str = "cHJlc2V0LXNpZGUK";
-const PRESET_BYTES: &[u8] = b"preset-side\n";
 const APPLIED_MARKER: &str = "applied-side.txt";
 const APPLIED_MARKER_B64: &str = "YXBwbGllZC1zaWRlCg==";
 const APPLIED_BYTES: &[u8] = b"applied-side\n";
 
-/// The prompt template the T4 bundle ships (the preset renders it through
-/// `prompt.input`).
-const INTAKE_PROMPT: &str = "Summarize the intake topic: {{preset.input.topic}}\n";
-
-/// A user preset bundle's YAML: open the fixture's `notes` scope, commit one
-/// marker file, then optionally run one inner prompt (whose template the
-/// caller writes into the bundle).
-fn intake_preset_yaml(
-    preset_id: &str,
-    marker: &str,
-    marker_b64: &str,
-    with_prompt: bool,
-) -> String {
-    let prompt_capability = if with_prompt {
-        "    - acp.prompt\n"
-    } else {
-        ""
-    };
-    let (next_after_commit, prompt_state, prompt_graphs) = if with_prompt {
-        (
-            "generate",
-            r"  - id: generate
-    enter:
-      - kind: inner_graph
-        name: generate_graph
-    exit_when: { kind: graph_complete }
-    next: done
-",
-            r"
-inner_graphs:
-  generate_graph:
-    nodes:
-      - id: prompt
-        kind: acp_prompt
-        template_file: prompts/generate.md
-        tool_policy: deny_all
-    output_binding: prompt.text
-",
-        )
-    } else {
-        ("done", "", "")
-    };
+/// A user preset bundle's YAML: open the fixture's `notes` scope and commit one
+/// marker file.
+fn intake_preset_yaml(preset_id: &str, marker: &str, marker_b64: &str) -> String {
     format!(
         r#"
 preset:
@@ -7458,7 +7554,7 @@ preset:
   requires_capabilities:
     - workspace.open
     - workspace.commit
-{prompt_capability}  initial: open_scope
+  initial: open_scope
   terminal: done
 states:
   - id: open_scope
@@ -7480,10 +7576,10 @@ states:
               op: create
               contentBase64: "{marker_b64}"
     exit_when: {{ kind: rule }}
-    next: {next_after_commit}
-{prompt_state}  - id: done
+    next: done
+  - id: done
     terminal: true
-{prompt_graphs}"#
+"#
     )
 }
 
@@ -7576,193 +7672,6 @@ fn read_marker(root: &Path, marker: &str) -> Option<Vec<u8>> {
         .then(|| std::fs::read(path).expect("marker bytes"))
 }
 
-/// T4: a schedule whose strategy has NO apply runs the YAML graph, and that
-/// graph is the one `build_wired_outer_graph` builds from the same preset.
-///
-/// The reference is a real run of the untouched builder's graph
-/// (`start_session_with_preset_for_creator` → `drive_preset_run`): same preset,
-/// same registry, same dispatch and prompt executor, no intake branch. The
-/// schedule must then commit the SAME marker with the same bytes, and must
-/// reach its prompt exactly once (the on-disk template only the YAML intake
-/// resolves).
-///
-/// An approved snapshot is planted and NEVER applied: an approval alone must
-/// change nothing. Its document commits a different marker, so a fallback to
-/// "the newest approval" is observable.
-///
-/// Mutations this fails on:
-/// - the `None` arm builds through `build_wired_outer_graph_from_ir` (from the
-///   import candidate): the prompt template cannot be resolved for the
-///   document's own source, so admission refuses `ir_unresolved_template`, no
-///   run exists and no prompt is ever reached;
-/// - the no-apply arm falls back to the strategy's newest approval: the run
-///   commits `applied-side.txt` instead of the reference marker.
-#[tokio::test]
-#[serial_test::serial]
-async fn a_schedule_with_no_apply_runs_the_yaml_graph_the_untouched_builder_builds() {
-    let fixture = hosted_fixture().await;
-    let nexus_home = fixture.tmp.path().join(".nexus42");
-    write_preset_bundle(
-        &nexus_home,
-        NO_APPLY_PRESET,
-        &intake_preset_yaml(NO_APPLY_PRESET, PRESET_MARKER, PRESET_MARKER_B64, true),
-        INTAKE_PROMPT,
-    );
-
-    // ── Reference: the same preset through the untouched builder. ──
-    let principal = fixture.core.active_principal().await.unwrap();
-    let caps = fixture
-        .handle
-        .capability_holder()
-        .get()
-        .expect("the owner publishes its capability registry");
-    let loaded = nexus_preset::resolve_preset(NO_APPLY_PRESET, &nexus_home, &caps)
-        .expect("the user preset resolves from disk");
-    let pool = fixture.handle.coordinator().pool();
-    let storage: Arc<dyn graph_flow::SessionStorage> =
-        Arc::new(SqliteSessionStorage::new(pool.clone()));
-    // The reference graph IS the untouched builder's graph. Driving it through
-    // the same engine seams the intake uses (same registry, same provider
-    // catalog, the fixture's parked prompt executor) means the only remaining
-    // difference between the two runs is how the graph was chosen.
-    let mut prompt_bindings = HashMap::new();
-    prompt_bindings.insert(
-        "default".to_string(),
-        nexus_orchestration::run_state::AgentBinding {
-            provider_id: PROVIDER.to_string(),
-            model: None,
-        },
-    );
-    let reference_executor = Arc::new(HostPromptExecutor::new(
-        fixture.host.clone(),
-        Arc::new(SqliteSessionStorage::new(pool.clone())),
-        TimeoutConfig::default(),
-    ));
-    let reference_graph = build_wired_outer_graph(
-        &loaded,
-        &fixture.handle.engine(),
-        &caps,
-        None,
-        Some(reference_executor as Arc<dyn nexus_orchestration::capability::PromptExecutor>),
-        fixture
-            .handle
-            .engine_concrete()
-            .shared_state()
-            .session_cancels
-            .clone(),
-    )
-    .expect("the untouched builder builds the reference graph");
-    let mut reference_input = serde_json::Map::new();
-    reference_input.insert("topic".to_string(), json!("intake"));
-    let reference_session = fixture
-        .handle
-        .engine_concrete()
-        .start_preset_run_with_input(
-            &format!("{NO_APPLY_PRESET}:reference"),
-            &loaded,
-            CREATOR,
-            None,
-            reference_input,
-            None,
-            prompt_bindings,
-            None,
-            None,
-            Arc::new(reference_graph),
-        )
-        .await
-        .expect("the reference run is admitted");
-    // The prompt parks, so the drive runs in a task the test unparks.
-    let reference_drive = {
-        let engine: Arc<dyn OrchestrationEngine> = fixture.handle.engine();
-        let storage = storage.clone();
-        let session = reference_session.clone();
-        tokio::spawn(async move {
-            drive_preset_run(
-                &*engine,
-                Some(&storage),
-                None,
-                &session,
-                &PresetRunConfig::default(),
-                None,
-            )
-            .await
-        })
-    };
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while fixture.host.prompt_count() == 0 {
-        if reference_drive.is_finished() {
-            let outcome = reference_drive.await.expect("the reference drive joins");
-            panic!("the untouched builder's graph stopped without prompting: {outcome:?}");
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the untouched builder's graph never reached the prompt port"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    fixture.host.release_parked();
-    assert!(
-        matches!(
-            reference_drive.await.expect("the reference drive joins"),
-            PresetRunOutcome::Completed { .. }
-        ),
-        "the untouched builder's graph must complete"
-    );
-    let reference = read_marker(&fixture.root, PRESET_MARKER)
-        .expect("the untouched builder's graph commits its marker");
-    assert_eq!(reference, PRESET_BYTES);
-    assert!(
-        read_marker(&fixture.root, APPLIED_MARKER).is_none(),
-        "the untouched builder's graph never commits the applied marker"
-    );
-    std::fs::remove_file(fixture.root.join("notes").join(PRESET_MARKER))
-        .expect("clear the reference marker for the schedule's run");
-
-    // ── An approval exists; nothing is applied. ──
-    let candidate = fixture
-        .core
-        .read_strategy_candidate(&principal, NO_APPLY_PRESET)
-        .await
-        .expect("the strategy's import candidate")
-        .document;
-    let applied_side = applied_side_document(&candidate);
-    seed_intake_approval(&fixture.core, &principal, NO_APPLY_PRESET, &applied_side).await;
-    let apply_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM strategy_applies")
-        .fetch_one(pool.as_ref())
-        .await
-        .expect("apply row count");
-    assert_eq!(apply_rows, 0, "the fixture applies nothing");
-
-    // ── The schedule: no apply, so the YAML graph must run again. ──
-    // P6 Task 3 flipped the default: a user bundle with no current apply is
-    // refused under `ir-only`, so the builder-parity comparison runs on the
-    // `yaml-only` compatibility arm (v1.243 only; removed at v1.244.0). The
-    // mode is read per admission, so pinning it before the schedule admits is
-    // enough.
-    let config_path = nexus_home.join("config.toml");
-    let mut config = std::fs::read_to_string(&config_path).expect("read the fixture config");
-    config.push_str("[strategy_intake]\nmode = \"yaml-only\"\n");
-    std::fs::write(&config_path, config).expect("write the yaml-only config");
-    let schedule_id =
-        add_intake_schedule(&fixture, NO_APPLY_PRESET, Some(default_bindings())).await;
-    wait_for_prompt_count(&fixture.host, 2).await;
-    let run_id = wait_for_schedule_run(pool.as_ref(), &schedule_id).await;
-    let scheduled = read_marker(&fixture.root, PRESET_MARKER)
-        .expect("the no-apply schedule commits the same marker the untouched builder commits");
-    assert_eq!(
-        scheduled, reference,
-        "a schedule with no apply must run the graph the untouched builder builds"
-    );
-    assert!(
-        read_marker(&fixture.root, APPLIED_MARKER).is_none(),
-        "an approval that was never applied must have no effect"
-    );
-    fixture.host.release_all();
-    wait_for_run_status(pool.as_ref(), &run_id, "completed").await;
-
-    fixture.core.close().await.expect("core close");
-}
-
 /// T5: an existing schedule runs from its strategy's applied identity.
 ///
 /// The preset commits `preset-side.txt`; the applied document commits
@@ -7777,7 +7686,7 @@ async fn an_applied_identity_runs_instead_of_the_preset() {
     write_preset_bundle(
         &nexus_home,
         APPLIED_PRESET,
-        &intake_preset_yaml(APPLIED_PRESET, PRESET_MARKER, PRESET_MARKER_B64, false),
+        &intake_preset_yaml(APPLIED_PRESET, PRESET_MARKER, PRESET_MARKER_B64),
         "",
     );
     let principal = fixture.core.active_principal().await.unwrap();
@@ -7861,12 +7770,7 @@ async fn a_user_bundle_shadowing_an_embedded_id_keeps_its_apply() {
     write_preset_bundle(
         &nexus_home,
         SHADOWED_EMBEDDED_PRESET,
-        &intake_preset_yaml(
-            SHADOWED_EMBEDDED_PRESET,
-            PRESET_MARKER,
-            PRESET_MARKER_B64,
-            false,
-        ),
+        &intake_preset_yaml(SHADOWED_EMBEDDED_PRESET, PRESET_MARKER, PRESET_MARKER_B64),
         "",
     );
     let principal = fixture.core.active_principal().await.unwrap();

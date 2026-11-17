@@ -208,6 +208,7 @@ describe('route-inventory (P5-T5)', () => {
   ['POST', '/v1/daemon/strategies/([^/]+)/compose', 'tier2', 'presets'],
   ['POST', '/v1/daemon/strategies/([^/]+)/approve', 'tier2', 'presets'],
   ['POST', '/v1/daemon/strategies/([^/]+)/apply', 'tier2', 'presets'],
+  ['POST', '/v1/daemon/strategies/([^/]+)/generate', 'tier2', 'presets'],
   ['POST', '/v1/daemon/strategies/([^/]+)/simulate', 'tier2', 'presets'],
   ['POST', '/v1/daemon/strategies/([^/]+)/states/([^/]+)/patch', 'tier2', 'presets'],
   ['POST', '/v1/daemon/strategies/([^/]+)/states/([^/]+)/prompt/patch', 'tier2', 'presets'],
@@ -276,7 +277,14 @@ describe('route-inventory (P5-T5)', () => {
     const missingStrategy = '/v1/daemon/strategies/strategy_missing';
     const appliedStatus = await jsonFetch(`${baseUrl}${missingStrategy}/applied`);
     assert.equal(appliedStatus.status, 200, appliedStatus.text);
-    assert.deepEqual(appliedStatus.payload, { current_apply: null, newest_approval: null });
+    assert.deepEqual(appliedStatus.payload, {
+      current_apply: null,
+      newest_approval: null,
+      // Schema v2 (D18): the applied document and its typed refusal are always present, and are
+      // both null for a strategy with no apply.
+      applied_document: null,
+      applied_document_refusal: null,
+    });
 
     // The same cross for the rollback read: `strategyApprovals` is the napi
     // export the Apply target list mounts.

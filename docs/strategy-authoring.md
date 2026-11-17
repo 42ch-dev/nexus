@@ -61,16 +61,18 @@ and `nexus42 preset export <dir>` are both part of the supported surface, and
 neither carries a removal boundary. Nothing converts a bundle automatically: a
 bundle keeps the files it has until you convert it yourself.
 
-**Only the emergency intake arm ends.** The `yaml-only` kill-switch
-(`[strategy_intake] mode = "yaml-only"` in the home `config.toml`) keeps intake
-running a user bundle's YAML manifest without reading its apply. It is supported
-for the v1.243 minor line only and is removed at v1.244.0. Default intake is
-`ir-only`: a user-bundle run executes the strategy's current apply, and a user
-bundle with none refuses before graph construction (`yaml_intake_disabled`)
-instead of falling back to YAML. That v1.244.0 boundary applies to the switch
-alone — not to the bundle format, not to `preset import`, and not to `preset
-export`. Embedded and `_system.` presets never consult the key, so the two
-YAML-primary cases below are governed by neither arm.
+**Only the emergency intake arm ended.** The `yaml-only` kill-switch
+(`[strategy_intake] mode = "yaml-only"` in the home `config.toml`) re-enabled
+intake running a user bundle's YAML manifest without reading its apply. It was
+supported for the v1.243 minor line only and was removed at v1.244.0: a config
+that still carries it is refused with `intake_config_invalid` naming `ir-only`,
+never silently mapped onto it. Intake has one arm: a user-bundle run executes
+the strategy's current apply, and a user bundle with none refuses before graph
+construction (`yaml_intake_disabled`) instead of falling back to YAML. That
+v1.244.0 boundary applied to the switch alone — not to the bundle format, not to
+`preset import`, and not to `preset export`. Embedded and `_system.` presets
+never consult the key, so the two YAML-primary cases below are governed by it
+neither.
 
 **Conversion is the import verb.** An existing partner YAML bundle converts by
 `nexus42 preset import <dir>`, which produces the strategy's candidate through

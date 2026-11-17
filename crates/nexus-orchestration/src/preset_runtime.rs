@@ -439,8 +439,9 @@ impl IrOuterGraphError {
 /// `nodes[kind=outer_state]` only, so the kind spelling is refused
 /// permanently and [`IrOuterGraphError::standalone_node_kind`] names the
 /// carrier to author instead. `pattern_slot` / `nest_group` have no execution
-/// row at all, and neither does a `nests[]` binding: it addresses a region the
-/// projection cannot honour, so the document must be flattened first.
+/// row at all. A `nests[]` binding is not refused: the projection never reads
+/// it, and the pinned body it names is verified by the apply's pin snapshot at
+/// admission and recovery instead, so a document may carry bindings and build.
 fn refuse_unmappable(document: &WorkflowDocument) -> Result<(), IrOuterGraphError> {
     for node in &document.nodes {
         match node.kind {
@@ -457,17 +458,6 @@ fn refuse_unmappable(document: &WorkflowDocument) -> Result<(), IrOuterGraphErro
             | WorkflowNodeKind::InnerStep
             | WorkflowNodeKind::Terminal => {}
         }
-    }
-    // A binding record addresses a composition node with no execution row, and the projection
-    // never reads it. Refusing it here keeps the guarantee inside the intake: the structural
-    // walk already requires a nest's parent to be a `pattern_slot` or `nest_group` (so a validated
-    // document reaches the node refusal above first), but the builder is also reachable without
-    // that walk, and a document must never run with its bindings silently dropped.
-    if let Some(binding) = document.nests.first() {
-        return Err(IrOuterGraphError::Unmappable {
-            concept: "nest binding".to_string(),
-            location: format!("nests[{}]", binding.id),
-        });
     }
     match document.terminal.as_slice() {
         [_] => Ok(()),
@@ -1809,20 +1799,6 @@ states:
         serde_json::from_value(document).expect("mutated fixture is a valid workflow document")
     }
 
-    /// A copy of [`IR_LINEAR`] carrying one nest binding whose parent is `parent`.
-    fn ir_with_nest(parent: &str) -> WorkflowDocument {
-        let mut document: serde_json::Value =
-            serde_json::from_str(IR_LINEAR).expect("fixture is JSON");
-        document["nests"] = serde_json::json!([{
-            "id": "review-nest",
-            "parent_node": parent,
-            "expansion": "defer_until_apply",
-            "pin_policy": "exact",
-            "child": {"kind": "pattern", "registry_id": "patterns/outline", "version": "1.0.0"}
-        }]);
-        serde_json::from_value(document).expect("mutated fixture is a valid workflow document")
-    }
-
     /// The typed refusal for a document the mapping cannot express; no graph.
     #[track_caller]
     fn assert_refused(document: &WorkflowDocument, concept: &str) -> IrOuterGraphError {
@@ -1934,17 +1910,6 @@ states:
     #[test]
     fn ir_refuses_nest_group_node_kind_by_name() {
         assert_unmappable(&ir_with_node_kind(1, "nest_group"), "nest_group", "review");
-    }
-
-    /// A binding record under a plain state: no node-kind refusal fires, so the
-    /// binding itself is the only thing that can refuse the document.
-    #[test]
-    fn ir_refuses_nest_binding_by_name() {
-        assert_unmappable(
-            &ir_with_nest("review"),
-            "nest binding",
-            "nests[review-nest]",
-        );
     }
 
     #[test]
