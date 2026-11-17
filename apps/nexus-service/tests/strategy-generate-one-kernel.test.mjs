@@ -116,6 +116,18 @@ function seedHome() {
     writePreset(nexusHome, id);
   }
 
+  // The selected workspace's registered creative root — the one document
+  // `nexus42 creator workspace create --creative-root <abs>` writes. Without it
+  // the workspace composition refuses the hosted execution owner with
+  // `uninitialized`, `startExecutionOwner` reports `engine_epoch: null`, and the
+  // agent-tool leg has no owner to dispatch through.
+  const creativeRoot = join(home, 'creative-root');
+  mkdirSync(creativeRoot, { recursive: true });
+  writeFileSync(
+    join(nexusHome, 'creators', 'ctr_testcreator', 'workspaces', 'default', 'meta.json'),
+    JSON.stringify({ local_root: creativeRoot }),
+  );
+
   const agentHostDir = join(nexusHome, 'agent-host');
   mkdirSync(agentHostDir, { recursive: true });
   const python = execFileSync('which', ['python3'], { encoding: 'utf8' }).trim();
@@ -186,7 +198,7 @@ describe('generate one-kernel drift guard (P6-T10)', () => {
     return { status: response.status, payload: text.length > 0 ? JSON.parse(text) : null };
   }
 
-  test('the CLI, the route and the agent tool reach one generate kernel', async (t) => {
+  test('the CLI, the route and the agent tool reach one generate kernel', async () => {
     // ── Leg 1: the CLI. Run before any service holds the home, so the child's direct writer opens
     // uncontended; the strategy is one of the seeded user bundles.
     const requestPath = join(home, 'legal-request.json');
@@ -268,27 +280,23 @@ describe('generate one-kernel drift guard (P6-T10)', () => {
     assertCandidate(routed.payload, ROUTE_STRATEGY, 'POST …/generate');
 
     const principal = await service.service.core.activePrincipal();
-    let tool;
-    try {
-      tool = await service.service.core.executeTool(principal, {
-        tool_name: TOOL,
-        parameters: {
-          strategy_id: TOOL_STRATEGY,
-          base_revision: 0,
-          request: legalRequest(),
-        },
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      // The tool dispatches through the owner's `ToolContext`, so it needs an execution owner.
-      // A home whose workspace composition refuses one (no registered creative root) cannot host
-      // it; every environment that does host one — the service's own boot path — runs this leg.
-      if (message.includes('execution owner')) {
-        t.skip(`the agent-tool leg needs an established execution owner: ${message}`);
-        return;
-      }
-      throw error;
-    }
+    // The tool dispatches through the execution owner's `ToolContext`. The
+    // fixture registers a creative root so the hosted owner is established —
+    // the same seam `compute-http.test.mjs` uses — and there is no skip here: a
+    // green run has to include this leg.
+    assert.notEqual(
+      service.service.engineEpoch,
+      null,
+      'the hosted profile must report an engine epoch (an execution owner was established)',
+    );
+    const tool = await service.service.core.executeTool(principal, {
+      tool_name: TOOL,
+      parameters: {
+        strategy_id: TOOL_STRATEGY,
+        base_revision: 0,
+        request: legalRequest(),
+      },
+    });
     assert.equal(tool.success, true, `the tool must commit: ${JSON.stringify(tool).slice(0, 600)}`);
     assertCandidate(tool.result, TOOL_STRATEGY, `tool ${TOOL}`);
   });
