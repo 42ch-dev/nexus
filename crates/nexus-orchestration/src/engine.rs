@@ -3138,7 +3138,7 @@ fn embedded_applied_document(
             )
         })?;
     Ok(crate::capability::AppliedDocument {
-        identity: crate::run_state::AppliedRunIdentity {
+        identity: nexus_session_storage::run_state::AppliedRunIdentity {
             apply_id,
             content_hash,
         },
