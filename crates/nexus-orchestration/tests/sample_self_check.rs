@@ -285,8 +285,8 @@ const VALUE_REWRITES: &[Normalisation] = &[
         source: "`skip_serializing_if` on those manifest fields",
     },
     Normalisation {
-        input: "a defaulted field left out (`preset.requires_capabilities`, `cli_args[].required`, a `previous_preset` gate's `scope`, `context_update.op.body`)",
-        output: "the default written out (`requires_capabilities: []`, `required: false`, `scope: work`, `body: ''`)",
+        input: "a defaulted field left out (`preset.requires_capabilities`, `cli_args[].required`, a `previous_preset` gate's `scope`)",
+        output: "the default written out (`requires_capabilities: []`, `required: false`, `scope: work`)",
         semantic: false,
         source: "those fields have `#[serde(default)]` and no `skip_serializing_if`",
     },
@@ -712,16 +712,6 @@ fn defaulted_fields_are_written_out() {
     assert_eq!(
         gate_scope["preset"]["gates"][0]["scope"],
         Value::String("work".to_string())
-    );
-
-    let context_body = probe_export_manifest(&probe_manifest_with(
-        "",
-        "    context_update:\n      op:\n        kind: append\n      \
-         template_file: prompts/append.md\n    next: b\n",
-    ));
-    assert_eq!(
-        context_body["states"][0]["context_update"]["op"]["body"],
-        Value::String(String::new())
     );
 }
 

@@ -158,7 +158,6 @@
     },
     {
       "context_update": {
-        "body": "",
         "op": "append",
         "template": "prompts/synthesizing-ctx-update.md"
       },

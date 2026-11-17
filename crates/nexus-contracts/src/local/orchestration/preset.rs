@@ -76,6 +76,12 @@ pub struct PresetHeader {
     pub initial: String,
     /// The ID of the terminal state (must match a `states[].id`).
     pub terminal: String,
+    /// Preset-level World-binding requirement (`workflow-profile` §5.3.4).
+    ///
+    /// The header is authoritative: the document carries the same value at
+    /// `meta.world_binding` and [`PresetHeader`] is the only place it is authored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world_binding: Option<WorldBinding>,
     /// Optional author name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
@@ -104,6 +110,27 @@ pub struct PresetHeader {
     /// preset-specific flags.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cli_args: Vec<PresetCliArg>,
+}
+
+// ---------------------------------------------------------------------------
+// WorldBinding (workflow-profile §5.3.4)
+// ---------------------------------------------------------------------------
+
+/// Preset-level World-binding requirement, declared as `preset.world_binding:`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldBinding {
+    /// Whether a run must be bound to a World.
+    pub mode: WorldBindingMode,
+}
+
+/// World-binding mode (`workflow-profile` §5.3.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorldBindingMode {
+    /// A run must carry a valid `world_id`.
+    Required,
+    /// Legacy mode: a worldless run is not blocked.
+    Optional,
 }
 
 // ---------------------------------------------------------------------------
@@ -654,25 +681,33 @@ pub struct ContextUpdateHook {
 pub enum ContextUpdateOp {
     /// Append text to existing content.
     Append {
-        /// Body content (empty by default; filled at runtime from template).
-        #[serde(default)]
-        body: String,
+        /// Body content; absent in the source, where the runtime renders `template_file`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
     },
     /// JSON-merge into struct payload.
     StructMerge {
-        /// Patch JSON (empty by default; filled at runtime from template).
-        #[serde(default)]
-        patch: serde_json::Value,
+        /// Patch JSON; absent in the source, where the runtime renders `template_file`.
+        ///
+        /// Double option: `None` = key absent, `Some(None)` = an explicit `patch: null` (JSON
+        /// null is a patch value), `Some(Some(patch))` = the patch. `Option` alone folds the
+        /// explicit null into the absent key and drops it on export.
+        #[serde(
+            default,
+            deserialize_with = "explicit_null",
+            skip_serializing_if = "Option::is_none"
+        )]
+        patch: Option<Option<serde_json::Value>>,
     },
     /// Replace is NOT allowed for preset hooks — will be rejected by the loader.
     Replace {
-        #[serde(default)]
-        body: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
     },
     /// `StructRemove` is NOT allowed for preset hooks — will be rejected by the loader.
     StructRemove {
-        #[serde(default)]
-        path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
     },
     /// V1.5+ only. Invoke `context.summarize` capability to produce an
     /// LLM-driven summary of the current `core_context`.
@@ -680,6 +715,18 @@ pub enum ContextUpdateOp {
         /// Capability name to invoke (e.g. `context.summarize`).
         capability: String,
     },
+}
+
+/// Deserialize a present key as `Some(..)` so an explicit `null` stays distinguishable from a
+/// missing key — [`serde`]'s own `Option` impl reports both as `None`.
+///
+/// `#[serde(default)]` supplies the absent case, so this only sees keys that exist.
+#[allow(clippy::option_option)] // absent, null and a value are the three states this keeps.
+fn explicit_null<'de, D>(deserializer: D) -> Result<Option<Option<serde_json::Value>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<serde_json::Value>::deserialize(deserializer).map(Some)
 }
 
 // ---------------------------------------------------------------------------
@@ -1324,6 +1371,7 @@ states:
                 run_intents: vec![],
                 initial: "a".into(),
                 terminal: "b".into(),
+                world_binding: None,
                 author: None,
                 homepage: None,
                 license: None,

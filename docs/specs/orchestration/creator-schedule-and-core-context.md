@@ -304,9 +304,13 @@ states:
       kind: manual
     next: drafting
     context_update:              # NEW; optional
-      op: append                 # or: struct_merge
+      op: { kind: append }       # or: { kind: struct_merge }
       template_file: prompts/outlining-context-update.md
 ```
+
+Only `op.kind` is required. An inline `op.body` / `op.patch` may be absent, and the
+manifest → IR → manifest round trip preserves the difference: an absent key stays absent, while an
+explicit `patch: null` stays `null` — JSON null is a patch value, not a missing one.
 
 #### 7.3 `seed_schema` (preset root, optional)
 

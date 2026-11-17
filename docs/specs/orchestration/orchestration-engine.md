@@ -879,6 +879,7 @@ one above, buildability, and the prompt-role and recovery limits — are
 | `assets[]` and `node.template` | Validated prompt/template inputs resolved for the consuming `Task`. |
 | `nodes[].effect_class` and `effect_summary` | Schema-required effect-fence metadata for validation and approval; neither creates a `Task` or changes graph execution. |
 | `meta.run_intents`, `meta.requires_capabilities`, `meta.cli_args`, `meta.gates` | Admission, loader, enqueue-time gate, and CLI-argument inputs checked before or while constructing tasks; they do not create graph nodes. |
+| `meta.world_binding` | Carried from `preset.world_binding` for the manifest projection and canvas display; no execution path reads it, so it creates no node and gates nothing at run time. |
 
 `pattern_slot` and `nest_group` are composition concepts, not executable tasks: a document whose
 nodes still carry either kind is refused `ir_unmappable` — they must be expanded into the concrete

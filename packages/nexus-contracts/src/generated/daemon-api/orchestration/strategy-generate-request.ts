@@ -20,6 +20,15 @@ export type Edges = WorkflowEdge[];
  * Composition bindings; at most three unexpanded nest levels, no cycles.
  */
 export type Nests = WorkflowNestBinding[];
+/**
+ * Preset-level World-binding requirement, carried from `preset.world_binding` (workflow-profile §5.3.4). Absent when the preset declares none.
+ */
+export type WorkflowWorldBinding = {
+  /**
+   * Whether a run must be bound to a World.
+   */
+  mode: "required" | "optional";
+} | null;
 
 /**
  * Body of POST /v1/daemon/strategies/{strategy_id}/generate, and the input contract of the `nexus.strategy.generate` agent tool. `request` is the GenerateRequest contract (D8): the pattern-package/IR subset a caller may declare, and nothing else — node declarations, edges, nest bindings and the meta fields semantic validation reads. It carries no executable code and no flag that bypasses lint, so a request can only ask for a document; whether that document is legal is decided by lint, never by the caller. The path `strategy_id` is authoritative and is not repeated in the body.
@@ -355,6 +364,7 @@ export interface WorkflowMeta {
    * Capabilities the workflow requires; resolution fails when any is missing.
    */
   requires_capabilities: string[];
+  world_binding?: WorkflowWorldBinding;
   /**
    * Preset-specific CLI argument declarations.
    */

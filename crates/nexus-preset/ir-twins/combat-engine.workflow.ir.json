@@ -40,7 +40,10 @@
     ],
     "run_intents": [
       "work_init"
-    ]
+    ],
+    "world_binding": {
+      "mode": "required"
+    }
   },
   "nests": [],
   "nodes": [

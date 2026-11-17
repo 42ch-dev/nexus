@@ -5,6 +5,16 @@
  */
 
 /**
+ * Preset-level World-binding requirement, carried from `preset.world_binding` (workflow-profile §5.3.4). Absent when the preset declares none.
+ */
+export type WorkflowWorldBinding = {
+  /**
+   * Whether a run must be bound to a World.
+   */
+  mode: "required" | "optional";
+} | null;
+
+/**
  * Body of the non-mutating simulate route. The document in the body is the candidate input, so no stored-candidate id, `base_revision` or persistence binding is carried.
  */
 export interface StrategySimulationRequest {
@@ -110,6 +120,7 @@ export interface WorkflowMeta {
    * Capabilities the workflow requires; resolution fails when any is missing.
    */
   requires_capabilities: string[];
+  world_binding?: WorkflowWorldBinding;
   /**
    * Preset-specific CLI argument declarations.
    */
