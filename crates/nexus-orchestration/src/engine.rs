@@ -3964,14 +3964,16 @@ impl GraphFlowEngine {
     /// `Ok(None)` therefore means "no applied identity", which only a
     /// non-embedded preset (`_system.`, or a system directory bundle) can
     /// answer: it keeps executing its manifest. An embedded preset resolves a
-    /// document or refuses through the `Err`; it never falls back to YAML.
+    /// document or refuses through the `Err`; it never falls back to YAML — so
+    /// a configured source answering `None` for one is stale wiring, and every
+    /// caller's `None` arm is provably a non-embedded preset.
     async fn resolve_applied(
         &self,
         preset_id: &str,
         loaded: Option<&nexus_preset::LoadedPreset>,
     ) -> Result<Option<crate::capability::AppliedDocument>, String> {
-        match &self.state.applied_document_source {
-            Some(source) => source.applied_document(preset_id, loaded).await,
+        let resolved = match &self.state.applied_document_source {
+            Some(source) => source.applied_document(preset_id, loaded).await?,
             None => loaded
                 .filter(|loaded| {
                     matches!(
@@ -3981,8 +3983,26 @@ impl GraphFlowEngine {
                 })
                 .map_or(Ok(None), |loaded| {
                     embedded_applied_document(loaded).map(Some)
-                }),
+                })?,
+        };
+        // An embedded preset executes compiled-in bytes. Refusing here is the
+        // one gate every route shares: a legacy descriptor with no `applied`
+        // (frozen before the identity existed) included — it must not rebuild
+        // the YAML manifest a source merely failed to resolve a document for.
+        if resolved.is_none()
+            && loaded.is_some_and(|loaded| {
+                matches!(
+                    loaded.source_identity,
+                    Some(PresetSourceIdentity::Embedded { .. })
+                )
+            })
+        {
+            return Err(format!(
+                "embedded_document_unavailable: embedded preset '{preset_id}' resolved no applied \
+                 document; refusing to execute its YAML manifest"
+            ));
         }
+        Ok(resolved)
     }
 
     #[allow(clippy::too_many_lines, clippy::significant_drop_tightening)] // sequential descriptor→validate→rebuild path; guard spans await loop
@@ -4093,7 +4113,10 @@ impl GraphFlowEngine {
         // under. Refusing keeps the run non-replayable, exactly as admission
         // refuses an applied identity it cannot verify; a descriptor with no
         // recorded identity (no apply then, or a row predating the freeze) keeps
-        // the pre-existing resolution unchanged.
+        // the pre-existing resolution unchanged — with one exception: an
+        // EMBEDDED preset that resolved no document refused in
+        // `resolve_applied`, so `current: None` below is always a non-embedded
+        // preset's answer and that preset executes its manifest.
         let applied = match (descriptor.applied.as_ref(), applied) {
             (None, current) => current.map(|applied| applied.document),
             (Some(recorded), Some(current)) if current.identity == *recorded => {
@@ -4295,10 +4318,11 @@ impl GraphFlowEngine {
                     session_id.0
                 )))
             })?,
-            // Only a NON-embedded preset reaches this arm: an embedded descriptor
-            // resolves its compiled-in document in the resolution above, and a
-            // document it cannot construct refused there. Such a preset
-            // (`_system.`, a system directory bundle) executes its manifest.
+            // Only a NON-embedded preset reaches this arm: `resolve_applied`
+            // refuses an embedded preset that resolved no document — a legacy
+            // descriptor with no recorded `applied` included — and a document
+            // it cannot construct refused below. Such a preset (`_system.`, a
+            // system directory bundle) executes its manifest.
             (None, Some(loaded)) => crate::preset_runtime::build_wired_outer_graph(
                 loaded,
                 &engine_proxy,
@@ -4565,23 +4589,6 @@ impl GraphFlowEngine {
             .map_err(|error| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
             })?;
-        // An embedded preset executes its document, so a source that answered
-        // none for one leaves the graph with no document to build from. That
-        // gap refuses instead of handing the preset to the YAML manifest.
-        if applied.is_none()
-            && matches!(
-                loaded.source_identity,
-                Some(nexus_preset::source_identity::PresetSourceIdentity::Embedded { .. })
-            )
-        {
-            return Err(EngineError::GraphFlow(
-                graph_flow::GraphError::StorageError(format!(
-                    "embedded_document_unavailable: embedded preset '{}' resolved no applied \
-                     document; refusing to execute its YAML manifest",
-                    loaded.id
-                )),
-            ));
-        }
         // ir-only is the only arm: a user bundle with no current apply refuses
         // before graph construction — never a YAML fallback.
         if user_bundle && applied.is_none() {
@@ -4609,7 +4616,7 @@ impl GraphFlowEngine {
             .map_err(|error| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(error.to_string()))
             })?,
-            // Only a NON-embedded preset reaches this arm: the check above
+            // Only a NON-embedded preset reaches this arm: `resolve_applied`
             // refuses an embedded preset that resolved no document, and every
             // other embedded answer carries one.
             None => crate::preset_runtime::build_wired_outer_graph(

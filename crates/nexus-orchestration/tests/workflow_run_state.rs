@@ -7501,3 +7501,73 @@ async fn legacy_recovery_rebuilds_an_embedded_session_from_the_document() {
         session.current_task_id
     );
 }
+
+/// A store-backed pre-upgrade row froze an embedded source but no applied
+/// identity (the field did not exist yet). A configured source that answers
+/// "no document" for it must leave the run non-replayable, not rebuild the
+/// YAML manifest: a run admitted after D10 executes its document, so the
+/// manifest is a graph this row never ran.
+///
+/// Mutation this fails on: `resolve_applied` answering `Ok(None)` for an
+/// embedded preset — recovery then reaches `build_wired_outer_graph(&loaded, ..)`
+/// for a descriptor with no recorded apply.
+#[tokio::test]
+async fn store_recovery_refuses_a_legacy_embedded_row_the_source_cannot_resolve() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, mut engine) = fresh_engine(pool);
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded =
+        nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
+    let session_id = SessionId("sess-legacy-embedded".to_string());
+
+    // Exactly the bytes a pre-upgrade admission wrote: the frozen embedded
+    // source identity and version, no `applied`, no `intake_mode`.
+    let mut descriptor = test_descriptor(&session_id.0);
+    descriptor.preset_id = loaded.id.clone();
+    descriptor.preset_version = loaded.version;
+    descriptor.source = loaded
+        .source_identity
+        .clone()
+        .expect("an embedded preset carries its source identity");
+    assert!(
+        descriptor.applied.is_none(),
+        "the fixture must be a legacy row: no applied identity"
+    );
+    let root = root_session(&session_id.0, "task_a");
+    storage
+        .start_run(
+            &session_id,
+            &descriptor,
+            RunCheckpoint {
+                root: &root,
+                children: &[],
+            },
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("start_run");
+
+    // The installed source answers for a different strategy, i.e. `None` here.
+    engine.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "some-other-strategy",
+        identity: AppliedRunIdentity {
+            apply_id: "apl_unused".to_string(),
+            content_hash: "blake3:unused".to_string(),
+        },
+        document: applied_probe_document("some-other-strategy"),
+    }));
+
+    let refused = engine
+        .ensure_recovered_runner_inner(&session_id)
+        .await
+        .expect_err("a legacy embedded row with no resolvable document must not be rebuilt");
+    let reason = refused.to_string();
+    assert!(
+        reason.contains("embedded_document_unavailable"),
+        "the refusal must name the missing embedded document: {reason}"
+    );
+    assert!(
+        reason.contains("non-replayable"),
+        "the run must stay non-replayable, not resume on its manifest: {reason}"
+    );
+}
