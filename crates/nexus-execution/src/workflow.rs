@@ -1708,9 +1708,11 @@ impl WorkflowRunCoordinator {
             Some(applied) => {
                 nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
                     &applied.document,
-                    // An applied user document's id is not a bundle id: reading
-                    // the embedded bundle could serve a colliding preset's bytes.
-                    nexus_orchestration::preset_runtime::IrTemplateSource::OwnSource,
+                    // An embedded document's own source is its compiled-in
+                    // bundle; any other applied document's id is not a bundle
+                    // id, so reading the embedded bundle could serve a colliding
+                    // preset's bytes.
+                    nexus_orchestration::preset_runtime::ir_template_source(Some(&loaded)),
                     &engine_proxy,
                     &registry,
                     daemon_tool_dispatch,
@@ -3024,10 +3026,11 @@ impl WorkflowRunCoordinator {
         //                                     bundle with no apply never falls back to YAML
         //
         // For a user-preset schedule `preset_id` IS the strategy id (compass D10), so no second
-        // key is introduced. Only a user (Canvas) preset may enter the lookup: an embedded or
-        // system preset id names no strategy, and treating one as a strategy id would redirect an
-        // existing YAML schedule. The IR path refuses an apply whose frozen bytes no longer hash
-        // to the identity the apply recorded, before any task exists.
+        // key is introduced. Only a user (Canvas) preset has a store APPLY: an embedded or
+        // system preset id names no strategy. An embedded preset resolves the document its own
+        // compiled-in bytes construct under `embedded:<preset_id>`, and a system preset resolves
+        // nothing — neither enters the strategy-apply lookup. The IR path refuses an apply whose
+        // frozen bytes no longer hash to the identity the apply recorded, before any task exists.
         //
         // "User" is the source the LOADER resolved (`loaded`, step 2) — never a second
         // classification. `locate_preset` checks embedded first, so a user bundle shadowing an
@@ -3090,9 +3093,11 @@ impl WorkflowRunCoordinator {
             Some(applied) => {
                 nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
                     &applied.document,
-                    // An applied user document's id is not a bundle id: reading
-                    // the embedded bundle could serve a colliding preset's bytes.
-                    nexus_orchestration::preset_runtime::IrTemplateSource::OwnSource,
+                    // An embedded document's own source is its compiled-in
+                    // bundle; any other applied document's id is not a bundle
+                    // id, so reading the embedded bundle could serve a colliding
+                    // preset's bytes.
+                    nexus_orchestration::preset_runtime::ir_template_source(Some(&loaded)),
                     &engine_proxy,
                     &registry,
                     daemon_tool_dispatch,

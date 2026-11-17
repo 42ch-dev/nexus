@@ -17,7 +17,7 @@
 use std::path::Path;
 
 use nexus_preset::capability_catalog::BuiltinCapabilityCatalog;
-use nexus_preset::workflow_ir::{import_preset_bundle, import_preset_manifest};
+use nexus_preset::workflow_ir::{import_preset_bundle, import_preset_manifest, FsAssetSource};
 use nexus_workflow_ir::{content_hash, WorkflowDocument, WorkflowDocumentState};
 use sqlx::SqlitePool;
 
@@ -63,7 +63,13 @@ pub fn imported_strategy_document(
         })?,
     };
     match bundle_dir {
-        Some(dir) => import_preset_bundle(&loaded.manifest, &dir).map(|imported| imported.document),
+        Some(dir) => {
+            let source = FsAssetSource::new(&dir).map_err(|source| CoreError::InvalidInput {
+                field: "strategy".into(),
+                reason: format!("open preset bundle `{}`: {source}", dir.display()),
+            })?;
+            import_preset_bundle(&loaded.manifest, &source).map(|imported| imported.document)
+        }
         None => import_preset_manifest(&loaded.manifest),
     }
     .map_err(|error| CoreError::InvalidInput {
@@ -461,7 +467,11 @@ impl CoreService {
         self.verify_principal(principal)?;
         let loaded = nexus_preset::load_preset(bundle_root, &BuiltinCapabilityCatalog)
             .map_err(|error| bundle_load_error(&error))?;
-        let imported = import_preset_bundle(&loaded.manifest, bundle_root).map_err(|error| {
+        let source = FsAssetSource::new(bundle_root).map_err(|source| CoreError::InvalidInput {
+            field: "bundle".into(),
+            reason: source.to_string(),
+        })?;
+        let imported = import_preset_bundle(&loaded.manifest, &source).map_err(|error| {
             CoreError::InvalidInput {
                 field: "bundle".into(),
                 reason: error.to_string(),

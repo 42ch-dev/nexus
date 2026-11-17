@@ -336,6 +336,23 @@ impl std::fmt::Display for IrTemplateSource {
     }
 }
 
+/// The template source a resolved applied document builds under.
+///
+/// An embedded bundle's document is constructed from `EMBEDDED_PRESETS` keyed by
+/// its own id, so that same tree is the document's own source and may answer for
+/// its templates. Any other document (an applied user bundle) has no bundle root
+/// at all, and reading the embedded tree for it could serve a colliding preset's
+/// bytes — [`IrTemplateSource::OwnSource`] refuses every template instead.
+#[must_use]
+pub fn ir_template_source(loaded: Option<&nexus_preset::LoadedPreset>) -> IrTemplateSource {
+    match loaded.and_then(|loaded| loaded.source_identity.as_ref()) {
+        Some(nexus_preset::source_identity::PresetSourceIdentity::Embedded { .. }) => {
+            IrTemplateSource::Embedded
+        }
+        _ => IrTemplateSource::OwnSource,
+    }
+}
+
 /// Why an IR document cannot become an outer graph.
 #[derive(Debug, thiserror::Error)]
 pub enum IrOuterGraphError {

@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 
 use nexus_preset::manifest::PresetManifest;
-use nexus_preset::{export_preset, import_preset_bundle, PresetIrImport};
+use nexus_preset::{export_preset, import_preset_bundle, FsAssetSource, PresetIrImport};
 use nexus_workflow_ir::{
     WorkflowDocument, WorkflowEdgeKind, WorkflowExitWhenKind, WorkflowInitialActionKind,
     WorkflowSignalBindingAction,
@@ -45,7 +45,8 @@ fn round_trip(id: &str) -> PresetIrImport {
     let bundle = sample_root(id);
     let yaml = std::fs::read_to_string(bundle.join("preset.yaml")).expect("read preset.yaml");
     let manifest: PresetManifest = serde_yaml::from_str(&yaml).expect("parse preset.yaml");
-    let imported = import_preset_bundle(&manifest, &bundle).expect("import preset bundle");
+    let source = FsAssetSource::new(&bundle).expect("open preset bundle");
+    let imported = import_preset_bundle(&manifest, &source).expect("import preset bundle");
 
     // Golden JSON: deserialize -> serialize is byte-identical to the committed fixture.
     let golden = std::fs::read_to_string(fixture_path(id)).expect("read golden fixture");
