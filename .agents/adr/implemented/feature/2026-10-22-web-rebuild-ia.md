@@ -119,7 +119,7 @@ Rail registry: 操作台 / Harness / 模块 / 能力 / 角色 / 会话. Hub card
 
 ### 7. Carried-over invariants from the retired spec
 
-These survive the retirement of `web-ui.md` and bind the rebuild:
+These survive the retirement of `web-ui.md` and bind the rebuild; the `(retired spec §N)` pointers below name sections of that record as it is preserved verbatim in [the archived retirement notes](../../archived/feature/2026-10-22-web-ui-retired-historical-notes.md):
 
 1. **PD-4 (Harness naming)** — user-visible pillar label is **Harness**; **Preset stays** the mechanism name; internal identifiers (`/strategies` route, `CanvasSurfaceKind = 'strategy'`, `preset` wire fields, CSS classes, hook names) are unchanged. recorded here as the durable authority.
 2. **`NexusClient` boundary** — screen logic depends on the `NexusClient` interface, never on `fetch`/IPC/filesystem directly; browser and desktop transports are interchangeable implementations (retired spec §5).
