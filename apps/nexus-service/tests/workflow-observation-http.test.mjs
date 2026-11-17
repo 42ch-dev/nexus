@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -79,16 +79,6 @@ function seededHome() {
     { cwd: root, stdio: 'inherit' },
   );
   assert.equal(seed.status, 0, seed.stderr?.toString());
-  // These cases pin the YAML observation/control contracts (run identity,
-  // streaming ring, park/resume), not the intake policy: every preset here is
-  // scaffolded through the public surface and never applied, so the default
-  // `ir-only` would refuse its run before graph construction. Pin the v1.243
-  // `yaml-only` compatibility arm these graphs were written against (removed
-  // at v1.244.0).
-  appendFileSync(
-    join(home, '.nexus42', 'config.toml'),
-    '\n[strategy_intake]\nmode = "yaml-only"\n',
-  );
   const agentHostDir = join(home, '.nexus42', 'agent-host');
   mkdirSync(agentHostDir, { recursive: true });
   writeFileSync(join(agentHostDir, 'config.toml'), acpProviderConfig());
@@ -229,6 +219,39 @@ async function jsonFetch(url, { method = 'GET', body, headers = {} } = {}) {
     payload,
     text,
   };
+}
+
+/**
+ * Freeze a runnable applied identity for a scaffolded user preset.
+ *
+ * The intake has one arm: a user bundle runs the document its current apply
+ * installed, and a bundle with no apply is refused before graph construction.
+ * An apply needs the strategy to own a schedule, so the caller adds the
+ * schedule first and applies here — a tick that admits in between fails closed
+ * and leaves the row pending for the next one.
+ *
+ * simulate → approve → apply is the public authoring chain; nothing here seeds
+ * the store privately.
+ */
+async function applyPreset(base, presetId) {
+  const candidate = await jsonFetch(`${base}/v1/daemon/strategies/${presetId}/candidate`);
+  assert.equal(candidate.status, 200, candidate.text);
+  const document = candidate.payload;
+  const trajectory = await jsonFetch(`${base}/v1/daemon/strategies/${presetId}/simulate`, {
+    method: 'POST',
+    body: { document },
+  });
+  assert.equal(trajectory.status, 200, trajectory.text);
+  const approved = await jsonFetch(`${base}/v1/daemon/strategies/${presetId}/approve`, {
+    method: 'POST',
+    body: { base_revision: document.revision, trajectory: trajectory.payload },
+  });
+  assert.equal(approved.status, 200, approved.text);
+  const applied = await jsonFetch(`${base}/v1/daemon/strategies/${presetId}/apply`, {
+    method: 'POST',
+    body: { approval_content_hash: approved.payload.content_hash },
+  });
+  assert.equal(applied.status, 200, applied.text);
 }
 
 async function startServiceOn(home) {
@@ -518,6 +541,7 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       },
     });
     assert.equal(created.status, 201, created.text);
+    await applyPreset(base, presetName);
     const scheduleId = created.payload.schedule_id;
     const inspect = async () => {
       const response = await jsonFetch(`${base}/v1/daemon/orchestration/schedules/${scheduleId}`);

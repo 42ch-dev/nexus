@@ -72,8 +72,8 @@ pub struct RunDescriptorV1 {
     /// admission): `Some` on new user-preset runs, `None` for embedded and
     /// `_system.` presets and for any row persisted before this field
     /// existed. Recovery follows the RECORDED mode, not the current config —
-    /// a `yaml-only` run keeps rebuilding the YAML graph after a config flip,
-    /// and an `ir-only` run refuses when its recorded apply is absent.
+    /// an `ir-only` run refuses when its recorded apply is absent, and a
+    /// config flip cannot retcon an in-flight run.
     /// Skipped when absent so a legacy descriptor serializes byte for byte
     /// as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]

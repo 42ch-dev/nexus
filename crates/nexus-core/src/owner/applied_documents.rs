@@ -35,8 +35,8 @@ use crate::error::CoreResult;
 ///
 /// # Errors
 /// The `intake_config_invalid`-prefixed reason when the home config document
-/// is unreadable or names a mode outside `ir-only`/`yaml-only` — a mistyped
-/// key fails closed instead of silently selecting an arm.
+/// is unreadable or names a mode outside `ir-only` — a mistyped key, or the
+/// removed `yaml-only` arm, fails closed instead of silently selecting an arm.
 pub fn intake_mode_for_admission(
     nexus_home: &std::path::Path,
     preset_id: &str,
@@ -130,13 +130,12 @@ impl AppliedAdmissionPort for CreatorAppliedDocuments {
         preset_id: &str,
         loaded: &LoadedPreset,
     ) -> Result<AppliedAdmission, AppliedAdmissionError> {
-        // The intake key governs user bundles only; `yaml-only` runs the YAML
-        // bundle without reading the apply at all.
+        // The intake key governs user bundles only; a non-user bundle reads no
+        // apply under it. The one remaining arm (`ir-only`) always resolves.
         let intake_mode = intake_mode_for_admission(&self.nexus_home, preset_id, loaded)
             .map_err(AppliedAdmissionError::InvalidIntakeConfig)?;
-        let applied = match intake_mode {
-            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
-            _ => resolve_applied_document(&self.pool, &self.nexus_home, preset_id, Some(loaded))
+        let applied =
+            resolve_applied_document(&self.pool, &self.nexus_home, preset_id, Some(loaded))
                 .await
                 .map_err(|error| AppliedAdmissionError::Store(error.to_string()))?
                 .map_err(|refusal| AppliedAdmissionError::AppliedIdentity {
@@ -144,8 +143,7 @@ impl AppliedAdmissionPort for CreatorAppliedDocuments {
                     // stable code plus the sentence naming strategy and apply.
                     code: refusal.reason().to_string(),
                     message: refusal.to_string(),
-                })?,
-        };
+                })?;
         Ok(AppliedAdmission {
             intake_mode,
             applied,
