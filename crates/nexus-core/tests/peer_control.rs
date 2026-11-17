@@ -759,28 +759,91 @@ async fn peer_control_acts_on_the_lane_installed_when_it_resolves() {
     );
 }
 
-/// `enabled` is reported state, never a second gate: a lane started disabled
-/// still serves an allowlisted operation, and its state says the cohort is off.
+/// Whether `result` is the disabled-lane refusal: a `ForbiddenReason` whose
+/// reason names the lane state, distinct from the allowlist's `Forbidden`.
+fn lane_disabled(
+    result: &Result<nexus_contracts::generated::core::CorePeerControlState, CoreError>,
+) -> bool {
+    matches!(result, Err(CoreError::ForbiddenReason { reason, .. }) if reason.contains("disabled"))
+}
+
+/// A disabled lane refuses every allowlisted operation except the two that can
+/// report or restore it (`status`, `enable`), and says which refusal it is.
+///
+/// Without the enablement check the first two refusals below pass instead — so
+/// this case fails when that check is removed, which is the point.
 #[tokio::test]
 #[serial]
-async fn peer_control_admits_the_allowlist_when_the_lane_reports_disabled() {
+async fn peer_control_a_disabled_lane_refuses_everything_but_status_and_enable() {
     let f = lane_fixture().await;
     let principal = f.core.active_principal().await.expect("active principal");
     let started = f
         .handle
-        .start_peer_control(&principal, start_options(false, &["status"]))
+        .start_peer_control(
+            &principal,
+            start_options(false, &["status", "enable", "allow", "disable"]),
+        )
         .await
         .expect("the lane starts");
     assert!(!started.enabled, "the start reports the disabled lane");
 
+    // `status` is reachable: a lane that cannot be observed cannot be
+    // diagnosed, so the reachable set is never empty.
     let reported = f
         .handle
         .peer_control(&principal, control_request("status", None))
         .await
-        .expect("the allowlist alone admits status on a disabled lane");
+        .expect("status is reachable on a disabled lane");
+    assert!(!reported.enabled, "the lane still reports itself disabled");
+
+    // Allowlisted operations outside the reachable set are refused, naming the
+    // lane state rather than reusing the allowlist refusal.
+    let withheld_allow = f
+        .handle
+        .peer_control(&principal, control_request("allow", Some("evict")))
+        .await;
     assert!(
-        !reported.enabled,
-        "the lane reports its enablement, it does not gate the allowlist"
+        lane_disabled(&withheld_allow),
+        "an allowlisted `allow` on a disabled lane is a lane-disabled refusal, got {withheld_allow:?}"
+    );
+    assert!(
+        !forbidden(&withheld_allow),
+        "the disabled-lane refusal must be distinguishable from the allowlist refusal"
+    );
+    let withheld_disable = f
+        .handle
+        .peer_control(&principal, control_request("disable", None))
+        .await;
+    assert!(
+        lane_disabled(&withheld_disable),
+        "`disable` cannot re-enable a lane, so a disabled lane refuses it, got {withheld_disable:?}"
+    );
+
+    // The allowlist refusal is unchanged: an operation the lane never granted
+    // is still the plain allowlist refusal, not the lane-disabled one.
+    let ungranted = f
+        .handle
+        .peer_control(&principal, control_request("evict", None))
+        .await;
+    assert!(
+        forbidden(&ungranted),
+        "an operation off the allowlist keeps the allowlist refusal, got {ungranted:?}"
+    );
+
+    // `enable` is reachable, and it restores the very operation refused above.
+    let enabled = f
+        .handle
+        .peer_control(&principal, control_request("enable", None))
+        .await
+        .expect("enable is reachable on a disabled lane");
+    assert!(enabled.enabled, "enable flips the lane back on");
+    let granted = f
+        .handle
+        .peer_control(&principal, control_request("allow", Some("evict")))
+        .await;
+    assert!(
+        granted.is_ok(),
+        "the same operation succeeds once the lane is enabled, got {granted:?}"
     );
 }
 

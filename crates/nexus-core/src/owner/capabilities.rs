@@ -1704,12 +1704,19 @@ fn kb_store_refusal(e: &nexus_knowledge::world_kb::store::KbStoreError) -> Nexus
 /// recorded `Put`, in input order. Each block must first pass the store's own
 /// record gates (`SqliteKbStore::validate_key_block`) and is refused with the
 /// store's refusal otherwise: `knowledge_record_to_spoke` asserts those gates,
-/// so converting first panics on caller input that production refuses. The
-/// preview is still not a prediction of store acceptance — it runs no
-/// uniqueness predicate, so a block that passes the record gates may yet
-/// collide at apply time. Zero blocks yield the explicit empty list, `Get`
-/// never appears (a read mutates nothing), and a production context carries
-/// neither the list nor an empty-state claim.
+/// so converting first panics on caller input that production refuses. It must
+/// then pass the store's `key_block_id` primary-key predicate
+/// (`SqliteKbStore::check_key_block_id_free`) — the same check the INSERT
+/// collides on — so an id that already exists is refused here instead of at
+/// apply time. Zero blocks yield the explicit empty list, `Get` never appears
+/// (a read mutates nothing), and a production context carries neither the list
+/// nor an empty-state claim.
+///
+/// shortcut: the preview predicts no other write failure. A block whose
+/// `(world_id, block_type, canonical_name)` is already held by a live row still
+/// previews as writable and collides on `idx_kb_key_blocks_active_unique` at
+/// apply, as does a `key_block_id` repeated by a sibling block of the same
+/// request. Upgrade only with the DDL-derived design pass `I-000515` requires.
 async fn execute_kb_snapshot_write(
     req: &ToolsApi,
     context: &ToolContext,
@@ -1772,6 +1779,13 @@ async fn execute_kb_snapshot_write(
             // document exists on this path (nothing is built or inserted).
             kb_store
                 .validate_key_block(&kb, None)
+                .map_err(|e| kb_store_refusal(&e))?;
+            // A taken id is the primary-key collision the INSERT reports, so the
+            // preview asks the store's own predicate rather than recording a
+            // `Put` production would refuse.
+            kb_store
+                .check_key_block_id_free(&kb)
+                .await
                 .map_err(|e| kb_store_refusal(&e))?;
             let entry = nexus_spoke_adapter::conversion::knowledge_record_to_spoke(&kb);
             if let SpokeResult::Reject(reject) = port.put_knowledge_entry(entry, None).await {
@@ -4699,6 +4713,88 @@ mod tests {
             kb_rows(&fixture.pool).await,
             before,
             "a refused batch writes nothing, in either branch"
+        );
+    }
+
+    /// A `key_block_id` an existing row already holds is the primary-key
+    /// collision `insert_key_block_in_tx` reports, so the simulated branch must
+    /// answer with the same refusal instead of previewing the block as writable;
+    /// the same request with a free id must still preview as writable.
+    /// `canonical_name` differs from every stored row, so the primary key is the
+    /// only guard in play.
+    #[tokio::test]
+    async fn simulated_knowledge_write_refuses_a_taken_key_block_id() {
+        use nexus_contracts::BlockType;
+        use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+
+        let fixture = fixture(false).await;
+        seed_kb_fixture(&fixture.pool).await;
+        let simulated = ToolContext::new_simulated(
+            fixture.pool.clone(),
+            fixture.context.nexus_home.clone(),
+            fixture.context.workspace_path(),
+            ToolRuntimeFacts::default(),
+            None,
+            None,
+        );
+        let before = kb_rows(&fixture.pool).await;
+
+        let mut colliding =
+            KnowledgeEntryRecord::new("wld_sim", BlockType::Character, "sim_pk_probe");
+        colliding.entry_id = "kb_sim_existing".to_string();
+        let payload = serde_json::to_value(&colliding).expect("serialize the block");
+
+        let live = execute_kb_snapshot_write(
+            &kb_write_request(&serde_json::json!([payload.clone()])),
+            &fixture.context,
+            CREATOR,
+        )
+        .await
+        .expect_err("production refuses a taken key_block_id");
+        let refused = execute_kb_snapshot_write(
+            &kb_write_request(&serde_json::json!([payload])),
+            &simulated,
+            CREATOR,
+        )
+        .await
+        .expect_err("a taken key_block_id must not preview as writable");
+
+        assert_eq!(
+            format!("{refused:?}"),
+            format!("{live:?}"),
+            "the preview must refuse a taken key_block_id exactly as production refuses it"
+        );
+
+        // The same request with a free id still previews as writable.
+        let mut fresh = KnowledgeEntryRecord::new("wld_sim", BlockType::Character, "sim_pk_fresh");
+        fresh.entry_id = "kb_sim_fresh".to_string();
+        let result = execute_kb_snapshot_write(
+            &kb_write_request(&serde_json::json!([
+                serde_json::to_value(&fresh).expect("serialize the block")
+            ])),
+            &simulated,
+            CREATOR,
+        )
+        .await
+        .expect("a free key_block_id still previews as writable");
+        assert_eq!(result["written"], serde_json::json!(0));
+        assert_eq!(
+            result["suppressed_writes"],
+            serde_json::json!([{ "entry_id": "kb_sim_fresh" }]),
+            "the free id is the only recorded intent"
+        );
+        assert_eq!(
+            simulated.recorded_knowledge_entry_mutations(),
+            Some(vec![StubKnowledgeEntryMutation::Put {
+                entry_id: "kb_sim_fresh".to_string(),
+                expected_base_revision: None,
+            }]),
+            "the refused id never reached the port"
+        );
+        assert_eq!(
+            kb_rows(&fixture.pool).await,
+            before,
+            "the refusal and the preview both write nothing"
         );
     }
 
