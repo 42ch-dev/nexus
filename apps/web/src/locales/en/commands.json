@@ -91,15 +91,6 @@
         "alt-view": "alt view",
         "switch": "switch"
       }
-    },
-    "create-transition": {
-      "label": "Create Transition",
-      "keywords": {
-        "add-edge": "add edge",
-        "new-transition": "new transition",
-        "state-machine": "state machine",
-        "link-states": "link states"
-      }
     }
   },
   "outline": {

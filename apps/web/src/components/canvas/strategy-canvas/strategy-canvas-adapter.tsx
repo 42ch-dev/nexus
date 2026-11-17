@@ -4,26 +4,18 @@ import type { Node } from '@xyflow/react';
 import type { SimulationTrajectory, WorkflowDocument, PatternSummary } from '@42ch/nexus-contracts';
 
 import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
-import type { ConflictModalProps } from '../conflict-modal';
 import { StrategyAltView } from '../strategy-alt-view';
 import { strategyNodeTypes } from '../strategy-nodes';
 import { buildStrategyGraphFromIr } from '@/lib/canvas/strategy-graph-ir';
 import type { StrategyEdgeData, StrategyNodeData } from '@/lib/canvas/strategy-graph';
 import type { ParsedPreset, PresetState } from '@/lib/canvas/preset-yaml';
-import { isStrategyConflictError } from '@/lib/canvas/use-strategy-data';
 
 import { EdgeInspector } from './inspectors/edge-inspector';
 import { PromptInspector } from './inspectors/prompt-inspector';
 import { SlotInspector } from './inspectors/slot-inspector';
 import { StateInspector } from './inspectors/state-inspector';
 import { applyTrajectoryOverlay } from './simulation-overlay';
-import {
-  getChangedFields,
-  getConflictDraft,
-  originalFormOf,
-  type EditForm,
-  type Section,
-} from './state-machine';
+import { type EditForm, type Section } from './state-machine';
 
 /** Live session overlay data attached to the graph payload. */
 export interface ActiveSession {
@@ -74,9 +66,6 @@ export interface StrategyCanvasAdapterContext {
   promptTemplateRef: string | undefined;
   selectedNode: Node<StrategyNodeData> | null;
   parsed: ParsedPreset | undefined;
-  onUseCurrent: () => void;
-  onReapply: () => void;
-  onDismiss: () => void;
   /**
    * Projection byproduct — the adapter writes `danglingTargets` here after
    * projecting; the orchestrator reads it for the ValidationPanel (V1.115 T2).
@@ -101,8 +90,8 @@ export type StrategyCanvasAdapter = CanvasSurfaceAdapter<StrategySurfaceGraph, S
 
 /**
  * Strategy canvas adapter — projects the workflow IR document into React Flow
- * nodes/edges and renders surface-specific chrome (inspectors, alt-view,
- * conflict modal, a11y summary).
+ * nodes/edges and renders surface-specific chrome (inspectors, alt-view, a11y
+ * summary).
  *
  * `projectGraph` performs the projection via `buildStrategyGraphFromIr` inside
  * `useCanvasSurface`'s `useMemo`. The Canvas renders the applied IR document, so
@@ -183,27 +172,6 @@ export function createStrategyCanvasAdapter(
         nodes: applyTrajectoryOverlay(nodes, graph.trajectory),
         edges: projected.edges,
       };
-    },
-
-    adaptConflict(error) {
-      if (!isStrategyConflictError(error)) return null;
-      const currentRevision =
-        typeof error.details === 'object' && error.details !== null
-          ? (error.details as { current_revision?: number }).current_revision ?? 0
-          : 0;
-      const selectedState = ctxRef.current.selectedState;
-      if (!selectedState) return null;
-      return {
-        open: true,
-        currentRevision,
-        draft: getConflictDraft(ctxRef.current.form),
-        canonicalState: selectedState,
-        promptTemplateRef: ctxRef.current.promptTemplateRef,
-        changedFields: getChangedFields(ctxRef.current.form, originalFormOf(selectedState)),
-        onUseCurrent: ctxRef.current.onUseCurrent,
-        onReapply: ctxRef.current.onReapply,
-        onDismiss: ctxRef.current.onDismiss,
-      } satisfies ConflictModalProps;
     },
 
     renderInspector(_node) {

@@ -198,17 +198,11 @@ vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => {
     setForm: () => {},
     setActiveSection: () => {},
     activeSection: 'state',
-    conflict: null,
-    setConflict: () => {},
-    saveTriggers: { state: 0, transition: 0, prompt: 0 },
-    setSaveTriggers: () => {},
-    handleConflict: () => {},
-    handleReapply: () => {},
   };
   return { useStrategyCanvas: () => strategyState };
 });
 
-// Strategy heavy children → no-ops (keep canvas-layout + edge-create-dialog real).
+// Strategy heavy children → no-ops (keep canvas-layout real).
 vi.mock('@/components/canvas/strategy-canvas/inspectors/state-inspector', () => ({
   StateInspector: () => null,
 }));
@@ -220,7 +214,6 @@ vi.mock('@/components/canvas/strategy-canvas/inspectors/prompt-inspector', () =>
 }));
 vi.mock('@/components/canvas/strategy-canvas/inspector-panel', () => ({
   InspectorPanel: () => null,
-  StrategyConflictModal: () => null,
 }));
 vi.mock('@/components/canvas/strategy-canvas/state-machine', () => ({
   ValidationPanel: () => null,
@@ -373,8 +366,8 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Strategy — toggle view + create transition (the only surface with a clean
-// canvas-level creation entrypoint: the "Create Transition…" button + dialog).
+// Strategy — toggle view. View switching is the only palette command this
+// surface registers; structural creation is a Compose operation.
 // ---------------------------------------------------------------------------
 
 describe('StrategyCanvas — palette commands', () => {

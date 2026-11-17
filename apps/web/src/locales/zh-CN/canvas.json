@@ -245,7 +245,6 @@
       "description": "状态机与转换编辑器",
       "showGraph": "显示图谱",
       "showList": "显示列表",
-      "createTransition": "创建",
       "simulate": "模拟…",
       "livePrefix": "实时：",
       "liveStatus": "",
@@ -294,7 +293,6 @@
       "steerResumeRefused": "想法已保存为核心上下文版本 {{version}}，但恢复被拒绝",
       "steerResumeConflict": "想法已保存为核心上下文版本 {{version}}；该计划正在等待人工步骤，因此恢复被作为状态冲突拒绝"
     },
-    "draftTransitionLabel": "草稿转换",
     "approve": {
       "title": "批准候选",
       "notSimulated": "尚未模拟。没有轨迹的候选不具备批准条件。",
@@ -376,27 +374,6 @@
       "ariaLabel": "Harness 产物",
       "empty": "暂无产物。"
     },
-    "edgeCreate": {
-      "title": "创建转换",
-      "description": "在两个状态之间添加转换。",
-      "sourceLabel": "来源",
-      "sourcePlaceholder": "选择来源",
-      "targetLabel": "目标",
-      "targetPlaceholder": "选择目标",
-      "targetPlaceholderLocked": "目标（已锁定）",
-      "kindLabel": "类型",
-      "kind": {
-        "next": "下一步",
-        "branch": "分支",
-        "default": "默认"
-      },
-      "conditionLabel": "条件",
-      "conditionPlaceholder": "条件（可选）…",
-      "cancel": "取消",
-      "submit": "创建",
-      "creating": "创建中…",
-      "draftAriaLabel": "从 {{source}} 到 {{target}} 的草稿转换"
-    },
     "inspector": {
       "ariaLabel": "Harness 检查器",
       "structuralDisabled": "画布展示的是文档，而非此编辑器写入的预设 YAML —— 请在 Compose 中编辑并应用。",
@@ -404,32 +381,17 @@
         "title": "状态",
         "ariaLabel": "状态检查器",
         "labelLabel": "标签",
-        "descriptionLabel": "描述",
-        "save": "保存",
-        "saved": "已保存",
-        "saveFailed": "保存失败",
-        "saving": "保存中…",
-        "updated": "状态已更新"
+        "descriptionLabel": "描述"
       },
       "transition": {
         "title": "转换",
         "ariaLabel": "转换检查器",
-        "targetLabel": "目标",
-        "save": "保存",
-        "saved": "已保存",
-        "saveFailed": "保存失败",
-        "saving": "保存中…",
-        "updated": "转换已更新"
+        "targetLabel": "目标"
       },
       "prompt": {
         "title": "提示词",
         "ariaLabel": "提示词检查器",
         "placeholder": "输入提示词模板…",
-        "save": "保存",
-        "saved": "已保存",
-        "saveFailed": "保存失败",
-        "saving": "保存中…",
-        "updated": "提示词模板已保存",
         "structuralDisabled": "画布渲染的是文档，而非此编辑器写入的预设 YAML，且 Compose 没有提示词正文的操作。请用 `nexus42 preset patch prompt <策略> <状态> --template-ref <路径> --file <路径>` 编辑模板后重新加载。"
       },
       "stateId": "状态 ID",
@@ -440,10 +402,7 @@
       "innerGraph": "内部图谱",
       "converge": "汇聚",
       "editAria": "编辑",
-      "cancelEditAria": "取消编辑",
-      "transitionConflict": {
-        "title": "转换冲突"
-      }
+      "cancelEditAria": "取消编辑"
     },
     "composeLoading": "正在加载策略候选…",
     "slot": {

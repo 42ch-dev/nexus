@@ -9,7 +9,6 @@ import { type Node } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ScrollText } from 'lucide-react';
 
-import type { ChangedField, ConflictModalDraft } from '@/components/canvas/conflict-modal';
 import type { IdeaArtifact } from '@/components/canvas/idea-input';
 import type { StrategyNodeData } from '@/lib/canvas/strategy-graph';
 import type { PresetState } from '@/lib/canvas/preset-yaml';
@@ -37,24 +36,6 @@ export function templateRefOf(state: PresetState | undefined): string | undefine
   const task = state.enter?.find((e) => e.kind === 'acp_prompt');
   if (task?.name) return task.name;
   return state.context_update?.template_file;
-}
-
-export function getConflictDraft(form: EditForm): ConflictModalDraft {
-  return {
-    label: form.label,
-    description: form.description,
-    nextTarget: form.nextTarget,
-    promptBody: form.promptBody,
-  };
-}
-
-export function getChangedFields(form: EditForm, original: EditForm): ChangedField[] {
-  const changed: ChangedField[] = [];
-  if (form.label !== original.label) changed.push('label');
-  if (form.description !== original.description) changed.push('description');
-  if (form.nextTarget !== original.nextTarget) changed.push('nextTarget');
-  if (form.promptBody && form.promptBody !== original.promptBody) changed.push('promptBody');
-  return changed;
 }
 
 export function isSectionDirty(section: Section, form: EditForm, original: EditForm): boolean {

@@ -10,12 +10,9 @@ import { useTranslation } from 'react-i18next';
 import type { Node } from '@xyflow/react';
 import { Info, Pencil, X } from 'lucide-react';
 
-import { ConflictModal } from '@/components/canvas/conflict-modal';
-import { ConflictModalBase } from '@/components/canvas/conflict-modal-base';
 import type { StrategyNodeData } from '@/lib/canvas/strategy-graph';
 import type { PresetState } from '@/lib/canvas/preset-yaml';
-import { getChangedFields, getConflictDraft, originalFormOf, templateRefOf, type EditForm } from './state-machine';
-import type { ConflictInfo } from './hooks/use-strategy-canvas';
+import { templateRefOf } from './state-machine';
 
 interface InspectorPanelProps {
   selected: Node | null;
@@ -118,63 +115,5 @@ function ReadOnlyDetails({ d, selectedState }: { d: StrategyNodeData; selectedSt
         </p>
       ) : null}
     </dl>
-  );
-}
-
-interface StrategyConflictModalProps {
-  conflict: ConflictInfo | null;
-  form: EditForm;
-  canonicalState: PresetState | undefined;
-  promptTemplateRef: string | undefined;
-  onUseCurrent: () => void;
-  onReapply: () => void;
-  onDismiss: () => void;
-}
-
-export function StrategyConflictModal({
-  conflict,
-  form,
-  canonicalState,
-  promptTemplateRef,
-  onUseCurrent,
-  onReapply,
-  onDismiss,
-}: StrategyConflictModalProps) {
-  const { t } = useTranslation('canvas');
-  if (!conflict) return null;
-
-  // Transition create/reconnect conflict — the state-edit field diff
-  // (label/description/nextTarget/promptBody) does not apply, and there may be
-  // no selected state to diff against. Render a transition-specific modal so
-  // the conflict is surfaced even without a selected node (QC1 W-001).
-  if (conflict.retry) {
-    return (
-      <ConflictModalBase
-        open
-        title={t('strategy.inspector.transitionConflict.title')}
-        currentRevision={conflict.currentRevision}
-        serverChanges={[]}
-        localChanges={[]}
-        reviewRows={[]}
-        onUseCurrent={onUseCurrent}
-        onReapply={onReapply}
-        onDismiss={onDismiss}
-      />
-    );
-  }
-
-  if (!canonicalState) return null;
-  return (
-    <ConflictModal
-      open
-      currentRevision={conflict.currentRevision}
-      draft={getConflictDraft(form)}
-      canonicalState={canonicalState}
-      promptTemplateRef={promptTemplateRef}
-      changedFields={getChangedFields(form, originalFormOf(canonicalState))}
-      onUseCurrent={onUseCurrent}
-      onReapply={onReapply}
-      onDismiss={onDismiss}
-    />
   );
 }

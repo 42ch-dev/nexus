@@ -91,15 +91,6 @@
         "alt-view": "替代视图",
         "switch": "切换"
       }
-    },
-    "create-transition": {
-      "label": "创建过渡",
-      "keywords": {
-        "add-edge": "添加边",
-        "new-transition": "新建过渡",
-        "state-machine": "状态机",
-        "link-states": "连接状态"
-      }
     }
   },
   "outline": {

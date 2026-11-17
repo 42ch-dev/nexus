@@ -61,12 +61,6 @@ vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => (
     setForm: () => {},
     activeSection: 'state',
     setActiveSection: () => {},
-    conflict: null,
-    setConflict: () => {},
-    saveTriggers: { state: 0, transition: 0, prompt: 0 },
-    setSaveTriggers: () => {},
-    handleConflict: () => {},
-    handleReapply: () => {},
   }),
 }));
 
@@ -81,7 +75,6 @@ vi.mock('@/components/canvas/strategy-canvas/inspectors/prompt-inspector', () =>
 }));
 vi.mock('@/components/canvas/strategy-canvas/inspector-panel', () => ({
   InspectorPanel: () => null,
-  StrategyConflictModal: () => null,
 }));
 vi.mock('@/components/canvas/strategy-canvas/state-machine', () => ({
   ValidationPanel: () => null,

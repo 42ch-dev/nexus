@@ -1,17 +1,15 @@
 /**
  * Strategy canvas — public orchestrator facade.
  *
- * B1: per-inspector saves (R-V171P0-QC1-004).
  * B2: split into focused sibling modules ≤200 lines (R-V171P0-QC1-006).
  * V1.114 P0 T2: migrated to the shared `CanvasSurfaceAdapter` abstraction via
  * `useCanvasSurface()` so graph projection, summary, inspector routing, and
  * alt-view are adapter-driven.
  * V1.115 P0 T2 (W001): the adapter's `projectGraph` now owns the real
- * projection (`buildStrategyGraph(parsed)`). `useStrategyCanvas` is a thin
- * query + state hook — it delegates projection to the adapter and owns only
- * form/save/conflict/draft state. Draft edges are merged into the projection
- * via `ctxRef.current.localEdges`; `danglingTargets` flows back via
- * `ctxRef.current.danglingTargets`.
+ * projection (`buildStrategyGraphFromIr(document)`). `useStrategyCanvas` is a
+ * thin query + state hook — it delegates projection to the adapter and owns
+ * only the edit form and the active inspector section. `danglingTargets`
+ * flows back from projection via `ctxRef.current.danglingTargets`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -45,7 +43,7 @@ import { ApproveDisclosure } from './strategy-canvas/approve-disclosure';
 import { StrategyAppliedState } from './strategy-canvas/applied-state';
 import { ComposeConflictDialog } from './strategy-canvas/compose-conflict-dialog';
 import { PatternPickerDialog } from './strategy-canvas/pattern-picker-dialog';
-import { InspectorPanel, StrategyConflictModal } from './strategy-canvas/inspector-panel';
+import { InspectorPanel } from './strategy-canvas/inspector-panel';
 import {
   ValidationPanel,
   isSectionDirty,
@@ -93,10 +91,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   // apply/approve produced, so this view is read-only and editing goes through
   // Compose (P6 condition 2, D18).
   const appliedView = document === appliedDocument;
-  const strategyState = useStrategyCanvas(presetId, {
-    document,
-    refetch: () => applied.refetch(),
-  });
+  const strategyState = useStrategyCanvas(presetId, document);
   const approval = useApproveStrategy(presetId);
   const application = useApplyStrategy(presetId);
   // T4: every approval, so Apply can be aimed at a superseded one (rollback).
@@ -123,9 +118,6 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     promptTemplateRef: undefined,
     selectedNode: null,
     parsed: undefined,
-    onUseCurrent: () => {},
-    onReapply: () => {},
-    onDismiss: () => {},
     danglingTargets: [],
   });
 
@@ -148,8 +140,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         refetch: refetchSurface,
       };
     }
-    // The payload carries the document only: the adapter projects it from IR
-    // and merges draft edges via ctxRef.localEdges.
+    // The payload carries the document only: the adapter projects it from IR.
     return {
       data: {
         revision: document.revision,
@@ -192,11 +183,10 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   // It moved here because it depends on selectedState (now resolved from
   // surface.selectedNode by the orchestrator, not from hook-owned node state).
   const original = useMemo(() => originalFormOf(selectedState), [selectedState]);
-  const revisionStatus: 'clean' | 'dirty' | 'conflict' = strategyState.conflict
-    ? 'conflict'
-    : isSectionDirty('state', strategyState.form, original) ||
-        isSectionDirty('transition', strategyState.form, original) ||
-        isSectionDirty('prompt', strategyState.form, original)
+  const revisionStatus: 'clean' | 'dirty' =
+    isSectionDirty('state', strategyState.form, original) ||
+    isSectionDirty('transition', strategyState.form, original) ||
+    isSectionDirty('prompt', strategyState.form, original)
       ? 'dirty'
       : 'clean';
 
@@ -288,18 +278,10 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     (surface.selectedNode?.data as StrategyNodeData | undefined)?.stateId ??
     compose.workingDocument?.entry;
 
-  function handleUseCurrent() {
-    strategyState.setConflict(null);
-    setIsEditing(false);
-    void applied.refetch();
-  }
-
   // Update the mutable adapter context every render. The adapter object is
   // stable, so useCanvasSurface's projection memo survives state changes.
-  // V1.115 T2: localEdges feeds draft transition edges into the adapter's
-  // projectGraph so they appear on the canvas without a second projection
-  // path. danglingTargets is written BY the adapter during projection and
-  // read below for the ValidationPanel.
+  // danglingTargets is written BY the adapter during projection and read below
+  // for the ValidationPanel.
   ctxRef.current = {
     form: strategyState.form,
     onChange: updateField,
@@ -308,9 +290,6 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     promptTemplateRef,
     selectedNode: surface.selectedNode as unknown as Node<StrategyNodeData> | null,
     parsed: strategyState.parsed,
-    onUseCurrent: handleUseCurrent,
-    onReapply: strategyState.handleReapply,
-    onDismiss: () => strategyState.setConflict(null),
     danglingTargets: ctxRef.current.danglingTargets,
     patterns: compose.patternsQuery.data?.items,
     ...(composeEnabled
@@ -509,16 +488,6 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         attachNodeId={nestAttachNodeId ?? compose.workingDocument?.entry ?? presetId}
         isComposing={compose.isComposing}
         onNest={compose.nestPattern}
-      />
-
-      <StrategyConflictModal
-        conflict={strategyState.conflict}
-        form={strategyState.form}
-        canonicalState={selectedState}
-        promptTemplateRef={promptTemplateRef}
-        onUseCurrent={handleUseCurrent}
-        onReapply={strategyState.handleReapply}
-        onDismiss={() => strategyState.setConflict(null)}
       />
 
       <CanvasFooter
