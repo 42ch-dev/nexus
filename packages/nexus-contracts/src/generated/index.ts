@@ -297,7 +297,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   SessionDetailResponse: 1,
   SessionSummary: 1,
   SimulationTrajectory: 1,
-  StrategyAppliedStatus: 1,
+  StrategyAppliedStatus: 2,
   StrategyApplyRequest: 1,
   StrategyApprovals: 1,
   StrategyApproveRequest: 1,

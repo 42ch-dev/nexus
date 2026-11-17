@@ -755,6 +755,11 @@ async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
             .map(|newest| newest.approval_id),
         Some(approval_id)
     );
+    // Invariant 1: with no current apply both document fields are null — the read attempted no
+    // document replay, so "no document" can never be confused with "the document does not
+    // replay".
+    assert!(approved_only.applied_document.is_none());
+    assert!(approved_only.applied_document_refusal.is_none());
 
     // No approval and no apply: both sides are null, not a refusal.
     let empty = setup
@@ -764,6 +769,8 @@ async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
         .unwrap();
     assert!(empty.current_apply.is_none());
     assert!(empty.newest_approval.is_none());
+    assert!(empty.applied_document.is_none());
+    assert!(empty.applied_document_refusal.is_none());
 
     // The rollback target read answers an empty list for the same strategy, never a refusal.
     let no_approvals = setup
@@ -772,6 +779,162 @@ async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
         .await
         .unwrap();
     assert!(no_approvals.items.is_empty());
+    setup.core.close().await.unwrap();
+}
+
+/// Rewrite a frozen approval's document so it no longer hashes to the identity the approval
+/// recorded — the state an admitted non-core writer leaves behind when it edits an applied
+/// document.
+async fn corrupt_approval_document(setup: &Setup, approval_id: &str) {
+    let document_json: String =
+        sqlx::query_scalar("SELECT document_json FROM strategy_approvals WHERE approval_id = ?")
+            .bind(approval_id)
+            .fetch_one(setup.core.pool())
+            .await
+            .unwrap();
+    let mut document: serde_json::Value = serde_json::from_str(&document_json).unwrap();
+    let version = document["version"]
+        .as_u64()
+        .expect("the fixture records a version");
+    document["version"] = serde_json::json!(version + 1);
+    sqlx::query("UPDATE strategy_approvals SET document_json = ? WHERE approval_id = ?")
+        .bind(document.to_string())
+        .bind(approval_id)
+        .execute(setup.core.pool())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn the_status_read_returns_the_document_the_current_apply_installed() {
+    let setup = setup().await;
+    let (approval_id, hash, document) = seed_approval(&setup, STRATEGY, 1).await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+    setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap();
+
+    let status = setup
+        .core
+        .strategy_applied(&setup.principal, STRATEGY)
+        .await
+        .unwrap();
+    let current = status
+        .current_apply
+        .as_ref()
+        .expect("the approval is applied");
+    assert_eq!(current.approval_id, approval_id);
+
+    // Invariant 3: the document is the frozen one the apply installed, so its canonical hash IS
+    // the identity the status reports beside it.
+    let applied = status
+        .applied_document
+        .as_ref()
+        .expect("a current apply's document replays");
+    assert_eq!(applied.id.as_str(), STRATEGY);
+    assert_eq!(applied.version, document.version);
+    assert_eq!(
+        nexus_workflow_ir::content_hash(applied).unwrap(),
+        current.content_hash
+    );
+    assert_eq!(current.content_hash, hash);
+
+    // Invariant 2, the readable side: a document present means no refusal, never both.
+    assert!(status.applied_document_refusal.is_none());
+    setup.core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_current_apply_whose_document_no_longer_verifies_reports_a_refusal_not_a_null_document() {
+    let setup = setup().await;
+    let (approval_id, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+    let applied = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap();
+    corrupt_approval_document(&setup, &approval_id).await;
+
+    let status = setup
+        .core
+        .strategy_applied(&setup.principal, STRATEGY)
+        .await
+        .unwrap();
+    assert!(
+        status.current_apply.is_some(),
+        "the apply row is still current; only its document stopped replaying"
+    );
+
+    // Invariant 2, the unreadable side: a failed replay is its own field. Folding it into a null
+    // document (or into both-null, as if nothing were applied) fails here.
+    assert!(
+        status.applied_document.is_none(),
+        "the changed bytes must never be handed out as the applied document"
+    );
+    let refusal = status
+        .applied_document_refusal
+        .expect("a replay that fails is named in `applied_document_refusal`");
+    assert_eq!(refusal.reason, "applied_document_changed");
+    assert!(refusal.message.contains(STRATEGY));
+    assert!(refusal.message.contains(&applied.apply_id));
+    setup.core.close().await.unwrap();
+}
+
+/// Drop the approval row an apply names, leaving the apply row in place — the inconsistency
+/// `verified_apply_document`'s absence branch defends against. The healthy store cannot
+/// represent it (the foreign key and the pin triggers keep the pair together), so the delete runs
+/// with foreign keys paused: a store that lost its guard, not a store the core would write.
+async fn forget_approval_row(setup: &Setup, approval_id: &str) {
+    let mut connection = setup.core.pool().acquire().await.unwrap();
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    let removed = sqlx::query("DELETE FROM strategy_approvals WHERE approval_id = ?")
+        .bind(approval_id)
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    assert_eq!(
+        removed.rows_affected(),
+        1,
+        "the fixture removes one approval"
+    );
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn an_apply_naming_an_absent_approval_row_is_an_error_response_not_a_refusal_body() {
+    let setup = setup().await;
+    let (approval_id, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+    setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap();
+    forget_approval_row(&setup, &approval_id).await;
+
+    // Invariant 4: the replay's outer `Err` is a fault, not a status body. Both a body carrying
+    // the empty state's fields and a body carrying this as `applied_document_refusal` fail here.
+    let error = setup
+        .core
+        .strategy_applied(&setup.principal, STRATEGY)
+        .await
+        .expect_err("an apply without its approval row is an error response");
+    let CoreError::Internal { category } = &error else {
+        panic!("expected an internal error, got {error:?}");
+    };
+    assert!(
+        category.contains(&approval_id),
+        "the fault names the missing approval: {category}"
+    );
     setup.core.close().await.unwrap();
 }
 
