@@ -24,12 +24,13 @@ use thiserror::Error;
 #[cfg(test)]
 use crate::capability::CapabilityError;
 use crate::capability::CapabilityRegistry;
-use crate::run_state::{
+use nexus_contracts::local::schedule::CoreContextPayload;
+use nexus_preset::source_identity::PresetSourceIdentity;
+use nexus_session_storage::run_state::{
     ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord, RunStateV1,
     SettlementResult, TerminalSettlementTarget, WorkflowStateStore,
 };
-use nexus_contracts::local::schedule::CoreContextPayload;
-use nexus_preset::source_identity::PresetSourceIdentity;
+use nexus_session_storage::StorageError;
 
 /// Context key that effectful tasks set when they perform an external effect
 /// (capability call, ACP/Host prompt dispatch, `HostTool` call, child spawn).
@@ -163,9 +164,9 @@ fn clear_step_effect_marker(root: &graph_flow::Session) {
 // Helper types
 // ---------------------------------------------------------------------------
 
-/// Opaque session identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct SessionId(pub String);
+// Session identity/status/summary types live in `nexus-session-storage`;
+// re-exported here so every existing consumer path stays unchanged.
+pub use nexus_session_storage::{SessionId, SessionStatus, SessionSummary};
 
 /// Composite key that uniquely identifies a session within the engine.
 #[derive(Debug, Clone)]
@@ -192,81 +193,6 @@ impl SessionKey {
 pub struct SessionFilter {
     pub creator_id: Option<String>,
     pub preset_id: Option<String>,
-}
-
-/// Lightweight summary returned by [`OrchestrationEngine::list_active`].
-#[derive(Debug, Clone)]
-pub struct SessionSummary {
-    pub session_id: SessionId,
-    pub creator_id: String,
-    pub preset_id: String,
-    pub status: SessionStatus,
-    pub current_task_id: Option<String>,
-}
-
-/// Runtime status of a session.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum SessionStatus {
-    Running,
-    Paused,
-    WaitingForInput,
-    Completed,
-    Failed,
-    /// Cancelled by an operator; terminal, never auto-driven.
-    Cancelled,
-    /// Interrupted — uncertain in-flight work; stopped, never safe retry.
-    Interrupted,
-}
-
-impl SessionStatus {
-    /// Returns `true` if the session is in a terminal state.
-    #[must_use]
-    pub const fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            Self::Completed | Self::Failed | Self::Cancelled | Self::Interrupted
-        )
-    }
-
-    /// Returns `true` if the session has completed successfully.
-    #[must_use]
-    pub const fn is_completed(&self) -> bool {
-        matches!(self, Self::Completed)
-    }
-
-    /// Map to the authoritative DB `status` string (A2).
-    #[must_use]
-    pub const fn as_db_str(&self) -> &'static str {
-        match self {
-            Self::Running => "running",
-            Self::Paused => "paused",
-            Self::WaitingForInput => "waiting_for_input",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-            Self::Interrupted => "interrupted",
-        }
-    }
-
-    /// Parse a DB `status` string back into a [`SessionStatus`].
-    ///
-    /// Returns `None` for unknown/unsupported values (A7): a corrupt or
-    /// ambiguous status must never be silently reinterpreted as `Running`.
-    /// Callers that need strict parsing should treat `None` as
-    /// unknown/non-replayable.
-    #[must_use]
-    pub fn from_db_str(status: &str) -> Option<Self> {
-        match status {
-            "running" => Some(Self::Running),
-            "paused" => Some(Self::Paused),
-            "waiting_for_input" => Some(Self::WaitingForInput),
-            "completed" => Some(Self::Completed),
-            "failed" => Some(Self::Failed),
-            "cancelled" => Some(Self::Cancelled),
-            "interrupted" => Some(Self::Interrupted),
-            _ => None,
-        }
-    }
 }
 
 /// Successful stopping point of a single engine step.
@@ -533,6 +459,41 @@ impl EngineError {
             session_id: session_id.to_string(),
             source: Box::new(source),
             witness: Box::new(witness),
+        }
+    }
+}
+
+impl From<StorageError> for EngineError {
+    fn from(err: StorageError) -> Self {
+        match err {
+            StorageError::GraphFlow(source) => Self::GraphFlow(source),
+            StorageError::SessionNotFound(session_id) => Self::SessionNotFound(session_id),
+            StorageError::RevisionMismatch {
+                session_id,
+                expected,
+                found,
+            } => Self::RevisionMismatch {
+                session_id,
+                expected,
+                found,
+            },
+            StorageError::TerminalState(session_id) => Self::TerminalState(session_id),
+            StorageError::RunAlreadyExists {
+                session_id,
+                execution_version,
+            } => Self::RunAlreadyExists {
+                session_id,
+                execution_version,
+            },
+            StorageError::WaitConflict {
+                session_id,
+                status,
+                current_wait_id,
+            } => Self::WaitConflict {
+                session_id,
+                status,
+                current_wait_id,
+            },
         }
     }
 }
@@ -878,7 +839,7 @@ impl EngineSharedState {
                 // (Minor 1: hydrate_children must not leave a stale entry on
                 // a load/child-snapshot error).
                 self.children.write().await.remove(&parent_session_id.0);
-                return Err(e);
+                return Err(e.into());
             }
         };
         let parent = self
@@ -902,7 +863,7 @@ impl EngineSharedState {
             Ok(record) => record,
             Err(e) => {
                 self.children.write().await.remove(&parent_session_id.0);
-                return Err(e);
+                return Err(e.into());
             }
         };
         if let Some(parent_record) = parent_record {
@@ -1302,7 +1263,7 @@ impl EngineSharedState {
                             }
                             break;
                         }
-                        Err(EngineError::RevisionMismatch { .. }) => {
+                        Err(StorageError::RevisionMismatch { .. }) => {
                             if !cancel_allow_rebase {
                                 return Err(EngineError::RevisionMismatch {
                                     session_id: session_id.0.clone(),
@@ -1344,7 +1305,7 @@ impl EngineSharedState {
                             fence_state = current.state.unwrap_or_default();
                             fence_state.cancel_requested = true;
                         }
-                        Err(e) => return Err(e),
+                        Err(e) => return Err(e.into()),
                     }
                 }
             }
@@ -1538,7 +1499,7 @@ impl EngineSharedState {
                         }
                         match interrupted_result {
                             Ok(_) => break,
-                            Err(EngineError::RevisionMismatch { .. }) => {
+                            Err(StorageError::RevisionMismatch { .. }) => {
                                 if !cancel_allow_rebase {
                                     return Err(EngineError::RevisionMismatch {
                                         session_id: session_id.0.clone(),
@@ -1557,7 +1518,7 @@ impl EngineSharedState {
                                 // Reload and re-commit against the new
                                 // revision.
                             }
-                            Err(err) => return Err(err),
+                            Err(err) => return Err(err.into()),
                         }
                     }
                     // Durable Interrupted confirmed: only now update the
@@ -1693,7 +1654,7 @@ impl EngineSharedState {
                         // tokens or infer cleanup from Observed (P4 §6.2).
                         return Ok(record.status);
                     }
-                    Err(EngineError::RevisionMismatch { .. }) => {
+                    Err(StorageError::RevisionMismatch { .. }) => {
                         if !cancel_allow_rebase {
                             return Err(EngineError::RevisionMismatch {
                                 session_id: session_id.0.clone(),
@@ -1711,7 +1672,7 @@ impl EngineSharedState {
                         }
                         // Reload and re-settle against the new revision.
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(e.into()),
                 }
             }
             // M-004: reclaim the run's coordinator cancellation token at
@@ -2009,7 +1970,7 @@ impl EngineSharedState {
                 match store.load_run(session_id).await {
                     Ok(Some(r)) => (r.state_revision, r.status, Some(r.execution_version)),
                     Ok(None) => (0, SessionStatus::Running, None),
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(e.into()),
                 }
             } else {
                 let status = self
@@ -2110,9 +2071,9 @@ impl EngineSharedState {
                 .await
             {
                 Err(
-                    e @ (EngineError::RevisionMismatch { .. }
-                    | EngineError::TerminalState(_)
-                    | EngineError::GraphFlow(graph_flow::GraphError::SessionConflict(_))),
+                    e @ (StorageError::RevisionMismatch { .. }
+                    | StorageError::TerminalState(_)
+                    | StorageError::GraphFlow(graph_flow::GraphError::SessionConflict(_))),
                 ) => {
                     // A marker refusal that names the concurrent authoritative
                     // winner (revision/graph ownership loss, terminal state,
@@ -2120,7 +2081,7 @@ impl EngineSharedState {
                     // authority: it must reach the drive loop as the losing
                     // writer's own disposition, never wrapped into a
                     // fabricated step-failure settlement.
-                    return Err(e);
+                    return Err(e.into());
                 }
                 Err(e) => {
                     // The marker did not commit: the attempt owns only the
@@ -2131,7 +2092,7 @@ impl EngineSharedState {
                         pre_step_status: pre_step_status.clone(),
                         pre_step_root: pre.clone(),
                     };
-                    return Err(EngineError::step_failed(&session_id.0, e, witness));
+                    return Err(EngineError::step_failed(&session_id.0, e.into(), witness));
                 }
                 Ok(marker_record) => {
                     transition_revision = marker_record.state_revision;
@@ -2333,7 +2294,7 @@ impl EngineSharedState {
                         {
                             Ok(SettlementResult::Applied(record)) => Ok((true, record.status)),
                             Ok(SettlementResult::Observed(record)) => Ok((false, record.status)),
-                            Err(e) => Err(e),
+                            Err(e) => Err(e.into()),
                         }
                     } else {
                         store
@@ -2347,6 +2308,7 @@ impl EngineSharedState {
                             )
                             .await
                             .map(|_| (true, status.clone()))
+                            .map_err(EngineError::from)
                     };
                 match commit_result {
                     Ok((owned_commit, durable_status)) => {
@@ -2519,8 +2481,8 @@ impl EngineSharedState {
                                 // error as the truthful outcome; the winner is
                                 // untouched.
                                 Err(
-                                    EngineError::RevisionMismatch { .. }
-                                    | EngineError::TerminalState(_),
+                                    StorageError::RevisionMismatch { .. }
+                                    | StorageError::TerminalState(_),
                                 ) => {}
                                 // Any other restore failure (storage fault,
                                 // corruption) must remain observable: an
@@ -2836,7 +2798,7 @@ impl EngineSharedState {
                             Ok(SettlementResult::Applied(_) | SettlementResult::Observed(_)) => {
                                 break;
                             }
-                            Err(EngineError::RevisionMismatch { .. }) => {
+                            Err(StorageError::RevisionMismatch { .. }) => {
                                 settle_attempts += 1;
                                 if settle_attempts >= CANCEL_FENCE_RETRY_BOUND {
                                     return Err(EngineError::RevisionMismatch {
@@ -2848,7 +2810,7 @@ impl EngineSharedState {
                                 // Reload and re-settle against the new
                                 // revision.
                             }
-                            Err(e) => return Err(e),
+                            Err(e) => return Err(e.into()),
                         }
                     }
                     child_map
@@ -3154,6 +3116,36 @@ fn inner_graph_entered_by_state<'a>(
         })
 }
 
+/// The applied document an embedded preset executes: the document its own
+/// compiled-in bundle constructs, under the compass D10 identity the applied
+/// route freezes.
+///
+/// The bytes are compiled into this binary, so an engine with no configured
+/// [`AppliedDocumentSource`](crate::capability::AppliedDocumentSource) can
+/// still resolve the document the preset runs. A bundle whose document cannot
+/// be constructed is the refusal below, named by preset — its YAML manifest is
+/// never an execution input.
+fn embedded_applied_document(
+    loaded: &nexus_preset::LoadedPreset,
+) -> Result<crate::capability::AppliedDocument, String> {
+    let document = nexus_preset::embedded_workflow_document(loaded)
+        .map_err(|error| format!("embedded_document_unavailable: {error}"))?;
+    let (apply_id, content_hash) = nexus_preset::embedded_applied_identity(&loaded.id, &document)
+        .map_err(|error| {
+        format!(
+            "embedded_document_unavailable: document of `{}` cannot be hashed: {error}",
+            loaded.id
+        )
+    })?;
+    Ok(crate::capability::AppliedDocument {
+        identity: nexus_session_storage::run_state::AppliedRunIdentity {
+            apply_id,
+            content_hash,
+        },
+        document,
+    })
+}
+
 /// Build the durable [`RunStateV1`] for a step outcome (A2/A4).
 ///
 /// On a terminal/wait/paused transition the step is no longer in flight; the
@@ -3181,7 +3173,7 @@ fn build_step_state(
     // `Err(GraphError)` and are persisted by the daemon driver's failure
     // path. A step that reached `build_step_state` therefore carries no
     // fabricated failure record.
-    let failure: Option<crate::run_state::RunFailure> = None;
+    let failure: Option<nexus_session_storage::run_state::RunFailure> = None;
     // Round-4 Critical 2 (A4): when THIS step parked because a nested child
     // is waiting for human input, the root WaitRecord names the exact
     // waiting descendant (`child_session_id` / `child_task_id`) so restart
@@ -3197,12 +3189,12 @@ fn build_step_state(
         (None, None)
     };
     let wait = if matches!(status, SessionStatus::WaitingForInput) {
-        Some(crate::run_state::WaitRecord {
+        Some(nexus_session_storage::run_state::WaitRecord {
             wait_id: uuid::Uuid::new_v4().to_string(),
             task_id: current_task_id.to_string(),
             child_session_id,
             child_task_id,
-            kind: crate::run_state::WaitKind::Manual,
+            kind: nexus_session_storage::run_state::WaitKind::Manual,
         })
     } else {
         None
@@ -3924,6 +3916,57 @@ impl GraphFlowEngine {
         Ok(loaded)
     }
 
+    /// The applied document a run of `preset_id` executes.
+    ///
+    /// The configured [`AppliedDocumentSource`](crate::capability::AppliedDocumentSource)
+    /// owns the route when one is installed (the daemon's core wiring). Without
+    /// one, an embedded preset still resolves its own compiled-in document —
+    /// [`embedded_applied_document`] — because those bytes are in this binary.
+    ///
+    /// `Ok(None)` therefore means "no applied identity", which only a
+    /// non-embedded preset (`_system.`, or a system directory bundle) can
+    /// answer: it keeps executing its manifest. An embedded preset resolves a
+    /// document or refuses through the `Err`; it never falls back to YAML — so
+    /// a configured source answering `None` for one is stale wiring, and every
+    /// caller's `None` arm is provably a non-embedded preset.
+    async fn resolve_applied(
+        &self,
+        preset_id: &str,
+        loaded: Option<&nexus_preset::LoadedPreset>,
+    ) -> Result<Option<crate::capability::AppliedDocument>, String> {
+        let resolved = match &self.state.applied_document_source {
+            Some(source) => source.applied_document(preset_id, loaded).await?,
+            None => loaded
+                .filter(|loaded| {
+                    matches!(
+                        loaded.source_identity,
+                        Some(PresetSourceIdentity::Embedded { .. })
+                    )
+                })
+                .map_or(Ok(None), |loaded| {
+                    embedded_applied_document(loaded).map(Some)
+                })?,
+        };
+        // An embedded preset executes compiled-in bytes. Refusing here is the
+        // one gate every route shares: a legacy descriptor with no `applied`
+        // (frozen before the identity existed) included — it must not rebuild
+        // the YAML manifest a source merely failed to resolve a document for.
+        if resolved.is_none()
+            && loaded.is_some_and(|loaded| {
+                matches!(
+                    loaded.source_identity,
+                    Some(PresetSourceIdentity::Embedded { .. })
+                )
+            })
+        {
+            return Err(format!(
+                "embedded_document_unavailable: embedded preset '{preset_id}' resolved no applied \
+                 document; refusing to execute its YAML manifest"
+            ));
+        }
+        Ok(resolved)
+    }
+
     #[allow(clippy::too_many_lines, clippy::significant_drop_tightening)] // sequential descriptor→validate→rebuild path; guard spans await loop
     async fn reconstruct_runner(&self, session_id: &SessionId) -> Result<(), EngineError> {
         // Load the durable descriptor (frozen at admission) so we honour the
@@ -3977,16 +4020,21 @@ impl GraphFlowEngine {
         // bundle — is the source an applied run executes, so this arm is
         // resolved before anything the bundle says.
         //
-        // The reload below is the no-apply path's frozen-source proof (A7). An
-        // applied run executes its document instead, so it never reads the
-        // bundle: one edited, moved or deleted between admission and this
-        // restart must not make such a run non-replayable, and the frozen
-        // applied identity already encodes the user-preset classification a
-        // reload would only re-establish — resolving it to then pass `None`
-        // anyway cost one preset load plus content hash per recovery.
-        let bundle = match &descriptor.applied {
-            Some(_) => None,
-            None => Some(self.reload_frozen_bundle(&descriptor, session_id)?),
+        // The reload below is the no-apply path's frozen-source proof (A7), and
+        // for an EMBEDDED applied run it is also the applied route's key: the
+        // embedded arm of the resolution below is keyed off the reloaded source
+        // identity, so the compiled-in bundle is reloaded and its identity
+        // re-compared — a changed embedded byte stays non-replayable here rather
+        // than being rebuilt from the YAML descriptor. An applied USER run
+        // executes its document instead and never reads the bundle: one edited,
+        // moved or deleted between admission and this restart must not make such
+        // a run non-replayable, and the frozen applied identity already encodes
+        // the user-preset classification a reload would only re-establish.
+        let bundle = match (&descriptor.applied, &descriptor.source) {
+            (Some(_), nexus_preset::source_identity::PresetSourceIdentity::Directory { .. }) => {
+                None
+            }
+            _ => Some(self.reload_frozen_bundle(&descriptor, session_id)?),
         };
 
         // P6 condition 6: recovery follows the RECORDED intake mode, never the
@@ -4008,19 +4056,15 @@ impl GraphFlowEngine {
                     )),
                 ));
             }
-            match &self.state.applied_document_source {
-                Some(source) => source
-                    .applied_document(&descriptor.preset_id, bundle.as_ref())
-                    .await
-                    .map_err(|error| {
-                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                            "R6: applied identity of session {} does not replay: {error} \
-                             (reconstruction_unavailable, non-replayable)",
-                            session_id.0
-                        )))
-                    })?,
-                None => None,
-            }
+            self.resolve_applied(&descriptor.preset_id, bundle.as_ref())
+                .await
+                .map_err(|error| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "R6: applied identity of session {} does not replay: {error} \
+                         (reconstruction_unavailable, non-replayable)",
+                        session_id.0
+                    )))
+                })?
         };
         // P4 Task 4 (I-000464): a run admitted under an applied identity is
         // rebuilt ONLY from that identity. The resolution above answers with the
@@ -4031,7 +4075,10 @@ impl GraphFlowEngine {
         // under. Refusing keeps the run non-replayable, exactly as admission
         // refuses an applied identity it cannot verify; a descriptor with no
         // recorded identity (no apply then, or a row predating the freeze) keeps
-        // the pre-existing resolution unchanged.
+        // the pre-existing resolution unchanged — with one exception: an
+        // EMBEDDED preset that resolved no document refused in
+        // `resolve_applied`, so `current: None` below is always a non-embedded
+        // preset's answer and that preset executes its manifest.
         let applied = match (descriptor.applied.as_ref(), applied) {
             (None, current) => current.map(|applied| applied.document),
             (Some(recorded), Some(current)) if current.identity == *recorded => {
@@ -4108,7 +4155,10 @@ impl GraphFlowEngine {
                 .collect();
             // Snapshot the closure first so no children-map lock is held
             // across the storage awaits below.
-            let snapshot: Vec<(SessionId, Vec<crate::run_state::ChildCheckpoint>)> = {
+            let snapshot: Vec<(
+                SessionId,
+                Vec<nexus_session_storage::run_state::ChildCheckpoint>,
+            )> = {
                 let children_map = self.state.children.read().await;
                 let mut queue: std::collections::VecDeque<SessionId> =
                     std::collections::VecDeque::new();
@@ -4212,13 +4262,14 @@ impl GraphFlowEngine {
         let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
         // The graph comes from the SAME source that decided the run's
         // projection above: the applied document when the descriptor froze an
-        // apply, the bundle otherwise. An applied user document's id is not a
+        // apply, the bundle otherwise. An applied embedded document builds from
+        // its own compiled-in bundle; any other applied document's id is not a
         // bundle id, so reading the embedded bundle for one could serve a
         // colliding preset's bytes — it is never read on that arm.
         let wired = match (&applied, &loaded) {
             (Some(document), _) => crate::preset_runtime::build_wired_outer_graph_from_ir(
                 document,
-                crate::preset_runtime::IrTemplateSource::OwnSource,
+                crate::preset_runtime::ir_template_source(loaded.as_ref()),
                 &engine_proxy,
                 &caps,
                 self.daemon_tool_dispatch.clone(),
@@ -4232,6 +4283,11 @@ impl GraphFlowEngine {
                     session_id.0
                 )))
             })?,
+            // Only a NON-embedded preset reaches this arm: `resolve_applied`
+            // refuses an embedded preset that resolved no document — a legacy
+            // descriptor with no recorded `applied` included — and a document
+            // it cannot construct refused below. Such a preset (`_system.`, a
+            // system directory bundle) executes its manifest.
             (None, Some(loaded)) => crate::preset_runtime::build_wired_outer_graph(
                 loaded,
                 &engine_proxy,
@@ -4276,7 +4332,10 @@ impl GraphFlowEngine {
 
     /// Legacy reconstruction against the current embedded preset (no workflow
     /// store). Used only by in-memory/test engines that never persisted a v1
-    /// descriptor. This path is intentionally NOT frozen-source aware.
+    /// descriptor, so there is no frozen identity to compare against: the run
+    /// is rebuilt from the applied document the same route answers for a
+    /// persisted run — an embedded preset's own compiled-in document — and
+    /// never from its YAML manifest.
     async fn reconstruct_runner_legacy(&self, summary: &SessionSummary) -> Result<(), EngineError> {
         let caps = self.current_caps();
         let loaded =
@@ -4286,19 +4345,44 @@ impl GraphFlowEngine {
                     summary.preset_id, summary.session_id.0, e
                 )))
             })?;
+        let applied = self
+            .resolve_applied(&summary.preset_id, Some(&loaded))
+            .await
+            .map_err(|error| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "R6: applied identity of session {} does not replay: {error} \
+                     (reconstruction_unavailable, non-replayable)",
+                    summary.session_id.0
+                )))
+            })?
+            .ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "R6: session {} resolved no applied document for preset '{}' \
+                     (reconstruction_unavailable, non-replayable)",
+                    summary.session_id.0, summary.preset_id
+                )))
+            })?;
 
         let proxy = Arc::new(EngineProxy {
             state: self.state.clone(),
         });
         let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
-        let wired = crate::preset_runtime::build_wired_outer_graph(
-            &loaded,
+        let wired = crate::preset_runtime::build_wired_outer_graph_from_ir(
+            &applied.document,
+            crate::preset_runtime::ir_template_source(Some(&loaded)),
             &engine_proxy,
             &caps,
             self.daemon_tool_dispatch.clone(),
             self.prompt_executor.clone(),
             self.session_cancels.clone(),
-        )?;
+        )
+        .map_err(|error| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "R6: applied document of session {} is not buildable: {error} \
+                 (reconstruction_unavailable, non-replayable)",
+                summary.session_id.0
+            )))
+        })?;
 
         let runner = Arc::new(FlowRunner::new(Arc::new(wired), self.state.storage.clone()));
         self.state
@@ -4337,7 +4421,7 @@ impl GraphFlowEngine {
         &self,
         loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
-        applied: Option<crate::run_state::AppliedRunIdentity>,
+        applied: Option<nexus_session_storage::run_state::AppliedRunIdentity>,
         intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
     ) -> Result<RunDescriptorV1, EngineError> {
         let source = loaded.source_identity.clone().ok_or_else(|| {
@@ -4369,7 +4453,7 @@ impl GraphFlowEngine {
         &self,
         loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
-        applied: Option<crate::run_state::AppliedRunIdentity>,
+        applied: Option<nexus_session_storage::run_state::AppliedRunIdentity>,
         intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
@@ -4464,15 +4548,10 @@ impl GraphFlowEngine {
         } else {
             None
         };
-        let applied = match &self.state.applied_document_source {
-            Some(source) => source
-                .applied_document(&loaded.id, Some(loaded))
-                .await
-                .map_err(|error| {
-                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
-                })?,
-            None => None,
-        };
+        let applied = self
+            .resolve_applied(&loaded.id, Some(loaded))
+            .await
+            .map_err(|error| EngineError::GraphFlow(graph_flow::GraphError::StorageError(error)))?;
         // ir-only is the only arm: a user bundle with no current apply refuses
         // before graph construction — never a YAML fallback.
         if user_bundle && applied.is_none() {
@@ -4485,12 +4564,12 @@ impl GraphFlowEngine {
             ));
         }
         let wired = match &applied {
-            // Same rule admission states: an applied user document's id is not a
-            // bundle id, so reading the embedded bundle could serve a colliding
-            // preset's bytes.
+            // An embedded document's own source IS its compiled-in bundle; any
+            // other applied document's id is not a bundle id, so reading the
+            // embedded bundle could serve a colliding preset's bytes.
             Some(applied) => crate::preset_runtime::build_wired_outer_graph_from_ir(
                 &applied.document,
-                crate::preset_runtime::IrTemplateSource::OwnSource,
+                crate::preset_runtime::ir_template_source(Some(loaded)),
                 &proxy,
                 &caps,
                 self.daemon_tool_dispatch.clone(),
@@ -4500,6 +4579,9 @@ impl GraphFlowEngine {
             .map_err(|error| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(error.to_string()))
             })?,
+            // Only a NON-embedded preset reaches this arm: `resolve_applied`
+            // refuses an embedded preset that resolved no document, and every
+            // other embedded answer carries one.
             None => crate::preset_runtime::build_wired_outer_graph(
                 loaded,
                 &proxy,
@@ -4548,8 +4630,11 @@ impl GraphFlowEngine {
         work_id: Option<String>,
         input: serde_json::Map<String, serde_json::Value>,
         core_context: Option<&CoreContextPayload>,
-        agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
-        applied: Option<crate::run_state::AppliedRunIdentity>,
+        agent_bindings: std::collections::HashMap<
+            String,
+            nexus_session_storage::run_state::AgentBinding,
+        >,
+        applied: Option<nexus_session_storage::run_state::AppliedRunIdentity>,
         intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
@@ -4651,11 +4736,14 @@ impl GraphFlowEngine {
         core_context: Option<&CoreContextPayload>,
         core_context_version: u32,
         expected_core_context_version: u32,
-        agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+        agent_bindings: std::collections::HashMap<
+            String,
+            nexus_session_storage::run_state::AgentBinding,
+        >,
         frozen_source: Option<PresetSourceIdentity>,
-        applied: Option<crate::run_state::AppliedRunIdentity>,
+        applied: Option<nexus_session_storage::run_state::AppliedRunIdentity>,
         intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
-        admission_gate: Option<crate::run_state::ScheduleAdmissionGate>,
+        admission_gate: Option<nexus_session_storage::run_state::ScheduleAdmissionGate>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
         let Some(store) = &self.state.workflow_store else {
@@ -5191,17 +5279,17 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
     async fn load_run(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+    ) -> Result<Option<nexus_session_storage::run_state::RunRecord>, StorageError> {
         self.inner.load_run(session_id).await
     }
 
     async fn start_run(
         &self,
         session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .start_run(session_id, descriptor, checkpoint, next_state)
             .await
@@ -5211,13 +5299,13 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         &self,
         schedule_id: &str,
         session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
+        descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
         core_context_version: u32,
         expected_core_context_version: u32,
-        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        admission_gate: Option<&nexus_session_storage::run_state::ScheduleAdmissionGate>,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .admit_schedule_run(
                 schedule_id,
@@ -5236,10 +5324,10 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         &self,
         session_id: &SessionId,
         expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
         next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         if next_status == SessionStatus::Interrupted
             && !self
                 .injected
@@ -5265,7 +5353,7 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
                 .commit_transition(
                     session_id,
                     record.state_revision,
-                    crate::run_state::RunCheckpoint {
+                    nexus_session_storage::run_state::RunCheckpoint {
                         root: &root,
                         children: &[],
                     },
@@ -5291,10 +5379,10 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
         next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         let _ = expected_graph_version;
         self.commit_transition(
             session_id,
@@ -5311,10 +5399,10 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
         terminal_target: TerminalSettlementTarget,
-    ) -> Result<SettlementResult, EngineError> {
+    ) -> Result<SettlementResult, StorageError> {
         self.inner
             .settle_run(
                 session_id,
@@ -5332,7 +5420,7 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         session_id: &SessionId,
         expected_revision: u64,
         pre_step: &graph_flow::Session,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .restore_pre_step(session_id, expected_revision, pre_step)
             .await
@@ -5343,9 +5431,9 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        step_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        step_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .mark_step_in_flight(
                 session_id,
@@ -5363,8 +5451,8 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         expected_revision: u64,
         expected_step: Option<&str>,
         expected_attempt_id: Option<&str>,
-        attempt: &crate::run_state::PromptAttempt,
-    ) -> Result<(), EngineError> {
+        attempt: &nexus_session_storage::run_state::PromptAttempt,
+    ) -> Result<(), StorageError> {
         self.inner
             .persist_prompt_attempt(
                 session_id,
@@ -5382,7 +5470,7 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         expected_revision: u64,
         expected_step: Option<&str>,
         attempt_id: &str,
-    ) -> Result<(), EngineError> {
+    ) -> Result<(), StorageError> {
         self.inner
             .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
             .await
@@ -5391,7 +5479,7 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
     async fn load_children(
         &self,
         parent_session_id: &SessionId,
-    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+    ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError> {
         self.inner.load_children(parent_session_id).await
     }
 }
@@ -5438,17 +5526,17 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
     async fn load_run(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+    ) -> Result<Option<nexus_session_storage::run_state::RunRecord>, StorageError> {
         self.inner.load_run(session_id).await
     }
 
     async fn start_run(
         &self,
         session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .start_run(session_id, descriptor, checkpoint, next_state)
             .await
@@ -5458,13 +5546,13 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         &self,
         schedule_id: &str,
         session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
+        descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
         core_context_version: u32,
         expected_core_context_version: u32,
-        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        admission_gate: Option<&nexus_session_storage::run_state::ScheduleAdmissionGate>,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .admit_schedule_run(
                 schedule_id,
@@ -5483,10 +5571,10 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         &self,
         session_id: &SessionId,
         expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
         next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         // The phase-1 cancel fence is the first commit carrying the durable
         // cancel intent on a non-terminal status. Inject the Continue winner
         // at the SAME revision BEFORE the fence commits, so the fence loses
@@ -5517,12 +5605,12 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
                 .commit_transition(
                     session_id,
                     record.state_revision,
-                    crate::run_state::RunCheckpoint {
+                    nexus_session_storage::run_state::RunCheckpoint {
                         root: &winner_root,
                         children: &[],
                     },
                     SessionStatus::Running,
-                    &crate::run_state::RunStateV1::default(),
+                    &nexus_session_storage::run_state::RunStateV1::default(),
                 )
                 .await
                 .expect("Continue wins the CAS before the cancel fence");
@@ -5543,10 +5631,10 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
         next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         let _ = expected_graph_version;
         self.commit_transition(
             session_id,
@@ -5563,10 +5651,10 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
         terminal_target: TerminalSettlementTarget,
-    ) -> Result<SettlementResult, EngineError> {
+    ) -> Result<SettlementResult, StorageError> {
         self.inner
             .settle_run(
                 session_id,
@@ -5584,7 +5672,7 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         session_id: &SessionId,
         expected_revision: u64,
         pre_step: &graph_flow::Session,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .restore_pre_step(session_id, expected_revision, pre_step)
             .await
@@ -5595,9 +5683,9 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        step_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        step_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .mark_step_in_flight(
                 session_id,
@@ -5615,8 +5703,8 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         expected_revision: u64,
         expected_step: Option<&str>,
         expected_attempt_id: Option<&str>,
-        attempt: &crate::run_state::PromptAttempt,
-    ) -> Result<(), EngineError> {
+        attempt: &nexus_session_storage::run_state::PromptAttempt,
+    ) -> Result<(), StorageError> {
         self.inner
             .persist_prompt_attempt(
                 session_id,
@@ -5634,7 +5722,7 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         expected_revision: u64,
         expected_step: Option<&str>,
         attempt_id: &str,
-    ) -> Result<(), EngineError> {
+    ) -> Result<(), StorageError> {
         self.inner
             .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
             .await
@@ -5643,7 +5731,7 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
     async fn load_children(
         &self,
         parent_session_id: &SessionId,
-    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+    ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError> {
         self.inner.load_children(parent_session_id).await
     }
 }
@@ -5684,17 +5772,17 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
     async fn load_run(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+    ) -> Result<Option<nexus_session_storage::run_state::RunRecord>, StorageError> {
         self.inner.load_run(session_id).await
     }
 
     async fn start_run(
         &self,
         session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .start_run(session_id, descriptor, checkpoint, next_state)
             .await
@@ -5704,13 +5792,13 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         &self,
         schedule_id: &str,
         session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
+        descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
         core_context_version: u32,
         expected_core_context_version: u32,
-        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        admission_gate: Option<&nexus_session_storage::run_state::ScheduleAdmissionGate>,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .admit_schedule_run(
                 schedule_id,
@@ -5729,10 +5817,10 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         &self,
         session_id: &SessionId,
         expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
         next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .commit_transition(
                 session_id,
@@ -5749,10 +5837,10 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
         next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         let _ = expected_graph_version;
         self.commit_transition(
             session_id,
@@ -5769,10 +5857,10 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
         terminal_target: TerminalSettlementTarget,
-    ) -> Result<SettlementResult, EngineError> {
+    ) -> Result<SettlementResult, StorageError> {
         if terminal_target == TerminalSettlementTarget::Cancelled
             && !self
                 .injected
@@ -5798,12 +5886,12 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
                 .commit_transition(
                     session_id,
                     record.state_revision,
-                    crate::run_state::RunCheckpoint {
+                    nexus_session_storage::run_state::RunCheckpoint {
                         root: &winner_root,
                         children: &[],
                     },
                     SessionStatus::Running,
-                    &crate::run_state::RunStateV1::default(),
+                    &nexus_session_storage::run_state::RunStateV1::default(),
                 )
                 .await
                 .expect("competing transition wins the CAS before the child settle");
@@ -5825,7 +5913,7 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         session_id: &SessionId,
         expected_revision: u64,
         pre_step: &graph_flow::Session,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .restore_pre_step(session_id, expected_revision, pre_step)
             .await
@@ -5836,9 +5924,9 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        step_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        step_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .mark_step_in_flight(
                 session_id,
@@ -5856,8 +5944,8 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         expected_revision: u64,
         expected_step: Option<&str>,
         expected_attempt_id: Option<&str>,
-        attempt: &crate::run_state::PromptAttempt,
-    ) -> Result<(), EngineError> {
+        attempt: &nexus_session_storage::run_state::PromptAttempt,
+    ) -> Result<(), StorageError> {
         self.inner
             .persist_prompt_attempt(
                 session_id,
@@ -5875,7 +5963,7 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         expected_revision: u64,
         expected_step: Option<&str>,
         attempt_id: &str,
-    ) -> Result<(), EngineError> {
+    ) -> Result<(), StorageError> {
         self.inner
             .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
             .await
@@ -5884,7 +5972,7 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
     async fn load_children(
         &self,
         parent_session_id: &SessionId,
-    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+    ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError> {
         self.inner.load_children(parent_session_id).await
     }
 }
@@ -5900,8 +5988,8 @@ mod tests {
     #![allow(clippy::significant_drop_tightening)] // tests read state snapshots; early-drop noise without contention value
 
     use super::*;
-    use crate::storage::SqliteSessionStorage;
     use graph_flow::InMemorySessionStorage;
+    use nexus_session_storage::storage::SqliteSessionStorage;
 
     /// Helper: create a test engine with in-memory storage and built-in caps.
     fn test_engine() -> GraphFlowEngine {
@@ -7026,12 +7114,12 @@ mod tests {
             .expect("get root")
             .expect("root exists");
         let waiting_state = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "wait-tok-1".to_string(),
                 task_id: "persist".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -7174,12 +7262,12 @@ mod tests {
             .expect("get root")
             .expect("root exists");
         let waiting_state = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "wait-tok-1".to_string(),
                 task_id: "persist".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -7333,12 +7421,12 @@ mod tests {
             .expect("get root")
             .expect("root exists");
         let waiting_state = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "wait-tok-1".to_string(),
                 task_id: "persist".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -7496,12 +7584,12 @@ mod tests {
             .expect("get grandchild root")
             .expect("grandchild root exists");
         let grandchild_waiting = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "grandchild-wait-tok".to_string(),
                 task_id: "persist".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -8342,12 +8430,12 @@ mod tests {
             .expect("get grandchild root")
             .expect("grandchild root exists");
         let grandchild_waiting = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "restart-grandchild-wait".to_string(),
                 task_id: "persist".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -8831,12 +8919,12 @@ mod tests {
             .expect("get child root")
             .expect("child root exists");
         let child_waiting = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "child-wait-tok".to_string(),
                 task_id: "persist".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -9025,12 +9113,12 @@ mod tests {
             .expect("get root")
             .expect("root row");
         let wait_state = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "wait-nested-1".to_string(),
                 task_id: root.current_task_id.clone(),
                 child_session_id: Some(child_id.0.clone()),
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };

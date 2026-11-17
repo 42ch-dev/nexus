@@ -5,15 +5,11 @@
  * trajectory that names a wired slot marks the slot node simulated. There is
  * no YAML branch: the Canvas renders the applied IR document (P6 condition 2).
  */
-import { describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, screen, within } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 import type { MutableRefObject } from 'react';
 
 import type { WorkflowDocument } from '@42ch/nexus-contracts';
 
-import type { NexusClient } from '@/lib/nexus';
-import type { PresetState } from '@/lib/canvas/preset-yaml';
-import { renderInApp } from '@/test/test-providers';
 import type { StrategyCanvasAdapterContext } from './strategy-canvas-adapter';
 import { createStrategyCanvasAdapter } from './strategy-canvas-adapter';
 import { candidateDocument, simulationTrajectory } from '@/test/simulation-fixture';
@@ -21,24 +17,14 @@ import { candidateDocument, simulationTrajectory } from '@/test/simulation-fixtu
 function ctxRef(overrides: Partial<StrategyCanvasAdapterContext> = {}) {
   return {
     current: {
-      presetId: 'user/demo',
       form: { label: '', description: '', nextTarget: '', promptBody: '' },
-      saveTriggers: { state: 0, transition: 0, prompt: 0 },
-      saveStatuses: {},
-      workingRevisionRef: { current: 0 },
-      handleConflict: () => {},
       onChange: () => {},
-      onSaveStatus: () => {},
       setActiveSection: () => {},
       selectedState: undefined,
       promptTemplateRef: undefined,
       selectedNode: null,
       parsed: undefined,
-      onUseCurrent: () => {},
-      onReapply: () => {},
-      onDismiss: () => {},
       danglingTargets: [],
-      localEdges: [],
       ...overrides,
     },
   } as MutableRefObject<StrategyCanvasAdapterContext>;
@@ -103,189 +89,6 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
     const slot = nodes.find((node) => node.id === 'collect-sources');
     (slot?.data.onToggleExpand as () => void)();
     expect(toggled).toEqual(['collect-sources']);
-  });
-
-  it('disables the YAML transition patch while a candidate document is the authority', () => {
-    const client = { strategyPatchTransition: vi.fn() } as unknown as NexusClient;
-    const adapter = createStrategyCanvasAdapter(
-      ctxRef({
-        selectedState: { id: 'draft', next: 'done' } as PresetState,
-        form: { label: '', description: '', nextTarget: 'revise', promptBody: '' },
-        compose: {
-          isComposing: false,
-          onToggleSlotExpanded: () => {},
-          onBindSlot: () => Promise.resolve(),
-          onReplaceSubtree: () => Promise.resolve(),
-          onUnnest: () => Promise.resolve(),
-        },
-      }),
-    );
-
-    renderInApp(<>{adapter.renderInspector?.(null as never)}</>, { client });
-
-    const section = screen.getByRole('region', { name: 'Transition inspector' });
-    // Kept visible with its reason, not silently hidden.
-    expect(within(section).getByTestId('transition-structural-disabled')).toBeInTheDocument();
-    const save = within(section).getByRole('button', { name: 'Save' });
-    expect(save).toBeDisabled();
-    fireEvent.click(save);
-    expect(client.strategyPatchTransition).not.toHaveBeenCalled();
-  });
-
-  it('disables the YAML state patch while a candidate document is the authority', () => {
-    const client = { strategyPatchState: vi.fn() } as unknown as NexusClient;
-    const adapter = createStrategyCanvasAdapter(
-      ctxRef({
-        selectedState: { id: 'draft', next: 'done' } as PresetState,
-        form: { label: 'Draft (renamed)', description: '', nextTarget: 'done', promptBody: '' },
-        compose: {
-          isComposing: false,
-          onToggleSlotExpanded: () => {},
-          onBindSlot: () => Promise.resolve(),
-          onReplaceSubtree: () => Promise.resolve(),
-          onUnnest: () => Promise.resolve(),
-        },
-      }),
-    );
-
-    renderInApp(<>{adapter.renderInspector?.(null as never)}</>, { client });
-
-    const section = screen.getByRole('region', { name: 'State inspector' });
-    // Kept visible with its reason, not silently hidden.
-    expect(within(section).getByTestId('state-structural-disabled')).toBeInTheDocument();
-    const save = within(section).getByRole('button', { name: 'Save' });
-    expect(save).toBeDisabled();
-    fireEvent.click(save);
-    expect(client.strategyPatchState).not.toHaveBeenCalled();
-  });
-
-  it('refuses a prompt Save on a compose candidate, which no compose op can write', async () => {
-    const client = { strategyPatchPromptTemplate: vi.fn() } as unknown as NexusClient;
-    const workingRevisionRef = { current: 7 };
-    const adapter = createStrategyCanvasAdapter(
-      ctxRef({
-        appliedView: false,
-        workingRevisionRef,
-        selectedState: {
-          id: 'draft',
-          next: 'done',
-          context_update: { template_file: 'prompts/draft.md' },
-        } as PresetState,
-        promptTemplateRef: 'prompts/draft.md',
-        form: { label: '', description: '', nextTarget: '', promptBody: '# edited prompt' },
-        // Cmd/Ctrl+S reaches handleSave without a click, so the refusal has to
-        // hold on that path as well as on the button.
-        saveTriggers: { state: 0, transition: 0, prompt: 1 },
-        compose: {
-          isComposing: false,
-          onToggleSlotExpanded: () => {},
-          onBindSlot: () => Promise.resolve(),
-          onReplaceSubtree: () => Promise.resolve(),
-          onUnnest: () => Promise.resolve(),
-        },
-      }),
-    );
-
-    renderInApp(<>{adapter.renderInspector?.(null as never)}</>, { client });
-
-    // The refusal is the behaviour, not just a disabled attribute: the Cmd/Ctrl+S
-    // trigger armed at mount must not reach the writer, so no preset-YAML
-    // revision moves behind the candidate on display. The mutation runs a
-    // microtask after it is requested, hence the flush.
-    await act(async () => {});
-    expect(client.strategyPatchPromptTemplate).not.toHaveBeenCalled();
-    expect(workingRevisionRef.current).toBe(7);
-
-    const prompt = screen.getByRole('region', { name: 'Prompt inspector' });
-    const save = within(prompt).getByRole('button', { name: 'Save' });
-    fireEvent.click(save);
-    await act(async () => {});
-    expect(client.strategyPatchPromptTemplate).not.toHaveBeenCalled();
-
-    // The only write this editor can reach is the legacy preset-YAML writer,
-    // which rewrites a bundle template and never the candidate on display. The
-    // editor states that limitation and the route that does reach the template.
-    expect(within(prompt).getByRole('textbox')).toBeDisabled();
-    expect(save).toBeDisabled();
-    expect(within(prompt).getByTestId('prompt-structural-disabled')).toHaveTextContent(
-      /no prompt-body operation.*nexus42 preset patch prompt/,
-    );
-  });
-
-  it('keeps the applied view read-only: every YAML editor refuses its write', () => {
-    const client = {
-      strategyPatchState: vi.fn(),
-      strategyPatchTransition: vi.fn(),
-      strategyPatchPromptTemplate: vi.fn(),
-    } as unknown as NexusClient;
-    const adapter = createStrategyCanvasAdapter(
-      ctxRef({
-        appliedView: true,
-        selectedState: {
-          id: 'draft',
-          next: 'done',
-          context_update: { template_file: 'prompts/draft.md' },
-        } as PresetState,
-        promptTemplateRef: 'prompts/draft.md',
-        form: {
-          label: 'Draft (renamed)',
-          description: '',
-          nextTarget: 'revise',
-          promptBody: '# edited prompt',
-        },
-      }),
-    );
-
-    renderInApp(<>{adapter.renderInspector?.(null as never)}</>, { client });
-
-    // The applied document is the running strategy. Rendering it must not give
-    // any control a way to write the preset file behind it — the very defect
-    // this covers is a canvas that displayed one revision and patched another.
-    const reason = /author the change in Compose/;
-    const state = screen.getByRole('region', { name: 'State inspector' });
-    expect(within(state).getByTestId('state-structural-disabled')).toHaveTextContent(reason);
-    const stateSave = within(state).getByRole('button', { name: 'Save' });
-    expect(stateSave).toBeDisabled();
-    fireEvent.click(stateSave);
-
-    const transition = screen.getByRole('region', { name: 'Transition inspector' });
-    expect(within(transition).getByTestId('transition-structural-disabled')).toHaveTextContent(reason);
-    const transitionSave = within(transition).getByRole('button', { name: 'Save' });
-    expect(transitionSave).toBeDisabled();
-    fireEvent.click(transitionSave);
-
-    const prompt = screen.getByRole('region', { name: 'Prompt inspector' });
-    expect(within(prompt).getByTestId('prompt-structural-disabled')).toHaveTextContent(
-      /no prompt-body operation/,
-    );
-    expect(within(prompt).getByRole('textbox')).toBeDisabled();
-    const promptSave = within(prompt).getByRole('button', { name: 'Save' });
-    expect(promptSave).toBeDisabled();
-    fireEvent.click(promptSave);
-
-    expect(client.strategyPatchState).not.toHaveBeenCalled();
-    expect(client.strategyPatchTransition).not.toHaveBeenCalled();
-    expect(client.strategyPatchPromptTemplate).not.toHaveBeenCalled();
-  });
-
-  it('merges a local draft edge into the projection', () => {
-    const draft = {
-      id: 'draft-edge',
-      source: 'draft',
-      target: 'done',
-      type: 'strategy-edge',
-      data: { transitionKind: 'next' as const, isDraft: true },
-    };
-    const adapter = createStrategyCanvasAdapter(ctxRef({ localEdges: [draft] }));
-    const payload = {
-      revision: 0,
-      activeSession: null,
-      trajectory: null,
-      document: composedCandidate(),
-    };
-
-    // A draft is the author's uncommitted transition, not part of the document.
-    expect(adapter.projectGraph(payload).edges.map((e) => e.id)).toContain('draft-edge');
   });
 
   it('projects the document it is given, with no YAML fallback to fall back to', () => {

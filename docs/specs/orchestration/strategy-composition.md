@@ -307,13 +307,15 @@ applied document back into a hint.
 ### 6. Why one structural authority
 
 The Canvas may not write structure through two authorities. With the compose flag on, a candidate document
-owns the graph, and every legacy YAML structural write — node and edge patches, transition create/update —
-is refused at a single dispatch point (`strategy-yaml-authority`). Per-control guards cannot converge: each
-round closes one control and leaves its neighbour reachable. With the flag off, the legacy authority
-dispatches unchanged.
+owns the graph. The legacy YAML structural entry points — transition create, edge create/reconnect, node
+patches and per-section inspector saves — are gone from the Canvas rather than guarded: there is no
+flag-off route that dispatches them, and the Canvas writes no structure in either flag state. Compose is
+its only structural write surface, and a per-control guard is not the mechanism: each round closed one
+control and left its neighbour reachable, so the controls themselves were deleted.
 
 The flag is `strategy_canvas_compose`, resolved per surface. Developer entrance defaults on, content-creator
-default off, an explicit selection wins. Flag-off renders exactly the pre-compose surface.
+default off, an explicit selection wins. Flag-off renders the applied document read-only; the authoring
+entry out of that view opens Compose.
 
 ### 7. Boundaries
 
@@ -340,7 +342,7 @@ digest over the template's bytes.
 Two surfaces stay YAML-primary and this page's boundary holds for them: `examples/first-workflow` and the
 embedded presets keep `preset.yaml` as their source, and they are the live evidence that a hand-authored
 YAML bundle still imports and exports. Nothing in the sample switch touches the intake precedence of
-§5.1, the legacy YAML write path of §6, or the pattern registry policy above. The authoring note
+§5.1, the Canvas's single structural authority of §6, or the pattern registry policy above. The authoring note
 (`## Deprecation — hand-authored YAML as the main path` in `docs/strategy-authoring.md`) deprecates
 hand-authored YAML as the main authoring path only: it changes neither YAML-primary case above,
 keeps `preset.yaml` supported, and names `nexus42 preset import <dir>` as the conversion route.
@@ -351,8 +353,8 @@ keeps `preset.yaml` supported, and names `nexus42 preset import <dir>` as the co
   and the manifest itself never are. Approve records hashes and apply recomputes them.
 - **One compare-and-swap authority.** `strategy_candidates.revision` is the only one, and the embedded
   `document.revision` mirrors it in the same transaction.
-- **One structural authority per flag value.** With compose on, no legacy YAML write reaches structure;
-  with it off, the legacy authority dispatches unchanged.
+- **One structural authority.** The Canvas writes structure only through Compose; the legacy YAML
+  structural controls are deleted, so neither flag value reaches them.
 - **Nothing refuses after a write.** Every refusal in compose, approve and apply is decided before the
   row exists — the stale-revision check, the already-current guard and the insert are one statement each.
 - **Append, never mutate.** `strategy_applies` and `strategy_approvals` are read-only after write; the

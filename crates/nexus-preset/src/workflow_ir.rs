@@ -1,9 +1,9 @@
 //! `PresetManifest` ↔ [`WorkflowDocument`] import adapter (Workflow IR v0).
 //!
 //! Import is a projection, never a second grammar: every executable preset carrier (`signals`,
-//! `roles`, `initial_action`, `gates`, `cli_args`, inner-graph `output_binding`, every `exit_when`
-//! kind) lands in an IR field, and [`export_preset`] rebuilds the manifest from those fields
-//! alone. [`PresetSourceIdentity`](crate::source_identity::PresetSourceIdentity) is untouched —
+//! `roles`, `initial_action`, `gates`, `cli_args`, `world_binding`, inner-graph
+//! `output_binding`, every `exit_when` kind) lands in an IR field, and [`export_preset`] rebuilds
+//! the manifest from those fields alone. [`PresetSourceIdentity`](crate::source_identity::PresetSourceIdentity) is untouched —
 //! this adapter neither reads nor redefines the preset content hash.
 //!
 //! v0 mapping choices:
@@ -31,8 +31,9 @@ use crate::manifest::{
     ConvergeStrategy, EnterAction, ExitWhen, GoNogoNext, GraphNode, GraphNodeKind, InitialAction,
     InnerGraph, LabeledNext, MergeKind, NextTarget, PresetCliArg, PresetCliArgType, PresetHeader,
     PresetKind, PresetManifest, RunIntent, SignalAction, SignalActionKind, SignalBinding,
-    StateDefinition,
+    StateDefinition, WorldBinding, WorldBindingMode,
 };
+use include_dir::Dir;
 use nexus_contracts::local::orchestration::preset_gate::{Gate, GateOp, PreviousPresetStatus};
 use nexus_workflow_ir::{
     WorkflowAssetRef, WorkflowAssetRefKind, WorkflowCliArg, WorkflowCliArgType,
@@ -44,6 +45,7 @@ use nexus_workflow_ir::{
     WorkflowMetaRunIntentsItem, WorkflowNode, WorkflowNodeEffectClass, WorkflowNodeKind,
     WorkflowNodeStepKind, WorkflowNodeUi, WorkflowProvenance, WorkflowProvenanceSource,
     WorkflowRoleDefinition, WorkflowSignalBinding, WorkflowSignalBindingAction,
+    WorkflowWorldBinding, WorkflowWorldBindingMode,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
@@ -133,60 +135,110 @@ pub struct PresetIrImport {
     pub assets: BTreeMap<String, Vec<u8>>,
 }
 
+/// Where [`import_preset_bundle`] reads referenced asset bytes from.
+///
+/// A source answers bundle-relative paths only: `import_preset_bundle` applies
+/// `assert_template_file_safe` before the first read, so no implementation repeats that check.
+pub trait AssetSource {
+    /// Bytes at a bundle-relative `path`; `Ok(None)` means the source has no such entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns the source's own failure — canonicalization, a sandbox escape, or IO. A
+    /// missing entry is `Ok(None)`, never an error.
+    fn read_asset(&self, path: &str) -> Result<Option<Vec<u8>>, std::io::Error>;
+}
+
+/// A bundle directory on disk, confined to its canonicalized root.
+#[derive(Debug, Clone)]
+pub struct FsAssetSource {
+    root: std::path::PathBuf,
+}
+
+impl FsAssetSource {
+    /// Canonicalize `root` once; every read joins and resolves inside it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the canonicalization error when `root` is not a readable directory.
+    pub fn new(root: &Path) -> std::io::Result<Self> {
+        Ok(Self {
+            root: root.canonicalize()?,
+        })
+    }
+}
+
+impl AssetSource for FsAssetSource {
+    fn read_asset(&self, path: &str) -> Result<Option<Vec<u8>>, std::io::Error> {
+        let canonical = self.root.join(path).canonicalize()?;
+        if !canonical.starts_with(&self.root) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("asset `{path}` resolves outside the bundle sandbox (symlink escape)"),
+            ));
+        }
+        std::fs::read(canonical).map(Some)
+    }
+}
+
+/// Assets compiled into the binary, from a [`include_dir::Dir`].
+///
+/// Pass the preset's own bundle directory: entries carry their path from the `include_dir!` root, so
+/// each lookup is prefixed with the directory's own path (`prompts/x.md` -> `<preset>/prompts/x.md`).
+#[derive(Debug, Clone, Copy)]
+pub struct EmbeddedAssetSource<'a>(pub &'a Dir<'a>);
+
+impl AssetSource for EmbeddedAssetSource<'_> {
+    fn read_asset(&self, path: &str) -> Result<Option<Vec<u8>>, std::io::Error> {
+        Ok(self
+            .0
+            .get_file(self.0.path().join(path))
+            .map(|file| file.contents().to_vec()))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Import: PresetManifest -> WorkflowDocument
 // ---------------------------------------------------------------------------
 
 /// Import a preset manifest into a Workflow IR document, hashing every asset the manifest
-/// references from `bundle_root`.
+/// references from `source`.
 ///
 /// # Errors
 ///
-/// Returns [`WorkflowIrError::AssetRead`] when a referenced asset is missing or unreadable, and
-/// [`WorkflowIrError::NotProjectable`] when a referenced path is unsafe (absolute, `..` traversal,
-/// or a symlink resolving outside the bundle) or the manifest header cannot form a document.
+/// Returns [`WorkflowIrError::AssetRead`] when a referenced asset is missing, unreadable, or
+/// refused by `source` (a [`FsAssetSource`] escape, for one), and
+/// [`WorkflowIrError::NotProjectable`] when a referenced path is unsafe (absolute, `..`
+/// traversal) or the manifest header cannot form a document.
 pub fn import_preset_bundle(
     manifest: &PresetManifest,
-    bundle_root: &Path,
+    source: &dyn AssetSource,
 ) -> Result<PresetIrImport, WorkflowIrError> {
     let mut references = crate::validation::collect_asset_file_references(manifest);
     references.sort_by(|a, b| a.1.cmp(&b.1));
     references.dedup_by(|a, b| a.1 == b.1);
 
-    // Fail closed before touching the filesystem: the manifest chooses these paths, and the same
-    // rule the loader/validator enforce (`assert_template_file_safe`) applies here.
+    // Fail closed before the source is touched: the manifest chooses these paths, and the same
+    // rule the loader/validator enforce (`assert_template_file_safe`) applies to every source.
     for (_, path) in &references {
         if let Err(reason) = crate::loader::assert_template_file_safe(path) {
             return Err(refuse(format!("unsafe asset path `{path}`: {reason}")));
         }
     }
-    let canonical_root =
-        bundle_root
-            .canonicalize()
-            .map_err(|source| WorkflowIrError::AssetRead {
-                path: ".".to_string(),
-                source,
-            })?;
 
     let mut assets = Vec::with_capacity(references.len());
     let mut asset_bytes = BTreeMap::new();
     for (_, path) in references {
-        let canonical = canonical_root
-            .join(&path)
-            .canonicalize()
-            .map_err(|source| WorkflowIrError::AssetRead {
-                path: path.clone(),
-                source,
-            })?;
-        if !canonical.starts_with(&canonical_root) {
-            return Err(refuse(format!(
-                "asset `{path}` resolves outside the bundle sandbox (symlink escape)"
-            )));
-        }
-        let bytes = std::fs::read(&canonical).map_err(|source| WorkflowIrError::AssetRead {
-            path: path.clone(),
-            source,
-        })?;
+        let bytes = match source.read_asset(&path) {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => {
+                return Err(WorkflowIrError::AssetRead {
+                    path,
+                    source: std::io::Error::from(std::io::ErrorKind::NotFound),
+                })
+            }
+            Err(source) => return Err(WorkflowIrError::AssetRead { path, source }),
+        };
         assets.push(WorkflowAssetRef {
             id: path.clone(),
             path: path.clone(),
@@ -294,6 +346,12 @@ fn document_from_manifest(
             requires_capabilities: header.requires_capabilities.clone(),
             cli_args: header.cli_args.iter().map(cli_arg_ir).collect(),
             gates: header.gates.iter().map(gate_ir).collect(),
+            world_binding: header.world_binding.map(|binding| WorkflowWorldBinding {
+                mode: match binding.mode {
+                    WorldBindingMode::Required => WorkflowWorldBindingMode::Required,
+                    WorldBindingMode::Optional => WorkflowWorldBindingMode::Optional,
+                },
+            }),
         },
         entry: header.initial.clone(),
         initial_action: header.initial_action.as_ref().map(initial_action_ir),
@@ -601,7 +659,7 @@ fn context_update_ir(hook: &ContextUpdateHook) -> WorkflowContextUpdate {
     let (op, body, capability, patch_json, remove_path) = match &hook.op {
         ContextUpdateOp::Append { body } => (
             WorkflowContextUpdateOp::Append,
-            Some(body.clone()),
+            body.clone(),
             None,
             None,
             None,
@@ -610,12 +668,13 @@ fn context_update_ir(hook: &ContextUpdateHook) -> WorkflowContextUpdate {
             WorkflowContextUpdateOp::StructMerge,
             None,
             None,
-            Some(patch.clone()),
+            // An explicit null is a patch value; only an absent key stays absent.
+            patch.clone().map(Option::unwrap_or_default),
             None,
         ),
         ContextUpdateOp::Replace { body } => (
             WorkflowContextUpdateOp::Replace,
-            Some(body.clone()),
+            body.clone(),
             None,
             None,
             None,
@@ -625,7 +684,7 @@ fn context_update_ir(hook: &ContextUpdateHook) -> WorkflowContextUpdate {
             None,
             None,
             None,
-            Some(path.clone()),
+            path.clone(),
         ),
         ContextUpdateOp::LlmSummarize { capability } => (
             WorkflowContextUpdateOp::LlmSummarize,
@@ -939,6 +998,16 @@ fn preset_header(document: &WorkflowDocument) -> Result<PresetHeader, WorkflowIr
             .collect(),
         initial: document.entry.clone(),
         terminal,
+        world_binding: document
+            .meta
+            .world_binding
+            .as_ref()
+            .map(|binding| WorldBinding {
+                mode: match binding.mode {
+                    WorkflowWorldBindingMode::Required => WorldBindingMode::Required,
+                    WorkflowWorldBindingMode::Optional => WorldBindingMode::Optional,
+                },
+            }),
         author: document.meta.author.clone(),
         homepage: document.meta.homepage.clone(),
         license: document.meta.license.clone(),
@@ -1193,28 +1262,19 @@ fn context_update_preset(
 ) -> Result<ContextUpdateHook, WorkflowIrError> {
     let op = match &update.op {
         WorkflowContextUpdateOp::Append => ContextUpdateOp::Append {
-            body: update
-                .body
-                .clone()
-                .ok_or_else(|| refuse("append context update carries no body"))?,
+            body: update.body.clone(),
         },
         WorkflowContextUpdateOp::Replace => ContextUpdateOp::Replace {
-            body: update
-                .body
-                .clone()
-                .ok_or_else(|| refuse("replace context update carries no body"))?,
+            body: update.body.clone(),
         },
         WorkflowContextUpdateOp::StructMerge => ContextUpdateOp::StructMerge {
             patch: update
                 .patch
                 .clone()
-                .ok_or_else(|| refuse("struct-merge context update carries no patch"))?,
+                .map(|patch| (!patch.is_null()).then_some(patch)),
         },
         WorkflowContextUpdateOp::StructRemove => ContextUpdateOp::StructRemove {
-            path: update
-                .path
-                .clone()
-                .ok_or_else(|| refuse("struct-remove context update carries no path"))?,
+            path: update.path.clone(),
         },
         WorkflowContextUpdateOp::LlmSummarize => ContextUpdateOp::LlmSummarize {
             capability: update
@@ -1448,7 +1508,11 @@ roles:
     #[test]
     fn import_hashes_assets_and_round_trips_the_manifest() {
         let (dir, manifest) = bundle();
-        let imported = import_preset_bundle(&manifest, dir.path()).expect("import");
+        let imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
 
         let document = &imported.document;
         assert_eq!(document.id.as_str(), "round-trip");
@@ -1522,7 +1586,11 @@ states:
     #[test]
     fn export_refuses_ir_only_node_kinds() {
         let (dir, manifest) = bundle();
-        let mut imported = import_preset_bundle(&manifest, dir.path()).expect("import");
+        let mut imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
         imported
             .document
             .nodes
@@ -1539,7 +1607,11 @@ states:
     #[test]
     fn export_refuses_duplicate_default_edges() {
         let (dir, manifest) = bundle();
-        let mut imported = import_preset_bundle(&manifest, dir.path()).expect("import");
+        let mut imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
         imported.document.edges.push(WorkflowEdge {
             id: "work->start#second-default".to_string(),
             from: "work".to_string(),
@@ -1558,7 +1630,11 @@ states:
     #[test]
     fn export_refuses_labeled_families_with_foreign_edge_kinds() {
         let (dir, manifest) = bundle();
-        let mut imported = import_preset_bundle(&manifest, dir.path()).expect("import");
+        let mut imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
         imported.document.edges.push(WorkflowEdge {
             id: "done->start#labeled".to_string(),
             from: "done".to_string(),
@@ -1587,7 +1663,11 @@ states:
     #[test]
     fn export_refuses_edges_beyond_the_go_nogo_pair() {
         let (dir, manifest) = bundle();
-        let mut imported = import_preset_bundle(&manifest, dir.path()).expect("import");
+        let mut imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
         imported.document.edges.push(WorkflowEdge {
             id: "start->work#sibling".to_string(),
             from: "start".to_string(),
@@ -1625,8 +1705,11 @@ states:
         )
         .expect("manifest parses");
 
-        let error =
-            import_preset_bundle(&manifest, dir.path()).expect_err("multi-terminal refused");
+        let error = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect_err("multi-terminal refused");
         assert!(matches!(
             error,
             WorkflowIrError::MultipleTerminalStates { count: 2 }
@@ -1640,8 +1723,11 @@ states:
             serde_yaml::from_str(&MANIFEST.replace("prompts/judge.md", "../evil.md"))
                 .expect("manifest parses");
 
-        let error =
-            import_preset_bundle(&manifest, dir.path()).expect_err("parent traversal refused");
+        let error = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect_err("parent traversal refused");
         assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
         assert!(error.to_string().contains("unsafe asset path `../evil.md`"));
     }

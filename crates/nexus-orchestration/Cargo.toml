@@ -39,6 +39,9 @@ nexus-contracts = { path = "../nexus-contracts" }
 # pulls it, and it carries no provider or execution edge.
 nexus-workflow-ir = { path = "../nexus-workflow-ir", optional = true }
 nexus-preset = { path = "../nexus-preset" }
+# Session identity/status types + StorageError contract moved out of engine.rs;
+# engine re-exports them so consumer paths stay unchanged.
+nexus-session-storage = { path = "../nexus-session-storage" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-knowledge = { path = "../nexus-knowledge" }
 # V1.145 P1a: narrative.compute converts WorldKbEntry↔spoke KnowledgeEntry via

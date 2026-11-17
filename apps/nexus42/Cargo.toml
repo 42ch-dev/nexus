@@ -94,6 +94,7 @@ nexus-preset = { path = "../../crates/nexus-preset" }
 # (`nexus_workflow_ir::validate`) alongside the preset facade.
 nexus-workflow-ir = { path = "../../crates/nexus-workflow-ir" }
 nexus-orchestration = { path = "../../crates/nexus-orchestration", optional = true }
+nexus-session-storage = { path = "../../crates/nexus-session-storage", optional = true }
 nexus-moment-context-assembly = { path = "../../crates/nexus-moment-context-assembly", optional = true, features = ["cloud-stage"] }
 nexus-creator-memory = { path = "../../crates/nexus-creator-memory", optional = true }
 nexus-creator = { path = "../../crates/nexus-creator", optional = true }
@@ -252,6 +253,7 @@ cli = [
   # nothing (v1.235 work-artifact IR, ADR #485 §7.8).
   "nexus-core/execution",
   "dep:nexus-orchestration",
+  "dep:nexus-session-storage",
   "dep:nexus-moment-context-assembly",
   "dep:nexus-creator-memory",
   "dep:nexus-creator",

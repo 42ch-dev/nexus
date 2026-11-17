@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use nexus_preset::manifest::PresetManifest;
-use nexus_preset::{canonical_twin_json, import_preset_bundle};
+use nexus_preset::{canonical_twin_json, import_preset_bundle, FsAssetSource};
 use nexus_workflow_ir::WorkflowDocument;
 
 /// Suffix of one twin file: `<id>.workflow.ir.json`, the fixture convention.
@@ -66,7 +66,8 @@ fn canonical_twin(id: &str) -> Result<String, String> {
         .map_err(|error| format!("read {}: {error}", manifest_path.display()))?;
     let manifest: PresetManifest = serde_yaml::from_str(&yaml)
         .map_err(|error| format!("parse {}: {error}", manifest_path.display()))?;
-    let imported = import_preset_bundle(&manifest, &bundle)
+    let source = FsAssetSource::new(&bundle).map_err(|error| format!("open `{id}`: {error}"))?;
+    let imported = import_preset_bundle(&manifest, &source)
         .map_err(|error| format!("import `{id}` at {}: {error}", bundle.display()))?;
     canonical_twin_json(&imported.document).map_err(|error| format!("serialize `{id}`: {error}"))
 }

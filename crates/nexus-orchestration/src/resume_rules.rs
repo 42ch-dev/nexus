@@ -10,7 +10,7 @@
 //!
 //! 1. **[`classify_recovery`]** — the canonical v1.186 A7 recovery classifier
 //!    (P0 Task 2). It consumes the authoritative v1 status plus the
-//!    deserialized [`crate::run_state::RunStateV1`] (A2 durable state) and
+//!    deserialized [`nexus_session_storage::run_state::RunStateV1`] (A2 durable state) and
 //!    yields one of seven [`RecoveryClass`] values. Daemon boot/resume, ops
 //!    detail, and ops list all call it — there is exactly ONE recovery
 //!    precedence for v1 rows (first rule that fires):
@@ -48,7 +48,7 @@
 //! consumers carry it as the separate `runner_check` caveat.
 
 use crate::engine::SessionStatus;
-use crate::run_state::RunStateV1;
+use nexus_session_storage::run_state::RunStateV1;
 use serde_json::{Map, Value};
 
 /// Canonical A7 recovery classification (v1.186 P0, Task 2).
@@ -520,12 +520,12 @@ mod tests {
 
     fn state(step_in_flight: Option<&str>, cancel_requested: bool, wait: bool) -> RunStateV1 {
         RunStateV1 {
-            wait: wait.then(|| crate::run_state::WaitRecord {
+            wait: wait.then(|| nexus_session_storage::run_state::WaitRecord {
                 wait_id: "w1".to_string(),
                 task_id: "t1".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             step_in_flight: step_in_flight.map(str::to_string),
             in_flight: None,

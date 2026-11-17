@@ -36,11 +36,11 @@ use graph_flow::{Session, SessionStorage};
 use std::sync::Arc;
 
 use super::inspect::{CheckpointRow, CheckpointSummary};
-use crate::engine::{EngineError, SessionId, SessionStatus, SessionSummary};
 use crate::run_state::{
     ChildCheckpoint, PromptAttempt, RunCheckpoint, RunDescriptorV1, RunRecord, RunStateV1,
     SettlementResult, TerminalSettlementTarget, WorkflowStateStore,
 };
+use crate::{SessionId, SessionStatus, SessionSummary, StorageError};
 
 /// SQLite-backed session storage sharing `nexus-local-db`'s pool.
 pub struct SqliteSessionStorage {
@@ -429,37 +429,37 @@ struct RunRow {
 /// the durable `graph_version` column (brief §3.1): an incoming version outside
 /// SQLite's signed range or an exhausted counter is a hard storage error with
 /// no write — never wrapped, saturated, or clamped.
-fn checked_next_graph_version(version: u64) -> Result<i64, EngineError> {
+fn checked_next_graph_version(version: u64) -> Result<i64, StorageError> {
     let as_i64 = i64::try_from(version).map_err(|_| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "graph version {version} exceeds SQLite's signed range"
         )))
     })?;
     as_i64.checked_add(1).ok_or_else(|| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(
             "graph version counter exhausted".to_string(),
         ))
     })
 }
 
 /// Serialize a run-state value to a BLOB, mapping serde errors to
-/// [`EngineError::GraphFlow`] (storage-layer serialization failure).
-fn serialize_blob<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, EngineError> {
+/// [`StorageError::GraphFlow`] (storage-layer serialization failure).
+fn serialize_blob<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, StorageError> {
     serde_json::to_vec(value).map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "serialize run-state blob: {e}"
         )))
     })
 }
 
 /// Deserialize a run-state BLOB, mapping serde errors to
-/// [`EngineError::GraphFlow`].
+/// [`StorageError::GraphFlow`].
 fn deserialize_blob<T: serde::de::DeserializeOwned>(
     bytes: &[u8],
     what: &str,
-) -> Result<T, EngineError> {
+) -> Result<T, StorageError> {
     serde_json::from_slice(bytes).map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "deserialize {what}: {e}"
         )))
     })
@@ -500,10 +500,10 @@ fn child_descriptor(
 /// child must not fail the parent's transition). When the DB terminal
 /// status differs from the submitted child status (e.g. the parent thinks
 /// the child is Running/completed but the DB is Failed/Cancelled at that
-/// revision), the confirmation is rejected and a [`EngineError::GraphFlow`]
+/// revision), the confirmation is rejected and a [`StorageError::GraphFlow`]
 /// mismatch is returned — a stale Running checkpoint must never let a parent
 /// commit Completed over a child that is Failed/Cancelled at that revision
-/// (Important 6). Returns `Ok(Some(EngineError))` when the child CAS genuinely
+/// (Important 6). Returns `Ok(Some(StorageError))` when the child CAS genuinely
 /// failed: a stale revision (child moved on) or a terminal child at a stale
 /// revision. SQL read failures are propagated so callers never mistake an
 /// unreadable row for an absent row.
@@ -513,7 +513,7 @@ async fn child_cas_outcome(
     child_id: &str,
     expected_revision: u64,
     submitted_status: SessionStatus,
-) -> Result<Option<EngineError>, EngineError> {
+) -> Result<Option<StorageError>, StorageError> {
     let row = sqlx::query!(
         "SELECT state_revision, status, graph_version FROM orchestration_sessions WHERE session_id = ?",
         child_id
@@ -521,7 +521,7 @@ async fn child_cas_outcome(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "read child CAS outcome for '{child_id}': {e}"
         )))
     })?;
@@ -531,7 +531,7 @@ async fn child_cas_outcome(
             // A negative or exhausted graph counter is a corrupt storage
             // invariant: a hard storage error, never a concurrency outcome.
             if row.graph_version < 0 || row.graph_version == i64::MAX {
-                return Err(EngineError::GraphFlow(
+                return Err(StorageError::GraphFlow(
                     graph_flow::GraphError::StorageError(format!(
                         "child CAS outcome for '{child_id}': corrupt/exhausted \
                          graph_version {} (non-replayable)",
@@ -541,8 +541,8 @@ async fn child_cas_outcome(
             }
             let found_rev = row.state_revision;
             let status = row.status;
-            if crate::engine::SessionStatus::from_db_str(&status).is_none() {
-                return Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+            if crate::SessionStatus::from_db_str(&status).is_none() {
+                return Err(StorageError::GraphFlow(graph_flow::GraphError::StorageError(
                     format!(
                         "child CAS outcome for '{child_id}': unknown/corrupt status {status:?}                          (non-replayable)"
                     ),
@@ -562,7 +562,7 @@ async fn child_cas_outcome(
                 if status == submitted_status.as_db_str() {
                     None
                 } else {
-                    Some(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                    Some(StorageError::GraphFlow(graph_flow::GraphError::StorageError(
                         format!(
                             "child '{child_id}' is terminal '{status}' at revision {expected_revision} \
                              but the parent submitted '{}' (ChildCheckpoint status/state \
@@ -572,20 +572,20 @@ async fn child_cas_outcome(
                     )))
                 }
             } else if terminal {
-                Some(EngineError::TerminalState(child_id.to_string()))
+                Some(StorageError::TerminalState(child_id.to_string()))
             } else if found_rev != expected_revision as i64 {
-                Some(EngineError::RevisionMismatch {
+                Some(StorageError::RevisionMismatch {
                     session_id: child_id.to_string(),
                     expected: expected_revision,
                     found: u64::try_from(found_rev).unwrap_or(0),
                 })
             } else {
-                Some(EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                Some(StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "child CAS failed for '{child_id}' (revision {expected_revision}, status {status})"
                 ))))
             }
         }
-        None => Some(EngineError::GraphFlow(
+        None => Some(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "child CAS failed for '{child_id}': row absent"
             )),
@@ -599,7 +599,7 @@ async fn child_cas_outcome(
 async fn read_root_descriptor(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     session_id: &str,
-) -> Result<Option<RunDescriptorV1>, EngineError> {
+) -> Result<Option<RunDescriptorV1>, StorageError> {
     let bytes: Option<Option<Vec<u8>>> = sqlx::query_scalar!(
         "SELECT run_descriptor_json FROM orchestration_sessions WHERE session_id = ?",
         session_id
@@ -607,7 +607,7 @@ async fn read_root_descriptor(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "read root descriptor '{session_id}': {e}"
         )))
     })?;
@@ -668,9 +668,9 @@ fn checked_load_clocks(
     execution_version_raw: i64,
     state_revision_raw: i64,
     graph_version_raw: i64,
-) -> Result<(u32, u64, u64), EngineError> {
+) -> Result<(u32, u64, u64), StorageError> {
     if execution_version_raw < 0 {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "{op} '{session_id}': negative execution_version {execution_version_raw} \
              (non-replayable)"
@@ -678,7 +678,7 @@ fn checked_load_clocks(
         ));
     }
     if execution_version_raw > 1 {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "{op} '{session_id}': unsupported execution_version {execution_version_raw} \
              (non-replayable, no forward-version policy)"
@@ -687,13 +687,13 @@ fn checked_load_clocks(
     }
     // Range-checked above (0 | 1); a conversion failure is corrupt storage.
     let execution_version = u32::try_from(execution_version_raw).map_err(|_| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "{op} '{session_id}': execution_version {execution_version_raw} out of range \
              (non-replayable)"
         )))
     })?;
     if state_revision_raw < 0 {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
             "{op} '{session_id}': negative state_revision {state_revision_raw} (non-replayable)"
         )),
@@ -701,7 +701,7 @@ fn checked_load_clocks(
     }
     let state_revision = u64::try_from(state_revision_raw).unwrap_or(0);
     if graph_version_raw < 0 {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "{op} '{session_id}': negative graph_version {graph_version_raw} (non-replayable)"
             )),
@@ -718,9 +718,9 @@ fn checked_expected_revision(
     op: &str,
     session_id: &SessionId,
     expected_revision: u64,
-) -> Result<i64, EngineError> {
+) -> Result<i64, StorageError> {
     i64::try_from(expected_revision).map_err(|_| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "{op} '{}': expected revision {expected_revision} exceeds SQLite's signed range \
              (non-replayable)",
             session_id.0
@@ -813,7 +813,7 @@ async fn ensure_run_absent(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     session_id: &SessionId,
     op: &str,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     let existing_version: Option<i64> = sqlx::query_scalar!(
         "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
         session_id.0
@@ -821,13 +821,13 @@ async fn ensure_run_absent(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "{op} '{}': {e}",
             session_id.0
         )))
     })?;
     if let Some(version) = existing_version {
-        return Err(EngineError::RunAlreadyExists {
+        return Err(StorageError::RunAlreadyExists {
             session_id: session_id.0.clone(),
             execution_version: u32::try_from(version).unwrap_or(0),
         });
@@ -840,7 +840,7 @@ async fn ensure_run_absent(
 async fn insert_v1_run_row(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     row: NewRunRow<'_>,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     // NOTE: the SQL text is byte-identical to the pre-refactor inline query;
     // the .sqlx offline cache hashes the string verbatim — do not re-indent.
     sqlx::query!(
@@ -869,7 +869,7 @@ async fn insert_v1_run_row(
     .execute(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "{} '{}': {e}",
             row.op, row.id
         )))
@@ -892,10 +892,10 @@ async fn persist_child_checkpoints(
     children: &[ChildCheckpoint],
     now: i64,
     op: &str,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     for child in children {
         let child_ctx = serde_json::to_vec(&child.session.context).map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "serialize child context: {e}"
             )))
         })?;
@@ -916,7 +916,7 @@ async fn persist_child_checkpoints(
         // never match a stored row — a hard storage error, never a wrapped
         // CAS (brief §3.1 convention).
         let child_revision = i64::try_from(child.state_revision).map_err(|_| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "{op} child '{child_id}': state_revision {} exceeds SQLite's signed range \
                  (non-replayable)",
                 child.state_revision
@@ -976,7 +976,7 @@ async fn persist_child_checkpoints(
         .execute(&mut **tx)
         .await
         .map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "{op} child '{child_id}': {e}"
             )))
         })?;
@@ -1008,7 +1008,7 @@ async fn classify_transition_fence_miss(
     expected_graph_i64: Option<i64>,
     op: &str,
     reject_legacy_row: bool,
-) -> Result<EngineError, EngineError> {
+) -> Result<StorageError, StorageError> {
     let current = sqlx::query!(
         "SELECT state_revision, execution_version, graph_version, status \
          FROM orchestration_sessions WHERE session_id = ?",
@@ -1017,7 +1017,7 @@ async fn classify_transition_fence_miss(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "{op} read revision/version: {e}"
         )))
     })?;
@@ -1027,42 +1027,44 @@ async fn classify_transition_fence_miss(
         // invariant: a hard storage error, never misclassified as a
         // concurrency or terminal outcome.
         Some(row) if row.graph_version < 0 || row.graph_version == i64::MAX => {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "{op} '{}': corrupt/exhausted graph_version {} (non-replayable)",
                 session_id.0, row.graph_version
             )))
         }
         // An unknown/corrupt status is corruption, never a concurrency or
         // terminal outcome (Important 6).
-        Some(row) if crate::engine::SessionStatus::from_db_str(&row.status).is_none() => {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        Some(row) if crate::SessionStatus::from_db_str(&row.status).is_none() => {
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "{op} '{}': unknown/corrupt status {:?} (non-replayable)",
                 session_id.0, row.status
             )))
         }
         Some(row) if reject_legacy_row && row.execution_version != 1 => {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "{op} '{}': execution_version {} is non-replayable; \
                  legacy runs cannot transition",
                 session_id.0, row.execution_version
             )))
         }
-        Some(row) if row.state_revision != expected_revision_i64 => EngineError::RevisionMismatch {
-            session_id: session_id.0.clone(),
-            expected: expected_revision,
-            found: u64::try_from(row.state_revision).unwrap_or(0),
-        },
-        // Graph-clock fence loss with an intact workflow revision: a
-        // graph-only winner owns the session clock — the same typed
-        // ownership loss as a revision mismatch, never a mutation.
-        Some(row) if expected_graph_i64.is_some_and(|expected| row.graph_version != expected) => {
-            EngineError::RevisionMismatch {
+        Some(row) if row.state_revision != expected_revision_i64 => {
+            StorageError::RevisionMismatch {
                 session_id: session_id.0.clone(),
                 expected: expected_revision,
                 found: u64::try_from(row.state_revision).unwrap_or(0),
             }
         }
-        _ => EngineError::TerminalState(session_id.0.clone()),
+        // Graph-clock fence loss with an intact workflow revision: a
+        // graph-only winner owns the session clock — the same typed
+        // ownership loss as a revision mismatch, never a mutation.
+        Some(row) if expected_graph_i64.is_some_and(|expected| row.graph_version != expected) => {
+            StorageError::RevisionMismatch {
+                session_id: session_id.0.clone(),
+                expected: expected_revision,
+                found: u64::try_from(row.state_revision).unwrap_or(0),
+            }
+        }
+        _ => StorageError::TerminalState(session_id.0.clone()),
     })
 }
 
@@ -1073,7 +1075,7 @@ async fn read_checked_v1_execution_version(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     session_id: &SessionId,
     op: &str,
-) -> Result<u32, EngineError> {
+) -> Result<u32, StorageError> {
     let persisted_version: i64 = sqlx::query_scalar!(
         "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
         session_id.0
@@ -1081,12 +1083,12 @@ async fn read_checked_v1_execution_version(
     .fetch_one(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "{op} read execution_version: {e}"
         )))
     })?;
     if persisted_version != 1 {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "{op} '{}': unsupported execution_version {persisted_version} (non-replayable)",
                 session_id.0
@@ -1095,7 +1097,7 @@ async fn read_checked_v1_execution_version(
     }
     // Fenced to 1 above; a conversion failure is corrupt storage.
     u32::try_from(persisted_version).map_err(|_| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "{op} '{}': execution_version {persisted_version} out of range (non-replayable)",
             session_id.0
         )))
@@ -1113,7 +1115,7 @@ async fn read_post_commit_graph_version(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     session_id: &SessionId,
     op: &str,
-) -> Result<u64, EngineError> {
+) -> Result<u64, StorageError> {
     let post_graph_version: i64 = sqlx::query_scalar!(
         "SELECT graph_version FROM orchestration_sessions WHERE session_id = ?",
         session_id.0
@@ -1121,12 +1123,12 @@ async fn read_post_commit_graph_version(
     .fetch_one(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "{op} read post-commit graph_version: {e}"
         )))
     })?;
     u64::try_from(post_graph_version).map_err(|_| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "{op} '{}': negative post-commit graph_version {post_graph_version} (non-replayable)",
             session_id.0
         )))
@@ -1147,12 +1149,12 @@ fn prepare_v1_transition_payload(
     session_id: &SessionId,
     root: &Session,
     next_state: &RunStateV1,
-) -> Result<V1TransitionPayload, EngineError> {
+) -> Result<V1TransitionPayload, StorageError> {
     let now = chrono::Utc::now().timestamp();
     let id = session_id.0.clone();
     let current_task_id = root.current_task_id.clone();
     let context_bytes = serde_json::to_vec(&root.context).map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "serialize context: {e}"
         )))
     })?;
@@ -1170,12 +1172,12 @@ fn checked_expected_graph_i64(
     op: &str,
     session_id: &SessionId,
     expected_graph_version: Option<u64>,
-) -> Result<Option<i64>, EngineError> {
+) -> Result<Option<i64>, StorageError> {
     expected_graph_version
         .map(i64::try_from)
         .transpose()
         .map_err(|_| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "{op} '{}': expected graph_version out of range",
                 session_id.0
             )))
@@ -1191,13 +1193,13 @@ async fn finalize_v1_transition_writes(
     checkpoint: RunCheckpoint<'_>,
     now: i64,
     op: &str,
-) -> Result<(Option<RunDescriptorV1>, u32, u64), EngineError> {
+) -> Result<(Option<RunDescriptorV1>, u32, u64), StorageError> {
     let root_descriptor = read_root_descriptor(tx, &session_id.0).await?;
     let execution_version = read_checked_v1_execution_version(tx, session_id, op).await?;
 
     if !checkpoint.children.is_empty() {
         let Some(root_descriptor) = &root_descriptor else {
-            return Err(EngineError::GraphFlow(
+            return Err(StorageError::GraphFlow(
                 graph_flow::GraphError::StorageError(format!(
                     "{op} '{}': root has no descriptor; \
                      cannot persist child identity",
@@ -1227,7 +1229,7 @@ async fn run_commit_transition_cas(
     status_str: &str,
     expected_revision: u64,
     expected_graph_version: Option<u64>,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     let expected_revision_i64 =
         checked_expected_revision("commit_transition", session_id, expected_revision)?;
     let expected_graph_i64 =
@@ -1258,7 +1260,7 @@ async fn run_commit_transition_cas(
     .execute(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "commit_transition '{}': {e}",
             session_id.0
         )))
@@ -1287,7 +1289,7 @@ async fn run_settle_cancelled_cas(
     payload: &V1TransitionPayload,
     expected_revision: u64,
     expected_graph_version: Option<u64>,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     let expected_revision_i64 =
         checked_expected_revision("settle_cancelled", session_id, expected_revision)?;
     let expected_graph_i64 =
@@ -1317,7 +1319,7 @@ async fn run_settle_cancelled_cas(
     .execute(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "settle_cancelled '{}': {e}",
             session_id.0
         )))
@@ -1344,7 +1346,7 @@ async fn run_settle_failed_cas(
     payload: &V1TransitionPayload,
     expected_revision: u64,
     expected_graph_version: Option<u64>,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     let expected_revision_i64 =
         checked_expected_revision("settle_failed", session_id, expected_revision)?;
     let expected_graph_i64 =
@@ -1374,7 +1376,7 @@ async fn run_settle_failed_cas(
     .execute(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "settle_failed '{}': {e}",
             session_id.0
         )))
@@ -1402,7 +1404,7 @@ async fn classify_restore_fence_miss(
     session_id: &SessionId,
     expected_revision: u64,
     expected_revision_i64: i64,
-) -> Result<EngineError, EngineError> {
+) -> Result<StorageError, StorageError> {
     #[derive(sqlx::FromRow)]
     struct RestoreFenceRow {
         state_revision: i64,
@@ -1418,13 +1420,13 @@ async fn classify_restore_fence_miss(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "restore_pre_step read revision: {e}"
         )))
     })?;
     Ok(match current {
         Some(row) if row.graph_version < 0 || row.graph_version == i64::MAX => {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "restore_pre_step '{}': corrupt/exhausted graph_version {} (non-replayable)",
                 session_id.0, row.graph_version
             )))
@@ -1433,23 +1435,25 @@ async fn classify_restore_fence_miss(
         // deterministic `TerminalState`/`RevisionMismatch` outcomes the
         // engine treats as an expected concurrent winner — it is corruption,
         // checked before the revision fence (Important 6).
-        Some(row) if crate::engine::SessionStatus::from_db_str(&row.status).is_none() => {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        Some(row) if crate::SessionStatus::from_db_str(&row.status).is_none() => {
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "restore_pre_step '{}': unknown/corrupt status {:?} (non-replayable)",
                 session_id.0, row.status
             )))
         }
-        Some(row) if row.state_revision != expected_revision_i64 => EngineError::RevisionMismatch {
-            session_id: session_id.0.clone(),
-            expected: expected_revision,
-            found: u64::try_from(row.state_revision).unwrap_or(0),
-        },
+        Some(row) if row.state_revision != expected_revision_i64 => {
+            StorageError::RevisionMismatch {
+                session_id: session_id.0.clone(),
+                expected: expected_revision,
+                found: u64::try_from(row.state_revision).unwrap_or(0),
+            }
+        }
         // A known, non-steppable status on the fence is a genuine
         // terminal/waiting winner.
-        Some(_) => EngineError::TerminalState(session_id.0.clone()),
+        Some(_) => StorageError::TerminalState(session_id.0.clone()),
         // The row vanished between the fenced write and the re-read: not a
         // winner, and not safely replayable.
-        None => EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        None => StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "restore_pre_step '{}': row absent after zero-row restore fence (non-replayable)",
             session_id.0
         ))),
@@ -1466,7 +1470,7 @@ async fn classify_mark_fence_miss(
     expected_revision: u64,
     expected_revision_i64: i64,
     expected_graph_i64: Option<i64>,
-) -> Result<EngineError, EngineError> {
+) -> Result<StorageError, StorageError> {
     let current = sqlx::query!(
         "SELECT status, state_revision, graph_version FROM orchestration_sessions \
          WHERE session_id = ?",
@@ -1475,42 +1479,44 @@ async fn classify_mark_fence_miss(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "mark_step_in_flight read row: {e}"
         )))
     })?;
     Ok(match current {
         Some(row) if row.graph_version < 0 || row.graph_version == i64::MAX => {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "mark_step_in_flight '{}': corrupt/exhausted graph_version {} (non-replayable)",
                 session_id.0, row.graph_version
             )))
         }
         // An unpersistable status string is corruption: a hard storage
         // error, never a concurrency/terminal outcome (Important 6).
-        Some(row) if crate::engine::SessionStatus::from_db_str(&row.status).is_none() => {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        Some(row) if crate::SessionStatus::from_db_str(&row.status).is_none() => {
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "mark_step_in_flight '{}': unknown/corrupt status {:?} (non-replayable)",
                 session_id.0, row.status
             )))
         }
-        Some(row) if row.state_revision != expected_revision_i64 => EngineError::RevisionMismatch {
-            session_id: session_id.0.clone(),
-            expected: expected_revision,
-            found: u64::try_from(row.state_revision).unwrap_or(0),
-        },
-        // Graph-clock fence loss with an intact workflow revision: a
-        // graph-only winner owns the session clock — the same typed
-        // ownership loss as a revision mismatch, never an overwrite.
-        Some(row) if expected_graph_i64.is_some_and(|expected| row.graph_version != expected) => {
-            EngineError::RevisionMismatch {
+        Some(row) if row.state_revision != expected_revision_i64 => {
+            StorageError::RevisionMismatch {
                 session_id: session_id.0.clone(),
                 expected: expected_revision,
                 found: u64::try_from(row.state_revision).unwrap_or(0),
             }
         }
-        Some(_) => EngineError::TerminalState(session_id.0.clone()),
-        None => EngineError::SessionNotFound(session_id.0.clone()),
+        // Graph-clock fence loss with an intact workflow revision: a
+        // graph-only winner owns the session clock — the same typed
+        // ownership loss as a revision mismatch, never an overwrite.
+        Some(row) if expected_graph_i64.is_some_and(|expected| row.graph_version != expected) => {
+            StorageError::RevisionMismatch {
+                session_id: session_id.0.clone(),
+                expected: expected_revision,
+                found: u64::try_from(row.state_revision).unwrap_or(0),
+            }
+        }
+        Some(_) => StorageError::TerminalState(session_id.0.clone()),
+        None => StorageError::SessionNotFound(session_id.0.clone()),
     })
 }
 
@@ -1533,7 +1539,7 @@ async fn ensure_marker_not_cancelled(
     expected_revision: u64,
     expected_revision_i64: i64,
     expected_graph_i64: Option<i64>,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     let cancel_intent: Option<i64> = sqlx::query_scalar(
         r"
             SELECT CASE WHEN json_extract(COALESCE(run_state_json, '{}'), '$.cancel_requested') IS 1
@@ -1552,7 +1558,7 @@ async fn ensure_marker_not_cancelled(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "mark_step_in_flight '{}': cancel-intent fence read: {e}",
             session_id.0
         )))
@@ -1563,7 +1569,7 @@ async fn ensure_marker_not_cancelled(
         // committed after the cancel winner. Refuse it: the drive loop stops
         // as a losing writer (no failure settlement, no durable write of any
         // kind).
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::SessionConflict(format!(
                 "mark_step_in_flight '{}': durable cancel intent committed at revision {}; \
                  the cancel fence owns this run",
@@ -1584,7 +1590,7 @@ async fn read_post_write_clocks(
     session_id: &SessionId,
     op: &str,
     phase: &str,
-) -> Result<(SessionStatus, u64), EngineError> {
+) -> Result<(SessionStatus, u64), StorageError> {
     // NOTE: the SQL text is byte-identical to the pre-refactor inline query;
     // the .sqlx offline cache hashes the string verbatim.
     let clocks = sqlx::query_as!(
@@ -1596,18 +1602,18 @@ async fn read_post_write_clocks(
     .fetch_one(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "{op} read {phase} clocks: {e}"
         )))
     })?;
     let graph_version = u64::try_from(clocks.graph_version).map_err(|_| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "{op} '{}': negative {phase} graph_version {} (non-replayable)",
             session_id.0, clocks.graph_version
         )))
     })?;
-    let status = crate::engine::SessionStatus::from_db_str(&clocks.status).ok_or_else(|| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+    let status = crate::SessionStatus::from_db_str(&clocks.status).ok_or_else(|| {
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "{op} '{}': unknown/corrupt status {:?} (non-replayable)",
             session_id.0, clocks.status
         )))
@@ -1626,7 +1632,7 @@ async fn classify_prompt_attempt_miss(
     expected_revision_i64: i64,
     expected_step: Option<&str>,
     expected_attempt_id: Option<&str>,
-) -> Result<EngineError, EngineError> {
+) -> Result<StorageError, StorageError> {
     #[derive(sqlx::FromRow)]
     struct FenceRow {
         state_revision: i64,
@@ -1648,22 +1654,24 @@ async fn classify_prompt_attempt_miss(
     .fetch_optional(pool)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "persist_prompt_attempt read row: {e}"
         )))
     })?;
     Ok(match current {
-        Some(row) if row.state_revision != expected_revision_i64 => EngineError::RevisionMismatch {
-            session_id: session_id.0.clone(),
-            expected: expected_revision,
-            found: u64::try_from(row.state_revision).unwrap_or(0),
-        },
+        Some(row) if row.state_revision != expected_revision_i64 => {
+            StorageError::RevisionMismatch {
+                session_id: session_id.0.clone(),
+                expected: expected_revision,
+                found: u64::try_from(row.state_revision).unwrap_or(0),
+            }
+        }
         // The revision still matches but the step marker moved (or is absent
         // while `expected_step` named one): a newer step superseded this
         // prompt's admission — same linearization boundary, same typed
         // mismatch.
         Some(row) if expected_step.is_some() && row.step_marker.as_deref() != expected_step => {
-            EngineError::RevisionMismatch {
+            StorageError::RevisionMismatch {
                 session_id: session_id.0.clone(),
                 expected: expected_revision,
                 found: u64::try_from(row.state_revision).unwrap_or(0),
@@ -1677,14 +1685,14 @@ async fn classify_prompt_attempt_miss(
             if expected_attempt_id.is_some()
                 && row.in_flight_attempt_id.as_deref() != expected_attempt_id =>
         {
-            EngineError::RevisionMismatch {
+            StorageError::RevisionMismatch {
                 session_id: session_id.0.clone(),
                 expected: expected_revision,
                 found: u64::try_from(row.state_revision).unwrap_or(0),
             }
         }
-        Some(_) => EngineError::TerminalState(session_id.0.clone()),
-        None => EngineError::SessionNotFound(session_id.0.clone()),
+        Some(_) => StorageError::TerminalState(session_id.0.clone()),
+        None => StorageError::SessionNotFound(session_id.0.clone()),
     })
 }
 
@@ -1698,7 +1706,7 @@ async fn load_fenced_schedule_claim(
     schedule_id: &str,
     session_id: &SessionId,
     expected_core_context_version: u32,
-) -> Result<ScheduleClaimRow, EngineError> {
+) -> Result<ScheduleClaimRow, StorageError> {
     // NOTE: the SQL text is byte-identical to the pre-refactor inline query;
     // the .sqlx offline cache hashes the string verbatim.
     let row = sqlx::query_as!(
@@ -1711,20 +1719,20 @@ async fn load_fenced_schedule_claim(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "admit_schedule_run '{}': {e}",
             session_id.0
         )))
     })?
     .ok_or_else(|| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "admit_schedule_run: schedule {schedule_id} not found"
         )))
     })?;
 
     if u32::try_from(row.current_core_context_version).unwrap_or(0) != expected_core_context_version
     {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "admit_schedule_run: schedule {schedule_id} core-context version \
                  moved (expected {expected_core_context_version}, found {})",
@@ -1744,10 +1752,10 @@ async fn verify_admission_gate(
     schedule_id: &str,
     session_id: &SessionId,
     gate: &crate::run_state::ScheduleAdmissionGate,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     let now_ts = chrono::Utc::now().timestamp();
     if gate.scheduled_at.is_some_and(|at| at > now_ts) {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "admit_schedule_run: schedule {schedule_id} is not due \
                  (scheduled_at {})",
@@ -1763,13 +1771,13 @@ async fn verify_admission_gate(
         .fetch_optional(&mut **tx)
         .await
         .map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "admit_schedule_run '{}': {e}",
                 session_id.0
             )))
         })?;
         if !matches!(dep_status.as_deref(), Some("completed" | "cancelled")) {
-            return Err(EngineError::GraphFlow(
+            return Err(StorageError::GraphFlow(
                 graph_flow::GraphError::StorageError(format!(
                     "admit_schedule_run: schedule {schedule_id} dependency \
                      '{dep}' is not completed/cancelled"
@@ -1794,7 +1802,7 @@ async fn verify_admission_gate(
     .fetch_all(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "admit_schedule_run '{}': {e}",
             session_id.0
         )))
@@ -1813,7 +1821,7 @@ async fn verify_admission_gate(
         _ => running.is_empty(),
     };
     if !concurrency_ok {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "admit_schedule_run: schedule {schedule_id} fails the \
                  per-creator concurrency gate ({} running)",
@@ -1830,9 +1838,9 @@ async fn verify_admission_gate(
 fn validate_schedule_admission(
     row: &ScheduleClaimRow,
     schedule_id: &str,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     if row.preset_id.starts_with("_system.") {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "admit_schedule_run: system preset '{0}' cannot be admitted as a driven run",
                 row.preset_id
@@ -1841,7 +1849,7 @@ fn validate_schedule_admission(
     }
     let policy_ok = row.execution_policy == "driven_v1" || row.execution_policy == "legacy_inert";
     if !policy_ok {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "admit_schedule_run: schedule {schedule_id} execution_policy is '{}'",
                 row.execution_policy
@@ -1852,7 +1860,7 @@ fn validate_schedule_admission(
         || row.status == "paused"
         || (row.status == "running" && row.current_session_id.is_none());
     if !status_ok {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "admit_schedule_run: schedule {schedule_id} status is '{}'",
                 row.status
@@ -1870,7 +1878,7 @@ async fn reject_existing_claim(
     schedule_id: &str,
     session_id: &SessionId,
     existing: &str,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     let existing_version: Option<i64> = sqlx::query_scalar!(
         "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
         existing
@@ -1878,13 +1886,13 @@ async fn reject_existing_claim(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "admit_schedule_run '{}': {e}",
             session_id.0
         )))
     })?;
     if existing_version.is_some() {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "admit_schedule_run: schedule {schedule_id} already owns run {existing}"
             )),
@@ -1892,7 +1900,7 @@ async fn reject_existing_claim(
     }
     // Stale claim: refuse fresh admission — the caller must route through
     // recovery, never mint a second session.
-    Err(EngineError::GraphFlow(
+    Err(StorageError::GraphFlow(
         graph_flow::GraphError::StorageError(format!(
             "admit_schedule_run: schedule {schedule_id} has a stale claim on {existing}; \
              recovery must classify it before re-admission"
@@ -1910,7 +1918,7 @@ async fn claim_schedule_run(
     session_id: &SessionId,
     core_context_version: u32,
     now: i64,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     let core_context_version_i64 = i64::from(core_context_version);
     // NOTE: the SQL text is byte-identical to the pre-refactor inline query;
     // the .sqlx offline cache hashes the string verbatim.
@@ -1929,13 +1937,13 @@ async fn claim_schedule_run(
     .execute(&mut **tx)
     .await
     .map_err(|e| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "admit_schedule_run claim '{}': {e}",
             session_id.0
         )))
     })?;
     if claim.rows_affected() == 0 {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "admit_schedule_run: schedule {schedule_id} was claimed concurrently"
             )),
@@ -1948,12 +1956,12 @@ async fn claim_schedule_run(
 fn child_run_record_from_row(
     parent_session_id: &SessionId,
     row: RunRow,
-) -> Result<RunRecord, EngineError> {
+) -> Result<RunRecord, StorageError> {
     // A corrupt/unsupported execution_version is non-replayable (A7):
     // never coerce negative values to 0 or forward versions (>=2) to
     // v1. Preserve the row verbatim (Important 4).
     if row.execution_version < 0 {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "load_children '{}': child '{}' has negative execution_version {} \
                  (non-replayable)",
@@ -1962,7 +1970,7 @@ fn child_run_record_from_row(
         ));
     }
     if row.execution_version > 1 {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "load_children '{}': child '{}' has unsupported execution_version {} \
                  (non-replayable)",
@@ -1971,7 +1979,7 @@ fn child_run_record_from_row(
         ));
     }
     let execution_version = u32::try_from(row.execution_version).map_err(|_| {
-        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "load_children '{}': child '{}' has out-of-range execution_version {} \
              (non-replayable)",
             parent_session_id.0, row.session_id, row.execution_version
@@ -1982,7 +1990,7 @@ fn child_run_record_from_row(
     // (Important 1), exactly as `load_run` does for the root row.
     let state_revision_i64 = row.state_revision;
     if state_revision_i64 < 0 {
-        return Err(EngineError::GraphFlow(
+        return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "load_children '{}': child '{}' has negative state_revision \
                  {state_revision_i64} (non-replayable)",
@@ -1993,19 +2001,19 @@ fn child_run_record_from_row(
     let state_revision = u64::try_from(state_revision_i64).unwrap_or(0);
     if execution_version >= 1 {
         let status = SessionStatus::from_db_str(&row.status).ok_or_else(|| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "load_children '{}': unknown/unsupported v1 status {:?} (non-replayable)",
                 row.session_id, row.status
             )))
         })?;
         let descriptor_bytes = row.run_descriptor_json.as_deref().ok_or_else(|| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "load_children '{}': v1 child missing run_descriptor_json (non-replayable)",
                 row.session_id
             )))
         })?;
         let state_bytes = row.run_state_json.as_deref().ok_or_else(|| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "load_children '{}': v1 child missing run_state_json (non-replayable)",
                 row.session_id
             )))
@@ -2014,7 +2022,7 @@ fn child_run_record_from_row(
             deserialize_blob::<RunDescriptorV1>(descriptor_bytes, "run_descriptor_json")?;
         let state = deserialize_blob::<RunStateV1>(state_bytes, "run_state_json")?;
         if row.graph_version < 0 {
-            return Err(EngineError::GraphFlow(
+            return Err(StorageError::GraphFlow(
                 graph_flow::GraphError::StorageError(format!(
                     "load_children '{}': child '{}' has negative graph_version {}                              (non-replayable)",
                     parent_session_id.0, row.session_id, row.graph_version
@@ -2034,7 +2042,7 @@ fn child_run_record_from_row(
     } else {
         // A v0 child row is legacy/unverified; surface it as a
         // non-replayable error rather than silently dropping it.
-        Err(EngineError::GraphFlow(
+        Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "load_children '{}': v0 legacy child row (non-replayable)",
                 row.session_id
@@ -2045,7 +2053,7 @@ fn child_run_record_from_row(
 
 #[async_trait]
 impl WorkflowStateStore for SqliteSessionStorage {
-    async fn load_run(&self, session_id: &SessionId) -> Result<Option<RunRecord>, EngineError> {
+    async fn load_run(&self, session_id: &SessionId) -> Result<Option<RunRecord>, StorageError> {
         let id = session_id.0.clone();
         let row = sqlx::query_as!(
             RunRow,
@@ -2059,7 +2067,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         .fetch_optional(&*self.pool)
         .await
         .map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "load_run '{}': {e}",
                 session_id.0
             )))
@@ -2088,7 +2096,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // status value is corrupt/ambiguous and must be surfaced as
             // non-replayable (A7), never silently reinterpreted as Running.
             let status = SessionStatus::from_db_str(&row.status).ok_or_else(|| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "load_run '{}': unknown/unsupported v1 status {:?} (non-replayable)",
                     session_id.0, row.status
                 )))
@@ -2096,13 +2104,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // A v1 row must carry both descriptor and state; a missing blob
             // is corrupt/unsupported and non-replayable (A7).
             let descriptor_bytes = row.run_descriptor_json.as_deref().ok_or_else(|| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "load_run '{}': v1 row missing run_descriptor_json (non-replayable)",
                     session_id.0
                 )))
             })?;
             let state_bytes = row.run_state_json.as_deref().ok_or_else(|| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "load_run '{}': v1 row missing run_state_json (non-replayable)",
                     session_id.0
                 )))
@@ -2126,7 +2134,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // integer revision is also corrupt and must not be coerced to
             // zero (A2/A7): preserve the row but surface it as unknown.
             let status = SessionStatus::from_db_str(&row.status).ok_or_else(|| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "load_run '{}': unknown/unsupported v0 status {:?} (non-replayable)",
                     session_id.0, row.status
                 )))
@@ -2149,7 +2157,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         descriptor: &RunDescriptorV1,
         checkpoint: RunCheckpoint<'_>,
         next_state: &RunStateV1,
-    ) -> Result<RunRecord, EngineError> {
+    ) -> Result<RunRecord, StorageError> {
         let id = session_id.0.clone();
         let creator_id = descriptor.creator_id.clone();
         let preset_id = descriptor.preset_id.clone();
@@ -2157,7 +2165,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let parent_session_id = descriptor.parent_session_id.as_ref().map(|s| s.0.clone());
         let current_task_id = checkpoint.root.current_task_id.clone();
         let context_bytes = serde_json::to_vec(&checkpoint.root.context).map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "serialize context: {e}"
             )))
         })?;
@@ -2171,7 +2179,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
             .map_err(|e| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "start_run begin tx: {e}"
                 )))
             })?;
@@ -2216,7 +2224,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         .await?;
 
         tx.commit().await.map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "start_run commit: {e}"
             )))
         })?;
@@ -2242,7 +2250,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         core_context_version: u32,
         expected_core_context_version: u32,
         admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
-    ) -> Result<RunRecord, EngineError> {
+    ) -> Result<RunRecord, StorageError> {
         let now = chrono::Utc::now().timestamp();
         let id = session_id.0.clone();
         let creator_id = descriptor.creator_id.clone();
@@ -2251,7 +2259,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let parent_session_id = descriptor.parent_session_id.as_ref().map(|s| s.0.clone());
         let current_task_id = checkpoint.root.current_task_id.clone();
         let context_bytes = serde_json::to_vec(&checkpoint.root.context).map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "serialize context: {e}"
             )))
         })?;
@@ -2262,7 +2270,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
             .map_err(|e| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "admit_schedule_run begin tx: {e}"
                 )))
             })?;
@@ -2319,7 +2327,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         claim_schedule_run(&mut tx, schedule_id, session_id, core_context_version, now).await?;
 
         tx.commit().await.map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "admit_schedule_run commit: {e}"
             )))
         })?;
@@ -2343,14 +2351,14 @@ impl WorkflowStateStore for SqliteSessionStorage {
         checkpoint: RunCheckpoint<'_>,
         next_status: SessionStatus,
         next_state: &RunStateV1,
-    ) -> Result<RunRecord, EngineError> {
+    ) -> Result<RunRecord, StorageError> {
         let payload = prepare_v1_transition_payload(session_id, checkpoint.root, next_state)?;
         let status_str = next_status.as_db_str();
 
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
             .map_err(|e| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "commit_transition begin tx: {e}"
                 )))
             })?;
@@ -2387,7 +2395,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         };
 
         tx.commit().await.map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "commit_transition commit: {e}"
             )))
         })?;
@@ -2403,7 +2411,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         checkpoint: RunCheckpoint<'_>,
         next_state: &RunStateV1,
         terminal_target: TerminalSettlementTarget,
-    ) -> Result<SettlementResult, EngineError> {
+    ) -> Result<SettlementResult, StorageError> {
         let next_status = match terminal_target {
             TerminalSettlementTarget::Completed => SessionStatus::Completed,
             TerminalSettlementTarget::Cancelled => SessionStatus::Cancelled,
@@ -2413,7 +2421,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
             .map_err(|e| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "settle_run begin tx: {e}"
                 )))
             })?;
@@ -2450,7 +2458,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 .await
             }
         };
-        if let Err(EngineError::TerminalState(_)) = &cas_result {
+        if let Err(StorageError::TerminalState(_)) = &cas_result {
             tx.rollback().await.ok();
             if let Some(winner) = self.load_run(session_id).await? {
                 if matches!(
@@ -2460,7 +2468,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
                     return Ok(SettlementResult::Observed(winner));
                 }
             }
-            return Err(EngineError::TerminalState(session_id.0.clone()));
+            return Err(StorageError::TerminalState(session_id.0.clone()));
         }
         cas_result?;
         let (descriptor, execution_version, graph_version) = finalize_v1_transition_writes(
@@ -2481,7 +2489,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             graph_version,
         };
         tx.commit().await.map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "settle_run commit: {e}"
             )))
         })?;
@@ -2491,7 +2499,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
     async fn load_children(
         &self,
         parent_session_id: &SessionId,
-    ) -> Result<Vec<RunRecord>, EngineError> {
+    ) -> Result<Vec<RunRecord>, StorageError> {
         let parent = parent_session_id.0.clone();
         let rows = sqlx::query_as!(
             RunRow,
@@ -2504,7 +2512,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         .fetch_all(&*self.pool)
         .await
         .map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "load_children '{}': {e}",
                 parent_session_id.0
             )))
@@ -2529,11 +2537,11 @@ impl WorkflowStateStore for SqliteSessionStorage {
         session_id: &SessionId,
         expected_revision: u64,
         pre_step: &graph_flow::Session,
-    ) -> Result<RunRecord, EngineError> {
+    ) -> Result<RunRecord, StorageError> {
         let now = chrono::Utc::now().timestamp();
         let id = session_id.0.clone();
         let context_bytes = serde_json::to_vec(&pre_step.context).map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "restore_pre_step '{}': serialize context: {e}",
                 session_id.0
             )))
@@ -2554,7 +2562,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
             .map_err(|e| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "restore_pre_step begin tx: {e}"
                 )))
             })?;
@@ -2588,7 +2596,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         .execute(&mut *tx)
         .await
         .map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "restore_pre_step '{}': {e}",
                 session_id.0
             )))
@@ -2613,7 +2621,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let descriptor = read_root_descriptor(&mut tx, &session_id.0).await?;
 
         tx.commit().await.map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "restore_pre_step commit: {e}"
             )))
         })?;
@@ -2652,12 +2660,12 @@ impl WorkflowStateStore for SqliteSessionStorage {
         expected_graph_version: Option<u64>,
         checkpoint: RunCheckpoint<'_>,
         step_state: &RunStateV1,
-    ) -> Result<RunRecord, EngineError> {
+    ) -> Result<RunRecord, StorageError> {
         let now = chrono::Utc::now().timestamp();
         let id = session_id.0.clone();
         let current_task_id = checkpoint.root.current_task_id.clone();
         let context_bytes = serde_json::to_vec(&checkpoint.root.context).map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "mark_step_in_flight '{}': serialize context: {e}",
                 session_id.0
             )))
@@ -2667,7 +2675,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
             .map_err(|e| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "mark_step_in_flight begin tx: {e}"
                 )))
             })?;
@@ -2689,7 +2697,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             .map(i64::try_from)
             .transpose()
             .map_err(|_| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "mark_step_in_flight '{}': expected graph_version out of range",
                     session_id.0
                 )))
@@ -2729,7 +2737,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         .execute(&mut *tx)
         .await
         .map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "mark_step_in_flight '{}': {e}",
                 session_id.0
             )))
@@ -2758,7 +2766,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let descriptor = read_root_descriptor(&mut tx, &session_id.0).await?;
 
         tx.commit().await.map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "mark_step_in_flight commit: {e}"
             )))
         })?;
@@ -2781,10 +2789,10 @@ impl WorkflowStateStore for SqliteSessionStorage {
         expected_step: Option<&str>,
         expected_attempt_id: Option<&str>,
         attempt: &PromptAttempt,
-    ) -> Result<(), EngineError> {
+    ) -> Result<(), StorageError> {
         let id = session_id.0.clone();
         let attempt_json = serde_json::to_string(attempt).map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "persist_prompt_attempt '{}': serialize attempt: {e}",
                 session_id.0
             )))
@@ -2858,7 +2866,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             q = q.bind(attempt_id);
         }
         let result = q.execute(&*self.pool).await.map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "persist_prompt_attempt '{}': {e}",
                 session_id.0
             )))
@@ -2890,7 +2898,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         expected_revision: u64,
         expected_step: Option<&str>,
         attempt_id: &str,
-    ) -> Result<(), EngineError> {
+    ) -> Result<(), StorageError> {
         let id = session_id.0.clone();
         let expected_revision_i64 =
             checked_expected_revision("clear_prompt_attempt", session_id, expected_revision)?;
@@ -2934,7 +2942,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         }
         q = q.bind(attempt_id);
         q.execute(&*self.pool).await.map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "clear_prompt_attempt '{}': {e}",
                 session_id.0
             )))
@@ -3569,7 +3577,7 @@ mod tests {
             .await
             .expect_err("a different attempt id must not overwrite the in_flight owner");
         assert!(
-            matches!(err, EngineError::RevisionMismatch { .. }),
+            matches!(err, StorageError::RevisionMismatch { .. }),
             "expected RevisionMismatch for foreign-owner overwrite, got: {err:?}"
         );
 
@@ -3601,7 +3609,7 @@ mod tests {
             .await
             .expect_err("foreign Active update must fail the ownership CAS");
         assert!(
-            matches!(err, EngineError::RevisionMismatch { .. }),
+            matches!(err, StorageError::RevisionMismatch { .. }),
             "expected RevisionMismatch for foreign Active update, got: {err:?}"
         );
     }
@@ -3638,7 +3646,7 @@ mod tests {
             .await
             .expect_err("stale revision must fail the CAS");
         match err {
-            EngineError::RevisionMismatch {
+            StorageError::RevisionMismatch {
                 session_id,
                 expected,
                 found,
@@ -3696,7 +3704,7 @@ mod tests {
             .await
             .expect_err("moved step marker must fail the CAS");
         assert!(
-            matches!(err, EngineError::RevisionMismatch { .. }),
+            matches!(err, StorageError::RevisionMismatch { .. }),
             "expected RevisionMismatch for moved marker, got: {err:?}"
         );
 
@@ -3729,7 +3737,7 @@ mod tests {
             .await
             .expect_err("corrupt status must fail closed");
         assert!(
-            !matches!(err, EngineError::TerminalState(_)),
+            !matches!(err, StorageError::TerminalState(_)),
             "corrupt status must not masquerade as TerminalState: {err:?}"
         );
         let msg = err.to_string();

@@ -5,6 +5,16 @@
  */
 
 /**
+ * Preset-level World-binding requirement, carried from `preset.world_binding` (workflow-profile §5.3.4). Absent when the preset declares none.
+ */
+export type WorkflowWorldBinding = {
+  /**
+   * Whether a run must be bound to a World.
+   */
+  mode: "required" | "optional";
+} | null;
+
+/**
  * Response of GET /v1/daemon/strategies/{strategy_id}/applied, read by both the Canvas and the intake. `current_apply` is the append-only row with no successor — the identity the schedule runs — and is null when the strategy has never been applied. `newest_approval` is the highest `candidate_revision` approval of the same strategy and is null when nothing was approved. A client compares the two `approval_id` values to answer 'is the newest approval the running one'; it never derives newness from `applied_at` or `approved_at`. The applied document rides the same response as the identity it belongs to: `applied_document` is the frozen document the current apply installed, re-verified against `current_apply.content_hash`, and `applied_document_refusal` names why that replay failed. Both are null when `current_apply` is null (no document read is attempted), and exactly one of them is non-null otherwise. An apply whose approval row this strategy does not have is an error response, not a body: it is neither a null document nor a refusal.
  */
 export interface StrategyAppliedStatus {
@@ -177,6 +187,7 @@ export interface WorkflowMeta {
    * Capabilities the workflow requires; resolution fails when any is missing.
    */
   requires_capabilities: string[];
+  world_binding?: WorkflowWorldBinding;
   /**
    * Preset-specific CLI argument declarations.
    */

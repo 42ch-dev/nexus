@@ -26,6 +26,7 @@ test-hooks = ["nexus-local-db/test-hooks"]
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-orchestration = { path = "../nexus-orchestration" }
+nexus-session-storage = { path = "../nexus-session-storage" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-preset = { path = "../nexus-preset" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }

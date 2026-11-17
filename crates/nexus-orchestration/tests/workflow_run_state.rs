@@ -23,13 +23,14 @@ use graph_flow::{Session, SessionStorage};
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument;
 use nexus_orchestration::capability::{AppliedDocument, AppliedDocumentSource};
 use nexus_orchestration::engine::{SessionId, SessionStatus};
-use nexus_orchestration::run_state::{
+use nexus_orchestration::OrchestrationEngine;
+use nexus_preset::source_identity::PresetSourceIdentity;
+use nexus_session_storage::run_state::{
     AgentBinding, AppliedRunIdentity, ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunStateV1,
     TerminalSettlementTarget, WorkflowStateStore,
 };
-use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
-use nexus_orchestration::OrchestrationEngine;
-use nexus_preset::source_identity::PresetSourceIdentity;
+use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
+use nexus_session_storage::StorageError as EngineError;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -200,12 +201,12 @@ async fn wait_status_survives_reopen() {
 
         // Commit a human-wait transition with a durable wait record.
         let wait_state = RunStateV1 {
-            wait: Some(nexus_orchestration::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "wait-abc".to_string(),
                 task_id: "wait_task".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: nexus_orchestration::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -362,7 +363,7 @@ async fn commit_transition_with_wrong_revision_fails() {
         .expect_err("wrong expected revision must fail the CAS");
 
     match err {
-        nexus_orchestration::engine::EngineError::RevisionMismatch {
+        EngineError::RevisionMismatch {
             session_id: sid,
             expected,
             found,
@@ -440,10 +441,7 @@ async fn commit_transition_after_terminal_fails() {
         .expect_err("transition after terminal must be refused");
 
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::TerminalState(_)
-        ),
+        matches!(err, EngineError::TerminalState(_)),
         "expected TerminalState, got {err:?}"
     );
 }
@@ -531,7 +529,7 @@ fn descriptor_serializes_the_applied_identity_only_when_present() {
     );
 
     let mut applied = test_descriptor("sess");
-    applied.applied = Some(nexus_orchestration::run_state::AppliedRunIdentity {
+    applied.applied = Some(nexus_session_storage::run_state::AppliedRunIdentity {
         apply_id: "apl_1".to_string(),
         content_hash: "blake3:abc".to_string(),
     });
@@ -702,7 +700,7 @@ async fn corrupt_blobs_preserved_not_reinterpreted() {
         .expect_err("corrupt blob must not be silently reinterpreted");
 
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error for corrupt blob, got {err:?}"
     );
 
@@ -1080,7 +1078,10 @@ async fn engine_wait_produces_durable_wait_token() {
         !wait.wait_id.is_empty(),
         "wait token must be a fresh UUID, not empty"
     );
-    assert_eq!(wait.kind, nexus_orchestration::run_state::WaitKind::Manual);
+    assert_eq!(
+        wait.kind,
+        nexus_session_storage::run_state::WaitKind::Manual
+    );
 
     let wait_id = wait.wait_id;
     let revision = record.state_revision;
@@ -1190,10 +1191,7 @@ async fn in_flight_marker_fences_control_signals_and_stale_transition() {
         )
         .await
         .expect_err("transition loaded before the marker must lose its CAS");
-    assert!(matches!(
-        stale,
-        nexus_orchestration::engine::EngineError::RevisionMismatch { .. }
-    ));
+    assert!(matches!(stale, EngineError::RevisionMismatch { .. }));
     let after = storage
         .load_run(&sid)
         .await
@@ -1480,7 +1478,7 @@ async fn unknown_v1_status_is_non_replayable() {
         .await
         .expect_err("unknown v1 status must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error for unknown status, got {err:?}"
     );
 }
@@ -1510,7 +1508,7 @@ async fn v1_row_missing_metadata_is_non_replayable() {
         .await
         .expect_err("v1 row missing descriptor must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error, got {err:?}"
     );
 }
@@ -1518,12 +1516,12 @@ async fn v1_row_missing_metadata_is_non_replayable() {
 // Important 7: WaitKind and PromptPhase encode as snake_case.
 #[test]
 fn wait_kind_and_prompt_phase_encode_snake_case() {
-    let wait = nexus_orchestration::run_state::WaitRecord {
+    let wait = nexus_session_storage::run_state::WaitRecord {
         wait_id: "w".to_string(),
         task_id: "t".to_string(),
         child_session_id: None,
         child_task_id: None,
-        kind: nexus_orchestration::run_state::WaitKind::Manual,
+        kind: nexus_session_storage::run_state::WaitKind::Manual,
     };
     let json = serde_json::to_value(&wait).expect("serialize wait");
     assert_eq!(
@@ -1532,10 +1530,10 @@ fn wait_kind_and_prompt_phase_encode_snake_case() {
         json["kind"]
     );
 
-    let attempt = nexus_orchestration::run_state::PromptAttempt {
+    let attempt = nexus_session_storage::run_state::PromptAttempt {
         attempt_id: "a".to_string(),
         task_id: "t".to_string(),
-        phase: nexus_orchestration::run_state::PromptPhase::Dispatching,
+        phase: nexus_session_storage::run_state::PromptPhase::Dispatching,
         host_session_id: None,
         operation_id: None,
         process_identity: None,
@@ -1547,8 +1545,8 @@ fn wait_kind_and_prompt_phase_encode_snake_case() {
         json["phase"]
     );
 
-    let active = nexus_orchestration::run_state::PromptAttempt {
-        phase: nexus_orchestration::run_state::PromptPhase::Active,
+    let active = nexus_session_storage::run_state::PromptAttempt {
+        phase: nexus_session_storage::run_state::PromptPhase::Active,
         ..attempt
     };
     let json = serde_json::to_value(&active).expect("serialize active");
@@ -1594,7 +1592,7 @@ async fn start_run_refuses_existing_v0_row() {
         .expect_err("start_run must refuse an existing v0 row");
 
     match err {
-        nexus_orchestration::engine::EngineError::RunAlreadyExists {
+        EngineError::RunAlreadyExists {
             session_id,
             execution_version,
         } => {
@@ -1654,7 +1652,7 @@ async fn start_run_reports_accurate_conflict_for_v1_row() {
         .expect_err("second start_run must be refused");
 
     match err {
-        nexus_orchestration::engine::EngineError::RunAlreadyExists {
+        EngineError::RunAlreadyExists {
             session_id: sid,
             execution_version,
         } => {
@@ -1770,10 +1768,7 @@ async fn child_cas_stale_revision_rolls_back_root() {
         .expect_err("stale child revision must fail the root transition");
 
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::RevisionMismatch { .. }
-        ),
+        matches!(err, EngineError::RevisionMismatch { .. }),
         "expected RevisionMismatch for stale child, got {err:?}"
     );
 
@@ -1912,10 +1907,7 @@ async fn child_cas_terminal_child_rolls_back_root() {
         .expect_err("terminal child at a stale revision must fail the root transition");
 
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::TerminalState(_)
-        ),
+        matches!(err, EngineError::TerminalState(_)),
         "expected TerminalState for terminal child at stale revision, got {err:?}"
     );
 
@@ -2228,7 +2220,7 @@ async fn unknown_v0_status_is_non_replayable() {
         .await
         .expect_err("unknown v0 status must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error for unknown v0 status, got {err:?}"
     );
 
@@ -2274,7 +2266,7 @@ async fn negative_v0_revision_is_non_replayable() {
         .await
         .expect_err("negative v0 revision must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error for negative revision, got {err:?}"
     );
 
@@ -4132,7 +4124,7 @@ async fn negative_v1_revision_is_non_replayable() {
         .await
         .expect_err("negative v1 revision must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error for negative v1 revision, got {err:?}"
     );
 
@@ -4197,7 +4189,7 @@ async fn child_terminal_status_mismatch_rejects_confirmation() {
         .expect_err("terminal child status mismatch must reject the parent's Completed commit");
 
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow mismatch error, got {err:?}"
     );
 
@@ -4579,10 +4571,7 @@ async fn restore_pre_step_is_single_atomic_revision_fence() {
         .await
         .expect_err("restore must refuse when a concurrent transition advanced the revision");
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::RevisionMismatch { expected: 1, .. }
-        ),
+        matches!(err, EngineError::RevisionMismatch { expected: 1, .. }),
         "expected RevisionMismatch(expected=1), got {err:?}"
     );
 
@@ -4640,7 +4629,7 @@ async fn negative_execution_version_is_non_replayable() {
         .await
         .expect_err("negative execution_version must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error, got {err:?}"
     );
 
@@ -4684,7 +4673,7 @@ async fn unsupported_forward_execution_version_is_non_replayable() {
         .await
         .expect_err("forward execution_version must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error, got {err:?}"
     );
 
@@ -5126,7 +5115,7 @@ async fn negative_child_revision_is_non_replayable() {
         .await
         .expect_err("negative child state_revision must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error for negative child revision, got {err:?}"
     );
 
@@ -5182,12 +5171,12 @@ async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
 
     // Commit a human-wait transition with a durable WaitRecord (revision 1 → 2).
     let wait_state = RunStateV1 {
-        wait: Some(nexus_orchestration::run_state::WaitRecord {
+        wait: Some(nexus_session_storage::run_state::WaitRecord {
             wait_id: "wait-mark-token".to_string(),
             task_id: "wait_task".to_string(),
             child_session_id: None,
             child_task_id: None,
-            kind: nexus_orchestration::run_state::WaitKind::Manual,
+            kind: nexus_session_storage::run_state::WaitKind::Manual,
         }),
         ..RunStateV1::default()
     };
@@ -5281,12 +5270,12 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
 
     // Commit a human-wait transition with a durable WaitRecord (revision 1 → 2).
     let wait_state = RunStateV1 {
-        wait: Some(nexus_orchestration::run_state::WaitRecord {
+        wait: Some(nexus_session_storage::run_state::WaitRecord {
             wait_id: "wait-restore-token".to_string(),
             task_id: "wait_task".to_string(),
             child_session_id: None,
             child_task_id: None,
-            kind: nexus_orchestration::run_state::WaitKind::Manual,
+            kind: nexus_session_storage::run_state::WaitKind::Manual,
         }),
         ..RunStateV1::default()
     };
@@ -5315,10 +5304,7 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
         .expect_err("restore_pre_step must refuse a human-wait row");
     // Revision matches, so the refusal is TerminalState (waiting is excluded).
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::TerminalState(_)
-        ),
+        matches!(err, EngineError::TerminalState(_)),
         "expected TerminalState for a waiting_for_input restore, got {err:?}"
     );
 
@@ -5380,12 +5366,12 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
         .expect("get pre-wait root")
         .expect("root present");
     let wait_state = RunStateV1 {
-        wait: Some(nexus_orchestration::run_state::WaitRecord {
+        wait: Some(nexus_session_storage::run_state::WaitRecord {
             wait_id: "wait-engine-gate".to_string(),
             task_id: root.current_task_id.clone(),
             child_session_id: None,
             child_task_id: None,
-            kind: nexus_orchestration::run_state::WaitKind::Manual,
+            kind: nexus_session_storage::run_state::WaitKind::Manual,
         }),
         ..RunStateV1::default()
     };
@@ -5509,7 +5495,7 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
     let caps = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+    let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc.clone(),
         workflow_store.clone(),
         nexus_orchestration::CapabilityRegistryHolder::with_registry(caps.clone()),
@@ -5528,6 +5514,15 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
         )
         .expect("embedded source identity"),
     );
+    // That identity names no compiled-in bundle, so the embedded arm cannot
+    // resolve a document for it: the fixture answers the document its own
+    // manifest projects.
+    engine.set_applied_document_source(Arc::new(ManifestDocumentSource {
+        identity: AppliedRunIdentity {
+            apply_id: "apl_converge".to_string(),
+            content_hash: "blake3:converge".to_string(),
+        },
+    }));
     let sid = engine
         .start_session_with_preset_for_creator(&loaded, "ctr_test")
         .await
@@ -5703,7 +5698,10 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
         !wait.wait_id.is_empty(),
         "the wait token must be a fresh UUID, not empty"
     );
-    assert_eq!(wait.kind, nexus_orchestration::run_state::WaitKind::Manual);
+    assert_eq!(
+        wait.kind,
+        nexus_session_storage::run_state::WaitKind::Manual
+    );
     let token = wait.wait_id.clone();
 
     // Reopen the SAME DB file (daemon restart boundary): the token must
@@ -6041,7 +6039,7 @@ async fn engine_conditional_routed_manual_wait_keeps_token_despite_join_keys() {
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+    let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc.clone(),
         workflow_store.clone(),
         nexus_orchestration::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
@@ -6082,6 +6080,15 @@ states:
         )
         .expect("embedded source identity"),
     );
+    // That identity names no compiled-in bundle, so the embedded arm cannot
+    // resolve a document for it: the fixture answers the document its own
+    // manifest projects.
+    engine.set_applied_document_source(Arc::new(ManifestDocumentSource {
+        identity: AppliedRunIdentity {
+            apply_id: "apl_cond_manual".to_string(),
+            content_hash: "blake3:cond_manual".to_string(),
+        },
+    }));
     let sid = engine
         .start_session_with_preset_for_creator(&loaded, "ctr_test")
         .await
@@ -6467,11 +6474,10 @@ async fn force_db_graph_version(pool: &sqlx::SqlitePool, session_id: &str, versi
 
 /// A corrupt/exhausted graph counter is a HARD storage error, never a
 /// concurrency (revision/terminal/conflict) outcome.
-fn assert_hard_storage_error(err: &nexus_orchestration::engine::EngineError, what: &str) {
+fn assert_hard_storage_error(err: &nexus_session_storage::StorageError, what: &str) {
     match err {
-        nexus_orchestration::engine::EngineError::GraphFlow(
-            graph_flow::GraphError::StorageError(_),
-        ) => {}
+        nexus_session_storage::StorageError::GraphFlow(graph_flow::GraphError::StorageError(_)) => {
+        }
         other => panic!("{what}: expected hard GraphError::StorageError, got {other:?}"),
     }
 }
@@ -6836,10 +6842,10 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
 
     // Prompt-attempt writes are in-task metadata under the runner-owned
     // session: they must NOT advance the graph clock (brief 3.3).
-    let attempt = nexus_orchestration::run_state::PromptAttempt {
+    let attempt = nexus_session_storage::run_state::PromptAttempt {
         attempt_id: uuid::Uuid::new_v4().to_string(),
         task_id: "task_b".to_string(),
-        phase: nexus_orchestration::run_state::PromptPhase::Dispatching,
+        phase: nexus_session_storage::run_state::PromptPhase::Dispatching,
         host_session_id: None,
         operation_id: None,
         process_identity: None,
@@ -6986,6 +6992,33 @@ impl AppliedDocumentSource for FakeAppliedDocuments {
         Ok((preset_id == self.preset_id).then(|| AppliedDocument {
             identity: self.identity.clone(),
             document: self.document.clone(),
+        }))
+    }
+}
+
+/// A source answering the document its loaded preset's manifest projects.
+///
+/// Some fixtures freeze an embedded source identity over a raw-YAML manifest
+/// (the identity only exists to satisfy the v1 descriptor), and such a preset
+/// has no compiled-in bundle to resolve — this source answers the document
+/// those bytes project instead.
+struct ManifestDocumentSource {
+    identity: AppliedRunIdentity,
+}
+
+#[async_trait::async_trait]
+impl AppliedDocumentSource for ManifestDocumentSource {
+    async fn applied_document(
+        &self,
+        _preset_id: &str,
+        loaded: Option<&nexus_preset::LoadedPreset>,
+    ) -> Result<Option<AppliedDocument>, String> {
+        let loaded = loaded.ok_or("the fixture supplies its loaded preset")?;
+        let document = nexus_preset::workflow_ir::import_preset_manifest(&loaded.manifest)
+            .map_err(|error| error.to_string())?;
+        Ok(Some(AppliedDocument {
+            identity: self.identity.clone(),
+            document,
         }))
     }
 }
@@ -7342,5 +7375,187 @@ async fn preset_entry_recovery_refuses_a_successor_and_rebuilds_the_admitted_app
         session.current_task_id, APPLIED_ONLY_PROBE,
         "the rebuilt graph must carry the applied-only node; got {:?}",
         session.current_task_id
+    );
+}
+
+/// An embedded preset admitted with NO configured applied source still executes
+/// its document: the entry resolves the preset's own compiled-in bundle under
+/// the compass D10 identity and freezes it on the descriptor.
+///
+/// Mutation this fails on: `start_preset_entry` handing the embedded preset to
+/// the YAML builder with `applied: None` — the descriptor then freezes no
+/// identity, so neither a restart nor an operator can tell which bytes the run
+/// executed, and recovery cannot refuse a changed embed.
+#[tokio::test]
+async fn embedded_entry_freezes_the_d10_identity_without_a_configured_source() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool);
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded =
+        nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
+    // Deliberately no `set_applied_document_source`: the compiled-in bytes are
+    // the document source an embedded preset never has to be handed.
+
+    let sid = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .expect("an embedded preset starts without a configured source");
+    let document =
+        nexus_preset::embedded_workflow_document(&loaded).expect("embedded document constructs");
+    let (apply_id, content_hash) =
+        nexus_preset::embedded_applied_identity(&loaded.id, &document).expect("D10 identity");
+    assert_eq!(apply_id, format!("embedded:{}", loaded.id));
+    let record = storage
+        .load_run(&sid)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    let descriptor = record.descriptor.expect("v1 descriptor");
+    assert_eq!(
+        descriptor.applied,
+        Some(AppliedRunIdentity {
+            apply_id,
+            content_hash,
+        }),
+        "the entry must freeze the identity of the document the run executes; \
+         `applied: None` means it executed the YAML manifest instead"
+    );
+}
+
+/// Legacy (no-store) recovery rebuilds an embedded session from the applied
+/// document, not from the preset's manifest: the source answers with a document
+/// whose node ids the bundle never declares, and the recovered runner continues
+/// on them.
+///
+/// Mutation this fails on: `reconstruct_runner_legacy` calling
+/// `build_wired_outer_graph(&loaded, ..)` directly — the rebuilt graph then has
+/// no `applied_entry_probe` task, so the run cannot resume where it parked.
+#[tokio::test]
+async fn legacy_recovery_rebuilds_an_embedded_session_from_the_document() {
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded =
+        nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
+    let identity = AppliedRunIdentity {
+        apply_id: "apl_legacy".to_string(),
+        content_hash: "blake3:legacy".to_string(),
+    };
+    let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
+    // A no-store engine is the legacy recovery path's only caller.
+    let mut admitted = nexus_orchestration::GraphFlowEngine::new_with_storage(
+        storage.clone(),
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        )),
+    );
+    admitted.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "novel-writing",
+        identity: identity.clone(),
+        document: applied_probe_document("novel-writing"),
+    }));
+    let sid = admitted
+        .start_session_with_preset(&loaded)
+        .await
+        .expect("start_session_with_preset");
+    let summaries = admitted
+        .list_active(nexus_orchestration::engine::SessionFilter::default())
+        .await
+        .expect("list_active");
+
+    let mut recovered = nexus_orchestration::GraphFlowEngine::new_with_storage(
+        storage.clone(),
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        )),
+    );
+    recovered.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "novel-writing",
+        identity,
+        document: applied_probe_document("novel-writing"),
+    }));
+    recovered.recover_sessions_inner(summaries).await;
+    recovered
+        .run_step(&sid)
+        .await
+        .expect("the recovered runner steps the document's graph");
+    let session = storage
+        .get(&sid.0)
+        .await
+        .expect("session read")
+        .expect("row");
+    assert_eq!(
+        session.current_task_id, APPLIED_ONLY_PROBE,
+        "legacy recovery must rebuild the document's graph; the bundle has no \
+         `{APPLIED_ENTRY_PROBE}` task to resume at (got {:?})",
+        session.current_task_id
+    );
+}
+
+/// A store-backed pre-upgrade row froze an embedded source but no applied
+/// identity (the field did not exist yet). A configured source that answers
+/// "no document" for it must leave the run non-replayable, not rebuild the
+/// YAML manifest: a run admitted after D10 executes its document, so the
+/// manifest is a graph this row never ran.
+///
+/// Mutation this fails on: `resolve_applied` answering `Ok(None)` for an
+/// embedded preset — recovery then reaches `build_wired_outer_graph(&loaded, ..)`
+/// for a descriptor with no recorded apply.
+#[tokio::test]
+async fn store_recovery_refuses_a_legacy_embedded_row_the_source_cannot_resolve() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, mut engine) = fresh_engine(pool);
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded =
+        nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
+    let session_id = SessionId("sess-legacy-embedded".to_string());
+
+    // Exactly the bytes a pre-upgrade admission wrote: the frozen embedded
+    // source identity and version, no `applied`, no `intake_mode`.
+    let mut descriptor = test_descriptor(&session_id.0);
+    descriptor.preset_id = loaded.id.clone();
+    descriptor.preset_version = loaded.version;
+    descriptor.source = loaded
+        .source_identity
+        .clone()
+        .expect("an embedded preset carries its source identity");
+    assert!(
+        descriptor.applied.is_none(),
+        "the fixture must be a legacy row: no applied identity"
+    );
+    let root = root_session(&session_id.0, "task_a");
+    storage
+        .start_run(
+            &session_id,
+            &descriptor,
+            RunCheckpoint {
+                root: &root,
+                children: &[],
+            },
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("start_run");
+
+    // The installed source answers for a different strategy, i.e. `None` here.
+    engine.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "some-other-strategy",
+        identity: AppliedRunIdentity {
+            apply_id: "apl_unused".to_string(),
+            content_hash: "blake3:unused".to_string(),
+        },
+        document: applied_probe_document("some-other-strategy"),
+    }));
+
+    let refused = engine
+        .ensure_recovered_runner_inner(&session_id)
+        .await
+        .expect_err("a legacy embedded row with no resolvable document must not be rebuilt");
+    let reason = refused.to_string();
+    assert!(
+        reason.contains("embedded_document_unavailable"),
+        "the refusal must name the missing embedded document: {reason}"
+    );
+    assert!(
+        reason.contains("non-replayable"),
+        "the run must stay non-replayable, not resume on its manifest: {reason}"
     );
 }

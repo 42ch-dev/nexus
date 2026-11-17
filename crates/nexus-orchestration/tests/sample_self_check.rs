@@ -39,7 +39,7 @@ use nexus_preset::manifest::{EnterAction, ExitWhen, NextTarget, PresetManifest};
 use nexus_preset::workflow_ir::import_preset_manifest;
 use nexus_preset::{
     collect_ir_asset_references, export_preset, expr, import_preset_bundle, load_preset,
-    validate_assets_in_bundle, validate_path_safety, validate_preset_semantic,
+    validate_assets_in_bundle, validate_path_safety, validate_preset_semantic, FsAssetSource,
 };
 use serde_yaml::Value;
 
@@ -285,8 +285,8 @@ const VALUE_REWRITES: &[Normalisation] = &[
         source: "`skip_serializing_if` on those manifest fields",
     },
     Normalisation {
-        input: "a defaulted field left out (`preset.requires_capabilities`, `cli_args[].required`, a `previous_preset` gate's `scope`, `context_update.op.body`)",
-        output: "the default written out (`requires_capabilities: []`, `required: false`, `scope: work`, `body: ''`)",
+        input: "a defaulted field left out (`preset.requires_capabilities`, `cli_args[].required`, a `previous_preset` gate's `scope`)",
+        output: "the default written out (`requires_capabilities: []`, `required: false`, `scope: work`)",
         semantic: false,
         source: "those fields have `#[serde(default)]` and no `skip_serializing_if`",
     },
@@ -367,7 +367,9 @@ fn assert_bundle_round_trips(bundle: &str) {
     let manifest: PresetManifest = serde_yaml::from_str(&yaml)
         .unwrap_or_else(|error| panic!("parse {bundle}/preset.yaml as a manifest: {error}"));
 
-    let imported = import_preset_bundle(&manifest, &root)
+    let source = FsAssetSource::new(&root)
+        .unwrap_or_else(|error| panic!("open {bundle} as a bundle: {error}"));
+    let imported = import_preset_bundle(&manifest, &source)
         .unwrap_or_else(|error| panic!("import {bundle} into the IR: {error}"));
     let exported = export_preset(&imported.document)
         .unwrap_or_else(|error| panic!("export {bundle} back to a manifest: {error}"));
@@ -629,7 +631,9 @@ fn sample_lane_prose_imports_back_into_ui_description() {
             .unwrap_or_else(|error| panic!("read {bundle}/preset.yaml: {error}"));
         let manifest: PresetManifest = serde_yaml::from_str(&yaml)
             .unwrap_or_else(|error| panic!("parse {bundle}/preset.yaml: {error}"));
-        let imported = import_preset_bundle(&manifest, &root)
+        let source = FsAssetSource::new(&root)
+            .unwrap_or_else(|error| panic!("open {bundle}/preset.yaml: {error}"));
+        let imported = import_preset_bundle(&manifest, &source)
             .unwrap_or_else(|error| panic!("import {bundle}/preset.yaml: {error}"));
 
         for (state, sentinel) in *lanes {
@@ -708,16 +712,6 @@ fn defaulted_fields_are_written_out() {
     assert_eq!(
         gate_scope["preset"]["gates"][0]["scope"],
         Value::String("work".to_string())
-    );
-
-    let context_body = probe_export_manifest(&probe_manifest_with(
-        "",
-        "    context_update:\n      op:\n        kind: append\n      \
-         template_file: prompts/append.md\n    next: b\n",
-    ));
-    assert_eq!(
-        context_body["states"][0]["context_update"]["op"]["body"],
-        Value::String(String::new())
     );
 }
 

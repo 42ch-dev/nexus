@@ -53,7 +53,10 @@
     ],
     "run_intents": [
       "work_continue"
-    ]
+    ],
+    "world_binding": {
+      "mode": "optional"
+    }
   },
   "nests": [],
   "nodes": [

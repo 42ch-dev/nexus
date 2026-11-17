@@ -100,10 +100,11 @@ use nexus_orchestration::engine::{
     GraphFlowEngine, OrchestrationEngine, SessionStatus, SessionSummary,
 };
 use nexus_orchestration::preset_runtime::build_wired_outer_graph;
-use nexus_orchestration::run_state::RunRecord;
-use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
-use nexus_orchestration::{CapabilityRegistry, CapabilityRegistryHolder, WorkflowStateStore};
+use nexus_orchestration::{CapabilityRegistry, CapabilityRegistryHolder};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
+use nexus_session_storage::run_state::RunRecord;
+use nexus_session_storage::run_state::WorkflowStateStore;
+use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -500,7 +501,7 @@ async fn owner_fixture() -> OwnerFixture {
     .expect("engine-owner core open");
 
     let host = ParkedHost::new();
-    let store: Arc<dyn nexus_orchestration::run_state::WorkflowStateStore> =
+    let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> =
         Arc::new(SqliteSessionStorage::new(Arc::new(core.pool().clone())));
     let executor = Arc::new(HostPromptExecutor::new(
         host.clone(),
@@ -737,7 +738,7 @@ async fn root_run_count(pool: &sqlx::SqlitePool) -> i64 {
 async fn durable_record(
     pool: &sqlx::SqlitePool,
     run_id: &str,
-) -> nexus_orchestration::run_state::RunRecord {
+) -> nexus_session_storage::run_state::RunRecord {
     SqliteSessionStorage::new(Arc::new(pool.clone()))
         .load_run(&nexus_orchestration::engine::SessionId(run_id.to_string()))
         .await
@@ -942,20 +943,16 @@ fn elapsed_ms_from_note(note: &str) -> u64 {
         .unwrap_or_else(|| panic!("note must carry a numeric elapsed_ms: {note}"))
 }
 
-/// Load a raw-YAML preset and freeze an embedded source identity over its
-/// manifest, exactly as the embedded loader does (a v1 run requires one).
-fn load_frozen_preset(yaml: &str, caps: &Arc<CapabilityRegistry>) -> nexus_preset::LoadedPreset {
-    let mut loaded = nexus_preset::load_preset_from_str(yaml, caps)
-        .unwrap_or_else(|e| panic!("test preset must load: {e}"));
-    loaded.source_identity = Some(
-        nexus_preset::loader::preset_source_identity(
-            &loaded.manifest,
-            None,
-            Some(loaded.id.as_str()),
-        )
-        .unwrap_or_else(|e| panic!("test preset must resolve a source identity: {e}")),
-    );
-    loaded
+/// Load a raw-YAML preset for a no-store engine.
+///
+/// Such an engine never freezes a v1 descriptor, so the fixture needs no source
+/// identity and stays a manifest-executing preset — the very class these join /
+/// resume tests drive. Freezing an embedded identity over it would name a
+/// compiled-in bundle that does not exist, which the embedded document route
+/// correctly refuses.
+fn load_manifest_preset(yaml: &str, caps: &Arc<CapabilityRegistry>) -> nexus_preset::LoadedPreset {
+    nexus_preset::load_preset_from_str(yaml, caps)
+        .unwrap_or_else(|e| panic!("test preset must load: {e}"))
 }
 
 /// MIGRATED from `apps/nexus42/tests/ops_e2e_converge_timeout.rs`
@@ -980,7 +977,7 @@ async fn hanging_upstream_with_timeout_reroutes_via_on_timeout() {
         CapabilityRegistryHolder::with_registry(Arc::clone(&caps)),
     );
 
-    let loaded = load_frozen_preset(TIMEOUT_REROUTE_YAML, &caps);
+    let loaded = load_manifest_preset(TIMEOUT_REROUTE_YAML, &caps);
     let session = engine
         .start_session_with_preset_for_creator(&loaded, CREATOR)
         .await
@@ -1144,7 +1141,7 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
     let dispatch = Arc::new(CountingDispatch {
         calls: Arc::new(AtomicUsize::new(0)),
     });
-    let loaded = load_frozen_preset(RESUME_REROUTE_YAML, &caps);
+    let loaded = load_manifest_preset(RESUME_REROUTE_YAML, &caps);
 
     // Phase 1: drive the converge chain to the parked join, then kill the
     // in-memory engine (the sqlite checkpoint persists).
@@ -2197,7 +2194,7 @@ async fn reconcile_dry_run_mutates_nothing_and_takes_no_lock() {
 async fn seed_prompt_run(
     store: &SqliteSessionStorage,
     session_id: &str,
-    bindings: HashMap<String, nexus_orchestration::run_state::AgentBinding>,
+    bindings: HashMap<String, nexus_session_storage::run_state::AgentBinding>,
 ) {
     let preset = PROMPT_PRESET;
     let source = nexus_preset::embedded_source_identity(preset).expect("embedded source identity");
@@ -2207,7 +2204,7 @@ async fn seed_prompt_run(
     )
     .expect("embedded preset loads")
     .version;
-    let descriptor = nexus_orchestration::RunDescriptorV1 {
+    let descriptor = nexus_session_storage::run_state::RunDescriptorV1 {
         creator_id: CREATOR.to_string(),
         work_id: None,
         workspace_root: PathBuf::from("/tmp/retained-ws"),
@@ -2225,7 +2222,7 @@ async fn seed_prompt_run(
     root.context
         .set("_session_id", session_id.to_string())
         .expect("seed session context");
-    let checkpoint = nexus_orchestration::RunCheckpoint {
+    let checkpoint = nexus_session_storage::run_state::RunCheckpoint {
         root: &root,
         children: &[],
     };
@@ -2234,7 +2231,7 @@ async fn seed_prompt_run(
             &nexus_orchestration::SessionId(session_id.to_string()),
             &descriptor,
             checkpoint,
-            &nexus_orchestration::RunStateV1::default(),
+            &nexus_session_storage::run_state::RunStateV1::default(),
         )
         .await
         .expect("seed the v1 run");
@@ -2252,7 +2249,7 @@ async fn seed_prompt_run(
 #[tokio::test]
 async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() {
     use nexus_orchestration::capability::{PromptExecutor, PromptRequest, ToolPolicy};
-    use nexus_orchestration::run_state::AgentBinding;
+    use nexus_session_storage::run_state::AgentBinding;
 
     let tmp = tempfile::tempdir().unwrap();
     let guarded = nexus_local_db::init_engine_pool(&tmp.path().join("state.db"))
@@ -2404,7 +2401,7 @@ async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() 
 #[tokio::test]
 async fn prompt_executor_types_eof_after_initialize_as_a_launch_failure() {
     use nexus_orchestration::capability::{PromptExecutor, PromptRequest, ToolPolicy};
-    use nexus_orchestration::run_state::AgentBinding;
+    use nexus_session_storage::run_state::AgentBinding;
 
     let tmp = tempfile::tempdir().unwrap();
     let guarded = nexus_local_db::init_engine_pool(&tmp.path().join("state.db"))
@@ -2505,8 +2502,8 @@ async fn prompt_executor_types_eof_after_initialize_as_a_launch_failure() {
 async fn graph_prompt_context_serializes_output_without_host_handles() {
     use graph_flow::Task as _;
     use nexus_orchestration::capability::{PromptExecutor, ToolPolicy};
-    use nexus_orchestration::run_state::AgentBinding;
     use nexus_orchestration::tasks::InnerGraphNodeTask;
+    use nexus_session_storage::run_state::AgentBinding;
     use std::sync::RwLock;
 
     let tmp = tempfile::tempdir().unwrap();

@@ -1,5 +1,5 @@
 use graph_flow::{Session, SessionStorage};
-use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
+use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
 use std::sync::Arc;
 
 #[tokio::test]

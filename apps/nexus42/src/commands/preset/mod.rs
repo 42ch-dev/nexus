@@ -556,7 +556,9 @@ fn export_ir_twin(path: &str, out: &str) -> Result<()> {
         .map_err(|error| CliError::Other(format!("read {}: {error}", manifest_path.display())))?;
     let manifest: nexus_preset::manifest::PresetManifest = serde_yaml::from_str(&yaml)
         .map_err(|error| CliError::Other(format!("parse {}: {error}", manifest_path.display())))?;
-    let imported = nexus_preset::import_preset_bundle(&manifest, bundle)
+    let source = nexus_preset::FsAssetSource::new(bundle)
+        .map_err(|error| CliError::Other(format!("open {}: {error}", bundle.display())))?;
+    let imported = nexus_preset::import_preset_bundle(&manifest, &source)
         .map_err(|error| CliError::Other(format!("import {}: {error}", bundle.display())))?;
     let json = nexus_preset::canonical_twin_json(&imported.document)?;
     std::fs::write(out, json)?;

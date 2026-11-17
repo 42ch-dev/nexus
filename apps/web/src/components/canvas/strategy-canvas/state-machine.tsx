@@ -5,11 +5,10 @@
  * panel, steering artifacts list, and the edit-form shape used by the three
  * inspector sections.
  */
-import { type Connection, type Edge, type Node } from '@xyflow/react';
+import { type Node } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ScrollText } from 'lucide-react';
 
-import type { ChangedField, ConflictModalDraft } from '@/components/canvas/conflict-modal';
 import type { IdeaArtifact } from '@/components/canvas/idea-input';
 import type { StrategyNodeData } from '@/lib/canvas/strategy-graph';
 import type { PresetState } from '@/lib/canvas/preset-yaml';
@@ -21,11 +20,6 @@ export interface EditForm {
   description: string;
   nextTarget: string;
   promptBody: string;
-}
-
-export interface SaveStatus {
-  type: 'success' | 'error';
-  message: string;
 }
 
 export function originalFormOf(state: PresetState | undefined): EditForm {
@@ -42,24 +36,6 @@ export function templateRefOf(state: PresetState | undefined): string | undefine
   const task = state.enter?.find((e) => e.kind === 'acp_prompt');
   if (task?.name) return task.name;
   return state.context_update?.template_file;
-}
-
-export function getConflictDraft(form: EditForm): ConflictModalDraft {
-  return {
-    label: form.label,
-    description: form.description,
-    nextTarget: form.nextTarget,
-    promptBody: form.promptBody,
-  };
-}
-
-export function getChangedFields(form: EditForm, original: EditForm): ChangedField[] {
-  const changed: ChangedField[] = [];
-  if (form.label !== original.label) changed.push('label');
-  if (form.description !== original.description) changed.push('description');
-  if (form.nextTarget !== original.nextTarget) changed.push('nextTarget');
-  if (form.promptBody && form.promptBody !== original.promptBody) changed.push('promptBody');
-  return changed;
 }
 
 export function isSectionDirty(section: Section, form: EditForm, original: EditForm): boolean {
@@ -163,33 +139,4 @@ export function selectedStateOf(
   if (!selected || !states) return undefined;
   const stateId = (selected.data as StrategyNodeData).stateId;
   return states.find((s) => s.id === stateId);
-}
-
-/** Label shown on a draft (uncommitted) transition edge (FB-SE-000, Voice & Content lock). */
-export const DRAFT_TRANSITION_LABEL_KEY = 'strategy.draftTransitionLabel';
-
-/**
- * Build a draft transition edge from a React Flow connect gesture, or return
- * `null` when the connection is invalid (self-loop / missing endpoints).
- *
- * The draft is **local-only** — it is never sent to the daemon until the author
- * commits in the edge inspector (FB-SE-000 #4). The edge is marked selected so
- * the canvas selection model drives inspector focus (FB-SE-000 #5). The draft
- * id is stable per source/target pair so re-attempting a connect from the same
- * state replaces the prior draft instead of stacking duplicates.
- */
-export function createDraftTransitionEdge(connection: Connection, draftLabel = 'Draft transition'): Edge | null {
-  const { source, target } = connection;
-  if (!source || !target || source === target) return null;
-  return {
-    id: `draft-${source}-${target}`,
-    source,
-    target,
-    type: 'strategy-edge',
-    label: draftLabel,
-    data: { transitionKind: 'next', condition: '', isDraft: true },
-    selected: true,
-    selectable: true,
-    focusable: true,
-  };
 }

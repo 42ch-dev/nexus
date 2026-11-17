@@ -46,9 +46,12 @@ use nexus_orchestration::engine::{
     StepOutcome,
 };
 use nexus_orchestration::resume_rules;
-use nexus_orchestration::run_state::{RunRecord, WorkflowStateStore};
 use nexus_orchestration::schedule::supervisor::{ScheduleRunStarter, SupervisorError};
-use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
+use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
+use nexus_session_storage::{
+    run_state::{RunRecord, WorkflowStateStore},
+    StorageError,
+};
 use tokio_util::sync::CancellationToken;
 
 /// Per-run live-ring registry (v1.188 P4 §6.3).
@@ -387,7 +390,7 @@ async fn settle_drive_failure(
 /// terminal write) must use these returned clocks — never a fresh load.
 struct AuthoritativeSettlement {
     disposition: FailurePersistenceDisposition,
-    committed: Option<nexus_orchestration::run_state::RunRecord>,
+    committed: Option<nexus_session_storage::run_state::RunRecord>,
     /// True ONLY when the durable row was positively read as a legacy v0
     /// (`execution_version < 1`) run. The v0 context-only failure contract is
     /// selected from this persisted fact, never from whether a workflow-store
@@ -406,7 +409,7 @@ const fn authoritative_failed(
 }
 
 fn failure_authority_rejection(
-    record: &nexus_orchestration::run_state::RunRecord,
+    record: &nexus_session_storage::run_state::RunRecord,
     witness: &FailedStepWitness,
 ) -> Option<AuthoritativeSettlement> {
     if record.state.is_none() {
@@ -491,7 +494,7 @@ async fn record_driver_failure(
     let mut next_state = record.state.clone().expect("v1 state checked above");
     next_state.in_flight = None;
     next_state.step_in_flight = None;
-    next_state.failure = Some(nexus_orchestration::run_state::RunFailure {
+    next_state.failure = Some(nexus_session_storage::run_state::RunFailure {
         code: "driver_failed".to_string(),
         message: error.to_string(),
     });
@@ -512,7 +515,7 @@ async fn record_driver_failure(
         );
         return authoritative_failed(FailurePersistenceDisposition::PersistenceFailed);
     }
-    let checkpoint = nexus_orchestration::run_state::RunCheckpoint {
+    let checkpoint = nexus_session_storage::run_state::RunCheckpoint {
         root: &root_with_failure,
         children: &[],
     };
@@ -532,7 +535,7 @@ async fn record_driver_failure(
             committed: Some(record),
             legacy_v0: false,
         },
-        Err(EngineError::RevisionMismatch { .. } | EngineError::TerminalState(_)) => {
+        Err(StorageError::RevisionMismatch { .. } | StorageError::TerminalState(_)) => {
             authoritative_failed(FailurePersistenceDisposition::OwnershipLost)
         }
         Err(e) => {
@@ -1150,9 +1153,9 @@ impl CancelOutcome {
 /// `completed`/`failed`-without-cancel-intent (or is still live) has no
 /// cancel outcome: the cancel genuinely did not happen.
 fn classify_cancel_outcome(
-    record: &nexus_orchestration::run_state::RunRecord,
+    record: &nexus_session_storage::run_state::RunRecord,
 ) -> Option<CancelOutcome> {
-    if !nexus_orchestration::run_state::durable_cancel_outcome_accomplished(record) {
+    if !nexus_session_storage::run_state::durable_cancel_outcome_accomplished(record) {
         return None;
     }
     match record.status {
@@ -1434,8 +1437,9 @@ impl WorkflowRunCoordinator {
         >,
         applied_admission: Arc<dyn AppliedAdmissionPort>,
     ) -> Self {
-        let workflow_store: Arc<dyn WorkflowStateStore> =
-            Arc::new(nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(pool.clone()));
+        let workflow_store: Arc<dyn WorkflowStateStore> = Arc::new(
+            nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(pool.clone()),
+        );
         Self {
             engine,
             storage,
@@ -1618,7 +1622,7 @@ impl WorkflowRunCoordinator {
         seed: Option<&str>,
         agent_bindings: std::collections::HashMap<
             String,
-            nexus_orchestration::run_state::AgentBinding,
+            nexus_session_storage::run_state::AgentBinding,
         >,
         nexus_home: &std::path::Path,
         caps: &nexus_orchestration::CapabilityRegistryHolder,
@@ -1708,9 +1712,11 @@ impl WorkflowRunCoordinator {
             Some(applied) => {
                 nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
                     &applied.document,
-                    // An applied user document's id is not a bundle id: reading
-                    // the embedded bundle could serve a colliding preset's bytes.
-                    nexus_orchestration::preset_runtime::IrTemplateSource::OwnSource,
+                    // An embedded document's own source is its compiled-in
+                    // bundle; any other applied document's id is not a bundle
+                    // id, so reading the embedded bundle could serve a colliding
+                    // preset's bytes.
+                    nexus_orchestration::preset_runtime::ir_template_source(Some(&loaded)),
                     &engine_proxy,
                     &registry,
                     daemon_tool_dispatch,
@@ -2479,7 +2485,7 @@ impl WorkflowRunCoordinator {
 
         // Re-entry: the schedule already owns a run — drive it.
         if let Some(sid) = &row.current_session_id {
-            let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+            let store = nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(
                 std::sync::Arc::new(pool.clone()),
             );
             let run_exists = store
@@ -2620,7 +2626,7 @@ impl WorkflowRunCoordinator {
                 .map(|role| {
                     (
                         role,
-                        nexus_orchestration::run_state::AgentBinding {
+                        nexus_session_storage::run_state::AgentBinding {
                             provider_id: provider_id.clone(),
                             model: None,
                         },
@@ -2660,7 +2666,7 @@ impl WorkflowRunCoordinator {
 
         // 5. Persist the frozen descriptor (idempotent under concurrent
         //    explicit starts — the winner's identical descriptor wins).
-        let descriptor = nexus_orchestration::run_state::RunDescriptorV1 {
+        let descriptor = nexus_session_storage::run_state::RunDescriptorV1 {
             creator_id: row.creator_id.clone(),
             work_id: row.work_id.clone().filter(|id| !id.is_empty()),
             workspace_root: std::path::PathBuf::new(),
@@ -2866,7 +2872,7 @@ impl WorkflowRunCoordinator {
             // Re-entry: the schedule already owns a run. Verify the run
             // actually exists; a stale claim (crash between claim and run
             // creation) is NOT cleared — boot recovery classifies it (C-1).
-            let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+            let store = nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(
                 std::sync::Arc::new(pool.clone()),
             );
             let run_exists = store
@@ -2901,7 +2907,7 @@ impl WorkflowRunCoordinator {
             ));
         }
         // Snapshot the matrix for the store's in-transaction recheck (N-1).
-        let admission_gate = nexus_orchestration::run_state::ScheduleAdmissionGate {
+        let admission_gate = nexus_session_storage::run_state::ScheduleAdmissionGate {
             creator_id: row.creator_id.clone(),
             scheduled_at: sqlx::query_scalar!(
                 "SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?",
@@ -2997,7 +3003,7 @@ impl WorkflowRunCoordinator {
         //    descriptor at insertion.
         let (work_id, input, agent_bindings, frozen_source) = match &row.execution_descriptor_json {
             Some(bytes) => {
-                let descriptor: nexus_orchestration::run_state::RunDescriptorV1 =
+                let descriptor: nexus_session_storage::run_state::RunDescriptorV1 =
                     serde_json::from_slice(bytes).map_err(|e| {
                         RunControlError::Admission(format!(
                             "schedule execution descriptor is corrupt: {e}"
@@ -3024,10 +3030,11 @@ impl WorkflowRunCoordinator {
         //                                     bundle with no apply never falls back to YAML
         //
         // For a user-preset schedule `preset_id` IS the strategy id (compass D10), so no second
-        // key is introduced. Only a user (Canvas) preset may enter the lookup: an embedded or
-        // system preset id names no strategy, and treating one as a strategy id would redirect an
-        // existing YAML schedule. The IR path refuses an apply whose frozen bytes no longer hash
-        // to the identity the apply recorded, before any task exists.
+        // key is introduced. Only a user (Canvas) preset has a store APPLY: an embedded or
+        // system preset id names no strategy. An embedded preset resolves the document its own
+        // compiled-in bytes construct under `embedded:<preset_id>`, and a system preset resolves
+        // nothing — neither enters the strategy-apply lookup. The IR path refuses an apply whose
+        // frozen bytes no longer hash to the identity the apply recorded, before any task exists.
         //
         // "User" is the source the LOADER resolved (`loaded`, step 2) — never a second
         // classification. `locate_preset` checks embedded first, so a user bundle shadowing an
@@ -3090,9 +3097,11 @@ impl WorkflowRunCoordinator {
             Some(applied) => {
                 nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
                     &applied.document,
-                    // An applied user document's id is not a bundle id: reading
-                    // the embedded bundle could serve a colliding preset's bytes.
-                    nexus_orchestration::preset_runtime::IrTemplateSource::OwnSource,
+                    // An embedded document's own source is its compiled-in
+                    // bundle; any other applied document's id is not a bundle
+                    // id, so reading the embedded bundle could serve a colliding
+                    // preset's bytes.
+                    nexus_orchestration::preset_runtime::ir_template_source(Some(&loaded)),
                     &engine_proxy,
                     &registry,
                     daemon_tool_dispatch,
@@ -3363,7 +3372,7 @@ impl WorkflowRunCoordinator {
 
         // Project the persisted status + current wait id for the response.
         let store =
-            nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(self.pool.clone());
+            nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(self.pool.clone());
         let record = store
             .load_run(session_id)
             .await
@@ -3763,7 +3772,7 @@ impl ScheduleRunStarter for CoordinatorScheduleRunStarter {
 /// inspection, never by deferring to the prompt executor.
 async fn validate_agent_bindings(
     manifest: &nexus_preset::manifest::PresetManifest,
-    bindings: &std::collections::HashMap<String, nexus_orchestration::run_state::AgentBinding>,
+    bindings: &std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>,
     catalog: Option<&Arc<dyn ProviderCatalogPort>>,
 ) -> Result<(), RunControlError> {
     let role_ids: std::collections::HashSet<&str> =
@@ -3905,7 +3914,7 @@ mod tests {
     /// (concurrent cancel vs drive-failure race — R-V1186P3-004).
     #[test]
     fn cancel_fence_accepts_failed_driver_failed_when_cancel_requested() {
-        use nexus_orchestration::run_state::{RunFailure, RunRecord, RunStateV1};
+        use nexus_session_storage::run_state::{RunFailure, RunRecord, RunStateV1};
         let record = RunRecord {
             session_id: SessionId("s".into()),
             status: SessionStatus::Failed,
@@ -3931,7 +3940,7 @@ mod tests {
     /// genuinely did not happen.
     #[test]
     fn classify_cancel_outcome_only_for_durable_cancel_outcomes() {
-        use nexus_orchestration::run_state::{RunRecord, RunStateV1};
+        use nexus_session_storage::run_state::{RunRecord, RunStateV1};
         let mk = |status, cancel_requested: bool| -> RunRecord {
             RunRecord {
                 session_id: SessionId("s".into()),
@@ -3982,7 +3991,7 @@ mod tests {
         let driver_failed = |code: &str| -> RunRecord {
             let mut record = mk(SessionStatus::Failed, true);
             if let Some(state) = record.state.as_mut() {
-                state.failure = Some(nexus_orchestration::run_state::RunFailure {
+                state.failure = Some(nexus_session_storage::run_state::RunFailure {
                     code: code.to_string(),
                     message: "drive failed".to_string(),
                 });
@@ -3999,7 +4008,7 @@ mod tests {
             "an unrelated failure code is not a cancel outcome"
         );
     }
-    use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
+    use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
 
     /// Delegating [`SessionStorage`] that reports a specific session as
     /// ABSENT (`Ok(None)`) while every other read/write hits the real store —
@@ -5659,17 +5668,17 @@ mod tests {
         async fn load_run(
             &self,
             session_id: &SessionId,
-        ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError> {
+        ) -> Result<Option<nexus_session_storage::run_state::RunRecord>, StorageError> {
             self.inner.load_run(session_id).await
         }
 
         async fn start_run(
             &self,
             session_id: &SessionId,
-            descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+            checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_session_storage::run_state::RunStateV1,
+        ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
             self.inner
                 .start_run(session_id, descriptor, checkpoint, next_state)
                 .await
@@ -5679,13 +5688,13 @@ mod tests {
             &self,
             schedule_id: &str,
             session_id: &SessionId,
-            descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
+            descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+            checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_session_storage::run_state::RunStateV1,
             core_context_version: u32,
             expected_core_context_version: u32,
-            admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            admission_gate: Option<&nexus_session_storage::run_state::ScheduleAdmissionGate>,
+        ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
             self.inner
                 .admit_schedule_run(
                     schedule_id,
@@ -5704,10 +5713,10 @@ mod tests {
             &self,
             session_id: &SessionId,
             expected_revision: u64,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
             next_status: SessionStatus,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            next_state: &nexus_session_storage::run_state::RunStateV1,
+        ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
             if !self.injected.swap(true, Ordering::SeqCst) {
                 // The competing transition wins the CAS first: a concurrent
                 // cancel fence commits `cancel_requested` at the SAME
@@ -5729,7 +5738,7 @@ mod tests {
                     .commit_transition(
                         session_id,
                         record.state_revision,
-                        nexus_orchestration::run_state::RunCheckpoint {
+                        nexus_session_storage::run_state::RunCheckpoint {
                             root: &root,
                             children: &[],
                         },
@@ -5755,10 +5764,10 @@ mod tests {
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
             next_status: SessionStatus,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            next_state: &nexus_session_storage::run_state::RunStateV1,
+        ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
             let _ = expected_graph_version;
             self.commit_transition(
                 session_id,
@@ -5775,10 +5784,10 @@ mod tests {
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-            terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
-        ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
+            checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_session_storage::run_state::RunStateV1,
+            terminal_target: nexus_session_storage::run_state::TerminalSettlementTarget,
+        ) -> Result<nexus_session_storage::run_state::SettlementResult, StorageError> {
             self.inner
                 .settle_run(
                     session_id,
@@ -5796,7 +5805,7 @@ mod tests {
             session_id: &SessionId,
             expected_revision: u64,
             pre_step: &graph_flow::Session,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+        ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
             self.inner
                 .restore_pre_step(session_id, expected_revision, pre_step)
                 .await
@@ -5807,9 +5816,9 @@ mod tests {
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            step_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+            step_state: &nexus_session_storage::run_state::RunStateV1,
+        ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
             self.inner
                 .mark_step_in_flight(
                     session_id,
@@ -5827,8 +5836,8 @@ mod tests {
             expected_revision: u64,
             expected_step: Option<&str>,
             expected_attempt_id: Option<&str>,
-            attempt: &nexus_orchestration::run_state::PromptAttempt,
-        ) -> Result<(), EngineError> {
+            attempt: &nexus_session_storage::run_state::PromptAttempt,
+        ) -> Result<(), StorageError> {
             self.inner
                 .persist_prompt_attempt(
                     session_id,
@@ -5846,7 +5855,7 @@ mod tests {
             expected_revision: u64,
             expected_step: Option<&str>,
             attempt_id: &str,
-        ) -> Result<(), EngineError> {
+        ) -> Result<(), StorageError> {
             self.inner
                 .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
                 .await
@@ -5855,7 +5864,7 @@ mod tests {
         async fn load_children(
             &self,
             parent_session_id: &SessionId,
-        ) -> Result<Vec<nexus_orchestration::run_state::RunRecord>, EngineError> {
+        ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError> {
             self.inner.load_children(parent_session_id).await
         }
     }
@@ -5937,8 +5946,8 @@ mod tests {
             !self.fired.swap(true, Ordering::SeqCst)
         }
 
-        fn injected(message: &str) -> EngineError {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(message.to_string()))
+        fn injected(message: &str) -> StorageError {
+            StorageError::GraphFlow(graph_flow::GraphError::StorageError(message.to_string()))
         }
 
         async fn inject_graph_only_winner(&self, session_id: &SessionId, marker: &str) {
@@ -5961,7 +5970,7 @@ mod tests {
         async fn winner_commit_cancelled_after_failure(
             &self,
             session_id: &SessionId,
-            committed: &nexus_orchestration::run_state::RunRecord,
+            committed: &nexus_session_storage::run_state::RunRecord,
             marker: &str,
         ) {
             let winner_root = self
@@ -5980,7 +5989,7 @@ mod tests {
                 .commit_transition(
                     session_id,
                     committed.state_revision,
-                    nexus_orchestration::run_state::RunCheckpoint {
+                    nexus_session_storage::run_state::RunCheckpoint {
                         root: &winner_root,
                         children: &[],
                     },
@@ -5994,7 +6003,7 @@ mod tests {
         async fn winner_settle_cancelled_after_phase_one(
             &self,
             session_id: &SessionId,
-            committed: &nexus_orchestration::run_state::RunRecord,
+            committed: &nexus_session_storage::run_state::RunRecord,
             marker: &str,
         ) {
             let winner_root = self
@@ -6015,12 +6024,12 @@ mod tests {
                     session_id,
                     committed.state_revision,
                     None,
-                    nexus_orchestration::run_state::RunCheckpoint {
+                    nexus_session_storage::run_state::RunCheckpoint {
                         root: &winner_root,
                         children: &[],
                     },
                     &winner_state,
-                    nexus_orchestration::run_state::TerminalSettlementTarget::Cancelled,
+                    nexus_session_storage::run_state::TerminalSettlementTarget::Cancelled,
                 )
                 .await
                 .expect("concurrent owner settles Cancelled after phase 1");
@@ -6033,7 +6042,7 @@ mod tests {
         async fn load_run(
             &self,
             session_id: &SessionId,
-        ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError> {
+        ) -> Result<Option<nexus_session_storage::run_state::RunRecord>, StorageError> {
             if self.fault == BoundaryFault::CorruptStateOnStepLoad && self.file_once() {
                 // REAL external corruption of the authoritative state blob:
                 // the row becomes non-replayable, exactly like an outside
@@ -6053,10 +6062,10 @@ mod tests {
         async fn start_run(
             &self,
             session_id: &SessionId,
-            descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+            checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_session_storage::run_state::RunStateV1,
+        ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
             self.inner
                 .start_run(session_id, descriptor, checkpoint, next_state)
                 .await
@@ -6067,13 +6076,13 @@ mod tests {
             &self,
             schedule_id: &str,
             session_id: &SessionId,
-            descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
+            descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+            checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_session_storage::run_state::RunStateV1,
             core_context_version: u32,
             expected_core_context_version: u32,
-            admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            admission_gate: Option<&nexus_session_storage::run_state::ScheduleAdmissionGate>,
+        ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
             self.inner
                 .admit_schedule_run(
                     schedule_id,
@@ -6092,10 +6101,10 @@ mod tests {
             &self,
             session_id: &SessionId,
             expected_revision: u64,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
             next_status: SessionStatus,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            next_state: &nexus_session_storage::run_state::RunStateV1,
+        ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
             self.inner
                 .commit_transition(
                     session_id,
@@ -6112,10 +6121,10 @@ mod tests {
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
             next_status: SessionStatus,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            next_state: &nexus_session_storage::run_state::RunStateV1,
+        ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
             match self.fault {
                 BoundaryFault::FailFailureCommit
                     if next_state.failure.is_some() && self.file_once() =>
@@ -6186,11 +6195,11 @@ mod tests {
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-            terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
-        ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
-            use nexus_orchestration::run_state::TerminalSettlementTarget;
+            checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_session_storage::run_state::RunStateV1,
+            terminal_target: nexus_session_storage::run_state::TerminalSettlementTarget,
+        ) -> Result<nexus_session_storage::run_state::SettlementResult, StorageError> {
+            use nexus_session_storage::run_state::TerminalSettlementTarget;
             // QC2: P4 §6.2 consolidated the anchored `settle_cancelled` /
             // `settle_failed` cleanup writes into `settle_run`. The fault must
             // follow the boundary it proves, or the fixture silently stops
@@ -6219,7 +6228,7 @@ mod tests {
             session_id: &SessionId,
             expected_revision: u64,
             pre_step: &graph_flow::Session,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+        ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
             if self.fault == BoundaryFault::StepCommitAndRestoreFail
                 && !self.restore_fired.swap(true, Ordering::SeqCst)
             {
@@ -6235,10 +6244,10 @@ mod tests {
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            step_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
-            let nexus_orchestration::run_state::RunCheckpoint { root, children } = checkpoint;
+            checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+            step_state: &nexus_session_storage::run_state::RunStateV1,
+        ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
+            let nexus_session_storage::run_state::RunCheckpoint { root, children } = checkpoint;
             if self.fault == BoundaryFault::GraphOnlyWinnerBeatsStepMarker && self.file_once() {
                 self.inject_graph_only_winner(session_id, "graph-only-before-marker")
                     .await;
@@ -6252,7 +6261,7 @@ mod tests {
                         session_id,
                         expected_revision,
                         expected_graph_version,
-                        nexus_orchestration::run_state::RunCheckpoint { root, children },
+                        nexus_session_storage::run_state::RunCheckpoint { root, children },
                         step_state,
                     )
                     .await
@@ -6263,7 +6272,7 @@ mod tests {
                     session_id,
                     expected_revision,
                     expected_graph_version,
-                    nexus_orchestration::run_state::RunCheckpoint { root, children },
+                    nexus_session_storage::run_state::RunCheckpoint { root, children },
                     step_state,
                 )
                 .await
@@ -6275,8 +6284,8 @@ mod tests {
             expected_revision: u64,
             expected_step: Option<&str>,
             expected_attempt_id: Option<&str>,
-            attempt: &nexus_orchestration::run_state::PromptAttempt,
-        ) -> Result<(), EngineError> {
+            attempt: &nexus_session_storage::run_state::PromptAttempt,
+        ) -> Result<(), StorageError> {
             self.inner
                 .persist_prompt_attempt(
                     session_id,
@@ -6294,7 +6303,7 @@ mod tests {
             expected_revision: u64,
             expected_step: Option<&str>,
             attempt_id: &str,
-        ) -> Result<(), EngineError> {
+        ) -> Result<(), StorageError> {
             self.inner
                 .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
                 .await
@@ -6303,7 +6312,7 @@ mod tests {
         async fn load_children(
             &self,
             parent_session_id: &SessionId,
-        ) -> Result<Vec<nexus_orchestration::run_state::RunRecord>, EngineError> {
+        ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError> {
             self.inner.load_children(parent_session_id).await
         }
     }
@@ -6447,21 +6456,21 @@ mod tests {
             .await
             .expect("get root")
             .expect("root exists");
-        let waiting_state = nexus_orchestration::run_state::RunStateV1 {
-            wait: Some(nexus_orchestration::run_state::WaitRecord {
+        let waiting_state = nexus_session_storage::run_state::RunStateV1 {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "wait-tok-1".to_string(),
                 task_id: "persist".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: nexus_orchestration::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
-            ..nexus_orchestration::run_state::RunStateV1::default()
+            ..nexus_session_storage::run_state::RunStateV1::default()
         };
         real_store
             .commit_transition(
                 &session_id,
                 record.state_revision,
-                nexus_orchestration::run_state::RunCheckpoint {
+                nexus_session_storage::run_state::RunCheckpoint {
                     root: &root,
                     children: &[],
                 },
@@ -6570,12 +6579,12 @@ mod tests {
                     .commit_transition(
                         &SessionId(session_id),
                         2,
-                        nexus_orchestration::run_state::RunCheckpoint {
+                        nexus_session_storage::run_state::RunCheckpoint {
                             root: &winner,
                             children: &[],
                         },
                         SessionStatus::Running,
-                        &nexus_orchestration::run_state::RunStateV1::default(),
+                        &nexus_session_storage::run_state::RunStateV1::default(),
                     )
                     .await
                     .map_err(|e| {
@@ -6730,12 +6739,12 @@ mod tests {
                     .commit_transition(
                         &SessionId(session_id),
                         2,
-                        nexus_orchestration::run_state::RunCheckpoint {
+                        nexus_session_storage::run_state::RunCheckpoint {
                             root: &winner,
                             children: &[],
                         },
                         SessionStatus::Running,
-                        &nexus_orchestration::run_state::RunStateV1::default(),
+                        &nexus_session_storage::run_state::RunStateV1::default(),
                     )
                     .await
                     .map_err(|e| {
@@ -6884,12 +6893,12 @@ mod tests {
                     .commit_transition(
                         &SessionId(session_id),
                         2,
-                        nexus_orchestration::run_state::RunCheckpoint {
+                        nexus_session_storage::run_state::RunCheckpoint {
                             root: &winner,
                             children: &[],
                         },
                         SessionStatus::Running,
-                        &nexus_orchestration::run_state::RunStateV1::default(),
+                        &nexus_session_storage::run_state::RunStateV1::default(),
                     )
                     .await
                     .map_err(|e| {
@@ -7487,12 +7496,12 @@ mod tests {
             .commit_transition(
                 &session_id,
                 1,
-                nexus_orchestration::run_state::RunCheckpoint {
+                nexus_session_storage::run_state::RunCheckpoint {
                     root: &root,
                     children: &[],
                 },
                 SessionStatus::Cancelled,
-                &nexus_orchestration::run_state::RunStateV1::default(),
+                &nexus_session_storage::run_state::RunStateV1::default(),
             )
             .await
             .expect("terminalize row");
@@ -9093,17 +9102,17 @@ mod tests {
             async fn load_run(
                 &self,
                 session_id: &SessionId,
-            ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError>
+            ) -> Result<Option<nexus_session_storage::run_state::RunRecord>, StorageError>
             {
                 self.inner.load_run(session_id).await
             }
             async fn start_run(
                 &self,
                 session_id: &SessionId,
-                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_session_storage::run_state::RunStateV1,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .start_run(session_id, descriptor, checkpoint, next_state)
                     .await
@@ -9113,13 +9122,13 @@ mod tests {
                 &self,
                 schedule_id: &str,
                 session_id: &SessionId,
-                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
+                descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_session_storage::run_state::RunStateV1,
                 core_context_version: u32,
                 expected_core_context_version: u32,
-                admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                admission_gate: Option<&nexus_session_storage::run_state::ScheduleAdmissionGate>,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .admit_schedule_run(
                         schedule_id,
@@ -9137,10 +9146,10 @@ mod tests {
                 &self,
                 session_id: &SessionId,
                 expected_revision: u64,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
                 next_status: SessionStatus,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                next_state: &nexus_session_storage::run_state::RunStateV1,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .commit_transition(
                         session_id,
@@ -9156,10 +9165,10 @@ mod tests {
                 session_id: &SessionId,
                 expected_revision: u64,
                 expected_graph_version: Option<u64>,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
                 next_status: SessionStatus,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                next_state: &nexus_session_storage::run_state::RunStateV1,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .commit_transition_with_graph_fence(
                         session_id,
@@ -9176,10 +9185,11 @@ mod tests {
                 session_id: &SessionId,
                 expected_revision: u64,
                 expected_graph_version: Option<u64>,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
-                terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
-            ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_session_storage::run_state::RunStateV1,
+                terminal_target: nexus_session_storage::run_state::TerminalSettlementTarget,
+            ) -> Result<nexus_session_storage::run_state::SettlementResult, StorageError>
+            {
                 self.inner
                     .settle_run(
                         session_id,
@@ -9196,7 +9206,7 @@ mod tests {
                 session_id: &SessionId,
                 expected_revision: u64,
                 pre_step: &graph_flow::Session,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .restore_pre_step(session_id, expected_revision, pre_step)
                     .await
@@ -9206,9 +9216,9 @@ mod tests {
                 session_id: &SessionId,
                 expected_revision: u64,
                 expected_graph_version: Option<u64>,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-                step_state: &nexus_orchestration::run_state::RunStateV1,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+                step_state: &nexus_session_storage::run_state::RunStateV1,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.at_barrier.store(true, Ordering::SeqCst);
                 while !self.release.load(Ordering::SeqCst) {
                     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -9229,8 +9239,8 @@ mod tests {
                 expected_revision: u64,
                 expected_step: Option<&str>,
                 expected_attempt_id: Option<&str>,
-                attempt: &nexus_orchestration::run_state::PromptAttempt,
-            ) -> Result<(), EngineError> {
+                attempt: &nexus_session_storage::run_state::PromptAttempt,
+            ) -> Result<(), StorageError> {
                 self.inner
                     .persist_prompt_attempt(
                         session_id,
@@ -9247,7 +9257,7 @@ mod tests {
                 expected_revision: u64,
                 expected_step: Option<&str>,
                 attempt_id: &str,
-            ) -> Result<(), EngineError> {
+            ) -> Result<(), StorageError> {
                 self.inner
                     .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
                     .await
@@ -9256,7 +9266,8 @@ mod tests {
             async fn load_children(
                 &self,
                 parent_session_id: &SessionId,
-            ) -> Result<Vec<nexus_orchestration::run_state::RunRecord>, EngineError> {
+            ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError>
+            {
                 self.inner.load_children(parent_session_id).await
             }
         }
@@ -9594,17 +9605,17 @@ mod tests {
             async fn load_run(
                 &self,
                 session_id: &SessionId,
-            ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError>
+            ) -> Result<Option<nexus_session_storage::run_state::RunRecord>, StorageError>
             {
                 self.inner.load_run(session_id).await
             }
             async fn start_run(
                 &self,
                 session_id: &SessionId,
-                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_session_storage::run_state::RunStateV1,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .start_run(session_id, descriptor, checkpoint, next_state)
                     .await
@@ -9614,13 +9625,13 @@ mod tests {
                 &self,
                 schedule_id: &str,
                 session_id: &SessionId,
-                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
+                descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_session_storage::run_state::RunStateV1,
                 core_context_version: u32,
                 expected_core_context_version: u32,
-                admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                admission_gate: Option<&nexus_session_storage::run_state::ScheduleAdmissionGate>,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .admit_schedule_run(
                         schedule_id,
@@ -9638,10 +9649,10 @@ mod tests {
                 &self,
                 session_id: &SessionId,
                 expected_revision: u64,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
                 next_status: SessionStatus,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                next_state: &nexus_session_storage::run_state::RunStateV1,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .commit_transition(
                         session_id,
@@ -9657,10 +9668,10 @@ mod tests {
                 session_id: &SessionId,
                 expected_revision: u64,
                 expected_graph_version: Option<u64>,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
                 next_status: SessionStatus,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                next_state: &nexus_session_storage::run_state::RunStateV1,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .commit_transition_with_graph_fence(
                         session_id,
@@ -9677,10 +9688,11 @@ mod tests {
                 session_id: &SessionId,
                 expected_revision: u64,
                 expected_graph_version: Option<u64>,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
-                terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
-            ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_session_storage::run_state::RunStateV1,
+                terminal_target: nexus_session_storage::run_state::TerminalSettlementTarget,
+            ) -> Result<nexus_session_storage::run_state::SettlementResult, StorageError>
+            {
                 let n = self.arrived.fetch_add(1, Ordering::SeqCst) + 1;
                 if n == 1 {
                     tokio::time::timeout(std::time::Duration::from_secs(2), async {
@@ -9707,7 +9719,7 @@ mod tests {
                 session_id: &SessionId,
                 expected_revision: u64,
                 pre_step: &graph_flow::Session,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .restore_pre_step(session_id, expected_revision, pre_step)
                     .await
@@ -9717,9 +9729,9 @@ mod tests {
                 session_id: &SessionId,
                 expected_revision: u64,
                 expected_graph_version: Option<u64>,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-                step_state: &nexus_orchestration::run_state::RunStateV1,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+                step_state: &nexus_session_storage::run_state::RunStateV1,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.dispatches.fetch_add(1, Ordering::SeqCst);
                 self.inner
                     .mark_step_in_flight(
@@ -9737,8 +9749,8 @@ mod tests {
                 expected_revision: u64,
                 expected_step: Option<&str>,
                 expected_attempt_id: Option<&str>,
-                attempt: &nexus_orchestration::run_state::PromptAttempt,
-            ) -> Result<(), EngineError> {
+                attempt: &nexus_session_storage::run_state::PromptAttempt,
+            ) -> Result<(), StorageError> {
                 self.inner
                     .persist_prompt_attempt(
                         session_id,
@@ -9756,7 +9768,7 @@ mod tests {
                 expected_revision: u64,
                 expected_step: Option<&str>,
                 attempt_id: &str,
-            ) -> Result<(), EngineError> {
+            ) -> Result<(), StorageError> {
                 self.inner
                     .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
                     .await
@@ -9765,7 +9777,8 @@ mod tests {
             async fn load_children(
                 &self,
                 parent_session_id: &SessionId,
-            ) -> Result<Vec<nexus_orchestration::run_state::RunRecord>, EngineError> {
+            ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError>
+            {
                 self.inner.load_children(parent_session_id).await
             }
         }
@@ -9985,17 +9998,17 @@ mod tests {
             async fn load_run(
                 &self,
                 session_id: &SessionId,
-            ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError>
+            ) -> Result<Option<nexus_session_storage::run_state::RunRecord>, StorageError>
             {
                 self.inner.load_run(session_id).await
             }
             async fn start_run(
                 &self,
                 session_id: &SessionId,
-                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_session_storage::run_state::RunStateV1,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .start_run(session_id, descriptor, checkpoint, next_state)
                     .await
@@ -10005,13 +10018,13 @@ mod tests {
                 &self,
                 schedule_id: &str,
                 session_id: &SessionId,
-                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
+                descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_session_storage::run_state::RunStateV1,
                 core_context_version: u32,
                 expected_core_context_version: u32,
-                admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                admission_gate: Option<&nexus_session_storage::run_state::ScheduleAdmissionGate>,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .admit_schedule_run(
                         schedule_id,
@@ -10029,10 +10042,10 @@ mod tests {
                 &self,
                 session_id: &SessionId,
                 expected_revision: u64,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
                 next_status: SessionStatus,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                next_state: &nexus_session_storage::run_state::RunStateV1,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .commit_transition(
                         session_id,
@@ -10048,10 +10061,10 @@ mod tests {
                 session_id: &SessionId,
                 expected_revision: u64,
                 expected_graph_version: Option<u64>,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
                 next_status: SessionStatus,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                next_state: &nexus_session_storage::run_state::RunStateV1,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .commit_transition_with_graph_fence(
                         session_id,
@@ -10068,10 +10081,11 @@ mod tests {
                 session_id: &SessionId,
                 expected_revision: u64,
                 expected_graph_version: Option<u64>,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-                next_state: &nexus_orchestration::run_state::RunStateV1,
-                terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
-            ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_session_storage::run_state::RunStateV1,
+                terminal_target: nexus_session_storage::run_state::TerminalSettlementTarget,
+            ) -> Result<nexus_session_storage::run_state::SettlementResult, StorageError>
+            {
                 self.inner
                     .settle_run(
                         session_id,
@@ -10088,7 +10102,7 @@ mod tests {
                 session_id: &SessionId,
                 expected_revision: u64,
                 pre_step: &graph_flow::Session,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .restore_pre_step(session_id, expected_revision, pre_step)
                     .await
@@ -10098,9 +10112,9 @@ mod tests {
                 session_id: &SessionId,
                 expected_revision: u64,
                 expected_graph_version: Option<u64>,
-                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-                step_state: &nexus_orchestration::run_state::RunStateV1,
-            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+                step_state: &nexus_session_storage::run_state::RunStateV1,
+            ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
                 self.inner
                     .mark_step_in_flight(
                         session_id,
@@ -10117,8 +10131,8 @@ mod tests {
                 expected_revision: u64,
                 expected_step: Option<&str>,
                 expected_attempt_id: Option<&str>,
-                attempt: &nexus_orchestration::run_state::PromptAttempt,
-            ) -> Result<(), EngineError> {
+                attempt: &nexus_session_storage::run_state::PromptAttempt,
+            ) -> Result<(), StorageError> {
                 self.inner
                     .persist_prompt_attempt(
                         session_id,
@@ -10135,7 +10149,7 @@ mod tests {
                 expected_revision: u64,
                 expected_step: Option<&str>,
                 attempt_id: &str,
-            ) -> Result<(), EngineError> {
+            ) -> Result<(), StorageError> {
                 self.inner
                     .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
                     .await
@@ -10143,7 +10157,8 @@ mod tests {
             async fn load_children(
                 &self,
                 parent_session_id: &SessionId,
-            ) -> Result<Vec<nexus_orchestration::run_state::RunRecord>, EngineError> {
+            ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError>
+            {
                 if self.armed.swap(false, Ordering::SeqCst) {
                     self.at_gate.store(true, Ordering::SeqCst);
                     while !self.release.load(Ordering::SeqCst) {
@@ -10631,9 +10646,9 @@ mod tests {
             .await
             .expect("get")
             .expect("root");
-        let interrupted_state = nexus_orchestration::run_state::RunStateV1 {
+        let interrupted_state = nexus_session_storage::run_state::RunStateV1 {
             cancel_requested: true,
-            failure: Some(nexus_orchestration::run_state::RunFailure {
+            failure: Some(nexus_session_storage::run_state::RunFailure {
                 code: "cancel_cleanup_unconfirmed".to_string(),
                 message: "cancel cleanup unconfirmed for run".to_string(),
             }),
@@ -10643,7 +10658,7 @@ mod tests {
             .commit_transition(
                 &session_id,
                 record.state_revision,
-                nexus_orchestration::run_state::RunCheckpoint {
+                nexus_session_storage::run_state::RunCheckpoint {
                     root: &root,
                     children: &[],
                 },
@@ -10681,18 +10696,18 @@ mod tests {
                 &session_id,
                 record.state_revision,
                 None,
-                nexus_orchestration::run_state::RunCheckpoint {
+                nexus_session_storage::run_state::RunCheckpoint {
                     root: &root,
                     children: &[],
                 },
                 &cancelled_state,
-                nexus_orchestration::run_state::TerminalSettlementTarget::Cancelled,
+                nexus_session_storage::run_state::TerminalSettlementTarget::Cancelled,
             )
             .await
             .expect("confirmed retry settle");
         assert!(matches!(
             settled,
-            nexus_orchestration::run_state::SettlementResult::Applied(_)
+            nexus_session_storage::run_state::SettlementResult::Applied(_)
         ));
 
         coordinator.publish_durable_run_state(&session_id).await;

@@ -72,7 +72,10 @@
     ],
     "run_intents": [
       "work_continue"
-    ]
+    ],
+    "world_binding": {
+      "mode": "optional"
+    }
   },
   "nests": [],
   "nodes": [
@@ -107,7 +110,6 @@
     },
     {
       "context_update": {
-        "body": "",
         "op": "append",
         "template": "prompts/synthesize-ctx-update.md"
       },
