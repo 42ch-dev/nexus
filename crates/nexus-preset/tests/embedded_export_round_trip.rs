@@ -2,15 +2,16 @@
 //! from, on the fields the round-trip contract names — `preset.world_binding` and every
 //! `states[].context_update` block.
 //!
-//! The comparison basis is the YAML value, not the typed manifest: the typed form folds an absent
-//! `body:` into a present empty one, so a typed comparison reports `research` as faithful today.
-//! Absence is part of the contract, and only the value representation keeps it.
+//! The comparison basis is the YAML value, not the typed manifest: the typed form hides the
+//! defaults and skipped fields of the source, so a typed comparison cannot say the export
+//! reproduced the author's file. Presence is part of the contract, and only the value
+//! representation keeps it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use nexus_preset::manifest::PresetManifest;
-use nexus_preset::{export_preset, import_preset_bundle, FsAssetSource};
+use nexus_preset::{export_preset, import_preset_bundle, AssetSource, FsAssetSource};
 use serde_yaml::Value;
 
 fn preset_root() -> PathBuf {
@@ -134,5 +135,92 @@ fn every_embedded_preset_round_trips_the_contract_fields() {
     assert!(
         bodyless_append > 0,
         "no embedded preset declares a bodyless `append` context update"
+    );
+}
+
+/// Asset source for [`payload_shapes_round_trip`]: the shape fixture owns no files, so every
+/// referenced template reads as empty bytes.
+struct EmptyAssets;
+
+impl AssetSource for EmptyAssets {
+    fn read_asset(&self, path: &str) -> std::io::Result<Option<Vec<u8>>> {
+        Ok(Some(path.as_bytes().to_vec()))
+    }
+}
+
+/// Payload presence gate: the four `context_update` payload shapes the embedded corpus does not
+/// carry — absent, explicit `null`, non-empty, empty string — reach the export unchanged.
+///
+/// An explicit `patch: null` is the shape that regressed: `Option<Value>` folds it into the
+/// absent key, which exports as no `patch` at all.
+#[test]
+fn payload_shapes_round_trip() {
+    const FIXTURE: &str = r#"
+preset:
+  id: payload-shapes
+  version: 1
+  kind: creator
+  description: context_update payload presence
+  initial: absent
+  terminal: done
+states:
+  - id: absent
+    next: done
+    context_update:
+      op: { kind: append }
+      template_file: prompts/absent.md
+  - id: empty
+    next: done
+    context_update:
+      op: { kind: append, body: "" }
+      template_file: prompts/empty.md
+  - id: merged
+    next: done
+    context_update:
+      op: { kind: struct_merge, patch: { tone: terse } }
+      template_file: prompts/merged.md
+  - id: nulled
+    next: done
+    context_update:
+      op: { kind: struct_merge, patch: null }
+      template_file: prompts/nulled.md
+  - id: done
+    terminal: true
+"#;
+
+    let manifest: PresetManifest = serde_yaml::from_str(FIXTURE).expect("fixture is a manifest");
+    let imported = import_preset_bundle(&manifest, &EmptyAssets).expect("import the shape fixture");
+    let exported = export_preset(&imported.document).expect("export the shape fixture");
+    let source: Value = serde_yaml::from_str(FIXTURE).expect("fixture is YAML");
+    let exported = serde_yaml::to_value(&exported).expect("serialize the shape export");
+
+    let source = named_fields(&source);
+    let exported = named_fields(&exported);
+    assert_eq!(
+        source, exported,
+        "context_update payload shapes changed through the IR"
+    );
+
+    // The equality above only proves as much as the fixture carries; name the four shapes so a
+    // fixture edit cannot quietly drop the one that regressed.
+    let op = |state: &str| {
+        source[&format!("states.{state}.context_update")]
+            .get("op")
+            .expect("context_update carries an op")
+    };
+    assert_eq!(op("absent").get("body"), None, "absent body");
+    assert_eq!(
+        op("empty").get("body").and_then(Value::as_str),
+        Some(""),
+        "empty-string body"
+    );
+    assert!(
+        op("merged").get("patch").is_some_and(Value::is_mapping),
+        "non-empty patch"
+    );
+    assert_eq!(
+        op("nulled").get("patch"),
+        Some(&Value::Null),
+        "explicit null patch"
     );
 }

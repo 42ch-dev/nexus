@@ -666,7 +666,8 @@ fn context_update_ir(hook: &ContextUpdateHook) -> WorkflowContextUpdate {
             WorkflowContextUpdateOp::StructMerge,
             None,
             None,
-            patch.clone(),
+            // An explicit null is a patch value; only an absent key stays absent.
+            patch.clone().map(Option::unwrap_or_default),
             None,
         ),
         ContextUpdateOp::Replace { body } => (
@@ -1265,7 +1266,10 @@ fn context_update_preset(
             body: update.body.clone(),
         },
         WorkflowContextUpdateOp::StructMerge => ContextUpdateOp::StructMerge {
-            patch: update.patch.clone(),
+            patch: update
+                .patch
+                .clone()
+                .map(|patch| (!patch.is_null()).then_some(patch)),
         },
         WorkflowContextUpdateOp::StructRemove => ContextUpdateOp::StructRemove {
             path: update.path.clone(),

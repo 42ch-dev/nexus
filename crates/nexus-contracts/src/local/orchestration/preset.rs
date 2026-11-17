@@ -688,8 +688,16 @@ pub enum ContextUpdateOp {
     /// JSON-merge into struct payload.
     StructMerge {
         /// Patch JSON; absent in the source, where the runtime renders `template_file`.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        patch: Option<serde_json::Value>,
+        ///
+        /// Double option: `None` = key absent, `Some(None)` = an explicit `patch: null` (JSON
+        /// null is a patch value), `Some(Some(patch))` = the patch. `Option` alone folds the
+        /// explicit null into the absent key and drops it on export.
+        #[serde(
+            default,
+            deserialize_with = "explicit_null",
+            skip_serializing_if = "Option::is_none"
+        )]
+        patch: Option<Option<serde_json::Value>>,
     },
     /// Replace is NOT allowed for preset hooks — will be rejected by the loader.
     Replace {
@@ -707,6 +715,18 @@ pub enum ContextUpdateOp {
         /// Capability name to invoke (e.g. `context.summarize`).
         capability: String,
     },
+}
+
+/// Deserialize a present key as `Some(..)` so an explicit `null` stays distinguishable from a
+/// missing key — [`serde`]'s own `Option` impl reports both as `None`.
+///
+/// `#[serde(default)]` supplies the absent case, so this only sees keys that exist.
+#[allow(clippy::option_option)] // absent, null and a value are the three states this keeps.
+fn explicit_null<'de, D>(deserializer: D) -> Result<Option<Option<serde_json::Value>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<serde_json::Value>::deserialize(deserializer).map(Some)
 }
 
 // ---------------------------------------------------------------------------
