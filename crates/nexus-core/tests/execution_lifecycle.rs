@@ -1984,6 +1984,287 @@ async fn a_restart_of_an_admitted_applied_run_recovers_the_applied_document() {
     owner.close().await.unwrap();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Embedded execution: the run input is the document (compass D10).
+// `.mstar/plans/embedded-ir-execution.md` Tasks 3–5. An embedded bundle resolves
+// an applied document from its own compiled-in bytes, admission freezes that
+// identity, and a restart re-enters through the ONE resolution route.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// An embedded preset with NO roles and a manual-wait ENTRY: a run admitted for
+/// it parks immediately, so neither admission nor recovery performs a provider
+/// effect.
+const EMBEDDED_RUN_PRESET: &str = "novel-review-master";
+/// [`EMBEDDED_RUN_PRESET`]'s entry state — a manual wait.
+const EMBEDDED_ENTRY_NODE: &str = "present";
+/// The manual wait [`EMBEDDED_ENTRY_NODE`] advances to once continued.
+const EMBEDDED_NEXT_NODE: &str = "await_decision";
+/// The input [`EMBEDDED_RUN_PRESET`]'s entry capabilities render (strict mode):
+/// every `preset.input.*` the first two manual states read.
+const EMBEDDED_RUN_INPUT: &str = r#"{"work_ref":"wrk-embedded-execution","topic":"embedded execution","work_id":"wrk_embedded_execution","open_findings":"[]"}"#;
+
+/// The identity an embedded bundle resolves — `apply_id = "embedded:<preset_id>"`
+/// and the canonical hash of the document `embedded_workflow_document`
+/// constructs. Written here the way `resolve_applied_document` writes it: the
+/// test pins the production value, it does not replace the production route.
+fn embedded_run_identity(preset_id: &str) -> nexus_orchestration::run_state::AppliedRunIdentity {
+    let caps = nexus_preset::capability_catalog::BuiltinCapabilityCatalog;
+    let loaded =
+        nexus_preset::load_embedded_preset(preset_id, &caps).expect("the embedded preset loads");
+    let document =
+        nexus_preset::embedded_workflow_document(&loaded).expect("the document constructs");
+    nexus_orchestration::run_state::AppliedRunIdentity {
+        apply_id: format!("embedded:{preset_id}"),
+        content_hash: nexus_workflow_ir::content_hash(&document).expect("the document hashes"),
+    }
+}
+
+/// Wait until an admitted run parks on a manual wait at `node`, answering that
+/// wait's durable id.
+async fn wait_for_manual_wait(pool: &sqlx::SqlitePool, session_id: &str, node: &str) -> String {
+    wait_for_record(
+        pool,
+        session_id,
+        "the embedded run to park on its entry manual wait",
+        |record| {
+            record.status == nexus_orchestration::engine::SessionStatus::WaitingForInput
+                && record
+                    .state
+                    .as_ref()
+                    .and_then(|state| state.wait.as_ref())
+                    .is_some_and(|wait| wait.task_id == node)
+        },
+    )
+    .await
+    .state
+    .and_then(|state| state.wait)
+    .expect("the manual wait record exists")
+    .wait_id
+}
+
+/// Admit `preset_id` through the production seam and park it on its entry manual
+/// wait, asserting the frozen descriptor carries the embedded identity and the
+/// run was positioned by the resolved document.
+async fn admit_embedded_and_park(
+    f: &Fixture,
+    nexus_home: &Path,
+    preset_id: &str,
+) -> (nexus_orchestration::SessionId, String) {
+    let owner = open_engine_owner(f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    let caps = handle.capability_holder();
+    // The entry capability renders `preset.input.*` in strict mode, so the run is
+    // admitted with exactly the input its document's first two manual states read.
+    let session_id = handle
+        .coordinator()
+        .start_session(
+            preset_id,
+            CREATOR,
+            Some(EMBEDDED_RUN_INPUT),
+            std::collections::HashMap::new(),
+            nexus_home,
+            &caps,
+            None,
+            None,
+        )
+        .await
+        .expect("an embedded preset admits through start_session");
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+    let wait_id = wait_for_manual_wait(&pool, &session_id.0, EMBEDDED_ENTRY_NODE).await;
+
+    let descriptor = read_restart_record(&pool, &session_id.0)
+        .await
+        .descriptor
+        .expect("the frozen descriptor exists");
+    assert_eq!(
+        descriptor.applied,
+        Some(embedded_run_identity(preset_id)),
+        "admission must freeze the embedded document's D10 identity"
+    );
+    assert!(
+        descriptor.intake_mode.is_none(),
+        "the intake key governs user bundles only; an embedded run records no mode"
+    );
+    assert!(
+        matches!(
+            descriptor.source,
+            nexus_preset::source_identity::PresetSourceIdentity::Embedded { .. }
+        ),
+        "an embedded run freezes its compiled-in source identity, got {:?}",
+        descriptor.source
+    );
+    let session = read_restart_session(&pool, &session_id.0)
+        .await
+        .expect("the run row exists");
+    assert_eq!(
+        session.current_task_id, EMBEDDED_ENTRY_NODE,
+        "the run's position must be a node of the resolved document"
+    );
+
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+    (session_id, wait_id)
+}
+
+/// The run input is the embedded document, and a restart resumes on the SAME
+/// identity: recovery re-resolves the compiled-in bundle, re-constructs the
+/// document and compares its identity against the frozen one before rebuilding.
+///
+/// Mutation this fails on: recovery passing `None` for an embedded applied run
+/// (the pre-change arm) resolves no document, and the run keeps the descriptor
+/// bundle. A resolver that recomputed the identity from a different source
+/// (e.g. the twin bytes) would not equal the frozen hash and refuse here.
+#[tokio::test]
+async fn an_embedded_run_recovers_on_the_identity_admission_froze() {
+    let f = fixture().await;
+    let nexus_home = f.tmp.path().join(".nexus42");
+
+    // ── Generation 1: admit through the seam, park on the entry manual wait. ──
+    let (session_id, wait_id) = admit_embedded_and_park(&f, &nexus_home, EMBEDDED_RUN_PRESET).await;
+
+    // ── Generation 2: restart, then continue past the entry wait. ──
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    handle
+        .coordinator()
+        .signal_run(
+            &session_id,
+            RunSignal::Continue {
+                wait_id: wait_id.clone(),
+            },
+        )
+        .await
+        .expect("an unchanged embedded document must reconstruct and continue");
+
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+    let record = wait_for_record(
+        &pool,
+        &session_id.0,
+        "the recovered run to park on the document's next manual wait",
+        |record| {
+            record.status == nexus_orchestration::engine::SessionStatus::WaitingForInput
+                && record
+                    .state
+                    .as_ref()
+                    .and_then(|state| state.wait.as_ref())
+                    .is_some_and(|wait| wait.task_id == EMBEDDED_NEXT_NODE)
+        },
+    )
+    .await;
+    assert_eq!(
+        record.descriptor.and_then(|descriptor| descriptor.applied),
+        Some(embedded_run_identity(EMBEDDED_RUN_PRESET)),
+        "recovery must not rewrite the identity admission froze"
+    );
+
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
+/// A changed embedded byte flips the document hash and the run stays
+/// non-replayable — never rebuilt from the YAML descriptor.
+///
+/// The frozen identity is rewritten to a hash the compiled-in document no longer
+/// produces, which is exactly what a binary upgrade between run and resume looks
+/// like to recovery. Only the document identity is moved: the frozen SOURCE
+/// identity still reloads, so the refusal must come from the applied-key
+/// comparison (the harder direction), not from the source reload.
+#[tokio::test]
+async fn a_changed_embedded_document_refuses_recovery_instead_of_the_yaml_graph() {
+    let f = fixture().await;
+    let nexus_home = f.tmp.path().join(".nexus42");
+    let (session_id, wait_id) = admit_embedded_and_park(&f, &nexus_home, EMBEDDED_RUN_PRESET).await;
+    let frozen = embedded_run_identity(EMBEDDED_RUN_PRESET);
+
+    // ── The bytes moved while no daemon owned the DB. ──
+    let seed = open_seed_pool(&f.db_path).await;
+    let bytes: Vec<u8> = sqlx::query_scalar(
+        "SELECT run_descriptor_json FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(&session_id.0)
+    .fetch_one(seed.pool())
+    .await
+    .expect("read the frozen descriptor bytes");
+    let mut descriptor: serde_json::Value =
+        serde_json::from_slice(&bytes).expect("the descriptor decodes");
+    descriptor["applied"]["content_hash"] = serde_json::json!("blake3:changed-after-admission");
+    let rewritten = serde_json::to_vec(&descriptor).expect("the descriptor encodes");
+    sqlx::query("UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?")
+        .bind(rewritten)
+        .bind(&session_id.0)
+        .execute(seed.pool())
+        .await
+        .expect("rewrite the frozen descriptor");
+    close_seed_pool(&f.db_path, seed).await;
+
+    // ── Generation 2: the re-resolved identity no longer matches. ──
+    let owner = open_engine_owner(&f).await;
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    let refusal = handle
+        .coordinator()
+        .signal_run(
+            &session_id,
+            RunSignal::Continue {
+                wait_id: wait_id.clone(),
+            },
+        )
+        .await
+        .expect_err("a changed embedded document must not be recovered from YAML");
+    let RunControlError::ReconstructionUnavailable { reason, .. } = refusal else {
+        panic!("expected reconstruction_unavailable, got {refusal:?}");
+    };
+    assert!(
+        reason.contains(&frozen.apply_id),
+        "the refusal names the embedded identity the run was admitted under: {reason}"
+    );
+    assert!(
+        reason.contains(&frozen.content_hash),
+        "the refusal names the document hash admission froze: {reason}"
+    );
+    assert!(
+        reason.contains("blake3:changed-after-admission"),
+        "the refusal names the identity recovery re-resolved: {reason}"
+    );
+
+    // The refusal advances nothing: same node, same human wait, same descriptor.
+    let pool: sqlx::SqlitePool = owner.pool().clone();
+    let record = read_restart_record(&pool, &session_id.0).await;
+    assert_eq!(
+        record.status,
+        nexus_orchestration::engine::SessionStatus::WaitingForInput,
+        "a refused reconstruction must leave the run on its preserved wait"
+    );
+    let session = read_restart_session(&pool, &session_id.0)
+        .await
+        .expect("the run row exists");
+    assert_eq!(
+        session.current_task_id, EMBEDDED_ENTRY_NODE,
+        "a refused reconstruction must not advance the run; got {:?}",
+        session.current_task_id
+    );
+
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
 // ── Concurrency regressions (T1 review C1/C2/C3) ───────────────────────────
 
 /// Poll `cond` until it holds, failing the test instead of hanging.

@@ -3977,16 +3977,21 @@ impl GraphFlowEngine {
         // bundle — is the source an applied run executes, so this arm is
         // resolved before anything the bundle says.
         //
-        // The reload below is the no-apply path's frozen-source proof (A7). An
-        // applied run executes its document instead, so it never reads the
-        // bundle: one edited, moved or deleted between admission and this
-        // restart must not make such a run non-replayable, and the frozen
-        // applied identity already encodes the user-preset classification a
-        // reload would only re-establish — resolving it to then pass `None`
-        // anyway cost one preset load plus content hash per recovery.
-        let bundle = match &descriptor.applied {
-            Some(_) => None,
-            None => Some(self.reload_frozen_bundle(&descriptor, session_id)?),
+        // The reload below is the no-apply path's frozen-source proof (A7), and
+        // for an EMBEDDED applied run it is also the applied route's key: the
+        // embedded arm of the resolution below is keyed off the reloaded source
+        // identity, so the compiled-in bundle is reloaded and its identity
+        // re-compared — a changed embedded byte stays non-replayable here rather
+        // than being rebuilt from the YAML descriptor. An applied USER run
+        // executes its document instead and never reads the bundle: one edited,
+        // moved or deleted between admission and this restart must not make such
+        // a run non-replayable, and the frozen applied identity already encodes
+        // the user-preset classification a reload would only re-establish.
+        let bundle = match (&descriptor.applied, &descriptor.source) {
+            (Some(_), nexus_preset::source_identity::PresetSourceIdentity::Directory { .. }) => {
+                None
+            }
+            _ => Some(self.reload_frozen_bundle(&descriptor, session_id)?),
         };
 
         // P6 condition 6: recovery follows the RECORDED intake mode, never the
@@ -4212,13 +4217,14 @@ impl GraphFlowEngine {
         let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
         // The graph comes from the SAME source that decided the run's
         // projection above: the applied document when the descriptor froze an
-        // apply, the bundle otherwise. An applied user document's id is not a
+        // apply, the bundle otherwise. An applied embedded document builds from
+        // its own compiled-in bundle; any other applied document's id is not a
         // bundle id, so reading the embedded bundle for one could serve a
         // colliding preset's bytes — it is never read on that arm.
         let wired = match (&applied, &loaded) {
             (Some(document), _) => crate::preset_runtime::build_wired_outer_graph_from_ir(
                 document,
-                crate::preset_runtime::IrTemplateSource::OwnSource,
+                crate::preset_runtime::ir_template_source(loaded.as_ref()),
                 &engine_proxy,
                 &caps,
                 self.daemon_tool_dispatch.clone(),
@@ -4485,12 +4491,12 @@ impl GraphFlowEngine {
             ));
         }
         let wired = match &applied {
-            // Same rule admission states: an applied user document's id is not a
-            // bundle id, so reading the embedded bundle could serve a colliding
-            // preset's bytes.
+            // An embedded document's own source IS its compiled-in bundle; any
+            // other applied document's id is not a bundle id, so reading the
+            // embedded bundle could serve a colliding preset's bytes.
             Some(applied) => crate::preset_runtime::build_wired_outer_graph_from_ir(
                 &applied.document,
-                crate::preset_runtime::IrTemplateSource::OwnSource,
+                crate::preset_runtime::ir_template_source(Some(loaded)),
                 &proxy,
                 &caps,
                 self.daemon_tool_dispatch.clone(),

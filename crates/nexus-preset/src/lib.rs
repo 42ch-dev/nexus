@@ -27,7 +27,8 @@ pub use validation::{
     ValidationResult,
 };
 pub use workflow_ir::{
-    canonical_twin_json, export_preset, import_preset_bundle, PresetIrImport, WorkflowIrError,
+    canonical_twin_json, export_preset, import_preset_bundle, AssetSource, EmbeddedAssetSource,
+    FsAssetSource, PresetIrImport, WorkflowIrError,
 };
 
 // ---------------------------------------------------------------------------
@@ -112,6 +113,53 @@ pub fn embedded_source_identity(
     load_embedded_preset(preset_id, &caps)
         .ok()
         .and_then(|loaded| loaded.source_identity)
+}
+
+/// Build the [`WorkflowDocument`](nexus_workflow_ir::WorkflowDocument) an
+/// embedded preset executes.
+///
+/// The manifest and every asset it references are read from the compiled-in
+/// bundle of `loaded`'s OWN source identity, never from `ir-twins/` and never
+/// from an on-disk root: `EMBEDDED_PRESETS.get_dir(id)` is passed to
+/// [`workflow_ir::EmbeddedAssetSource`] because `include_dir` entry paths carry
+/// the `<preset-id>/` prefix.
+///
+/// # Errors
+///
+/// [`WorkflowIrError::NotProjectable`] unless `loaded.source_identity` is
+/// [`PresetSourceIdentity::Embedded`](crate::source_identity::PresetSourceIdentity::Embedded)
+/// naming the manifest's own id — a user or system bundle must not execute
+/// through the compiled-in tree, mirroring the engine's colliding-preset rule —
+/// and [`WorkflowIrError::AssetRead`] when a referenced asset is absent from
+/// that bundle (fail closed; no partial document is returned).
+pub fn embedded_workflow_document(
+    loaded: &LoadedPreset,
+) -> Result<nexus_workflow_ir::WorkflowDocument, workflow_ir::WorkflowIrError> {
+    use crate::source_identity::PresetSourceIdentity;
+
+    let embedded_id = match &loaded.source_identity {
+        Some(PresetSourceIdentity::Embedded { preset_id, .. }) => preset_id,
+        _ => {
+            return Err(workflow_ir::WorkflowIrError::NotProjectable {
+                reason: format!("preset `{}` is not an embedded bundle", loaded.id),
+            })
+        }
+    };
+    if embedded_id != &loaded.id {
+        return Err(workflow_ir::WorkflowIrError::NotProjectable {
+            reason: format!(
+                "embedded source `{embedded_id}` does not name the manifest's own id `{}`",
+                loaded.id
+            ),
+        });
+    }
+    let dir = EMBEDDED_PRESETS
+        .get_dir(embedded_id.as_str())
+        .ok_or_else(|| workflow_ir::WorkflowIrError::NotProjectable {
+            reason: format!("compiled-in bundle `{embedded_id}` is missing"),
+        })?;
+    workflow_ir::import_preset_bundle(&loaded.manifest, &workflow_ir::EmbeddedAssetSource(dir))
+        .map(|imported| imported.document)
 }
 
 /// Derive the complete effective prompt-role set from a preset manifest

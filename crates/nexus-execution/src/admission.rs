@@ -22,7 +22,8 @@ use nexus_preset::LoadedPreset;
 /// document it builds the graph from.
 ///
 /// `intake_mode: None` means the preset is not a user bundle, so no intake key
-/// governs it; `applied: None` means the strategy has no current apply.
+/// governs it; `applied: None` means the strategy has no current apply (never an
+/// embedded bundle, whose document always resolves).
 pub struct AppliedAdmission {
     /// The `[strategy_intake]` mode this admission runs under, when one does.
     pub intake_mode: Option<StrategyIntakeMode>,

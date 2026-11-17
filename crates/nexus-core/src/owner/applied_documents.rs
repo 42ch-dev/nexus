@@ -23,7 +23,7 @@ use nexus_orchestration::run_state::AppliedRunIdentity;
 use nexus_preset::LoadedPreset;
 
 use crate::apply::ApplyLoadRefusal;
-use crate::error::CoreResult;
+use crate::error::{CoreError, CoreResult};
 
 /// The intake mode one new admission runs under (P6 condition 6).
 ///
@@ -57,6 +57,15 @@ pub fn intake_mode_for_admission(
 /// admitted while the strategy had no current apply resolves `None` and
 /// therefore freezes no identity — that case is recovery's, not this route's.
 ///
+/// Two identities answer here. A user bundle answers from its current apply
+/// (the store route below). An EMBEDDED bundle answers from the document its
+/// own compiled-in bytes construct, under the compass D10 identity
+/// `apply_id = "embedded:<preset_id>"` / `content_hash =
+/// nexus_workflow_ir::canonical::content_hash(document)` — the same hash a user
+/// apply records, so a changed embedded byte flips it and recovery refuses
+/// instead of falling back to the YAML graph. `_system.` and system-directory
+/// bundles stay `None`: they execute from their manifest.
+///
 /// `nexus_home` is the workspace home the pins are re-compared against; the pin
 /// re-comparison runs against `<nexus_home>/patterns`, so no caller can skip it.
 ///
@@ -69,6 +78,39 @@ pub async fn resolve_applied_document(
     preset_id: &str,
     loaded: Option<&LoadedPreset>,
 ) -> CoreResult<Result<Option<AppliedDocument>, ApplyLoadRefusal>> {
+    // An embedded bundle's applied identity is its own compiled-in bytes, not a
+    // store row: the document is constructed here from the same `EMBEDDED_PRESETS`
+    // tree the run reads, so admission and recovery reach one identity through
+    // one route. A hash failure is a fault of this route (outer `Err`), never a
+    // silent `None` that would rebuild the YAML graph.
+    if let Some(loaded) = loaded {
+        if let Some(nexus_preset::source_identity::PresetSourceIdentity::Embedded {
+            preset_id,
+            ..
+        }) = &loaded.source_identity
+        {
+            let document = nexus_preset::embedded_workflow_document(loaded).map_err(|error| {
+                CoreError::Internal {
+                    category: format!("embedded applied document of `{preset_id}`: {error}"),
+                }
+            })?;
+            let content_hash =
+                nexus_workflow_ir::canonical::content_hash(&document).map_err(|error| {
+                    CoreError::Internal {
+                        category: format!(
+                            "embedded applied document of `{preset_id}` cannot be hashed: {error}"
+                        ),
+                    }
+                })?;
+            return Ok(Ok(Some(AppliedDocument {
+                identity: AppliedRunIdentity {
+                    apply_id: format!("embedded:{preset_id}"),
+                    content_hash,
+                },
+                document,
+            })));
+        }
+    }
     // The loader's own classification, exactly as admission reads it: only a
     // user bundle with a current apply has an applied identity. `None` is the
     // applied re-entry (I-000443: the run's bundle may be gone), and it cannot
@@ -165,5 +207,89 @@ impl AppliedDocumentSource for CreatorAppliedDocuments {
             // arrives here in `reconstruction_unavailable`, so a bare human
             // sentence would lose the `applied_pin_*` family a caller branches on.
             .map_err(|refusal| format!("{}: {refusal}", refusal.reason()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_preset::capability_catalog::BuiltinCapabilityCatalog;
+
+    /// A pool neither the embedded arm nor the system arm may query. `connect_lazy`
+    /// builds it without opening a connection, so a stray query fails the test loudly
+    /// instead of being answered by an empty database.
+    fn unqueried_pool() -> sqlx::SqlitePool {
+        sqlx::sqlite::SqlitePoolOptions::new()
+            .connect_lazy("sqlite::memory:")
+            .expect("a lazy pool")
+    }
+
+    fn unqueried_home() -> std::path::PathBuf {
+        std::path::PathBuf::from("/nonexistent-nexus-home")
+    }
+
+    /// An embedded bundle resolves the document it executes, under the compass D10
+    /// identity — computed from the same constructor admission and recovery use.
+    #[tokio::test]
+    async fn an_embedded_preset_resolves_the_document_it_runs() {
+        let caps = BuiltinCapabilityCatalog;
+        let loaded =
+            nexus_preset::load_embedded_preset("memory-augmented", &caps).expect("preset loads");
+        let resolved = resolve_applied_document(
+            &unqueried_pool(),
+            &unqueried_home(),
+            "memory-augmented",
+            Some(&loaded),
+        )
+        .await
+        .expect("the embedded arm reads no store")
+        .expect("an embedded bundle resolves its identity");
+        let resolved = resolved.expect("an embedded bundle has an applied document");
+
+        assert_eq!(resolved.identity.apply_id, "embedded:memory-augmented");
+        let expected_hash = nexus_workflow_ir::canonical::content_hash(&resolved.document)
+            .expect("the constructed document hashes");
+        assert_eq!(
+            resolved.identity.content_hash, expected_hash,
+            "D10: the identity is the document's canonical content hash"
+        );
+        let constructed =
+            nexus_preset::embedded_workflow_document(&loaded).expect("the bundle constructs");
+        assert_eq!(
+            nexus_preset::canonical_twin_json(&resolved.document).expect("serializes"),
+            nexus_preset::canonical_twin_json(&constructed).expect("serializes"),
+            "the run input is the document the embedded constructor builds"
+        );
+    }
+
+    /// A `_system.` directory bundle keeps `Ok(None)`: it executes from its manifest,
+    /// never through an applied identity, and the store is never read for it.
+    #[tokio::test]
+    async fn a_system_bundle_resolves_no_applied_document() {
+        let home = tempfile::tempdir().expect("a temporary nexus home");
+        nexus_preset::system_preset_dir::ensure_maintenance_preset(home.path())
+            .expect("the system bundle is written");
+        let bundle =
+            nexus_preset::system_preset_dir::system_preset_bundle_dir(home.path(), "maintenance");
+        let entry = nexus_preset::system_preset_dir::load_system_preset_from_dir(
+            &bundle,
+            "maintenance",
+            &BuiltinCapabilityCatalog,
+        )
+        .expect("the system bundle loads");
+
+        let resolved = resolve_applied_document(
+            &unqueried_pool(),
+            home.path(),
+            &entry.qualified_id,
+            Some(&entry.loaded),
+        )
+        .await
+        .expect("a system bundle reads no store")
+        .expect("a system bundle is not a refusal");
+        assert!(
+            resolved.is_none(),
+            "a `_system.` bundle executes from its manifest, not an applied document"
+        );
     }
 }
