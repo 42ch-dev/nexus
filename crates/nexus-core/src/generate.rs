@@ -12,12 +12,13 @@
 //! because Generate produces a whole document rather than an operation on one.
 //!
 //! Round 1 materializes the request deterministically and touches no model. Rounds 2 and 3 hand
-//! the previous round's document and **all** of that round's corrections to the corrector. Lint is
-//! the three layers the rest of the system already uses — structural, semantic, buildability —
-//! plus the pin and slot findings Approve refuses on, and a round passes only when all of them are
-//! silent, so semantic warnings never block. The ceiling is three rounds; exhaustion returns the
-//! LAST round's corrections and persists nothing, because the commit is reached only from a passing
-//! round.
+//! the previous round's document and **all** of that round's corrections to the corrector, whose
+//! response is normalized back onto the kernel's identity and the request's field space, so
+//! provenance and the D8 bound hold for every round. Lint is the three layers the rest of the
+//! system already uses — structural, semantic, buildability — plus the pin and slot findings
+//! Approve refuses on, and a round passes only when all of them are silent, so semantic warnings
+//! never block. The ceiling is three rounds; exhaustion returns the LAST round's corrections and
+//! persists nothing, because the commit is reached only from a passing round.
 
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
     WorkflowDocumentEffectSummary, WorkflowDocumentId, WorkflowDocumentState, WorkflowEdge,
@@ -280,6 +281,20 @@ impl CoreService {
     }
 }
 
+/// The provenance of a document this kernel generated.
+///
+/// It is the kernel's, never a model's: the three-surface drift guard reads
+/// `provenance.source == generate`, so a corrector must not be able to set it (or invent lineage)
+/// from the inside. Round 1 and every corrected round record this same origin.
+const fn generated_provenance() -> WorkflowProvenance {
+    WorkflowProvenance {
+        source: WorkflowProvenanceSource::Generate,
+        agent_run_id: None,
+        parent_candidate_id: None,
+        resolved_pins: Vec::new(),
+    }
+}
+
 /// Build the round-1 document from the request alone.
 ///
 /// Nothing is invented: every node, edge and nest is the request's, and the fields the request
@@ -311,12 +326,7 @@ fn materialize(request: GenerateRequest, strategy_id: &str) -> CoreResult<Workfl
         signals: Vec::new(),
         roles: Vec::new(),
         effect_summary: WorkflowDocumentEffectSummary::Pure,
-        provenance: WorkflowProvenance {
-            source: WorkflowProvenanceSource::Generate,
-            agent_run_id: None,
-            parent_candidate_id: None,
-            resolved_pins: Vec::new(),
-        },
+        provenance: generated_provenance(),
     })
 }
 
@@ -424,9 +434,19 @@ async fn correct(
              parse is an executor failure, not an exhaustion"
         ))
     })?;
-    // A generated document has no identity yet: approval binds the hash, so a hash the corrector
-    // echoed from a prior snapshot must not travel as this candidate's claim.
+    // A corrected document is still this generation's candidate. Identity is the kernel's:
+    // provenance is this generation's origin (the drift guard asserts it), the hash is bound at
+    // approval, and the IR and authored versions come from the contract. The field space stays the
+    // request's (D8): assets, signals, roles and initial_action are not a generate request's to add.
+    // `document.id`, `state` and `revision` are enforced by the CAS commit.
     document.content_hash = None;
+    document.ir_version = IR_VERSION;
+    document.version = 1;
+    document.initial_action = None;
+    document.assets.clear();
+    document.signals.clear();
+    document.roles.clear();
+    document.provenance = generated_provenance();
     Ok(document)
 }
 

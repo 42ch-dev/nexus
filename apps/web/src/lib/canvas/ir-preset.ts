@@ -35,7 +35,11 @@ function enterOf(node: IrNode): PresetEnterTask[] {
 /** One outgoing edge is a linear target; several become the conditional form. */
 function nextOf(outgoing: IrEdge[]): PresetState['next'] {
   if (outgoing.length === 0) return undefined;
-  if (outgoing.length === 1) return outgoing[0].to;
+  if (outgoing.length === 1) {
+    const [edge] = outgoing;
+    // A lone fallback edge is unconditional; a lone guarded edge keeps its guard.
+    if (edge.kind === 'default' || (edge.when ?? edge.label) === undefined) return edge.to;
+  }
   const fallback = outgoing.find((edge) => edge.kind === 'default');
   return {
     kind: 'conditional',
