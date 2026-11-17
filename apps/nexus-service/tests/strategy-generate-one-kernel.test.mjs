@@ -227,6 +227,9 @@ describe('generate one-kernel drift guard (P6-T10)', () => {
         CLI_STRATEGY,
         '--request',
         requestPath,
+        // The default output is a human summary since BUG-05; the machine
+        // payload this assertion parses is behind the flag.
+        '--json',
       ],
       { env: cliEnv, encoding: 'utf8' },
     );
