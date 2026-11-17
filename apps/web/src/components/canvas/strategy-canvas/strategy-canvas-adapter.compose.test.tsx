@@ -1,10 +1,9 @@
 /**
- * Strategy canvas adapter — compose branch (v239-p3-canvas-compose-ui T3b/T5).
+ * Strategy canvas adapter — IR projection (v239-p3-canvas-compose-ui T3b/T5).
  *
- * With a candidate document in the payload the adapter projects from IR; a
- * trajectory that names a wired slot marks the slot node simulated — the
- * simulation overlay names the slot. With the flag off (no `document`
- * payload) the YAML projection runs untouched.
+ * The payload carries the document only; the adapter projects it from IR and a
+ * trajectory that names a wired slot marks the slot node simulated. There is
+ * no YAML branch: the Canvas renders the applied IR document (P6 condition 2).
  */
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, within } from '@testing-library/react';
@@ -70,7 +69,6 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
     const document = composedCandidate();
     const { nodes } = adapter.projectGraph({
       revision: 0,
-      parsed: { manifest: { preset: { id: 'user/demo' }, states: [] }, problems: [] },
       activeSession: null,
       trajectory: simulationTrajectory({ nodes_visited: ['collect-sources', 'done', 'draft', 'routing'] }),
       document,
@@ -98,7 +96,6 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
     );
     const { nodes } = adapter.projectGraph({
       revision: 0,
-      parsed: { manifest: { preset: { id: 'user/demo' }, states: [] }, problems: [] },
       activeSession: null,
       trajectory: null,
       document: composedCandidate(),
@@ -162,7 +159,7 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
     expect(client.strategyPatchState).not.toHaveBeenCalled();
   });
 
-  it('never merges a local draft edge into the compose projection', () => {
+  it('merges a local draft edge into the projection', () => {
     const draft = {
       id: 'draft-edge',
       source: 'draft',
@@ -173,33 +170,24 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
     const adapter = createStrategyCanvasAdapter(ctxRef({ localEdges: [draft] }));
     const payload = {
       revision: 0,
-      parsed: { manifest: { preset: { id: 'user/demo' }, states: [] }, problems: [] },
       activeSession: null,
       trajectory: null,
+      document: composedCandidate(),
     };
 
-    // Compose path: the candidate is the only structural authority.
-    expect(adapter.projectGraph({ ...payload, document: composedCandidate() }).edges.map((e) => e.id))
-      .not.toContain('draft-edge');
-    // Flag off: today's behaviour is untouched.
+    // A draft is the author's uncommitted transition, not part of the document.
     expect(adapter.projectGraph(payload).edges.map((e) => e.id)).toContain('draft-edge');
   });
 
-  it('keeps the YAML projection when no candidate document is present (flag off)', () => {
+  it('projects the document it is given, with no YAML fallback to fall back to', () => {
     const adapter = createStrategyCanvasAdapter(ctxRef());
     const { nodes } = adapter.projectGraph({
       revision: 1,
-      parsed: {
-        manifest: {
-          preset: { id: 'user/demo' },
-          states: [{ id: 'draft', next: 'done', terminal: false }],
-        },
-        problems: [],
-      },
       activeSession: null,
       trajectory: null,
+      document: candidateDocument(),
     });
     expect(nodes.some((node) => node.type === 'strategy-pattern-slot')).toBe(false);
-    expect(nodes.map((node) => node.id)).toContain('draft');
+    expect(nodes.map((node) => node.id).sort()).toEqual(['done', 'draft', 'pause', 'routing']);
   });
 });

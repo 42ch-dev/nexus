@@ -228,6 +228,23 @@
     "engineUnavailableTitle": "Orchestration engine not running",
     "engineUnavailableDescription": "Start the daemon orchestration engine, then try again.",
     "graphAriaLabel": "Harness spatial graph",
+    "applied": {
+      "neverApplied": {
+        "title": "No preset applied yet",
+        "description": "This workspace has no live preset. Build a first candidate in Compose.",
+        "openCompose": "Open Compose"
+      },
+      "approvedUnapplied": {
+        "title": "Approved, not yet live",
+        "description": "An approved candidate has no live version. Apply one to make it the preset this workspace runs.",
+        "applyLatest": "Apply the latest approval"
+      },
+      "unreadable": {
+        "title": "The running preset cannot be read",
+        "description": "An apply is recorded but its document no longer verifies: {{reason}}. Nothing was changed, and nothing will be applied from here.",
+        "recheck": "Recheck"
+      }
+    },
     "header": {
       "title": "Preset",
       "description": "State machine and transition editor",

@@ -67,6 +67,9 @@ function appliedStatus(overrides: Partial<StrategyAppliedStatus> = {}): Strategy
       candidate_revision: 3,
       approved_at: '2026-11-13T00:00:00Z',
     },
+    // T1 added the document half of the read; these rows are about identity.
+    applied_document: null,
+    applied_document_refusal: null,
     ...overrides,
   };
 }
@@ -95,7 +98,7 @@ describe('ApproveDisclosure — live apply state (compose path)', () => {
     renderDisclosure({
       onApply: vi.fn(),
       approvals: [approvalRow()],
-      appliedStatus: { current_apply: null, newest_approval: null },
+      appliedStatus: appliedStatus({ current_apply: null, newest_approval: null }),
     });
 
     expect(screen.queryByTestId('apply-live')).toBeNull();

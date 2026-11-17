@@ -162,6 +162,31 @@ const strategyMocks = vi.hoisted(() => ({
   },
 }));
 
+vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-applied', async () => {
+  const { candidateDocument } = await import('@/test/simulation-fixture');
+  const document = candidateDocument({ id: 'novel-writing' });
+  return {
+    useStrategyApplied: () => ({
+      data: {
+        current_apply: {
+          apply_id: 'app_1',
+          approval_id: 'apr_42',
+          content_hash: 'hash-1',
+          applied_at: '2026-11-13T01:00:00Z',
+          supersedes_apply_id: null,
+        },
+        newest_approval: null,
+        applied_document: document,
+        applied_document_refusal: null,
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      isPending: false,
+      refetch: () => Promise.resolve(undefined),
+    }),
+  };
+});
 vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => {
   const strategyState = {
     graphQuery: strategyMocks.graphQuery,
