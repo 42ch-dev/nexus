@@ -250,7 +250,9 @@
       "livePrefix": "实时：",
       "liveStatus": "",
       "staging": "暂存",
-      "addPattern": "添加模式…"
+      "addPattern": "添加模式…",
+      "editApplied": "编辑此策略",
+      "editAppliedHint": "在 Compose 中打开此策略的候选文档——只有再次批准并应用后，正在运行的预设才会改变。"
     },
     "node": {
       "status": {

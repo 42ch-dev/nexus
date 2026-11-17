@@ -580,6 +580,60 @@ fn descriptor_round_trips_intake_mode_and_legacy_bytes_hold() {
     );
 }
 
+/// A run admitted while `yaml-only` was live recorded that spelling on its
+/// descriptor. Recovery must refuse it by name — not as a bare unknown-variant
+/// parse error, and never as `IrOnly`: mapping it would silently switch the
+/// document source the run executes, which is the outcome the arm's removal
+/// refuses (I-000509).
+#[tokio::test]
+async fn recorded_retired_intake_mode_refuses_by_name() {
+    // A real recorded descriptor, respelled to the arm that was live when the
+    // row was written.
+    let mut recorded =
+        serde_json::to_value(test_descriptor("sess")).expect("descriptor serializes");
+    recorded["intake_mode"] = serde_json::json!("yaml-only");
+
+    let error = serde_json::from_value::<RunDescriptorV1>(recorded.clone())
+        .expect_err("a recorded retired intake mode must not decode");
+    let message = error.to_string();
+    assert!(
+        message.contains("intake_mode_retired"),
+        "the refusal is a named one: {message}"
+    );
+    assert!(
+        message.contains("'yaml-only'"),
+        "the refusal names the recorded value: {message}"
+    );
+
+    // The recovery read over a row carrying those bytes reports the same named
+    // cause, not a JSON-corruption error: `load_run` is what a restart uses.
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, status,
+             current_task_id, context_json, created_at, updated_at,
+             execution_version, state_revision, run_state_json, run_descriptor_json)
+         VALUES ('sess-yaml-only', 'ctr_t', 'test-preset', 3, 'running', 'task_a',
+                 '{\"data\":{}}', 1756990000, 1756990300,
+                 1, 0, ?, ?)",
+    )
+    .bind(serde_json::to_vec(&RunStateV1::default()).expect("state serializes"))
+    .bind(serde_json::to_vec(&recorded).expect("descriptor serializes"))
+    .execute(&*pool)
+    .await
+    .expect("seed a descriptor recorded under the retired arm");
+
+    let err = storage
+        .load_run(&SessionId("sess-yaml-only".to_string()))
+        .await
+        .expect_err("a recorded retired intake mode is not replayable");
+    assert!(
+        format!("{err:?}").contains("intake_mode_retired"),
+        "recovery names the retired mode: {err:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // 4. Unchanged legacy / corrupt evidence
 // ---------------------------------------------------------------------------

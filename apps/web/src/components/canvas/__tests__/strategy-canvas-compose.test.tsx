@@ -793,4 +793,54 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
     expect(composeCalls).toBe(0);
   });
+
+  it('gives the read-only applied view one authoring entry and opens Compose from it', async () => {
+    window.localStorage.removeItem(COMPOSE_FLAG_STORAGE_KEY);
+    let candidateReads = 0;
+    useHandlers(
+      http.get(APPLIED_PATH, () =>
+        HttpResponse.json({
+          current_apply: {
+            apply_id: 'app_1',
+            approval_id: 'apr_42',
+            content_hash: 'hash-1',
+            applied_at: '2026-11-13T01:00:00Z',
+            supersedes_apply_id: null,
+          },
+          newest_approval: null,
+          applied_document: SEED,
+          applied_document_refusal: null,
+        }),
+      ),
+      // What Compose seeds from: the strategy's candidate, a successor of the
+      // applied document (never the applied bytes themselves).
+      http.get(CANDIDATE_PATH, () => {
+        candidateReads += 1;
+        return HttpResponse.json({ ...SEED, revision: 4 });
+      }),
+      http.get(PATTERNS_PATH, () =>
+        HttpResponse.json({ items: patternItems(false), pagination: { limit: 100, has_more: false } }),
+      ),
+    );
+
+    renderCanvas();
+    await screen.findByRole('button', { name: 'Simulate…' });
+    // Applied view, flag off: nothing is authored in place (no canvas gesture,
+    // no transition author) — every editing affordance is disabled.
+    expect(shellProps.current.onConnect).toBeUndefined();
+    expect(shellProps.current.onReconnect).toBeUndefined();
+    expect(screen.queryByTestId('strategy-add-pattern')).not.toBeInTheDocument();
+
+    // The one authoring entry is reachable, and it states what it seeds from.
+    expect(screen.getByTestId('strategy-edit-applied-hint')).toHaveTextContent(
+      "Opens Compose on this strategy's candidate document",
+    );
+    fireEvent.click(screen.getByTestId('strategy-open-compose'));
+
+    // Compose is enabled and the write affordance (nest) is now offered.
+    expect(await screen.findByTestId('strategy-staging')).toBeInTheDocument();
+    expect(await screen.findByTestId('strategy-add-pattern')).toBeInTheDocument();
+    await waitFor(() => expect(candidateReads).toBe(1));
+    expect(screen.queryByTestId('strategy-open-compose')).not.toBeInTheDocument();
+  });
 });

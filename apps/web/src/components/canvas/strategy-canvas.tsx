@@ -76,7 +76,8 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   // Canvas renders the applied preset with no composition surface.
   const composeFlag = useStrategyCanvasComposeFlag();
   // D16(a): Compose is the never-applied state's one action, so it must be
-  // reachable for a creator whose entrance defaults the flag off.
+  // reachable for a creator whose entrance defaults the flag off — and from the
+  // read-only applied view, which otherwise renders a strategy nobody can edit.
   const [composeByUser, setComposeByUser] = useState(false);
   const composeEnabled = composeFlag || composeByUser;
   // D18: one status read carries the identity, the frozen applied document and
@@ -488,6 +489,10 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         onSimulate={handleSimulate}
         staging={composeEnabled}
         onAddPattern={composeEnabled ? () => setPatternPickerOpen(true) : undefined}
+        // D16(a) read from a state that has content: the flag-off applied view
+        // is read-only, so this is the one way to author — Compose, seeded from
+        // the strategy's candidate (the hint in the header says so).
+        onEditApplied={appliedView && !composeEnabled ? () => setComposeByUser(true) : undefined}
       />
 
       {surface.showAlt && parsed ? (

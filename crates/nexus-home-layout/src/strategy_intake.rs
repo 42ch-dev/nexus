@@ -14,10 +14,11 @@
 
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// Which document a user-bundle run executes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum StrategyIntakeMode {
     /// IR-primary (the default and only arm): a current apply runs its
@@ -25,6 +26,33 @@ pub enum StrategyIntakeMode {
     /// with no current apply refuses before graph construction — never a YAML
     /// fallback.
     IrOnly,
+}
+
+/// Hand-written so a descriptor recorded while the `yaml-only` arm was live
+/// refuses by name instead of reading as an unknown variant — or, worse, as
+/// `ir-only`.
+///
+/// The enum has one arm, so a derived `Deserialize` would answer a recorded
+/// `"yaml-only"` with a bare `unknown variant` message: recovery would fail as
+/// a parse error with no cause named, for a run that is legitimately
+/// non-replayable. Every other value outside `ir-only` refuses the same way,
+/// so a hand-edited row cannot select an arm either.
+impl<'de> Deserialize<'de> for StrategyIntakeMode {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "ir-only" => Ok(Self::IrOnly),
+            "yaml-only" => Err(D::Error::custom(
+                "intake_mode_retired: the run descriptor records [strategy_intake] mode \
+                 'yaml-only', which was removed at v1.244.0; that run cannot be rebuilt — \
+                 admit a new run under 'ir-only', which executes a user bundle's current apply \
+                 and refuses a bundle with none",
+            )),
+            other => Err(D::Error::custom(format!(
+                "intake_mode_invalid: the run descriptor records [strategy_intake] mode \
+                 '{other}', expected 'ir-only'"
+            ))),
+        }
+    }
 }
 
 /// Whether `preset_id` resolved to a user bundle — the only source intake
