@@ -13,7 +13,7 @@ Source: migrated from the retired tracked specs corpus
 
 The decision is to adopt the published upstream `spoke-memory` protocol as the memory family, at the 0.16.0 lockstep, rather than define a Nexus-specific wire contract or extend `KnowledgeEntry` / `modules.memory` to carry memory.
 
-Nexus's current consumption is described in [`spoke-memory-provider-binding.md`](../../../../docs/specs/architecture/spoke-memory-provider-binding.md) and [`spoke-memory-conformance-staging.md`](../../../../docs/specs/architecture/spoke-memory-conformance-staging.md): the local provider is the default, remote binding is an opt-in Connect client, the base operations plus reflection are wired through `MemoryPort`, and transfer/import-export remain explicitly unsupported as N4-T. Operation names, wire fields, and `MEM-R###` invariants are owned by the published upstream protocol and are referenced, not restated here.
+Nexus's current consumption is described in [`spoke-memory-provider-binding.md`](../../../../docs/specs/architecture/spoke-memory-provider-binding.md) and [`spoke-memory-conformance-staging.md`](../../../../docs/specs/architecture/spoke-memory-conformance-staging.md): the local provider is the default, remote binding is an opt-in Connect client, the base operations plus reflection are wired through `MemoryPort`, and transfer/import-export remain explicitly unsupported as N4-T. Operation names, wire fields, and `MEM-R###` invariants are owned by the published upstream protocol and are referenced, not restated here. Section numbers cited as `§N` throughout this record are that publication's numbering, not headings of this file.
 
 ## Alternatives considered
 
@@ -55,6 +55,6 @@ The adopted contract fixes these boundaries and non-goals:
 - No transport definition beyond mapping onto the existing SPOKE Connect envelope (`schemas/connect/*`, verified §18). No HTTP routes, headers, or methods appear in this protocol.
 - No mandate of identical ranking, summarization, or reflection algorithms across providers (§9, item 2). Algorithm policy is engine-versioned, not protocol-versioned.
 - No space-creation or provider-bootstrap operation: spaces and initial administrator grants are provider-operator provisioned out of band (§7.0.6). No product identity model: `Subject` is a stable opaque ID with optional namespaced kind metadata; the protocol never closes the kind vocabulary to `Creator|Character` or any product enum, and equal subject IDs across systems never auto-link identities (MEM-R002).
-- No changes to `BaselinePorts`, the six baseline port families, the core op table (`upsert|promote|relate|check|assemble|project|compute|extract`), or the `port.*` D4 catalogue, except the additive extension points listed in §13 and in the companion implementation plan.
+- No changes to `BaselinePorts`, the six baseline port families, the core op table (`upsert|promote|relate|check|assemble|project|compute|extract`), or the `port.*` D4 catalogue, except the additive extension points listed in §13.
 
 ---

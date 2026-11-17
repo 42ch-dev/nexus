@@ -2,7 +2,7 @@
 
 Status: proposed — P4 and P5 are complete and P6 is five of seven conditions in. P3 shipped in v1.239 (#515), P3.5 Apply/Execute in v1.241 (#520), the applied-identity half of P4 in v1.242 and the rest of P4 with P5 in v1.243; P6 conditions 3, 5, 6 and 7 shipped in v1.243 (a committed `preset export` generator, a CI byte gate, the pin re-comparison at Apply and recovery, a partner-bundle import path with its deprecation note, and the `yaml-only` kill-switch), condition 1 shipped in v1.245 (#528) — twenty `crates/nexus-preset/ir-twins/<id>.workflow.ir.json` twins produced by `nexus42 preset export-ir` through one key-sorted serializer, gated by `crates/nexus-preset/tests/embedded_ir_twins.rs` on stale, missing, orphan and non-canonical drift — while conditions 2 and 4 remain: `parsePresetYaml` confined to an import wizard that does not exist, and a Generate entry point. All shipped parts are governed by the composition spec, not by this record, which carries only what is still open.
 Date: 2026-11-10
-Scope: The still-unshipped part of the cutover — the dual-read loader, IR-primary authoring, and retirement of the hand-authored YAML main path while retaining `preset.yaml` import/export. The Canvas composition surface, the compose operations, the pattern packages, the candidate lifecycle **up to Approve** (v1.239) and **Apply/Execute** (v1.241) shipped and are owned by the composition spec.
+Scope: The still-unshipped part of the cutover — P6's two open retirement conditions: `parsePresetYaml` confined to an import wizard that does not exist, and a Generate entry point. Everything else shipped and is owned by the composition spec: the Canvas composition surface, the compose operations, the pattern packages and the candidate lifecycle **up to Approve** (v1.239), **Apply/Execute** (v1.241), the P4 dual-read loader (v1.242–v1.243) and P5 IR-primary authoring (v1.243), with `preset.yaml` import/export retained.
 Source: split from the archived Canvas + Workflow IR redesign and Dynamic Workflow Generation and Orchestration Simulation records
 
 ## Problem
@@ -12,21 +12,23 @@ P2 shipped the [strategy simulation fence](../../implemented/architecture/2026-1
 P3 shipped composition and approval in v1.239, and P3.5 shipped Apply/Execute in v1.241. Canvas
 composes, packages are published with pinned identity, a candidate can be simulated and approved,
 and an approved snapshot now becomes the identity production intake reads. What the cutover still
-lacks:
+lacked when this section was written — P4 and P5 have since shipped, and P6's conditions 2 and 4 are
+the remainder:
 
 Two stakes that drove this record are closed and are kept only because they explain why the
 remaining stages are shaped as they are: approved identity is no longer persisted-but-never-applied,
-and the candidate lifecycle no longer stops at Approve. Both were closed with a limit rather than
-cleanly, and only one of those limits is still live: durability was the first and it is closed — the
-applied identity now survives admission and recovery (I-000443) — while a document can still be
-applied that intake later refuses to build (I-000448).
+and the candidate lifecycle no longer stops at Approve. Each was closed with a limit rather than
+cleanly, and both limits are closed too: the applied identity survives admission and recovery
+(I-000443), and an unbuildable document no longer applies — `validate_ir_buildability` runs in
+`crates/nexus-core/src/apply.rs` before the apply row is written, so the refusal intake would raise
+(I-000448) lands as `DocumentUnbuildable` at Apply instead.
 
-1. **Production intake is still YAML-first.** A controlled dual-read transition has to exist before
-   IR-primary execution can replace the YAML-only mapper. It can begin on imported preset bundles —
-   today's intake — but the applied path now exists, so dual-read is a loader decision rather than
-   a missing stage.
+1. **Production intake was still YAML-first.** A controlled dual-read transition had to exist before
+   IR-primary execution could replace the YAML-only mapper. It could begin on imported preset bundles
+   — the intake of the time — but the applied path already existed, so dual-read was a loader decision
+   rather than a missing stage.
 2. **New strategy authoring, compatibility export, and retirement of the hand-authored YAML main path**
-   need explicit exit criteria so the two grammars do not evolve independently.
+   needed explicit exit criteria so the two grammars would not evolve independently.
 
 ## Proposal
 
