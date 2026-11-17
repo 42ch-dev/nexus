@@ -146,8 +146,10 @@ pub enum PresetCommand {
     /// `lint_exhausted` payload (rounds, every violation with its correction,
     /// and the message) and nothing is persisted; `--json` emits that payload
     /// verbatim. A survivor is committed at `base-revision + 1` and printed as
-    /// the candidate document with its semantic warnings — never as a live
-    /// strategy: validate, simulate and approve are separate steps.
+    /// a human summary (strategy, revision, provenance, warning count, next
+    /// steps); `--json` prints the committed candidate document with its
+    /// semantic warnings instead — never a live strategy: validate, simulate
+    /// and approve are separate steps.
     Generate {
         /// Strategy id the candidate belongs to (also the document id)
         strategy_id: String,
@@ -344,8 +346,33 @@ async fn generate_candidate(
     .await;
     let outcome = finish_direct(&core, outcome).await?;
 
-    println!("{}", serde_json::to_string_pretty(&outcome.wire())?);
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&outcome.wire())?);
+    } else {
+        print!("{}", render_generate_summary(&outcome));
+    }
     Ok(())
+}
+
+/// The human rendering of a committed candidate.
+///
+/// The document is the machine payload (`--json`), so the summary names it instead of reprinting
+/// it: what was generated, at which revision, from which provenance, how many warnings the passing
+/// round carried, and the chain that has to follow — the commit is a candidate, never a live
+/// strategy.
+fn render_generate_summary(outcome: &nexus_core::GenerateOutcome) -> String {
+    let document = &outcome.candidate.document;
+    format!(
+        "generated candidate for strategy `{}` at revision {}\n\
+         provenance: {}\n\
+         warnings: {}\n\
+         next: validate the document, then simulate → approve → apply; this candidate is not a \
+         live strategy\n",
+        document.id.as_str(),
+        outcome.candidate.revision,
+        document.provenance.source,
+        outcome.warnings.len(),
+    )
 }
 
 /// Render a generate refusal: the D20 payload on exhaustion, the ordinary mapping otherwise.

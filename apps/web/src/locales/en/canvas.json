@@ -255,7 +255,9 @@
       "livePrefix": "Live:",
       "liveStatus": "",
       "staging": "Staging",
-      "addPattern": "Add pattern…"
+      "addPattern": "Add pattern…",
+      "editApplied": "Edit this strategy",
+      "editAppliedHint": "Opens Compose on this strategy's candidate document — the running preset changes only when you approve and apply again."
     },
     "node": {
       "status": {

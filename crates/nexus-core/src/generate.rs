@@ -13,10 +13,11 @@
 //!
 //! Round 1 materializes the request deterministically and touches no model. Rounds 2 and 3 hand
 //! the previous round's document and **all** of that round's corrections to the corrector. Lint is
-//! the three layers the rest of the system already uses — structural, semantic, buildability — and
-//! a round passes only when all three are silent, so semantic warnings never block. The ceiling is
-//! three rounds; exhaustion returns the LAST round's corrections and persists nothing, because the
-//! commit is reached only from a passing round.
+//! the three layers the rest of the system already uses — structural, semantic, buildability —
+//! plus the pin and slot findings Approve refuses on, and a round passes only when all of them are
+//! silent, so semantic warnings never block. The ceiling is three rounds; exhaustion returns the
+//! LAST round's corrections and persists nothing, because the commit is reached only from a passing
+//! round.
 
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
     WorkflowDocumentEffectSummary, WorkflowDocumentId, WorkflowDocumentState, WorkflowEdge,
@@ -26,6 +27,7 @@ use nexus_orchestration::capability::{PromptExecutor, PromptRequest, ToolPolicy}
 use nexus_orchestration::preset_runtime::{
     validate_ir_buildability, IrOuterGraphError, IrTemplateSource,
 };
+use nexus_pattern::PatternPackage;
 use nexus_preset::capability_catalog::BuiltinCapabilityCatalog;
 use nexus_preset::validation::{validate_workflow_ir, DiagnosticCategory, ValidationDiagnostic};
 use nexus_preset::workflow_ir::WorkflowIrError;
@@ -34,6 +36,7 @@ use nexus_workflow_ir::{
     WorkflowProvenanceSource, IR_VERSION, MAX_NEST_DEPTH,
 };
 
+use crate::compose::ComposeDiagnostic;
 use crate::strategy_candidates::conflict;
 use crate::{CoreError, CoreResult, CoreService, Principal, StrategyCandidate};
 
@@ -228,11 +231,11 @@ impl CoreService {
         let mut document = materialize(request, strategy_id)?;
         let mut round = 1;
         let warnings = loop {
-            let (bodies, _pin_diagnostics) = crate::compose::document_bodies(&document, &packages);
+            let (bodies, pin_diagnostics) = crate::compose::document_bodies(&document, &packages);
             // The rollup is derived from the bytes under lint, never trusted from the request or
             // the corrector: an under-declared fence would hide a write from Simulate and Approve.
             let summary = document_summary(&document, &bodies);
-            let linted = lint(&document, &bodies);
+            let linted = lint(&document, &bodies, &pin_diagnostics, &packages);
             if linted.violations.is_empty() {
                 document.effect_summary = summary;
                 break linted.warnings;
@@ -323,12 +326,27 @@ struct Round {
     warnings: Vec<ValidationDiagnostic>,
 }
 
-/// The three existing lint layers, in order. None of them is new; this only collects their
-/// findings into one correction list per round.
+/// The three existing lint layers, plus the pin and slot findings Approve refuses on.
 ///
-/// Layer 3 runs even when 1 and 2 already failed, so a corrector receives the whole round's
-/// corrections instead of rediscovering the remaining layers one round later.
-fn lint(document: &WorkflowDocument, bodies: &[PatternBody<'_>]) -> Round {
+/// Layers 1–3 are the ones the rest of the system uses. The last two groups are the byproduct of
+/// the same pin walk Approve runs ([`crate::compose::document_bodies`] and
+/// [`crate::compose::document_unbound_slots`]): a generated candidate must be held to the same
+/// pin/slot standard as the gate that follows it, or the generator's "this is fine" is weaker than
+/// Approve's refusal and the corrector is never told which pin or slot to fix. Approve's remaining
+/// refusals are not lint: a missing/stale/mismatched trajectory is absence of simulation evidence,
+/// and no correction can invent one. `GraphCycle` is the one asymmetry in the other direction —
+/// Approve exempts it for imported presets, while a generated candidate is not an imported preset.
+///
+/// Layers 2 and 3 run even when 1 already failed, so a corrector receives the whole round's
+/// corrections instead of rediscovering the remaining layers one round later. The pin findings come
+/// before the slot findings, Approve's order: an unavailable package still declares slots, and the
+/// pin is the root cause.
+fn lint(
+    document: &WorkflowDocument,
+    bodies: &[PatternBody<'_>],
+    pin_diagnostics: &[ComposeDiagnostic],
+    packages: &[PatternPackage],
+) -> Round {
     let mut violations = Vec::new();
     if let Err(found) = validate(&[document], bodies) {
         violations.extend(
@@ -337,6 +355,12 @@ fn lint(document: &WorkflowDocument, bodies: &[PatternBody<'_>]) -> Round {
                 .map(|violation| structural_correction(violation, document)),
         );
     }
+    violations.extend(pin_diagnostics.iter().map(compose_correction));
+    violations.extend(
+        crate::compose::document_unbound_slots(document, packages)
+            .iter()
+            .map(compose_correction),
+    );
     let semantic = validate_workflow_ir(document, &BuiltinCapabilityCatalog);
     violations.extend(semantic.errors().map(diagnostic_correction));
     if let Err(refusal) = validate_ir_buildability(document, IrTemplateSource::OwnSource) {
@@ -566,6 +590,72 @@ fn structural_correction(violation: &Violation, document: &WorkflowDocument) -> 
         kind: structural_kind(violation),
         location,
         observed,
+        correction,
+    }
+}
+
+/// One pin or slot finding from Approve's own walk as an actionable correction.
+///
+/// The three reachable kinds are exactly the three Approve refuses on; `DroppedSlotBinding` is
+/// reachable only from a compose operation that drops a binding, never from a whole-document walk,
+/// so it keeps the plain message for the one caller that can produce it.
+fn compose_correction(diagnostic: &ComposeDiagnostic) -> Correction {
+    let (kind, location, correction) = match diagnostic {
+        ComposeDiagnostic::StalePin {
+            nest_id,
+            package,
+            recorded_hash,
+            scanned_hash,
+        } => (
+            "stale_pin",
+            format!("nest {nest_id}"),
+            format!(
+                "re-pin `{nest_id}`'s child `content_hash` to `{scanned_hash}` (the bytes the \
+                 registry serves for `{package}` now), or restore the pinned bytes so they hash to \
+                 `{recorded_hash}`: Approve refuses a pin it cannot confirm"
+            ),
+        ),
+        ComposeDiagnostic::PinUnavailable {
+            nest_id,
+            package,
+            recorded_hash,
+            ..
+        } => (
+            "pin_unavailable",
+            format!("nest {nest_id}"),
+            format!(
+                "pin a `{}` version the registry resolves under the patterns root, or drop nest \
+                 `{nest_id}`; it records content hash `{recorded_hash}`, and Approve refuses a pin \
+                 with no bytes to confirm",
+                package.id
+            ),
+        ),
+        ComposeDiagnostic::UnboundRequiredSlot {
+            nest_id,
+            package,
+            slot,
+        } => (
+            "unbound_required_slot",
+            format!("nest {nest_id}"),
+            format!(
+                "bind slot `{slot}` on `{nest_id}`'s parent node (`bind.{slot}` must name a \
+                 value), or remove the nest: pattern `{package}` declares it required, and \
+                 Approve refuses an unbound required slot"
+            ),
+        ),
+        ComposeDiagnostic::DroppedSlotBinding { nest_id, slot } => (
+            "dropped_slot_binding",
+            format!("nest {nest_id}"),
+            format!(
+                "drop `bind.{slot}` from `{nest_id}`'s parent node: the flattened fragment \
+                 addresses no slot by that name, so the binding has nowhere to land"
+            ),
+        ),
+    };
+    Correction {
+        kind,
+        location,
+        observed: diagnostic.to_string(),
         correction,
     }
 }
@@ -1074,8 +1164,8 @@ mod tests {
     }
 
     #[test]
-    fn the_legal_fixture_passes_all_three_layers() {
-        let round = lint(&legal_document(), &[]);
+    fn the_legal_fixture_passes_every_layer() {
+        let round = lint(&legal_document(), &[], &[], &[]);
         assert!(
             round.violations.is_empty(),
             "{:?}",
@@ -1085,6 +1175,68 @@ mod tests {
                 .map(|correction| (correction.kind, correction.observed.clone()))
                 .collect::<Vec<_>>()
         );
+    }
+
+    /// A document pinning a package the registry does not serve. Before `lint` read the pin
+    /// findings, this round still failed buildability (a `pattern_slot` is unmappable), but nothing
+    /// named the pin the registry cannot confirm — the one finding Approve refuses on.
+    #[test]
+    fn an_unresolvable_pin_is_a_correction_naming_the_pin() {
+        let document: WorkflowDocument = serde_json::from_value(json!({
+            "ir_version": 0,
+            "id": "generated",
+            "version": 1,
+            "revision": 0,
+            "state": "candidate",
+            "meta": {
+                "description": "generate fixture",
+                "kind": "creator",
+                "run_intents": ["work_init"],
+                "requires_capabilities": []
+            },
+            "entry": "slot",
+            "terminal": ["done"],
+            "nodes": [node("slot", "pattern_slot"), node("done", "terminal")],
+            "edges": [{ "id": "slot->done", "from": "slot", "to": "done", "kind": "linear" }],
+            "nests": [{
+                "id": "ghost-nest",
+                "parent_node": "slot",
+                "expansion": "expand_in_candidate",
+                "pin_policy": "exact",
+                "child": {
+                    "kind": "pattern",
+                    "registry_id": "ghost",
+                    "version": "1.0.0",
+                    "content_hash": "0".repeat(64)
+                }
+            }],
+            "assets": [],
+            "signals": [],
+            "roles": [],
+            "effect_summary": "pure",
+            "provenance": { "source": "generate" }
+        }))
+        .expect("fixture is a valid workflow document");
+
+        let (bodies, pin_diagnostics) = crate::compose::document_bodies(&document, &[]);
+        let round = lint(&document, &bodies, &pin_diagnostics, &[]);
+        let pin = round
+            .violations
+            .iter()
+            .find(|correction| correction.kind == "pin_unavailable")
+            .unwrap_or_else(|| {
+                panic!(
+                    "the round must name the pin Approve refuses: {:?}",
+                    round.violations
+                )
+            });
+        assert_eq!(pin.location, "nest ghost-nest");
+        for named in ["ghost@1.0.0", "ghost-nest"] {
+            assert!(
+                pin.observed.contains(named) || pin.correction.contains(named),
+                "the pin correction must name `{named}`: {pin:?}"
+            );
+        }
     }
 
     #[test]

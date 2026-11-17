@@ -439,9 +439,14 @@ impl IrOuterGraphError {
 /// `nodes[kind=outer_state]` only, so the kind spelling is refused
 /// permanently and [`IrOuterGraphError::standalone_node_kind`] names the
 /// carrier to author instead. `pattern_slot` / `nest_group` have no execution
-/// row at all. A `nests[]` binding is not refused: the projection never reads
-/// it, and the pinned body it names is verified by the apply's pin snapshot at
-/// admission and recovery instead, so a document may carry bindings and build.
+/// row at all. A `nests[]` binding is not itself a refusal reason, and the
+/// projection never reads one — the pinned body it names is verified by the
+/// apply's pin snapshot at admission and recovery. What a binding *implies* is
+/// what refuses it in practice: structure validation requires every binding's
+/// `parent_node` to be a `pattern_slot` or `nest_group`, and both kinds are
+/// refused above, so an unexpanded composition cannot build here. The binding
+/// record on an already-expanded document is carried and ignored, which is why
+/// this function still does not look at `nests[]`.
 fn refuse_unmappable(document: &WorkflowDocument) -> Result<(), IrOuterGraphError> {
     for node in &document.nodes {
         match node.kind {
