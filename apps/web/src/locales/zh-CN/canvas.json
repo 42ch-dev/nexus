@@ -427,7 +427,8 @@
         "saved": "已保存",
         "saveFailed": "保存失败",
         "saving": "保存中…",
-        "updated": "提示词模板已保存"
+        "updated": "提示词模板已保存",
+        "structuralDisabled": "画布渲染的是文档，而非此编辑器写入的预设 YAML，且 Compose 没有提示词正文的操作。请用 `nexus42 preset patch prompt <策略> <状态> --template-ref <路径> --file <路径>` 编辑模板后重新加载。"
       },
       "stateId": "状态 ID",
       "status": "状态",

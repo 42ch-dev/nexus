@@ -299,9 +299,11 @@ export function createStrategyCanvasAdapter(
                 saveStatus={ctx.saveStatuses.prompt}
                 onSaveStatus={(s) => ctx.onSaveStatus('prompt', s)}
                 onConflict={ctx.handleConflict}
-                // The applied document is frozen; a prompt body is authored in
-                // Compose, never patched into the running strategy's file.
-                structuralWritesDisabled={ctx.appliedView}
+                // Neither rendered document is the preset YAML this editor
+                // writes: the applied view is frozen, and no compose op sets a
+                // prompt body. A Save here would rewrite the bundle template
+                // behind the candidate and leave the candidate untouched.
+                structuralWritesDisabled={Boolean(ctx.compose) || ctx.appliedView}
               />
             </div>
           ) : null}

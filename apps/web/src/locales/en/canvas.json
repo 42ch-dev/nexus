@@ -434,7 +434,8 @@
         "saved": "Saved",
         "saveFailed": "Save failed",
         "saving": "Saving…",
-        "updated": "Prompt template saved"
+        "updated": "Prompt template saved",
+        "structuralDisabled": "The canvas renders a document, not the preset YAML this editor writes, and Compose has no prompt-body operation. Edit the template with `nexus42 preset patch prompt <strategy> <state> --template-ref <path> --file <path>` and reload."
       },
       "stateId": "State ID",
       "status": "Status",

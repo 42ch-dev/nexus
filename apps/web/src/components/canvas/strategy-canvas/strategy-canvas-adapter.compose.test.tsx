@@ -6,7 +6,7 @@
  * no YAML branch: the Canvas renders the applied IR document (P6 condition 2).
  */
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import type { MutableRefObject } from 'react';
 
 import type { WorkflowDocument } from '@42ch/nexus-contracts';
@@ -159,11 +159,13 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
     expect(client.strategyPatchState).not.toHaveBeenCalled();
   });
 
-  it('keeps the prompt editor writable on a compose candidate', () => {
+  it('refuses a prompt Save on a compose candidate, which no compose op can write', async () => {
     const client = { strategyPatchPromptTemplate: vi.fn() } as unknown as NexusClient;
+    const workingRevisionRef = { current: 7 };
     const adapter = createStrategyCanvasAdapter(
       ctxRef({
         appliedView: false,
+        workingRevisionRef,
         selectedState: {
           id: 'draft',
           next: 'done',
@@ -171,6 +173,9 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
         } as PresetState,
         promptTemplateRef: 'prompts/draft.md',
         form: { label: '', description: '', nextTarget: '', promptBody: '# edited prompt' },
+        // Cmd/Ctrl+S reaches handleSave without a click, so the refusal has to
+        // hold on that path as well as on the button.
+        saveTriggers: { state: 0, transition: 0, prompt: 1 },
         compose: {
           isComposing: false,
           onToggleSlotExpanded: () => {},
@@ -183,15 +188,31 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
 
     renderInApp(<>{adapter.renderInspector?.(null as never)}</>, { client });
 
-    // A prompt body on the candidate is content its author still owns; only the
-    // read-only applied view disables it.
+    // The refusal is the behaviour, not just a disabled attribute: the Cmd/Ctrl+S
+    // trigger armed at mount must not reach the writer, so no preset-YAML
+    // revision moves behind the candidate on display. The mutation runs a
+    // microtask after it is requested, hence the flush.
+    await act(async () => {});
+    expect(client.strategyPatchPromptTemplate).not.toHaveBeenCalled();
+    expect(workingRevisionRef.current).toBe(7);
+
     const prompt = screen.getByRole('region', { name: 'Prompt inspector' });
-    expect(within(prompt).queryByTestId('prompt-structural-disabled')).toBeNull();
-    expect(within(prompt).getByRole('textbox')).not.toBeDisabled();
-    expect(within(prompt).getByRole('button', { name: 'Save' })).not.toBeDisabled();
+    const save = within(prompt).getByRole('button', { name: 'Save' });
+    fireEvent.click(save);
+    await act(async () => {});
+    expect(client.strategyPatchPromptTemplate).not.toHaveBeenCalled();
+
+    // The only write this editor can reach is the legacy preset-YAML writer,
+    // which rewrites a bundle template and never the candidate on display. The
+    // editor states that limitation and the route that does reach the template.
+    expect(within(prompt).getByRole('textbox')).toBeDisabled();
+    expect(save).toBeDisabled();
+    expect(within(prompt).getByTestId('prompt-structural-disabled')).toHaveTextContent(
+      /no prompt-body operation.*nexus42 preset patch prompt/,
+    );
   });
 
-  it('keeps the applied view read-only: every YAML editor refuses its write and names Compose', () => {
+  it('keeps the applied view read-only: every YAML editor refuses its write', () => {
     const client = {
       strategyPatchState: vi.fn(),
       strategyPatchTransition: vi.fn(),
@@ -234,7 +255,9 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
     fireEvent.click(transitionSave);
 
     const prompt = screen.getByRole('region', { name: 'Prompt inspector' });
-    expect(within(prompt).getByTestId('prompt-structural-disabled')).toHaveTextContent(reason);
+    expect(within(prompt).getByTestId('prompt-structural-disabled')).toHaveTextContent(
+      /no prompt-body operation/,
+    );
     expect(within(prompt).getByRole('textbox')).toBeDisabled();
     const promptSave = within(prompt).getByRole('button', { name: 'Save' });
     expect(promptSave).toBeDisabled();

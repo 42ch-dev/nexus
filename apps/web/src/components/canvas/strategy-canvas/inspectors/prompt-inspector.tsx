@@ -65,8 +65,9 @@ interface PromptInspectorProps {
   onSaveStatus: (status: SaveStatus | undefined) => void;
   onConflict: (currentRevision: number, section: Section) => void;
   /**
-   * The applied document is the rendered source: its prompt body is frozen, so
-   * the editor stays visible but inert with its reason (P6).
+   * The preset YAML this writer targets is never the rendered document — the
+   * applied view is frozen and a compose candidate has no prompt-body operation
+   * — so the editor stays visible but inert with its reason (P6).
    */
   structuralWritesDisabled?: boolean;
 }
@@ -91,8 +92,8 @@ export function PromptInspector({
   const lastHandledTriggerRef = useRef(0);
 
   const handleSave = useCallback(async () => {
-    // The applied document is not written in place, so the prompt patch (the
-    // one write that bypasses the YAML authority) is refused here too.
+    // No canvas document is the preset YAML this patch writes, so the Save is
+    // refused rather than rewriting a bundle template behind the candidate.
     if (structuralWritesDisabled || !dirty || patch.isPending) return;
     onSaveStatus(undefined);
 
@@ -156,7 +157,7 @@ export function PromptInspector({
       />
       {structuralWritesDisabled ? (
         <p data-testid="prompt-structural-disabled" className="text-copy-12 text-gray-700">
-          {t('strategy.inspector.structuralDisabled')}
+          {t('strategy.inspector.prompt.structuralDisabled')}
         </p>
       ) : saveStatus ? (
         <p
