@@ -4289,8 +4289,9 @@ async fn compute_run_settlement_fault_answers_the_committed_effect_refusal() {
 // reads core's own `host_tool_registry`, so it cannot live with the peer
 // contracts in `nexus-connect` — connect has no core edge by design.
 
-/// The 26 shipped `nexus.*` host-tool ids (V1.59 P0 roster, minus the retired
-/// `nexus.reference.refresh` and `nexus.research.query`).
+/// The 27 shipped `nexus.*` host-tool ids (V1.59 P0 roster, minus the retired
+/// `nexus.reference.refresh` and `nexus.research.query`, plus the v1.247 P6
+/// `nexus.strategy.generate`).
 const NEXUS_TOOL_IDS: &[&str] = &[
     "nexus.context.whoami",
     "nexus.workspace.info",
@@ -4298,6 +4299,8 @@ const NEXUS_TOOL_IDS: &[&str] = &[
     "nexus.work.patch",
     "nexus.orchestration.schedule_status",
     "nexus.context.assemble",
+    // v1.247 P6: the generate kernel's agent-tool surface.
+    "nexus.strategy.generate",
     "nexus.world.snapshot.get",
     "nexus.timeline.recent.get",
     "nexus.kb_snapshot.read",
@@ -4347,8 +4350,8 @@ fn host_tool_registry_roster_is_the_declared_nexus_surface() {
     }
     assert_eq!(
         registry.len(),
-        28,
-        "the registry holds the 26 nexus.* ids plus the 2 fs/* ids"
+        29,
+        "the registry holds the 27 nexus.* ids plus the 2 fs/* ids"
     );
 
     for profile_id in [
