@@ -139,16 +139,23 @@ the row says which, and §6 keeps the pre-migration shape as history.
   the context lifetime (activity fence across all nested effects).
   Evidence: `BearerCapability::Writable` (`crates/nexus-core/src/memory_pipeline.rs`).
 - Fragment promotion is revision-CAS, and the two layers behave differently. At
-  the Core entry, `CoreService::promote_character_fragment` projects the record
-  and refuses before any provider call: an already-shared fragment is the
-  `character_fragment_already_shared` conflict (after it settles an outstanding
-  SOUL-narrative invalidation), and a projected revision that is not
-  `expected_revision + 1` is the retained `version_mismatch` conflict (409). The
-  provider's own promotion (`promote_record`) is where a duplicate request is the
-  §7.0.4 no-op that keeps the revision; a real change commits the requested
-  shared placement and bumps the revision once, and provenance is untouched.
-  Evidence: `crates/nexus-core/src/memory.rs` and
-  `crates/nexus-memory-provider/src/storage.rs`.
+  the Core entry, `CoreService::promote_character_fragment` reads the record
+  through the provider (`MemoryAdapter::character_fragment` → `port.get_record`)
+  and then refuses before the provider's *promotion* method is called: an
+  already-shared fragment is the `character_fragment_already_shared` conflict
+  (after it settles an outstanding SOUL-narrative invalidation), and a projected
+  revision that is not `expected_revision + 1` is the retained
+  `version_mismatch` conflict (409). The provider's `promote_record` decides in
+  this order: a duplicate idempotency key probes the recorded intent and settles
+  as a replay; a new request whose `expected_revision` is stale returns
+  `RevisionConflict` and never reaches the placement branch; and a request that
+  passes the revision check while naming the placement the record already holds
+  is the §7.0.4 no-op that keeps the revision and commits the receipt with no
+  effect recorded. A request that changes the placement commits it with one
+  revision bump, and provenance is untouched either way. Evidence:
+  `crates/nexus-core/src/memory.rs` (`character_fragment`,
+  `promote_character_fragment`) and
+  `crates/nexus-memory-provider/src/storage.rs` (`promote_record`).
 - Durable receipts: `crates/nexus-core/src/operation_receipts.rs` owns
   the **read side** of the durable operation-receipts store (spec
   `connect-event-delivery-and-operation-receipts.md` §B.2/§B.3); the frozen
