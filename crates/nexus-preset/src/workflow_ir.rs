@@ -1,9 +1,9 @@
 //! `PresetManifest` ↔ [`WorkflowDocument`] import adapter (Workflow IR v0).
 //!
 //! Import is a projection, never a second grammar: every executable preset carrier (`signals`,
-//! `roles`, `initial_action`, `gates`, `cli_args`, inner-graph `output_binding`, every `exit_when`
-//! kind) lands in an IR field, and [`export_preset`] rebuilds the manifest from those fields
-//! alone. [`PresetSourceIdentity`](crate::source_identity::PresetSourceIdentity) is untouched —
+//! `roles`, `initial_action`, `gates`, `cli_args`, `world_binding`, inner-graph
+//! `output_binding`, every `exit_when` kind) lands in an IR field, and [`export_preset`] rebuilds
+//! the manifest from those fields alone. [`PresetSourceIdentity`](crate::source_identity::PresetSourceIdentity) is untouched —
 //! this adapter neither reads nor redefines the preset content hash.
 //!
 //! v0 mapping choices:
@@ -31,7 +31,7 @@ use crate::manifest::{
     ConvergeStrategy, EnterAction, ExitWhen, GoNogoNext, GraphNode, GraphNodeKind, InitialAction,
     InnerGraph, LabeledNext, MergeKind, NextTarget, PresetCliArg, PresetCliArgType, PresetHeader,
     PresetKind, PresetManifest, RunIntent, SignalAction, SignalActionKind, SignalBinding,
-    StateDefinition,
+    StateDefinition, WorldBinding, WorldBindingMode,
 };
 use include_dir::Dir;
 use nexus_contracts::local::orchestration::preset_gate::{Gate, GateOp, PreviousPresetStatus};
@@ -45,6 +45,7 @@ use nexus_workflow_ir::{
     WorkflowMetaRunIntentsItem, WorkflowNode, WorkflowNodeEffectClass, WorkflowNodeKind,
     WorkflowNodeStepKind, WorkflowNodeUi, WorkflowProvenance, WorkflowProvenanceSource,
     WorkflowRoleDefinition, WorkflowSignalBinding, WorkflowSignalBindingAction,
+    WorkflowWorldBinding, WorkflowWorldBindingMode,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
@@ -343,6 +344,12 @@ fn document_from_manifest(
             requires_capabilities: header.requires_capabilities.clone(),
             cli_args: header.cli_args.iter().map(cli_arg_ir).collect(),
             gates: header.gates.iter().map(gate_ir).collect(),
+            world_binding: header.world_binding.map(|binding| WorkflowWorldBinding {
+                mode: match binding.mode {
+                    WorldBindingMode::Required => WorkflowWorldBindingMode::Required,
+                    WorldBindingMode::Optional => WorkflowWorldBindingMode::Optional,
+                },
+            }),
         },
         entry: header.initial.clone(),
         initial_action: header.initial_action.as_ref().map(initial_action_ir),
@@ -650,7 +657,7 @@ fn context_update_ir(hook: &ContextUpdateHook) -> WorkflowContextUpdate {
     let (op, body, capability, patch_json, remove_path) = match &hook.op {
         ContextUpdateOp::Append { body } => (
             WorkflowContextUpdateOp::Append,
-            Some(body.clone()),
+            body.clone(),
             None,
             None,
             None,
@@ -659,12 +666,12 @@ fn context_update_ir(hook: &ContextUpdateHook) -> WorkflowContextUpdate {
             WorkflowContextUpdateOp::StructMerge,
             None,
             None,
-            Some(patch.clone()),
+            patch.clone(),
             None,
         ),
         ContextUpdateOp::Replace { body } => (
             WorkflowContextUpdateOp::Replace,
-            Some(body.clone()),
+            body.clone(),
             None,
             None,
             None,
@@ -674,7 +681,7 @@ fn context_update_ir(hook: &ContextUpdateHook) -> WorkflowContextUpdate {
             None,
             None,
             None,
-            Some(path.clone()),
+            path.clone(),
         ),
         ContextUpdateOp::LlmSummarize { capability } => (
             WorkflowContextUpdateOp::LlmSummarize,
@@ -988,6 +995,16 @@ fn preset_header(document: &WorkflowDocument) -> Result<PresetHeader, WorkflowIr
             .collect(),
         initial: document.entry.clone(),
         terminal,
+        world_binding: document
+            .meta
+            .world_binding
+            .as_ref()
+            .map(|binding| WorldBinding {
+                mode: match binding.mode {
+                    WorkflowWorldBindingMode::Required => WorldBindingMode::Required,
+                    WorkflowWorldBindingMode::Optional => WorldBindingMode::Optional,
+                },
+            }),
         author: document.meta.author.clone(),
         homepage: document.meta.homepage.clone(),
         license: document.meta.license.clone(),
@@ -1242,28 +1259,16 @@ fn context_update_preset(
 ) -> Result<ContextUpdateHook, WorkflowIrError> {
     let op = match &update.op {
         WorkflowContextUpdateOp::Append => ContextUpdateOp::Append {
-            body: update
-                .body
-                .clone()
-                .ok_or_else(|| refuse("append context update carries no body"))?,
+            body: update.body.clone(),
         },
         WorkflowContextUpdateOp::Replace => ContextUpdateOp::Replace {
-            body: update
-                .body
-                .clone()
-                .ok_or_else(|| refuse("replace context update carries no body"))?,
+            body: update.body.clone(),
         },
         WorkflowContextUpdateOp::StructMerge => ContextUpdateOp::StructMerge {
-            patch: update
-                .patch
-                .clone()
-                .ok_or_else(|| refuse("struct-merge context update carries no patch"))?,
+            patch: update.patch.clone(),
         },
         WorkflowContextUpdateOp::StructRemove => ContextUpdateOp::StructRemove {
-            path: update
-                .path
-                .clone()
-                .ok_or_else(|| refuse("struct-remove context update carries no path"))?,
+            path: update.path.clone(),
         },
         WorkflowContextUpdateOp::LlmSummarize => ContextUpdateOp::LlmSummarize {
             capability: update

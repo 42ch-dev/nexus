@@ -5,6 +5,16 @@
  */
 
 /**
+ * Preset-level World-binding requirement, carried from `preset.world_binding` (workflow-profile §5.3.4). Absent when the preset declares none.
+ */
+export type WorkflowWorldBinding = {
+  /**
+   * Whether a run must be bound to a World.
+   */
+  mode: "required" | "optional";
+} | null;
+
+/**
  * Workflow IR v0 — the single source of truth for the composed workflow document. A distinct document from `preset.yaml`: YAML is a projection, never a second grammar. Executable preset carriers (signals, roles, initial_action, cli_args, output_binding, every exit_when kind) are preserved; canvas-only nests, lifecycle state, effect fence and provenance are IR-only. `ir_version` stays 0 until P1 parity.
  */
 export interface WorkflowDocument {
@@ -104,6 +114,7 @@ export interface WorkflowMeta {
    * Capabilities the workflow requires; resolution fails when any is missing.
    */
   requires_capabilities: string[];
+  world_binding?: WorkflowWorldBinding;
   /**
    * Preset-specific CLI argument declarations.
    */

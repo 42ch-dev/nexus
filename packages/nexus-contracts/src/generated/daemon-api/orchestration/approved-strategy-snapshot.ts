@@ -5,6 +5,16 @@
  */
 
 /**
+ * Preset-level World-binding requirement, carried from `preset.world_binding` (workflow-profile §5.3.4). Absent when the preset declares none.
+ */
+export type WorkflowWorldBinding = {
+  /**
+   * Whether a run must be bound to a World.
+   */
+  mode: "required" | "optional";
+} | null;
+
+/**
  * Immutable approval of one candidate document content, returned by POST /v1/daemon/strategies/{strategy_id}/approve. The snapshot freezes the validated and simulated candidate bytes: the document, its canonical content hash, the candidate revision the approver read, the exact simulation trajectory the approval rests on, every resolved pattern pin, the approver and the approval time. It is never mutated; a later edit produces a new candidate revision and needs a new approval. Approve does not apply, schedule or execute.
  */
 export interface ApprovedStrategySnapshot {
@@ -139,6 +149,7 @@ export interface WorkflowMeta {
    * Capabilities the workflow requires; resolution fails when any is missing.
    */
   requires_capabilities: string[];
+  world_binding?: WorkflowWorldBinding;
   /**
    * Preset-specific CLI argument declarations.
    */

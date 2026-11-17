@@ -1318,6 +1318,9 @@ pub struct WorkflowMeta {
     pub requires_capabilities: ::std::vec::Vec<::std::string::String>,
     ///Declared run intents.
     pub run_intents: ::std::vec::Vec<WorkflowMetaRunIntentsItem>,
+    ///Preset-level World-binding requirement, carried from `preset.world_binding` (workflow-profile §5.3.4). Absent when the preset declares none.
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub world_binding: ::std::option::Option<WorkflowWorldBinding>,
 }
 impl WorkflowMeta {
     pub fn builder() -> builder::WorkflowMeta {
@@ -2124,6 +2127,73 @@ impl ::std::convert::TryFrom<&str> for WorkflowSignalBindingAction {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for WorkflowSignalBindingAction {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///Preset-level World-binding requirement, carried from `preset.world_binding` (workflow-profile §5.3.4). Absent when the preset declares none.
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowWorldBinding {
+    ///Whether a run must be bound to a World.
+    pub mode: WorkflowWorldBindingMode,
+}
+impl WorkflowWorldBinding {
+    pub fn builder() -> builder::WorkflowWorldBinding {
+        Default::default()
+    }
+}
+///Whether a run must be bound to a World.
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum WorkflowWorldBindingMode {
+    #[serde(rename = "required")]
+    Required,
+    #[serde(rename = "optional")]
+    Optional,
+}
+impl ::std::fmt::Display for WorkflowWorldBindingMode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Required => f.write_str("required"),
+            Self::Optional => f.write_str("optional"),
+        }
+    }
+}
+impl ::std::str::FromStr for WorkflowWorldBindingMode {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "required" => Ok(Self::Required),
+            "optional" => Ok(Self::Optional),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for WorkflowWorldBindingMode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for WorkflowWorldBindingMode {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -3766,6 +3836,10 @@ pub mod builder {
             ::std::vec::Vec<super::WorkflowMetaRunIntentsItem>,
             ::std::string::String,
         >,
+        world_binding: ::std::result::Result<
+            ::std::option::Option<super::WorkflowWorldBinding>,
+            ::std::string::String,
+        >,
     }
     impl ::std::default::Default for WorkflowMeta {
         fn default() -> Self {
@@ -3781,6 +3855,7 @@ pub mod builder {
                     "no value supplied for requires_capabilities".to_string(),
                 ),
                 run_intents: Err("no value supplied for run_intents".to_string()),
+                world_binding: Ok(Default::default()),
             }
         }
     }
@@ -3891,6 +3966,20 @@ pub mod builder {
                 });
             self
         }
+        pub fn world_binding<T>(mut self, value: T) -> Self
+        where
+            T: ::std::convert::TryInto<
+                ::std::option::Option<super::WorkflowWorldBinding>,
+            >,
+            T::Error: ::std::fmt::Display,
+        {
+            self.world_binding = value
+                .try_into()
+                .map_err(|e| {
+                    format!("error converting supplied value for world_binding: {e}")
+                });
+            self
+        }
     }
     impl ::std::convert::TryFrom<WorkflowMeta> for super::WorkflowMeta {
         type Error = super::error::ConversionError;
@@ -3907,6 +3996,7 @@ pub mod builder {
                 license: value.license?,
                 requires_capabilities: value.requires_capabilities?,
                 run_intents: value.run_intents?,
+                world_binding: value.world_binding?,
             })
         }
     }
@@ -3922,6 +4012,7 @@ pub mod builder {
                 license: Ok(value.license),
                 requires_capabilities: Ok(value.requires_capabilities),
                 run_intents: Ok(value.run_intents),
+                world_binding: Ok(value.world_binding),
             }
         }
     }
@@ -5071,6 +5162,45 @@ pub mod builder {
                 name: Ok(value.name),
                 target: Ok(value.target),
             }
+        }
+    }
+    #[derive(Clone, Debug)]
+    pub struct WorkflowWorldBinding {
+        mode: ::std::result::Result<
+            super::WorkflowWorldBindingMode,
+            ::std::string::String,
+        >,
+    }
+    impl ::std::default::Default for WorkflowWorldBinding {
+        fn default() -> Self {
+            Self {
+                mode: Err("no value supplied for mode".to_string()),
+            }
+        }
+    }
+    impl WorkflowWorldBinding {
+        pub fn mode<T>(mut self, value: T) -> Self
+        where
+            T: ::std::convert::TryInto<super::WorkflowWorldBindingMode>,
+            T::Error: ::std::fmt::Display,
+        {
+            self.mode = value
+                .try_into()
+                .map_err(|e| format!("error converting supplied value for mode: {e}"));
+            self
+        }
+    }
+    impl ::std::convert::TryFrom<WorkflowWorldBinding> for super::WorkflowWorldBinding {
+        type Error = super::error::ConversionError;
+        fn try_from(
+            value: WorkflowWorldBinding,
+        ) -> ::std::result::Result<Self, super::error::ConversionError> {
+            Ok(Self { mode: value.mode? })
+        }
+    }
+    impl ::std::convert::From<super::WorkflowWorldBinding> for WorkflowWorldBinding {
+        fn from(value: super::WorkflowWorldBinding) -> Self {
+            Self { mode: Ok(value.mode) }
         }
     }
 }

@@ -88,6 +88,20 @@
           "items": { "type": "string" },
           "description": "Capabilities the workflow requires; resolution fails when any is missing."
         },
+        "world_binding": {
+          "title": "WorkflowWorldBinding",
+          "description": "Preset-level World-binding requirement, carried from `preset.world_binding` (workflow-profile §5.3.4). Absent when the preset declares none.",
+          "type": ["object", "null"],
+          "required": ["mode"],
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["required", "optional"],
+              "description": "Whether a run must be bound to a World."
+            }
+          }
+        },
         "cli_args": {
           "type": "array",
           "items": {

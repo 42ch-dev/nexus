@@ -5,6 +5,16 @@
  */
 
 /**
+ * Preset-level World-binding requirement, carried from `preset.world_binding` (workflow-profile §5.3.4). Absent when the preset declares none.
+ */
+export type WorkflowWorldBinding = {
+  /**
+   * Whether a run must be bound to a World.
+   */
+  mode: "required" | "optional";
+} | null;
+
+/**
  * Body of a generated candidate (HTTP 200). `document` is the committed candidate at `new_revision`, so the caller replaces its candidate with this document instead of predicting server normalization. Success means structurally legal and nothing more: generate performs no validate, simulate, approve or apply step, and `warnings` are the passing round's semantic warnings.
  */
 export interface StrategyGenerateResponse {
@@ -118,6 +128,7 @@ export interface WorkflowMeta {
    * Capabilities the workflow requires; resolution fails when any is missing.
    */
   requires_capabilities: string[];
+  world_binding?: WorkflowWorldBinding;
   /**
    * Preset-specific CLI argument declarations.
    */
