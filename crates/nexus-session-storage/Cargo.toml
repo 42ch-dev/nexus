@@ -22,3 +22,8 @@ graph-flow = { version = "=0.8.1", default-features = false }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-preset = { path = "../nexus-preset" }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1.35", features = ["macros", "rt"] }
+uuid = { version = "1", features = ["v4"] }

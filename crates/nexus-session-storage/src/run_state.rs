@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::{SessionId, SessionStatus, StorageError as EngineError};
+use crate::{SessionId, SessionStatus, StorageError};
 use nexus_preset::source_identity::PresetSourceIdentity;
 
 /// Frozen server-side descriptor for a v1 run (A2).
@@ -330,8 +330,8 @@ pub trait WorkflowStateStore: Send + Sync {
     /// legacy/unverified record (`execution_version = 0`, no descriptor/state).
     ///
     /// # Errors
-    /// Returns [`EngineError`] on storage failure.
-    async fn load_run(&self, session_id: &SessionId) -> Result<Option<RunRecord>, EngineError>;
+    /// Returns [`StorageError`] on storage failure.
+    async fn load_run(&self, session_id: &SessionId) -> Result<Option<RunRecord>, StorageError>;
 
     /// Start a new v1 run with a frozen descriptor.
     ///
@@ -341,14 +341,14 @@ pub trait WorkflowStateStore: Send + Sync {
     /// real explicit new start never launders an uncertain old run.
     ///
     /// # Errors
-    /// Returns [`EngineError`] on storage failure or if the row is already v1.
+    /// Returns [`StorageError`] on storage failure or if the row is already v1.
     async fn start_run(
         &self,
         session_id: &SessionId,
         descriptor: &RunDescriptorV1,
         checkpoint: RunCheckpoint<'_>,
         next_state: &RunStateV1,
-    ) -> Result<RunRecord, EngineError>;
+    ) -> Result<RunRecord, StorageError>;
 
     /// Atomically admit a schedule as a driven v1 run (A3).
     ///
@@ -379,7 +379,7 @@ pub trait WorkflowStateStore: Send + Sync {
     /// distinct serial schedules for one creator can never both claim.
     ///
     /// # Errors
-    /// Returns [`EngineError`] on storage failure, policy refusal, or when
+    /// Returns [`StorageError`] on storage failure, policy refusal, or when
     /// the schedule is not in an admissible state.
     #[allow(clippy::too_many_arguments)] // atomic claim payload; grouping into a struct would leak the CAS-fence coupling
     async fn admit_schedule_run(
@@ -392,7 +392,7 @@ pub trait WorkflowStateStore: Send + Sync {
         core_context_version: u32,
         expected_core_context_version: u32,
         admission_gate: Option<&ScheduleAdmissionGate>,
-    ) -> Result<RunRecord, EngineError>;
+    ) -> Result<RunRecord, StorageError>;
 
     /// Atomically persist a transition under a root revision compare-and-swap.
     ///
@@ -401,7 +401,7 @@ pub trait WorkflowStateStore: Send + Sync {
     /// the persisted `state_revision` no longer equals `expected_revision`.
     ///
     /// # Errors
-    /// Returns [`EngineError`] on storage failure or revision mismatch.
+    /// Returns [`StorageError`] on storage failure or revision mismatch.
     async fn commit_transition(
         &self,
         session_id: &SessionId,
@@ -409,7 +409,7 @@ pub trait WorkflowStateStore: Send + Sync {
         checkpoint: RunCheckpoint<'_>,
         next_status: SessionStatus,
         next_state: &RunStateV1,
-    ) -> Result<RunRecord, EngineError> {
+    ) -> Result<RunRecord, StorageError> {
         self.commit_transition_with_graph_fence(
             session_id,
             expected_revision,
@@ -430,7 +430,7 @@ pub trait WorkflowStateStore: Send + Sync {
     /// may reload and retry, while failed-step anchored cleanup never rebases.
     ///
     /// # Errors
-    /// Returns [`EngineError`] on storage failure or revision/graph
+    /// Returns [`StorageError`] on storage failure or revision/graph
     /// mismatch (both surface as ownership loss).
     async fn commit_transition_with_graph_fence(
         &self,
@@ -440,7 +440,7 @@ pub trait WorkflowStateStore: Send + Sync {
         checkpoint: RunCheckpoint<'_>,
         next_status: SessionStatus,
         next_state: &RunStateV1,
-    ) -> Result<RunRecord, EngineError>;
+    ) -> Result<RunRecord, StorageError>;
 
     /// Atomically settle a run to a terminal status under the revision/graph
     /// fences (P4 §6.2).
@@ -448,10 +448,10 @@ pub trait WorkflowStateStore: Send + Sync {
     /// Consolidates cancelled/failed/completed terminal writes. On a lost CAS
     /// where the row already carries a durable terminal winner, returns
     /// [`SettlementResult::Observed`] instead of a conflict. Still-live
-    /// revision/graph contention returns [`EngineError::RevisionMismatch`].
+    /// revision/graph contention returns [`StorageError::RevisionMismatch`].
     ///
     /// # Errors
-    /// Returns [`EngineError`] on storage failure or still-live fence loss.
+    /// Returns [`StorageError`] on storage failure or still-live fence loss.
     async fn settle_run(
         &self,
         session_id: &SessionId,
@@ -460,7 +460,7 @@ pub trait WorkflowStateStore: Send + Sync {
         checkpoint: RunCheckpoint<'_>,
         next_state: &RunStateV1,
         terminal_target: TerminalSettlementTarget,
-    ) -> Result<SettlementResult, EngineError>;
+    ) -> Result<SettlementResult, StorageError>;
 
     /// Atomically restore a pre-step root snapshot via ONE revision-fenced
     /// storage operation (Important 3).
@@ -470,22 +470,22 @@ pub trait WorkflowStateStore: Send + Sync {
     /// `state_revision` still equals `expected_revision` AND the row is still
     /// non-terminal (running or paused). A concurrent transition that wins
     /// between a check and a save is never overwritten — this leaves the row
-    /// untouched and returns [`EngineError::RevisionMismatch`].
+    /// untouched and returns [`StorageError::RevisionMismatch`].
     ///
     /// Returns the restored row's [`RunRecord`] — the commit-owned clocks of
     /// THIS operation, which a failed step's witness must adopt (the restore
     /// advances only the graph clock; the workflow revision is unchanged).
     ///
     /// # Errors
-    /// Returns [`EngineError::RevisionMismatch`] when the persisted revision no
-    /// longer equals `expected_revision`; [`EngineError::TerminalState`] when
+    /// Returns [`StorageError::RevisionMismatch`] when the persisted revision no
+    /// longer equals `expected_revision`; [`StorageError::TerminalState`] when
     /// the row is no longer non-terminal.
     async fn restore_pre_step(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
         pre_step: &graph_flow::Session,
-    ) -> Result<RunRecord, EngineError>;
+    ) -> Result<RunRecord, StorageError>;
 
     /// Persist the in-flight (current-position safety) intent BEFORE an
     /// external effect dispatch (A2/A7 Important 5), so a crash after an
@@ -508,7 +508,7 @@ pub trait WorkflowStateStore: Send + Sync {
     /// the external effect must not run on an unmarked or clobbered row.
     ///
     /// # Errors
-    /// Returns [`EngineError`] on storage failure, revision/graph mismatch,
+    /// Returns [`StorageError`] on storage failure, revision/graph mismatch,
     /// or a non-step-able status.
     async fn mark_step_in_flight(
         &self,
@@ -517,7 +517,7 @@ pub trait WorkflowStateStore: Send + Sync {
         expected_graph_version: Option<u64>,
         checkpoint: RunCheckpoint<'_>,
         step_state: &RunStateV1,
-    ) -> Result<RunRecord, EngineError>;
+    ) -> Result<RunRecord, StorageError>;
 
     /// Persist the durable `PromptAttempt` dispatch intent (A2/A5) BEFORE
     /// the external Host effect, and update it to `Active` once the Host
@@ -546,9 +546,9 @@ pub trait WorkflowStateStore: Send + Sync {
     /// bypass ownership CAS (storage-level tests).
     ///
     /// # Errors
-    /// Returns [`EngineError::RevisionMismatch`] when the persisted revision
+    /// Returns [`StorageError::RevisionMismatch`] when the persisted revision
     /// no longer equals `expected_revision` (or the step marker moved, or an
-    /// unrelated operation owns `in_flight`), [`EngineError::TerminalState`]
+    /// unrelated operation owns `in_flight`), [`StorageError::TerminalState`]
     /// when the row is no longer step-able — the external effect must not
     /// run on an unmatching row.
     async fn persist_prompt_attempt(
@@ -558,7 +558,7 @@ pub trait WorkflowStateStore: Send + Sync {
         expected_step: Option<&str>,
         expected_attempt_id: Option<&str>,
         attempt: &PromptAttempt,
-    ) -> Result<(), EngineError>;
+    ) -> Result<(), StorageError>;
 
     /// Clear the durable `in_flight` prompt-attempt marker after the owning
     /// operation completed successfully.
@@ -574,7 +574,7 @@ pub trait WorkflowStateStore: Send + Sync {
     /// capability callers so the next operation can claim an empty slot.
     ///
     /// # Errors
-    /// Returns [`EngineError`] only on storage failure; fence misses are
+    /// Returns [`StorageError`] only on storage failure; fence misses are
     /// returned as `Ok(())` (idempotent).
     async fn clear_prompt_attempt(
         &self,
@@ -582,7 +582,7 @@ pub trait WorkflowStateStore: Send + Sync {
         expected_revision: u64,
         expected_step: Option<&str>,
         attempt_id: &str,
-    ) -> Result<(), EngineError>;
+    ) -> Result<(), StorageError>;
 
     /// Load all persisted child runs whose `parent_session_id` matches.
     ///
@@ -591,9 +591,9 @@ pub trait WorkflowStateStore: Send + Sync {
     /// its next `commit_transition` submits the correct child revisions.
     ///
     /// # Errors
-    /// Returns [`EngineError`] on storage failure.
+    /// Returns [`StorageError`] on storage failure.
     async fn load_children(
         &self,
         parent_session_id: &SessionId,
-    ) -> Result<Vec<RunRecord>, EngineError>;
+    ) -> Result<Vec<RunRecord>, StorageError>;
 }

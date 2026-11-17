@@ -8,8 +8,6 @@
 pub mod run_state;
 pub mod storage;
 
-pub use storage::sqlite::SqliteSessionStorage;
-
 use thiserror::Error;
 
 /// Opaque session identifier.
