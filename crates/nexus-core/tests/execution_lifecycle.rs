@@ -2007,13 +2007,13 @@ const EMBEDDED_RUN_INPUT: &str = r#"{"work_ref":"wrk-embedded-execution","topic"
 /// and the canonical hash of the document `embedded_workflow_document`
 /// constructs. Written here the way `resolve_applied_document` writes it: the
 /// test pins the production value, it does not replace the production route.
-fn embedded_run_identity(preset_id: &str) -> nexus_orchestration::run_state::AppliedRunIdentity {
+fn embedded_run_identity(preset_id: &str) -> nexus_session_storage::run_state::AppliedRunIdentity {
     let caps = nexus_preset::capability_catalog::BuiltinCapabilityCatalog;
     let loaded =
         nexus_preset::load_embedded_preset(preset_id, &caps).expect("the embedded preset loads");
     let document =
         nexus_preset::embedded_workflow_document(&loaded).expect("the document constructs");
-    nexus_orchestration::run_state::AppliedRunIdentity {
+    nexus_session_storage::run_state::AppliedRunIdentity {
         apply_id: format!("embedded:{preset_id}"),
         content_hash: nexus_workflow_ir::content_hash(&document).expect("the document hashes"),
     }

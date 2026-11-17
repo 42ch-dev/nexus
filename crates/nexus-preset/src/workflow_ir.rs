@@ -140,10 +140,12 @@ pub struct PresetIrImport {
 /// A source answers bundle-relative paths only: `import_preset_bundle` applies
 /// `assert_template_file_safe` before the first read, so no implementation repeats that check.
 pub trait AssetSource {
-    /// Bytes at a bundle-relative `path`.
+    /// Bytes at a bundle-relative `path`; `Ok(None)` means the source has no such entry.
     ///
-    /// `Ok(None)` = the source has no such entry; `Err` = the source itself failed
-    /// (canonicalization, escape, IO).
+    /// # Errors
+    ///
+    /// Returns the source's own failure — canonicalization, a sandbox escape, or IO. A
+    /// missing entry is `Ok(None)`, never an error.
     fn read_asset(&self, path: &str) -> Result<Option<Vec<u8>>, std::io::Error>;
 }
 

@@ -137,13 +137,14 @@ pub fn embedded_workflow_document(
 ) -> Result<nexus_workflow_ir::WorkflowDocument, workflow_ir::WorkflowIrError> {
     use crate::source_identity::PresetSourceIdentity;
 
-    let embedded_id = match &loaded.source_identity {
-        Some(PresetSourceIdentity::Embedded { preset_id, .. }) => preset_id,
-        _ => {
-            return Err(workflow_ir::WorkflowIrError::NotProjectable {
-                reason: format!("preset `{}` is not an embedded bundle", loaded.id),
-            })
-        }
+    let Some(PresetSourceIdentity::Embedded {
+        preset_id: embedded_id,
+        ..
+    }) = &loaded.source_identity
+    else {
+        return Err(workflow_ir::WorkflowIrError::NotProjectable {
+            reason: format!("preset `{}` is not an embedded bundle", loaded.id),
+        });
     };
     if embedded_id != &loaded.id {
         return Err(workflow_ir::WorkflowIrError::NotProjectable {
