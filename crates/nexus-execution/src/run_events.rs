@@ -1,6 +1,6 @@
 //! Bounded per-run workflow event rings and live SSE replay (v1.188 P4 §6.3).
 
-use nexus_orchestration::run_state::RunRecord;
+use nexus_session_storage::run_state::RunRecord;
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

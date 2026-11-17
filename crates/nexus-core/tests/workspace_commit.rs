@@ -28,7 +28,7 @@ use nexus_orchestration::capability::{
     CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps, WorkspaceExecutor,
 };
 use nexus_orchestration::engine::GraphFlowEngine;
-use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
+use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::OrchestrationEngine;
 use nexus_preset::load_preset_from_str;
 use serde_json::json;

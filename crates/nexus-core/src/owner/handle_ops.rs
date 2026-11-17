@@ -1451,7 +1451,7 @@ impl ExecutionHandle {
         request: &AddScheduleRequest,
         loaded: Option<&nexus_preset::LoadedPreset>,
     ) -> CoreResult<Option<Vec<u8>>> {
-        use nexus_orchestration::run_state::{AgentBinding, RunDescriptorV1};
+        use nexus_session_storage::run_state::{AgentBinding, RunDescriptorV1};
 
         let Some(loaded) = loaded else {
             // `_system.*`: never admitted, so no descriptor is required.
@@ -1777,7 +1777,7 @@ fn failure_reason(row: &SessionRow) -> Option<String> {
     row.run_state_json
         .as_deref()
         .and_then(|blob| {
-            serde_json::from_slice::<nexus_orchestration::run_state::RunStateV1>(blob).ok()
+            serde_json::from_slice::<nexus_session_storage::run_state::RunStateV1>(blob).ok()
         })
         .and_then(|state| state.failure)
         .map(|failure| failure.message)

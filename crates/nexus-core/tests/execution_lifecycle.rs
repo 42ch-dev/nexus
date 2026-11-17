@@ -21,7 +21,7 @@ use nexus_execution::workflow::{RunControlError, RunSignal};
 use nexus_orchestration::capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,
 };
-use nexus_orchestration::WorkflowStateStore;
+use nexus_session_storage::run_state::WorkflowStateStore;
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use std::future::Future;
 use std::path::Path;
@@ -189,7 +189,7 @@ async fn seed_run(
     db_path: &Path,
     session_id: &str,
     creator: &str,
-    state: nexus_orchestration::RunStateV1,
+    state: nexus_session_storage::run_state::RunStateV1,
 ) {
     seed_run_at(db_path, session_id, creator, state, SEED_PRESET_INITIAL).await;
 }
@@ -199,7 +199,7 @@ async fn seed_run_at(
     db_path: &Path,
     session_id: &str,
     creator: &str,
-    state: nexus_orchestration::RunStateV1,
+    state: nexus_session_storage::run_state::RunStateV1,
     initial: &str,
 ) {
     let preset_id = SEED_PRESET;
@@ -215,12 +215,12 @@ async fn seed_run_at(
     let guarded = nexus_local_db::init_engine_pool(db_path)
         .await
         .expect("seed engine pool init");
-    let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(
+    let store = nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(Arc::new(
         guarded.clone_pool(),
     ));
 
     let sid = nexus_orchestration::SessionId(session_id.to_string());
-    let descriptor = nexus_orchestration::RunDescriptorV1 {
+    let descriptor = nexus_session_storage::run_state::RunDescriptorV1 {
         creator_id: creator.to_string(),
         work_id: None,
         workspace_root: std::path::PathBuf::from("/tmp/ws"),
@@ -240,7 +240,7 @@ async fn seed_run_at(
     root.context
         .set("_session_id", session_id.to_string())
         .expect("seed session context");
-    let checkpoint = nexus_orchestration::RunCheckpoint {
+    let checkpoint = nexus_session_storage::run_state::RunCheckpoint {
         root: &root,
         children: &[],
     };
@@ -261,7 +261,7 @@ async fn seed_committed_run(db_path: &Path, session_id: &str, creator: &str) {
         db_path,
         session_id,
         creator,
-        nexus_orchestration::RunStateV1::default(),
+        nexus_session_storage::run_state::RunStateV1::default(),
     )
     .await;
 }
@@ -272,7 +272,7 @@ async fn seed_in_flight_run(db_path: &Path, session_id: &str, creator: &str) {
         db_path,
         session_id,
         creator,
-        nexus_orchestration::RunStateV1 {
+        nexus_session_storage::run_state::RunStateV1 {
             step_in_flight: Some("s1".to_string()),
             ..Default::default()
         },
@@ -314,7 +314,7 @@ async fn second_owner_and_restart_are_fenced() {
     // `SqlitePool` beside a live engine owner is exactly what the writer
     // protocol fences, and it also carries none of the installed
     // `nexus_writer_*` functions; the owner's pool has both by construction.
-    let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(
+    let store = nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(Arc::new(
         owner_a.pool().clone(),
     ));
     let uncertain = store
@@ -418,7 +418,7 @@ async fn daemon_restart_safe_boundary_is_reconstructed_and_redriven() {
         &f.db_path,
         "test-preset:safe-boundary",
         CREATOR,
-        nexus_orchestration::RunStateV1::default(),
+        nexus_session_storage::run_state::RunStateV1::default(),
         "generate",
     )
     .await;
@@ -705,7 +705,7 @@ async fn close_seed_pool(db_path: &Path, guarded: nexus_local_db::GuardedPool) {
 async fn seed_restart_apply(
     pool: &sqlx::SqlitePool,
     preset_id: &str,
-) -> nexus_orchestration::run_state::AppliedRunIdentity {
+) -> nexus_session_storage::run_state::AppliedRunIdentity {
     let document = restart_applied_document(preset_id, APPLIED_ONLY_NODE);
     seed_apply(pool, preset_id, &document, "[]").await
 }
@@ -717,7 +717,7 @@ async fn seed_pinned_restart_apply(
     pool: &sqlx::SqlitePool,
     preset_id: &str,
     pin_hash: &str,
-) -> nexus_orchestration::run_state::AppliedRunIdentity {
+) -> nexus_session_storage::run_state::AppliedRunIdentity {
     let document = restart_pinned_applied_document(preset_id, Some(pin_hash));
     let pins = serde_json::json!([{
         "id": RESTART_PINNED_PACKAGE,
@@ -732,7 +732,7 @@ async fn seed_pinned_restart_apply(
 async fn seed_hashless_restart_apply(
     pool: &sqlx::SqlitePool,
     preset_id: &str,
-) -> nexus_orchestration::run_state::AppliedRunIdentity {
+) -> nexus_session_storage::run_state::AppliedRunIdentity {
     let document = restart_pinned_applied_document(preset_id, None);
     seed_apply(pool, preset_id, &document, "[]").await
 }
@@ -744,7 +744,7 @@ async fn seed_apply(
     preset_id: &str,
     document_json: &str,
     pins_json: &str,
-) -> nexus_orchestration::run_state::AppliedRunIdentity {
+) -> nexus_session_storage::run_state::AppliedRunIdentity {
     let document: nexus_workflow_ir::WorkflowDocument =
         serde_json::from_str(document_json).expect("the applied-side document decodes");
     let hash = nexus_workflow_ir::content_hash(&document).expect("the fixture document hashes");
@@ -797,7 +797,7 @@ async fn seed_apply(
     .await
     .expect("apply row");
 
-    nexus_orchestration::run_state::AppliedRunIdentity {
+    nexus_session_storage::run_state::AppliedRunIdentity {
         apply_id: format!("apl_{preset_id}"),
         content_hash: hash,
     }
@@ -811,7 +811,7 @@ async fn seed_superseding_apply(
     pool: &sqlx::SqlitePool,
     preset_id: &str,
     supersedes: &str,
-) -> nexus_orchestration::run_state::AppliedRunIdentity {
+) -> nexus_session_storage::run_state::AppliedRunIdentity {
     let document: nexus_workflow_ir::WorkflowDocument =
         serde_json::from_str(&restart_applied_document(preset_id, SUPERSEDING_ONLY_NODE))
             .expect("the superseding document decodes");
@@ -850,7 +850,7 @@ async fn seed_superseding_apply(
     .await
     .expect("superseding apply row");
 
-    nexus_orchestration::run_state::AppliedRunIdentity {
+    nexus_session_storage::run_state::AppliedRunIdentity {
         apply_id: format!("apl2_{preset_id}"),
         content_hash: hash,
     }
@@ -872,7 +872,7 @@ async fn seed_restart_run(
     session_id: &str,
     preset_id: &str,
     bundle: &Path,
-    applied: Option<nexus_orchestration::run_state::AppliedRunIdentity>,
+    applied: Option<nexus_session_storage::run_state::AppliedRunIdentity>,
     intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
 ) {
     let loaded = nexus_preset::load_preset(
@@ -884,8 +884,8 @@ async fn seed_restart_run(
         .source_identity
         .expect("a directory bundle carries an identity");
     let store =
-        nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone()));
-    let descriptor = nexus_orchestration::RunDescriptorV1 {
+        nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone()));
+    let descriptor = nexus_session_storage::run_state::RunDescriptorV1 {
         creator_id: CREATOR.to_string(),
         work_id: None,
         workspace_root: std::path::PathBuf::from("/tmp/ws"),
@@ -903,7 +903,7 @@ async fn seed_restart_run(
     root.context
         .set("_session_id", session_id.to_string())
         .expect("seed session context");
-    let checkpoint = nexus_orchestration::RunCheckpoint {
+    let checkpoint = nexus_session_storage::run_state::RunCheckpoint {
         root: &root,
         children: &[],
     };
@@ -912,7 +912,7 @@ async fn seed_restart_run(
             &nexus_orchestration::SessionId(session_id.to_string()),
             &descriptor,
             checkpoint,
-            &nexus_orchestration::RunStateV1::default(),
+            &nexus_session_storage::run_state::RunStateV1::default(),
         )
         .await
         .expect("seed start_run");
@@ -924,7 +924,7 @@ async fn read_restart_session(
     session_id: &str,
 ) -> Option<graph_flow::Session> {
     use graph_flow::SessionStorage as _;
-    nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone()))
+    nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone()))
         .get(session_id)
         .await
         .expect("read the run row")
@@ -948,8 +948,8 @@ async fn wait_for_position(pool: &sqlx::SqlitePool, session_id: &str, node: &str
 async fn read_restart_record(
     pool: &sqlx::SqlitePool,
     session_id: &str,
-) -> nexus_orchestration::run_state::RunRecord {
-    nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone()))
+) -> nexus_session_storage::run_state::RunRecord {
+    nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone()))
         .load_run(&nexus_orchestration::SessionId(session_id.to_string()))
         .await
         .expect("read the run record")
@@ -963,9 +963,9 @@ async fn wait_for_record<F>(
     session_id: &str,
     what: &str,
     mut cond: F,
-) -> nexus_orchestration::run_state::RunRecord
+) -> nexus_session_storage::run_state::RunRecord
 where
-    F: FnMut(&nexus_orchestration::run_state::RunRecord) -> bool,
+    F: FnMut(&nexus_session_storage::run_state::RunRecord) -> bool,
 {
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
@@ -1031,7 +1031,7 @@ async fn recovered_position(owner: &CoreService, session_id: &str) -> graph_flow
 async fn admit_and_park(
     f: &Fixture,
     nexus_home: &Path,
-    admitted: &nexus_orchestration::run_state::AppliedRunIdentity,
+    admitted: &nexus_session_storage::run_state::AppliedRunIdentity,
 ) -> (nexus_orchestration::SessionId, String) {
     let owner = open_engine_owner(f).await;
     let handle = owner
@@ -2063,7 +2063,7 @@ async fn draining_close_holds_the_db_fence_until_drives_join() {
         &f.db_path,
         "test-preset:held",
         CREATOR,
-        nexus_orchestration::RunStateV1::default(),
+        nexus_session_storage::run_state::RunStateV1::default(),
         "generate",
     )
     .await;
@@ -2120,7 +2120,7 @@ async fn competing_owner_refused_while_close_is_draining() {
         &f.db_path,
         "test-preset:held",
         CREATOR,
-        nexus_orchestration::RunStateV1::default(),
+        nexus_session_storage::run_state::RunStateV1::default(),
         "generate",
     )
     .await;
@@ -2365,7 +2365,7 @@ async fn close_waits_for_a_canceled_builds_live_drives() {
         &f.db_path,
         "test-preset:canceled",
         CREATOR,
-        nexus_orchestration::RunStateV1::default(),
+        nexus_session_storage::run_state::RunStateV1::default(),
         "generate",
     )
     .await;
@@ -2574,7 +2574,7 @@ async fn close_waits_for_a_retired_owner_during_the_receipt_wait() {
         &f.db_path,
         "test-preset:retired",
         CREATOR,
-        nexus_orchestration::RunStateV1::default(),
+        nexus_session_storage::run_state::RunStateV1::default(),
         "generate",
     )
     .await;

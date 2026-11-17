@@ -58,7 +58,7 @@ async fn restart_durability_e2e() {
             .await
             .expect("open_pool");
         let pool = guarded.clone_pool();
-        let storage = Arc::new(nexus_orchestration::storage::SqliteSessionStorage::new(
+        let storage = Arc::new(nexus_session_storage::storage::SqliteSessionStorage::new(
             std::sync::Arc::new(pool),
         ));
         let registry = Arc::new(CapabilityRegistry::with_builtins());
@@ -93,7 +93,7 @@ async fn restart_durability_e2e() {
             .await
             .expect("open_pool v2");
         let pool = guarded.clone_pool();
-        let storage = Arc::new(nexus_orchestration::storage::SqliteSessionStorage::new(
+        let storage = Arc::new(nexus_session_storage::storage::SqliteSessionStorage::new(
             std::sync::Arc::new(pool),
         ));
 

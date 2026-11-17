@@ -36,7 +36,7 @@ use graph_flow::{Session, SessionStorage};
 use std::sync::Arc;
 
 use super::inspect::{CheckpointRow, CheckpointSummary};
-use crate::engine::{EngineError, SessionId, SessionStatus, SessionSummary};
+use crate::{SessionId, SessionStatus, SessionSummary, StorageError as EngineError};
 use crate::run_state::{
     ChildCheckpoint, PromptAttempt, RunCheckpoint, RunDescriptorV1, RunRecord, RunStateV1,
     SettlementResult, TerminalSettlementTarget, WorkflowStateStore,
@@ -541,7 +541,7 @@ async fn child_cas_outcome(
             }
             let found_rev = row.state_revision;
             let status = row.status;
-            if crate::engine::SessionStatus::from_db_str(&status).is_none() {
+            if crate::SessionStatus::from_db_str(&status).is_none() {
                 return Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
                     format!(
                         "child CAS outcome for '{child_id}': unknown/corrupt status {status:?}                          (non-replayable)"
@@ -1034,7 +1034,7 @@ async fn classify_transition_fence_miss(
         }
         // An unknown/corrupt status is corruption, never a concurrency or
         // terminal outcome (Important 6).
-        Some(row) if crate::engine::SessionStatus::from_db_str(&row.status).is_none() => {
+        Some(row) if crate::SessionStatus::from_db_str(&row.status).is_none() => {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "{op} '{}': unknown/corrupt status {:?} (non-replayable)",
                 session_id.0, row.status
@@ -1433,7 +1433,7 @@ async fn classify_restore_fence_miss(
         // deterministic `TerminalState`/`RevisionMismatch` outcomes the
         // engine treats as an expected concurrent winner — it is corruption,
         // checked before the revision fence (Important 6).
-        Some(row) if crate::engine::SessionStatus::from_db_str(&row.status).is_none() => {
+        Some(row) if crate::SessionStatus::from_db_str(&row.status).is_none() => {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "restore_pre_step '{}': unknown/corrupt status {:?} (non-replayable)",
                 session_id.0, row.status
@@ -1488,7 +1488,7 @@ async fn classify_mark_fence_miss(
         }
         // An unpersistable status string is corruption: a hard storage
         // error, never a concurrency/terminal outcome (Important 6).
-        Some(row) if crate::engine::SessionStatus::from_db_str(&row.status).is_none() => {
+        Some(row) if crate::SessionStatus::from_db_str(&row.status).is_none() => {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "mark_step_in_flight '{}': unknown/corrupt status {:?} (non-replayable)",
                 session_id.0, row.status
@@ -1606,7 +1606,7 @@ async fn read_post_write_clocks(
             session_id.0, clocks.graph_version
         )))
     })?;
-    let status = crate::engine::SessionStatus::from_db_str(&clocks.status).ok_or_else(|| {
+    let status = crate::SessionStatus::from_db_str(&clocks.status).ok_or_else(|| {
         EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "{op} '{}': unknown/corrupt status {:?} (non-replayable)",
             session_id.0, clocks.status

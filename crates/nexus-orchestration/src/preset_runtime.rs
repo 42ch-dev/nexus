@@ -26,14 +26,14 @@ use std::sync::Arc;
 pub fn default_bindings_for_preset(
     preset_id: &str,
     provider_id: &str,
-) -> Option<std::collections::HashMap<String, crate::run_state::AgentBinding>> {
+) -> Option<std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>> {
     let caps = crate::capability::CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset(preset_id, &caps).ok()?;
     let roles = required_prompt_roles(&loaded.manifest);
     if roles.is_empty() {
         return Some(std::collections::HashMap::new());
     }
-    let binding = crate::run_state::AgentBinding {
+    let binding = nexus_session_storage::run_state::AgentBinding {
         provider_id: provider_id.to_string(),
         model: None,
     };

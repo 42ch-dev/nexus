@@ -30,6 +30,7 @@ execution = [
     # `nexus_connect::peer_tools` directly.
     "nexus-connect/peer-tools",
     "dep:nexus-orchestration",
+    "dep:nexus-session-storage",
     # The Simulate route is served at this execution edge only: the walk runs in-process,
     # constructs no executor or provider, and stays out of the default/domain cohort.
     "nexus-orchestration/simulate",
@@ -118,6 +119,7 @@ nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-memory-provider = { path = "../nexus-memory-provider" }
 nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }
 nexus-orchestration = { path = "../nexus-orchestration", optional = true }
+nexus-session-storage = { path = "../nexus-session-storage", optional = true }
 # Pattern registry reader + the candidate IR the Simulate walk reads.
 nexus-pattern = { path = "../nexus-pattern" }
 nexus-workflow-ir = { path = "../nexus-workflow-ir" }
@@ -231,6 +233,7 @@ parking_lot = "0.13"
 # scanner's dependencies.
 nexus-wasm-host = { path = "../nexus-wasm-host" }
 nexus-orchestration = { path = "../nexus-orchestration" }
+nexus-session-storage = { path = "../nexus-session-storage" }
 nexus-knowledge = { path = "../nexus-knowledge" }
 # The WAT compiler named above: the capability/compute target compiles the
 # runaway module its sandbox-limit cases trap on (the same way

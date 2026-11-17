@@ -50,8 +50,7 @@ use nexus_agent_host::{HostFacade, HostOperationId, ProviderId};
 use nexus_orchestration::capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,
 };
-use nexus_orchestration::engine::EngineError;
-use nexus_orchestration::run_state::{PromptAttempt, PromptPhase, WorkflowStateStore};
+use nexus_session_storage::{run_state::{PromptAttempt, PromptPhase, WorkflowStateStore}, StorageError};
 use nexus_orchestration::SessionId;
 
 /// Key for a lazily-reused Host session: the same run+role reuses its
@@ -267,7 +266,7 @@ impl HostPromptExecutor {
             // durable shape (identical fields; this crate persists the
             // fingerprint without importing provider crates).
             process_identity: process_identity.map(|pi| {
-                nexus_orchestration::run_state::OwnedProcessIdentity {
+                nexus_session_storage::run_state::OwnedProcessIdentity {
                     pid: pi.pid,
                     process_birth: pi.process_birth,
                     group_id: pi.group_id,
@@ -289,9 +288,9 @@ impl HostPromptExecutor {
                 // operation won since admission — the prompt must not
                 // launch and the caller sees the same typed cancellation a
                 // post-fence cancellation produces.
-                EngineError::RevisionMismatch { .. }
-                | EngineError::TerminalState(_)
-                | EngineError::SessionNotFound(_) => CapabilityError::Cancelled,
+                StorageError::RevisionMismatch { .. }
+                | StorageError::TerminalState(_)
+                | StorageError::SessionNotFound(_) => CapabilityError::Cancelled,
                 other => CapabilityError::Internal(format!("persist prompt attempt: {other}")),
             })?;
         Ok(())
@@ -1019,7 +1018,7 @@ mod tests {
         HostStartConfig, OperationFinishedEvent, SessionOwner,
     };
     use nexus_agent_host::{HostFacade, HostResult, HostSession, ProviderCatalog, SessionState};
-    use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
+    use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
     use nexus_orchestration::OrchestrationEngine;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1301,7 +1300,7 @@ mod tests {
     async fn real_executor_cancel_reaches_host_shutdown() {
         let host = ScriptedHost::new();
         let (executor, sqlite, storage, _pool, _db) = test_executor(host.clone()).await;
-        let store: Arc<dyn nexus_orchestration::run_state::WorkflowStateStore> = sqlite.clone();
+        let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
         let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
             nexus_orchestration::CapabilityRegistry::with_builtins(),
@@ -1350,16 +1349,16 @@ mod tests {
             .await
             .expect("get root")
             .expect("root exists");
-        let in_flight_state = nexus_orchestration::run_state::RunStateV1 {
+        let in_flight_state = nexus_session_storage::run_state::RunStateV1 {
             step_in_flight: Some(pre_step_root.current_task_id.clone()),
-            ..nexus_orchestration::run_state::RunStateV1::default()
+            ..nexus_session_storage::run_state::RunStateV1::default()
         };
         store
             .mark_step_in_flight(
                 &session_id,
                 record.state_revision,
                 Some(record.graph_version),
-                nexus_orchestration::run_state::RunCheckpoint {
+                nexus_session_storage::run_state::RunCheckpoint {
                     root: &pre_step_root,
                     children: &[],
                 },
@@ -1414,7 +1413,7 @@ mod tests {
     async fn real_executor_active_operation_cancel_reaches_host_and_reaps() {
         let host = ScriptedHost::new();
         let (executor, sqlite, storage, pool, _db) = test_executor(host.clone()).await;
-        let store: Arc<dyn nexus_orchestration::run_state::WorkflowStateStore> = sqlite.clone();
+        let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
         let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
             nexus_orchestration::CapabilityRegistry::with_builtins(),
@@ -1453,7 +1452,7 @@ mod tests {
         let mut descriptor = record.descriptor.clone().expect("v1 descriptor present");
         descriptor.agent_bindings.insert(
             "default".to_string(),
-            nexus_orchestration::run_state::AgentBinding {
+            nexus_session_storage::run_state::AgentBinding {
                 provider_id: "scripted".to_string(),
                 model: None,
             },
@@ -1481,16 +1480,16 @@ mod tests {
             .await
             .expect("get root")
             .expect("root exists");
-        let in_flight_state = nexus_orchestration::run_state::RunStateV1 {
+        let in_flight_state = nexus_session_storage::run_state::RunStateV1 {
             step_in_flight: Some(pre_step_root.current_task_id.clone()),
-            ..nexus_orchestration::run_state::RunStateV1::default()
+            ..nexus_session_storage::run_state::RunStateV1::default()
         };
         store
             .mark_step_in_flight(
                 &session_id,
                 record.state_revision,
                 Some(record.graph_version),
-                nexus_orchestration::run_state::RunCheckpoint {
+                nexus_session_storage::run_state::RunCheckpoint {
                     root: &pre_step_root,
                     children: &[],
                 },
@@ -1616,7 +1615,7 @@ mod tests {
     async fn non_cooperative_host_cancel_is_bounded_and_never_falsely_cancelled() {
         let host = ScriptedHost::new();
         let (executor, sqlite, storage, pool, _db) = test_executor(host.clone()).await;
-        let store: Arc<dyn nexus_orchestration::run_state::WorkflowStateStore> = sqlite.clone();
+        let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
         let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
             nexus_orchestration::CapabilityRegistry::with_builtins(),
@@ -1654,7 +1653,7 @@ mod tests {
         let mut descriptor = record.descriptor.clone().expect("v1 descriptor present");
         descriptor.agent_bindings.insert(
             "default".to_string(),
-            nexus_orchestration::run_state::AgentBinding {
+            nexus_session_storage::run_state::AgentBinding {
                 provider_id: "scripted".to_string(),
                 model: None,
             },
@@ -1680,16 +1679,16 @@ mod tests {
             .await
             .expect("get root")
             .expect("root exists");
-        let in_flight_state = nexus_orchestration::run_state::RunStateV1 {
+        let in_flight_state = nexus_session_storage::run_state::RunStateV1 {
             step_in_flight: Some(pre_step_root.current_task_id.clone()),
-            ..nexus_orchestration::run_state::RunStateV1::default()
+            ..nexus_session_storage::run_state::RunStateV1::default()
         };
         store
             .mark_step_in_flight(
                 &session_id,
                 record.state_revision,
                 Some(record.graph_version),
-                nexus_orchestration::run_state::RunCheckpoint {
+                nexus_session_storage::run_state::RunCheckpoint {
                     root: &pre_step_root,
                     children: &[],
                 },
@@ -1829,7 +1828,7 @@ mod tests {
     async fn real_executor_reaps_parked_child_and_grandchild_sessions() {
         let host = ScriptedHost::new();
         let (executor, sqlite, storage, _pool, _db) = test_executor(host.clone()).await;
-        let store: Arc<dyn nexus_orchestration::run_state::WorkflowStateStore> = sqlite.clone();
+        let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
         let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
             nexus_orchestration::CapabilityRegistry::with_builtins(),
@@ -1934,7 +1933,7 @@ mod tests {
     async fn real_executor_failed_shutdown_retains_for_retry() {
         let host = ScriptedHost::new();
         let (executor, sqlite, storage, _pool, _db) = test_executor(host.clone()).await;
-        let store: Arc<dyn nexus_orchestration::run_state::WorkflowStateStore> = sqlite.clone();
+        let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
         let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
             nexus_orchestration::CapabilityRegistry::with_builtins(),

@@ -162,7 +162,7 @@ impl ResearchScheduleFixture {
         // (manifest + referenced template bytes) — never a zero placeholder.
         let source = nexus_preset::embedded_source_identity("research")
             .expect("research preset must carry an embedded source identity");
-        let descriptor = nexus_orchestration::run_state::RunDescriptorV1 {
+        let descriptor = nexus_session_storage::run_state::RunDescriptorV1 {
             creator_id: self.creator_id.to_string(),
             work_id: Some(self.work_id.to_string()),
             workspace_root: std::path::PathBuf::new(),

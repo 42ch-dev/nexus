@@ -3762,6 +3762,7 @@ dependencies = [
  "nexus-pattern",
  "nexus-preset",
  "nexus-provider-ports",
+ "nexus-session-storage",
  "nexus-spoke-adapter",
  "nexus-storage-guard",
  "nexus-wasm-host",
@@ -3876,6 +3877,7 @@ dependencies = [
  "nexus-local-db",
  "nexus-orchestration",
  "nexus-preset",
+ "nexus-session-storage",
  "nix 0.31.3",
  "parking_lot 0.13.0",
  "serde",
@@ -4060,6 +4062,7 @@ dependencies = [
  "nexus-local-db",
  "nexus-narrative",
  "nexus-preset",
+ "nexus-session-storage",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
  "nexus-workflow-ir",
@@ -4125,6 +4128,22 @@ dependencies = [
  "async-trait",
  "futures-core",
  "nexus-contracts",
+]
+
+[[package]]
+name = "nexus-session-storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "graph-flow",
+ "nexus-home-layout",
+ "nexus-local-db",
+ "nexus-preset",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -4221,6 +4240,7 @@ dependencies = [
  "nexus-narrative",
  "nexus-orchestration",
  "nexus-preset",
+ "nexus-session-storage",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
  "nexus-workflow-ir",

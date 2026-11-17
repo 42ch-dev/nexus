@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::engine::{EngineError, SessionId, SessionStatus};
+use crate::{SessionId, SessionStatus, StorageError as EngineError};
 use nexus_preset::source_identity::PresetSourceIdentity;
 
 /// Frozen server-side descriptor for a v1 run (A2).
