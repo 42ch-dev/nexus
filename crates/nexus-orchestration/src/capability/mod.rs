@@ -375,7 +375,7 @@ pub trait AppliedDocumentSource: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct AppliedDocument {
     /// The apply row that is current for the strategy.
-    pub identity: crate::run_state::AppliedRunIdentity,
+    pub identity: nexus_session_storage::run_state::AppliedRunIdentity,
     /// The verified document those bytes decode to.
     pub document:
         nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument,

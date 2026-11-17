@@ -21,9 +21,9 @@ use nexus_orchestration::capability::{
     CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps, DaemonToolDispatch,
     PromptExecutor, WorkspaceExecutor, WorkspaceStateProvider,
 };
-use nexus_orchestration::run_state::WorkflowStateStore;
+use nexus_session_storage::run_state::WorkflowStateStore;
 use nexus_orchestration::schedule::supervisor::{ScheduleRunStarter, ScheduleSupervisor};
-use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
+use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
 use nexus_provider_ports::ProviderPort;
 use sqlx::SqlitePool;

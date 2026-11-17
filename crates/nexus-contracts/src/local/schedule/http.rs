@@ -61,7 +61,7 @@ pub struct AddScheduleRequest {
 }
 
 /// Role → provider binding (A1) — wire form of
-/// [`nexus_orchestration::run_state::AgentBinding`].
+/// [`nexus_session_storage::run_state::AgentBinding`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentBindingDto {
     /// Provider id.

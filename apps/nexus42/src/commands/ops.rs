@@ -52,7 +52,7 @@ use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use nexus_orchestration::resume_rules::{self, RecoveryClass, ResumeClass};
-use nexus_orchestration::storage::{CheckpointRow, CheckpointSummary, SqliteSessionStorage};
+use nexus_session_storage::storage::{CheckpointRow, CheckpointSummary, SqliteSessionStorage};
 use serde::Serialize;
 use serde_json::Value;
 use std::fmt::Write as _;
@@ -315,14 +315,14 @@ async fn inspect_inner(session_id: Option<String>, config: &CliConfig) -> Result
 /// but does not deserialize as [`RunStateV1`] (e.g. `{"cancel_requested":
 /// "false"}`) returns `None` just like corrupt bytes, so list and detail
 /// agree.
-fn parse_run_state(bytes: Option<&[u8]>) -> Option<nexus_orchestration::run_state::RunStateV1> {
+fn parse_run_state(bytes: Option<&[u8]>) -> Option<nexus_session_storage::run_state::RunStateV1> {
     let bytes = bytes?;
     serde_json::from_slice(bytes).ok()
 }
 
 fn descriptor_is_valid(bytes: Option<&[u8]>) -> bool {
     bytes.is_some_and(|bytes| {
-        serde_json::from_slice::<nexus_orchestration::run_state::RunDescriptorV1>(bytes).is_ok()
+        serde_json::from_slice::<nexus_session_storage::run_state::RunDescriptorV1>(bytes).is_ok()
     })
 }
 
@@ -339,7 +339,7 @@ fn descriptor_is_valid(bytes: Option<&[u8]>) -> bool {
 fn recovery_class_for(
     execution_version: i64,
     status: &str,
-    state: Option<&nexus_orchestration::run_state::RunStateV1>,
+    state: Option<&nexus_session_storage::run_state::RunStateV1>,
     descriptor_valid: bool,
     gate_park_live: bool,
 ) -> RecoveryClass {
@@ -703,7 +703,7 @@ fn frozen_source_reconstructable(bytes: Option<&[u8]>) -> bool {
         return false;
     };
     let Ok(descriptor) =
-        serde_json::from_slice::<nexus_orchestration::run_state::RunDescriptorV1>(bytes)
+        serde_json::from_slice::<nexus_session_storage::run_state::RunDescriptorV1>(bytes)
     else {
         return false;
     };

@@ -20,6 +20,7 @@ members = [
     "crates/nexus-pattern",
     "crates/nexus-preset",
     "crates/nexus-provider-conformance",
+    "crates/nexus-session-storage",
     "crates/nexus-spoke-adapter",
     "crates/nexus-wasm-host",
     "crates/nexus-workflow-ir",

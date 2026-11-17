@@ -23,11 +23,12 @@ use graph_flow::{Session, SessionStorage};
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument;
 use nexus_orchestration::capability::{AppliedDocument, AppliedDocumentSource};
 use nexus_orchestration::engine::{SessionId, SessionStatus};
-use nexus_orchestration::run_state::{
+use nexus_session_storage::StorageError as EngineError;
+use nexus_session_storage::run_state::{
     AgentBinding, AppliedRunIdentity, ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunStateV1,
     TerminalSettlementTarget, WorkflowStateStore,
 };
-use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
+use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::OrchestrationEngine;
 use nexus_preset::source_identity::PresetSourceIdentity;
 use std::collections::HashMap;
@@ -200,12 +201,12 @@ async fn wait_status_survives_reopen() {
 
         // Commit a human-wait transition with a durable wait record.
         let wait_state = RunStateV1 {
-            wait: Some(nexus_orchestration::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "wait-abc".to_string(),
                 task_id: "wait_task".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: nexus_orchestration::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -362,7 +363,7 @@ async fn commit_transition_with_wrong_revision_fails() {
         .expect_err("wrong expected revision must fail the CAS");
 
     match err {
-        nexus_orchestration::engine::EngineError::RevisionMismatch {
+        EngineError::RevisionMismatch {
             session_id: sid,
             expected,
             found,
@@ -442,7 +443,7 @@ async fn commit_transition_after_terminal_fails() {
     assert!(
         matches!(
             err,
-            nexus_orchestration::engine::EngineError::TerminalState(_)
+            EngineError::TerminalState(_)
         ),
         "expected TerminalState, got {err:?}"
     );
@@ -531,7 +532,7 @@ fn descriptor_serializes_the_applied_identity_only_when_present() {
     );
 
     let mut applied = test_descriptor("sess");
-    applied.applied = Some(nexus_orchestration::run_state::AppliedRunIdentity {
+    applied.applied = Some(nexus_session_storage::run_state::AppliedRunIdentity {
         apply_id: "apl_1".to_string(),
         content_hash: "blake3:abc".to_string(),
     });
@@ -702,7 +703,7 @@ async fn corrupt_blobs_preserved_not_reinterpreted() {
         .expect_err("corrupt blob must not be silently reinterpreted");
 
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error for corrupt blob, got {err:?}"
     );
 
@@ -1080,7 +1081,7 @@ async fn engine_wait_produces_durable_wait_token() {
         !wait.wait_id.is_empty(),
         "wait token must be a fresh UUID, not empty"
     );
-    assert_eq!(wait.kind, nexus_orchestration::run_state::WaitKind::Manual);
+    assert_eq!(wait.kind, nexus_session_storage::run_state::WaitKind::Manual);
 
     let wait_id = wait.wait_id;
     let revision = record.state_revision;
@@ -1192,7 +1193,7 @@ async fn in_flight_marker_fences_control_signals_and_stale_transition() {
         .expect_err("transition loaded before the marker must lose its CAS");
     assert!(matches!(
         stale,
-        nexus_orchestration::engine::EngineError::RevisionMismatch { .. }
+        EngineError::RevisionMismatch { .. }
     ));
     let after = storage
         .load_run(&sid)
@@ -1480,7 +1481,7 @@ async fn unknown_v1_status_is_non_replayable() {
         .await
         .expect_err("unknown v1 status must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error for unknown status, got {err:?}"
     );
 }
@@ -1510,7 +1511,7 @@ async fn v1_row_missing_metadata_is_non_replayable() {
         .await
         .expect_err("v1 row missing descriptor must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error, got {err:?}"
     );
 }
@@ -1518,12 +1519,12 @@ async fn v1_row_missing_metadata_is_non_replayable() {
 // Important 7: WaitKind and PromptPhase encode as snake_case.
 #[test]
 fn wait_kind_and_prompt_phase_encode_snake_case() {
-    let wait = nexus_orchestration::run_state::WaitRecord {
+    let wait = nexus_session_storage::run_state::WaitRecord {
         wait_id: "w".to_string(),
         task_id: "t".to_string(),
         child_session_id: None,
         child_task_id: None,
-        kind: nexus_orchestration::run_state::WaitKind::Manual,
+        kind: nexus_session_storage::run_state::WaitKind::Manual,
     };
     let json = serde_json::to_value(&wait).expect("serialize wait");
     assert_eq!(
@@ -1532,10 +1533,10 @@ fn wait_kind_and_prompt_phase_encode_snake_case() {
         json["kind"]
     );
 
-    let attempt = nexus_orchestration::run_state::PromptAttempt {
+    let attempt = nexus_session_storage::run_state::PromptAttempt {
         attempt_id: "a".to_string(),
         task_id: "t".to_string(),
-        phase: nexus_orchestration::run_state::PromptPhase::Dispatching,
+        phase: nexus_session_storage::run_state::PromptPhase::Dispatching,
         host_session_id: None,
         operation_id: None,
         process_identity: None,
@@ -1547,8 +1548,8 @@ fn wait_kind_and_prompt_phase_encode_snake_case() {
         json["phase"]
     );
 
-    let active = nexus_orchestration::run_state::PromptAttempt {
-        phase: nexus_orchestration::run_state::PromptPhase::Active,
+    let active = nexus_session_storage::run_state::PromptAttempt {
+        phase: nexus_session_storage::run_state::PromptPhase::Active,
         ..attempt
     };
     let json = serde_json::to_value(&active).expect("serialize active");
@@ -1594,7 +1595,7 @@ async fn start_run_refuses_existing_v0_row() {
         .expect_err("start_run must refuse an existing v0 row");
 
     match err {
-        nexus_orchestration::engine::EngineError::RunAlreadyExists {
+        EngineError::RunAlreadyExists {
             session_id,
             execution_version,
         } => {
@@ -1654,7 +1655,7 @@ async fn start_run_reports_accurate_conflict_for_v1_row() {
         .expect_err("second start_run must be refused");
 
     match err {
-        nexus_orchestration::engine::EngineError::RunAlreadyExists {
+        EngineError::RunAlreadyExists {
             session_id: sid,
             execution_version,
         } => {
@@ -1772,7 +1773,7 @@ async fn child_cas_stale_revision_rolls_back_root() {
     assert!(
         matches!(
             err,
-            nexus_orchestration::engine::EngineError::RevisionMismatch { .. }
+            EngineError::RevisionMismatch { .. }
         ),
         "expected RevisionMismatch for stale child, got {err:?}"
     );
@@ -1914,7 +1915,7 @@ async fn child_cas_terminal_child_rolls_back_root() {
     assert!(
         matches!(
             err,
-            nexus_orchestration::engine::EngineError::TerminalState(_)
+            EngineError::TerminalState(_)
         ),
         "expected TerminalState for terminal child at stale revision, got {err:?}"
     );
@@ -2228,7 +2229,7 @@ async fn unknown_v0_status_is_non_replayable() {
         .await
         .expect_err("unknown v0 status must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error for unknown v0 status, got {err:?}"
     );
 
@@ -2274,7 +2275,7 @@ async fn negative_v0_revision_is_non_replayable() {
         .await
         .expect_err("negative v0 revision must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error for negative revision, got {err:?}"
     );
 
@@ -4132,7 +4133,7 @@ async fn negative_v1_revision_is_non_replayable() {
         .await
         .expect_err("negative v1 revision must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error for negative v1 revision, got {err:?}"
     );
 
@@ -4197,7 +4198,7 @@ async fn child_terminal_status_mismatch_rejects_confirmation() {
         .expect_err("terminal child status mismatch must reject the parent's Completed commit");
 
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow mismatch error, got {err:?}"
     );
 
@@ -4581,7 +4582,7 @@ async fn restore_pre_step_is_single_atomic_revision_fence() {
     assert!(
         matches!(
             err,
-            nexus_orchestration::engine::EngineError::RevisionMismatch { expected: 1, .. }
+            EngineError::RevisionMismatch { expected: 1, .. }
         ),
         "expected RevisionMismatch(expected=1), got {err:?}"
     );
@@ -4640,7 +4641,7 @@ async fn negative_execution_version_is_non_replayable() {
         .await
         .expect_err("negative execution_version must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error, got {err:?}"
     );
 
@@ -4684,7 +4685,7 @@ async fn unsupported_forward_execution_version_is_non_replayable() {
         .await
         .expect_err("forward execution_version must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error, got {err:?}"
     );
 
@@ -5126,7 +5127,7 @@ async fn negative_child_revision_is_non_replayable() {
         .await
         .expect_err("negative child state_revision must be non-replayable");
     assert!(
-        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
+        matches!(err, EngineError::GraphFlow(_)),
         "expected GraphFlow error for negative child revision, got {err:?}"
     );
 
@@ -5182,12 +5183,12 @@ async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
 
     // Commit a human-wait transition with a durable WaitRecord (revision 1 → 2).
     let wait_state = RunStateV1 {
-        wait: Some(nexus_orchestration::run_state::WaitRecord {
+        wait: Some(nexus_session_storage::run_state::WaitRecord {
             wait_id: "wait-mark-token".to_string(),
             task_id: "wait_task".to_string(),
             child_session_id: None,
             child_task_id: None,
-            kind: nexus_orchestration::run_state::WaitKind::Manual,
+            kind: nexus_session_storage::run_state::WaitKind::Manual,
         }),
         ..RunStateV1::default()
     };
@@ -5281,12 +5282,12 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
 
     // Commit a human-wait transition with a durable WaitRecord (revision 1 → 2).
     let wait_state = RunStateV1 {
-        wait: Some(nexus_orchestration::run_state::WaitRecord {
+        wait: Some(nexus_session_storage::run_state::WaitRecord {
             wait_id: "wait-restore-token".to_string(),
             task_id: "wait_task".to_string(),
             child_session_id: None,
             child_task_id: None,
-            kind: nexus_orchestration::run_state::WaitKind::Manual,
+            kind: nexus_session_storage::run_state::WaitKind::Manual,
         }),
         ..RunStateV1::default()
     };
@@ -5317,7 +5318,7 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
     assert!(
         matches!(
             err,
-            nexus_orchestration::engine::EngineError::TerminalState(_)
+            EngineError::TerminalState(_)
         ),
         "expected TerminalState for a waiting_for_input restore, got {err:?}"
     );
@@ -5380,12 +5381,12 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
         .expect("get pre-wait root")
         .expect("root present");
     let wait_state = RunStateV1 {
-        wait: Some(nexus_orchestration::run_state::WaitRecord {
+        wait: Some(nexus_session_storage::run_state::WaitRecord {
             wait_id: "wait-engine-gate".to_string(),
             task_id: root.current_task_id.clone(),
             child_session_id: None,
             child_task_id: None,
-            kind: nexus_orchestration::run_state::WaitKind::Manual,
+            kind: nexus_session_storage::run_state::WaitKind::Manual,
         }),
         ..RunStateV1::default()
     };
@@ -5703,7 +5704,7 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
         !wait.wait_id.is_empty(),
         "the wait token must be a fresh UUID, not empty"
     );
-    assert_eq!(wait.kind, nexus_orchestration::run_state::WaitKind::Manual);
+    assert_eq!(wait.kind, nexus_session_storage::run_state::WaitKind::Manual);
     let token = wait.wait_id.clone();
 
     // Reopen the SAME DB file (daemon restart boundary): the token must
@@ -6467,9 +6468,9 @@ async fn force_db_graph_version(pool: &sqlx::SqlitePool, session_id: &str, versi
 
 /// A corrupt/exhausted graph counter is a HARD storage error, never a
 /// concurrency (revision/terminal/conflict) outcome.
-fn assert_hard_storage_error(err: &nexus_orchestration::engine::EngineError, what: &str) {
+fn assert_hard_storage_error(err: &nexus_session_storage::StorageError, what: &str) {
     match err {
-        nexus_orchestration::engine::EngineError::GraphFlow(
+        nexus_session_storage::StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(_),
         ) => {}
         other => panic!("{what}: expected hard GraphError::StorageError, got {other:?}"),
@@ -6836,10 +6837,10 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
 
     // Prompt-attempt writes are in-task metadata under the runner-owned
     // session: they must NOT advance the graph clock (brief 3.3).
-    let attempt = nexus_orchestration::run_state::PromptAttempt {
+    let attempt = nexus_session_storage::run_state::PromptAttempt {
         attempt_id: uuid::Uuid::new_v4().to_string(),
         task_id: "task_b".to_string(),
-        phase: nexus_orchestration::run_state::PromptPhase::Dispatching,
+        phase: nexus_session_storage::run_state::PromptPhase::Dispatching,
         host_session_id: None,
         operation_id: None,
         process_identity: None,

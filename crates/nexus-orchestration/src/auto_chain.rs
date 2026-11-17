@@ -1386,7 +1386,7 @@ fn enqueue_descriptor_json(
     preset_id: &str,
     preset_version: i64,
     input: serde_json::Map<String, serde_json::Value>,
-    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+    agent_bindings: std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>,
 ) -> Result<Vec<u8>, AutoChainError> {
     // N-5/N-5b/N-15: stamp the REAL content-addressed source identity
     // (manifest + referenced template bytes) — never a zero placeholder.
@@ -1402,7 +1402,7 @@ fn enqueue_descriptor_json(
              refusing to publish a drive-enabled row"
         ))
     })?;
-    let descriptor = crate::run_state::RunDescriptorV1 {
+    let descriptor = nexus_session_storage::run_state::RunDescriptorV1 {
         creator_id: creator_id.to_string(),
         work_id: if work_id.is_empty() {
             None
@@ -1452,7 +1452,7 @@ pub async fn enqueue_auto_chain_schedule(
     chapter: Option<i32>,
     volume: Option<i32>,
     work: &WorkRecord,
-    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+    agent_bindings: std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>,
     source_run_id: Option<&str>,
 ) -> Result<String, AutoChainError> {
     // I-9: the schedule INSERT and the Work driver-pointer update commit in
@@ -1607,7 +1607,7 @@ pub async fn enqueue_auto_chain_schedule_in_tx(
     chapter: Option<i32>,
     volume: Option<i32>,
     work: &WorkRecord,
-    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+    agent_bindings: std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>,
     source_run_id: Option<&str>,
 ) -> Result<String, AutoChainError> {
     // V1.48 P1 (overlay §2 Consumer): render the open-findings prompt
@@ -1794,7 +1794,7 @@ pub async fn enqueue_review_master_schedule(
     pool: &SqlitePool,
     creator_id: &str,
     work_id: &str,
-    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+    agent_bindings: std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>,
 ) -> Result<String, AutoChainError> {
     // R-V147P0-05 (hotfix H-1): append a per-process monotonic counter suffix
     // (mirrors `ACH_COUNTER` / R-V139P0-W-B) so two enqueues in the same
@@ -1914,7 +1914,7 @@ pub async fn enqueue_cron_schedule(
     work_id: &str,
     preset_id: &str,
     role: &str,
-    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+    agent_bindings: std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>,
 ) -> Result<String, AutoChainError> {
     // CRON prefix + timestamp + per-process counter (collision-resistant,
     // mirrors `ACH_COUNTER` / `RVM_COUNTER`). Two roles firing in the same

@@ -24,12 +24,13 @@ use thiserror::Error;
 #[cfg(test)]
 use crate::capability::CapabilityError;
 use crate::capability::CapabilityRegistry;
-use crate::run_state::{
+use nexus_session_storage::run_state::{
     ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord, RunStateV1,
     SettlementResult, TerminalSettlementTarget, WorkflowStateStore,
 };
 use nexus_contracts::local::schedule::CoreContextPayload;
 use nexus_preset::source_identity::PresetSourceIdentity;
+use nexus_session_storage::StorageError;
 
 /// Context key that effectful tasks set when they perform an external effect
 /// (capability call, ACP/Host prompt dispatch, `HostTool` call, child spawn).
@@ -163,9 +164,9 @@ fn clear_step_effect_marker(root: &graph_flow::Session) {
 // Helper types
 // ---------------------------------------------------------------------------
 
-/// Opaque session identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct SessionId(pub String);
+// Session identity/status/summary types live in `nexus-session-storage`;
+// re-exported here so every existing consumer path stays unchanged.
+pub use nexus_session_storage::{SessionId, SessionStatus, SessionSummary};
 
 /// Composite key that uniquely identifies a session within the engine.
 #[derive(Debug, Clone)]
@@ -192,81 +193,6 @@ impl SessionKey {
 pub struct SessionFilter {
     pub creator_id: Option<String>,
     pub preset_id: Option<String>,
-}
-
-/// Lightweight summary returned by [`OrchestrationEngine::list_active`].
-#[derive(Debug, Clone)]
-pub struct SessionSummary {
-    pub session_id: SessionId,
-    pub creator_id: String,
-    pub preset_id: String,
-    pub status: SessionStatus,
-    pub current_task_id: Option<String>,
-}
-
-/// Runtime status of a session.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum SessionStatus {
-    Running,
-    Paused,
-    WaitingForInput,
-    Completed,
-    Failed,
-    /// Cancelled by an operator; terminal, never auto-driven.
-    Cancelled,
-    /// Interrupted — uncertain in-flight work; stopped, never safe retry.
-    Interrupted,
-}
-
-impl SessionStatus {
-    /// Returns `true` if the session is in a terminal state.
-    #[must_use]
-    pub const fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            Self::Completed | Self::Failed | Self::Cancelled | Self::Interrupted
-        )
-    }
-
-    /// Returns `true` if the session has completed successfully.
-    #[must_use]
-    pub const fn is_completed(&self) -> bool {
-        matches!(self, Self::Completed)
-    }
-
-    /// Map to the authoritative DB `status` string (A2).
-    #[must_use]
-    pub const fn as_db_str(&self) -> &'static str {
-        match self {
-            Self::Running => "running",
-            Self::Paused => "paused",
-            Self::WaitingForInput => "waiting_for_input",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-            Self::Interrupted => "interrupted",
-        }
-    }
-
-    /// Parse a DB `status` string back into a [`SessionStatus`].
-    ///
-    /// Returns `None` for unknown/unsupported values (A7): a corrupt or
-    /// ambiguous status must never be silently reinterpreted as `Running`.
-    /// Callers that need strict parsing should treat `None` as
-    /// unknown/non-replayable.
-    #[must_use]
-    pub fn from_db_str(status: &str) -> Option<Self> {
-        match status {
-            "running" => Some(Self::Running),
-            "paused" => Some(Self::Paused),
-            "waiting_for_input" => Some(Self::WaitingForInput),
-            "completed" => Some(Self::Completed),
-            "failed" => Some(Self::Failed),
-            "cancelled" => Some(Self::Cancelled),
-            "interrupted" => Some(Self::Interrupted),
-            _ => None,
-        }
-    }
 }
 
 /// Successful stopping point of a single engine step.
@@ -533,6 +459,41 @@ impl EngineError {
             session_id: session_id.to_string(),
             source: Box::new(source),
             witness: Box::new(witness),
+        }
+    }
+}
+
+impl From<StorageError> for EngineError {
+    fn from(err: StorageError) -> Self {
+        match err {
+            StorageError::GraphFlow(source) => Self::GraphFlow(source),
+            StorageError::SessionNotFound(session_id) => Self::SessionNotFound(session_id),
+            StorageError::RevisionMismatch {
+                session_id,
+                expected,
+                found,
+            } => Self::RevisionMismatch {
+                session_id,
+                expected,
+                found,
+            },
+            StorageError::TerminalState(session_id) => Self::TerminalState(session_id),
+            StorageError::RunAlreadyExists {
+                session_id,
+                execution_version,
+            } => Self::RunAlreadyExists {
+                session_id,
+                execution_version,
+            },
+            StorageError::WaitConflict {
+                session_id,
+                status,
+                current_wait_id,
+            } => Self::WaitConflict {
+                session_id,
+                status,
+                current_wait_id,
+            },
         }
     }
 }
@@ -878,7 +839,7 @@ impl EngineSharedState {
                 // (Minor 1: hydrate_children must not leave a stale entry on
                 // a load/child-snapshot error).
                 self.children.write().await.remove(&parent_session_id.0);
-                return Err(e);
+                return Err(e.into());
             }
         };
         let parent = self
@@ -902,7 +863,7 @@ impl EngineSharedState {
             Ok(record) => record,
             Err(e) => {
                 self.children.write().await.remove(&parent_session_id.0);
-                return Err(e);
+                return Err(e.into());
             }
         };
         if let Some(parent_record) = parent_record {
@@ -1302,7 +1263,7 @@ impl EngineSharedState {
                             }
                             break;
                         }
-                        Err(EngineError::RevisionMismatch { .. }) => {
+                        Err(StorageError::RevisionMismatch { .. }) => {
                             if !cancel_allow_rebase {
                                 return Err(EngineError::RevisionMismatch {
                                     session_id: session_id.0.clone(),
@@ -1344,7 +1305,7 @@ impl EngineSharedState {
                             fence_state = current.state.unwrap_or_default();
                             fence_state.cancel_requested = true;
                         }
-                        Err(e) => return Err(e),
+                        Err(e) => return Err(e.into()),
                     }
                 }
             }
@@ -1538,7 +1499,7 @@ impl EngineSharedState {
                         }
                         match interrupted_result {
                             Ok(_) => break,
-                            Err(EngineError::RevisionMismatch { .. }) => {
+                            Err(StorageError::RevisionMismatch { .. }) => {
                                 if !cancel_allow_rebase {
                                     return Err(EngineError::RevisionMismatch {
                                         session_id: session_id.0.clone(),
@@ -1557,7 +1518,7 @@ impl EngineSharedState {
                                 // Reload and re-commit against the new
                                 // revision.
                             }
-                            Err(err) => return Err(err),
+                            Err(err) => return Err(err.into()),
                         }
                     }
                     // Durable Interrupted confirmed: only now update the
@@ -1693,7 +1654,7 @@ impl EngineSharedState {
                         // tokens or infer cleanup from Observed (P4 §6.2).
                         return Ok(record.status);
                     }
-                    Err(EngineError::RevisionMismatch { .. }) => {
+                    Err(StorageError::RevisionMismatch { .. }) => {
                         if !cancel_allow_rebase {
                             return Err(EngineError::RevisionMismatch {
                                 session_id: session_id.0.clone(),
@@ -1711,7 +1672,7 @@ impl EngineSharedState {
                         }
                         // Reload and re-settle against the new revision.
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(e.into()),
                 }
             }
             // M-004: reclaim the run's coordinator cancellation token at
@@ -2009,7 +1970,7 @@ impl EngineSharedState {
                 match store.load_run(session_id).await {
                     Ok(Some(r)) => (r.state_revision, r.status, Some(r.execution_version)),
                     Ok(None) => (0, SessionStatus::Running, None),
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(e.into()),
                 }
             } else {
                 let status = self
@@ -2110,9 +2071,9 @@ impl EngineSharedState {
                 .await
             {
                 Err(
-                    e @ (EngineError::RevisionMismatch { .. }
-                    | EngineError::TerminalState(_)
-                    | EngineError::GraphFlow(graph_flow::GraphError::SessionConflict(_))),
+                    e @ (StorageError::RevisionMismatch { .. }
+                    | StorageError::TerminalState(_)
+                    | StorageError::GraphFlow(graph_flow::GraphError::SessionConflict(_))),
                 ) => {
                     // A marker refusal that names the concurrent authoritative
                     // winner (revision/graph ownership loss, terminal state,
@@ -2120,7 +2081,7 @@ impl EngineSharedState {
                     // authority: it must reach the drive loop as the losing
                     // writer's own disposition, never wrapped into a
                     // fabricated step-failure settlement.
-                    return Err(e);
+                    return Err(e.into());
                 }
                 Err(e) => {
                     // The marker did not commit: the attempt owns only the
@@ -2131,7 +2092,7 @@ impl EngineSharedState {
                         pre_step_status: pre_step_status.clone(),
                         pre_step_root: pre.clone(),
                     };
-                    return Err(EngineError::step_failed(&session_id.0, e, witness));
+                    return Err(EngineError::step_failed(&session_id.0, e.into(), witness));
                 }
                 Ok(marker_record) => {
                     transition_revision = marker_record.state_revision;
@@ -2333,7 +2294,7 @@ impl EngineSharedState {
                         {
                             Ok(SettlementResult::Applied(record)) => Ok((true, record.status)),
                             Ok(SettlementResult::Observed(record)) => Ok((false, record.status)),
-                            Err(e) => Err(e),
+                            Err(e) => Err(e.into()),
                         }
                     } else {
                         store
@@ -2347,6 +2308,7 @@ impl EngineSharedState {
                             )
                             .await
                             .map(|_| (true, status.clone()))
+                            .map_err(EngineError::from)
                     };
                 match commit_result {
                     Ok((owned_commit, durable_status)) => {
@@ -2519,8 +2481,8 @@ impl EngineSharedState {
                                 // error as the truthful outcome; the winner is
                                 // untouched.
                                 Err(
-                                    EngineError::RevisionMismatch { .. }
-                                    | EngineError::TerminalState(_),
+                                    StorageError::RevisionMismatch { .. }
+                                    | StorageError::TerminalState(_),
                                 ) => {}
                                 // Any other restore failure (storage fault,
                                 // corruption) must remain observable: an
@@ -2836,7 +2798,7 @@ impl EngineSharedState {
                             Ok(SettlementResult::Applied(_) | SettlementResult::Observed(_)) => {
                                 break;
                             }
-                            Err(EngineError::RevisionMismatch { .. }) => {
+                            Err(StorageError::RevisionMismatch { .. }) => {
                                 settle_attempts += 1;
                                 if settle_attempts >= CANCEL_FENCE_RETRY_BOUND {
                                     return Err(EngineError::RevisionMismatch {
@@ -2848,7 +2810,7 @@ impl EngineSharedState {
                                 // Reload and re-settle against the new
                                 // revision.
                             }
-                            Err(e) => return Err(e),
+                            Err(e) => return Err(e.into()),
                         }
                     }
                     child_map
@@ -3181,7 +3143,7 @@ fn build_step_state(
     // `Err(GraphError)` and are persisted by the daemon driver's failure
     // path. A step that reached `build_step_state` therefore carries no
     // fabricated failure record.
-    let failure: Option<crate::run_state::RunFailure> = None;
+    let failure: Option<nexus_session_storage::run_state::RunFailure> = None;
     // Round-4 Critical 2 (A4): when THIS step parked because a nested child
     // is waiting for human input, the root WaitRecord names the exact
     // waiting descendant (`child_session_id` / `child_task_id`) so restart
@@ -3197,12 +3159,12 @@ fn build_step_state(
         (None, None)
     };
     let wait = if matches!(status, SessionStatus::WaitingForInput) {
-        Some(crate::run_state::WaitRecord {
+        Some(nexus_session_storage::run_state::WaitRecord {
             wait_id: uuid::Uuid::new_v4().to_string(),
             task_id: current_task_id.to_string(),
             child_session_id,
             child_task_id,
-            kind: crate::run_state::WaitKind::Manual,
+            kind: nexus_session_storage::run_state::WaitKind::Manual,
         })
     } else {
         None
@@ -4108,7 +4070,7 @@ impl GraphFlowEngine {
                 .collect();
             // Snapshot the closure first so no children-map lock is held
             // across the storage awaits below.
-            let snapshot: Vec<(SessionId, Vec<crate::run_state::ChildCheckpoint>)> = {
+            let snapshot: Vec<(SessionId, Vec<nexus_session_storage::run_state::ChildCheckpoint>)> = {
                 let children_map = self.state.children.read().await;
                 let mut queue: std::collections::VecDeque<SessionId> =
                     std::collections::VecDeque::new();
@@ -4337,7 +4299,7 @@ impl GraphFlowEngine {
         &self,
         loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
-        applied: Option<crate::run_state::AppliedRunIdentity>,
+        applied: Option<nexus_session_storage::run_state::AppliedRunIdentity>,
         intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
     ) -> Result<RunDescriptorV1, EngineError> {
         let source = loaded.source_identity.clone().ok_or_else(|| {
@@ -4369,7 +4331,7 @@ impl GraphFlowEngine {
         &self,
         loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
-        applied: Option<crate::run_state::AppliedRunIdentity>,
+        applied: Option<nexus_session_storage::run_state::AppliedRunIdentity>,
         intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
@@ -4548,8 +4510,8 @@ impl GraphFlowEngine {
         work_id: Option<String>,
         input: serde_json::Map<String, serde_json::Value>,
         core_context: Option<&CoreContextPayload>,
-        agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
-        applied: Option<crate::run_state::AppliedRunIdentity>,
+        agent_bindings: std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>,
+        applied: Option<nexus_session_storage::run_state::AppliedRunIdentity>,
         intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
@@ -4651,11 +4613,11 @@ impl GraphFlowEngine {
         core_context: Option<&CoreContextPayload>,
         core_context_version: u32,
         expected_core_context_version: u32,
-        agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+        agent_bindings: std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>,
         frozen_source: Option<PresetSourceIdentity>,
-        applied: Option<crate::run_state::AppliedRunIdentity>,
+        applied: Option<nexus_session_storage::run_state::AppliedRunIdentity>,
         intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
-        admission_gate: Option<crate::run_state::ScheduleAdmissionGate>,
+        admission_gate: Option<nexus_session_storage::run_state::ScheduleAdmissionGate>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
         let Some(store) = &self.state.workflow_store else {
@@ -5191,17 +5153,17 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
     async fn load_run(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+    ) -> Result<Option<nexus_session_storage::run_state::RunRecord>, StorageError> {
         self.inner.load_run(session_id).await
     }
 
     async fn start_run(
         &self,
         session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .start_run(session_id, descriptor, checkpoint, next_state)
             .await
@@ -5211,13 +5173,13 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         &self,
         schedule_id: &str,
         session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
+        descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
         core_context_version: u32,
         expected_core_context_version: u32,
-        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        admission_gate: Option<&nexus_session_storage::run_state::ScheduleAdmissionGate>,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .admit_schedule_run(
                 schedule_id,
@@ -5236,10 +5198,10 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         &self,
         session_id: &SessionId,
         expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
         next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         if next_status == SessionStatus::Interrupted
             && !self
                 .injected
@@ -5265,7 +5227,7 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
                 .commit_transition(
                     session_id,
                     record.state_revision,
-                    crate::run_state::RunCheckpoint {
+                    nexus_session_storage::run_state::RunCheckpoint {
                         root: &root,
                         children: &[],
                     },
@@ -5291,10 +5253,10 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
         next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         let _ = expected_graph_version;
         self.commit_transition(
             session_id,
@@ -5311,10 +5273,10 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
         terminal_target: TerminalSettlementTarget,
-    ) -> Result<SettlementResult, EngineError> {
+    ) -> Result<SettlementResult, StorageError> {
         self.inner
             .settle_run(
                 session_id,
@@ -5332,7 +5294,7 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         session_id: &SessionId,
         expected_revision: u64,
         pre_step: &graph_flow::Session,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .restore_pre_step(session_id, expected_revision, pre_step)
             .await
@@ -5343,9 +5305,9 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        step_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        step_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .mark_step_in_flight(
                 session_id,
@@ -5363,8 +5325,8 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         expected_revision: u64,
         expected_step: Option<&str>,
         expected_attempt_id: Option<&str>,
-        attempt: &crate::run_state::PromptAttempt,
-    ) -> Result<(), EngineError> {
+        attempt: &nexus_session_storage::run_state::PromptAttempt,
+    ) -> Result<(), StorageError> {
         self.inner
             .persist_prompt_attempt(
                 session_id,
@@ -5382,7 +5344,7 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         expected_revision: u64,
         expected_step: Option<&str>,
         attempt_id: &str,
-    ) -> Result<(), EngineError> {
+    ) -> Result<(), StorageError> {
         self.inner
             .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
             .await
@@ -5391,7 +5353,7 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
     async fn load_children(
         &self,
         parent_session_id: &SessionId,
-    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+    ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError> {
         self.inner.load_children(parent_session_id).await
     }
 }
@@ -5438,17 +5400,17 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
     async fn load_run(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+    ) -> Result<Option<nexus_session_storage::run_state::RunRecord>, StorageError> {
         self.inner.load_run(session_id).await
     }
 
     async fn start_run(
         &self,
         session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .start_run(session_id, descriptor, checkpoint, next_state)
             .await
@@ -5458,13 +5420,13 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         &self,
         schedule_id: &str,
         session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
+        descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
         core_context_version: u32,
         expected_core_context_version: u32,
-        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        admission_gate: Option<&nexus_session_storage::run_state::ScheduleAdmissionGate>,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .admit_schedule_run(
                 schedule_id,
@@ -5483,10 +5445,10 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         &self,
         session_id: &SessionId,
         expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
         next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         // The phase-1 cancel fence is the first commit carrying the durable
         // cancel intent on a non-terminal status. Inject the Continue winner
         // at the SAME revision BEFORE the fence commits, so the fence loses
@@ -5517,12 +5479,12 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
                 .commit_transition(
                     session_id,
                     record.state_revision,
-                    crate::run_state::RunCheckpoint {
+                    nexus_session_storage::run_state::RunCheckpoint {
                         root: &winner_root,
                         children: &[],
                     },
                     SessionStatus::Running,
-                    &crate::run_state::RunStateV1::default(),
+                    &nexus_session_storage::run_state::RunStateV1::default(),
                 )
                 .await
                 .expect("Continue wins the CAS before the cancel fence");
@@ -5543,10 +5505,10 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
         next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         let _ = expected_graph_version;
         self.commit_transition(
             session_id,
@@ -5563,10 +5525,10 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
         terminal_target: TerminalSettlementTarget,
-    ) -> Result<SettlementResult, EngineError> {
+    ) -> Result<SettlementResult, StorageError> {
         self.inner
             .settle_run(
                 session_id,
@@ -5584,7 +5546,7 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         session_id: &SessionId,
         expected_revision: u64,
         pre_step: &graph_flow::Session,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .restore_pre_step(session_id, expected_revision, pre_step)
             .await
@@ -5595,9 +5557,9 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        step_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        step_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .mark_step_in_flight(
                 session_id,
@@ -5615,8 +5577,8 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         expected_revision: u64,
         expected_step: Option<&str>,
         expected_attempt_id: Option<&str>,
-        attempt: &crate::run_state::PromptAttempt,
-    ) -> Result<(), EngineError> {
+        attempt: &nexus_session_storage::run_state::PromptAttempt,
+    ) -> Result<(), StorageError> {
         self.inner
             .persist_prompt_attempt(
                 session_id,
@@ -5634,7 +5596,7 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         expected_revision: u64,
         expected_step: Option<&str>,
         attempt_id: &str,
-    ) -> Result<(), EngineError> {
+    ) -> Result<(), StorageError> {
         self.inner
             .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
             .await
@@ -5643,7 +5605,7 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
     async fn load_children(
         &self,
         parent_session_id: &SessionId,
-    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+    ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError> {
         self.inner.load_children(parent_session_id).await
     }
 }
@@ -5684,17 +5646,17 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
     async fn load_run(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+    ) -> Result<Option<nexus_session_storage::run_state::RunRecord>, StorageError> {
         self.inner.load_run(session_id).await
     }
 
     async fn start_run(
         &self,
         session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .start_run(session_id, descriptor, checkpoint, next_state)
             .await
@@ -5704,13 +5666,13 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         &self,
         schedule_id: &str,
         session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
+        descriptor: &nexus_session_storage::run_state::RunDescriptorV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
         core_context_version: u32,
         expected_core_context_version: u32,
-        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        admission_gate: Option<&nexus_session_storage::run_state::ScheduleAdmissionGate>,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .admit_schedule_run(
                 schedule_id,
@@ -5729,10 +5691,10 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         &self,
         session_id: &SessionId,
         expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
         next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .commit_transition(
                 session_id,
@@ -5749,10 +5711,10 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
         next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        next_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         let _ = expected_graph_version;
         self.commit_transition(
             session_id,
@@ -5769,10 +5731,10 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        next_state: &nexus_session_storage::run_state::RunStateV1,
         terminal_target: TerminalSettlementTarget,
-    ) -> Result<SettlementResult, EngineError> {
+    ) -> Result<SettlementResult, StorageError> {
         if terminal_target == TerminalSettlementTarget::Cancelled
             && !self
                 .injected
@@ -5798,12 +5760,12 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
                 .commit_transition(
                     session_id,
                     record.state_revision,
-                    crate::run_state::RunCheckpoint {
+                    nexus_session_storage::run_state::RunCheckpoint {
                         root: &winner_root,
                         children: &[],
                     },
                     SessionStatus::Running,
-                    &crate::run_state::RunStateV1::default(),
+                    &nexus_session_storage::run_state::RunStateV1::default(),
                 )
                 .await
                 .expect("competing transition wins the CAS before the child settle");
@@ -5825,7 +5787,7 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         session_id: &SessionId,
         expected_revision: u64,
         pre_step: &graph_flow::Session,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .restore_pre_step(session_id, expected_revision, pre_step)
             .await
@@ -5836,9 +5798,9 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        step_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        checkpoint: nexus_session_storage::run_state::RunCheckpoint<'_>,
+        step_state: &nexus_session_storage::run_state::RunStateV1,
+    ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
         self.inner
             .mark_step_in_flight(
                 session_id,
@@ -5856,8 +5818,8 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         expected_revision: u64,
         expected_step: Option<&str>,
         expected_attempt_id: Option<&str>,
-        attempt: &crate::run_state::PromptAttempt,
-    ) -> Result<(), EngineError> {
+        attempt: &nexus_session_storage::run_state::PromptAttempt,
+    ) -> Result<(), StorageError> {
         self.inner
             .persist_prompt_attempt(
                 session_id,
@@ -5875,7 +5837,7 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         expected_revision: u64,
         expected_step: Option<&str>,
         attempt_id: &str,
-    ) -> Result<(), EngineError> {
+    ) -> Result<(), StorageError> {
         self.inner
             .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
             .await
@@ -5884,7 +5846,7 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
     async fn load_children(
         &self,
         parent_session_id: &SessionId,
-    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+    ) -> Result<Vec<nexus_session_storage::run_state::RunRecord>, StorageError> {
         self.inner.load_children(parent_session_id).await
     }
 }
@@ -5900,7 +5862,7 @@ mod tests {
     #![allow(clippy::significant_drop_tightening)] // tests read state snapshots; early-drop noise without contention value
 
     use super::*;
-    use crate::storage::SqliteSessionStorage;
+    use nexus_session_storage::storage::SqliteSessionStorage;
     use graph_flow::InMemorySessionStorage;
 
     /// Helper: create a test engine with in-memory storage and built-in caps.
@@ -7026,12 +6988,12 @@ mod tests {
             .expect("get root")
             .expect("root exists");
         let waiting_state = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "wait-tok-1".to_string(),
                 task_id: "persist".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -7174,12 +7136,12 @@ mod tests {
             .expect("get root")
             .expect("root exists");
         let waiting_state = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "wait-tok-1".to_string(),
                 task_id: "persist".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -7333,12 +7295,12 @@ mod tests {
             .expect("get root")
             .expect("root exists");
         let waiting_state = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "wait-tok-1".to_string(),
                 task_id: "persist".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -7496,12 +7458,12 @@ mod tests {
             .expect("get grandchild root")
             .expect("grandchild root exists");
         let grandchild_waiting = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "grandchild-wait-tok".to_string(),
                 task_id: "persist".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -8342,12 +8304,12 @@ mod tests {
             .expect("get grandchild root")
             .expect("grandchild root exists");
         let grandchild_waiting = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "restart-grandchild-wait".to_string(),
                 task_id: "persist".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -8831,12 +8793,12 @@ mod tests {
             .expect("get child root")
             .expect("child root exists");
         let child_waiting = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "child-wait-tok".to_string(),
                 task_id: "persist".to_string(),
                 child_session_id: None,
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };
@@ -9025,12 +8987,12 @@ mod tests {
             .expect("get root")
             .expect("root row");
         let wait_state = RunStateV1 {
-            wait: Some(crate::run_state::WaitRecord {
+            wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "wait-nested-1".to_string(),
                 task_id: root.current_task_id.clone(),
                 child_session_id: Some(child_id.0.clone()),
                 child_task_id: None,
-                kind: crate::run_state::WaitKind::Manual,
+                kind: nexus_session_storage::run_state::WaitKind::Manual,
             }),
             ..RunStateV1::default()
         };

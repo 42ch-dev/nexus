@@ -582,7 +582,7 @@ pub struct ManagedSessionHandle {
 /// Opaque owned-process identity (A5) — PID plus process-birth and group.
 ///
 /// Never identified by PID alone. Mirrors the durable
-/// `nexus_orchestration::run_state::OwnedProcessIdentity` shape so the daemon
+/// `nexus_session_storage::run_state::OwnedProcessIdentity` shape so the daemon
 /// can persist the fingerprint without importing provider crates.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OwnedProcessIdentity {
