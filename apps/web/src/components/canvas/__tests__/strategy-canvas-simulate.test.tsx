@@ -56,30 +56,17 @@ vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => (
     revision: 1,
     activeSession: null,
     creatorId: 'c1',
-    baseRevision: 1,
     activeScheduleId: undefined,
-    draftEdges: [],
-    onConnect: () => {},
-    onReconnect: () => {},
     form: { label: '', description: '', nextTarget: '', promptBody: '' },
     setForm: () => {},
-    saveStatuses: {},
-    setSaveStatuses: () => {},
+    activeSection: 'state',
     setActiveSection: () => {},
     conflict: null,
     setConflict: () => {},
-    saveTriggers: {},
-    workingRevisionRef: { current: 1 },
+    saveTriggers: { state: 0, transition: 0, prompt: 0 },
+    setSaveTriggers: () => {},
     handleConflict: () => {},
     handleReapply: () => {},
-    selectedDraftEdge: null,
-    draftSourceState: null,
-    commitDraft: () => {},
-    isCommittingDraft: false,
-    cancelDraft: () => {},
-    commitKeyboardCreate: () => {},
-    isCommittingKeyboardCreate: false,
-    isReconnecting: false,
   }),
 }));
 
@@ -88,7 +75,6 @@ vi.mock('@/components/canvas/strategy-canvas/inspectors/state-inspector', () => 
 }));
 vi.mock('@/components/canvas/strategy-canvas/inspectors/edge-inspector', () => ({
   EdgeInspector: () => null,
-  DraftEdgeInspector: () => null,
 }));
 vi.mock('@/components/canvas/strategy-canvas/inspectors/prompt-inspector', () => ({
   PromptInspector: () => null,

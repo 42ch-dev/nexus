@@ -1,5 +1,5 @@
 import type { MutableRefObject } from 'react';
-import type { Edge, Node } from '@xyflow/react';
+import type { Node } from '@xyflow/react';
 
 import type { SimulationTrajectory, WorkflowDocument, PatternSummary } from '@42ch/nexus-contracts';
 
@@ -22,7 +22,6 @@ import {
   getConflictDraft,
   originalFormOf,
   type EditForm,
-  type SaveStatus,
   type Section,
 } from './state-machine';
 
@@ -68,14 +67,8 @@ export interface StrategySurfaceGraph {
  * stable and never recreated.
  */
 export interface StrategyCanvasAdapterContext {
-  presetId: string;
   form: EditForm;
-  saveTriggers: Record<Section, number>;
-  saveStatuses: Partial<Record<Section, SaveStatus>>;
-  workingRevisionRef: MutableRefObject<number>;
-  handleConflict: (currentRevision: number, section: Section) => void;
   onChange: <K extends keyof EditForm>(field: K, value: EditForm[K]) => void;
-  onSaveStatus: (section: Section, status: SaveStatus | undefined) => void;
   setActiveSection: (section: Section) => void;
   selectedState: PresetState | undefined;
   promptTemplateRef: string | undefined;
@@ -89,19 +82,6 @@ export interface StrategyCanvasAdapterContext {
    * projecting; the orchestrator reads it for the ValidationPanel (V1.115 T2).
    */
   danglingTargets: string[];
-  /**
-   * Local edge modifications (draft transition edges created by the author via
-   * `onConnect`) that live outside the daemon-persisted graph. The adapter
-   * merges them with the projected edges so drafts are visible on the canvas
-   * without a second projection path (V1.115 T2).
-   */
-  localEdges: Edge<StrategyEdgeData>[];
-  /**
-   * The canvas renders the applied (running) strategy rather than a compose
-   * candidate. That view is read-only: its structural and prompt editors are
-   * disabled because the running document is what apply/approve produced (P6).
-   */
-  appliedView: boolean;
   /**
    * Compose-path (flag on) slot interactions. Absent when the flag is off, so
    * the slot inspector and expand toggle never render there.
@@ -199,16 +179,9 @@ export function createStrategyCanvasAdapter(
         );
       }
 
-      // Merge local edge modifications (draft transition edges created by the
-      // author via onConnect) that are not yet persisted. Drafts have no
-      // matching projected edge id, so we append them; the author commits or
-      // cancels them in the edge inspector.
-      const baseIds = new Set(projected.edges.map((e) => e.id));
-      const drafts = ctxRef.current.localEdges.filter((e) => !baseIds.has(e.id));
-
       return {
         nodes: applyTrajectoryOverlay(nodes, graph.trajectory),
-        edges: [...projected.edges, ...drafts],
+        edges: projected.edges,
       };
     },
 
@@ -256,54 +229,16 @@ export function createStrategyCanvasAdapter(
 
       return (
         <>
-          <StateInspector
-            presetId={ctx.presetId}
-            selectedState={selectedState}
-            form={ctx.form}
-            onChange={ctx.onChange}
-            workingRevisionRef={ctx.workingRevisionRef}
-            saveTrigger={ctx.saveTriggers.state}
-            saveStatus={ctx.saveStatuses.state}
-            onSaveStatus={(s) => ctx.onSaveStatus('state', s)}
-            onConflict={ctx.handleConflict}
-            // The preset YAML is never the edited document: off while a
-            // candidate owns the write, and off on the read-only applied view.
-            structuralWritesDisabled={Boolean(ctx.compose) || ctx.appliedView}
-          />
+          <StateInspector form={ctx.form} onChange={ctx.onChange} />
           <div onFocusCapture={() => ctx.setActiveSection('transition')}>
-            <EdgeInspector
-              presetId={ctx.presetId}
-              selectedState={selectedState}
-              form={ctx.form}
-              onChange={ctx.onChange}
-              workingRevisionRef={ctx.workingRevisionRef}
-              saveTrigger={ctx.saveTriggers.transition}
-              saveStatus={ctx.saveStatuses.transition}
-              onSaveStatus={(s) => ctx.onSaveStatus('transition', s)}
-              onConflict={ctx.handleConflict}
-              // Kept visible, disabled, with its reason (the candidate owns the
-              // write while composing; the applied view is read-only).
-              structuralWritesDisabled={Boolean(ctx.compose) || ctx.appliedView}
-            />
+            <EdgeInspector selectedState={selectedState} form={ctx.form} onChange={ctx.onChange} />
           </div>
           {ctx.promptTemplateRef ? (
             <div onFocusCapture={() => ctx.setActiveSection('prompt')}>
               <PromptInspector
-                presetId={ctx.presetId}
-                selectedState={selectedState}
                 form={ctx.form}
                 onChange={ctx.onChange}
-                workingRevisionRef={ctx.workingRevisionRef}
                 promptTemplateRef={ctx.promptTemplateRef}
-                saveTrigger={ctx.saveTriggers.prompt}
-                saveStatus={ctx.saveStatuses.prompt}
-                onSaveStatus={(s) => ctx.onSaveStatus('prompt', s)}
-                onConflict={ctx.handleConflict}
-                // Neither rendered document is the preset YAML this editor
-                // writes: the applied view is frozen, and no compose op sets a
-                // prompt body. A Save here would rewrite the bundle template
-                // behind the candidate and leave the candidate untouched.
-                structuralWritesDisabled={Boolean(ctx.compose) || ctx.appliedView}
               />
             </div>
           ) : null}

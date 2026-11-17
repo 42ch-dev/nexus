@@ -2,46 +2,31 @@
  * Orchestrator-level state hook for the Strategy canvas.
  *
  * The Canvas renders a workflow IR document (the applied one, or the candidate
- * being composed) — never YAML. The hook owns: the shared edit form,
- * per-section save triggers/statuses, revision tracking, conflict/reapply
- * coordination, draft transition edges (local-only), and the three
- * transition-write mutations (commit draft, keyboard create, reconnect). The
- * editing surface still speaks the flat state shape, so `parsedPresetFromIr`
- * presents the document's nodes to it without any YAML parse.
+ * being composed) — never YAML. The hook owns: the shared edit form, revision
+ * tracking, and conflict/reapply coordination. The editing surface still
+ * speaks the flat state shape, so `parsedPresetFromIr` presents the document's
+ * nodes to it without any YAML parse.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { Connection, Edge } from '@xyflow/react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type { WorkflowDocument } from '@42ch/nexus-contracts';
 
 import { parsedPresetFromIr } from '@/lib/canvas/ir-preset';
 import {
-  isStrategyConflictError,
   useActiveSession,
   useDerivedCreatorId,
   usePresetSchedules,
 } from '@/lib/canvas/use-strategy-data';
-import { useStrategyYamlAuthority } from '@/lib/canvas/strategy-yaml-authority';
-import { queryKeys } from '@/lib/nexus/query-keys';
-import { useToast } from '@/lib/use-toast';
 
-import {
-  createDraftTransitionEdge,
-  type EditForm,
-  type SaveStatus,
-  type Section,
-} from '../state-machine';
+import type { EditForm, Section } from '../state-machine';
 
 /**
  * Conflict state shared across the canvas write boundary.
  *
- * `retry` is present when the conflict originated from a transition
- * create/reconnect command (not a state-edit save). In that case
- * {@link useStrategyCanvas.handleReapply} replays the original transition
- * command instead of incrementing the section save trigger, which would
- * wrongly replay a state-edit save (QC1 W-001).
+ * `retry` is present when the conflict carries the command that must be
+ * replayed instead of the section save trigger. In that case
+ * {@link useStrategyCanvas.handleReapply} replays the original command, which
+ * would otherwise wrongly replay a state-edit save (QC1 W-001).
  */
 export interface ConflictInfo {
   currentRevision: number;
@@ -57,12 +42,7 @@ export interface StrategyDocumentSource {
   refetch: () => Promise<unknown>;
 }
 
-export function useStrategyCanvas(
-  presetId: string,
-  source: StrategyDocumentSource,
-  structuralWritesDisabled = false,
-) {
-  const { t } = useTranslation('canvas');
+export function useStrategyCanvas(presetId: string, source: StrategyDocumentSource) {
   const { document, refetch } = source;
   // The editing surface's flat state view of the rendered document. No YAML
   // is parsed on this path.
@@ -73,7 +53,6 @@ export function useStrategyCanvas(
   const creatorId = useDerivedCreatorId(presetId);
 
   const [form, setForm] = useState<EditForm>({ label: '', description: '', nextTarget: '', promptBody: '' });
-  const [saveStatuses, setSaveStatuses] = useState<Partial<Record<Section, SaveStatus>>>({});
   const [activeSection, setActiveSection] = useState<Section>('state');
   const [conflict, setConflict] = useState<ConflictInfo | null>(null);
   const [saveTriggers, setSaveTriggers] = useState<Record<Section, number>>({
@@ -81,18 +60,6 @@ export function useStrategyCanvas(
     transition: 0,
     prompt: 0,
   });
-
-  // Draft transition edges (local-only — created by onConnect, committed or
-  // cancelled in the inspector). The adapter merges these with the projected
-  // daemon edges so drafts appear on the canvas without the hook managing base
-  // node/edge state.
-  const [draftEdges, setDraftEdges] = useState<Edge[]>([]);
-
-  const workingRevisionRef = useRef(revision);
-
-  useEffect(() => {
-    workingRevisionRef.current = revision;
-  }, [revision]);
 
   useEffect(() => {
     if (conflict && revision !== conflict.currentRevision) {
@@ -110,8 +77,6 @@ export function useStrategyCanvas(
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeSection]);
-
-
 
   const activeScheduleId = useMemo(() => {
     if (!activeSession) return undefined;
@@ -140,237 +105,6 @@ export function useStrategyCanvas(
     });
   }
 
-  /**
-   * Spatial connect gesture → local draft transition edge (FB-SE-000).
-   *
-   * The draft is appended to `draftEdges` and selected so the edge inspector
-   * can take focus. No daemon call happens here — the author commits (or
-   * cancels) in the inspector (FB-SE-002). Re-attempting a connect from the
-   * same source replaces any existing draft rather than stacking duplicates.
-   */
-  const onConnect = useCallback(
-    (connection: Connection) => {
-      const draft = createDraftTransitionEdge(connection, t('strategy.draftTransitionLabel'));
-      if (!draft) return;
-      setDraftEdges((prev) => [
-        ...prev.map((e) => ({ ...e, selected: false })).filter(
-          (e) => !(e.data as { isDraft?: boolean })?.isDraft,
-        ),
-        draft,
-      ]);
-    },
-    [t],
-  );
-
-  /**
-   * FB-SE-002 — the draft transition selected on the canvas. A draft edge is
-   * any edge carrying `data.isDraft = true` (created by {@link onConnect}).
-   * There is at most one draft at a time; {@link onConnect} replaces any
-   * existing draft instead of stacking duplicates.
-   */
-  const selectedDraftEdge = useMemo(
-    () => draftEdges.find((e) => (e.data as { isDraft?: boolean } | undefined)?.isDraft) ?? null,
-    [draftEdges],
-  );
-
-  const states = parsed?.manifest.states;
-  const draftSourceState = useMemo(() => {
-    if (!selectedDraftEdge) return undefined;
-    return states?.find((s) => s.id === selectedDraftEdge.source);
-  }, [selectedDraftEdge, states]);
-
-  const yaml = useStrategyYamlAuthority(structuralWritesDisabled);
-  const qc = useQueryClient();
-  const { toast } = useToast();
-
-  /**
-   * Commit a draft transition via `strategy.patch_transition` with
-   * **`op: "create"`** (FB-SE-002). On success the draft is removed from
-   * `draftEdges` and the preset query is invalidated so the canonical edge —
-   * built by the daemon from the structured op — replaces it on refetch. A 409
-   * revision conflict keeps the draft and routes through the same
-   * {@link handleConflict} path the existing edit inspector uses, so the
-   * conflict modal with Use current / Reapply / Review side-by-side opens.
-   *
-   * `handleConflict` is a hoisted function declaration, so it is safe to
-   * reference here even though it is defined textually later in the hook.
-   */
-  const commitDraftMutation = useMutation({
-    mutationFn: async (args: { condition?: string }) => {
-      if (!selectedDraftEdge) throw new Error('No draft transition to commit');
-      return yaml.patchTransition(presetId, {
-        strategy_id: presetId,
-        base_revision: workingRevisionRef.current,
-        source_state_id: selectedDraftEdge.source,
-        new_target: selectedDraftEdge.target,
-        condition: args.condition,
-        op: 'create',
-        transition_kind: 'next',
-      });
-    },
-    onSuccess: (res) => {
-      workingRevisionRef.current = Number(res.new_revision);
-      setDraftEdges((prev) => prev.filter((e) => !(e.data as { isDraft?: boolean } | undefined)?.isDraft));
-      toast({
-        variant: 'success',
-        title: 'Transition created',
-        description: `${selectedDraftEdge?.source} → ${selectedDraftEdge?.target}`,
-      });
-      void qc.invalidateQueries({ queryKey: queryKeys.presets.detail(presetId) });
-    },
-    onError: (error, args) => {
-      if (isStrategyConflictError(error)) {
-        const currentRevision =
-          typeof error.details === 'object' && error.details !== null
-            ? (error.details as { current_revision?: number }).current_revision ?? 0
-            : 0;
-        // Keep the draft so the author can reconcile; refetch canonical.
-        // Pass a retry that replays the original transition command so
-        // "Reapply my edit" re-issues the create, not a state-edit save (QC1 W-001).
-        handleConflict(currentRevision, 'transition', () => commitDraftMutation.mutate(args));
-      } else {
-        const message = error instanceof Error ? error.message : 'Failed to create transition';
-        toast({ variant: 'error', title: message });
-      }
-    },
-  });
-
-  /** Discard the current draft transition without a daemon call (FB-SE-001 #4). */
-  const cancelDraft = useCallback(() => {
-    setDraftEdges((prev) => prev.filter((e) => !(e.data as { isDraft?: boolean } | undefined)?.isDraft));
-  }, []);
-
-  /**
-   * FB-SE-004 — keyboard edge-creation commit. Sends the same
-   * `strategy.patch_transition` with **`op: "create"`** as the spatial path
-   * (FB-SE-002), but with explicit source/target from the dialog instead of a
-   * draft edge. On 409, routes through the same {@link handleConflict} path so
-   * the conflict modal opens. There is no local draft edge to remove on
-   * success — the dialog closes and the preset refetch brings the canonical
-   * edge.
-   *
-   * `handleConflict` is a hoisted function declaration, so it is safe to
-   * reference here even though it is defined textually later in the hook.
-   */
-  const commitKeyboardCreateMutation = useMutation({
-    mutationFn: async (args: {
-      sourceStateId: string;
-      targetStateId: string;
-      transitionKind?: 'next' | 'branch' | 'default';
-      condition?: string;
-    }) => {
-      return yaml.patchTransition(presetId, {
-        strategy_id: presetId,
-        base_revision: workingRevisionRef.current,
-        source_state_id: args.sourceStateId,
-        new_target: args.targetStateId,
-        condition: args.condition,
-        transition_kind: args.transitionKind ?? 'next',
-        op: 'create',
-      });
-    },
-    onSuccess: (res, args) => {
-      workingRevisionRef.current = Number(res.new_revision);
-      toast({
-        variant: 'success',
-        title: 'Transition created',
-        description: `${args.sourceStateId} → ${args.targetStateId}`,
-      });
-      void qc.invalidateQueries({ queryKey: queryKeys.presets.detail(presetId) });
-    },
-    onError: (error, args) => {
-      if (isStrategyConflictError(error)) {
-        const currentRevision =
-          typeof error.details === 'object' && error.details !== null
-            ? (error.details as { current_revision?: number }).current_revision ?? 0
-            : 0;
-        // Replay the original transition command on reapply (QC1 W-001).
-        handleConflict(currentRevision, 'transition', () =>
-          commitKeyboardCreateMutation.mutate(args),
-        );
-      } else {
-        const message = error instanceof Error ? error.message : 'Failed to create transition';
-        toast({ variant: 'error', title: message });
-      }
-    },
-  });
-
-  /**
-   * FB-SE-003 — reconnect an existing transition edge to a new target by drag.
-   *
-   * Sends a single `strategy.patch_transition` with `op: "update"` (default) +
-   * `old_target` (the previous target) + `new_target` (the drag's new target).
-   * The daemon replaces the matched transition atomically — no delete+create,
-   * so the author ends with one edge for that logical rewiring.
-   *
-   * V1.115 T2: the optimistic edge update (and its revert-on-failure) are no
-   * longer managed in local edge state. The adapter projects from `parsed` on
-   * every render, so the canonical edge moves to the new target once the query
-   * refetch completes. On failure, the old target persists because no daemon
-   * state changed.
-   *
-   * `handleConflict` is a hoisted function declaration, so it is safe to
-   * reference here even though it is defined textually later in the hook.
-   */
-  const reconnectTransitionMutation = useMutation({
-    mutationFn: async (args: { oldEdge: Edge; newConnection: Connection }) => {
-      const { oldEdge, newConnection } = args;
-      if (!newConnection.target) throw new Error('Reconnect is missing a new target');
-      const data = oldEdge.data as { transitionKind?: string; condition?: string } | undefined;
-      return yaml.patchTransition(presetId, {
-        strategy_id: presetId,
-        base_revision: workingRevisionRef.current,
-        source_state_id: oldEdge.source,
-        old_target: oldEdge.target,
-        new_target: newConnection.target,
-        condition: data?.condition,
-        transition_kind: (data?.transitionKind ?? 'next') as 'next' | 'branch' | 'default',
-        op: 'update',
-      });
-    },
-    onSuccess: (res, args) => {
-      workingRevisionRef.current = Number(res.new_revision);
-      toast({
-        variant: 'success',
-        title: 'Transition reconnected',
-        description: `${args.oldEdge.source} → ${args.newConnection.target}`,
-      });
-      void qc.invalidateQueries({ queryKey: queryKeys.presets.detail(presetId) });
-    },
-    onError: (error, args) => {
-      if (isStrategyConflictError(error)) {
-        const currentRevision =
-          typeof error.details === 'object' && error.details !== null
-            ? (error.details as { current_revision?: number }).current_revision ?? 0
-            : 0;
-        // Replay the original reconnect command on reapply (QC1 W-001).
-        handleConflict(currentRevision, 'transition', () =>
-          reconnectTransitionMutation.mutate(args),
-        );
-      } else {
-        const message = error instanceof Error ? error.message : 'Failed to reconnect transition';
-        toast({ variant: 'error', title: message });
-      }
-    },
-  });
-
-  /**
-   * React Flow reconnect gesture (dragging an existing edge end to a new
-   * target) → single `patch_transition` reconnect payload (FB-SE-003).
-   *
-   * Self-loops and missing endpoints are ignored so the edge snaps back to its
-   * prior target (no daemon call). V1.115 T2: no local optimistic update —
-   * the edge moves to the new target once the query refetch completes.
-   */
-  const onReconnect = useCallback(
-    (oldEdge: Edge, newConnection: Connection) => {
-      if (!newConnection.target || newConnection.target === oldEdge.source) return;
-      if (newConnection.target === oldEdge.target) return;
-      reconnectTransitionMutation.mutate({ oldEdge, newConnection });
-    },
-    [reconnectTransitionMutation],
-  );
-
   return {
     parsed,
     revision,
@@ -380,27 +114,13 @@ export function useStrategyCanvas(
     activeScheduleId,
     form,
     setForm,
-    saveStatuses,
-    setSaveStatuses,
     activeSection,
     setActiveSection,
     conflict,
     setConflict,
     saveTriggers,
     setSaveTriggers,
-    workingRevisionRef,
     handleConflict,
     handleReapply,
-    draftEdges,
-    selectedDraftEdge,
-    draftSourceState,
-    onConnect,
-    commitDraft: commitDraftMutation.mutate,
-    isCommittingDraft: commitDraftMutation.isPending,
-    cancelDraft,
-    commitKeyboardCreate: commitKeyboardCreateMutation.mutate,
-    isCommittingKeyboardCreate: commitKeyboardCreateMutation.isPending,
-    onReconnect,
-    isReconnecting: reconnectTransitionMutation.isPending,
   };
 }

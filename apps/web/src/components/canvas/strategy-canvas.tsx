@@ -15,7 +15,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Connection, Edge, Node } from '@xyflow/react';
+import type { Node } from '@xyflow/react';
 
 import type { StrategyApprovals, WorkflowDocument } from '@42ch/nexus-contracts';
 
@@ -24,7 +24,7 @@ import { ErrorState, LoadingState, UnavailableState } from '@/components/ui/stat
 import { useRegisterCommand } from '@/lib/canvas/command-registry';
 import { useSimulationTrajectory } from '@/lib/canvas/use-simulation-trajectory';
 import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
-import type { StrategyEdgeData, StrategyNodeData } from '@/lib/canvas/strategy-graph';
+import type { StrategyNodeData } from '@/lib/canvas/strategy-graph';
 import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
 
 import { useStrategyCanvas } from '@/components/canvas/strategy-canvas/hooks/use-strategy-canvas';
@@ -46,15 +46,11 @@ import { StrategyAppliedState } from './strategy-canvas/applied-state';
 import { ComposeConflictDialog } from './strategy-canvas/compose-conflict-dialog';
 import { PatternPickerDialog } from './strategy-canvas/pattern-picker-dialog';
 import { InspectorPanel, StrategyConflictModal } from './strategy-canvas/inspector-panel';
-import { EdgeCreateDialog } from './strategy-canvas/edge-create-dialog';
-import { DraftEdgeInspector } from './strategy-canvas/inspectors/edge-inspector';
 import {
   ValidationPanel,
   isSectionDirty,
   originalFormOf,
   templateRefOf,
-  type SaveStatus,
-  type Section,
 } from './strategy-canvas/state-machine';
 import type { IdeaArtifact } from '@/components/canvas/idea-input';
 
@@ -97,15 +93,10 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   // apply/approve produced, so this view is read-only and editing goes through
   // Compose (P6 condition 2, D18).
   const appliedView = document === appliedDocument;
-  // No rendered document is authored in place — the applied view is the running
-  // strategy and a compose candidate is written through compose ops — so the
-  // preset-YAML structural author is never offered and never dispatched.
-  const yamlWritesDisabled = appliedView || composeEnabled;
-  const strategyState = useStrategyCanvas(
-    presetId,
-    { document, refetch: () => applied.refetch() },
-    yamlWritesDisabled,
-  );
+  const strategyState = useStrategyCanvas(presetId, {
+    document,
+    refetch: () => applied.refetch(),
+  });
   const approval = useApproveStrategy(presetId);
   const application = useApplyStrategy(presetId);
   // T4: every approval, so Apply can be aimed at a superseded one (rollback).
@@ -119,21 +110,14 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
 
   const [artifacts, setArtifacts] = useState<IdeaArtifact[]>([]);
   const [isEditing, setIsEditing] = useState(false);
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [patternPickerOpen, setPatternPickerOpen] = useState(false);
   const [approveOpen, setApproveOpen] = useState(false);
   // Which listed approval Apply is aimed at; null means the newest (T4).
   const [applyTargetId, setApplyTargetId] = useState<string | null>(null);
 
   const ctxRef = useRef<StrategyCanvasAdapterContext>({
-    presetId,
     form: strategyState.form,
-    saveTriggers: strategyState.saveTriggers,
-    saveStatuses: strategyState.saveStatuses,
-    workingRevisionRef: strategyState.workingRevisionRef,
-    handleConflict: strategyState.handleConflict,
     onChange: () => {},
-    onSaveStatus: () => {},
     setActiveSection: strategyState.setActiveSection,
     selectedState: undefined,
     promptTemplateRef: undefined,
@@ -143,8 +127,6 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     onReapply: () => {},
     onDismiss: () => {},
     danglingTargets: [],
-    localEdges: [],
-    appliedView,
   });
 
   const adapter = useMemo(() => createStrategyCanvasAdapter(ctxRef), []);
@@ -223,10 +205,6 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     value: (typeof strategyState.form)[K],
   ) {
     strategyState.setForm((prev) => ({ ...prev, [field]: value }));
-  }
-
-  function onSaveStatus(section: Section, status: SaveStatus | undefined) {
-    strategyState.setSaveStatuses((prev) => ({ ...prev, [section]: status }));
   }
 
   // One Simulate action for the open strategy: a supplied candidate is walked
@@ -323,14 +301,8 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   // path. danglingTargets is written BY the adapter during projection and
   // read below for the ValidationPanel.
   ctxRef.current = {
-    presetId,
     form: strategyState.form,
-    saveTriggers: strategyState.saveTriggers,
-    saveStatuses: strategyState.saveStatuses,
-    workingRevisionRef: strategyState.workingRevisionRef,
-    handleConflict: strategyState.handleConflict,
     onChange: updateField,
-    onSaveStatus,
     setActiveSection: strategyState.setActiveSection,
     selectedState,
     promptTemplateRef,
@@ -340,8 +312,6 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     onReapply: strategyState.handleReapply,
     onDismiss: () => strategyState.setConflict(null),
     danglingTargets: ctxRef.current.danglingTargets,
-    localEdges: strategyState.draftEdges as Edge<StrategyEdgeData>[],
-    appliedView,
     patterns: compose.patternsQuery.data?.items,
     ...(composeEnabled
       ? {
@@ -374,38 +344,14 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     ],
     handler: () => surface.setShowAlt(!showAltRef.current),
   });
-  useRegisterCommand({
-    id: 'strategy.create-transition',
-    labelKey: 'strategy.create-transition.label',
-    groupKey: 'group.strategy',
-    keywordKeys: [
-      'strategy.create-transition.keywords.add-edge',
-      'strategy.create-transition.keywords.new-transition',
-      'strategy.create-transition.keywords.state-machine',
-      'strategy.create-transition.keywords.link-states',
-    ],
-    handler: () => setCreateDialogOpen(true),
-    // The YAML transition author writes the preset file, which is never the
-    // document on canvas — neither the applied view nor a compose candidate.
-    available: () => !yamlWritesDisabled,
-  });
 
   useEffect(() => {
     if (!isEditing || !selectedState) {
       strategyState.setForm({ label: '', description: '', nextTarget: '', promptBody: '' });
-      strategyState.setSaveStatuses({});
       return;
     }
     strategyState.setForm(originalFormOf(selectedState));
-    strategyState.setSaveStatuses({});
-  }, [isEditing, selectedState?.id, strategyState.setForm, strategyState.setSaveStatuses]);
-
-  const onConnect = useCallback(
-    (connection: Connection) => {
-      strategyState.onConnect(connection);
-    },
-    [strategyState.onConnect],
-  );
+  }, [isEditing, selectedState?.id, strategyState.setForm]);
 
   // D16(c): an apply is recorded but its document no longer verifies. This is
   // not an empty state — presenting it as "not yet applied" would invite an
@@ -485,7 +431,6 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         activeSession={strategyState.activeSession}
         showAlt={surface.showAlt}
         setShowAlt={surface.setShowAlt}
-        onOpenCreateTransition={yamlWritesDisabled ? undefined : () => setCreateDialogOpen(true)}
         onSimulate={handleSimulate}
         staging={composeEnabled}
         onAddPattern={composeEnabled ? () => setPatternPickerOpen(true) : undefined}
@@ -503,11 +448,6 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
           edges={surface.edges}
           nodeTypes={surface.nodeTypes}
           onNodesChange={surface.onNodesChange}
-          // A displayed edge is never authored through the YAML authority: the
-          // applied view is read-only and connect/reconnect write the preset,
-          // not the candidate, so neither gesture is offered.
-          onConnect={yamlWritesDisabled ? undefined : onConnect}
-          onReconnect={yamlWritesDisabled ? undefined : strategyState.onReconnect}
           summaryText={surface.summaryText}
           ariaLabel={t('strategy.graphAriaLabel')}
           relayout={surface.relayout}
@@ -523,21 +463,6 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
               ? surface.inspector
               : null}
           </InspectorPanel>
-          {strategyState.selectedDraftEdge ? (
-            <aside
-              className="absolute right-3 top-3 w-[280px] rounded-card border border-gray-alpha-400 bg-background-100 p-3 shadow-popover"
-              aria-label={t('strategy.draftTransitionEditor')}
-            >
-              <DraftEdgeInspector
-                sourceStateId={strategyState.selectedDraftEdge.source}
-                targetStateId={strategyState.selectedDraftEdge.target}
-                isCommitting={strategyState.isCommittingDraft}
-                onCommit={strategyState.commitDraft}
-                onCancel={strategyState.cancelDraft}
-                structuralWritesDisabled={yamlWritesDisabled}
-              />
-            </aside>
-          ) : null}
           <ValidationPanel problems={problems} dangling={dangling} />
         </CanvasShell>
       )}
@@ -589,22 +514,11 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       <StrategyConflictModal
         conflict={strategyState.conflict}
         form={strategyState.form}
-        canonicalState={selectedState ?? strategyState.draftSourceState}
+        canonicalState={selectedState}
         promptTemplateRef={promptTemplateRef}
         onUseCurrent={handleUseCurrent}
         onReapply={strategyState.handleReapply}
         onDismiss={() => strategyState.setConflict(null)}
-      />
-
-      <EdgeCreateDialog
-        open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
-        states={parsed?.manifest.states ?? []}
-        isCommitting={strategyState.isCommittingKeyboardCreate}
-        onCommit={(args) => {
-          strategyState.commitKeyboardCreate(args);
-          setCreateDialogOpen(false);
-        }}
       />
 
       <CanvasFooter
