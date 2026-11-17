@@ -1,6 +1,6 @@
 # ADR: Strategy Simulation Fence — Simulate Before Approve
 
-Status: implemented — P2 simulator shipped in `v1.237-p2-simulator`; simulation is the standing safety fence before graph approval as a capability (`approve_strategy` refuses a missing, stale or mismatched trajectory, `crates/nexus-core/src/approve.rs:406-450`).
+Status: implemented — P2 simulator shipped in `v1.237-p2-simulator`; simulation is the standing safety fence before graph approval as a capability (`approve_strategy` refuses a missing, stale or mismatched trajectory through `ApproveRefusal`'s `SimulationMissing` / `SimulationStale` / `SimulationMismatch`, `crates/nexus-core/src/approve.rs`).
 Date: 2026-11-10
 Scope: Simulate-before-approve for Workflow IR: the trajectory contract, static reachability with stubbed judges, declared fidelity limits, deterministic output, effect rollup, and the requirement that Approve never renders as an enabled no-op.
 Source: split from the archived Canvas + Workflow IR redesign and Dynamic Workflow Generation and Orchestration Simulation records
@@ -63,4 +63,4 @@ P2 supplies a deterministic, isolated review artifact that makes reachability, w
 
 The cost is deliberate conservatism: static waits can over-report, judges disclose only their default path, and the result says nothing about output quality or production usefulness. Those limits must be shown wherever Approve is offered. Deterministic errors for invalid judge defaults and fail-closed source identity preserve safety at the cost of refusing ambiguous graphs.
 
-P2 ships validation and simulation only. Canvas compose, pinned pattern packages, the approval freeze and Apply shipped in v1.239 and v1.241 and are now governed by [the composition spec](../../../../docs/specs/orchestration/strategy-composition.md); dual-read loading, IR-primary authoring and retirement of hand-authored YAML remain in [Canvas Composition and Pattern Packages](../../proposed/architecture/2026-11-10-canvas-composition-and-pattern-packages.md), and the document model and validation parity remain in [Workflow IR Document Model](2026-11-10-workflow-ir-document-model.md).
+P2 ships validation and simulation only. Canvas compose, pinned pattern packages, the approval freeze and Apply shipped in v1.239 and v1.241, and the P4 dual-read loader with P5 IR-primary authoring shipped in v1.242–v1.243; all of them are now governed by [the composition spec](../../../../docs/specs/orchestration/strategy-composition.md). Retirement of hand-authored YAML remains in [Canvas Composition and Pattern Packages](../../proposed/architecture/2026-11-10-canvas-composition-and-pattern-packages.md), and the document model and validation parity remain in [Workflow IR Document Model](2026-11-10-workflow-ir-document-model.md).

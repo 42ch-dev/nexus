@@ -23,6 +23,7 @@ export function CanvasHeader({
   onSimulate,
   staging = false,
   onAddPattern,
+  onEditApplied,
 }: {
   revision: number;
   status: 'clean' | 'dirty' | 'conflict';
@@ -48,6 +49,12 @@ export function CanvasHeader({
    */
   staging?: boolean;
   onAddPattern?: () => void;
+  /**
+   * Read-only applied view, Compose flag off: the one authoring entry out of
+   * this state. Compose opens on the strategy's candidate document, so the
+   * hint under the header says what that entry does and does not continue.
+   */
+  onEditApplied?: () => void;
 }) {
   const { t } = useTranslation('canvas');
 
@@ -121,6 +128,16 @@ export function CanvasHeader({
               {t('strategy.header.simulate')}
             </button>
           ) : null}
+          {onEditApplied ? (
+            <button
+              type="button"
+              data-testid="strategy-open-compose"
+              onClick={onEditApplied}
+              className="rounded-control border border-gray-alpha-400 px-3 py-1.5 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
+            >
+              {t('strategy.header.editApplied')}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => setShowAlt(!showAlt)}
@@ -131,6 +148,11 @@ export function CanvasHeader({
           </button>
         </div>
       </div>
+      {onEditApplied ? (
+        <p data-testid="strategy-edit-applied-hint" className="text-copy-13 text-gray-700">
+          {t('strategy.header.editAppliedHint')}
+        </p>
+      ) : null}
       {activeSession ? (
         <div className="flex items-center gap-2 rounded-card border border-info-surface-border bg-info-surface px-3 py-2 text-copy-13 text-gray-900">
           <span className="inline-block h-2 w-2 rounded-pill bg-blue-1000 dark:bg-blue-700" aria-hidden />

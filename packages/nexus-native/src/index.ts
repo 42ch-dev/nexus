@@ -192,6 +192,10 @@ import type {
   StrategyPatchPromptTemplateRequest,
   StrategyComposeRequest,
   StrategyComposeResponse,
+  StrategyGenerateRequest,
+  StrategyGenerateResponse,
+  CoreToolExecuteResponse,
+  ToolsApi,
   StrategyApproveRequest,
   StrategyApplyRequest,
   StrategyAppliedStatus,
@@ -798,6 +802,22 @@ export interface NativeCore {
     strategyId: string,
     request: StrategyComposeRequest,
   ): Promise<StrategyComposeResponse>;
+  /**
+   * `POST /v1/daemon/strategies/{strategy_id}/generate` — one committed candidate from the
+   * `GenerateRequest` contract. Lint exhaustion is the native `invalid_input` carrying the D20
+   * payload under `details`, so a caller reads it through the same error envelope as everything
+   * else.
+   */
+  generateStrategy(
+    principal: PrincipalHandle,
+    strategyId: string,
+    request: StrategyGenerateRequest,
+  ): Promise<StrategyGenerateResponse>;
+  /**
+   * One `nexus.*` host-tool call through the capability spine — the agent-tool surface. The
+   * owner's admission pipeline, dispatch and audit are the spine's, not this facade's.
+   */
+  executeTool(principal: PrincipalHandle, request: ToolsApi): Promise<CoreToolExecuteResponse>;
   approveStrategy(
     principal: PrincipalHandle,
     strategyId: string,
@@ -1153,6 +1173,8 @@ type DomainSurface = Pick<
   | 'patchStrategyPromptTemplate'
   | 'simulateStrategy'
   | 'composeStrategy'
+  | 'generateStrategy'
+  | 'executeTool'
   | 'approveStrategy'
   | 'applyStrategy'
   | 'strategyApplied'
@@ -1652,6 +1674,14 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
       return json(
         await inner.composeStrategy(principal, strategyId, wire(request, 'request')),
       );
+    },
+    async generateStrategy(principal, strategyId, request) {
+      return json(
+        await inner.generateStrategy(principal, strategyId, wire(request, 'request')),
+      );
+    },
+    async executeTool(principal, request) {
+      return json(await inner.executeTool(principal, wire(request, 'request')));
     },
     async approveStrategy(principal, strategyId, request) {
       return json(

@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/strategy-generate-request.schema.json",
+  "schema_version": 1,
+  "title": "NexusStrategyGenerateRequest",
+  "description": "Body of POST /v1/daemon/strategies/{strategy_id}/generate, and the input contract of the `nexus.strategy.generate` agent tool. `request` is the GenerateRequest contract (D8): the pattern-package/IR subset a caller may declare, and nothing else — node declarations, edges, nest bindings and the meta fields semantic validation reads. It carries no executable code and no flag that bypasses lint, so a request can only ask for a document; whether that document is legal is decided by lint, never by the caller. The path `strategy_id` is authoritative and is not repeated in the body.",
+  "type": "object",
+  "required": ["base_revision", "request"],
+  "additionalProperties": false,
+  "properties": {
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Candidate revision the caller last read. The kernel commits `base_revision + 1`, or refuses with `strategy_candidate_conflict` and writes nothing — the same compare-and-swap Compose uses."
+    },
+    "request": {
+      "title": "GenerateRequest",
+      "description": "The document to generate. Every node, edge and nest is the caller's; nothing is invented. The effect rollup is derived from the bytes under lint, never trusted from this object.",
+      "type": "object",
+      "required": ["entry", "terminal", "nodes", "edges", "nests", "meta"],
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/workflow-document.schema.json#/properties/entry"
+        },
+        "terminal": {
+          "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/workflow-document.schema.json#/properties/terminal"
+        },
+        "nodes": {
+          "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/workflow-document.schema.json#/properties/nodes"
+        },
+        "edges": {
+          "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/workflow-document.schema.json#/properties/edges"
+        },
+        "nests": {
+          "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/workflow-document.schema.json#/properties/nests"
+        },
+        "meta": {
+          "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/workflow-document.schema.json#/properties/meta"
+        }
+      }
+    }
+  }
+}

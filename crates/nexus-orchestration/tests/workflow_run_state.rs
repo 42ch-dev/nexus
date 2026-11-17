@@ -545,8 +545,8 @@ fn descriptor_serializes_the_applied_identity_only_when_present() {
 }
 
 /// The intake mode is frozen on the descriptor only when an admission recorded
-/// one, both arms round-trip under their kebab-case spellings, and a legacy
-/// descriptor keeps its exact bytes.
+/// one, the one remaining arm round-trips under its kebab-case spelling, and a
+/// legacy descriptor keeps its exact bytes.
 #[test]
 fn descriptor_round_trips_intake_mode_and_legacy_bytes_hold() {
     use nexus_home_layout::strategy_intake::StrategyIntakeMode;
@@ -562,32 +562,75 @@ fn descriptor_round_trips_intake_mode_and_legacy_bytes_hold() {
         "a legacy descriptor must not gain a key: {legacy_value}"
     );
 
-    for mode in [StrategyIntakeMode::IrOnly, StrategyIntakeMode::YamlOnly] {
-        let mut descriptor = test_descriptor("sess");
-        descriptor.intake_mode = Some(mode);
-        let value = serde_json::to_value(&descriptor).expect("descriptor serializes");
-        let back: RunDescriptorV1 =
-            serde_json::from_value(value.clone()).expect("descriptor decodes");
-        assert_eq!(back.intake_mode, Some(mode));
-        assert!(
-            value.get("intake_mode").is_some(),
-            "a recorded mode must serialize a key: {value}"
-        );
-    }
-
-    // The exact kebab-case spellings the config file and the descriptor share.
     let mut descriptor = test_descriptor("sess");
-    descriptor.intake_mode = Some(StrategyIntakeMode::YamlOnly);
-    let json = serde_json::to_string(&descriptor).expect("descriptor serializes");
-    assert!(
-        json.contains(r#""intake_mode":"yaml-only""#),
-        "yaml-only must serialize kebab-case: {json}"
-    );
     descriptor.intake_mode = Some(StrategyIntakeMode::IrOnly);
+    let value = serde_json::to_value(&descriptor).expect("descriptor serializes");
+    let back: RunDescriptorV1 = serde_json::from_value(value.clone()).expect("descriptor decodes");
+    assert_eq!(back.intake_mode, Some(StrategyIntakeMode::IrOnly));
+    assert!(
+        value.get("intake_mode").is_some(),
+        "a recorded mode must serialize a key: {value}"
+    );
+
+    // The exact kebab-case spelling the config file and the descriptor share.
     let json = serde_json::to_string(&descriptor).expect("descriptor serializes");
     assert!(
         json.contains(r#""intake_mode":"ir-only""#),
         "ir-only must serialize kebab-case: {json}"
+    );
+}
+
+/// A run admitted while `yaml-only` was live recorded that spelling on its
+/// descriptor. Recovery must refuse it by name — not as a bare unknown-variant
+/// parse error, and never as `IrOnly`: mapping it would silently switch the
+/// document source the run executes, which is the outcome the arm's removal
+/// refuses (I-000509).
+#[tokio::test]
+async fn recorded_retired_intake_mode_refuses_by_name() {
+    // A real recorded descriptor, respelled to the arm that was live when the
+    // row was written.
+    let mut recorded =
+        serde_json::to_value(test_descriptor("sess")).expect("descriptor serializes");
+    recorded["intake_mode"] = serde_json::json!("yaml-only");
+
+    let error = serde_json::from_value::<RunDescriptorV1>(recorded.clone())
+        .expect_err("a recorded retired intake mode must not decode");
+    let message = error.to_string();
+    assert!(
+        message.contains("intake_mode_retired"),
+        "the refusal is a named one: {message}"
+    );
+    assert!(
+        message.contains("'yaml-only'"),
+        "the refusal names the recorded value: {message}"
+    );
+
+    // The recovery read over a row carrying those bytes reports the same named
+    // cause, not a JSON-corruption error: `load_run` is what a restart uses.
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, status,
+             current_task_id, context_json, created_at, updated_at,
+             execution_version, state_revision, run_state_json, run_descriptor_json)
+         VALUES ('sess-yaml-only', 'ctr_t', 'test-preset', 3, 'running', 'task_a',
+                 '{\"data\":{}}', 1756990000, 1756990300,
+                 1, 0, ?, ?)",
+    )
+    .bind(serde_json::to_vec(&RunStateV1::default()).expect("state serializes"))
+    .bind(serde_json::to_vec(&recorded).expect("descriptor serializes"))
+    .execute(&*pool)
+    .await
+    .expect("seed a descriptor recorded under the retired arm");
+
+    let err = storage
+        .load_run(&SessionId("sess-yaml-only".to_string()))
+        .await
+        .expect_err("a recorded retired intake mode is not replayable");
+    assert!(
+        format!("{err:?}").contains("intake_mode_retired"),
+        "recovery names the retired mode: {err:?}"
     );
 }
 
@@ -7190,8 +7233,8 @@ async fn preset_entry_does_not_gate_an_embedded_preset() {
 ///
 /// Mutation this fails on: passing `Path::new("")` for a missing home — the
 /// read then joins onto the process CWD, where an unrelated `config.toml` can
-/// select `yaml-only` (admitting the YAML bundle this test expects refused) or
-/// refuse with `intake_config_invalid` naming a file the operator never set.
+/// refuse with `intake_config_invalid` (the `yaml-only` value below no longer
+/// parses) naming a file the operator never set.
 #[tokio::test]
 async fn preset_entry_without_a_home_takes_ir_only() {
     let (pool, _db) = fresh_pool().await;

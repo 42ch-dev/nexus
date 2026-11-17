@@ -1,11 +1,16 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/strategy-applied-status.schema.json",
-  "schema_version": 1,
+  "schema_version": 2,
   "title": "Nexus StrategyAppliedStatus",
-  "description": "Response of GET /v1/daemon/strategies/{strategy_id}/applied, read by both the Canvas and the intake. `current_apply` is the append-only row with no successor — the identity the schedule runs — and is null when the strategy has never been applied. `newest_approval` is the highest `candidate_revision` approval of the same strategy and is null when nothing was approved. A client compares the two `approval_id` values to answer 'is the newest approval the running one'; it never derives newness from `applied_at` or `approved_at`.",
+  "description": "Response of GET /v1/daemon/strategies/{strategy_id}/applied, read by both the Canvas and the intake. `current_apply` is the append-only row with no successor — the identity the schedule runs — and is null when the strategy has never been applied. `newest_approval` is the highest `candidate_revision` approval of the same strategy and is null when nothing was approved. A client compares the two `approval_id` values to answer 'is the newest approval the running one'; it never derives newness from `applied_at` or `approved_at`. The applied document rides the same response as the identity it belongs to: `applied_document` is the frozen document the current apply installed, re-verified against `current_apply.content_hash`, and `applied_document_refusal` names why that replay failed. Both are null when `current_apply` is null (no document read is attempted), and exactly one of them is non-null otherwise. An apply whose approval row this strategy does not have is an error response, not a body: it is neither a null document nor a refusal.",
   "type": "object",
-  "required": ["current_apply", "newest_approval"],
+  "required": [
+    "current_apply",
+    "newest_approval",
+    "applied_document",
+    "applied_document_refusal"
+  ],
   "additionalProperties": false,
   "properties": {
     "current_apply": {
@@ -21,6 +26,22 @@
         { "type": "null" }
       ],
       "description": "The approval with the highest `candidate_revision` for this strategy, or null when none exists. `approved_at` and `approval_id` order an otherwise tied query and never define newness."
+    },
+    "applied_document": {
+      "oneOf": [
+        {
+          "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/workflow-document.schema.json"
+        },
+        { "type": "null" }
+      ],
+      "description": "The frozen document the current apply installed, re-verified against `current_apply.content_hash` by the same replay the schedule intake and recovery run. Null when no apply exists and null when the document no longer replays — `applied_document_refusal` tells the two apart."
+    },
+    "applied_document_refusal": {
+      "oneOf": [
+        { "$ref": "#/definitions/AppliedDocumentRefusal" },
+        { "type": "null" }
+      ],
+      "description": "Why the current apply's frozen document could not be replayed, or null when it replayed or none is applied. Present only with a `current_apply`; a corrupt state, never a 'not yet applied' one."
     }
   },
   "definitions": {
@@ -92,6 +113,25 @@
           "type": "string",
           "format": "date-time",
           "description": "RFC 3339 UTC timestamp of the approval; it orders tied revisions only."
+        }
+      }
+    },
+    "AppliedDocumentRefusal": {
+      "title": "AppliedDocumentRefusal",
+      "description": "The typed `ApplyLoadRefusal` a status read reports instead of a document when the current apply's frozen bytes no longer replay. It is the same refusal the schedule intake and P6 condition 5's recovery path name, so a client renders the reason the run would report.",
+      "type": "object",
+      "required": ["reason", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable snake_case wire code of the refusal. The core's `ApplyLoadRefusal::reason` owns the value set; a client switches on it instead of parsing `message`."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The refusal's full sentence, naming the strategy, the apply and what no longer verifies."
         }
       }
     }

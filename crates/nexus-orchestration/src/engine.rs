@@ -3850,9 +3850,9 @@ impl GraphFlowEngine {
     /// bundle refuses reconstruction instead of running different bytes.
     ///
     /// This proves the source of a run that executes its bundle: the no-apply
-    /// path and the `yaml-only` arm. An applied run executes the applied
-    /// document and never calls this — its bundle is an admission input, and
-    /// its frozen proof is the applied identity on the descriptor.
+    /// path. An applied run executes the applied document and never calls this
+    /// — its bundle is an admission input, and its frozen proof is the applied
+    /// identity on the descriptor.
     fn reload_frozen_bundle(
         &self,
         descriptor: &RunDescriptorV1,
@@ -3990,16 +3990,14 @@ impl GraphFlowEngine {
         };
 
         // P6 condition 6: recovery follows the RECORDED intake mode, never the
-        // current config. A `yaml-only` run rebuilds the YAML bundle and never
-        // reads the current apply — a config flip cannot retcon an in-flight
-        // run onto a document it never ran. An `ir-only` run without a recorded
-        // applied identity is the no-apply admission refusal resurfaced: never
-        // rebuilt from YAML. A legacy row (no recorded mode) keeps the
+        // current config. `ir-only` is the only recorded arm; without a frozen
+        // applied identity it is the no-apply admission refusal resurfaced:
+        // never rebuilt from YAML. A legacy row (no recorded mode) keeps the
         // pre-existing resolution.
-        let applied = match descriptor.intake_mode {
-            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
-            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
-                if descriptor.applied.is_none() =>
+        let applied = {
+            if descriptor.intake_mode
+                == Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
+                && descriptor.applied.is_none()
             {
                 return Err(EngineError::GraphFlow(
                     graph_flow::GraphError::StorageError(format!(
@@ -4010,7 +4008,7 @@ impl GraphFlowEngine {
                     )),
                 ));
             }
-            _ => match &self.state.applied_document_source {
+            match &self.state.applied_document_source {
                 Some(source) => source
                     .applied_document(&descriptor.preset_id, bundle.as_ref())
                     .await
@@ -4022,7 +4020,7 @@ impl GraphFlowEngine {
                         )))
                     })?,
                 None => None,
-            },
+            }
         };
         // P4 Task 4 (I-000464): a run admitted under an applied identity is
         // rebuilt ONLY from that identity. The resolution above answers with the
@@ -4422,10 +4420,8 @@ impl GraphFlowEngine {
     }
 
     /// Admit a trait-entry start under the configured intake mode: the wired
-    /// APPLIED graph when the strategy has a current apply and the mode is
-    /// `ir-only`, the YAML graph under `yaml-only` (the apply unread), and —
-    /// for a user bundle under `ir-only` — a typed `yaml_intake_disabled`
-    /// refusal when there is no current apply.
+    /// APPLIED graph when the strategy has a current apply, and — for a user
+    /// bundle with none — a typed `yaml_intake_disabled` refusal.
     ///
     /// Both preset trait entries come through here, so neither can admit a graph
     /// and freeze a descriptor that disagree — recovery rebuilds from the
@@ -4468,30 +4464,22 @@ impl GraphFlowEngine {
         } else {
             None
         };
-        let applied = match intake_mode {
-            // yaml-only runs the YAML bundle without reading the current apply.
-            Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::YamlOnly) => None,
-            _ => match &self.state.applied_document_source {
-                Some(source) => source
-                    .applied_document(&loaded.id, Some(loaded))
-                    .await
-                    .map_err(|error| {
-                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
-                    })?,
-                None => None,
-            },
+        let applied = match &self.state.applied_document_source {
+            Some(source) => source
+                .applied_document(&loaded.id, Some(loaded))
+                .await
+                .map_err(|error| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
+                })?,
+            None => None,
         };
-        // ir-only is the default arm: a user bundle with no current apply
-        // refuses before graph construction — never a YAML fallback.
-        if user_bundle
-            && intake_mode == Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
-            && applied.is_none()
-        {
+        // ir-only is the only arm: a user bundle with no current apply refuses
+        // before graph construction — never a YAML fallback.
+        if user_bundle && applied.is_none() {
             return Err(EngineError::GraphFlow(
                 graph_flow::GraphError::StorageError(format!(
                     "yaml_intake_disabled: user preset '{}' has no current apply under \
-                     [strategy_intake] mode 'ir-only'; apply a strategy or set mode to \
-                     'yaml-only' to run the YAML bundle",
+                     [strategy_intake] mode 'ir-only'; apply a strategy before running it",
                     loaded.id
                 )),
             ));

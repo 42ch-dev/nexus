@@ -223,6 +223,23 @@
     "engineUnavailableTitle": "编排引擎未运行",
     "engineUnavailableDescription": "请启动守护进程编排引擎后重试。",
     "graphAriaLabel": "Harness 空间图谱",
+    "applied": {
+      "neverApplied": {
+        "title": "尚未应用预设",
+        "description": "此工作区没有运行中的预设。在 Compose 中构建第一个候选。",
+        "openCompose": "打开 Compose"
+      },
+      "approvedUnapplied": {
+        "title": "已批准，尚未上线",
+        "description": "有一个已批准的候选还没有运行版本。应用其中之一，使其成为此工作区运行的预设。",
+        "applyLatest": "应用最新批准"
+      },
+      "unreadable": {
+        "title": "无法读取正在运行的预设",
+        "description": "存在一条应用记录，但其文档已无法校验：{{reason}}。未做任何更改，也不会从此处应用任何内容。",
+        "recheck": "重新检查"
+      }
+    },
     "header": {
       "title": "预设",
       "description": "状态机与转换编辑器",
@@ -233,7 +250,9 @@
       "livePrefix": "实时：",
       "liveStatus": "",
       "staging": "暂存",
-      "addPattern": "添加模式…"
+      "addPattern": "添加模式…",
+      "editApplied": "编辑此策略",
+      "editAppliedHint": "在 Compose 中打开此策略的候选文档——只有再次批准并应用后，正在运行的预设才会改变。"
     },
     "node": {
       "status": {
@@ -380,6 +399,7 @@
     },
     "inspector": {
       "ariaLabel": "Harness 检查器",
+      "structuralDisabled": "画布展示的是文档，而非此编辑器写入的预设 YAML —— 请在 Compose 中编辑并应用。",
       "state": {
         "title": "状态",
         "ariaLabel": "状态检查器",
@@ -389,8 +409,7 @@
         "saved": "已保存",
         "saveFailed": "保存失败",
         "saving": "保存中…",
-        "updated": "状态已更新",
-        "composeDisabled": "组合期间状态由候选文档写入，此 YAML 编辑器已禁用。"
+        "updated": "状态已更新"
       },
       "transition": {
         "title": "转换",
@@ -400,8 +419,7 @@
         "saved": "已保存",
         "saveFailed": "保存失败",
         "saving": "保存中…",
-        "updated": "转换已更新",
-        "composeDisabled": "组合期间转换由候选文档写入，此 YAML 编辑器已禁用。"
+        "updated": "转换已更新"
       },
       "prompt": {
         "title": "提示词",
@@ -411,7 +429,8 @@
         "saved": "已保存",
         "saveFailed": "保存失败",
         "saving": "保存中…",
-        "updated": "提示词模板已保存"
+        "updated": "提示词模板已保存",
+        "structuralDisabled": "画布渲染的是文档，而非此编辑器写入的预设 YAML，且 Compose 没有提示词正文的操作。请用 `nexus42 preset patch prompt <策略> <状态> --template-ref <路径> --file <路径>` 编辑模板后重新加载。"
       },
       "stateId": "状态 ID",
       "status": "状态",

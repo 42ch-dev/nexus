@@ -64,6 +64,12 @@ interface PromptInspectorProps {
   saveStatus: SaveStatus | undefined;
   onSaveStatus: (status: SaveStatus | undefined) => void;
   onConflict: (currentRevision: number, section: Section) => void;
+  /**
+   * The preset YAML this writer targets is never the rendered document — the
+   * applied view is frozen and a compose candidate has no prompt-body operation
+   * — so the editor stays visible but inert with its reason (P6).
+   */
+  structuralWritesDisabled?: boolean;
 }
 
 export function PromptInspector({
@@ -77,6 +83,7 @@ export function PromptInspector({
   saveStatus,
   onSaveStatus,
   onConflict,
+  structuralWritesDisabled = false,
 }: PromptInspectorProps) {
   const { t } = useTranslation('canvas');
   const patch = usePatchStrategyPromptTemplate();
@@ -85,7 +92,9 @@ export function PromptInspector({
   const lastHandledTriggerRef = useRef(0);
 
   const handleSave = useCallback(async () => {
-    if (!dirty || patch.isPending) return;
+    // No canvas document is the preset YAML this patch writes, so the Save is
+    // refused rather than rewriting a bundle template behind the candidate.
+    if (structuralWritesDisabled || !dirty || patch.isPending) return;
     onSaveStatus(undefined);
 
     try {
@@ -110,7 +119,7 @@ export function PromptInspector({
         onSaveStatus({ type: 'error', message });
       }
     }
-  }, [dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict, promptTemplateRef, t]);
+  }, [structuralWritesDisabled, dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict, promptTemplateRef, t]);
 
   // Keep a fresh callback reference for the keyboard shortcut effect so the
   // effect itself does not need to depend on the callback (R-V172P1-QC1-001).
@@ -131,7 +140,7 @@ export function PromptInspector({
         <button
           type="button"
           onClick={handleSave}
-          disabled={!dirty || patch.isPending}
+          disabled={structuralWritesDisabled || !dirty || patch.isPending}
           className="rounded-control border border-gray-alpha-400 px-2 py-1 text-button-12 text-gray-900 hover:bg-gray-alpha-100 disabled:text-gray-500"
         >
           {patch.isPending ? t('strategy.inspector.prompt.saving') : t('strategy.inspector.prompt.save')}
@@ -141,11 +150,16 @@ export function PromptInspector({
       <textarea
         value={form.promptBody}
         onChange={(e) => onChange('promptBody', e.target.value)}
+        disabled={structuralWritesDisabled}
         rows={4}
         placeholder={t('strategy.inspector.prompt.placeholder')}
         className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
       />
-      {saveStatus ? (
+      {structuralWritesDisabled ? (
+        <p data-testid="prompt-structural-disabled" className="text-copy-12 text-gray-700">
+          {t('strategy.inspector.prompt.structuralDisabled')}
+        </p>
+      ) : saveStatus ? (
         <p
           className={
             saveStatus.type === 'success'

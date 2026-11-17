@@ -108,7 +108,7 @@ describe('DraftEdgeInspector (FB-SE-002)', () => {
     const commit = screen.getByRole('button', { name: 'Create' });
     expect(commit).toBeDisabled();
     expect(screen.getByTestId('draft-transition-structural-disabled')).toHaveTextContent(
-      'Transitions are authored in the candidate while composing; this YAML editor is disabled.',
+      'The canvas shows a document, not the preset YAML this editor writes — author the change in Compose.',
     );
 
     fireEvent.click(commit);

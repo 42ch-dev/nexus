@@ -166,7 +166,7 @@ export function StateInspector({
       </label>
       {structuralWritesDisabled ? (
         <p data-testid="state-structural-disabled" className="text-copy-12 text-gray-700">
-          {t('strategy.inspector.state.composeDisabled')}
+          {t('strategy.inspector.structuralDisabled')}
         </p>
       ) : saveStatus ? (
         <p

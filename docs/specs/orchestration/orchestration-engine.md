@@ -857,7 +857,7 @@ one above, buildability, and the prompt-role and recovery limits — are
 | IR document concept | Task / graph-flow execution counterpart |
 | --- | --- |
 | `entry` | Selects the initial outer `Task`; the target node id is its `Task::id()`. |
-| `nodes[kind=outer_state]` | `StateCompositeTask`, carrying the node's enter actions, exit condition and routing. The node's `context_update` rides the projected state; the task neither carries nor runs it, and no production site fires the hook today — the core-context manager's `apply_preset_hook` (`schedule/derivation.rs`) has test-only callers. |
+| `nodes[kind=outer_state]` | `StateCompositeTask`, carrying the node's enter actions, exit condition and routing. The node's `context_update` rides the projected state; the task neither carries nor runs it, and no production site fires the hook today — the core-context manager's `apply_preset_hook` (`schedule/derivation.rs`) has test-only callers. It is not inert metadata: a state declaring a hook ranks `write_candidate` in the effect summary (`nexus-preset` `state_effect`), so it affects admission without writing anything. |
 | `outer_state.enter[kind=capability]` | `CapabilityTask`, invoked by the owning `StateCompositeTask`. |
 | `outer_state.enter[kind=host_tool]` | `HostToolCallTask`, invoked inline by the owning `StateCompositeTask`; requires the injected daemon tool dispatch and fails closed when unset. It is not added as a graph node. |
 | `outer_state.enter[kind=inner_graph]` | `InnerGraphTask`, launching the referenced inner graph in a child session. |
@@ -884,7 +884,8 @@ one above, buildability, and the prompt-role and recovery limits — are
 nodes still carry either kind is refused `ir_unmappable` — they must be expanded into the concrete
 nodes and edges above before intake can construct a graph. `nests[]` is the composition *binding
 record*: the projection does not read it, and an applied document may carry non-empty `nests[]`;
-what runs is always its `nodes` and `edges`.
+what runs is always its `nodes` and `edges`. The pinned bodies such a binding names are guarded by
+the approval's pin snapshot, re-compared at admission and recovery (`verify_recorded_pins`).
 
 The standalone `nodes[kind=judge]`, `nodes[kind=manual_wait]` and `nodes[kind=join]` spellings have
 no row in this table and never will: their semantics are carried by `nodes[kind=outer_state]`, so a

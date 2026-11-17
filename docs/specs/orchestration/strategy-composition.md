@@ -141,17 +141,13 @@ both ports, and the daemon installs it in `crates/nexus-core/src/owner/lifecycle
 
 **The rule.** When the answer is a document, the entry builds the graph from that document with
 `IrTemplateSource::OwnSource` and freezes the `AppliedRunIdentity` the answer carries on the run descriptor
-it writes; when the answer is `None`, the intake mode decides what happens next — under `yaml-only` it
-builds the YAML bundle (`build_wired_outer_graph`) and freezes no identity, and under the default `ir-only`
-a user bundle with no current apply is refused before graph construction instead (the intake-mode switch
-below). For a run admitted with a resolved document, no entry admits YAML and recovers into IR: the graph
-the run executes and the identity its descriptor freezes come from the same resolution. A run admitted
-under `yaml-only` while the strategy had no current apply resolves `None`, freezes no identity, and records
-`Some(YamlOnly)`; recovery follows that recorded mode (`Some(YamlOnly)` skips the apply read), so the
-restart rebuilds the same YAML bundle even if the strategy gained an apply or the config flipped — it never
-reaches the `(None, current)` arm below. That arm is left to a descriptor that records no mode at all, a
-row predating the field, so no newly admitted run can be put on a document it never ran; under the default
-`ir-only` a no-apply user bundle is the refusal instead, so no such run exists at all. Both admission
+it writes; when the answer is `None`, a user bundle is refused before graph construction
+(`yaml_intake_disabled` — the switch below) while a non-user bundle builds its YAML descriptor with
+`build_wired_outer_graph` and freezes no identity. For a run admitted with a resolved document, no entry
+admits YAML and recovers into IR: the graph the run executes and the identity its descriptor freezes come
+from the same resolution. The `(None, current)` arm below is left to a descriptor that records no intake
+mode at all, a row predating the field: a newly admitted user run either resolves a document or is refused,
+so no new run can be put on a document it never ran. Both admission
 entries resolve before the binding gate, so the roles validated are the roles the applied graph consumes —
 `export_preset(&document)` when an apply exists, the loaded manifest otherwise (`export_preset` and
 `validate_agent_bindings` in both `start_session` and `admit_schedule_inner`).
@@ -168,32 +164,34 @@ read, in exactly three cases:
 
 | Strategy the loader resolved | Document the run is built from |
 | --- | --- |
-| a user bundle with a current apply, under `ir-only` (the default) or `yaml-only` | under `ir-only`: the applied `WorkflowDocument`, through the [§8.2.1 mapping](orchestration-engine.md#821-ir--task-mapping); under `yaml-only`: the YAML descriptor — the apply is never read |
+| a user bundle with a current apply | the applied `WorkflowDocument`, through the [§8.2.1 mapping](orchestration-engine.md#821-ir--task-mapping) — the apply is the only source |
 | an embedded or `_system.` preset | the YAML descriptor — the apply branch is never entered and the intake key is never consulted |
-| a user bundle with no current apply | `ir-only` (the default): refused before graph construction — `yaml_intake_disabled`, never a YAML fallback; `yaml-only`: the YAML descriptor of [§8.1](orchestration-engine.md) |
+| a user bundle with no current apply | refused before graph construction — `yaml_intake_disabled`, never a YAML fallback |
 
 The apply branch is entered only for a user bundle: `is_user_preset` requires the source identity the
 loader recorded to be a directory bundle and refuses every `_system.` id, so an embedded or system preset
 never names a strategy and is never looked up. The discriminator is that loader classification, never a
 preset lookup — the embedded-first lookup would hand an applied user bundle the embedded preset's graph
-when the ids collide. A user bundle whose apply rows have no successor-less row is on the YAML path under `yaml-only`:
-`current_apply` returning `None` is an answer, not a refusal. Under the default `ir-only` it is the
-refusal — see the intake-mode switch below.
+when the ids collide. A user bundle whose apply rows have no successor-less row is refused: `current_apply`
+returning `None` is an answer, and for a user bundle that answer is the intake refusal — see the
+intake-mode switch below.
 
 **Recovery** re-enters through the same route instead of a second reader (`AppliedDocumentSource` →
 `is_user_preset` → `current_apply` → `verified_apply_document`), and a strategy with no apply recovers its
 descriptor graph exactly as before — for legacy rows. A row that records an intake mode follows the
 recorded mode instead (see below).
 
-**The intake-mode switch.** `[strategy_intake] mode = "ir-only" | "yaml-only"` in the home `config.toml`
-selects which document a **user bundle** runs; `strategy_intake_mode`
-(`crates/nexus-home-layout/src/strategy_intake.rs`) reads it per new admission. A missing file, table or
-key — and an engine with no configured home, which has no key to read — defaults to `ir-only`. An
-unreadable document or an unknown mode value is a refusal: `RunControlError::InvalidIntakeConfig` at the
-two coordinator entries, which `map_run_control_error` (`crates/nexus-core/src/owner/handle_ops.rs`)
-renders as the coded `intake_config_invalid`, and at the two preset trait entries an
-`EngineError::GraphFlow(GraphError::StorageError)` whose message begins with that code. **The code does not
-cross the trait boundary** — `start_preset_entry` wraps the reason in a storage error, so there is no
+**The intake switch.** `[strategy_intake] mode = "ir-only"` in the home `config.toml` is the only arm;
+`strategy_intake_mode` (`crates/nexus-home-layout/src/strategy_intake.rs`) reads it per new admission. A
+missing file, table or key — and an engine with no configured home, which has no key to read — defaults to
+`ir-only`. An unreadable document, an unknown mode value, or the removed `yaml-only` arm is a refusal:
+`RunControlError::InvalidIntakeConfig` at the two coordinator entries, which `map_run_control_error`
+(`crates/nexus-core/src/owner/handle_ops.rs`) renders as the coded `intake_config_invalid`, and at the two
+preset trait entries an `EngineError::GraphFlow(GraphError::StorageError)` whose message begins with that
+code. The `yaml-only` value refuses with the replacement named (`ir-only`) and is never mapped silently
+onto it: an operator still carrying the key is mid-incident, and a silent switch of the document their
+bundles run is the worst outcome. **The code does not cross the trait boundary** —
+`start_preset_entry` wraps the reason in a storage error, so there is no
 `intake_config_invalid` code for a caller mapping `EngineError` structurally; only the text names it, and
 nexus-core's `RunControlError::Admission` arm reports it as an internal refusal. The coordinator entries
 above are where the code is a contract. Embedded and `_system.` presets never consult the key: the
@@ -202,32 +200,33 @@ classification is `is_user_strategy_bundle` (`strategy_intake.rs`), the same dec
 
 - **New admissions** (`intake_mode_for_admission` in `crates/nexus-core/src/owner/applied_documents.rs`
   gates `admit_schedule_inner` and `start_session`; the same gate inlined in `start_preset_entry` in
-  `crates/nexus-orchestration/src/engine.rs` covers both preset trait entries): under `ir-only` a current
-  apply runs through `resolve_applied_document` and a user bundle with none refuses with
+  `crates/nexus-orchestration/src/engine.rs` covers both preset trait entries): a current apply runs
+  through `resolve_applied_document` and a user bundle with none refuses with
   `RunControlError::YamlIntakeDisabled` at the coordinator entries; the inlined copy in `start_preset_entry`
   refuses with the same reason wrapped in `EngineError::GraphFlow(GraphError::StorageError)`, whose message
   begins `yaml_intake_disabled` — the text, not a code. Either way the refusal lands before graph
-  construction — never a YAML fallback. Under `yaml-only` the YAML manifest and graph run without reading
-  the current apply.
+  construction — never a YAML fallback.
 - **The descriptor is the observability record.** `RunDescriptorV1.intake_mode`
-  (`crates/nexus-orchestration/src/run_state.rs`) freezes `Some(IrOnly)` or `Some(YamlOnly)` on new
-  user-preset runs and is omitted — byte for byte — on embedded/system and legacy rows. Child descriptors
-  inherit the root's value; the auto-chain and raw-construction sites record none.
-- **Recovery follows the recorded mode, not the current config** (the `descriptor.intake_mode` match in
-  `reconstruct_runner`, `engine.rs`): `Some(YamlOnly)` skips `applied_document()` and rebuilds the YAML
-  bundle even if the config flipped or the strategy gained an apply; `Some(IrOnly)` resolves and checks the
-  recorded identity as the `Some(recorded)` rows always have, and a `Some(IrOnly)` row without a recorded
-  identity refuses (`yaml_intake_disabled`, non-replayable) instead of rebuilding from YAML; `None` retains
-  the legacy `(None, current)` arm below. The current config affects new admissions only.
-- **Lifetime.** `yaml-only` is the emergency compatibility arm for the v1.243 minor line and is removed at
-  v1.244.0. Bundle discovery and import/export have no removal boundary: the switch changes which document
-  executes, never whether a bundle exists or can be imported or exported.
+  (`crates/nexus-orchestration/src/run_state.rs`) freezes `Some(IrOnly)` on new user-preset runs and is
+  omitted — byte for byte — on embedded/system and legacy rows. Child descriptors inherit the root's
+  value; the auto-chain and raw-construction sites record none. A row persisted under the removed
+  `yaml-only` arm no longer decodes: its recovery is a decode refusal, never a silent re-run under another
+  arm.
+- **Recovery follows the recorded mode, not the current config** (the `descriptor.intake_mode` check in
+  `reconstruct_runner`, `engine.rs`): `Some(IrOnly)` resolves and checks the recorded identity as the
+  `Some(recorded)` rows always have, and a `Some(IrOnly)` row without a recorded identity refuses
+  (`yaml_intake_disabled`, non-replayable) instead of rebuilding from YAML; `None` retains the legacy
+  `(None, current)` arm below. The current config affects new admissions only.
+- **Lifetime.** The `yaml-only` kill-switch that re-enabled YAML intake for one minor release after
+  default-off was removed at v1.244.0 (I-000509). Bundle discovery and import/export have no removal
+  boundary: the switch changes which document executes, never whether a bundle exists or can be imported or
+  exported.
 
 **The legacy `(None, current)` arm.** `reconstruct_runner`
 (`crates/nexus-orchestration/src/engine.rs:3845`) first selects the apply read by the recorded mode — the
-`descriptor.intake_mode` match (`crates/nexus-orchestration/src/engine.rs:4097`) — and then matches the
+`descriptor.intake_mode` check (`crates/nexus-orchestration/src/engine.rs:3997`) — and then matches the
 descriptor's recorded identity against that resolution **before** it builds: the
-`(descriptor.applied.as_ref(), applied)` match (`crates/nexus-orchestration/src/engine.rs:4135`).
+`(descriptor.applied.as_ref(), applied)` match (`crates/nexus-orchestration/src/engine.rs:4035`).
 
 | `descriptor.applied` | Resolved current apply | Graph rebuilt from |
 | --- | --- | --- |

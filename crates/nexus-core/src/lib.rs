@@ -24,6 +24,11 @@ mod creators;
 mod error;
 mod findings;
 mod forks;
+// Generate produces a whole candidate through the three shared lint layers; layer 3 is the
+// orchestration buildability predicate apply gates on, so the module is execution-gated like
+// apply/approve/simulate rather than always compiled like compose.
+#[cfg(feature = "execution")]
+mod generate;
 mod home;
 #[cfg(feature = "provider-host")]
 pub mod host;
@@ -92,7 +97,10 @@ pub use actors::{
     CoreActorAdmission, CHARACTER_WIRE_INVALID_PREFIX,
 };
 #[cfg(feature = "execution")]
-pub use apply::{AppliedStrategy, StrategyAppliedStatus, StrategyApproval, StrategyApprovals};
+pub use apply::{
+    AppliedDocumentRefusal, AppliedStrategy, StrategyAppliedStatus, StrategyApproval,
+    StrategyApprovals,
+};
 pub use chronology::CoreWorkChronology;
 pub use config_lock::with_config_lock;
 pub use content::{resolve_guarded_path, resolve_guarded_path_async, CoreChapterContentQuery};
@@ -137,6 +145,10 @@ pub use compose::{
     BindSlotOp, ComposeDiagnostic, ComposeOp, ComposeOutcome, ComposeRefusal, NestOp,
     PatternPackageRef, ReplaceSubtreeOp, UnnestOp,
 };
+// Generate shares the compose registry and the CAS commit with Compose and needs the
+// orchestration buildability predicate, so it rides the same execution edge as apply/approve.
+#[cfg(feature = "execution")]
+pub use generate::{Correction, GenerateExhaustion, GenerateOutcome, GenerateRequest};
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 pub use soul::CoreCharacterMind;
 pub use spoke_operations::spoke_schemas::{ProfileDocument, RetainedRecord};

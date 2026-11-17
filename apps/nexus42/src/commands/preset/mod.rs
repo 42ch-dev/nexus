@@ -1,7 +1,7 @@
 //! `nexus42 preset` — canonical preset CLI group (PL-5, AR-24, AR-25).
 //!
 //! Top-level developer-facing surface for presets:
-//! `list|show|validate|export|export-ir|scaffold|import|trigger|patch`.
+//! `list|show|validate|export|export-ir|scaffold|import|trigger|generate|patch`.
 //!
 //! - `export <dir>` rewrites a bundle's `preset.yaml` from its
 //!   `workflow.json` through `nexus_preset::export_preset` — the committed
@@ -138,6 +138,31 @@ pub enum PresetCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+    /// Generate a strategy candidate from a declarative request
+    ///
+    /// Runs the same lint-correct kernel the agent tool and the daemon route
+    /// call — three transports, one implementation. The CLI attaches no model,
+    /// so a request that fails its first round is refused with the whole
+    /// `lint_exhausted` payload (rounds, every violation with its correction,
+    /// and the message) and nothing is persisted; `--json` emits that payload
+    /// verbatim. A survivor is committed at `base-revision + 1` and printed as
+    /// a human summary (strategy, revision, provenance, warning count, next
+    /// steps); `--json` prints the committed candidate document with its
+    /// semantic warnings instead — never a live strategy: validate, simulate
+    /// and approve are separate steps.
+    Generate {
+        /// Strategy id the candidate belongs to (also the document id)
+        strategy_id: String,
+        /// Candidate revision you last read; the commit is `base-revision + 1`
+        #[arg(long, default_value_t = 0)]
+        base_revision: u64,
+        /// File holding the request JSON (the `GenerateRequest` contract)
+        #[arg(long)]
+        request: String,
+        /// Emit the D20 payload or the committed candidate as JSON
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     /// Patch a strategy canvas node (state, transition, or prompt template)
     ///
     /// CAS-guarded direct-core writes over the strategy canvas seam
@@ -169,6 +194,12 @@ pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
         PresetCommand::Scaffold { name, json } => scaffold_preset(config, &name, json).await,
         PresetCommand::Import { dir } => import_bundle(config, &dir).await,
         PresetCommand::Trigger { id, json } => trigger_preset(config, &id, json).await,
+        PresetCommand::Generate {
+            strategy_id,
+            base_revision,
+            request,
+            json,
+        } => generate_candidate(config, &strategy_id, base_revision, &request, json).await,
         PresetCommand::Patch { command } => patch::run(command, config).await,
     }
 }
@@ -282,6 +313,140 @@ async fn show_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> {
         print!("{}", format_profile_text(&profile));
     }
     Ok(())
+}
+
+/// Generate one committed candidate from a request file.
+///
+/// The kernel is [`nexus_core::CoreService::generate_strategy_candidate`] with **no** corrector:
+/// the CLI attaches no model, so a request that fails its first lint round is an exhaustion naming
+/// the absent corrector rather than a retried one. Rendering is this surface's whole job — the
+/// request type, the loop and the payload belong to the kernel.
+async fn generate_candidate(
+    config: &CliConfig,
+    strategy_id: &str,
+    base_revision: u64,
+    request_path: &str,
+    json_output: bool,
+) -> Result<()> {
+    let raw = std::fs::read_to_string(request_path)
+        .map_err(|error| CliError::Other(format!("read {request_path}: {error}")))?;
+    let request: nexus_core::GenerateRequest = serde_json::from_str(&raw).map_err(|error| {
+        CliError::Other(format!(
+            "parse {request_path} as the GenerateRequest contract: {error}"
+        ))
+    })?;
+
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.generate_strategy_candidate(&principal, strategy_id, base_revision, request, None)
+            .await
+            .map_err(|error| render_generate_refusal(error, json_output))
+    }
+    .await;
+    let outcome = finish_direct(&core, outcome).await?;
+
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&outcome.wire())?);
+    } else {
+        print!("{}", render_generate_summary(&outcome));
+    }
+    Ok(())
+}
+
+/// The human rendering of a committed candidate.
+///
+/// The document is the machine payload (`--json`), so the summary names it instead of reprinting
+/// it: what was generated, at which revision, from which provenance, how many warnings the passing
+/// round carried, and the chain that has to follow — the commit is a candidate, never a live
+/// strategy.
+fn render_generate_summary(outcome: &nexus_core::GenerateOutcome) -> String {
+    let document = &outcome.candidate.document;
+    format!(
+        "generated candidate for strategy `{}` at revision {}\n\
+         provenance: {}\n\
+         warnings: {}\n\
+         next: validate the document, then simulate → approve → apply; this candidate is not a \
+         live strategy\n",
+        document.id.as_str(),
+        outcome.candidate.revision,
+        document.provenance.source,
+        outcome.warnings.len(),
+    )
+}
+
+/// Render a generate refusal: the D20 payload on exhaustion, the ordinary mapping otherwise.
+///
+/// Exhaustion is the one failure a caller acts on, so it is never flattened into a status line:
+/// the payload's own `code`, round count, `persisted` flag, every violation's
+/// `kind`/`location`/`observed`/`correction` and its message all reach the human. `--json` emits
+/// the payload verbatim — the same object the HTTP `details` and the agent tool result carry.
+fn render_generate_refusal(error: nexus_core::CoreError, json_output: bool) -> CliError {
+    let nexus_core::CoreError::InputValidation { details } = &error else {
+        return map_core_error(error);
+    };
+    if details.get("code").and_then(serde_json::Value::as_str) != Some("lint_exhausted") {
+        return map_core_error(error);
+    }
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(details).unwrap_or_default()
+        );
+    }
+    CliError::Other(render_lint_exhaustion(details))
+}
+
+/// The human rendering of the `lint_exhausted` payload.
+///
+/// One header naming the code, the rounds and the `persisted` flag; one line per violation as
+/// `[kind] location: observed → correction`; then the payload's own message. Nothing the payload
+/// carries is summarised away.
+fn render_lint_exhaustion(payload: &serde_json::Value) -> String {
+    use std::fmt::Write as _;
+
+    let mut text = String::new();
+    let _ = writeln!(
+        text,
+        "{} after {} round(s); persisted: {}",
+        payload
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("lint_exhausted"),
+        payload
+            .get("rounds_attempted")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        payload
+            .get("persisted")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+    );
+    for violation in payload
+        .get("violations")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let field = |name: &str| {
+            violation
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+        };
+        let _ = writeln!(
+            text,
+            "  [{}] {}: {} → {}",
+            field("kind"),
+            field("location"),
+            field("observed"),
+            field("correction"),
+        );
+    }
+    if let Some(message) = payload.get("message").and_then(serde_json::Value::as_str) {
+        text.push_str(message);
+    }
+    text
 }
 
 /// Print trigger-lane classification only (AR-25) — never cron authoring,

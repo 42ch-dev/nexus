@@ -898,7 +898,8 @@ impl ExecutionHandle {
             self.runtime_facts().clone(),
             self.linked_core().ok(),
             Some(self.capability_holder()),
-        ))
+        )
+        .with_prompt_executor(self.prompt_executor()))
     }
 
     /// Build the compute context for this owner.
@@ -2286,8 +2287,8 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
             code: "yaml_intake_disabled".to_string(),
             message: format!(
                 "yaml intake is disabled for user preset '{preset_id}' under [strategy_intake] \
-                 mode 'ir-only': the strategy has no current apply (apply a strategy, or set \
-                 mode to 'yaml-only' for the v1.243 compatibility arm)"
+                 mode 'ir-only': the strategy has no current apply — apply a strategy before \
+                 running it (the 'yaml-only' compatibility arm was removed at v1.244.0)"
             ),
         },
         // The applied identity's own refusal, already carrying the coded
@@ -2321,16 +2322,28 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
 #[cfg(feature = "connect-host")]
 const PEER_CONTROL_OPERATIONS: [&str; 5] = ["status", "enable", "disable", "allow", "evict"];
 
+/// The operations a DISABLED lane still admits, by name: `status`, so a
+/// disabled lane can still report itself, and `enable`, so it can be
+/// re-enabled — a lane that refused these would be unrecoverable. The
+/// dispatcher admits them whether or not the start allowlisted them, because
+/// recovery must not depend on the grant that can lock it out; neither arm can
+/// do more than report state and flip the lane back on. `disable` is
+/// deliberately absent: it cannot re-enable a lane, so a disabled lane refuses
+/// it. Every other operation waits for `enable`.
+#[cfg(feature = "connect-host")]
+const PEER_CONTROL_REACHABLE_WHEN_DISABLED: [&str; 2] = ["status", "enable"];
+
 #[cfg(feature = "connect-host")]
 impl ExecutionHandle {
     /// Install (or disable) this execution owner's peer-control lane
-    /// (P4-T3). `enabled` is the enablement the lane REPORTS to the Connect
-    /// surface; it is not a second gate — [`Self::peer_control`] admits an
-    /// operation on the allowlist alone, so `enabled: false` still serves an
-    /// allowlisted operation and only the state says the cohort is off. Every
-    /// start REPLACES the allowlist, so the lane holds exactly the named
-    /// `allowed_operations` (empty admits nothing) and a restart can only
-    /// narrow, never accumulate.
+    /// (P4-T3). `enabled` is both what the lane REPORTS to the Connect surface
+    /// and the gate [`Self::peer_control`] consults beside the allowlist: a
+    /// lane started disabled serves only the operations that can report or
+    /// re-enable it (`status`, `enable`) — whichever allowlist it was started
+    /// with — and refuses the rest until `enable`. Every start REPLACES the
+    /// allowlist, so the lane holds exactly the named `allowed_operations`
+    /// (empty admits nothing but the disabled-lane recovery pair) and a
+    /// restart can only narrow, never accumulate.
     ///
     /// # Errors
     /// Returns [`CoreError::NotFound`] when the owning service was already
@@ -2385,21 +2398,26 @@ impl ExecutionHandle {
     }
 
     /// Drive one peer-control operation against this owner's lane (P4-T3).
-    /// `status` reports the lane state; `enable`/`disable` flip the reported
+    /// `status` reports the lane state; `enable`/`disable` flip the lane's
     /// enablement; `allow` adds the operation its payload names
     /// (`payload.operation`, which must be a dispatched operation) to the
     /// allowlist; `evict` removes a peer's registered tools. Anything else is
-    /// `invalid_input`, and every operation not on the lane's allowlist is
-    /// refused before any effect — visibility of a peer tool never implies
-    /// authority to control it. The lane's `enabled` flag is reported state,
-    /// never a second gate: the allowlist alone decides admission.
+    /// `invalid_input`. Admission is decided at one point by both halves of
+    /// the lane: the operation must be on the allowlist, and the lane must be
+    /// enabled. The one exemption is the recovery pair on a disabled lane —
+    /// `status` and `enable` are admitted even when the allowlist omits them,
+    /// because recovery must not depend on the grant that can lock it out —
+    /// while `disable`, `allow` and `evict` are all refused on a disabled
+    /// lane. Visibility of a peer tool never implies authority to control it.
     ///
     /// # Errors
     /// As [`Self::start_peer_control`], plus [`CoreError::InvalidInput`] when
     /// no lane has been started (`field: "lane"`), when the operation is
     /// unknown, or when `allow` names no dispatched grant target;
     /// [`CoreError::Forbidden`] when the
-    /// operation is not allowlisted, and [`CoreError::NotFound`] when `evict`
+    /// operation is not allowlisted, [`CoreError::ForbiddenReason`] when it is
+    /// allowlisted but the lane is disabled and the operation is outside the
+    /// reachable set, and [`CoreError::NotFound`] when `evict`
     /// names a peer with no registered tools.
     #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
     #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
@@ -2425,9 +2443,36 @@ impl ExecutionHandle {
             reason: "peer control has not been started".into(),
         })?;
         let operation: &str = &request.operation;
-        if !lane.allows(operation) {
+        // Admission is decided here by BOTH halves of the lane, at one point: the allowlist names
+        // what this owner may ever be asked to do, and the enablement says whether the lane is
+        // currently willing. Keeping them side by side is what stops them from drifting apart.
+        //
+        // The one exemption is deliberate: a DISABLED lane admits the two operations that can
+        // report and restore it (`PEER_CONTROL_REACHABLE_WHEN_DISABLED`) even when the same
+        // allowlist omits them. Recovery must not depend on the grant that can lock it out — a
+        // start may narrow the allowlist on the way in, and an operator whose only escape is a
+        // restart does not have a control, they have a one-way switch. The exemption widens no
+        // operation's effect: `status` only reports the lane, `enable` only flips it back on, and
+        // every operation still has to be allowlisted to run afterwards. An ENABLED lane keeps
+        // refusing an off-allowlist `status`/`enable`, so the allowlist still bounds the lane while
+        // it is in service.
+        let disabled = !lane.enabled();
+        let recoverable = PEER_CONTROL_REACHABLE_WHEN_DISABLED.contains(&operation);
+        let recovery_exempt = disabled && recoverable;
+        if !(lane.allows(operation) || recovery_exempt) {
             return Err(CoreError::Forbidden {
                 resource: format!("peer_control:{operation}"),
+            });
+        }
+        // A disabled lane refuses everything else, in a refusal distinct from the allowlist one so
+        // an operator can tell "never granted" from "granted but the lane is off".
+        if disabled && !recoverable {
+            return Err(CoreError::ForbiddenReason {
+                resource: format!("peer_control:{operation}"),
+                reason: format!(
+                    "the peer-control lane is disabled: only {PEER_CONTROL_REACHABLE_WHEN_DISABLED:?} \
+                     are admitted until the operation `enable` succeeds"
+                ),
             });
         }
         match operation {

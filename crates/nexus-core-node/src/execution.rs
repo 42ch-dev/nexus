@@ -1070,6 +1070,71 @@ impl NativeCore {
         .await
     }
 
+    /// `POST /v1/daemon/strategies/{strategy_id}/generate`.
+    ///
+    /// The HTTP surface of the generate kernel: the body is the generated `{base_revision, request}`
+    /// contract, `request` is decoded into the SAME `GenerateRequest` the CLI parses arguments into
+    /// and the agent tool's schema describes, and the owner's prompt executor (when the daemon
+    /// assembled one) is the corrector. Lint exhaustion is the core's `invalid_input` carrying the
+    /// D20 payload under `details`, so the existing error envelope renders it and no second error
+    /// class exists.
+    #[napi]
+    pub async fn generate_strategy(
+        &self,
+        principal_handle: String,
+        strategy_id: String,
+        request_json: Buffer,
+    ) -> Result<Buffer> {
+        /// The wire body minus the generated scaffolding: the request half IS the core's type, so
+        /// the two cannot drift without this failing to compile.
+        #[derive(serde::Deserialize)]
+        struct GenerateBody {
+            base_revision: u64,
+            request: nexus_core::GenerateRequest,
+        }
+
+        let body: GenerateBody = decode(request_json, "request")?;
+        self.json_call(principal_handle, async move |core, principal| {
+            // The executor the owner drives, never a second Host client: the HTTP surface corrects
+            // through the same provider selection a run uses, and `None` when the transport attached
+            // no model.
+            let corrector = core.execution().and_then(|owner| owner.prompt_executor());
+            let outcome = core
+                .generate_strategy_candidate(
+                    &principal,
+                    &strategy_id,
+                    body.base_revision,
+                    body.request,
+                    corrector.as_deref(),
+                )
+                .await?;
+            Ok(outcome.wire())
+        })
+        .await
+    }
+
+    /// One `nexus.*` host-tool call through the capability spine — the agent-tool surface.
+    ///
+    /// The SAME admission pipeline, dispatch and audit an in-process schedule tick runs, over the
+    /// owner's narrow `ToolContext` (which is where the prompt executor lives). A tool the spine
+    /// cannot resolve, an admission denial and a handler refusal are the spine's own codes.
+    #[napi]
+    pub async fn execute_tool(
+        &self,
+        principal_handle: String,
+        request_json: Buffer,
+    ) -> Result<Buffer> {
+        let request: nexus_contracts::ToolsApi = decode(request_json, "request")?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let owner = core.execution().ok_or_else(|| CoreError::Coded {
+                code: "not_supported".to_owned(),
+                message: "tool dispatch requires an established execution owner".to_owned(),
+            })?;
+            owner.execute_tool(&principal, request).await
+        })
+        .await
+    }
+
     /// `POST /v1/daemon/strategies/{strategy_id}/simulate`.
     #[napi]
     pub async fn simulate_strategy(

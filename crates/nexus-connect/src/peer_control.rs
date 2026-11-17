@@ -1,9 +1,9 @@
 //! The peer-control lane (v1.190 P4-T3).
 //!
-//! The reported enablement and the operation allowlist one execution owner
-//! admits, observed by the Connect surface. Capability dispatch itself lives in
-//! [`crate::peer_tools`]: this module only holds the lane's state, and never
-//! becomes a second registry.
+//! The enablement and the operation allowlist that together decide which
+//! operations one execution owner admits, observed by the Connect surface.
+//! Capability dispatch itself lives in [`crate::peer_tools`]: this module only
+//! holds the lane's state, and never becomes a second registry.
 //!
 //! The `ExecutionHandle` entry points that own a lane (`start_peer_control`,
 //! `peer_control`) stay in `nexus-core`'s `execution/handle_ops.rs` — Rust
@@ -18,8 +18,8 @@ use std::sync::Mutex;
 
 use nexus_contracts::generated::core::CorePeerControlState;
 
-/// The peer-control lane one execution owner admits: the enablement it reports
-/// plus the operation allowlist that decides admission, observed by the
+/// The peer-control lane one execution owner admits: the enablement and the
+/// operation allowlist that together decide admission, observed by the
 /// connect surface.
 #[derive(Debug)]
 pub struct PeerControlLane {
@@ -38,15 +38,20 @@ impl PeerControlLane {
         }
     }
 
-    /// The enablement the lane reports to the Connect surface. Admission is
-    /// decided by the allowlist, so this is observed state, not a gate.
+    /// Whether the lane is enabled. Admission reads this beside the
+    /// allowlist: a disabled lane admits only the operations that can report
+    /// or re-enable it (`status`, `enable`) and refuses the rest — the
+    /// deciding gate lives in `nexus-core`'s `peer_control` dispatcher, which
+    /// is where the allowlist is consulted too.
     #[must_use]
     pub fn enabled(&self) -> bool {
         self.enabled.load(Ordering::SeqCst)
     }
 
     /// Whether `operation` is on the allowlist. An empty allowlist admits
-    /// nothing — operators must name the operations they intend.
+    /// nothing — operators must name the operations they intend — except the
+    /// disabled-lane recovery pair (`status`, `enable`), which the dispatcher
+    /// exempts so the lane can always be reported and restored.
     #[must_use]
     pub fn allows(&self, operation: &str) -> bool {
         self.allowed_operations
@@ -55,8 +60,10 @@ impl PeerControlLane {
             .contains(operation)
     }
 
-    /// Flip the reported enablement. The allowlist decides admission, so this
-    /// does not refuse or admit an operation by itself.
+    /// Flip the lane's enablement. `false` stops every operation outside the
+    /// reachable set (`status`, `enable`) from being admitted, and `true`
+    /// restores them on the next admission — the effect is immediate, which
+    /// is what makes `disable` a control rather than a report.
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::SeqCst);
     }

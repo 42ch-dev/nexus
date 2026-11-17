@@ -228,6 +228,23 @@
     "engineUnavailableTitle": "Orchestration engine not running",
     "engineUnavailableDescription": "Start the daemon orchestration engine, then try again.",
     "graphAriaLabel": "Harness spatial graph",
+    "applied": {
+      "neverApplied": {
+        "title": "No preset applied yet",
+        "description": "This workspace has no live preset. Build a first candidate in Compose.",
+        "openCompose": "Open Compose"
+      },
+      "approvedUnapplied": {
+        "title": "Approved, not yet live",
+        "description": "An approved candidate has no live version. Apply one to make it the preset this workspace runs.",
+        "applyLatest": "Apply the latest approval"
+      },
+      "unreadable": {
+        "title": "The running preset cannot be read",
+        "description": "An apply is recorded but its document no longer verifies: {{reason}}. Nothing was changed, and nothing will be applied from here.",
+        "recheck": "Recheck"
+      }
+    },
     "header": {
       "title": "Preset",
       "description": "State machine and transition editor",
@@ -238,7 +255,9 @@
       "livePrefix": "Live:",
       "liveStatus": "",
       "staging": "Staging",
-      "addPattern": "Add pattern…"
+      "addPattern": "Add pattern…",
+      "editApplied": "Edit this strategy",
+      "editAppliedHint": "Opens Compose on this strategy's candidate document — the running preset changes only when you approve and apply again."
     },
     "node": {
       "status": {
@@ -387,6 +406,7 @@
     },
     "inspector": {
       "ariaLabel": "Harness inspector",
+      "structuralDisabled": "The canvas shows a document, not the preset YAML this editor writes — author the change in Compose.",
       "state": {
         "title": "State",
         "ariaLabel": "State inspector",
@@ -396,8 +416,7 @@
         "saved": "Saved",
         "saveFailed": "Save failed",
         "saving": "Saving…",
-        "updated": "State updated",
-        "composeDisabled": "States are authored in the candidate while composing; this YAML editor is disabled."
+        "updated": "State updated"
       },
       "transition": {
         "title": "Transition",
@@ -407,8 +426,7 @@
         "saved": "Saved",
         "saveFailed": "Save failed",
         "saving": "Saving…",
-        "updated": "Transition updated",
-        "composeDisabled": "Transitions are authored in the candidate while composing; this YAML editor is disabled."
+        "updated": "Transition updated"
       },
       "prompt": {
         "title": "Prompt",
@@ -418,7 +436,8 @@
         "saved": "Saved",
         "saveFailed": "Save failed",
         "saving": "Saving…",
-        "updated": "Prompt template saved"
+        "updated": "Prompt template saved",
+        "structuralDisabled": "The canvas renders a document, not the preset YAML this editor writes, and Compose has no prompt-body operation. Edit the template with `nexus42 preset patch prompt <strategy> <state> --template-ref <path> --file <path>` and reload."
       },
       "stateId": "State ID",
       "status": "Status",

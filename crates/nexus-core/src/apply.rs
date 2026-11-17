@@ -378,21 +378,44 @@ pub struct StrategyApprovals {
 /// `candidate_revision` defines approval newness (compass D11); `approved_at` and `approval_id`
 /// only make a tied query deterministic. A client compares `newest_approval.approval_id` with
 /// `current_apply.approval_id` and never derives newness from either timestamp.
+///
+/// `applied_document` is the frozen document `current_apply` installed, replayed through
+/// [`verified_apply_document`] so its canonical hash is the one the apply recorded;
+/// `applied_document_refusal` is why that replay failed. Both are `None` when nothing is
+/// applied, and exactly one is `Some` otherwise — "no applied document" and "the applied
+/// document does not replay" must never look alike (D16(c)).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StrategyAppliedStatus {
     pub current_apply: Option<AppliedStrategy>,
     pub newest_approval: Option<StrategyApproval>,
+    pub applied_document: Option<WorkflowDocument>,
+    pub applied_document_refusal: Option<AppliedDocumentRefusal>,
+}
+
+/// Why the current apply's frozen document could not be replayed, as the status read reports it.
+///
+/// `reason` is [`ApplyLoadRefusal::reason`]'s stable `snake_case` wire code — the same code the
+/// schedule intake and the recovery path name — so a client switches on it, never on `message`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AppliedDocumentRefusal {
+    pub reason: &'static str,
+    pub message: String,
 }
 
 impl CoreService {
-    /// The applied identity of `strategy_id` and its newest approval, both read from the
-    /// append-only rows. The apply side is [`current_apply`] — the same answer the schedule
-    /// intake branches on, so the Canvas and the run never disagree about which apply is live.
+    /// The applied identity of `strategy_id`, the document it installed and its newest approval,
+    /// all read from the append-only rows. The apply side is [`current_apply`] — the same answer
+    /// the schedule intake branches on, so the Canvas and the run never disagree about which
+    /// apply is live — and the document is the one that apply installed.
     ///
     /// # Errors
     ///
-    /// The principal and store errors. A strategy with no apply reports `current_apply: null`
-    /// and a strategy with no approval reports `newest_approval: null`; neither is a refusal.
+    /// The principal and store errors, and the replay's outer error: an apply naming an approval
+    /// row this strategy does not have, or a store failure. That is an error response, never a
+    /// body — it is not "never applied" and not `applied_document_refusal`, whose only content is
+    /// the typed [`ApplyLoadRefusal`]. A strategy with no apply reports `current_apply: null` and
+    /// both document fields `null` without reading a document; a strategy with no approval
+    /// reports `newest_approval: null`. Neither is a refusal.
     pub async fn strategy_applied(
         &self,
         principal: &Principal,
@@ -401,6 +424,30 @@ impl CoreService {
         self.verify_principal(principal)?;
 
         let current_apply = current_apply(&self.inner.pool, strategy_id).await?;
+
+        // The document half runs the same replay the intake and recovery run, against the apply
+        // row this response reports: resolving a second `current_apply` could pair the document
+        // with another apply's identity in one body. The outer `Err` propagates as above.
+        let (applied_document, applied_document_refusal) = match current_apply.as_ref() {
+            None => (None, None),
+            Some(apply) => match verified_apply_document(
+                &self.inner.pool,
+                self.nexus_home(),
+                strategy_id,
+                apply,
+            )
+            .await?
+            {
+                Ok(document) => (Some(document), None),
+                Err(refusal) => (
+                    None,
+                    Some(AppliedDocumentRefusal {
+                        reason: refusal.reason(),
+                        message: refusal.to_string(),
+                    }),
+                ),
+            },
+        };
 
         let newest_approval = sqlx::query_as::<_, (String, String, i64, String)>(
             "SELECT approval_id, content_hash, candidate_revision, approved_at \
@@ -425,6 +472,8 @@ impl CoreService {
         Ok(StrategyAppliedStatus {
             current_apply,
             newest_approval,
+            applied_document,
+            applied_document_refusal,
         })
     }
 

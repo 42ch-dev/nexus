@@ -11,6 +11,8 @@ pub mod strategy_approvals;
 pub mod strategy_approve_request;
 pub mod strategy_compose_request;
 pub mod strategy_compose_response;
+pub mod strategy_generate_request;
+pub mod strategy_generate_response;
 pub mod strategy_simulation_request;
 pub mod workflow_document;
 
@@ -24,5 +26,7 @@ pub use strategy_approvals::*;
 pub use strategy_approve_request::*;
 pub use strategy_compose_request::*;
 pub use strategy_compose_response::StrategyComposeResponse;
+pub use strategy_generate_request::StrategyGenerateRequest;
+pub use strategy_generate_response::StrategyGenerateResponse;
 pub use strategy_simulation_request::*;
 pub use workflow_document::WorkflowDocument;

@@ -7,7 +7,7 @@ Source: migrated from the retired tracked specs corpus
 
 ## Problem
 
-**Landing reconciliation (2026-11-01).** This plan was written against SPOKE 0.14.1, where the family was still proposed. Upstream 0.15.0 (2026-10-30) landed it additively and 0.15.1 (2026-10-31) is docs/CI only; crates.io and npm publish 0.15.1, so the protocol side of the two-layer model is now available to consume. The reference policy engine stays `fixtures/memory-engine/rust` (`spoke-fixture-memory-engine`, path-dependency-only, unpublished) — provider-private implementation, not a published protocol participant, so plans that treat it as an upstream dependency must vendor or reimplement rather than depend on it. This nexus repository moved its five lockstep pins first to 0.15.1 and then to the 0.16.0 lockstep (workspace pins in `Cargo.toml`); the staged adoption N0–N3, N4-R and NXM-16 has since been delivered (v1.227–v1.230), while N4-T transfer remains explicitly unsupported.
+**Landing reconciliation (2026-11-01).** This plan was written against SPOKE 0.14.1, where the family was still proposed. Upstream 0.15.0 (2026-10-30) landed it additively and 0.15.1 (2026-10-31) is docs/CI only; crates.io and npm publish 0.15.1, so the protocol side of the two-layer model is now available to consume. The reference policy engine stays `fixtures/memory-engine/rust` (`spoke-fixture-memory-engine`, path-dependency-only, unpublished) — provider-private implementation, not a published protocol participant, so plans that treat it as an upstream dependency must vendor or reimplement rather than depend on it. This nexus repository moved its five lockstep pins first to 0.15.1 and then to the 0.16.0 lockstep (three pins in `Cargo.toml`, two `@42ch/spoke-*` npm pins in `package.json`); the staged adoption N0–N3, N4-R and NXM-16 has since been delivered (v1.227–v1.230), while N4-T transfer remains explicitly unsupported.
 
 ## Decision
 
@@ -15,12 +15,12 @@ Source: migrated from the retired tracked specs corpus
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | **Implemented** — adoption stages N0–N3, N4-R (reflection) and NXM-16 delivered (v1.227–v1.230, at the 0.16.0 lockstep); N4-T transfer explicitly unsupported. "Current" statements in §3 are the 2026-10-28 baseline snapshot kept as provenance. |
+| **Status** | **Implemented** — adoption stages N0–N3, N4-R (reflection) and NXM-16 delivered (v1.227–v1.230, at the 0.16.0 lockstep); N4-T transfer explicitly unsupported. §3 states each entry point as the shipped code serves it, naming the 2026-10-28 snapshot's shape where a later stage replaced it; §6 keeps that snapshot as the pre-migration inventory. |
 | **Document class** | Exploration |
 | **Scope** | How nexus adopted the `spoke-memory` family: the two-layer landing model (protocol adoption ≠ data merge), the target architecture (`MemoryPort` in-process provider + application authorization adapter), the caller-migration inventory, the staged roadmap `NXM-*` with its gates, the deferred triggers, and the adoption-program definition of done. |
 | **Coordinates with** | [spoke-memory-protocol.md](2026-10-28-spoke-memory-protocol.md) (wire symbols and `MEM-R###` invariants — referenced, never redefined here), [spoke-memory-conformance.md](2026-10-28-spoke-memory-conformance.md) (`C-*` scenarios and the acceptance matrix this plan's stages trace to), [spoke-adapter-architecture.md](../../../../docs/specs/architecture/spoke-adapter-architecture.md) (the consumption boundary and port-delegation rules the provider must fit) |
 
-**Landing reconciliation (2026-11-01).** This plan was written against SPOKE 0.14.1, where the family was still proposed. Upstream 0.15.0 (2026-10-30) landed it additively and 0.15.1 (2026-10-31) is docs/CI only; crates.io and npm publish 0.15.1, so the protocol side of the two-layer model is now available to consume. The reference policy engine stays `fixtures/memory-engine/rust` (`spoke-fixture-memory-engine`, path-dependency-only, unpublished) — provider-private implementation, not a published protocol participant, so plans that treat it as an upstream dependency must vendor or reimplement rather than depend on it. This nexus repository moved its five lockstep pins first to 0.15.1 and then to the 0.16.0 lockstep (workspace pins in `Cargo.toml`); the staged adoption N0–N3, N4-R and NXM-16 has since been delivered (v1.227–v1.230), while N4-T transfer remains unscheduled and explicitly unsupported; upstream task IDs from the discarded implementation plan are replaced by "already landed upstream".
+**Landing reconciliation (2026-11-01).** This plan was written against SPOKE 0.14.1, where the family was still proposed. Upstream 0.15.0 (2026-10-30) landed it additively and 0.15.1 (2026-10-31) is docs/CI only; crates.io and npm publish 0.15.1, so the protocol side of the two-layer model is now available to consume. The reference policy engine stays `fixtures/memory-engine/rust` (`spoke-fixture-memory-engine`, path-dependency-only, unpublished) — provider-private implementation, not a published protocol participant, so plans that treat it as an upstream dependency must vendor or reimplement rather than depend on it. This nexus repository moved its five lockstep pins first to 0.15.1 and then to the 0.16.0 lockstep (three pins in `Cargo.toml`, two `@42ch/spoke-*` npm pins in `package.json`); the staged adoption N0–N3, N4-R and NXM-16 has since been delivered (v1.227–v1.230), while N4-T transfer remains unscheduled and explicitly unsupported; upstream task IDs from the discarded implementation plan are replaced by "already landed upstream".
 
 #### Original framing (research provenance)
 
@@ -48,7 +48,10 @@ currently refused automatic run-capture path (§6.4, Decision D-4).
 > [spoke-memory-conformance.md](2026-10-28-spoke-memory-conformance.md); `02` = the
 > upstream implementation plan, **not tracked here** — it is superseded by the
 > landed 0.15.0 shape, so its task series (A1–A3, B1–B4, C1–C3, D1–D5, E1–E4,
-> F1–F2) is history, not a dependency.
+> F1–F2) is history, not a dependency. Section numbers cited against `01`
+> (`01 §N`) are those of the published upstream protocol it summarizes at the
+> 0.16.0 lockstep, which owns the wire contract and is not tracked in this
+> repository.
 
 | Symbol | Meaning | Owner |
 |---|---|---|
@@ -76,24 +79,26 @@ SPOKE consumed upstream package version `0.14.1`; SPOKE has since published
 `0.15.1` carrying the memory family; this repository then moved its five
 lockstep pins to `0.15.1` without yet consuming the family. (Consumption of
 the base family, reflection and fencing later landed at the 0.16.0 lockstep,
-v1.227–v1.230; transfer (N4-T) remains unconsumed.)
+v1.227–v1.230; transfer (N4-T) remains unconsumed.) Each row below states what the
+shipped code does for that entry now; where a stage replaced the snapshot's shape,
+the row says which, and §6 keeps the pre-migration shape as history.
 
 #### 3.1 Memory entry points (as-is)
 
 | # | Entry point | Current behavior | Evidence |
 |---|---|---|---|
-| E1 | CLI `apps/nexus42/src/commands/creator/memory.rs` | **Direct file I/O** through `nexus_creator_memory::memory_io` (`list_memories`, `load_memory`, `save_memory`, `delete_memory`) against the Creator bearer, bypassing CoreService | `memory.rs:14-15,199-337` |
-| E2 | CLI `apps/nexus42/src/commands/creator/soul.rs` | **Direct file I/O** through `nexus_creator_memory::soul_io` (`exists`/`create`/`load`/`save`/`validate`) for Creator SOUL.md | `soul.rs:7,62-216` |
-| E3 | CLI `apps/nexus42/src/commands/creator/character.rs` | The Character memory and ToM family authors through **direct-core** (`open_direct_core`): capture, pending-review list/count/dismiss, the bounded review drain, fragments, and the revision-checked promote, plus ToM record/show with carrier admission and keyset paging (`character.rs:20-27`, DTO imports `:44-46`, retained `Memory{CharacterMemoryCommand}` / `Tom{CharacterTomCommand}` enum arms `:118-127`). Only the `creator character run` and `creator character soul reflect` entrances were retired (with the daemon transport they needed) | `character.rs:20-27,44-46,118-127` |
-| E4 | CoreService memory family `crates/nexus-core/src/memory.rs` (2178 lines) | Bearer-isolated pending-review capture/list/count/delete, fragment list, revision-checked promotion, bounded Creator review drain, Character ToM carrier family. Character mutations admit a per-Character `ActorActivityLease` held across DB/file/provider effects | `memory.rs:1-14,106-123,356-388` |
-| E5 | Host run path `crates/nexus-core/src/host.rs` | `ExecuteOperationRequest::Prompt{remember:true}`: non-Character ⇒ `invalid_input`; Character ⇒ typed `not_supported` **before** any provider effect — automatic run capture is currently refused | `host.rs:1208-1230` |
-| E6 | Execution projection `crates/nexus-core/src/soul.rs` | `load_character_mind_projection` reads Character SOUL.md + fragment rows (shared scope + selected binding scope) + promoted LTM files directly; fail-closed on read errors; deterministic merge with bounded budget | `soul.rs:628-722` |
-| E7 | Host prompt assembly `crates/nexus-core/src/host.rs` | `assemble_admitted_prompt` builds `CoreCharacterMind` projection (with ToM) for Character actors; Creator actors get `creator_with_view` **without** a memory mind projection — no general Creator memory load is proven | `host.rs:1960-2016` |
-| E8 | napi native surface `crates/nexus-core-node/src/actors.rs` | Exports the memory family to TS: `capture_character_pending_review`, `list/count/delete_character_pending_review`, `review_character_memory`, `list_character_memory_fragments`, `promote_character_fragment`, plus Creator-arm `list/count/delete_pending_review`, `review_memory`, `list_memory_fragments` | `actors.rs:1046-1350` |
-| E9 | TS service `apps/nexus-service/src/memory.ts` | `/v1/daemon/*` HTTP memory/SOUL/ToM routes; thin translation over the native family surface with schema-owned generated DTOs | `memory.ts:1-40` |
-| E10 | Moment context assembly `crates/nexus-moment-context-assembly` | `stage0.rs:18,51,189` and `cloud_stage.rs:9,87,246` consume `nexus_creator_memory::LongTermMemory`; `moment.rs:64-220` defines `CharacterMindInput` and the four fixed mind slots | cited lines |
-| E11 | Review pipeline `crates/nexus-core/src/memory_pipeline.rs` + `crates/nexus-creator-memory/src/review.rs` | Deterministic rule classifier (thresholds 50/80/200 chars, task-kind rules); outcomes `PromoteToLongTerm`/`FragmentOnly`/`Drop` mutually exclusive; binding-local Character Promote coerced to fragment to block silent cross-world promotion; `MergeIntoExisting`/`TriggerSoulExperienceOnly` **declared but unimplemented** (skipped with debug log) | `review.rs:130-249`; `memory_pipeline.rs:319-418` |
-| E12 | Digest capture writer `memory_pipeline.rs` | `PassthroughSummarizer`: no LLM; 256 KiB cap; prepends `# UNTRUSTED:` provenance header | `memory_pipeline.rs:645-700` |
+| E1 | CLI `apps/nexus42/src/commands/creator/memory.rs` | **Typed `CoreService` client** since NXM-6: `list_creator_memories` / `create_creator_memory` / `update_creator_memory` / `delete_creator_memory` against the Creator bearer, and no command opens a legacy memory file (the snapshot's direct `memory_io` path is gone; §6 keeps it as history) | module doc and those four calls (`apps/nexus42/src/commands/creator/memory.rs`) |
+| E2 | CLI `apps/nexus42/src/commands/creator/soul.rs` | **Provider `personality` profile** since NXM-6: `get_creator_soul` / `set_creator_soul` read and write the profile the bridge projects from SOUL.md, writing back on the revision it read; no leaf touches the bearer file (the snapshot's direct `soul_io` path is gone; §6 keeps it as history) | module doc and those calls (`apps/nexus42/src/commands/creator/soul.rs`) |
+| E3 | CLI `apps/nexus42/src/commands/creator/character.rs` | The Character memory and ToM family authors through **direct-core** (`open_direct_core`): capture, pending-review list/count/dismiss, the bounded review drain, fragments, and the revision-checked promote, plus ToM record/show with carrier admission and keyset paging (the `nexus_contracts::daemon_api::characters` DTO imports, retained `Memory{CharacterMemoryCommand}` / `Tom{CharacterTomCommand}` enum arms). Only the `creator character run` and `creator character soul reflect` entrances were retired (with the daemon transport they needed) | `CharacterMemoryCommand` / `CharacterTomCommand` (`apps/nexus42/src/commands/creator/character.rs`) |
+| E4 | CoreService memory family `crates/nexus-core/src/memory.rs` | Bearer-isolated pending-review capture/list/count/delete, fragment list, revision-checked promotion, bounded Creator review drain, Character ToM carrier family. Character mutations admit a per-Character `ActorActivityLease` held across DB/file/provider effects | `CoreService::capture_character_pending_review`, `CoreService::review_character_memory`, `CoreService::review_memory` (`crates/nexus-core/src/memory.rs`) |
+| E5 | Host run path `crates/nexus-core/src/host.rs` | `ExecuteOperationRequest::Prompt{remember:true}`: non-Character ⇒ `invalid_input`; Character ⇒ typed `not_supported` **before** any provider effect — automatic run capture is currently refused | `HostHandle::execute`'s `remember` refusal (`crates/nexus-core/src/host.rs`) |
+| E6 | Execution projection `crates/nexus-core/src/soul.rs` | `load_character_mind_projection` reads through the provider binding: SOUL as the `personality` profile (`read.personality()`), fragments as kind-filtered `read.family` reads over the shared scope plus the selected binding scope, and promoted memories as the `nexus.<kind>` recall families ranked by slug order; deterministic merge on the raw `created_at` / `fragment_id` keys with a bounded LTM tail. No file read since NXM-7 (`memory_document_line` re-renders the record through `LongTermMemory` for byte parity only) | `load_character_mind_projection`, `projection_fragments`, `memory_document_line` (`crates/nexus-core/src/soul.rs`) |
+| E7 | Host prompt assembly `crates/nexus-core/src/host.rs` | `assemble_admitted_prompt` builds `CoreCharacterMind` projection (with ToM) for Character actors; Creator actors get `creator_with_view` **without** a memory mind projection — no general Creator memory load is proven | `assemble_admitted_prompt` (`crates/nexus-core/src/host.rs`) |
+| E8 | napi native surface `crates/nexus-core-node/src/actors.rs` | Exports the memory family to TS: `capture_character_pending_review`, `list/count/delete_character_pending_review`, `review_character_memory`, `list_character_memory_fragments`, `promote_character_fragment`, plus Creator-arm `list/count/delete_pending_review`, `review_memory`, `list_memory_fragments` | the memory-family napi exports (`crates/nexus-core-node/src/actors.rs`) |
+| E9 | TS service `apps/nexus-service/src/memory.ts` | `/v1/daemon/*` HTTP memory/SOUL/ToM routes; thin translation over the native family surface with schema-owned generated DTOs | the memory-family route exports (`apps/nexus-service/src/memory.ts`) |
+| E10 | Moment context assembly `crates/nexus-moment-context-assembly` | Contract `RetainedRecord` recall since NXM-7: `Stage0Assembly::long_term_memories` and `TwoStageAssembly::long_term_memories` hold `Vec<RetainedRecord>` from provider recall — never the legacy `LongTermMemory` file type — while `CharacterMindInput` and the four fixed mind slots stay in `moment.rs` | `Vec<RetainedRecord>` (`stage0.rs`, `cloud_stage.rs`); `CharacterMindInput` (`moment.rs`) |
+| E11 | Review pipeline `crates/nexus-core/src/memory_pipeline.rs` + `crates/nexus-creator-memory/src/review.rs` | Deterministic rule classifier (thresholds 50/80/200 chars, task-kind rules); outcomes `PromoteToLongTerm`/`FragmentOnly`/`Drop` mutually exclusive; binding-local Character Promote coerced to fragment to block silent cross-world promotion; `MergeIntoExisting`/`TriggerSoulExperienceOnly` **declared but unimplemented** (skipped with debug log) | `classify_pending_review` (`crates/nexus-creator-memory/src/review.rs`); `consume_review_decision` (`crates/nexus-core/src/memory_pipeline.rs`) |
+| E12 | Digest capture writer `memory_pipeline.rs` | `PassthroughSummarizer`: no LLM; 256 KiB cap; prepends `# UNTRUSTED:` provenance header | `PassthroughSummarizer` (`crates/nexus-core/src/memory_pipeline.rs`) |
 
 #### 3.2 Storage layout (as-is)
 
@@ -104,7 +109,7 @@ v1.227–v1.230; transfer (N4-T) remains unconsumed.)
   dimension in the file layout. `MemoryBearerRef` is a **closed** two-arm enum
   (`Creator` | `Character`); creator ids must carry the `ctr_` prefix and pass
   path-safety validation.
-  Evidence: `crates/nexus-creator-memory/src/bearer.rs:1-46`.
+  Evidence: `MemoryBearerRef` (`crates/nexus-creator-memory/src/bearer.rs`).
 - **SQL tables** (SQLite, `crates/nexus-local-db/migrations/`): Creator and
   Character table families for pending review, fragments, soul narratives and
   stats caches (`20260701_000001_memory_fragments_world_and_soul_narratives.sql`,
@@ -121,7 +126,7 @@ v1.227–v1.230; transfer (N4-T) remains unconsumed.)
   Creator arm's **world id** or the Character arm's **binding id**; `None`
   means whole-Creator vs shared-Character depending on the arm. The same
   column therefore carries two different foreign-key semantics.
-  Evidence: `crates/nexus-core/src/memory_pipeline.rs:73-93`.
+  Evidence: `MemoryPipelineCtx.scope_id` (`crates/nexus-core/src/memory_pipeline.rs`).
 
 #### 3.3 Authorization and fencing (as-is)
 
@@ -129,61 +134,85 @@ v1.227–v1.230; transfer (N4-T) remains unconsumed.)
   `creator` / `character_read` / `character_write` constructors; Character
   contexts pass an ownership check (foreign or missing Character ⇒ 404
   `not_found`, indistinguishable); a read-only context cannot mutate.
-  Evidence: `memory_pipeline.rs:66-123`.
+  Evidence: `MemoryPipelineCtx` (`crates/nexus-core/src/memory_pipeline.rs`).
 - Writable Character contexts wrap an admitted `ActorActivityLease` held for
   the context lifetime (activity fence across all nested effects).
-  Evidence: `memory_pipeline.rs:59-75`.
-- Fragment promotion is revision-CAS: a stale `expected_revision` writes
-  nothing (409 `version_mismatch`); success clears binding provenance and
-  bumps the revision. Evidence: `crates/nexus-core/src/memory.rs:356-388,1219-1224`.
-- Durable receipts: `crates/nexus-core/src/operation_receipts.rs:1-13` owns
+  Evidence: `BearerCapability::Writable` (`crates/nexus-core/src/memory_pipeline.rs`).
+- Fragment promotion is revision-CAS, and the two layers behave differently. At
+  the Core entry, `CoreService::promote_character_fragment` reads the record
+  through the provider (`MemoryAdapter::character_fragment` → `port.get_record`)
+  and then refuses before the provider's *promotion* method is called: an
+  already-shared fragment is the `character_fragment_already_shared` conflict
+  (after it settles an outstanding SOUL-narrative invalidation), and a projected
+  revision that is not `expected_revision + 1` is the retained
+  `version_mismatch` conflict (409). The provider's `promote_record` decides in
+  this order: a duplicate idempotency key probes the recorded intent and settles
+  as a replay; a new request whose `expected_revision` is stale returns
+  `RevisionConflict` and never reaches the placement branch; and a request that
+  passes the revision check while naming the placement the record already holds
+  is the §7.0.4 no-op that keeps the revision and commits the receipt with no
+  effect recorded. A request that changes the placement commits it with one
+  revision bump, and provenance is untouched either way. Evidence:
+  `crates/nexus-core/src/memory.rs` (`character_fragment`,
+  `promote_character_fragment`) and
+  `crates/nexus-memory-provider/src/storage.rs` (`promote_record`).
+- Durable receipts: `crates/nexus-core/src/operation_receipts.rs` owns
   the **read side** of the durable operation-receipts store (spec
   `connect-event-delivery-and-operation-receipts.md` §B.2/§B.3); the frozen
-  `uncertain` refusal (`UNCERTAIN_CODE`, `uncertain_refusal`) exists at
-  `:32-57` but is currently **`#[cfg(feature = "compute")]`-gated** — the
+  `uncertain` refusal (`UNCERTAIN_CODE`, `uncertain_refusal`) exists but is
+  currently **`#[cfg(feature = "compute")]`-gated** — the
   receipt stack is live for compute Runs, **not** yet a Memory-domain
   consumer.
-- Stable operation identity: `crates/nexus-core/src/operation_id.rs:1-24`
+- Stable operation identity: `crates/nexus-core/src/operation_id.rs`
   defines `op_<hex32>` = SHA-256(canonical_json({actor, session, action,
-  args})) truncated to 128 bits; `:39-55` documents that random-per-attempt
+  args})) truncated to 128 bits (`OPERATION_ID_PREFIX`, `derive_operation_id`);
+  `OperationScope` documents that random-per-attempt
   `HostOperationId::new()` is uniqueness, **not** replay stability.
-- Service open/binding: `CoreOpenOptions` currently carries only
-  `user_home` + `access`; `CoreInner` binds one creator + one workspace
-  (`state.db`) per open, holds the engine admission, re-reads the on-disk
-  selection on use (`verify_selected_context`), and runs a retained close
-  drain. Evidence: `crates/nexus-core/src/service.rs:62-98,114+`.
+- Service open/binding: `CoreOpenOptions` carries `user_home`, `access`, and the
+  open-only provider override `memory: Option<MemoryProviderSelection>` — the
+  third field is §4.2's selection interface, and `None` reads the on-disk table;
+  `CoreInner` binds one creator + one workspace (`state.db`) per open, holds the
+  workspace writer admission, re-reads the on-disk selection on use
+  (`verify_selected_context`), and runs a retained close drain. Evidence:
+  `CoreOpenOptions` / `CoreInner` (`crates/nexus-core/src/service.rs`).
 - Conformance precedent: `crates/nexus-provider-conformance` is a neutral,
   credential-free CI conformance runner over normalized provider streams;
   `crates/nexus-provider-ports` defines the schema-derived `ProviderPort`
   trait precedent for a single injectable service boundary.
 - Cloud boundary: the local service host must not depend on cloud-sync /
   cloud-domain crates and must not expose cloud HTTP or sync proxies.
-  Evidence: `docs/specs/architecture/overview.md:37-58`.
+  Evidence: `docs/specs/architecture/overview.md` § "Two product lines" (Hard isolation).
 - Credential precedent: CLI auth persists the user token at
-  `~/.nexus42/auth.json` (`apps/nexus42/src/auth/user_auth.rs:8`);
-  `crates/nexus-cloud-sync/src/platform_client.rs:54-95` redacts bearer/API-key
+  `~/.nexus42/auth.json` (`AuthStore` in `apps/nexus42/src/auth/mod.rs`);
+  `sanitize_error_body` (`crates/nexus-cloud-sync/src/platform_client.rs`) redacts bearer/API-key
   patterns from error strings.
 
-#### 3.4 Verified gaps (current facts, not proposals)
+#### 3.4 Verified gaps at the snapshot, and the stage that closed each
 
-1. **Creator production capture is not wired.** `create_pending_review`
-   (`crates/nexus-local-db/src/pending_review.rs:36`) has callers only in that
-   file's tests (`:220-314`); no production Creator capture writer exists.
+1. **Creator production capture was not wired.** At the snapshot
+   `create_pending_review` (`crates/nexus-local-db/src/pending_review.rs`) had
+   callers only in its own tests. NXM-16 closed it: `CoreService::create_pending_review`
+   (`crates/nexus-core/src/memory.rs`) is the typed Creator capture leg, exported
+   as the napi `create_pending_review` and covered by `crates/nexus-core/tests/creator_capture.rs`.
    This is scoped investigation evidence about this repository, not a claim
    about external consumers.
 2. **Automatic run capture is refused.** Host `remember:true` is rejected for
-   every session (`host.rs:1208-1230`); the `character_run_captures` receipt
+   every session (the `remember` refusal in `HostHandle::execute`, `crates/nexus-core/src/host.rs`); the `character_run_captures` receipt
    table exists but no Host capture writer is connected.
 3. **Two declared review actions are unimplemented.**
    `MergeIntoExisting` / `TriggerSoulExperienceOnly` are skipped at runtime
-   (`memory_pipeline.rs:319-418`); they must not be advertised as supported
+   (`consume_review_decision` in `crates/nexus-core/src/memory_pipeline.rs`); they must not be advertised as supported
    default behavior.
 4. **Scope is ambiguous.** `scope_id` doubles as world id vs binding id and
    `None` overloads two meanings (§3.2).
-5. **CLI bypass.** E1/E2 reach memory files without CoreService, the writer
-   protocol, or any grant check (§3.1).
-6. **Receipt stack not extended to Memory.** The `uncertain` refusal is
-   compute-gated; no memory-domain operation identity is recorded (§3.3).
+5. **CLI bypass.** At the snapshot E1/E2 reached memory files without CoreService,
+   the writer protocol, or any grant check. NXM-6 closed it: both leaves are typed
+   `CoreService` clients (E1, E2 in §3.1).
+6. **The core receipt stack is not the Memory consumer.** `uncertain_refusal`
+   (`crates/nexus-core/src/operation_receipts.rs`) is still
+   `#[cfg(feature = "compute")]`-gated and `operation_receipts.rs` names no memory
+   consumer; the memory domain keeps its own provider-side receipts, dedup
+   namespace and `memory.receipts.get` (`crates/nexus-memory-provider`).
 
 ### 4. Target architecture (proposed)
 
@@ -191,7 +220,7 @@ v1.227–v1.230; transfer (N4-T) remains unconsumed.)
 
 - **Default local provider — `LocalMemoryProvider` (new, in-process).**
   Implements `MemoryPort` in `crates/nexus-memory-provider`
-  (`crates/nexus-memory-provider/src/lib.rs:3157`), the crate the v1.245
+  (`crates/nexus-memory-provider/src/lib.rs`), the crate the v1.245
   extraction (#528) moved out of `nexus-core`, with **provider-private**
   storage/transaction code over the existing SQLite tables and bearer
   markdown files, enforcing all MEM-R invariants in its own transaction
@@ -208,7 +237,7 @@ v1.227–v1.230; transfer (N4-T) remains unconsumed.)
   A remote provider is a Connect peer exposing the 33-op inventory under the
   `spoke-memory` capability. Transport reuses Connect; it MUST NOT route
   through `nexus-cloud-sync` and MUST NOT reintroduce a platform sync proxy
-  (`docs/specs/architecture/overview.md:37-58` hard isolation). Protocol support does not
+  (`docs/specs/architecture/overview.md` § "Two product lines" — hard isolation). Protocol support does not
   imply any production cloud-service deployment.
 - **One boundary.** `MemoryPort` is the single public replacement boundary.
   Provider-private storage/transaction code stays an implementation detail;
@@ -223,7 +252,7 @@ v1.227–v1.230; transfer (N4-T) remains unconsumed.)
 - **Binding pin.** The selected provider is resolved once at
   `CoreService::open` and pinned in `CoreInner` for the open's lifetime —
   same discipline as the existing creator/workspace binding
-  (`service.rs:62-98`). A config change never retargets a live open.
+  (`CoreInner` in `crates/nexus-core/src/service.rs`). A config change never retargets a live open.
   The pin carries the **authority identity pair `(authority_host_id,
   authority_generation)`** (01 v2.0): after a cutover (§5.3) the old provider
   remains frozen and rejects writes, and a stale client holding a
@@ -246,11 +275,11 @@ v1.227–v1.230; transfer (N4-T) remains unconsumed.)
 
 - Remote credentials are referenced by opaque `credential_id` and resolved
   from the local auth store (precedent: `~/.nexus42/auth.json`,
-  `apps/nexus42/src/auth/user_auth.rs:8`). The token lives in memory for the
+  `AuthStore` in `apps/nexus42/src/auth/mod.rs`). The token lives in memory for the
   duration of a Connect session and is never written into receipts, export
   bundles, `core_changes`, logs, or error messages.
 - All memory-provider error rendering reuses the redaction discipline of
-  `platform_client.rs:54-95` (bearer/API-key pattern redaction).
+  `sanitize_error_body` (`crates/nexus-cloud-sync/src/platform_client.rs`) (bearer/API-key pattern redaction).
 - `MemoryReceipt` carries `payload_digest`, never payload; receipts and
   `memory.receipts.get` responses are therefore safe to persist and replay
   without disclosing secrets or content.
@@ -292,7 +321,7 @@ v1.227–v1.230; transfer (N4-T) remains unconsumed.)
 #### 4.6 Nexus record kinds (mapping, not replacement)
 
 Current fact: `nexus_creator_memory::memory_item::MemoryKind` is a **nine-value**
-enum (`memory_item.rs:31-64`): `story_summary`, `research_material`,
+enum (`crates/nexus-creator-memory/src/memory_item.rs`): `story_summary`, `research_material`,
 `review_note`, `character_note`, `world_building`, `plot_outline`,
 `theme_analysis`, `personality_core` (the push-from-SOUL.md personality
 track), `custom`. The protocol's open `RetainedRecord.kind` vocab (core
@@ -466,7 +495,7 @@ up as distributed safety. The protocol primitives (01) are used as follows:
    unfence restores, state survives restart via the fence metadata of
    §5.1's migration), and does NOT use the terminal protocol archive for
    its restore path. Today's "archived Character retained rows stay
-   readable" behavior (`memory_pipeline.rs:106-117`) maps directly.
+   readable" behavior (`MemoryPipelineCtx::character_read` in `crates/nexus-core/src/memory_pipeline.rs`) maps directly.
 8. **Races**: freeze/revoke/fence vs in-flight write ⇒ outcome decided at
    admission (MEM-R018: admitted ops complete; non-admitted get the typed
    refusal), receipt records the outcome; vs concurrent import activation
@@ -492,7 +521,7 @@ up as distributed safety. The protocol primitives (01) are used as follows:
   requires extending the receipt store's consumer set and schema
   registration and lifting the `uncertain` refusal out of its current
   `compute`-feature gate for the memory consumer
-  (`operation_receipts.rs:32-57`). This plan does **not** claim the existing
+  (`uncertain_refusal` in `crates/nexus-core/src/operation_receipts.rs`). This plan does **not** claim the existing
   store already serves Memory.
 - **Retention**: dedup tombstones are retained `dedup_retention_seconds`
   (≥ `receipt_retention_seconds`; both advertised in `describe.limits`).
@@ -514,7 +543,9 @@ up as distributed safety. The protocol primitives (01) are used as follows:
 
 ### 6. Caller migration inventory
 
-| Entry | Current (§3.1) | Target | Migration action |
+The inventory as it stood before N0–N3; the Migration action column records what landed.
+
+| Entry | Shape before the migration | Target | Migration action |
 |---|---|---|---|
 | E1 CLI `creator/memory.rs` | Direct `memory_io` file I/O | Calls CoreService memory family (records list/get/create/update/delete) | Reroute each subcommand; delete direct `memory_io` use |
 | E2 CLI `creator/soul.rs` | Direct `soul_io` file I/O | `memory.profile.get`/`memory.profile.update` (kind `personality`) | Reroute; delete direct `soul_io` use |
@@ -557,7 +588,7 @@ real browsers/devices, or deployments.
 
 | Task | Owner | Deps | Acceptance |
 |---|---|---|---|
-| NXM-1: `LocalMemoryProvider: MemoryPort` in `crates/nexus-memory-provider` (extracted from `nexus-core` in v1.245; the impl is `crates/nexus-memory-provider/src/lib.rs:3157`): provider-private storage/transaction layer over existing SQLite tables + bearer files under writer admission; **Nexus-owned** policy functions for classification/recall/staleness/transfer (algorithm-variable — the unpublished fixture engine is an optional offline reference, never a dependency). Includes the §5.1 additive control-metadata migration (revision columns, stable record/candidate identity, idempotency/fence/journal metadata) registered with the writer guard/outbox and bumping `DB_SCHEMA_VERSION` | fullstack-dev | NXM-0 | `PROPOSED: cargo test -p nexus-core local_memory_provider` (the round trip is still a `nexus-core` integration target, `crates/nexus-core/tests/local_memory_provider.rs`) and `cargo test -p nexus-memory-provider` (the crate's own units) — round-trips capture→review→promote→recall against a temp nexus home; writer-guard triggers still fire on out-of-protocol writes (assert `WRITER_FENCED`); migration idempotent and registered in `core_writer_registration` |
+| NXM-1: `LocalMemoryProvider: MemoryPort` in `crates/nexus-memory-provider` (extracted from `nexus-core` in v1.245; the impl is `impl MemoryPort for LocalMemoryProvider` in `crates/nexus-memory-provider/src/lib.rs`): provider-private storage/transaction layer over existing SQLite tables + bearer files under writer admission; **Nexus-owned** policy functions for classification/recall/staleness/transfer (algorithm-variable — the unpublished fixture engine is an optional offline reference, never a dependency). Includes the §5.1 additive control-metadata migration (revision columns, stable record/candidate identity, idempotency/fence/journal metadata) registered with the writer guard/outbox and bumping `DB_SCHEMA_VERSION` | fullstack-dev | NXM-0 | `PROPOSED: cargo test -p nexus-core local_memory_provider` (the round trip is still a `nexus-core` integration target, `crates/nexus-core/tests/local_memory_provider.rs`) and `cargo test -p nexus-memory-provider` (the crate's own units) — round-trips capture→review→promote→recall against a temp nexus home; writer-guard triggers still fire on out-of-protocol writes (assert `WRITER_FENCED`); migration idempotent and registered in `core_writer_registration` |
 | NXM-2: Memory-domain receipts: extend receipt store consumer set + memory scope tuple (§5.4); lift `uncertain` refusal for memory consumer | fullstack-dev | NXM-1 | `PROPOSED: cargo test -p nexus-core memory_receipts` — duplicate `memory.capture` returns `IDEMPOTENCY_CONFLICT`-free replay with identical receipt; timeout path yields `OUTCOME_UNCERTAIN` then resolves via `memory.receipts.get` |
 | NXM-3: SQL+file reconciliation pass (§5.2) | fullstack-dev | NXM-1 | `PROPOSED: cargo test -p nexus-core memory_reconcile` — kill-injected fixtures for both crash windows converge or quarantine deterministically |
 | NXM-4: Profile admission with content-kind discipline (§4.5): required authored profile missing ⇒ `PROFILE_INCOMPLETE`; optional authored data absent ⇒ honest-empty; provider-capability mismatch ⇒ distinct provider-selection failure. SOUL.md mapped to `personality`; NO fake governance/transfer/reflection profile documents | fullstack-dev | NXM-1 | `PROPOSED: cargo test -p nexus-core memory_profile_admission` — all three outcomes distinguished |
@@ -570,7 +601,7 @@ files: none beyond NXM-1's landed interface).
 | Task | Owner | Deps | Acceptance |
 |---|---|---|---|
 | NXM-5: Refactor CoreService memory family (E4) onto `MemoryPort`; preserve DTOs and error mapping | fullstack-dev | NXM-1..4 | Existing runnable regression anchors pass: `cargo test -p nexus-local-db pending_review`, `cargo test -p nexus-core memory_pipeline` (incl. `passthrough_summarizer_includes_untrusted_header`) |
-| NXM-6: Reroute CLI E1/E2 through CoreService; delete direct `memory_io`/`soul_io` use from `apps/nexus42` | fullstack-dev | NXM-5 | `grep`-verifiable absence: no `memory_io`/`soul_io` imports under `apps/nexus42/src/commands/`; CLI smoke via existing command tests `PROPOSED: cargo test -p nexus42-cli creator_memory` |
+| NXM-6: Reroute CLI E1/E2 through CoreService; delete direct `memory_io`/`soul_io` use from `apps/nexus42` | fullstack-dev | NXM-5 | `grep`-verifiable absence: no `memory_io`/`soul_io` imports under `apps/nexus42/src/commands/`; CLI smoke via the existing command tests `cargo test -p nexus42 --test memory_daemon_cli` |
 | NXM-7: Reroute E6 projection + E10 MCA consumption through adapter recall; swap `LongTermMemory` for contract DTO | fullstack-dev | NXM-5 | `PROPOSED: cargo test -p nexus-moment-context-assembly memory_recall_dto`; `cargo test -p nexus-core soul` projection fixtures unchanged in content |
 | NXM-8: Review pipeline reroute (E11) onto candidate/record ops | fullstack-dev | NXM-5 | Existing: `cargo test -p nexus-creator-memory` (review classifier tests); `PROPOSED: cargo test -p nexus-core memory_review_port` — binding-local promote coercion preserved |
 | NXM-16: Creator explicit-capture parity: typed Creator capture capability contract across core / native (napi) / service / CLI (mirroring the existing Character capture family), closing the Creator/Character interface asymmetry (gap 1). Explicit capture only — Host auto `remember` stays refused (D-4) | fullstack-dev | NXM-5 | `PROPOSED: cargo test -p nexus-core creator_capture` — Creator capture→review→promote round trip via the typed API; CLI `creator memory` capture command smoke; regression: `remember:true` refusal unchanged (C-115) |
@@ -592,8 +623,8 @@ NXM-16 touches the same family surface as NXM-5 but lands after it).
 | Task | Owner | Deps | Acceptance |
 |---|---|---|---|
 | NXM-9: `CoreOpenOptions.memory` selection, binding pin, credential resolution + redaction (§4.2/§4.3) | fullstack-dev | NXM-2 | `PROPOSED: cargo test -p nexus-core memory_provider_selection` — pin stability, config re-read between opens, no secret in any persisted receipt/log fixture |
-| NXM-10: Connect client wiring to `RemoteMemoryService`; capability admission (`spoke-memory` + sub-capabilities); no cloud-sync dependency | fullstack-dev | NXM-9 | `PROPOSED: cargo test -p nexus-core memory_remote_loopback` — loopback Connect responder served by an independent provider with its own private temp storage and its **own policy implementation** (the unpublished fixture engine is an optional offline conformance reference, never a dependency — not an echo mock); architecture guard: `cargo tree -p nexus-runtime` shows no cloud-sync/cloud-domain edge |
-| NXM-11: Conformance runner integration: the 04 matrix executes against the local provider AND an **independent real durable service provider** (own persistent store, restart-surviving, served via `RemoteMemoryService` on loopback — an engine-internal mock is NOT accepted as the second provider). Standard libtest named-test filters (`cargo test -p nexus-memory-conformance c_020`); no custom `--scenario` harness and no local `--all` requirement | qa-engineer | NXM-10, 04 matrix | All 04 scenarios marked `both` pass against both providers; results table in 04 §6 |
+| NXM-10: Connect client wiring to `RemoteMemoryService`; capability admission (`spoke-memory` + sub-capabilities); no cloud-sync dependency | fullstack-dev | NXM-9 | `PROPOSED: cargo test -p nexus-core memory_remote_loopback` — loopback Connect responder served by an independent provider with its own private temp storage and its **own policy implementation** (the unpublished fixture engine is an optional offline conformance reference, never a dependency — not an echo mock); architecture guard: `cargo tree -p nexus42 --no-default-features --features connect-host` (the `nexus-runtime` bin's graph) shows no cloud-sync/cloud-domain edge |
+| NXM-11: Conformance runner integration: the 04 matrix executes against the local provider AND an **independent real durable service provider** (own persistent store, restart-surviving, served via `RemoteMemoryService` on loopback — an engine-internal mock is NOT accepted as the second provider). Standard libtest named-test filters (`cargo test -p nexus-memory-conformance c_020`); no custom `--scenario` harness and no local `--all` requirement | qa-engineer | NXM-10, 04 matrix | All 04 scenarios marked `both` pass against both providers; evidence status in 04 §7 |
 
 #### Stage N4 — Lifecycle and transfer tooling
 
@@ -607,7 +638,7 @@ NXM-16 touches the same family surface as NXM-5 but lands after it).
 | Task | Owner | Deps | Acceptance |
 |---|---|---|---|
 | NXM-14: Removal list execution: delete direct `memory_io`/`soul_io` call sites left dead after N2; remove dual-meaning `scope_id` internals in favor of typed contexts; delete obsolete comments referencing removed entrances | fullstack-dev | NXM-6..8 | `grep` audit: no production caller of `nexus_creator_memory::memory_io`/`soul_io` outside the adapter crate seam; `cargo check` clean |
-| NXM-15: Final DoD audit against §9 | architect + qa-engineer | NXM-1..14, NXM-16 | DoD checklist all green; 04 matrix re-run green |
+| NXM-15: Final DoD audit against the program definition of done in `Consequences` | architect + qa-engineer | NXM-1..14, NXM-16 | DoD checklist all green; 04 matrix re-run green |
 
 ### 8. Deferred triggers
 
@@ -622,11 +653,11 @@ NXM-16 touches the same family surface as NXM-5 but lands after it).
 ### 11. Decision log
 
 - **D-1**: Default keeps physical layout; protocol adoption ≠ data merge (§5.1). Rationale: zero-downtime rollback, writer-guard preservation.
-- **D-2**: One `MemoryPort` boundary; no local DTO clone, no legacy shim layer, no second storage protocol. Rationale: agreed direction §9 of the package brief.
-- **D-3**: Unimplemented review actions stay unadvertised; capability/`op_unsupported` is the honest refusal. Evidence: `memory_pipeline.rs:319-418`.
-- **D-4**: Automatic run capture remains refused; re-enable is a separate authorized product decision with its own acceptance revision (§6.4). Evidence: `host.rs:1208-1230`.
-- **D-5**: Memory operation identity uses memory-space binding scope, never Connect peer session scope (§5.4). Evidence: `operation_id.rs:39-55`.
-- **D-6**: Remote transport is SPOKE Connect; `nexus-cloud-sync` is not involved (§4.1). Evidence: `docs/specs/architecture/overview.md:37-58`.
+- **D-2**: One `MemoryPort` boundary; no local DTO clone, no legacy shim layer, no second storage protocol. Rationale: the agreed direction of the design package brief (not tracked here).
+- **D-3**: Unimplemented review actions stay unadvertised; capability/`op_unsupported` is the honest refusal. Evidence: `consume_review_decision` in `crates/nexus-core/src/memory_pipeline.rs`.
+- **D-4**: Automatic run capture remains refused; re-enable is a separate authorized product decision with its own acceptance revision (§6.4). Evidence: the `remember` refusal in `HostHandle::execute` (`crates/nexus-core/src/host.rs`).
+- **D-5**: Memory operation identity uses memory-space binding scope, never Connect peer session scope (§5.4). Evidence: `OperationScope` in `crates/nexus-core/src/operation_id.rs`.
+- **D-6**: Remote transport is SPOKE Connect; `nexus-cloud-sync` is not involved (§4.1). Evidence: `docs/specs/architecture/overview.md` § "Two product lines" (Hard isolation).
 - **D-7**: Nexus keeps its nine-value `MemoryKind` taxonomy via a lossless namespaced kind mapping plus frontmatter/section preservation (§4.6); no forced collapse into core `event`/`fact`/`note`.
 - **D-8**: ToM stays in World KB; memory references, never copies (§4.5).
 - **D-9**: Durable receipts are content-free summaries; live data is re-read under current authorization; dedup tombstones outlive receipts (§5.4).
@@ -638,7 +669,7 @@ NXM-16 touches the same family surface as NXM-5 but lands after it).
 
 ### 12. Evidence appendix
 
-Verified source windows (read 2026-10-28): `crates/nexus-creator-memory/Cargo.toml:12-15`; `crates/nexus-creator-memory/src/bearer.rs:1-46`; `crates/nexus-creator-memory/src/review.rs:119-263`; `crates/nexus-creator-memory/src/memory_item.rs:24-73`; `crates/nexus-core/src/memory_pipeline.rs:59-123,314-428,644-708`; `crates/nexus-core/src/memory.rs:1-123,176-260,356-388,557-620,740-830,953,1219-1262`; `crates/nexus-core/src/host.rs:1199-1243,1949-2028`; `crates/nexus-core/src/soul.rs:619-733`; `crates/nexus-core/src/service.rs:54-113`; `crates/nexus-core/src/operation_receipts.rs:1-63`; `crates/nexus-core/src/operation_id.rs:1-63`; `crates/nexus-local-db/src/pending_review.rs:36,220-314`; `crates/nexus-local-db/migrations/20260906000003_character_run_capture.sql:1-40`; `crates/nexus-local-db/migrations/20260912000001_core_writer_protocol.sql:1-60`; `crates/nexus-moment-context-assembly/src/stage0.rs:18-51,189-302`; `crates/nexus-moment-context-assembly/src/cloud_stage.rs:9-87,246-274`; `crates/nexus-moment-context-assembly/src/moment.rs:24-220`; `crates/nexus-core-node/src/actors.rs:1046-1350`; `apps/nexus-service/src/memory.ts:1-40`; `apps/nexus42/src/commands/creator/memory.rs:14-337`; `apps/nexus42/src/commands/creator/soul.rs:7-216`; `apps/nexus42/src/commands/creator/character.rs:17-53,111-133`; `apps/nexus42/src/auth/user_auth.rs:8`; `crates/nexus-cloud-sync/src/platform_client.rs:37-95,308-348`; `crates/nexus-provider-ports/src/lib.rs:1-30`; `crates/nexus-provider-conformance/src/lib.rs:1-25`; `docs/specs/architecture/overview.md:29-68`.
+Verified source files (read 2026-10-28): `crates/nexus-creator-memory/Cargo.toml`; `crates/nexus-creator-memory/src/bearer.rs`; `crates/nexus-creator-memory/src/review.rs`; `crates/nexus-creator-memory/src/memory_item.rs`; `crates/nexus-core/src/memory_pipeline.rs`; `crates/nexus-core/src/memory.rs`; `crates/nexus-core/src/host.rs`; `crates/nexus-core/src/soul.rs`; `crates/nexus-core/src/service.rs`; `crates/nexus-core/src/operation_receipts.rs`; `crates/nexus-core/src/operation_id.rs`; `crates/nexus-local-db/src/pending_review.rs`; `crates/nexus-local-db/migrations/20260906000003_character_run_capture.sql`; `crates/nexus-local-db/migrations/20260912000001_core_writer_protocol.sql`; `crates/nexus-moment-context-assembly/src/stage0.rs`; `crates/nexus-moment-context-assembly/src/cloud_stage.rs`; `crates/nexus-moment-context-assembly/src/moment.rs`; `crates/nexus-core-node/src/actors.rs`; `apps/nexus-service/src/memory.ts`; `apps/nexus42/src/commands/creator/memory.rs`; `apps/nexus42/src/commands/creator/soul.rs`; `apps/nexus42/src/commands/creator/character.rs`; `apps/nexus42/src/auth/user_auth.rs`; `crates/nexus-cloud-sync/src/platform_client.rs`; `crates/nexus-provider-ports/src/lib.rs`; `crates/nexus-provider-conformance/src/lib.rs`; `docs/specs/architecture/overview.md`.
 
 Known factual limits: exact CLI subcommand help text after reroute (depends on
 implementation). The upstream implementation task series (A1–A3, B1–B4, C1–C3,
@@ -673,7 +704,8 @@ with quoted command evidence live in that audit guide (control-tree
    this Markdown-only promotion diff, so the observed result applies to the
    reviewed code), job "Rust memory-remote cohort" (conclusion `SUCCESS`) ran
    `cargo test -p nexus-memory-conformance --features dev-graph-memory-remote`
-   (`.github/workflows/ci.yml:852`);
+   (`Run dev-graph memory-remote conformance cohort` step, `Rust memory-remote cohort` job,
+   `.github/workflows/ci.yml`);
    and the staged 95-scenario disposition
    (`docs/specs/architecture/spoke-memory-conformance-staging.md`) is the
    standing contract.
@@ -685,14 +717,14 @@ with quoted command evidence live in that audit guide (control-tree
    replay; no peer-session-derived identity anywhere in the memory domain —
    selectors `c_capture_candidates` and `c_grants_errors` are observed green
    in run 42990561936; identity anchor
-   `crates/nexus-core/src/operation_id.rs:39–55`.
+   `OperationScope` in `crates/nexus-core/src/operation_id.rs`.
 5. Transfer runbook (NXM-12) demonstrated local→remote and back with explicit
    rollback points; no dual-write or silent fallback exists — **unsupported:
    N4-T remains open**; no transfer, drain or cutover is implemented or claimed.
 6. D-4 boundary intact: `remember:true` refusal unchanged and covered by a
    regression test; Creator **explicit** capture parity (NXM-16) passes its
    typed contract scenarios — configured to run in CI
-   (`host_actor_lifecycle.rs:1517–1580`; `--test memory_services`;
+   (`character_terminal_remember_refusal_precedes_reservation_and_effects` in `crates/nexus-core/tests/host_actor_lifecycle.rs`; `--test memory_services`;
    `--test creator_memory_remote`).
 7. Control-metadata migration is registered/idempotent; binary/schema rollback
    compatibility verified or backup-restore path documented — configured to
@@ -704,7 +736,7 @@ with quoted command evidence live in that audit guide (control-tree
 Items 2 and 5 are honest limits, not omissions: the observed CI result
 (run 42990561936) covers per-capability selectors only, and transfer stays
 explicitly unsupported, matching the implemented protocol record's Status
-line (`2026-10-28-spoke-memory-protocol.md:3`, same directory).
+line (`Status:` in `2026-10-28-spoke-memory-protocol.md`, same directory).
 
 | Risk | Mitigation |
 |---|---|

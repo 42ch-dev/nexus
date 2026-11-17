@@ -21,6 +21,8 @@ import type {
   StrategyApplyRequest,
   StrategyComposeRequest,
   StrategyComposeResponse,
+  StrategyGenerateRequest,
+  StrategyGenerateResponse,
   StrategyPatchPromptTemplateRequest,
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
@@ -197,6 +199,27 @@ export function composeStrategy(
 ): Promise<StrategyComposeResponse> {
   return withPrincipal(service, (principal) =>
     service.core.composeStrategy(principal, strategyId, request),
+  );
+}
+
+/**
+ * `POST /v1/daemon/strategies/{strategy_id}/generate`.
+ *
+ * The HTTP transport of the one generate kernel — the same request type and the same rendering as
+ * `nexus42 preset generate` and the `nexus.strategy.generate` agent tool. The body is the
+ * `GenerateRequest` contract guarded by `base_revision`; the response is the committed candidate
+ * plus the passing round's semantic warnings. Lint exhaustion is the core's `invalid_input` whose
+ * `details` IS the D20 payload (`code: lint_exhausted`, `rounds_attempted`, every violation with its
+ * correction, `persisted: false`, `message`), so the existing error envelope carries it and no
+ * second error class exists.
+ */
+export function generateStrategy(
+  service: ServiceCore,
+  strategyId: string,
+  request: StrategyGenerateRequest,
+): Promise<StrategyGenerateResponse> {
+  return withPrincipal(service, (principal) =>
+    service.core.generateStrategy(principal, strategyId, request),
   );
 }
 
@@ -411,6 +434,19 @@ export const PRESET_ROUTES: readonly DomainRoute[] = [
         service,
         params[0],
         wirePayload<StrategyComposeRequest>(body, 'request'),
+      ),
+    }),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/v1\/daemon\/strategies\/([^/]+)\/generate$/,
+    tier: 'tier2',
+    family: 'presets',
+    handle: async (service, params, _search, body) => ({
+      body: await generateStrategy(
+        service,
+        params[0],
+        wirePayload<StrategyGenerateRequest>(body, 'request'),
       ),
     }),
   },

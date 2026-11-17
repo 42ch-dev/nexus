@@ -1,24 +1,26 @@
 /**
  * Orchestrator-level state hook for the Strategy canvas.
  *
- * V1.115 P0 T2 (W001): this hook is now a thin query + state hook — graph
- * projection is delegated to the Strategy adapter's `projectGraph` (called by
- * `useCanvasSurface`). The hook owns: the shared edit form, per-section save
- * triggers/statuses, revision tracking, conflict/reapply coordination, draft
- * transition edges (local-only), and the three transition-write mutations
- * (commit draft, keyboard create, reconnect). It no longer manages base
- * node/edge state — the adapter projects from `parsed` and merges drafts.
+ * The Canvas renders a workflow IR document (the applied one, or the candidate
+ * being composed) — never YAML. The hook owns: the shared edit form,
+ * per-section save triggers/statuses, revision tracking, conflict/reapply
+ * coordination, draft transition edges (local-only), and the three
+ * transition-write mutations (commit draft, keyboard create, reconnect). The
+ * editing surface still speaks the flat state shape, so `parsedPresetFromIr`
+ * presents the document's nodes to it without any YAML parse.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Connection, Edge } from '@xyflow/react';
 
+import type { WorkflowDocument } from '@42ch/nexus-contracts';
+
+import { parsedPresetFromIr } from '@/lib/canvas/ir-preset';
 import {
   isStrategyConflictError,
   useActiveSession,
   useDerivedCreatorId,
-  usePresetGraph,
   usePresetSchedules,
 } from '@/lib/canvas/use-strategy-data';
 import { useStrategyYamlAuthority } from '@/lib/canvas/strategy-yaml-authority';
@@ -47,9 +49,25 @@ export interface ConflictInfo {
   retry?: () => void;
 }
 
-export function useStrategyCanvas(presetId: string, structuralWritesDisabled = false) {
+/** Where the rendered document comes from, and how to re-read it. */
+export interface StrategyDocumentSource {
+  /** The document the canvas is rendering; null when there is nothing to show. */
+  document: WorkflowDocument | null;
+  /** Re-reads that document's source (the applied-status read). */
+  refetch: () => Promise<unknown>;
+}
+
+export function useStrategyCanvas(
+  presetId: string,
+  source: StrategyDocumentSource,
+  structuralWritesDisabled = false,
+) {
   const { t } = useTranslation('canvas');
-  const graphQuery = usePresetGraph(presetId);
+  const { document, refetch } = source;
+  // The editing surface's flat state view of the rendered document. No YAML
+  // is parsed on this path.
+  const parsed = useMemo(() => (document ? parsedPresetFromIr(document) : undefined), [document]);
+  const revision = document?.revision ?? 0;
   const activeSession = useActiveSession(presetId);
   const schedules = usePresetSchedules(presetId);
   const creatorId = useDerivedCreatorId(presetId);
@@ -70,17 +88,17 @@ export function useStrategyCanvas(presetId: string, structuralWritesDisabled = f
   // node/edge state.
   const [draftEdges, setDraftEdges] = useState<Edge[]>([]);
 
-  const workingRevisionRef = useRef(graphQuery.data?.revision ?? 0);
+  const workingRevisionRef = useRef(revision);
 
   useEffect(() => {
-    workingRevisionRef.current = graphQuery.data?.revision ?? 0;
-  }, [graphQuery.data?.revision]);
+    workingRevisionRef.current = revision;
+  }, [revision]);
 
   useEffect(() => {
-    if (conflict && graphQuery.data && graphQuery.data.revision !== conflict.currentRevision) {
+    if (conflict && revision !== conflict.currentRevision) {
       setConflict(null);
     }
-  }, [graphQuery.data, conflict]);
+  }, [revision, conflict]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -93,7 +111,7 @@ export function useStrategyCanvas(presetId: string, structuralWritesDisabled = f
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeSection]);
 
-  const baseRevision = graphQuery.data?.revision ?? 0;
+
 
   const activeScheduleId = useMemo(() => {
     if (!activeSession) return undefined;
@@ -103,14 +121,14 @@ export function useStrategyCanvas(presetId: string, structuralWritesDisabled = f
 
   function handleConflict(currentRevision: number, section: Section, retry?: () => void) {
     setConflict({ currentRevision, section, retry });
-    void graphQuery.refetch();
+    void refetch();
   }
 
   function handleReapply() {
     if (!conflict) return;
     const { section, retry } = conflict;
     setConflict(null);
-    void graphQuery.refetch().then(() => {
+    void refetch().then(() => {
       // Transition create/reconnect conflicts replay the original transition
       // command; state-edit conflicts replay the section save trigger
       // (QC1 W-001).
@@ -155,7 +173,7 @@ export function useStrategyCanvas(presetId: string, structuralWritesDisabled = f
     [draftEdges],
   );
 
-  const states = graphQuery.data?.parsed.manifest.states;
+  const states = parsed?.manifest.states;
   const draftSourceState = useMemo(() => {
     if (!selectedDraftEdge) return undefined;
     return states?.find((s) => s.id === selectedDraftEdge.source);
@@ -354,11 +372,11 @@ export function useStrategyCanvas(presetId: string, structuralWritesDisabled = f
   );
 
   return {
-    graphQuery,
+    parsed,
+    revision,
     activeSession,
     schedules,
     creatorId,
-    baseRevision,
     activeScheduleId,
     form,
     setForm,

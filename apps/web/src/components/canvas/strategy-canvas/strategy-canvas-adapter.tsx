@@ -7,7 +7,6 @@ import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
 import type { ConflictModalProps } from '../conflict-modal';
 import { StrategyAltView } from '../strategy-alt-view';
 import { strategyNodeTypes } from '../strategy-nodes';
-import { buildStrategyGraph } from '@/lib/canvas/strategy-graph';
 import { buildStrategyGraphFromIr } from '@/lib/canvas/strategy-graph-ir';
 import type { StrategyEdgeData, StrategyNodeData } from '@/lib/canvas/strategy-graph';
 import type { ParsedPreset, PresetState } from '@/lib/canvas/preset-yaml';
@@ -36,13 +35,11 @@ export interface ActiveSession {
 /**
  * Graph payload consumed by the Strategy surface adapter.
  *
- * V1.115 P0 T2 (W001): the pre-projected `graph` field is dropped — the adapter
- * projects from `parsed` via `buildStrategyGraph` inside `projectGraph`. This
- * makes the adapter's contract honest (it owns projection, not a passthrough).
+ * The Canvas runs on the applied IR document (P6 condition 2): `document` is
+ * the one projection source and carries no YAML anywhere in the payload.
  */
 export interface StrategySurfaceGraph {
   revision: number;
-  parsed: ParsedPreset;
   activeSession: ActiveSession | null | undefined;
   /**
    * Static trajectory of the open candidate, when a simulation has run. It is
@@ -50,11 +47,11 @@ export interface StrategySurfaceGraph {
    */
   trajectory: SimulationTrajectory | null;
   /**
-   * Compose path (flag on): the working candidate document. When present,
-   * `projectGraph` projects from IR and the YAML projection never runs — one
-   * projection per render, never both (plan risk mitigation).
+   * The document being rendered: the applied IR document the status read
+   * returned, or the candidate the author is composing. Projected by
+   * `buildStrategyGraphFromIr` — there is no YAML fallback.
    */
-  document?: WorkflowDocument;
+  document: WorkflowDocument;
   /** Pattern registry listing; supplies declared slots for slot nodes. */
   patterns?: PatternSummary[];
   /** Slot node ids the author expanded into groups. */
@@ -100,6 +97,12 @@ export interface StrategyCanvasAdapterContext {
    */
   localEdges: Edge<StrategyEdgeData>[];
   /**
+   * The canvas renders the applied (running) strategy rather than a compose
+   * candidate. That view is read-only: its structural and prompt editors are
+   * disabled because the running document is what apply/approve produced (P6).
+   */
+  appliedView: boolean;
+  /**
    * Compose-path (flag on) slot interactions. Absent when the flag is off, so
    * the slot inspector and expand toggle never render there.
    */
@@ -117,14 +120,13 @@ export interface StrategyCanvasAdapterContext {
 export type StrategyCanvasAdapter = CanvasSurfaceAdapter<StrategySurfaceGraph, StrategyNodeData, StrategyEdgeData>;
 
 /**
- * Strategy canvas adapter — projects the daemon preset graph into React Flow
+ * Strategy canvas adapter — projects the workflow IR document into React Flow
  * nodes/edges and renders surface-specific chrome (inspectors, alt-view,
  * conflict modal, a11y summary).
  *
- * V1.115 P0 T2 (W001): `projectGraph` performs the real projection via
- * `buildStrategyGraph(parsed)` — it is no longer a passthrough. The projection
- * runs once inside `useCanvasSurface`'s `useMemo`, matching the old timing
- * (the query fn previously called `buildStrategyGraph`; now the adapter does).
+ * `projectGraph` performs the projection via `buildStrategyGraphFromIr` inside
+ * `useCanvasSurface`'s `useMemo`. The Canvas renders the applied IR document, so
+ * there is no YAML projection to choose between (P6 condition 2).
  *
  * The returned adapter is stable; it reads mutable values from the supplied
  * context ref so the orchestrator can update state without invalidating the
@@ -140,16 +142,13 @@ export function createStrategyCanvasAdapter(
     layoutOptions: { direction: 'TB' },
 
     projectGraph(graph) {
-      // Flag contract: the IR projection is the composition path; the YAML
-      // projection survives only as the flag-off compatibility view. Exactly
-      // one runs per render, selected by the payload the orchestrator sends.
-      const projected = graph.document
-        ? buildStrategyGraphFromIr(graph.document, {
-            expandedSlots: graph.expandedSlots,
-            patterns: graph.patterns,
-            containment: graph.containment,
-          })
-        : buildStrategyGraph(graph.parsed);
+      // One projection, from IR, always. The Canvas has no YAML payload to fall
+      // back to (P6 condition 2).
+      const projected = buildStrategyGraphFromIr(graph.document, {
+        expandedSlots: graph.expandedSlots,
+        patterns: graph.patterns,
+        containment: graph.containment,
+      });
 
       // Surface the dangling-targets byproduct via ctxRef so the orchestrator
       // can feed the ValidationPanel without extending the projectGraph return
@@ -178,12 +177,10 @@ export function createStrategyCanvasAdapter(
         });
       }
 
-      // Compose-path simulation overlay (T3b/T5): the trajectory names the
-      // nodes the static walk visited — a wired pattern slot is named, and the
-      // overlay says so on the slot itself. Compose-only by construction: the
-      // `document` payload field is absent with the flag off, so today's
-      // flag-off render is untouched.
-      if (graph.document && graph.trajectory) {
+      // Simulation overlay (T3b/T5): the trajectory names the nodes the static
+      // walk visited — a wired pattern slot is named, and the overlay says so
+      // on the slot itself.
+      if (graph.trajectory) {
         const visited = new Set(graph.trajectory.nodes_visited);
         nodes = nodes.map((node) =>
           node.type === 'strategy-pattern-slot' && visited.has(node.id)
@@ -193,7 +190,7 @@ export function createStrategyCanvasAdapter(
       }
 
       // Compose-path slot expand/collapse toggle, patched onto slot node data.
-      if (graph.document && ctxRef.current.compose) {
+      if (ctxRef.current.compose) {
         const toggle = ctxRef.current.compose.onToggleSlotExpanded;
         nodes = nodes.map((node) =>
           node.type === 'strategy-pattern-slot'
@@ -203,13 +200,11 @@ export function createStrategyCanvasAdapter(
       }
 
       // Merge local edge modifications (draft transition edges created by the
-      // author via onConnect) that are not yet persisted to the daemon graph.
-      // Drafts have no matching projected edge id, so we append them. On the
-      // compose path the candidate is the only structural authority: a draft
-      // would display a transition the simulated and approved document lacks.
-      const localEdges = graph.document ? [] : ctxRef.current.localEdges;
+      // author via onConnect) that are not yet persisted. Drafts have no
+      // matching projected edge id, so we append them; the author commits or
+      // cancels them in the edge inspector.
       const baseIds = new Set(projected.edges.map((e) => e.id));
-      const drafts = localEdges.filter((e) => !baseIds.has(e.id));
+      const drafts = ctxRef.current.localEdges.filter((e) => !baseIds.has(e.id));
 
       return {
         nodes: applyTrajectoryOverlay(nodes, graph.trajectory),
@@ -271,8 +266,9 @@ export function createStrategyCanvasAdapter(
             saveStatus={ctx.saveStatuses.state}
             onSaveStatus={(s) => ctx.onSaveStatus('state', s)}
             onConflict={ctx.handleConflict}
-            // Compose path: node writes belong to the candidate document.
-            structuralWritesDisabled={Boolean(ctx.compose)}
+            // The preset YAML is never the edited document: off while a
+            // candidate owns the write, and off on the read-only applied view.
+            structuralWritesDisabled={Boolean(ctx.compose) || ctx.appliedView}
           />
           <div onFocusCapture={() => ctx.setActiveSection('transition')}>
             <EdgeInspector
@@ -285,9 +281,9 @@ export function createStrategyCanvasAdapter(
               saveStatus={ctx.saveStatuses.transition}
               onSaveStatus={(s) => ctx.onSaveStatus('transition', s)}
               onConflict={ctx.handleConflict}
-              // Compose path: the candidate document is the structural authority;
-              // the YAML transition patch stays visible, disabled, with its reason.
-              structuralWritesDisabled={Boolean(ctx.compose)}
+              // Kept visible, disabled, with its reason (the candidate owns the
+              // write while composing; the applied view is read-only).
+              structuralWritesDisabled={Boolean(ctx.compose) || ctx.appliedView}
             />
           </div>
           {ctx.promptTemplateRef ? (
@@ -303,6 +299,11 @@ export function createStrategyCanvasAdapter(
                 saveStatus={ctx.saveStatuses.prompt}
                 onSaveStatus={(s) => ctx.onSaveStatus('prompt', s)}
                 onConflict={ctx.handleConflict}
+                // Neither rendered document is the preset YAML this editor
+                // writes: the applied view is frozen, and no compose op sets a
+                // prompt body. A Save here would rewrite the bundle template
+                // behind the candidate and leave the candidate untouched.
+                structuralWritesDisabled={Boolean(ctx.compose) || ctx.appliedView}
               />
             </div>
           ) : null}
@@ -317,26 +318,16 @@ export function createStrategyCanvasAdapter(
     },
 
     summarizeGraph(graph) {
-      if (graph.document) {
-        const slots = graph.document.nodes.filter((node) => node.kind === 'pattern_slot').length;
-        const visited = graph.trajectory ? ` Simulated nodes: ${graph.trajectory.nodes_visited.join(', ')}.` : ' Not simulated.';
-        return `Strategy candidate ${graph.document.id} at revision ${graph.revision}: ${graph.document.nodes.length} nodes, ${graph.document.edges.length} edges, ${slots} pattern slots.${visited}`;
-      }
-      const states = graph.parsed.manifest.states;
-      const count = states.length;
-      let edgeCount = 0;
-      for (const s of states) {
-        if (typeof s.next === 'string') {
-          edgeCount++;
-        } else if (s.next && typeof s.next === 'object') {
-          edgeCount += (s.next.rules?.length ?? 0) + (s.next.default ? 1 : 0);
-        }
-      }
+      const { document } = graph;
+      const slots = document.nodes.filter((node) => node.kind === 'pattern_slot').length;
+      const visited = graph.trajectory
+        ? ` Simulated nodes: ${graph.trajectory.nodes_visited.join(', ')}.`
+        : ' Not simulated.';
       const sel = ctxRef.current.selectedNode ? ` Selected: ${ctxRef.current.selectedNode.id}.` : '';
       const live = graph.activeSession
         ? ` Current node: ${graph.activeSession.current_task_id ?? 'none'}. Session status: ${graph.activeSession.status}.`
         : ' No active session.';
-      return `Strategy graph: ${count} states, ${edgeCount} transitions.${live}${sel}`;
+      return `Strategy preset ${document.id} at revision ${graph.revision}: ${document.nodes.length} nodes, ${document.edges.length} edges, ${slots} pattern slots.${visited}${live}${sel}`;
     },
   };
 }

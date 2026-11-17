@@ -79,11 +79,14 @@ The companion proposal [canvas-composition-and-pattern-packages.md](2026-11-10-c
 - **Simulator** is a feature package for review graphs (including nested effect rollup).
 - Generation / compose churn stays out of `nexus-core`’s default cohort.
 
-Dual-track roadmap lives in that companion §7 (packaging A + generate/compose/Canvas nest B).
+Dual-track roadmap (packaging A + generate/compose/Canvas nest B): the archived
+[Dynamic Workflow and Orchestration Simulation record](../../archived/architecture/2026-11-10-dynamic-workflow-and-simulation.md) §7
+sketches it as a non-binding plan; that sketch is frozen history, and the companion proposal above
+carries no roadmap of its own.
 
 ---
 
-### 7. References
+### 6. References
 
 - [docs/specs/architecture/overview.md](../../../../docs/specs/architecture/overview.md)
 - [rust-core-service-boundary.md](../../../../docs/specs/architecture/rust-core-service-boundary.md)
