@@ -14,6 +14,10 @@ Exempt: mechanical edits, local edits whose whole rationale is visible in the co
 
 A record is the history of a change, not a description of the system it left behind: it states the decision and why the alternatives lost. The current state that decision produced belongs to [`docs/specs/`](../../docs/specs), which the same PR keeps true to the code.
 
+## Migration duty
+
+A record carried over from a retired corpus, another repository, or a design draft is verified against the tree in the same change that lands it: every `Status` claim names a symbol, path or check the settled tree answers, and a claim the code no longer supports is rewritten or marked unverified in the `Status` line itself. A batch migration that cannot run that check says so per record — the landing date is not evidence that the decision shipped.
+
 ## Directory shape
 
 ```
