@@ -250,7 +250,6 @@
       "description": "State machine and transition editor",
       "showGraph": "Show graph",
       "showList": "Show list",
-      "createTransition": "Create",
       "simulate": "Simulate…",
       "livePrefix": "Live:",
       "liveStatus": "",
@@ -299,7 +298,6 @@
       "steerResumeRefused": "Idea saved as core context version {{version}}, but the resume was refused",
       "steerResumeConflict": "Idea saved as core context version {{version}}; this schedule is waiting on a manual step, so the resume was refused as a state conflict"
     },
-    "draftTransitionLabel": "Draft transition",
     "approve": {
       "title": "Approve candidate",
       "notSimulated": "Not simulated. A candidate with no trajectory is not approval-ready.",
@@ -383,27 +381,6 @@
       "ariaLabel": "Harness artifacts",
       "empty": "No artifacts yet."
     },
-    "edgeCreate": {
-      "title": "Create Transition",
-      "description": "Add a transition between two states.",
-      "sourceLabel": "Source",
-      "sourcePlaceholder": "Choose source",
-      "targetLabel": "Target",
-      "targetPlaceholder": "Choose target",
-      "targetPlaceholderLocked": "Target (locked)",
-      "kindLabel": "Kind",
-      "kind": {
-        "next": "Next",
-        "branch": "Branch",
-        "default": "Default"
-      },
-      "conditionLabel": "Condition",
-      "conditionPlaceholder": "Condition (optional)…",
-      "cancel": "Cancel",
-      "submit": "Create",
-      "creating": "Creating…",
-      "draftAriaLabel": "Draft transition from {{source}} to {{target}}"
-    },
     "inspector": {
       "ariaLabel": "Harness inspector",
       "structuralDisabled": "The canvas shows a document, not the preset YAML this editor writes — author the change in Compose.",
@@ -411,32 +388,17 @@
         "title": "State",
         "ariaLabel": "State inspector",
         "labelLabel": "Label",
-        "descriptionLabel": "Description",
-        "save": "Save",
-        "saved": "Saved",
-        "saveFailed": "Save failed",
-        "saving": "Saving…",
-        "updated": "State updated"
+        "descriptionLabel": "Description"
       },
       "transition": {
         "title": "Transition",
         "ariaLabel": "Transition inspector",
-        "targetLabel": "Target",
-        "save": "Save",
-        "saved": "Saved",
-        "saveFailed": "Save failed",
-        "saving": "Saving…",
-        "updated": "Transition updated"
+        "targetLabel": "Target"
       },
       "prompt": {
         "title": "Prompt",
         "ariaLabel": "Prompt inspector",
         "placeholder": "Enter prompt template…",
-        "save": "Save",
-        "saved": "Saved",
-        "saveFailed": "Save failed",
-        "saving": "Saving…",
-        "updated": "Prompt template saved",
         "structuralDisabled": "The canvas renders a document, not the preset YAML this editor writes, and Compose has no prompt-body operation. Edit the template with `nexus42 preset patch prompt <strategy> <state> --template-ref <path> --file <path>` and reload."
       },
       "stateId": "State ID",
@@ -447,10 +409,7 @@
       "innerGraph": "Inner graph",
       "converge": "Converge",
       "editAria": "Edit",
-      "cancelEditAria": "Cancel edit",
-      "transitionConflict": {
-        "title": "Transition conflict"
-      }
+      "cancelEditAria": "Cancel edit"
     },
     "composeLoading": "Loading the strategy candidate…",
     "slot": {

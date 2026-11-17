@@ -12,8 +12,8 @@
  * canvas internals (React Flow, daemon queries, inspectors, alt-views, conflict
  * modals) are mocked so the test focuses on the command registration and the
  * graph↔list toggle button, which is where the T4 wiring lives. The header
- * (which owns the toggle button) and the Strategy edge-create dialog (the
- * create-transition target) are kept real so handler effects are observable.
+ * (which owns the toggle button) is kept real so handler effects are
+ * observable.
  */
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -194,46 +194,26 @@ vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => {
     creatorId: 'c1',
     baseRevision: 1,
     activeScheduleId: undefined,
-    draftEdges: [] as never[],
-    onConnect: () => {},
-    onReconnect: () => {},
     form: { label: '', description: '', nextTarget: '', promptBody: '' },
     setForm: () => {},
-    saveStatuses: {},
-    setSaveStatuses: () => {},
     setActiveSection: () => {},
-    conflict: null,
-    setConflict: () => {},
-    saveTriggers: {},
-    workingRevisionRef: { current: 1 },
-    handleConflict: () => {},
-    handleReapply: () => {},
-    selectedDraftEdge: null,
-    draftSourceState: null,
-    commitDraft: () => {},
-    isCommittingDraft: false,
-    cancelDraft: () => {},
-    commitKeyboardCreate: () => {},
-    isCommittingKeyboardCreate: false,
-    isReconnecting: false,
+    activeSection: 'state',
   };
   return { useStrategyCanvas: () => strategyState };
 });
 
-// Strategy heavy children → no-ops (keep canvas-layout + edge-create-dialog real).
+// Strategy heavy children → no-ops (keep canvas-layout real).
 vi.mock('@/components/canvas/strategy-canvas/inspectors/state-inspector', () => ({
   StateInspector: () => null,
 }));
 vi.mock('@/components/canvas/strategy-canvas/inspectors/edge-inspector', () => ({
   EdgeInspector: () => null,
-  DraftEdgeInspector: () => null,
 }));
 vi.mock('@/components/canvas/strategy-canvas/inspectors/prompt-inspector', () => ({
   PromptInspector: () => null,
 }));
 vi.mock('@/components/canvas/strategy-canvas/inspector-panel', () => ({
   InspectorPanel: () => null,
-  StrategyConflictModal: () => null,
 }));
 vi.mock('@/components/canvas/strategy-canvas/state-machine', () => ({
   ValidationPanel: () => null,
@@ -386,21 +366,18 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Strategy — toggle view + create transition (the only surface with a clean
-// canvas-level creation entrypoint: the "Create Transition…" button + dialog).
+// Strategy — toggle view. View switching is the only palette command this
+// surface registers; structural creation is a Compose operation.
 // ---------------------------------------------------------------------------
 
 describe('StrategyCanvas — palette commands', () => {
-  it('registers a toggle-view and a create-transition command on mount', async () => {
+  it('registers the toggle-view command on mount', async () => {
     const { StrategyCanvas } = await import('@/components/canvas/strategy-canvas');
     render(withProviders(<StrategyCanvas presetId="p1" />));
-    expect(getCommands().map((c) => c.id).sort()).toEqual([
-      'strategy.create-transition',
-      'strategy.toggle-view',
-    ]);
+    expect(getCommands().map((c) => c.id)).toEqual(['strategy.toggle-view']);
   });
 
-  it('unregisters both on unmount', async () => {
+  it('unregisters on unmount', async () => {
     const { StrategyCanvas } = await import('@/components/canvas/strategy-canvas');
     const { unmount } = render(withProviders(<StrategyCanvas presetId="p1" />));
     unmount();
@@ -434,23 +411,6 @@ describe('StrategyCanvas — palette commands', () => {
       findById('strategy.toggle-view')?.handler();
     });
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
-  });
-
-  it('create-transition handler opens the edge-create dialog', async () => {
-    const { StrategyCanvas } = await import('@/components/canvas/strategy-canvas');
-    const renderResult = render(withProviders(<StrategyCanvas presetId="p1" />));
-
-    // The Radix Dialog is not mounted while closed. (The header's "Create
-    // Transition…" button is always visible, so assert on role="dialog"
-    // rather than text — the dialog content renders into a portal only when
-    // open=true.)
-    expect(renderResult.queryByRole('dialog')).toBeNull();
-
-    act(() => {
-      findById('strategy.create-transition')?.handler();
-    });
-
-    expect(renderResult.getByRole('dialog')).toBeInTheDocument();
   });
 });
 
