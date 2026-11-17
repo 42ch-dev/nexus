@@ -831,7 +831,7 @@ bundle that happens to share its id — and refuses rather than building a parti
 
 | Refusal | When |
 | --- | --- |
-| `ir_unmappable` | A concept with no execution counterpart in this table: `pattern_slot`, `nest_group`. |
+| `ir_unmappable` | A concept with no execution counterpart in this table: `pattern_slot`, `nest_group`, and any `nests[]` binding. |
 | `ir_unprojected` | A concept whose execution counterpart exists in this table but which `export_preset` cannot project, and never will: the standalone `judge`, `manual_wait` and `join` node kinds, and a `terminal` array that is not exactly one entry. |
 | `ir_unresolved_template` | An instruction (an inner step's prompt, or the judge prompt of an `exit_when.llm_judge`) would reach its task without content. **`IrTemplateSource::OwnSource` resolves nothing**, so on the applied path this refusal is unconditional: every state whose `exit_when` is `llm_judge` is refused whether it names a template or not, and so is **every** inner step of **every** inner graph — naming a template changes nothing, and the check is not a path check. Only `Embedded` can resolve, and production never passes it. |
 
@@ -857,7 +857,7 @@ one above, buildability, and the prompt-role and recovery limits — are
 | IR document concept | Task / graph-flow execution counterpart |
 | --- | --- |
 | `entry` | Selects the initial outer `Task`; the target node id is its `Task::id()`. |
-| `nodes[kind=outer_state]` | `StateCompositeTask`, carrying the node's enter actions, exit condition and routing. The node's `context_update` rides the projected state; the task neither carries nor runs it, and no production site fires the hook today — the core-context manager's `apply_preset_hook` (`schedule/derivation.rs`) has test-only callers. |
+| `nodes[kind=outer_state]` | `StateCompositeTask`, carrying the node's enter actions, exit condition and routing. The node's `context_update` rides the projected state; the task neither carries nor runs it, and no production site fires the hook today — the core-context manager's `apply_preset_hook` (`schedule/derivation.rs`) has test-only callers. It is not inert metadata: a state declaring a hook ranks `write_candidate` in the effect summary (`nexus-preset` `state_effect`), so it affects admission without writing anything. |
 | `outer_state.enter[kind=capability]` | `CapabilityTask`, invoked by the owning `StateCompositeTask`. |
 | `outer_state.enter[kind=host_tool]` | `HostToolCallTask`, invoked inline by the owning `StateCompositeTask`; requires the injected daemon tool dispatch and fails closed when unset. It is not added as a graph node. |
 | `outer_state.enter[kind=inner_graph]` | `InnerGraphTask`, launching the referenced inner graph in a child session. |
@@ -880,11 +880,12 @@ one above, buildability, and the prompt-role and recovery limits — are
 | `nodes[].effect_class` and `effect_summary` | Schema-required effect-fence metadata for validation and approval; neither creates a `Task` or changes graph execution. |
 | `meta.run_intents`, `meta.requires_capabilities`, `meta.cli_args`, `meta.gates` | Admission, loader, enqueue-time gate, and CLI-argument inputs checked before or while constructing tasks; they do not create graph nodes. |
 
-`pattern_slot` and `nest_group` are composition concepts, not executable tasks: a document whose
-nodes still carry either kind is refused `ir_unmappable` — they must be expanded into the concrete
-nodes and edges above before intake can construct a graph. `nests[]` is the composition *binding
-record*: the projection does not read it, and an applied document may carry non-empty `nests[]`;
-what runs is always its `nodes` and `edges`.
+`pattern_slot` and `nest_group` are composition concepts, not executable tasks, and `nests[]` is
+the composition *binding record* that addresses them: a document whose nodes still carry either
+kind, or whose `nests[]` is non-empty, is refused `ir_unmappable`. A binding names a region the
+table has no row for, so the region must be expanded into the concrete nodes and edges above
+before intake can construct a graph. The projection never reads `nests[]`, and what runs is always
+the document's `nodes` and `edges`.
 
 The standalone `nodes[kind=judge]`, `nodes[kind=manual_wait]` and `nodes[kind=join]` spellings have
 no row in this table and never will: their semantics are carried by `nodes[kind=outer_state]`, so a

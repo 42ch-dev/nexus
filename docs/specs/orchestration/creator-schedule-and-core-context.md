@@ -223,7 +223,7 @@ Every Schedule has a strictly-increasing `CoreContextVersion` sequence beginning
 
 - **`Seed`** — written when the Schedule is added. Content = `--seed` argument verbatim (for built-in presets that declare the default initial action). Version = 0.
 - **`UserEdit`** — written whenever a user applies a valid `EditOp` via the core-context edit surface (§9). `Replace` is allowed — users retain full control, whereas preset hooks are append-only. Edits on terminal-status Schedules are rejected; edits on running Schedules take effect at the next state transition (§3.3, §6.4). Version = prev + 1.
-- **`PresetHook`** — written when a preset declares a `context_update` hook on a state's `exit` and that state exits successfully. Hooks are **strictly additive**: only `EditOp::Append` or `EditOp::StructMerge` are valid; a hook cannot replace or remove. Version = prev + 1.
+- **`PresetHook`** — the derivation kind and its writer (`CoreContextManager::apply_preset_hook`, `crates/nexus-orchestration/src/schedule/derivation.rs`) exist, but **no production path calls it**: only tests do, so no run writes this version. A preset's `context_update` hook is declared, validated and projected (see §7.2) and is inert. Hooks are **strictly additive**: only `EditOp::Append` or `EditOp::StructMerge` are accepted; a hook cannot replace or remove.
 - **`PresetSeedExpansion`** — written when the Schedule is added and the preset declares `initial_action: llm_expand` (opt-in per preset). Content = result of a one-shot LLM capability call over the raw seed. Built-in presets do **not** declare this; the plumbing exists so external-preset authors can opt in.
 
 #### 6.3 `LlmSummarize` derivation kind
@@ -288,7 +288,13 @@ Built-in presets (`_system.maintenance`, `novel-writing`) use `kind: seed_direct
 
 #### 7.2 `context_update` hook on a state
 
-Declares that when this state's `exit_when` fires (success path), a `PresetHook` derivation writes a new `core_context` version:
+Declares the `context_update` hook a state would fire when its `exit_when` fires (success path). **No
+engine site evaluates it**: the hook is parsed, validated and carried — `StateDefinition.context_update`
+on the manifest, `nodes[kind=outer_state].context_update` on the IR — and `apply_preset_hook` can apply
+it, but nothing calls that method, so no `core_context_versions` row with `kind: PresetHook` is ever
+written. An applied document could not render the hook in any case: it carries no bundle root, so
+`template_file` resolves to nothing on that path ([orchestration-engine.md](orchestration-engine.md)
+§8.2.1, `ir_unresolved_template`).
 
 ```yaml
 states:
@@ -300,10 +306,7 @@ states:
     context_update:              # NEW; optional
       op: append                 # or: struct_merge
       template_file: prompts/outlining-context-update.md
-      # prompt template can use {{state.outlining.output}}, {{core_context.*}}, etc.
 ```
-
-The engine evaluates the template at state exit, runs the declared `EditOp`, and persists a new `core_context_versions` row with `kind: PresetHook`.
 
 #### 7.3 `seed_schema` (preset root, optional)
 
