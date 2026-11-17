@@ -372,6 +372,12 @@ export interface NativeCoreBinding {
     strategyId: string,
     requestJson: Uint8Array,
   ): Promise<Uint8Array>;
+  generateStrategy(
+    principal: string,
+    strategyId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  executeTool(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   approveStrategy(
     principal: string,
     strategyId: string,

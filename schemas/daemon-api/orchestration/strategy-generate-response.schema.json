@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/strategy-generate-response.schema.json",
+  "schema_version": 1,
+  "title": "NexusStrategyGenerateResponse",
+  "description": "Body of a generated candidate (HTTP 200). `document` is the committed candidate at `new_revision`, so the caller replaces its candidate with this document instead of predicting server normalization. Success means structurally legal and nothing more: generate performs no validate, simulate, approve or apply step, and `warnings` are the passing round's semantic warnings.",
+  "type": "object",
+  "required": ["new_revision", "document", "warnings"],
+  "additionalProperties": false,
+  "properties": {
+    "new_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Revision the kernel committed; always the request's `base_revision` plus one."
+    },
+    "document": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/workflow-document.schema.json"
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Semantic warnings the passing round carried, even when empty. They never block generation; a warning is reported, never dropped.",
+      "items": {
+        "title": "StrategyGenerateWarning",
+        "type": "object",
+        "required": ["path", "message", "severity", "category"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Dot path to the offending field (e.g. `states[1].enter[0].name`)."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable description of the problem."
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["error", "warning"],
+            "description": "Severity of the diagnostic. A generated document carries warnings only; an error would have kept the round from passing."
+          },
+          "category": {
+            "type": "string",
+            "description": "Stable snake_case machine category (e.g. `orphan_inner_graph`, `run_intents`)."
+          }
+        }
+      }
+    }
+  }
+}

@@ -898,7 +898,8 @@ impl ExecutionHandle {
             self.runtime_facts().clone(),
             self.linked_core().ok(),
             Some(self.capability_holder()),
-        ))
+        )
+        .with_prompt_executor(self.prompt_executor()))
     }
 
     /// Build the compute context for this owner.

@@ -303,6 +303,8 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   StrategyApproveRequest: 1,
   StrategyComposeRequest: 1,
   StrategyComposeResponse: 1,
+  StrategyGenerateRequest: 1,
+  StrategyGenerateResponse: 1,
   StrategySimulationRequest: 1,
   WorkflowDocument: 1,
   ListPatternsQuery: 1,

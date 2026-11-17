@@ -178,6 +178,14 @@ serial_test = "4"
 # itself only spawns processes and asserts output.
 tokio = { workspace = true }
 tempfile = "3"
+# `tests/preset_generate_cli.rs` seeds the schedule row apply admits a strategy against. Seeding it
+# through the store is the only product-free route (the owner's `add_schedule` needs a hosted
+# engine owner), so this dev-dependency enables the core's test-only pool seam — exactly as
+# nexus-core's own acceptance targets do. Test profile only; the shipped graph is unchanged.
+nexus-core = { path = "../../crates/nexus-core", features = [
+  "execution",
+  "test-hooks",
+] }
 # V1.154 P2 T1: the Connect compute interop tests install the embedded
 # `basic-combat` module into the hermetic home's `~/.nexus42/modules/`
 # store (spec §2.1 — host-local module resolution). The Connect cohort

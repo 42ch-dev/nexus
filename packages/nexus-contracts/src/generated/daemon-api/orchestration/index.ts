@@ -12,5 +12,7 @@ export type { StrategyApprovals } from './strategy-approvals';
 export type { StrategyApproveRequest } from './strategy-approve-request';
 export type { StrategyComposeRequest } from './strategy-compose-request';
 export type { StrategyComposeResponse } from './strategy-compose-response';
+export type { StrategyGenerateRequest } from './strategy-generate-request';
+export type { StrategyGenerateResponse } from './strategy-generate-response';
 export type { StrategySimulationRequest } from './strategy-simulation-request';
 export type { WorkflowDocument } from './workflow-document';
