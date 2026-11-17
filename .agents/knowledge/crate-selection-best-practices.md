@@ -83,7 +83,7 @@ Changing a decision in §2 follows the flow in §4. Do not silently swap crates,
 
 | # | Module | Decision | Alternative(s) considered | Plan / SSOT linkage |
 |---|--------|----------|---------------------------|---------------------|
-| 2.1 | **JSON-RPC** (daemon ↔ `acp-worker` IPC) | `jsonrpsee-core` + proc macros + custom `RpcTransport` trait + NDJSON via `tokio_util::codec::LinesCodec` | Hand-rolled `serde_json` framing; `json-rpc-rs`; `tokio-jrpc`; `karyon-jsonrpc` |  Task 5; `orchestration-engine.md` §6 |
+| 2.1 | **JSON-RPC** (daemon ↔ `acp-worker` IPC) — **retired, no dependency exists** | Was `jsonrpsee-core` + proc macros + custom `RpcTransport` trait + NDJSON via `tokio_util::codec::LinesCodec`. The worker subtree plus the hidden `nexus42 acp-worker` CLI went in v1.186 (`6e2535415`, 2026-09-10); the daemon-side per-creator composition went in v1.193 P2 (`e3df40f13`, 2026-09-21). There was never a `crates/nexus-acp-worker`. Providers now reach the runtime through `agent-client-protocol`, not a Nexus-owned JSON-RPC transport | Hand-rolled `serde_json` framing; `json-rpc-rs`; `tokio-jrpc`; `karyon-jsonrpc` (all moot: no layer to transport) | §3.1 below keeps the retired design as history only |
 | 2.2 | **Orchestration SessionStorage** | `sqlx` (sqlite + runtime-tokio + macros + migrate + chrono + uuid) on the unified **`state.db`** via the `Arc<SqlitePool>` exposed by `nexus-local-db` (post-WS8). `orchestration_sessions` table added through the same `sqlx migrate` pipeline. | Keep `rusqlite` + `deadpool-sqlite`; separate `.db` file; `sea-orm` |  Task 3 (depends on WS8) |
 | 2.3 | **`nexus-local-db` / `state.db` engine** | **Migrated from `rusqlite` + `deadpool-sqlite` + bespoke sequential migrations → to `sqlx` (sqlite + runtime-tokio + macros + migrate)** as **V1.4 WS8** (done). Bespoke `Migration` registry replaced by `sqlx::migrate!`-driven `.sql` files. | Keep rusqlite (A-4 rejected by PM 2026-04-17) |  (new plan row); `local-db-refactor.md` revised at WS8 T9 |
 | 2.4 | **Platform user auth / JWT** | `jsonwebtoken` only | `oauth2` v5.x (deferred — not rejected) | TD-10 deferral (retired device-flow exploration) |
@@ -99,37 +99,11 @@ Changing a decision in §2 follows the flow in §4. Do not silently swap crates,
 
 ## 3. Per-decision details
 
-### 3.1 JSON-RPC (daemon ↔ worker IPC)
+### 3.1 JSON-RPC (daemon ↔ worker IPC) — retired
 
-**Decision**: `jsonrpsee-core` + proc macros + custom `RpcTransport` trait; framing = newline-delimited JSON via `tokio_util::codec::LinesCodec` over stdin/stdout pipes.
+**Status: retired in two steps.** v1.186 (`6e2535415`, 2026-09-10) deleted the `crates/nexus-orchestration/src/worker/` subtree (ipc, manager, registry, transport) and the hidden `nexus42 acp-worker` CLI with its AgentSlot; v1.193 P2 (`e3df40f13`, 2026-09-21) retired the daemon-side per-creator `acp-worker` composition. No `crates/nexus-acp-worker` ever existed, and `jsonrpsee` is not a workspace dependency. The design that lived here (a `RpcTransport` trait over NDJSON on stdio, with an in-memory duplex test shim) was removed with the layer it served, so it is not a precedent for a new transport decision.
 
-**Why not hand-rolled**: method count will grow from single digits to tens; cancellation, timeouts, batch, and typed error objects are free with `jsonrpsee`, while a hand-rolled layer becomes a maintenance sink as methods proliferate.
-
-**Why `jsonrpsee-core` specifically**: `jsonrpsee` has no built-in stdio transport, but its core exposes `RpcModule` + trait-based transport so we can adapt it to stdio with a thin shim. We retain the option to replace core later (see §4); the `RpcTransport` trait is our insurance.
-
-**Implementation sketch** (to be realised in `crates/nexus-orchestration` per WS2 Task 5):
-
-```rust
-#[async_trait::async_trait]
-pub trait RpcTransport: Send + 'static {
-    async fn recv(&mut self) -> Option<String>;
-    async fn send(&mut self, line: String) -> std::io::Result<()>;
-}
-```
-
-Stdio impl uses `tokio_util::codec::FramedRead<_, LinesCodec>` + `FramedWrite<_, LinesCodec>` on the child's stdin/stdout. Unit tests use `tokio::io::duplex` or a channel-backed fake.
-
-**Cancellation / timeouts**: `tokio::select!` + `CancellationToken` at the call site; jsonrpsee's async method signature carries it naturally.
-
-**Feature flags** (exact version resolved at introduction time per §1.2 — **do not fabricate a version in this document**; the authoritative version lives in `Cargo.toml` when WS2 Task 5 lands):
-
-```toml
-# Shape only — author MUST pin an actual version from crates.io when adding.
-jsonrpsee = { version = "<pin-at-intro>", default-features = false, features = ["server", "client", "macros"] }
-# pick matching minor + server-core/client-core feature split per current jsonrpsee layout
-```
-
-**Testing**: in-memory duplex transport MUST be provided as a dev-dep shim in `nexus-orchestration`'s tests; every registered method should at minimum have a round-trip test.
+**What replaced it**: providers reach the runtime through the upstream ACP client, `agent-client-protocol = "=5.1.0"` in `crates/nexus-acp-host/Cargo.toml`, behind Nexus-owned DTOs. A future IPC need starts from a new decision record, not from this entry.
 
 ---
 

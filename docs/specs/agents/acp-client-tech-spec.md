@@ -6,17 +6,17 @@ The shipped Rust ACP client adapter: the `agent-client-protocol` pin, the Nexus-
 
 ## Current state
 
-**Status:** Shipped. The Rust adapter uses official `agent-client-protocol = "=5.0.0"` (stable-v1 API via `v1::schema::*`; no unstable v2 features, no `agent-client-protocol-rmcp`) behind Nexus-owned DTOs. Current service composition uses the core-owned `HostManager` and `packages/nexus-provider-acp` callbacks, not a route-facing daemon manager plus per-creator `acp-worker` children.
+**Status:** Shipped. The Rust adapter uses official `agent-client-protocol = "=5.1.0"` (stable-v1 API via `v1::schema::*`; no unstable v2 features, no `agent-client-protocol-rmcp`) behind Nexus-owned DTOs. Current service composition uses the core-owned `HostManager` and `packages/nexus-provider-acp` callbacks, not a route-facing daemon manager plus per-creator `acp-worker` children.
 **Document class**: Master  
 
 **Source Plan**: `2025-04-05-acp-client`
 **Date**: 2026-04-06
-**Last reconciled**: 2026-11-09 — `agent-client-protocol = "=5.0.0"` pin, the v5 module/API migration (§1.1, §1.2), and the re-affirmed stable-v1-only capabilities.
+**Last reconciled**: 2026-11-17 — `agent-client-protocol = "=5.1.0"` pin (bumped in `8e8b90c62`, #514), with the v5 module/API migration (§1.1, §1.2) and the re-affirmed stable-v1-only capabilities recorded at 2026-11-09.
 
 The shipped boundary is:
 
 - `crates/nexus-acp-host/Cargo.toml` pins
-  `agent-client-protocol = "=5.0.0"`; stable-v1 messages are imported from
+  `agent-client-protocol = "=5.1.0"`; stable-v1 messages are imported from
   `agent_client_protocol::v1::schema` (v5 removed the `schema::v1` alias) and the adapter pins `ProtocolVersion::V1` explicitly.
 - Official SDK types are confined to `nexus-acp-host`; the public
   `NexusAcpClient` trait uses Nexus-owned DTOs and includes both one-shot and
@@ -41,8 +41,8 @@ The shipped boundary is:
 
 #### 1.1 Current dependency and boundary
 
-The shipped Rust ACP SDK is **`agent-client-protocol` 5.0.0**, exact-pinned
-(`=5.0.0`) in `crates/nexus-acp-host/Cargo.toml`. ACP crate major 5 does not
+The shipped Rust ACP SDK is **`agent-client-protocol` 5.1.0**, exact-pinned
+(`=5.1.0`) in `crates/nexus-acp-host/Cargo.toml`. ACP crate major 5 does not
 put the wire on protocol v2 — the adapter stays on stable v1 and does not pull
 `rmcp` (the ordinary-CLI ACP graph is rmcp-free; see `tooling/check-graph-pins.sh`).
 The v5 SDK still declares `default = []`, so its native transports (`process`,

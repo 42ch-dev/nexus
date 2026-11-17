@@ -2,10 +2,15 @@
 
 A **strategy** is a preset bundle that declares *capability routing and prompt
 templates* for an orchestration loop: which lane a run enters, which prompts
-run in which order, and what the run payload looks like. It is a plain
-directory — `preset.yaml` + a `templates/` directory — consumed through the
-same preset bundle format as embedded presets. Nothing in a strategy is
-compiled into any binary. For a guided authoring reference, use the
+run in which order, and what the run payload looks like. A bundle is a plain
+directory carrying `preset.yaml` and a `templates/` directory, consumed through
+the same preset bundle format as embedded presets. Bundles under
+`strategy-samples/` are IR-primary: `workflow.json` is the hand-edited source
+and `preset.yaml` is its export, not a file an author edits — the layout is
+normative in
+[`specs/orchestration/strategy-composition.md`](specs/orchestration/strategy-composition.md)
+§7.1. Embedded presets and `examples/first-workflow` keep `preset.yaml` as
+their source. Nothing in a strategy is compiled into any binary. For a guided authoring reference, use the
 `strategy-author` skill published in the external
 [`42ch-dev/agent-toolkit`](https://github.com/42ch-dev/agent-toolkit)
 repository (no agent skill ships in this repo) — the agent-side on-ramp
