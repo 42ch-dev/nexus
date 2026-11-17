@@ -942,20 +942,16 @@ fn elapsed_ms_from_note(note: &str) -> u64 {
         .unwrap_or_else(|| panic!("note must carry a numeric elapsed_ms: {note}"))
 }
 
-/// Load a raw-YAML preset and freeze an embedded source identity over its
-/// manifest, exactly as the embedded loader does (a v1 run requires one).
-fn load_frozen_preset(yaml: &str, caps: &Arc<CapabilityRegistry>) -> nexus_preset::LoadedPreset {
-    let mut loaded = nexus_preset::load_preset_from_str(yaml, caps)
-        .unwrap_or_else(|e| panic!("test preset must load: {e}"));
-    loaded.source_identity = Some(
-        nexus_preset::loader::preset_source_identity(
-            &loaded.manifest,
-            None,
-            Some(loaded.id.as_str()),
-        )
-        .unwrap_or_else(|e| panic!("test preset must resolve a source identity: {e}")),
-    );
-    loaded
+/// Load a raw-YAML preset for a no-store engine.
+///
+/// Such an engine never freezes a v1 descriptor, so the fixture needs no source
+/// identity and stays a manifest-executing preset — the very class these join /
+/// resume tests drive. Freezing an embedded identity over it would name a
+/// compiled-in bundle that does not exist, which the embedded document route
+/// correctly refuses.
+fn load_manifest_preset(yaml: &str, caps: &Arc<CapabilityRegistry>) -> nexus_preset::LoadedPreset {
+    nexus_preset::load_preset_from_str(yaml, caps)
+        .unwrap_or_else(|e| panic!("test preset must load: {e}"))
 }
 
 /// MIGRATED from `apps/nexus42/tests/ops_e2e_converge_timeout.rs`
@@ -980,7 +976,7 @@ async fn hanging_upstream_with_timeout_reroutes_via_on_timeout() {
         CapabilityRegistryHolder::with_registry(Arc::clone(&caps)),
     );
 
-    let loaded = load_frozen_preset(TIMEOUT_REROUTE_YAML, &caps);
+    let loaded = load_manifest_preset(TIMEOUT_REROUTE_YAML, &caps);
     let session = engine
         .start_session_with_preset_for_creator(&loaded, CREATOR)
         .await
@@ -1144,7 +1140,7 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
     let dispatch = Arc::new(CountingDispatch {
         calls: Arc::new(AtomicUsize::new(0)),
     });
-    let loaded = load_frozen_preset(RESUME_REROUTE_YAML, &caps);
+    let loaded = load_manifest_preset(RESUME_REROUTE_YAML, &caps);
 
     // Phase 1: drive the converge chain to the parked join, then kill the
     // in-memory engine (the sqlite checkpoint persists).

@@ -5509,7 +5509,7 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
     let caps = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+    let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc.clone(),
         workflow_store.clone(),
         nexus_orchestration::CapabilityRegistryHolder::with_registry(caps.clone()),
@@ -5528,6 +5528,15 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
         )
         .expect("embedded source identity"),
     );
+    // That identity names no compiled-in bundle, so the embedded arm cannot
+    // resolve a document for it: the fixture answers the document its own
+    // manifest projects.
+    engine.set_applied_document_source(Arc::new(ManifestDocumentSource {
+        identity: AppliedRunIdentity {
+            apply_id: "apl_converge".to_string(),
+            content_hash: "blake3:converge".to_string(),
+        },
+    }));
     let sid = engine
         .start_session_with_preset_for_creator(&loaded, "ctr_test")
         .await
@@ -6041,7 +6050,7 @@ async fn engine_conditional_routed_manual_wait_keeps_token_despite_join_keys() {
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+    let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc.clone(),
         workflow_store.clone(),
         nexus_orchestration::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
@@ -6082,6 +6091,15 @@ states:
         )
         .expect("embedded source identity"),
     );
+    // That identity names no compiled-in bundle, so the embedded arm cannot
+    // resolve a document for it: the fixture answers the document its own
+    // manifest projects.
+    engine.set_applied_document_source(Arc::new(ManifestDocumentSource {
+        identity: AppliedRunIdentity {
+            apply_id: "apl_cond_manual".to_string(),
+            content_hash: "blake3:cond_manual".to_string(),
+        },
+    }));
     let sid = engine
         .start_session_with_preset_for_creator(&loaded, "ctr_test")
         .await
@@ -6990,6 +7008,33 @@ impl AppliedDocumentSource for FakeAppliedDocuments {
     }
 }
 
+/// A source answering the document its loaded preset's manifest projects.
+///
+/// Some fixtures freeze an embedded source identity over a raw-YAML manifest
+/// (the identity only exists to satisfy the v1 descriptor), and such a preset
+/// has no compiled-in bundle to resolve — this source answers the document
+/// those bytes project instead.
+struct ManifestDocumentSource {
+    identity: AppliedRunIdentity,
+}
+
+#[async_trait::async_trait]
+impl AppliedDocumentSource for ManifestDocumentSource {
+    async fn applied_document(
+        &self,
+        _preset_id: &str,
+        loaded: Option<&nexus_preset::LoadedPreset>,
+    ) -> Result<Option<AppliedDocument>, String> {
+        let loaded = loaded.ok_or("the fixture supplies its loaded preset")?;
+        let document = nexus_preset::workflow_ir::import_preset_manifest(&loaded.manifest)
+            .map_err(|error| error.to_string())?;
+        Ok(Some(AppliedDocument {
+            identity: self.identity.clone(),
+            document,
+        }))
+    }
+}
+
 /// Assert the entry admitted the applied graph and froze its identity.
 async fn assert_applied_entry(
     storage: &Arc<SqliteSessionStorage>,
@@ -7341,6 +7386,118 @@ async fn preset_entry_recovery_refuses_a_successor_and_rebuilds_the_admitted_app
     assert_eq!(
         session.current_task_id, APPLIED_ONLY_PROBE,
         "the rebuilt graph must carry the applied-only node; got {:?}",
+        session.current_task_id
+    );
+}
+
+/// An embedded preset admitted with NO configured applied source still executes
+/// its document: the entry resolves the preset's own compiled-in bundle under
+/// the compass D10 identity and freezes it on the descriptor.
+///
+/// Mutation this fails on: `start_preset_entry` handing the embedded preset to
+/// the YAML builder with `applied: None` — the descriptor then freezes no
+/// identity, so neither a restart nor an operator can tell which bytes the run
+/// executed, and recovery cannot refuse a changed embed.
+#[tokio::test]
+async fn embedded_entry_freezes_the_d10_identity_without_a_configured_source() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool);
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded =
+        nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
+    // Deliberately no `set_applied_document_source`: the compiled-in bytes are
+    // the document source an embedded preset never has to be handed.
+
+    let sid = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .expect("an embedded preset starts without a configured source");
+    let document =
+        nexus_preset::embedded_workflow_document(&loaded).expect("embedded document constructs");
+    let (apply_id, content_hash) =
+        nexus_preset::embedded_applied_identity(&loaded.id, &document).expect("D10 identity");
+    assert_eq!(apply_id, format!("embedded:{}", loaded.id));
+    let record = storage
+        .load_run(&sid)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    let descriptor = record.descriptor.expect("v1 descriptor");
+    assert_eq!(
+        descriptor.applied,
+        Some(AppliedRunIdentity {
+            apply_id,
+            content_hash,
+        }),
+        "the entry must freeze the identity of the document the run executes; \
+         `applied: None` means it executed the YAML manifest instead"
+    );
+}
+
+/// Legacy (no-store) recovery rebuilds an embedded session from the applied
+/// document, not from the preset's manifest: the source answers with a document
+/// whose node ids the bundle never declares, and the recovered runner continues
+/// on them.
+///
+/// Mutation this fails on: `reconstruct_runner_legacy` calling
+/// `build_wired_outer_graph(&loaded, ..)` directly — the rebuilt graph then has
+/// no `applied_entry_probe` task, so the run cannot resume where it parked.
+#[tokio::test]
+async fn legacy_recovery_rebuilds_an_embedded_session_from_the_document() {
+    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded =
+        nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
+    let identity = AppliedRunIdentity {
+        apply_id: "apl_legacy".to_string(),
+        content_hash: "blake3:legacy".to_string(),
+    };
+    let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
+    // A no-store engine is the legacy recovery path's only caller.
+    let mut admitted = nexus_orchestration::GraphFlowEngine::new_with_storage(
+        storage.clone(),
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        )),
+    );
+    admitted.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "novel-writing",
+        identity: identity.clone(),
+        document: applied_probe_document("novel-writing"),
+    }));
+    let sid = admitted
+        .start_session_with_preset(&loaded)
+        .await
+        .expect("start_session_with_preset");
+    let summaries = admitted
+        .list_active(nexus_orchestration::engine::SessionFilter::default())
+        .await
+        .expect("list_active");
+
+    let mut recovered = nexus_orchestration::GraphFlowEngine::new_with_storage(
+        storage.clone(),
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        )),
+    );
+    recovered.set_applied_document_source(Arc::new(FakeAppliedDocuments {
+        preset_id: "novel-writing",
+        identity,
+        document: applied_probe_document("novel-writing"),
+    }));
+    recovered.recover_sessions_inner(summaries).await;
+    recovered
+        .run_step(&sid)
+        .await
+        .expect("the recovered runner steps the document's graph");
+    let session = storage
+        .get(&sid.0)
+        .await
+        .expect("session read")
+        .expect("row");
+    assert_eq!(
+        session.current_task_id, APPLIED_ONLY_PROBE,
+        "legacy recovery must rebuild the document's graph; the bundle has no \
+         `{APPLIED_ENTRY_PROBE}` task to resume at (got {:?})",
         session.current_task_id
     );
 }

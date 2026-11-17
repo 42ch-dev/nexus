@@ -3154,6 +3154,36 @@ fn inner_graph_entered_by_state<'a>(
         })
 }
 
+/// The applied document an embedded preset executes: the document its own
+/// compiled-in bundle constructs, under the compass D10 identity the applied
+/// route freezes.
+///
+/// The bytes are compiled into this binary, so an engine with no configured
+/// [`AppliedDocumentSource`](crate::capability::AppliedDocumentSource) can
+/// still resolve the document the preset runs. A bundle whose document cannot
+/// be constructed is the refusal below, named by preset — its YAML manifest is
+/// never an execution input.
+fn embedded_applied_document(
+    loaded: &nexus_preset::LoadedPreset,
+) -> Result<crate::capability::AppliedDocument, String> {
+    let document = nexus_preset::embedded_workflow_document(loaded)
+        .map_err(|error| format!("embedded_document_unavailable: {error}"))?;
+    let (apply_id, content_hash) =
+        nexus_preset::embedded_applied_identity(&loaded.id, &document).map_err(|error| {
+            format!(
+                "embedded_document_unavailable: document of `{}` cannot be hashed: {error}",
+                loaded.id
+            )
+        })?;
+    Ok(crate::capability::AppliedDocument {
+        identity: crate::run_state::AppliedRunIdentity {
+            apply_id,
+            content_hash,
+        },
+        document,
+    })
+}
+
 /// Build the durable [`RunStateV1`] for a step outcome (A2/A4).
 ///
 /// On a terminal/wait/paused transition the step is no longer in flight; the
@@ -3924,6 +3954,37 @@ impl GraphFlowEngine {
         Ok(loaded)
     }
 
+    /// The applied document a run of `preset_id` executes.
+    ///
+    /// The configured [`AppliedDocumentSource`](crate::capability::AppliedDocumentSource)
+    /// owns the route when one is installed (the daemon's core wiring). Without
+    /// one, an embedded preset still resolves its own compiled-in document —
+    /// [`embedded_applied_document`] — because those bytes are in this binary.
+    ///
+    /// `Ok(None)` therefore means "no applied identity", which only a
+    /// non-embedded preset (`_system.`, or a system directory bundle) can
+    /// answer: it keeps executing its manifest. An embedded preset resolves a
+    /// document or refuses through the `Err`; it never falls back to YAML.
+    async fn resolve_applied(
+        &self,
+        preset_id: &str,
+        loaded: Option<&nexus_preset::LoadedPreset>,
+    ) -> Result<Option<crate::capability::AppliedDocument>, String> {
+        match &self.state.applied_document_source {
+            Some(source) => source.applied_document(preset_id, loaded).await,
+            None => loaded
+                .filter(|loaded| {
+                    matches!(
+                        loaded.source_identity,
+                        Some(PresetSourceIdentity::Embedded { .. })
+                    )
+                })
+                .map_or(Ok(None), |loaded| {
+                    embedded_applied_document(loaded).map(Some)
+                }),
+        }
+    }
+
     #[allow(clippy::too_many_lines, clippy::significant_drop_tightening)] // sequential descriptor→validate→rebuild path; guard spans await loop
     async fn reconstruct_runner(&self, session_id: &SessionId) -> Result<(), EngineError> {
         // Load the durable descriptor (frozen at admission) so we honour the
@@ -4013,19 +4074,15 @@ impl GraphFlowEngine {
                     )),
                 ));
             }
-            match &self.state.applied_document_source {
-                Some(source) => source
-                    .applied_document(&descriptor.preset_id, bundle.as_ref())
-                    .await
-                    .map_err(|error| {
-                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                            "R6: applied identity of session {} does not replay: {error} \
-                             (reconstruction_unavailable, non-replayable)",
-                            session_id.0
-                        )))
-                    })?,
-                None => None,
-            }
+            self.resolve_applied(&descriptor.preset_id, bundle.as_ref())
+                .await
+                .map_err(|error| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "R6: applied identity of session {} does not replay: {error} \
+                         (reconstruction_unavailable, non-replayable)",
+                        session_id.0
+                    )))
+                })?
         };
         // P4 Task 4 (I-000464): a run admitted under an applied identity is
         // rebuilt ONLY from that identity. The resolution above answers with the
@@ -4238,6 +4295,10 @@ impl GraphFlowEngine {
                     session_id.0
                 )))
             })?,
+            // Only a NON-embedded preset reaches this arm: an embedded descriptor
+            // resolves its compiled-in document in the resolution above, and a
+            // document it cannot construct refused there. Such a preset
+            // (`_system.`, a system directory bundle) executes its manifest.
             (None, Some(loaded)) => crate::preset_runtime::build_wired_outer_graph(
                 loaded,
                 &engine_proxy,
@@ -4282,7 +4343,10 @@ impl GraphFlowEngine {
 
     /// Legacy reconstruction against the current embedded preset (no workflow
     /// store). Used only by in-memory/test engines that never persisted a v1
-    /// descriptor. This path is intentionally NOT frozen-source aware.
+    /// descriptor, so there is no frozen identity to compare against: the run
+    /// is rebuilt from the applied document the same route answers for a
+    /// persisted run — an embedded preset's own compiled-in document — and
+    /// never from its YAML manifest.
     async fn reconstruct_runner_legacy(&self, summary: &SessionSummary) -> Result<(), EngineError> {
         let caps = self.current_caps();
         let loaded =
@@ -4292,19 +4356,44 @@ impl GraphFlowEngine {
                     summary.preset_id, summary.session_id.0, e
                 )))
             })?;
+        let applied = self
+            .resolve_applied(&summary.preset_id, Some(&loaded))
+            .await
+            .map_err(|error| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "R6: applied identity of session {} does not replay: {error} \
+                     (reconstruction_unavailable, non-replayable)",
+                    summary.session_id.0
+                )))
+            })?
+            .ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "R6: session {} resolved no applied document for preset '{}' \
+                     (reconstruction_unavailable, non-replayable)",
+                    summary.session_id.0, summary.preset_id
+                )))
+            })?;
 
         let proxy = Arc::new(EngineProxy {
             state: self.state.clone(),
         });
         let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
-        let wired = crate::preset_runtime::build_wired_outer_graph(
-            &loaded,
+        let wired = crate::preset_runtime::build_wired_outer_graph_from_ir(
+            &applied.document,
+            crate::preset_runtime::ir_template_source(Some(&loaded)),
             &engine_proxy,
             &caps,
             self.daemon_tool_dispatch.clone(),
             self.prompt_executor.clone(),
             self.session_cancels.clone(),
-        )?;
+        )
+        .map_err(|error| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "R6: applied document of session {} is not buildable: {error} \
+                 (reconstruction_unavailable, non-replayable)",
+                summary.session_id.0
+            )))
+        })?;
 
         let runner = Arc::new(FlowRunner::new(Arc::new(wired), self.state.storage.clone()));
         self.state
@@ -4470,15 +4559,29 @@ impl GraphFlowEngine {
         } else {
             None
         };
-        let applied = match &self.state.applied_document_source {
-            Some(source) => source
-                .applied_document(&loaded.id, Some(loaded))
-                .await
-                .map_err(|error| {
-                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
-                })?,
-            None => None,
-        };
+        let applied = self
+            .resolve_applied(&loaded.id, Some(loaded))
+            .await
+            .map_err(|error| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(error))
+            })?;
+        // An embedded preset executes its document, so a source that answered
+        // none for one leaves the graph with no document to build from. That
+        // gap refuses instead of handing the preset to the YAML manifest.
+        if applied.is_none()
+            && matches!(
+                loaded.source_identity,
+                Some(nexus_preset::source_identity::PresetSourceIdentity::Embedded { .. })
+            )
+        {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "embedded_document_unavailable: embedded preset '{}' resolved no applied \
+                     document; refusing to execute its YAML manifest",
+                    loaded.id
+                )),
+            ));
+        }
         // ir-only is the only arm: a user bundle with no current apply refuses
         // before graph construction — never a YAML fallback.
         if user_bundle && applied.is_none() {
@@ -4506,6 +4609,9 @@ impl GraphFlowEngine {
             .map_err(|error| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(error.to_string()))
             })?,
+            // Only a NON-embedded preset reaches this arm: the check above
+            // refuses an embedded preset that resolved no document, and every
+            // other embedded answer carries one.
             None => crate::preset_runtime::build_wired_outer_graph(
                 loaded,
                 &proxy,

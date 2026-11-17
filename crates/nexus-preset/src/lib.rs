@@ -162,6 +162,28 @@ pub fn embedded_workflow_document(
         .map(|imported| imported.document)
 }
 
+/// The compass D10 applied identity of an EMBEDDED preset's document:
+/// `apply_id = "embedded:<preset_id>"` and the canonical document hash a user
+/// apply records.
+///
+/// Both execution routes build it here — admission's applied source and the
+/// engine's own compiled-in construction when no source is configured — so one
+/// document can never be frozen under two identities, and a changed embedded
+/// byte flips the hash that makes a restarted run non-replayable.
+///
+/// # Errors
+/// [`nexus_workflow_ir::CanonicalHashError`] when the document cannot be
+/// canonicalized or carries an unresolved asset/nest hash.
+pub fn embedded_applied_identity(
+    preset_id: &str,
+    document: &nexus_workflow_ir::WorkflowDocument,
+) -> Result<(String, String), nexus_workflow_ir::CanonicalHashError> {
+    Ok((
+        format!("embedded:{preset_id}"),
+        nexus_workflow_ir::content_hash(document)?,
+    ))
+}
+
 /// Derive the complete effective prompt-role set from a preset manifest
 /// (N-4b/N-9).
 ///

@@ -94,8 +94,8 @@ pub async fn resolve_applied_document(
                     category: format!("embedded applied document of `{preset_id}`: {error}"),
                 }
             })?;
-            let content_hash =
-                nexus_workflow_ir::canonical::content_hash(&document).map_err(|error| {
+            let (apply_id, content_hash) =
+                nexus_preset::embedded_applied_identity(preset_id, &document).map_err(|error| {
                     CoreError::Internal {
                         category: format!(
                             "embedded applied document of `{preset_id}` cannot be hashed: {error}"
@@ -104,7 +104,7 @@ pub async fn resolve_applied_document(
                 })?;
             return Ok(Ok(Some(AppliedDocument {
                 identity: AppliedRunIdentity {
-                    apply_id: format!("embedded:{preset_id}"),
+                    apply_id,
                     content_hash,
                 },
                 document,
