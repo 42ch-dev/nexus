@@ -148,11 +148,13 @@ impl AssetSource for EmptyAssets {
     }
 }
 
-/// Payload presence gate: the four `context_update` payload shapes the embedded corpus does not
-/// carry — absent, explicit `null`, non-empty, empty string — reach the export unchanged.
+/// Payload presence gate: the five `context_update` payload shapes the embedded corpus does not
+/// carry — absent body, empty string, non-empty patch, explicit `null` patch, and a `struct_merge`
+/// with no `patch` key at all — reach the export unchanged.
 ///
-/// An explicit `patch: null` is the shape that regressed: `Option<Value>` folds it into the
-/// absent key, which exports as no `patch` at all.
+/// The two `struct_merge` payload forms are the ones that regressed: a single `Option<Value>`
+/// folds an explicit `null` into the absent key, and an unconditional reverse map invents
+/// `patch: null` where the author wrote no patch.
 #[test]
 fn payload_shapes_round_trip() {
     const FIXTURE: &str = r#"
@@ -184,6 +186,11 @@ states:
     context_update:
       op: { kind: struct_merge, patch: null }
       template_file: prompts/nulled.md
+  - id: unpatched
+    next: done
+    context_update:
+      op: { kind: struct_merge }
+      template_file: prompts/unpatched.md
   - id: done
     terminal: true
 "#;
@@ -222,5 +229,16 @@ states:
         op("nulled").get("patch"),
         Some(&Value::Null),
         "explicit null patch"
+    );
+    // The template-driven form: no `patch` key in the source, so none in the export. An
+    // unconditional reverse map would invent `patch: null` here and the equality above would
+    // still pass if the fixture echoed that null back.
+    assert_eq!(
+        exported["states.unpatched.context_update"]
+            .get("op")
+            .expect("context_update carries an op")
+            .get("patch"),
+        None,
+        "absent patch exported as a key"
     );
 }
