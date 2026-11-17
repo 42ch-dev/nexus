@@ -464,3 +464,68 @@ async fn a_stale_base_refuses_before_any_round_runs() {
     );
     setup.core.close().await.unwrap();
 }
+
+/// A request that pins a package the registry does not serve. Approve refuses exactly that pin, so
+/// the generator must report it too: the round's refusal has to name the pin the corrector has to
+/// re-pin or drop, and nothing may persist. Without the pin findings in lint the payload carried
+/// only the unmappable-node correction and never mentioned the pin.
+#[tokio::test]
+async fn an_unresolvable_pin_is_refused_by_name_and_persists_nothing() {
+    let setup = setup().await;
+    let request: GenerateRequest = serde_json::from_value(json!({
+        "entry": "slot",
+        "terminal": ["done"],
+        "nodes": [node("slot", "pattern_slot"), node("done", "terminal")],
+        "edges": [{ "id": "slot->done", "from": "slot", "to": "done", "kind": "linear" }],
+        "nests": [{
+            "id": "ghost-nest",
+            "parent_node": "slot",
+            "expansion": "expand_in_candidate",
+            "pin_policy": "exact",
+            "child": {
+                "kind": "pattern",
+                "registry_id": "ghost",
+                "version": "1.0.0",
+                "content_hash": "0".repeat(64)
+            }
+        }],
+        "meta": {
+            "description": "generate fixture",
+            "kind": "creator",
+            "run_intents": ["work_init"],
+            "requires_capabilities": []
+        }
+    }))
+    .expect("the pinned fixture is a generate request");
+
+    let details = exhaustion_of(
+        setup
+            .core
+            .generate_strategy_candidate(&setup.principal, STRATEGY, 0, request, None)
+            .await
+            .unwrap_err(),
+    );
+
+    assert_eq!(details["code"], "lint_exhausted");
+    assert_eq!(details["persisted"], false);
+    let pin = details["violations"]
+        .as_array()
+        .expect("the payload carries a violations array")
+        .iter()
+        .find(|violation| violation["kind"] == "pin_unavailable")
+        .unwrap_or_else(|| panic!("the refusal names the pin Approve would refuse: {details}"));
+    assert_eq!(pin["location"], "nest ghost-nest");
+    assert!(
+        pin["correction"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("ghost"),
+        "the correction names the pin to re-pin or drop: {pin}"
+    );
+    assert_eq!(
+        stored_revision(setup.core.pool(), STRATEGY).await,
+        None,
+        "a pin Approve would refuse never reaches the CAS"
+    );
+    setup.core.close().await.unwrap();
+}

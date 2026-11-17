@@ -49,7 +49,9 @@ impl PeerControlLane {
     }
 
     /// Whether `operation` is on the allowlist. An empty allowlist admits
-    /// nothing — operators must name the operations they intend.
+    /// nothing — operators must name the operations they intend — except the
+    /// disabled-lane recovery pair (`status`, `enable`), which the dispatcher
+    /// exempts so the lane can always be reported and restored.
     #[must_use]
     pub fn allows(&self, operation: &str) -> bool {
         self.allowed_operations

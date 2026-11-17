@@ -847,6 +847,54 @@ async fn peer_control_a_disabled_lane_refuses_everything_but_status_and_enable()
     );
 }
 
+/// Recovery must not depend on the allowlist: a lane started disabled with an
+/// allowlist that omits `status` and `enable` can still be reported and
+/// re-enabled. Before the exemption both calls were the allowlist refusal, so
+/// the lane stayed off until a restart — the one-way switch the reachable set
+/// exists to prevent.
+#[tokio::test]
+#[serial]
+async fn a_disabled_lane_recovers_even_when_its_allowlist_omits_enable() {
+    let f = lane_fixture().await;
+    let principal = f.core.active_principal().await.expect("active principal");
+    f.handle
+        .start_peer_control(&principal, start_options(false, &["allow"]))
+        .await
+        .expect("the lane starts");
+
+    let reported = f
+        .handle
+        .peer_control(&principal, control_request("status", None))
+        .await
+        .expect("status is reachable without being allowlisted");
+    assert!(!reported.enabled, "the lane reports itself disabled");
+
+    let enabled = f
+        .handle
+        .peer_control(&principal, control_request("enable", None))
+        .await
+        .expect("enable is reachable without being allowlisted");
+    assert!(enabled.enabled, "enable restores the lane");
+
+    // The exemption restores no grant: the allowlist still bounds the lane.
+    let still_withheld = f
+        .handle
+        .peer_control(&principal, control_request("disable", None))
+        .await;
+    assert!(
+        forbidden(&still_withheld),
+        "an operation the start never allowlisted stays refused after recovery, got \
+         {still_withheld:?}"
+    );
+    assert!(
+        f.handle
+            .peer_control(&principal, control_request("allow", Some("status")))
+            .await
+            .is_ok(),
+        "the allowlisted operation runs once the lane is enabled"
+    );
+}
+
 /// `allow` refuses a `payload.operation` no arm dispatches: a grant nothing
 /// would ever match is not a permission, and the refusal names the field.
 #[tokio::test]

@@ -4,7 +4,8 @@
 //! `GenerateRequest` contract, passes **no** corrector (the CLI attaches no model) and renders what
 //! the kernel answers. These tests drive the real binary against a hermetic `HOME`:
 //!
-//! - a legal request commits revision 1 and prints the candidate plus its warnings;
+//! - a legal request commits revision 1 and prints a human summary; `--json` prints the committed
+//!   candidate plus its warnings instead;
 //! - a request that fails lint is rendered as the whole `lint_exhausted` payload (§5), never as a
 //!   bare "generation failed", and `--json` emits that same object;
 //! - a generated candidate drives validate → simulate → approve → apply end to end, which is what
@@ -138,11 +139,11 @@ async fn chain_core(fixture: &DirectFixture) -> (CoreService, nexus_core::Princi
 }
 
 #[tokio::test]
-async fn generate_prints_the_committed_candidate_and_its_warnings() {
-    let fixture = fixture().await;
-    let request = write_request(&fixture, "request.json", &legal_request());
-
-    let output = fixture
+async fn generate_prints_a_summary_and_reserves_json_for_the_flag() {
+    // Two independent homes: each commits revision 1, so neither run can be the other's conflict.
+    let plain = fixture().await;
+    let request = write_request(&plain, "request.json", &legal_request());
+    let output = plain
         .command()
         .args([
             "preset",
@@ -159,14 +160,53 @@ async fn generate_prints_the_committed_candidate_and_its_warnings() {
         "the legal request must commit: {}",
         stderr_of(&output)
     );
+    let printed = stdout_of(&output);
+    assert!(
+        serde_json::from_str::<Value>(&printed).is_err(),
+        "without --json the success path is a human summary, not the payload: {printed}"
+    );
+    for fragment in [
+        STRATEGY,
+        "revision 1",
+        "provenance: generate",
+        "warnings: 0",
+        "simulate",
+        "approve",
+    ] {
+        assert!(
+            printed.contains(fragment),
+            "the summary must carry `{fragment}`: {printed}"
+        );
+    }
+
+    let json = fixture().await;
+    let request = write_request(&json, "request.json", &legal_request());
+    let output = json
+        .command()
+        .args([
+            "preset",
+            "generate",
+            STRATEGY,
+            "--request",
+            request.to_str().expect("utf-8 path"),
+            "--json",
+        ])
+        .output()
+        .expect("the generate verb runs");
+    assert!(
+        output.status.success(),
+        "the legal request must commit: {}",
+        stderr_of(&output)
+    );
     let printed: Value =
-        serde_json::from_str(&stdout_of(&output)).expect("the verb prints one JSON object");
+        serde_json::from_str(&stdout_of(&output)).expect("--json prints one JSON object");
     assert_eq!(printed["new_revision"], 1, "a first candidate inserts at 1");
     assert_eq!(printed["document"]["id"], STRATEGY);
     // Success means structurally legal and nothing more: the document is still a candidate, never
     // a live strategy, and the semantic warnings travel with it.
     assert_eq!(printed["document"]["state"], "candidate");
     assert_eq!(printed["document"]["revision"], 1);
+    assert_eq!(printed["document"]["provenance"]["source"], "generate");
     assert!(
         printed["warnings"].is_array(),
         "the passing round's warnings ride the output: {printed}"
@@ -249,7 +289,8 @@ async fn a_generated_candidate_completes_validate_simulate_approve_apply() {
     let fixture = fixture().await;
     let request = write_request(&fixture, "request.json", &legal_request());
 
-    // 1. generate — the CLI commits the candidate the rest of the chain reads.
+    // 1. generate — the CLI commits the candidate the rest of the chain reads. `--json` is what
+    // carries the document forward; without it the verb prints the summary for a human.
     let output = fixture
         .command()
         .args([
@@ -258,6 +299,7 @@ async fn a_generated_candidate_completes_validate_simulate_approve_apply() {
             STRATEGY,
             "--request",
             request.to_str().expect("utf-8 path"),
+            "--json",
         ])
         .output()
         .expect("the generate verb runs");
