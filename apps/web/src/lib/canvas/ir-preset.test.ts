@@ -33,6 +33,22 @@ describe('parsedPresetFromIr', () => {
     expect(parsed.manifest.states[3].terminal).toBe(true);
   });
 
+  it('keeps the condition on a state with exactly one guarded outgoing edge', () => {
+    const parsed = parsedPresetFromIr(
+      candidateDocument({
+        edges: [
+          { id: 'draft->done', from: 'draft', to: 'done', kind: 'conditional', when: 'quality >= 3' },
+        ],
+      }),
+    );
+
+    // The linear form would drop the guard, so the projection keeps the conditional form.
+    expect(parsed.manifest.states[0].next).toEqual({
+      kind: 'conditional',
+      rules: [{ when: 'quality >= 3', to: 'done' }],
+    });
+  });
+
   it('leaves inner steps, pattern slots and nest groups out of the state list', () => {
     const parsed = parsedPresetFromIr(
       candidateDocument({

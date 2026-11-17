@@ -188,6 +188,20 @@ impl PromptExecutor for ConvergesOnce {
     }
 }
 
+/// A corrector that returns the given document verbatim, claims and all.
+struct ReturnsDocument(Value);
+
+#[async_trait]
+impl PromptExecutor for ReturnsDocument {
+    async fn execute(&self, _request: PromptRequest) -> Result<PromptResult, CapabilityError> {
+        Ok(PromptResult {
+            full_text: self.0.to_string(),
+            host_session_id: "fake-session".to_owned(),
+            operation_id: "fake-operation".to_owned(),
+        })
+    }
+}
+
 /// The legal document as the corrector would return it: the same graph, the strategy's id.
 fn legal_request_document() -> Value {
     document(
@@ -300,6 +314,132 @@ async fn a_corrector_that_converges_commits_the_corrected_document() {
             .all(|node| node.depends_on.is_empty()),
         "the committed document is the corrected one, not round 1's"
     );
+    setup.core.close().await.unwrap();
+}
+
+/// A corrector is not the document's origin. The drift guard reads `provenance.source == generate`,
+/// so a corrector that could set provenance, lineage or hash would falsify the assertion from the
+/// inside.
+#[tokio::test]
+async fn a_corrector_cannot_claim_another_origin_lineage_hash_or_version() {
+    let setup = setup().await;
+    let mut claimed = legal_request_document();
+    claimed["provenance"] = json!({
+        "source": "import_preset",
+        "agent_run_id": "another-agent-run",
+        "parent_candidate_id": "another-candidate"
+    });
+    claimed["content_hash"] = json!("hash-from-a-prior-snapshot");
+    claimed["version"] = json!(9);
+    let corrector = ReturnsDocument(claimed);
+
+    let outcome = setup
+        .core
+        .generate_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            0,
+            dangling_request(),
+            Some(&corrector),
+        )
+        .await
+        .unwrap();
+
+    let document = &outcome.candidate.document;
+    assert_eq!(
+        document.provenance.source.to_string(),
+        "generate",
+        "a generated candidate is provenance=generate whatever the model wrote"
+    );
+    assert_eq!(document.provenance.agent_run_id, None);
+    assert_eq!(
+        document.provenance.parent_candidate_id, None,
+        "the corrector invents no lineage"
+    );
+    assert!(document.provenance.resolved_pins.is_empty());
+    assert_eq!(document.content_hash, None);
+    assert_eq!(document.version, 1);
+    setup.core.close().await.unwrap();
+}
+
+/// The IR grammar version is the contract's, not the corrector's: a response claiming a version
+/// this kernel does not implement is normalized before lint, so it neither commits nor burns the
+/// remaining rounds on a buildability refusal the correction cannot address.
+#[tokio::test]
+async fn a_corrector_cannot_claim_an_ir_version_the_kernel_does_not_implement() {
+    let setup = setup().await;
+    let mut claimed = legal_request_document();
+    claimed["ir_version"] = json!(7);
+    let corrector = ReturnsDocument(claimed);
+
+    let outcome = setup
+        .core
+        .generate_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            0,
+            dangling_request(),
+            Some(&corrector),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.candidate.document.ir_version, 0);
+    setup.core.close().await.unwrap();
+}
+
+/// D8 bounds the field space at the request's. `GenerateRequest` exposes entry, terminal, nodes,
+/// edges, nests and meta, so a corrector adding assets, signals, roles or an initial action is
+/// outside the contract and the commit carries none of them.
+#[tokio::test]
+async fn a_corrector_cannot_add_fields_the_request_does_not_expose() {
+    let setup = setup().await;
+    let mut extra = legal_request_document();
+    extra["assets"] = json!([{
+        "id": "seed",
+        "kind": "template",
+        "path": "prompts/seed.md",
+        "content_hash": "0".repeat(64)
+    }]);
+    extra["signals"] =
+        json!([{ "action": "force_transition", "name": "revise", "target": "start" }]);
+    extra["roles"] = json!([{
+        "description": "writer",
+        "id": "writer",
+        "system_prompt_file": "prompts/writer.md"
+    }]);
+    extra["initial_action"] = json!({ "kind": "seed_direct" });
+    let corrector = ReturnsDocument(extra);
+
+    let outcome = setup
+        .core
+        .generate_strategy_candidate(
+            &setup.principal,
+            STRATEGY,
+            0,
+            dangling_request(),
+            Some(&corrector),
+        )
+        .await
+        .unwrap();
+
+    let document = &outcome.candidate.document;
+    assert!(
+        document.assets.is_empty(),
+        "assets are not the request's: {:?}",
+        document.assets
+    );
+    assert!(
+        document.signals.is_empty(),
+        "signals are not the request's: {:?}",
+        document.signals
+    );
+    assert!(
+        document.roles.is_empty(),
+        "roles are not the request's: {:?}",
+        document.roles
+    );
+    assert!(document.initial_action.is_none());
     setup.core.close().await.unwrap();
 }
 
