@@ -97,6 +97,12 @@ export interface StrategyCanvasAdapterContext {
    */
   localEdges: Edge<StrategyEdgeData>[];
   /**
+   * The canvas renders the applied (running) strategy rather than a compose
+   * candidate. That view is read-only: its structural and prompt editors are
+   * disabled because the running document is what apply/approve produced (P6).
+   */
+  appliedView: boolean;
+  /**
    * Compose-path (flag on) slot interactions. Absent when the flag is off, so
    * the slot inspector and expand toggle never render there.
    */
@@ -260,8 +266,9 @@ export function createStrategyCanvasAdapter(
             saveStatus={ctx.saveStatuses.state}
             onSaveStatus={(s) => ctx.onSaveStatus('state', s)}
             onConflict={ctx.handleConflict}
-            // Compose path: node writes belong to the candidate document.
-            structuralWritesDisabled={Boolean(ctx.compose)}
+            // The preset YAML is never the edited document: off while a
+            // candidate owns the write, and off on the read-only applied view.
+            structuralWritesDisabled={Boolean(ctx.compose) || ctx.appliedView}
           />
           <div onFocusCapture={() => ctx.setActiveSection('transition')}>
             <EdgeInspector
@@ -274,9 +281,9 @@ export function createStrategyCanvasAdapter(
               saveStatus={ctx.saveStatuses.transition}
               onSaveStatus={(s) => ctx.onSaveStatus('transition', s)}
               onConflict={ctx.handleConflict}
-              // Compose path: the candidate document is the structural authority;
-              // the YAML transition patch stays visible, disabled, with its reason.
-              structuralWritesDisabled={Boolean(ctx.compose)}
+              // Kept visible, disabled, with its reason (the candidate owns the
+              // write while composing; the applied view is read-only).
+              structuralWritesDisabled={Boolean(ctx.compose) || ctx.appliedView}
             />
           </div>
           {ctx.promptTemplateRef ? (
@@ -292,6 +299,9 @@ export function createStrategyCanvasAdapter(
                 saveStatus={ctx.saveStatuses.prompt}
                 onSaveStatus={(s) => ctx.onSaveStatus('prompt', s)}
                 onConflict={ctx.handleConflict}
+                // The applied document is frozen; a prompt body is authored in
+                // Compose, never patched into the running strategy's file.
+                structuralWritesDisabled={ctx.appliedView}
               />
             </div>
           ) : null}

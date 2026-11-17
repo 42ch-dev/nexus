@@ -159,6 +159,60 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
     expect(client.strategyPatchState).not.toHaveBeenCalled();
   });
 
+  it('keeps the applied view read-only: every YAML editor refuses its write and names Compose', () => {
+    const client = {
+      strategyPatchState: vi.fn(),
+      strategyPatchTransition: vi.fn(),
+      strategyPatchPromptTemplate: vi.fn(),
+    } as unknown as NexusClient;
+    const adapter = createStrategyCanvasAdapter(
+      ctxRef({
+        appliedView: true,
+        selectedState: {
+          id: 'draft',
+          next: 'done',
+          context_update: { template_file: 'prompts/draft.md' },
+        } as PresetState,
+        promptTemplateRef: 'prompts/draft.md',
+        form: {
+          label: 'Draft (renamed)',
+          description: '',
+          nextTarget: 'revise',
+          promptBody: '# edited prompt',
+        },
+      }),
+    );
+
+    renderInApp(<>{adapter.renderInspector?.(null as never)}</>, { client });
+
+    // The applied document is the running strategy. Rendering it must not give
+    // any control a way to write the preset file behind it — the very defect
+    // this covers is a canvas that displayed one revision and patched another.
+    const reason = /author the change in Compose/;
+    const state = screen.getByRole('region', { name: 'State inspector' });
+    expect(within(state).getByTestId('state-structural-disabled')).toHaveTextContent(reason);
+    const stateSave = within(state).getByRole('button', { name: 'Save' });
+    expect(stateSave).toBeDisabled();
+    fireEvent.click(stateSave);
+
+    const transition = screen.getByRole('region', { name: 'Transition inspector' });
+    expect(within(transition).getByTestId('transition-structural-disabled')).toHaveTextContent(reason);
+    const transitionSave = within(transition).getByRole('button', { name: 'Save' });
+    expect(transitionSave).toBeDisabled();
+    fireEvent.click(transitionSave);
+
+    const prompt = screen.getByRole('region', { name: 'Prompt inspector' });
+    expect(within(prompt).getByTestId('prompt-structural-disabled')).toHaveTextContent(reason);
+    expect(within(prompt).getByRole('textbox')).toBeDisabled();
+    const promptSave = within(prompt).getByRole('button', { name: 'Save' });
+    expect(promptSave).toBeDisabled();
+    fireEvent.click(promptSave);
+
+    expect(client.strategyPatchState).not.toHaveBeenCalled();
+    expect(client.strategyPatchTransition).not.toHaveBeenCalled();
+    expect(client.strategyPatchPromptTemplate).not.toHaveBeenCalled();
+  });
+
   it('merges a local draft edge into the projection', () => {
     const draft = {
       id: 'draft-edge',

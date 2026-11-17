@@ -767,7 +767,7 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
 
     renderCanvas();
     // The applied read is async; wait for the rendered preset before asserting.
-    await screen.findByRole('button', { name: 'Create' });
+    await screen.findByRole('button', { name: 'Simulate…' });
 
     // No Staging badge, no Add pattern entry point.
     expect(screen.queryByTestId('strategy-staging')).not.toBeInTheDocument();
@@ -776,10 +776,12 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
     expect(irReads).toBe(0);
     expect(patternReads).toBe(0);
 
-    // The legacy transition author and both connection gestures stay exactly where they were.
-    expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
-    expect(typeof shellProps.current.onConnect).toBe('function');
-    expect(typeof shellProps.current.onReconnect).toBe('function');
+    // The applied view is read-only (P6 condition 2): the YAML transition author
+    // and both connection gestures write the preset file, which is not the
+    // document on canvas, so neither is offered — editing goes through Compose.
+    expect(screen.queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
+    expect(shellProps.current.onConnect).toBeUndefined();
+    expect(shellProps.current.onReconnect).toBeUndefined();
 
     // Today's Simulate behaviour: resolve the installed preset IR and walk it.
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));

@@ -397,6 +397,7 @@
     },
     "inspector": {
       "ariaLabel": "Harness 检查器",
+      "structuralDisabled": "画布展示的是文档，而非此编辑器写入的预设 YAML —— 请在 Compose 中编辑并应用。",
       "state": {
         "title": "状态",
         "ariaLabel": "状态检查器",
@@ -406,8 +407,7 @@
         "saved": "已保存",
         "saveFailed": "保存失败",
         "saving": "保存中…",
-        "updated": "状态已更新",
-        "composeDisabled": "组合期间状态由候选文档写入，此 YAML 编辑器已禁用。"
+        "updated": "状态已更新"
       },
       "transition": {
         "title": "转换",
@@ -417,8 +417,7 @@
         "saved": "已保存",
         "saveFailed": "保存失败",
         "saving": "保存中…",
-        "updated": "转换已更新",
-        "composeDisabled": "组合期间转换由候选文档写入，此 YAML 编辑器已禁用。"
+        "updated": "转换已更新"
       },
       "prompt": {
         "title": "提示词",

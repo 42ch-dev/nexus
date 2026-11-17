@@ -92,10 +92,18 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   const document = composeEnabled
     ? (compose.workingDocument ?? appliedDocument)
     : appliedDocument;
+  // The document being rendered is the applied (running) strategy: it is what
+  // apply/approve produced, so this view is read-only and editing goes through
+  // Compose (P6 condition 2, D18).
+  const appliedView = document === appliedDocument;
+  // No rendered document is authored in place — the applied view is the running
+  // strategy and a compose candidate is written through compose ops — so the
+  // preset-YAML structural author is never offered and never dispatched.
+  const yamlWritesDisabled = appliedView || composeEnabled;
   const strategyState = useStrategyCanvas(
     presetId,
     { document, refetch: () => applied.refetch() },
-    composeEnabled,
+    yamlWritesDisabled,
   );
   const approval = useApproveStrategy(presetId);
   const application = useApplyStrategy(presetId);
@@ -135,6 +143,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     onDismiss: () => {},
     danglingTargets: [],
     localEdges: [],
+    appliedView,
   });
 
   const adapter = useMemo(() => createStrategyCanvasAdapter(ctxRef), []);
@@ -331,6 +340,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     onDismiss: () => strategyState.setConflict(null),
     danglingTargets: ctxRef.current.danglingTargets,
     localEdges: strategyState.draftEdges as Edge<StrategyEdgeData>[],
+    appliedView,
     patterns: compose.patternsQuery.data?.items,
     ...(composeEnabled
       ? {
@@ -374,9 +384,9 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       'strategy.create-transition.keywords.link-states',
     ],
     handler: () => setCreateDialogOpen(true),
-    // Compose path: the candidate is the one structural authority, so the YAML
-    // transition author stays out of the palette (D: one writer per path).
-    available: () => !composeEnabled,
+    // The YAML transition author writes the preset file, which is never the
+    // document on canvas — neither the applied view nor a compose candidate.
+    available: () => !yamlWritesDisabled,
   });
 
   useEffect(() => {
@@ -474,7 +484,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         activeSession={strategyState.activeSession}
         showAlt={surface.showAlt}
         setShowAlt={surface.setShowAlt}
-        onOpenCreateTransition={composeEnabled ? undefined : () => setCreateDialogOpen(true)}
+        onOpenCreateTransition={yamlWritesDisabled ? undefined : () => setCreateDialogOpen(true)}
         onSimulate={handleSimulate}
         staging={composeEnabled}
         onAddPattern={composeEnabled ? () => setPatternPickerOpen(true) : undefined}
@@ -488,10 +498,11 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
           edges={surface.edges}
           nodeTypes={surface.nodeTypes}
           onNodesChange={surface.onNodesChange}
-          // Compose path: a displayed edge is never authored through the YAML
-          // authority — connect/reconnect write the preset, not the candidate.
-          onConnect={composeEnabled ? undefined : onConnect}
-          onReconnect={composeEnabled ? undefined : strategyState.onReconnect}
+          // A displayed edge is never authored through the YAML authority: the
+          // applied view is read-only and connect/reconnect write the preset,
+          // not the candidate, so neither gesture is offered.
+          onConnect={yamlWritesDisabled ? undefined : onConnect}
+          onReconnect={yamlWritesDisabled ? undefined : strategyState.onReconnect}
           summaryText={surface.summaryText}
           ariaLabel={t('strategy.graphAriaLabel')}
           relayout={surface.relayout}
@@ -518,7 +529,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
                 isCommitting={strategyState.isCommittingDraft}
                 onCommit={strategyState.commitDraft}
                 onCancel={strategyState.cancelDraft}
-                structuralWritesDisabled={composeEnabled}
+                structuralWritesDisabled={yamlWritesDisabled}
               />
             </aside>
           ) : null}

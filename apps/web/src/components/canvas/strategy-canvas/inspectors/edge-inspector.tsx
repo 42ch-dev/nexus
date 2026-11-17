@@ -162,7 +162,7 @@ export function EdgeInspector({
       </label>
       {structuralWritesDisabled ? (
         <p data-testid="transition-structural-disabled" className="text-copy-12 text-gray-700">
-          {t('strategy.inspector.transition.composeDisabled')}
+          {t('strategy.inspector.structuralDisabled')}
         </p>
       ) : saveStatus ? (
         <p
@@ -280,7 +280,7 @@ export function DraftEdgeInspector({
       </label>
       {structuralWritesDisabled ? (
         <p data-testid="draft-transition-structural-disabled" className="text-copy-12 text-gray-700">
-          {t('strategy.inspector.transition.composeDisabled')}
+          {t('strategy.inspector.structuralDisabled')}
         </p>
       ) : null}
     </section>
