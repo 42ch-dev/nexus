@@ -828,6 +828,9 @@ test("a tracked relative symlink stages verbatim, so a clean checkout is clean e
       "../../.agents/skills/probe",
       join(dir, ".claude/skills/probe"),
     );
+    // A link may point at a path that is not materialized in this checkout; it
+    // is still one tree entry with its own bytes, and staging must copy it.
+    symlinkSync("../../.agents/skills/absent", join(dir, ".claude/skills/absent"));
     gitOk(dir, ["add", "-A"]);
     gitOk(dir, [
       "-c",

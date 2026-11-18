@@ -69,6 +69,7 @@ import {
   readlinkSync,
   rmSync,
   statSync,
+  symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
@@ -300,11 +301,12 @@ function workingSourcePaths(repoRoot) {
  * executable bits and symlinks are preserved because packed build scripts and
  * tools depend on them.
  *
- * `verbatimSymlinks` copies a link's target bytes instead of resolving them
- * against the source directory: a tracked relative link (this repository keeps
- * three under `.claude/skills/`) must stay relative, or {@link verifyStagedSource}
- * compares an absolute path with the revision's stored target and reports a
- * clean checkout as unclean.
+ * Symlinks are re-created with their stored target bytes rather than copied by
+ * `cpSync`, which resolves the target against the source directory (an absolute
+ * path in the copy, which {@link verifyStagedSource} then reads as a mismatch on
+ * a clean checkout — this repository keeps three such links under
+ * `.claude/skills/`) and refuses one whose target is absent. A link is data:
+ * its bytes are what Git stores, so nothing else is needed.
  *
  * @param {string} repoRoot
  * @param {string} stageRoot
@@ -329,10 +331,12 @@ function stageWorkingSource(repoRoot, stageRoot) {
     }
     const destination = join(stageRoot, path);
     mkdirSync(dirname(destination), { recursive: true });
-    cpSync(source, destination, { recursive: true, verbatimSymlinks: true });
-    if (!stats.isSymbolicLink()) {
-      chmodSync(destination, stats.mode);
+    if (stats.isSymbolicLink()) {
+      symlinkSync(readlinkSync(source), destination);
+      continue;
     }
+    cpSync(source, destination, { recursive: true });
+    chmodSync(destination, stats.mode);
   }
 }
 
@@ -684,7 +688,7 @@ function runConsumer({
   }
 
   const consumerRoot = join(scratchRoot, "consumers", entryName);
-  cpSync(fixturePath, consumerRoot, { recursive: true, verbatimSymlinks: true });
+  cpSync(fixturePath, consumerRoot, { recursive: true });
   /** @type {ConsumerEvidence} */
   const evidence = {
     case: `${CONSUMER_FIXTURES_PATH}/${entryName}`,
