@@ -233,7 +233,11 @@ fn rebuild_registry_inner(
 ) -> (CapabilityRegistry, ScanOutcome) {
     #[cfg(not(feature = "wasm"))]
     let _ = _executor;
-    let builtin_names: HashSet<&str> = reg.capabilities.iter().map(|c| c.name()).collect();
+    // Collision ownership derives from THE DECLARATION (C3 contract), never
+    // from constructed handler objects: the watcher rebuild gates against
+    // the preset catalog's canonical names, so a builtin declared without a
+    // handler object still cannot be claimed by a user capability.
+    let builtin_names: HashSet<&str> = nexus_preset::capability_catalog::builtin_names().collect();
     #[cfg(feature = "wasm")]
     let scan = match executor {
         Some((engine, module_cache)) => scan::scan_user_capabilities_with_executor(

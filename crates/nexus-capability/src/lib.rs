@@ -1140,9 +1140,10 @@ impl nexus_preset::capability_catalog::CapabilityCatalog for CapabilityRegistry 
     /// declaration's own schema answers, because this reads the descriptor
     /// surface, not the executable lookup.
     fn input_schema(&self, name: &str) -> Option<&str> {
-        let idx = self.index.as_ref()?;
-        let pos = idx.get(name)?;
-        Some(self.capabilities[*pos].input_schema())
+        if let Some(pos) = self.index.as_ref().and_then(|idx| idx.get(name)) {
+            return Some(self.capabilities[*pos].input_schema());
+        }
+        nexus_preset::capability_catalog::builtin_input_schema(name)
     }
 }
 
@@ -1450,6 +1451,82 @@ mod tests {
         // it lives in the reservation instead.
         assert!(!names.contains(&"narrative.compute"));
         assert!(reg.reserved_names().any(|n| n == "narrative.compute"));
+    }
+
+    /// QC2-02 property, proved on the DECLARATION (C3 contract): a canonical
+    /// builtin stays describable and reserved even when NO handler object is
+    /// constructed for it.
+    ///
+    /// `CapabilityRegistry::empty()` is the honest staging — it carries no
+    /// rows at all (no fake builtin is shipped), yet the preset declaration
+    /// reserves and describes every canonical name: reservation, collision
+    /// ownership and metadata derive from
+    /// [`nexus_preset::capability_catalog::builtin_names`], never from
+    /// constructed handler objects.
+    #[test]
+    fn declaration_preserves_a_builtin_without_a_handler_object() {
+        use nexus_preset::capability_catalog::CapabilityCatalog;
+        use std::collections::HashSet;
+
+        let reg = CapabilityRegistry::empty();
+        assert!(
+            reg.iter().next().is_none() && reg.capabilities.is_empty(),
+            "no handler object is constructed for any builtin"
+        );
+
+        // Describable purely by the declaration.
+        assert_eq!(
+            CapabilityCatalog::input_schema(&reg, "narrative.compute"),
+            Some(nexus_preset::capability_catalog::NARRATIVE_COMPUTE_INPUT_SCHEMA),
+            "a declared builtin with no handler resolves its schema"
+        );
+
+        // Reserved purely by the declaration — the dispatch discriminator
+        // treats it as known (WorkerUnavailable before any effect).
+        assert!(reg.get("narrative.compute").is_none());
+        assert!(reg.is_reserved_only("narrative.compute"));
+
+        // The generation projection holds every declared name, and the
+        // collision set a scan receives IS that projection.
+        let generation: HashSet<&str> = reg.reserved_names().collect();
+        for declared in nexus_preset::capability_catalog::builtin_names() {
+            assert!(
+                generation.contains(&declared),
+                "declared '{declared}' is reserved with no handler object"
+            );
+        }
+
+        // And the holder's accumulated projection inherits it through the
+        // boot swap.
+        let holder = CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
+            CapabilityRegistry::empty(),
+        ));
+        assert!(
+            holder.reserved_names().any(|n| n == "narrative.compute"),
+            "the holder reserves the declared name with no handler object"
+        );
+    }
+
+    /// Anti-drift anchor for the declaration roster: every builtin row the
+    /// registry constructs must name a DECLARATION entry. A builtin added to
+    /// the registry without a declaration entry (or vice versa, caught by
+    /// the preset crate's own roster/schema lockstep test) turns this red —
+    /// the two surfaces cannot drift apart silently.
+    #[test]
+    fn every_constructed_builtin_names_a_declaration_entry() {
+        use std::collections::HashSet;
+        let declared: HashSet<&str> = nexus_preset::capability_catalog::builtin_names().collect();
+        let reg = CapabilityRegistry::with_builtins();
+        for cap in reg.iter() {
+            assert!(
+                declared.contains(cap.name()),
+                "builtin '{}' is constructed but not declared in capability_catalog",
+                cap.name()
+            );
+        }
+        // The carried-row count equals the declaration: nothing declared is
+        // missing from the boot registry either.
+        assert_eq!(reg.len(), declared.len());
     }
 
     /// The runtime-deps registry is the supported executable path for the

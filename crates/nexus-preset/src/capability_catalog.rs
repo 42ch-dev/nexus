@@ -293,3 +293,31 @@ pub const WORKSPACE_COMMIT_INPUT_SCHEMA: &str = r#"{"type":"object","properties"
 
 /// Input schema for `workspace.open`.
 pub const WORKSPACE_OPEN_INPUT_SCHEMA: &str = r#"{"type":"object","properties":{"path":{"type":"string","minLength":1,"maxLength":4096,"pattern":"^(?!/)(?!.*\.\.)[^/]+(?:/[^/]+)*$"}},"required":["path"],"additionalProperties":false}"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The declaration roster is in lockstep with the schema match: every
+    /// declared name resolves a schema — a roster entry missing from the
+    /// match would leave a builtin undescribable.
+    #[test]
+    fn every_declared_name_resolves_a_schema() {
+        for name in BUILTIN_CAPABILITY_NAMES {
+            assert!(
+                builtin_input_schema(name).is_some(),
+                "declared builtin '{name}' has no input schema"
+            );
+        }
+    }
+
+    /// Count anchor for the other direction (a match key without a roster
+    /// entry): the capability registry carries exactly this many builtin
+    /// rows and asserts every carried builtin name is IN this declaration —
+    /// a match key missing here surfaces there as a builtin outside the
+    /// declaration.
+    #[test]
+    fn declaration_has_thirty_two_canonical_names() {
+        assert_eq!(BUILTIN_CAPABILITY_NAMES.len(), 32);
+    }
+}
