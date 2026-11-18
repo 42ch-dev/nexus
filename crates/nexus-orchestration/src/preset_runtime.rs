@@ -1,6 +1,6 @@
 //! Execution-only preset graph construction and provider binding creation.
 
-use crate::capability::CapabilityRegistry;
+use nexus_capability::CapabilityRegistry;
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
     WorkflowDocument, WorkflowNodeKind,
 };
@@ -27,7 +27,7 @@ pub fn default_bindings_for_preset(
     preset_id: &str,
     provider_id: &str,
 ) -> Option<std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>> {
-    let caps = crate::capability::CapabilityRegistry::with_builtins();
+    let caps = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset(preset_id, &caps).ok()?;
     let roles = required_prompt_roles(&loaded.manifest);
     if roles.is_empty() {
@@ -181,8 +181,8 @@ pub fn build_wired_outer_graph(
     loaded: &LoadedPreset,
     engine: &Arc<dyn crate::engine::OrchestrationEngine>,
     caps: &Arc<CapabilityRegistry>,
-    daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
-    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
+    prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
@@ -684,8 +684,8 @@ pub fn build_wired_outer_graph_from_ir(
     template_source: IrTemplateSource,
     engine: &Arc<dyn crate::engine::OrchestrationEngine>,
     caps: &Arc<CapabilityRegistry>,
-    daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
-    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
+    prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
@@ -1082,7 +1082,7 @@ fn build_inner_graphs(
     manifest: &PresetManifest,
     preset_id: &str,
     source_identity: Option<&nexus_preset::source_identity::PresetSourceIdentity>,
-    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
@@ -1130,7 +1130,7 @@ fn build_inner_graphs(
                                 node.tool_policy
                                     .as_ref()
                                     .and_then(|s| std::str::FromStr::from_str(s.as_str()).ok())
-                                    .unwrap_or(crate::tasks::ToolPolicy::AutoGrantReadOnly),
+                                    .unwrap_or(nexus_capability::ToolPolicy::AutoGrantReadOnly),
                             )
                             // Resolved template content (rendered at runtime)
                             .with_template(template)
@@ -1252,7 +1252,8 @@ mod tests {
         async fn list_active(
             &self,
             _: crate::engine::SessionFilter,
-        ) -> Result<Vec<nexus_session_storage::SessionSummary>, crate::engine::EngineError> {
+        ) -> Result<Vec<nexus_session_storage::SessionSummary>, crate::engine::EngineError>
+        {
             unimplemented!()
         }
         async fn spawn_child_session(
@@ -1529,16 +1530,16 @@ states:
     }
 
     #[async_trait::async_trait]
-    impl crate::capability::PromptExecutor for RecordingExecutor {
+    impl nexus_capability::PromptExecutor for RecordingExecutor {
         async fn execute(
             &self,
-            request: crate::capability::PromptRequest,
-        ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError> {
+            request: nexus_capability::PromptRequest,
+        ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError> {
             self.calls
                 .lock()
                 .expect("recording executor lock")
                 .push((request.task_id.clone(), request.prompt.clone()));
-            Ok(crate::capability::PromptResult {
+            Ok(nexus_capability::PromptResult {
                 full_text: format!("{} output", request.task_id),
                 host_session_id: format!("host:{}", request.run_id),
                 operation_id: "op-1".to_string(),
@@ -1686,7 +1687,8 @@ states:
         async fn list_active(
             &self,
             _: crate::engine::SessionFilter,
-        ) -> Result<Vec<nexus_session_storage::SessionSummary>, crate::engine::EngineError> {
+        ) -> Result<Vec<nexus_session_storage::SessionSummary>, crate::engine::EngineError>
+        {
             unimplemented!("inner-graph trace does not drive the outer engine")
         }
         async fn get_current_task_id(
@@ -2422,12 +2424,13 @@ states:
             IrTemplateSource, OuterGraphProjection, ProjectedEdge, ProjectedTask,
         };
         use super::{ir_document, no_cancels, ChildRunningEngine, UnreachableEngine};
-        use crate::capability::{
-            Capability, CapabilityError, CapabilityRegistry, DaemonToolDispatch, PromptExecutor,
-            PromptRequest, PromptResult,
-        };
         use crate::engine::OrchestrationEngine;
         use graph_flow::{Context, ExecutionStatus, Graph, NextAction, Session};
+        use nexus_capability::CapabilityRegistry;
+        use nexus_capability::{
+            Capability, CapabilityError, DaemonToolDispatch, PromptExecutor, PromptRequest,
+            PromptResult,
+        };
         use nexus_preset::load_preset_from_str;
         use nexus_preset::manifest::PresetManifest;
         use std::collections::{BTreeMap, HashMap};
@@ -3017,7 +3020,7 @@ states:
             recorder: &Recorder,
             scripted: &[(&'static str, serde_json::Value)],
         ) -> Arc<CapabilityRegistry> {
-            crate::capability::test_support::registry_with(
+            nexus_capability::test_support::registry_with(
                 scripted
                     .iter()
                     .map(|(name, output)| {

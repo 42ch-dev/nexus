@@ -12,15 +12,13 @@
 #![cfg(feature = "execution")]
 
 use async_trait::async_trait;
+use nexus_capability::{CapabilityError, PromptExecutor, PromptRequest, PromptResult};
 use nexus_contracts::{
     CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply,
 };
 use nexus_core::owner::ExecutionOpenError;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, ExecutionBuildObserver, RunnerDeps};
 use nexus_execution::workflow::{RunControlError, RunSignal};
-use nexus_orchestration::capability::{
-    CapabilityError, PromptExecutor, PromptRequest, PromptResult,
-};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use nexus_session_storage::run_state::WorkflowStateStore;
 use std::future::Future;

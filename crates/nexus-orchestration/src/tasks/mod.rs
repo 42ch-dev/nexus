@@ -12,10 +12,11 @@
 //! - If `_trace_file` is present in context, append start/finish trace events
 //!   best-effort using the DTOs from `nexus-contracts::local::acp_runtime::trace`.
 
-use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::engine::OrchestrationEngine;
 use async_trait::async_trait;
 use graph_flow::{Graph, NextAction, Task, TaskResult};
+use nexus_capability::CapabilityRegistry;
+use nexus_capability::{CapabilityError, ToolPolicy};
 use nexus_preset::manifest::{ConvergeConfig, ConvergeStrategy};
 use nexus_preset::manifest::{EnterAction, ExitWhen, MergeKind, NextTarget, StateDefinition};
 use nexus_session_storage::SessionId;
@@ -67,9 +68,27 @@ impl Task for CapabilityTask {
         let name: String = context.get("_capability_name").unwrap_or_default();
         let input: Value = context.get("_capability_input").unwrap_or(Value::Null);
 
-        let cap = self.registry.get(&name).ok_or_else(|| {
-            graph_flow::GraphError::TaskExecutionFailed(format!("capability not found: {name}"))
-        })?;
+        // Resolve the capability (C3 contract): a reserved-only name —
+        // admitted without a binding in this build — refuses BEFORE any
+        // effect with the same TaskResult shape run() would produce for its
+        // worker refusal; unknown names keep the existing not-found refusal.
+        let cap = match self.registry.get(&name) {
+            Some(cap) => cap,
+            None if self.registry.is_reserved_only(&name) => {
+                let unavailable = CapabilityError::WorkerUnavailable;
+                context.set("_capability_error", format!("{unavailable}"))?;
+                return Ok(TaskResult::new_with_status(
+                    Some(format!("capability error: {unavailable}")),
+                    NextAction::Continue,
+                    Some(format!("capability '{name}' failed: {unavailable}")),
+                ));
+            }
+            None => {
+                return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "capability not found: {name}"
+                )));
+            }
+        };
 
         // A capability invocation may perform an external effect (capability
         // calls can trigger provider/prompt/host activity). Mark the step as
@@ -528,13 +547,29 @@ impl LlmJudgeTask {
             }
         }
 
-        // 3. Resolve the capability from the registry.
-        let cap = self.registry.get(&self.capability_name).ok_or_else(|| {
-            graph_flow::GraphError::TaskExecutionFailed(format!(
-                "judge capability '{}' not found in registry",
-                self.capability_name
-            ))
-        })?;
+        // 3. Resolve the capability from the registry (C3 contract: a
+        // reserved-only name — admitted without a binding in this build —
+        // refuses with the existing WorkerUnavailable BEFORE any effect;
+        // unknown names keep the existing not-found refusal).
+        let cap = match self.registry.get(&self.capability_name) {
+            Some(cap) => cap,
+            None if self.registry.is_reserved_only(&self.capability_name) => {
+                tracing::warn!(
+                    capability = %self.capability_name,
+                    "judge capability reserved without a binding; returning NOGO"
+                );
+                return Ok((
+                    false,
+                    "judge.llm: worker unavailable — cannot evaluate, waiting".to_string(),
+                ));
+            }
+            None => {
+                return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "judge capability '{}' not found in registry",
+                    self.capability_name
+                )));
+            }
+        };
 
         // 4. Invoke the capability.
         match cap.run(input).await {
@@ -683,14 +718,16 @@ impl LlmExtractTask {
         // capability refuses a missing target rather than extracting under an
         // invented policy, so the task surfaces that refusal to its caller.
         let target = match context.get::<serde_json::Value>("_extract_target") {
-            Some(value) => match crate::quality_loop::ExtractionTarget::from_context(&value) {
-                Ok(target) => target,
-                Err(e) => {
-                    return Ok(crate::quality_loop::LlmExtractOutcome::Refused(format!(
-                        "extract target: {e}"
-                    )));
+            Some(value) => {
+                match nexus_capability::extraction_target::ExtractionTarget::from_context(&value) {
+                    Ok(target) => target,
+                    Err(e) => {
+                        return Ok(crate::quality_loop::LlmExtractOutcome::Refused(format!(
+                            "extract target: {e}"
+                        )));
+                    }
                 }
-            },
+            }
             None => {
                 return Ok(crate::quality_loop::LlmExtractOutcome::Refused(
                     "missing trusted extraction target: the orchestration caller must resolve \
@@ -815,7 +852,7 @@ pub struct StateCompositeTask {
     /// Shared capability registry (injected by the engine; falls back to builtins if None).
     registry: Option<std::sync::Arc<CapabilityRegistry>>,
     /// Daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
-    daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
+    daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
     /// Merge semantics for states with multiple incoming labeled edges (V1.52 T-B P1).
     merge_kind: Option<MergeKind>,
     /// Expected number of incoming labeled edges for merge nodes.
@@ -847,7 +884,7 @@ pub struct StateCompositeTask {
     /// `_context.workspace` object from the daemon's shared workspace
     /// authority at expression-evaluation time. Wired by the production
     /// loader; `None` for engines/tests without a provider.
-    workspace_state_provider: Option<Arc<dyn crate::capability::WorkspaceStateProvider>>,
+    workspace_state_provider: Option<Arc<dyn nexus_capability::WorkspaceStateProvider>>,
     /// Bounded-join deadline in milliseconds for this state's join gate
     /// (DR-06, v1.179). `None` = unbounded wait (legacy behaviour).
     timeout_ms: Option<u64>,
@@ -952,7 +989,7 @@ impl StateCompositeTask {
     #[must_use]
     pub fn with_daemon_tool_dispatch(
         mut self,
-        dispatch: std::sync::Arc<dyn crate::capability::DaemonToolDispatch>,
+        dispatch: std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>,
     ) -> Self {
         self.daemon_tool_dispatch = Some(dispatch);
         self
@@ -1006,7 +1043,7 @@ impl StateCompositeTask {
     #[must_use]
     pub fn with_workspace_state_provider(
         mut self,
-        provider: Arc<dyn crate::capability::WorkspaceStateProvider>,
+        provider: Arc<dyn nexus_capability::WorkspaceStateProvider>,
     ) -> Self {
         self.workspace_state_provider = Some(provider);
         self
@@ -2233,7 +2270,7 @@ impl Task for StateCompositeTask {
 pub struct InnerGraphNodeTask {
     id: String,
     /// Production prompt executor. `None` for stub/test mode.
-    executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     /// Per-run coordinator cancellation tokens (A1).
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
@@ -2286,7 +2323,7 @@ impl InnerGraphNodeTask {
     #[must_use]
     pub fn with_prompt_executor(
         mut self,
-        executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+        executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     ) -> Self {
         self.executor = executor;
         self
@@ -2412,25 +2449,19 @@ impl Task for InnerGraphNodeTask {
 // AcpPromptTask (dispatches prompt through the Host plane)
 // ---------------------------------------------------------------------------
 
-/// Tool policy for ACP prompt sessions (A1).
-///
-/// Design: `orchestration-engine.md` §6.5. Defined in `capability` so the
-/// Host permission scope mapping lives next to the seam.
-pub use crate::capability::ToolPolicy;
-
 /// A task that sends a prompt to an ACP agent through the Host plane (A1).
 ///
 /// Design: `orchestration-engine.md` §4.4 (`AcpPromptTask` row) + A1.
 ///
 /// `run(ctx)`:
 /// 1. Renders the template with `handlebars` against `ctx` bindings.
-/// 2. Executes the prompt through the injected [`crate::capability::PromptExecutor`]
+/// 2. Executes the prompt through the injected [`nexus_capability::PromptExecutor`]
 ///    with the run/task identity and the coordinator cancellation token.
 /// 3. Stores `result.full_text` at `ctx["state.<state_id>.output"]`.
 /// 4. Returns `TaskResult { response: Some(full_text), next_action: NextAction::Continue }`.
 pub struct AcpPromptTask {
     /// Production prompt executor. `None` for test stub mode.
-    executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     /// Per-run coordinator cancellation tokens (A1).
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
@@ -2458,7 +2489,7 @@ impl AcpPromptTask {
     /// `session_id`: optional session ID for multi-agent routing. If `None`,
     /// defaults to `"default"` for backward compatibility with single-agent workers.
     pub fn new(
-        executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+        executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
         session_cancels: std::sync::Arc<
             std::sync::RwLock<
                 std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
@@ -2482,7 +2513,7 @@ impl AcpPromptTask {
 
     /// Test helper: create an `AcpPromptTask` with a prompt executor directly.
     pub fn new_for_test(
-        executor: std::sync::Arc<dyn crate::capability::PromptExecutor>,
+        executor: std::sync::Arc<dyn nexus_capability::PromptExecutor>,
         state_id: impl Into<String>,
         template: impl Into<String>,
         tool_policy: ToolPolicy,
@@ -2505,7 +2536,7 @@ impl AcpPromptTask {
     /// Convenience constructor for multi-agent presets where the `session_id`
     /// is known at task creation time.
     pub fn with_session_id(
-        executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+        executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
         session_cancels: std::sync::Arc<
             std::sync::RwLock<
                 std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
@@ -2575,7 +2606,7 @@ impl Task for AcpPromptTask {
             // `CancellationUnavailable` — a fresh token would be
             // uncancellable by any coordinator. The run admission path
             // (engine start/spawn/recovery) registers the token.
-            let cancellation = crate::capability::resolve_session_cancellation(
+            let cancellation = nexus_capability::resolve_session_cancellation(
                 &self.session_cancels,
                 &self.session_id,
             )
@@ -2592,7 +2623,7 @@ impl Task for AcpPromptTask {
             context.set(crate::engine::EXTERNAL_EFFECT_MARKER, true)?;
 
             let result = executor
-                .execute(crate::capability::PromptRequest {
+                .execute(nexus_capability::PromptRequest {
                     run_id: self.session_id.clone(),
                     task_id: self.state_id.clone(),
                     agent_ref: self.agent_ref.clone(),
@@ -2799,14 +2830,14 @@ fn insert_nested(
 /// Wraps an `Arc<Mutex<Option<Arc<dyn DaemonToolDispatch>>>>` for interior
 /// mutability without consuming the dispatch on use.
 type DaemonDispatchSlot = std::sync::Arc<
-    std::sync::Mutex<Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>>,
+    std::sync::Mutex<Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>>,
 >;
 
 /// A task that calls a `nexus.*` host tool through the daemon's unified registry.
 ///
 /// Production wiring for DF-47: the schedule executor can invoke read-only
 /// (or mutating) `nexus.*` tools on a configured stage in-process. The call
-/// goes directly through [`crate::capability::DaemonToolDispatch`] which is
+/// goes directly through [`nexus_capability::DaemonToolDispatch`] which is
 /// implemented in `nexus-daemon-runtime` by `DaemonToolDispatchAdapter`
 /// (`HostToolExecutor::dispatch_for_schedule`).
 ///
@@ -2815,7 +2846,7 @@ pub struct HostToolCallTask {
     /// Daemon-side tool dispatch provider (test-oriented, wraps Arc<Mutex<Option<...>>>).
     dispatch: Option<DaemonDispatchSlot>,
     /// Direct dispatch reference (production path, no Mutex overhead).
-    direct_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
+    direct_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
     /// Tool name, e.g. `"nexus.orchestration.schedule_status"`.
     tool_name: String,
     /// Tool parameters (may contain template references rendered at runtime).
@@ -2853,7 +2884,7 @@ impl HostToolCallTask {
     /// The dispatch is stored directly; `run()` skips the lock/unlock overhead.
     #[must_use]
     pub fn from_dispatch(
-        dispatch: std::sync::Arc<dyn crate::capability::DaemonToolDispatch>,
+        dispatch: std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>,
         task_id: impl Into<String>,
         tool_name: impl Into<String>,
         args: serde_json::Value,
@@ -3103,7 +3134,7 @@ mod tests {
         let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
         let engine = crate::GraphFlowEngine::new_with_storage(
             storage,
-            crate::capability::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
+            nexus_capability::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
                 CapabilityRegistry::with_builtins(),
             )),
         );
@@ -3152,18 +3183,18 @@ mod tests {
     async fn llm_judge_task_with_mock_worker_go() {
         // Prove LlmJudgeTask invokes judge.llm capability and maps GO → Continue.
         // Use the registry with a mock worker that returns "GO".
-        use crate::capability::CapabilityRuntimeDeps;
+        use nexus_capability::CapabilityRuntimeDeps;
 
         struct MockGoProvider;
 
         #[async_trait]
-        impl crate::capability::PromptExecutor for MockGoProvider {
+        impl nexus_capability::PromptExecutor for MockGoProvider {
             async fn execute(
                 &self,
-                _request: crate::capability::PromptRequest,
-            ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError>
+                _request: nexus_capability::PromptRequest,
+            ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError>
             {
-                Ok(crate::capability::PromptResult {
+                Ok(nexus_capability::PromptResult {
                     full_text: "GO — evaluation passes.".to_string(),
                     host_session_id: "host-sess".to_string(),
                     operation_id: "op-1".to_string(),
@@ -3197,18 +3228,18 @@ mod tests {
     #[tokio::test]
     async fn llm_judge_task_with_mock_worker_nogo() {
         // Prove LlmJudgeTask maps NOGO → false.
-        use crate::capability::CapabilityRuntimeDeps;
+        use nexus_capability::CapabilityRuntimeDeps;
 
         struct MockNogoProvider;
 
         #[async_trait]
-        impl crate::capability::PromptExecutor for MockNogoProvider {
+        impl nexus_capability::PromptExecutor for MockNogoProvider {
             async fn execute(
                 &self,
-                _request: crate::capability::PromptRequest,
-            ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError>
+                _request: nexus_capability::PromptRequest,
+            ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError>
             {
-                Ok(crate::capability::PromptResult {
+                Ok(nexus_capability::PromptResult {
                     full_text: "NO — stop and review.".to_string(),
                     host_session_id: "host-sess".to_string(),
                     operation_id: "op-1".to_string(),
@@ -3286,12 +3317,12 @@ mod tests {
     }
 
     #[async_trait]
-    impl crate::capability::PromptExecutor for MockExtractProvider {
+    impl nexus_capability::PromptExecutor for MockExtractProvider {
         async fn execute(
             &self,
-            _request: crate::capability::PromptRequest,
-        ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError> {
-            Ok(crate::capability::PromptResult {
+            _request: nexus_capability::PromptRequest,
+        ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError> {
+            Ok(nexus_capability::PromptResult {
                 full_text: self.response.clone(),
                 host_session_id: "host-sess".to_string(),
                 operation_id: "op-1".to_string(),
@@ -3326,7 +3357,7 @@ mod tests {
     }
 
     fn extract_registry_with_mock(response: &str) -> Arc<CapabilityRegistry> {
-        use crate::capability::CapabilityRuntimeDeps;
+        use nexus_capability::CapabilityRuntimeDeps;
         let map = session_cancels_with_default();
         // The capability resolves the coordinator token of the fixture's run id
         // (fail-closed contract) before the prompt reaches the mock executor.
@@ -3559,13 +3590,13 @@ mod tests {
     }
 
     #[async_trait]
-    impl crate::capability::PromptExecutor for ControlledMockProvider {
+    impl nexus_capability::PromptExecutor for ControlledMockProvider {
         async fn execute(
             &self,
-            _request: crate::capability::PromptRequest,
-        ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError> {
+            _request: nexus_capability::PromptRequest,
+        ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError> {
             let resp = self.response.lock().unwrap().clone();
-            Ok(crate::capability::PromptResult {
+            Ok(nexus_capability::PromptResult {
                 full_text: resp,
                 host_session_id: "host-sess".to_string(),
                 operation_id: "op-1".to_string(),
@@ -3576,7 +3607,7 @@ mod tests {
     /// T5: novel-writing gathering exit with GO → Continue.
     #[tokio::test]
     async fn state_composite_llm_judge_go_continues() {
-        use crate::capability::CapabilityRuntimeDeps;
+        use nexus_capability::CapabilityRuntimeDeps;
 
         let provider = std::sync::Arc::new(ControlledMockProvider::new(
             "GO — sufficient material gathered.",
@@ -3630,7 +3661,7 @@ mod tests {
     /// T5: novel-writing gathering exit with NOGO → `WaitForInput`.
     #[tokio::test]
     async fn state_composite_llm_judge_nogo_waits() {
-        use crate::capability::CapabilityRuntimeDeps;
+        use nexus_capability::CapabilityRuntimeDeps;
 
         let provider = std::sync::Arc::new(ControlledMockProvider::new(
             "NO — need more research material.",
@@ -4020,13 +4051,13 @@ mod tests {
         struct MockExecutor;
 
         #[async_trait]
-        impl crate::capability::PromptExecutor for MockExecutor {
+        impl nexus_capability::PromptExecutor for MockExecutor {
             async fn execute(
                 &self,
-                _request: crate::capability::PromptRequest,
-            ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError>
+                _request: nexus_capability::PromptRequest,
+            ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError>
             {
-                Ok(crate::capability::PromptResult {
+                Ok(nexus_capability::PromptResult {
                     full_text: "transformed:test prompt".to_string(),
                     host_session_id: "host-sess".to_string(),
                     operation_id: "op-1".to_string(),
@@ -4061,11 +4092,11 @@ mod tests {
         }
 
         #[async_trait]
-        impl crate::capability::PromptExecutor for MarkerObservingExecutor {
+        impl nexus_capability::PromptExecutor for MarkerObservingExecutor {
             async fn execute(
                 &self,
-                _request: crate::capability::PromptRequest,
-            ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError>
+                _request: nexus_capability::PromptRequest,
+            ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError>
             {
                 let marked: bool = self
                     .ctx
@@ -4075,7 +4106,7 @@ mod tests {
                     marked,
                     "external-effect marker must be persisted BEFORE prompt dispatch"
                 );
-                Ok(crate::capability::PromptResult {
+                Ok(nexus_capability::PromptResult {
                     full_text: "observed".to_string(),
                     host_session_id: "host-sess".to_string(),
                     operation_id: "op-1".to_string(),
@@ -4206,17 +4237,17 @@ mod tests {
 
     #[derive(Default)]
     struct CapturingIdentityExecutor {
-        request: std::sync::Mutex<Option<crate::capability::PromptRequest>>,
+        request: std::sync::Mutex<Option<nexus_capability::PromptRequest>>,
     }
 
     #[async_trait]
-    impl crate::capability::PromptExecutor for CapturingIdentityExecutor {
+    impl nexus_capability::PromptExecutor for CapturingIdentityExecutor {
         async fn execute(
             &self,
-            request: crate::capability::PromptRequest,
-        ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError> {
+            request: nexus_capability::PromptRequest,
+        ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError> {
             *self.request.lock().expect("capture lock") = Some(request);
-            Ok(crate::capability::PromptResult {
+            Ok(nexus_capability::PromptResult {
                 full_text: "captured".to_string(),
                 host_session_id: "host-sess".to_string(),
                 operation_id: "op-1".to_string(),
@@ -4242,7 +4273,7 @@ mod tests {
                 .entry(sid.to_string())
                 .or_default();
         }
-        let deps = crate::capability::CapabilityRuntimeDeps {
+        let deps = nexus_capability::CapabilityRuntimeDeps {
             pool: None,
             prompt_executor: Some(executor),
             session_cancels,
@@ -5120,7 +5151,7 @@ mod tests {
     struct FixedWorkspaceStateProvider(serde_json::Value);
 
     #[async_trait]
-    impl crate::capability::WorkspaceStateProvider for FixedWorkspaceStateProvider {
+    impl nexus_capability::WorkspaceStateProvider for FixedWorkspaceStateProvider {
         async fn workspace_state(&self) -> Option<serde_json::Value> {
             Some(self.0.clone())
         }

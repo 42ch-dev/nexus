@@ -270,7 +270,7 @@ async fn rules_writes_land_under_the_registered_creative_root() {
     );
     assert_eq!(
         std::fs::read_to_string(&agents_md).expect("reset rewrites the creative-root file"),
-        nexus_orchestration::rules_layers::render_default_agents_md(WORK_REF),
+        nexus_capability::rules_layers::render_default_agents_md(WORK_REF),
         "reset must restore the default scaffold"
     );
     assert!(

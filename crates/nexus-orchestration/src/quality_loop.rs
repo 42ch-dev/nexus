@@ -33,8 +33,9 @@
 //! are **not** inserted into `kb_extract_jobs`.
 
 use crate::auto_chain::AutoChainError;
-use crate::capability::{CapabilityError, CapabilityRegistry};
-use nexus_knowledge::world_kb::KnowledgeGovernance;
+use nexus_capability::extraction_target::{resolve_extraction_target, ExtractionTarget};
+use nexus_capability::CapabilityError;
+use nexus_capability::CapabilityRegistry;
 use nexus_local_db::kb_extract_job::{insert_pending_with_llm, is_idempotent};
 use nexus_local_db::kb_relationships::{
     resolve_entity_by_canonical_name, upsert_extraction_relationship,
@@ -443,128 +444,6 @@ fn inject_source_chapters(base_payload: &str, chapters: &[i32]) -> String {
 
 // ── Trusted extraction target (v1.191 P1 T13) ─────────────────────────
 
-/// The trusted target of one production extraction run (durable §§3, 8;
-/// `holder-product.md` §11).
-///
-/// Resolved from stored state by [`resolve_extraction_target`] before the
-/// model runs, then threaded to the extraction capability as trusted context.
-/// Model output never reaches either field, so the LLM cannot mark an author
-/// secret shared and cannot name someone else's holder.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ExtractionTarget {
-    /// The World container the extracted entries belong to.
-    pub world_id: String,
-    /// The governance pair the service decided for this target.
-    pub governance: KnowledgeGovernance,
-}
-
-impl ExtractionTarget {
-    /// The trusted-context JSON field the extraction capability consumes.
-    fn context_value(&self) -> serde_json::Value {
-        serde_json::json!({
-            "world_id": self.world_id,
-            "holder_entry_id": self.governance.holder_entry_id,
-            "disclosure": self.governance.disclosure,
-        })
-    }
-
-    /// Parse a trusted target out of its context value.
-    ///
-    /// Fails closed on an empty container or a malformed native governance
-    /// pair, so a caller cannot hand the extractor an invented policy.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CapabilityError::Forbidden`] for a missing/empty `world_id` or
-    /// a pair the domain rules refuse.
-    pub(crate) fn from_context(value: &serde_json::Value) -> Result<Self, CapabilityError> {
-        let world_id = value.get("world_id").and_then(|v| v.as_str()).unwrap_or("");
-        if world_id.is_empty() {
-            return Err(CapabilityError::Forbidden(
-                "extraction target world_id must be non-empty".to_string(),
-            ));
-        }
-        let holder_entry_id = value.get("holder_entry_id").and_then(|v| v.as_str());
-        let disclosure = value.get("disclosure").and_then(|v| v.as_str());
-        nexus_knowledge::world_kb::validate_native_governance(holder_entry_id, disclosure)
-            .map_err(|e| {
-                CapabilityError::Forbidden(format!("extraction target governance: {e}"))
-            })?;
-        Ok(Self {
-            world_id: world_id.to_string(),
-            governance: KnowledgeGovernance {
-                holder_entry_id: holder_entry_id.map(str::to_owned),
-                disclosure: disclosure.map(str::to_owned),
-            },
-        })
-    }
-}
-
-/// Resolve the trusted extraction target of one production run from stored
-/// state (durable §§3, 8).
-///
-/// Two trusted steps, both outside the model's reach:
-///
-/// 1. **Stored-state recheck.** The target World must still exist and still be
-///    owned by the stored controlling Creator. A stale admission (foreign or
-///    missing World) refuses instead of extracting into a container the run is
-///    no longer authorized for.
-/// 2. **Audience resolution.** The service chooses the audience of an
-///    extraction target — `holder-product.md` §11 fixes it to the in-scope
-///    shared default, because no extraction surface carries an audience
-///    selector — and resolves the native pair through the same domain rule an
-///    authored write uses, so a private extraction target would resolve its
-///    holder the same way (never from a client or model string).
-///
-/// # Errors
-///
-/// Returns [`CapabilityError::Forbidden`] for an empty identity or an
-/// unowned/missing World, and [`CapabilityError::Internal`] on database
-/// failure or a resolution the domain rule refuses.
-pub(crate) async fn resolve_extraction_target(
-    pool: &SqlitePool,
-    creator_id: &str,
-    world_id: &str,
-) -> Result<ExtractionTarget, CapabilityError> {
-    if creator_id.is_empty() || world_id.is_empty() {
-        return Err(CapabilityError::Forbidden(
-            "extraction target requires a stored controlling creator and World".into(),
-        ));
-    }
-    match nexus_local_db::narrative_write::is_world_owned(pool, creator_id, world_id).await {
-        Ok(true) => {}
-        Ok(false) => {
-            return Err(CapabilityError::Forbidden(format!(
-                "extraction target World {world_id} is missing or not owned by creator \
-                 {creator_id}; refusing to extract"
-            )));
-        }
-        Err(e) => {
-            return Err(CapabilityError::Internal(format!(
-                "extraction target ownership recheck: {e}"
-            )));
-        }
-    }
-
-    let audience = nexus_knowledge::world_kb::KnowledgeAudience::Shared;
-    let governance = nexus_knowledge::world_kb::resolve_authored_governance(
-        nexus_knowledge::world_kb::KnowledgeAuthoringOp::Create,
-        Some(&audience),
-        None,
-    )
-    .map_err(|e| CapabilityError::Internal(format!("extraction target audience: {e}")))?
-    .ok_or_else(|| {
-        CapabilityError::Internal(
-            "the in-scope extraction audience resolved no governance pair".into(),
-        )
-    })?;
-
-    Ok(ExtractionTarget {
-        world_id: world_id.to_string(),
-        governance,
-    })
-}
-
 // ── Hook entry point ──────────────────────────────────────────────────
 
 /// Review-time KB extraction hook (V1.50 T-B P1; V1.51 T-A P0 LLM swap).
@@ -727,7 +606,7 @@ pub async fn detect_missing_kb_on_finalize(
     schedule_id: &str,
     workspace_dir: Option<&std::path::Path>,
     registry: Option<&CapabilityRegistry>,
-    executor: Option<&std::sync::Arc<dyn crate::capability::WorkspaceExecutor>>,
+    executor: Option<&std::sync::Arc<dyn nexus_capability::WorkspaceExecutor>>,
 ) -> Result<usize, AutoChainError> {
     let Some(ctx) = load_finalize_context(pool, schedule_id, workspace_dir).await? else {
         return Ok(0);
@@ -867,6 +746,12 @@ pub(crate) async fn run_llm_extract(
     let Some(registry) = registry else {
         return LlmExtractOutcome::WorkerUnavailable;
     };
+    if registry.is_reserved_only(capability_name) {
+        // Known extraction capability admitted without a binding in this
+        // build (C3 contract): the existing worker refusal BEFORE any
+        // effect — never a stand-in and never a heuristic fallback.
+        return LlmExtractOutcome::WorkerUnavailable;
+    }
     let Some(cap) = registry.get(capability_name) else {
         // A missing extraction capability is not a worker outage: refuse rather
         // than stand in with heuristic candidates (review I2).
@@ -1708,7 +1593,7 @@ async fn write_missing_kb_log(
     workspace_dir: Option<&std::path::Path>,
     ctx: &ChapterContext,
     missing: &[KbCandidate],
-    executor: Option<&std::sync::Arc<dyn crate::capability::WorkspaceExecutor>>,
+    executor: Option<&std::sync::Arc<dyn nexus_capability::WorkspaceExecutor>>,
 ) -> Result<usize, String> {
     if missing.is_empty() {
         return Ok(0);
@@ -1776,9 +1661,9 @@ async fn write_missing_kb_log(
         }
     }
 
-    let executor = crate::capability::builtins::work_commit::require_executor(executor)
+    let executor = nexus_capability::builtins::work_commit::require_executor(executor)
         .map_err(|e| format!("work artifact commit unavailable: {e}"))?;
-    crate::capability::builtins::work_commit::commit_work_bytes(
+    nexus_capability::builtins::work_commit::commit_work_bytes(
         executor, ws_dir, work_ref, &rel_child, &body,
     )
     .await

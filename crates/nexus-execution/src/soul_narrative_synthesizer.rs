@@ -13,12 +13,13 @@
 //!
 //! Missing registry/capability or `WorkerUnavailable` maps to `MemoryError`.
 
+use nexus_capability::CapabilityError;
+use nexus_capability::CapabilityRegistry;
 use nexus_creator_memory::soul_narrative::{
     SoulNarrativeDraft, SoulNarrativeSynthesisInput, SoulNarrativeSynthesizer,
 };
 use nexus_creator_memory::MemoryBearerRef;
 use nexus_creator_memory::MemoryError;
-use nexus_orchestration::capability::{CapabilityError, CapabilityRegistry};
 use serde_json::json;
 use std::sync::Arc;
 

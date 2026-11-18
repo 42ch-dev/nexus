@@ -9,8 +9,8 @@
 use nexus_contracts::local::orchestration::preset::PresetManifest;
 use nexus_preset::loader::load_preset_from_str;
 
-fn test_capability_registry() -> nexus_orchestration::capability::CapabilityRegistry {
-    nexus_orchestration::capability::CapabilityRegistry::with_builtins()
+fn test_capability_registry() -> nexus_capability::CapabilityRegistry {
+    nexus_capability::CapabilityRegistry::with_builtins()
 }
 
 // ── Role parsing tests ──────────────────────────────────────────────────────

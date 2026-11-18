@@ -5,9 +5,8 @@
 //! - `restart_durability_e2e`: verifies session survives engine restart.
 
 use graph_flow::SessionStorage;
-use nexus_orchestration::{
-    system_preset, CapabilityRegistry, GraphFlowEngine, OrchestrationEngine,
-};
+use nexus_capability::CapabilityRegistry;
+use nexus_orchestration::{system_preset, GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
 /// Run the system preset graph and verify it reaches terminal state.
@@ -17,7 +16,7 @@ async fn system_preset_runs_to_terminal_state() {
     let registry = Arc::new(CapabilityRegistry::with_builtins());
     let engine = GraphFlowEngine::new_with_storage(
         storage,
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry.clone()),
+        nexus_capability::CapabilityRegistryHolder::with_registry(registry.clone()),
     );
     let graph = system_preset::build(registry);
     let sid = engine
@@ -64,7 +63,7 @@ async fn restart_durability_e2e() {
         let registry = Arc::new(CapabilityRegistry::with_builtins());
         let engine = GraphFlowEngine::new_with_storage(
             storage,
-            nexus_orchestration::CapabilityRegistryHolder::with_registry(registry.clone()),
+            nexus_capability::CapabilityRegistryHolder::with_registry(registry.clone()),
         );
         let graph = system_preset::build(registry);
         let sid = engine

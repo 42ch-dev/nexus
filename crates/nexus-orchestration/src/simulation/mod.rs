@@ -15,7 +15,7 @@
 //! reject a producer that materialized a deferred body *and* made it edge-reachable; that body
 //! would then be walked and rolled up.
 
-use crate::CapabilityRegistryHolder;
+use nexus_capability::CapabilityRegistryHolder;
 use nexus_contracts::generated::daemon_api::orchestration::simulation_trajectory::{
     SimulationPredictedWait, SimulationPredictedWaitReason,
 };

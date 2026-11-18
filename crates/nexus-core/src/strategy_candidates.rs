@@ -22,9 +22,10 @@ use nexus_workflow_ir::{content_hash, WorkflowDocument, WorkflowDocumentState};
 use sqlx::SqlitePool;
 
 #[cfg(feature = "execution")]
-use nexus_contracts::SimulationTrajectory;
+use nexus_capability::CapabilityRegistryHolder;
 #[cfg(feature = "execution")]
-use nexus_orchestration::{simulate_document, CapabilityRegistryHolder, SimulationOptions};
+use nexus_contracts::SimulationTrajectory;
+use nexus_orchestration::{simulate_document, SimulationOptions};
 
 use crate::error::local_db_err;
 use crate::{

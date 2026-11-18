@@ -6,8 +6,9 @@
 //! - `output_binding` is read from child context and written to parent
 //! - `engine.spawn_child_session` + `engine.get_context` work on trait + impl
 
+use nexus_capability::CapabilityRegistry;
 use nexus_orchestration::engine::StepOutcome;
-use nexus_orchestration::{CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
+use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
 /// Deterministic prompt executor for the P1 cutover (no echo/worker fallback):
@@ -15,15 +16,12 @@ use std::sync::Arc;
 struct EchoExecutor;
 
 #[async_trait::async_trait]
-impl nexus_orchestration::capability::PromptExecutor for EchoExecutor {
+impl nexus_capability::PromptExecutor for EchoExecutor {
     async fn execute(
         &self,
-        request: nexus_orchestration::capability::PromptRequest,
-    ) -> Result<
-        nexus_orchestration::capability::PromptResult,
-        nexus_orchestration::capability::CapabilityError,
-    > {
-        Ok(nexus_orchestration::capability::PromptResult {
+        request: nexus_capability::PromptRequest,
+    ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError> {
+        Ok(nexus_capability::PromptResult {
             full_text: format!("inner_node:{}:echo_output", request.task_id),
             host_session_id: "host-test".to_string(),
             operation_id: "op-test".to_string(),
@@ -79,7 +77,7 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let mut engine = GraphFlowEngine::new_with_storage(
         storage,
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
+        nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
     );
     // P1 cutover: inner `acp_prompt` nodes require a prompt executor.
     engine.set_prompt_executor(
@@ -154,7 +152,7 @@ async fn spawn_child_and_get_context() {
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let engine = Arc::new(GraphFlowEngine::new_with_storage(
         storage,
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         )),
     ));

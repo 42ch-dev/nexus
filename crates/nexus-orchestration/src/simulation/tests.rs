@@ -3,7 +3,7 @@
 //! generated contract the route carries.
 
 use super::*;
-use crate::{Capability, CapabilityError};
+use nexus_capability::{Capability, CapabilityError};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -341,7 +341,7 @@ impl Capability for RecordingCap {
 #[test]
 fn a_capability_bearing_document_simulates_with_zero_dispatch() {
     let hits = Arc::new(AtomicUsize::new(0));
-    let registry = crate::capability::test_support::registry_with(vec![Box::new(RecordingCap {
+    let registry = nexus_capability::test_support::registry_with(vec![Box::new(RecordingCap {
         hits: Arc::clone(&hits),
     })]);
 

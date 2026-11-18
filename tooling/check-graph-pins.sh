@@ -95,6 +95,12 @@
 #                                 engine/Host/WASM/compute/Connect plane.
 #                                 `policy` = the private std-only compute
 #                                 policy leaf with zero dependencies.
+#                                 `capability` = the enabled Connect library
+#                                 (capability + transport, no engine plane),
+#                                 the default WASM-free capability crate, the
+#                                 real WASM host under an explicit compute
+#                                 selection, and the native factory's actual
+#                                 dependency set.
 #                                 Other plans add their cohorts as their real
 #                                 source lands; an unknown name fails.
 #   --manifest-path <Cargo.toml>  resolve every probe against that workspace.
@@ -350,18 +356,18 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "usage: $0 [--cohort domain|catalog|policy] [--manifest-path <Cargo.toml>]"
+      echo "usage: $0 [--cohort domain|catalog|policy|capability] [--manifest-path <Cargo.toml>]"
       exit 0
       ;;
     *)
-      fail "unknown argument '$1' (usage: $0 [--cohort domain|catalog|policy] [--manifest-path <Cargo.toml>])"
+      fail "unknown argument '$1' (usage: $0 [--cohort domain|catalog|policy|capability] [--manifest-path <Cargo.toml>])"
       ;;
   esac
 done
 if [[ -n "$COHORT" ]]; then
   case "$COHORT" in
-    domain | catalog | policy) ;;
-    *) fail "unknown cohort '$COHORT' (known: domain, catalog, policy)" ;;
+    domain | catalog | policy | capability) ;;
+    *) fail "unknown cohort '$COHORT' (known: domain, catalog, policy, capability)" ;;
   esac
 fi
 if [[ -n "$MANIFEST_PATH" && ! -f "$MANIFEST_PATH" ]]; then
@@ -482,6 +488,71 @@ if [[ "$COHORT" == "catalog" ]]; then
   assert_empty nexus-core "" rmcp
 
   echo "graph pins OK (cohort: catalog)"
+  exit 0
+fi
+
+# --- scoped cohort: enabled capability graph (v1.249 C4) --------------------
+# The capability extraction's integration proof, in four rows:
+#
+#  (1) The ENABLED Connect library. `connect-client,embedded-mcp` is the widest
+#      feature selection `nexus-connect` ships, and it must resolve the two
+#      planes the product keeps — the private capability crate (the registry
+#      holder and its digest-poll watcher moved there in C3) and the WS
+#      transport — while resolving NONE of the five planes the extraction cut:
+#      core, orchestration, execution, session-storage and graph-flow. C3 moved
+#      the capability tree out of orchestration, so the library edge onto
+#      orchestration is obsolete rather than optional; this cohort is what
+#      keeps it from coming back.
+#  (2) The capability crate carries no WASM edge in EITHER selection: the
+#      explicit `--no-default-features` build and the ordinary DEFAULT build
+#      (the one `cargo build -p nexus-capability` produces) are separate rows,
+#      because the claim "default excludes WASM" is about the default one.
+#      `nexus-wasm-host` is an optional dependency bound only by the `wasm`
+#      feature, so each absence pin is the visible proof of that gate.
+#  (3) An EXPLICIT compute selection binds the REAL WASM host — one version, not
+#      a stand-in — so "compute-off by default" cannot decay into "compute
+#      gone".
+#  (4) The NATIVE host keeps every dependency its hosted factory actually
+#      installs: the capability crate, the WASM host behind core's `compute`
+#      feature, the Agent Host, and core's exact resolved feature set.
+#
+# The Connect product staying engine-free is NOT asserted here: `nexus-core`'s
+# own `connect-host` cohort still links `execution` by declaration and S6 owns
+# that roster prerequisite cut. This cohort proves the library graph C4 owns.
+if [[ "$COHORT" == "capability" ]]; then
+  CONNECT_ENABLED="--no-default-features --features connect-client,embedded-mcp"
+  assert_graph_nonempty nexus-connect "$CONNECT_ENABLED"
+  assert_exactly_one nexus-connect "$CONNECT_ENABLED" nexus-capability
+  assert_exactly_one nexus-connect "$CONNECT_ENABLED" spoke-connect
+  assert_empty nexus-connect "$CONNECT_ENABLED" nexus-core
+  assert_empty nexus-connect "$CONNECT_ENABLED" nexus-orchestration
+  assert_empty nexus-connect "$CONNECT_ENABLED" nexus-execution
+  assert_empty nexus-connect "$CONNECT_ENABLED" nexus-session-storage
+  assert_empty nexus-connect "$CONNECT_ENABLED" graph-flow
+
+  # Row (2), two SELECTIONS with two claims — never one row standing in for the
+  # other (`--no-default-features` and the default selection coincide today only
+  # because `nexus-capability` declares `default = []`; a future
+  # `default = ["wasm"]` changes the ordinary build alone).
+  #
+  # Explicit `--no-default-features`: the bare crate carries no WASM edge.
+  assert_graph_nonempty nexus-capability "--no-default-features"
+  assert_empty nexus-capability "--no-default-features" nexus-wasm-host
+  # DEFAULT selection (no flag): the build `cargo build -p nexus-capability`
+  # produces carries no WASM edge. This is the row the claim "default excludes
+  # WASM" belongs to; the fixture suite flips `default = ["wasm"]` to prove it
+  # fails while the row above still passes.
+  assert_graph_nonempty nexus-capability ""
+  assert_empty nexus-capability "" nexus-wasm-host
+  # Row (3): an EXPLICIT compute selection binds the REAL WASM host.
+  assert_exactly_one nexus-capability "--features wasm" nexus-wasm-host
+
+  assert_exactly_one nexus-core-node "" nexus-capability
+  assert_exactly_one nexus-core-node "" nexus-wasm-host
+  assert_exactly_one nexus-core-node "" nexus-agent-host
+  assert_features nexus-core-node "" nexus-core "compute,default,execution,nexus-connect,operation-id,provider-host"
+
+  echo "graph pins OK (cohort: capability)"
   exit 0
 fi
 
@@ -626,10 +697,19 @@ for crate in nexus-orchestration nexus42 nexus-core-node; do
   assert_features "$crate" "" graph-flow ""
 done
 
-assert_features nexus42 "" nexus-spoke-adapter "compute,default"
+# V249 C3: the engine no longer carries a direct spoke-adapter edge, so the
+# ordinary CLI cohort resolves the adapter FEATURELESS — the compute half
+# (`default` = `compute` → nexus-wasm-host) that used to ride in through
+# `nexus-orchestration` is gone. That is the accidental-WASM removal this plan
+# owns: the CLI's own `cli` feature enables no compute route, so nothing it
+# ships loses a surface, and the Connect cohort below states its compute edge
+# explicitly instead of inheriting one.
+assert_features nexus42 "" nexus-spoke-adapter ""
 # Since v1.207 P2 the Connect-only lane boots nexus-core's peer-tools event
-# lane, which links `execution` → `nexus-orchestration` → spoke-adapter's
-# `default` (= `compute`); the guard still asserts the exact set.
-assert_features nexus42 "--no-default-features --features connect-host" nexus-spoke-adapter "compute,default"
+# lane. Since V249 C3 the compute half comes from the app's EXPLICIT
+# `nexus-spoke-adapter/compute` feature entry (peer compute + shared WASM cache
+# stay retained Connect behavior) rather than orchestration's `default`, so the
+# resolved set is `compute` alone; the guard still asserts the exact set.
+assert_features nexus42 "--no-default-features --features connect-host" nexus-spoke-adapter "compute"
 
 echo "graph pins OK"

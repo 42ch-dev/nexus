@@ -8,7 +8,7 @@
 //! 5. `world_binding` is required (R-V144P0-002: daemon-side enforcement).
 //! 6. No `review_report` state in extract preset.
 
-use nexus_orchestration::capability::CapabilityRegistry;
+use nexus_capability::CapabilityRegistry;
 use nexus_preset::load_embedded_preset;
 use nexus_preset::manifest;
 

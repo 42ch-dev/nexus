@@ -342,24 +342,21 @@ struct MockReviewExtract {
 }
 
 #[async_trait::async_trait]
-impl nexus_orchestration::capability::PromptExecutor for MockReviewExtract {
+impl nexus_capability::PromptExecutor for MockReviewExtract {
     async fn execute(
         &self,
-        request: nexus_orchestration::capability::PromptRequest,
-    ) -> Result<
-        nexus_orchestration::capability::PromptResult,
-        nexus_orchestration::capability::CapabilityError,
-    > {
+        request: nexus_capability::PromptRequest,
+    ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError> {
         *self.run_id.lock().expect("run id lock") = request.run_id;
         if self.pending {
             std::future::pending::<()>().await;
         }
         if self.failing {
-            return Err(nexus_orchestration::capability::CapabilityError::Internal(
+            return Err(nexus_capability::CapabilityError::Internal(
                 "host prompt worker failed".to_string(),
             ));
         }
-        Ok(nexus_orchestration::capability::PromptResult {
+        Ok(nexus_capability::PromptResult {
             full_text: self.response.clone(),
             host_session_id: "host-sess".to_string(),
             operation_id: "op-1".to_string(),
@@ -372,14 +369,14 @@ impl nexus_orchestration::capability::PromptExecutor for MockReviewExtract {
 /// cancellable run.
 fn review_registry(
     schedule_id: &str,
-    executor: std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
-) -> nexus_orchestration::capability::CapabilityRegistry {
+    executor: std::sync::Arc<dyn nexus_capability::PromptExecutor>,
+) -> nexus_capability::CapabilityRegistry {
     let mut cancels = std::collections::HashMap::new();
     cancels.insert(
         format!("run_{schedule_id}"),
         tokio_util::sync::CancellationToken::new(),
     );
-    let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
+    let deps = nexus_capability::CapabilityRuntimeDeps {
         pool: None,
         prompt_executor: Some(executor),
         session_cancels: std::sync::Arc::new(std::sync::RwLock::new(cancels)),
@@ -387,7 +384,7 @@ fn review_registry(
         cdn_config: None,
         workspace_executor: None,
     };
-    nexus_orchestration::capability::CapabilityRegistry::with_runtime_deps(&deps)
+    nexus_capability::CapabilityRegistry::with_runtime_deps(&deps)
 }
 
 async fn pending_rows(

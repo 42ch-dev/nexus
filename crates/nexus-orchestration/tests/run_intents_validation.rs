@@ -3,7 +3,7 @@
 //! Migrated from inline `#[cfg(test)]` in `validation.rs` to standalone
 //! integration test binary per T1 §7.5 contract.
 
-use nexus_orchestration::capability::CapabilityRegistry;
+use nexus_capability::CapabilityRegistry;
 use nexus_preset::manifest::PresetManifest;
 use nexus_preset::validation::{validate_preset_semantic, DiagnosticCategory, DiagnosticSeverity};
 

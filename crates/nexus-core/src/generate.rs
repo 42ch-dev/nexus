@@ -20,11 +20,11 @@
 //! never block. The ceiling is three rounds; exhaustion returns the LAST round's corrections and
 //! persists nothing, because the commit is reached only from a passing round.
 
+use nexus_capability::{PromptExecutor, PromptRequest, ToolPolicy};
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
     WorkflowDocumentEffectSummary, WorkflowDocumentId, WorkflowDocumentState, WorkflowEdge,
     WorkflowMeta, WorkflowNestBinding, WorkflowNode,
 };
-use nexus_orchestration::capability::{PromptExecutor, PromptRequest, ToolPolicy};
 use nexus_orchestration::preset_runtime::{
     validate_ir_buildability, IrOuterGraphError, IrTemplateSource,
 };

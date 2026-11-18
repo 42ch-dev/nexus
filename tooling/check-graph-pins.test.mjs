@@ -640,3 +640,175 @@ test('a failing census leaves no temp files behind', () => {
   assert.match(run.stdout, /--locked/);
   assert.deepEqual(readdirSync(guardTmp), [], `temp files leaked: ${readdirSync(guardTmp)}`);
 });
+
+// The five engine-plane edges the enabled Connect library must NOT resolve
+// (v1.249 C4), in script order.
+const CONNECT_FORBIDDEN = [
+  'nexus-core',
+  'nexus-orchestration',
+  'nexus-execution',
+  'nexus-session-storage',
+  'graph-flow',
+];
+
+// The real capability-extraction shape: the Connect library links the private
+// capability crate plus the WS transport; the capability crate binds
+// `nexus-wasm-host` only behind its `wasm` feature; the native host selects the
+// factory's full feature set on core. `execution` forwards through
+// `nexus-connect/peer-tools` (not `dep:`) so core keeps the implicit
+// `nexus-connect` feature the native pin asserts.
+function capabilityCrates({ connectDeps = {}, capabilityDeps = {}, extra = {} } = {}) {
+  return {
+    'nexus-connect': {
+      features: [
+        'default = []',
+        'peer-tools = []',
+        'connect-host = ["peer-tools"]',
+        'connect-client = ["connect-host"]',
+        'embedded-mcp = ["connect-client"]',
+      ],
+      deps: { 'nexus-capability': null, 'spoke-connect': null, ...connectDeps },
+    },
+    'nexus-capability': {
+      features: ['default = []', 'wasm = ["dep:nexus-wasm-host"]'],
+      deps: { 'nexus-preset': null, 'nexus-wasm-host': ', optional = true', ...capabilityDeps },
+    },
+    'nexus-preset': { deps: {} },
+    'nexus-wasm-host': { deps: {} },
+    'nexus-agent-host': { deps: {} },
+    'spoke-connect': { deps: {} },
+    'nexus-core': {
+      features: [
+        'default = []',
+        'provider-host = []',
+        'operation-id = []',
+        'execution = ["operation-id", "nexus-connect/peer-tools"]',
+        'compute = ["execution", "dep:nexus-wasm-host"]',
+      ],
+      deps: { 'nexus-connect': ', optional = true', 'nexus-wasm-host': ', optional = true' },
+    },
+    'nexus-core-node': {
+      deps: {
+        'nexus-capability': null,
+        'nexus-wasm-host': null,
+        'nexus-agent-host': null,
+        'nexus-core': ', features = ["execution", "provider-host", "compute"]',
+      },
+    },
+    ...extra,
+  };
+}
+
+function capabilityRun(root) {
+  return runGuard(['--cohort', 'capability', '--manifest-path', path.join(root, 'Cargo.toml')]);
+}
+
+test('capability cohort passes on a capability-shaped workspace', () => {
+  const root = createWorkspace(capabilityCrates());
+  const run = capabilityRun(root);
+
+  assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+  // Positive controls assert a COUNT, so a collapsed graph cannot satisfy them.
+  assert.match(run.stdout, /ok: nexus-connect --no-default-features --features connect-client,embedded-mcp resolves 3 distinct dependency package\(s\)/);
+  assert.match(run.stdout, /ok: nexus-capability single version .* for nexus-connect/);
+  assert.match(run.stdout, /ok: spoke-connect single version .* for nexus-connect/);
+  assert.match(run.stdout, /ok: nexus-orchestration absent from nexus-connect/);
+  assert.match(run.stdout, /ok: nexus-wasm-host absent from nexus-capability/);
+  assert.match(run.stdout, /ok: nexus-wasm-host single version .* for nexus-capability --features wasm/);
+  assert.match(run.stdout, /ok: nexus-capability single version .* for nexus-core-node/);
+  assert.match(run.stdout, /ok: nexus-wasm-host single version .* for nexus-core-node/);
+  assert.match(run.stdout, /graph pins OK \(cohort: capability\)$/m);
+});
+
+test('each forbidden Connect-plane edge fails the cohort', async (t) => {
+  for (const pkg of CONNECT_FORBIDDEN) {
+    await t.test(pkg, () => {
+      // The native row's `nexus-core → nexus-connect` edge would form a cycle
+      // with the very edge under test, and this case must attribute the
+      // failure to the Connect row, so the library-only shape drops the native
+      // host and keeps core a leaf.
+      const crates = capabilityCrates({ connectDeps: { [pkg]: null } });
+      delete crates['nexus-core-node'];
+      crates['nexus-core'] = { deps: {} };
+      crates[pkg] ??= { deps: {} };
+      const run = capabilityRun(createWorkspace(crates));
+
+      assert.notEqual(run.status, 0, `a real nexus-connect -> ${pkg} edge was accepted`);
+      assert.match(run.stdout, /graph pin failed/);
+      assert.match(run.stdout, new RegExp(`${pkg} must be MISSING`));
+    });
+  }
+});
+
+test('an unconditional WASM edge fails the explicit no-default row first', () => {
+  // Control for the feature gate itself: with the host as a NORMAL dependency
+  // the `--no-default-features` row (which runs first) is already red — a
+  // feature cannot be the only thing keeping the host out.
+  const run = capabilityRun(
+    createWorkspace(
+      capabilityCrates({
+        extra: {
+          'nexus-capability': {
+            features: ['default = []', 'wasm = []'],
+            deps: { 'nexus-preset': null, 'nexus-wasm-host': null },
+          },
+        },
+      }),
+    ),
+  );
+
+  assert.notEqual(run.status, 0, 'an unconditional capability -> nexus-wasm-host edge was accepted');
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(run.stdout, /nexus-wasm-host must be MISSING from nexus-capability--no-default-features/);
+});
+
+test('a `default`-selected WASM edge fails the default row only', () => {
+  // The asymmetry the finding requires: `default = ["wasm"]` changes ONLY the
+  // default selection. Probing both configurations with `--no-default-features`
+  // would leave this fixture green; the separate default row is what catches it.
+  const run = capabilityRun(
+    createWorkspace(
+      capabilityCrates({
+        extra: {
+          'nexus-capability': {
+            features: ['default = ["wasm"]', 'wasm = ["dep:nexus-wasm-host"]'],
+            deps: { 'nexus-preset': null, 'nexus-wasm-host': ', optional = true' },
+          },
+        },
+      }),
+    ),
+  );
+
+  assert.notEqual(run.status, 0, 'a default-selected WASM edge was accepted');
+  // The no-default row ran earlier and stayed green...
+  assert.match(run.stdout, /ok: nexus-wasm-host absent from nexus-capability --no-default-features/);
+  // ...and the DEFAULT selection is the row that failed.
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(run.stdout, /nexus-wasm-host must be MISSING from nexus-capability graph/);
+  assert.match(run.stdout, /found 1 entry/);
+});
+
+test('the capability cohort fails when the Connect library loses its capability edge', () => {
+  const crates = capabilityCrates();
+  delete crates['nexus-connect'].deps['nexus-capability'];
+  const run = capabilityRun(createWorkspace(crates));
+
+  assert.notEqual(run.status, 0);
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(run.stdout, /nexus-capability expected in nexus-connect.*but absent/);
+});
+
+test('the capability cohort fails when its graph is empty', () => {
+  // Declared features, zero dependencies: the absence pins would be vacuous.
+  const run = capabilityRun(
+    createWorkspace({
+      'nexus-connect': {
+        features: ['default = []', 'connect-client = []', 'embedded-mcp = ["connect-client"]'],
+        deps: {},
+      },
+    }),
+  );
+
+  assert.notEqual(run.status, 0);
+  assert.match(run.stdout, /absence pins would be vacuous/);
+});

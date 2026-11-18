@@ -889,9 +889,7 @@ pub fn reserved_host_tool_ids() -> impl Iterator<Item = &'static str> {
 /// Look up one canonical row by its wire id.
 #[must_use]
 pub fn lookup_host_tool(id: &str) -> Option<&'static HostToolMetadata> {
-    host_tool_catalog()
-        .iter()
-        .find(|row| row.id.as_str() == id)
+    host_tool_catalog().iter().find(|row| row.id.as_str() == id)
 }
 
 #[cfg(test)]
@@ -942,7 +940,8 @@ mod tests {
                     )
                 });
             assert_eq!(
-                parsed["type"], "object",
+                parsed["type"],
+                "object",
                 "canonical tool '{}' must declare a root object schema",
                 row.id.as_str()
             );

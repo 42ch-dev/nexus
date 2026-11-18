@@ -1367,8 +1367,8 @@ mod tests {
         let engine = WasmEngine::new().unwrap();
         let manifest = make_manifest(
             "over-the-limit",
-            Some(DEFAULT_FUEL * 10), // 10× host default
-            Some(DEFAULT_MEMORY_MIB * 4), // 4× host default
+            Some(DEFAULT_FUEL * 10),                   // 10× host default
+            Some(DEFAULT_MEMORY_MIB * 4),              // 4× host default
             Some(wall_time_ms(DEFAULT_WALL_TIME) * 5), // 5× host default
         );
         let resolved = engine.resolve_sandbox(&manifest);

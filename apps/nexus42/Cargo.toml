@@ -81,6 +81,7 @@ required-features = ["connect-host"]
 
 [dependencies]
 nexus-contracts = { path = "../../crates/nexus-contracts" }
+nexus-capability = { path = "../../crates/nexus-capability" }
 nexus-home-layout = { path = "../../crates/nexus-home-layout" }
 # §2.1 basic allowlist: available to BOTH cohorts as a normal dependency —
 # the `basic-cli` feature must not be a dependency switch (it is `[]`).

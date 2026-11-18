@@ -61,7 +61,7 @@ test-hooks = [
     # provider.
     "nexus-memory-provider/test-hooks",
 ]
-compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute"]
+compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute", "nexus-capability/wasm"]
 # Connect-host product cohort (v1.207 P2): the WS accept loop, per-session
 # monitoring and the peer-tools event lane the shipped `nexus-runtime` /
 # `nexus42 connect start` boot. This is the Connect-host surface only — it
@@ -95,6 +95,11 @@ memory-remote = [
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+# V249: capability port/error contract moved to the private capability crate.
+# The executable WASM gate is selected explicitly by this crate's `compute`
+# feature (C3) — the default build carries the pure descriptor/scan surface
+# only and never pulls nexus-wasm-host.
+nexus-capability = { path = "../nexus-capability" }
 nexus-preset = { path = "../nexus-preset" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }

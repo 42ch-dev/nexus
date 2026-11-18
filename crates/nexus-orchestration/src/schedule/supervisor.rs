@@ -127,7 +127,7 @@ pub struct ScheduleSupervisor {
     /// a builtin; hot reloads never change builtins, so a swap cannot affect
     /// it. New graphs (which DO need hot-added user capabilities) snapshot
     /// the shared holder in the engine instead (`GraphFlowEngine::current_caps`).
-    registry: Arc<Option<std::sync::Arc<crate::capability::CapabilityRegistry>>>,
+    registry: Arc<Option<std::sync::Arc<nexus_capability::CapabilityRegistry>>>,
     /// Injected daemon admission callback (A3). When `Some`, `tick` admits a
     /// `driven_v1` pending row through [`ScheduleRunStarter::start`] (which
     /// creates the owned run + schedule→session identity atomically) instead
@@ -147,7 +147,7 @@ pub struct ScheduleSupervisor {
     ///
     /// `None` (tests, standalone supervisor) leaves those chains unable to
     /// write, which they log and skip — never a local fallback writer.
-    workspace_executor: Arc<Option<Arc<dyn crate::capability::WorkspaceExecutor>>>,
+    workspace_executor: Arc<Option<Arc<dyn nexus_capability::WorkspaceExecutor>>>,
 }
 
 struct Inner {
@@ -196,7 +196,7 @@ impl ScheduleSupervisor {
     #[must_use]
     pub fn with_capability_registry(
         mut self,
-        registry: std::sync::Arc<crate::capability::CapabilityRegistry>,
+        registry: std::sync::Arc<nexus_capability::CapabilityRegistry>,
     ) -> Self {
         self.registry = Arc::new(Some(registry));
         self
@@ -221,7 +221,7 @@ impl ScheduleSupervisor {
     #[must_use]
     pub fn with_workspace_executor(
         mut self,
-        executor: Arc<dyn crate::capability::WorkspaceExecutor>,
+        executor: Arc<dyn nexus_capability::WorkspaceExecutor>,
     ) -> Self {
         self.workspace_executor = Arc::new(Some(executor));
         self
@@ -682,11 +682,11 @@ impl ScheduleSupervisor {
         use crate::quality_loop;
         let ws_ref = self.workspace_dir.as_ref();
         let ws_path = ws_ref.as_deref();
-        let reg: Option<&crate::capability::CapabilityRegistry> =
+        let reg: Option<&nexus_capability::CapabilityRegistry> =
             self.registry.as_ref().as_ref().map(|r| &**r);
         // The Work artifact chains below commit through the SAME executor the
         // capability registry received (ADR #485 §6.1 P2 rows 5–6).
-        let executor: Option<&Arc<dyn crate::capability::WorkspaceExecutor>> =
+        let executor: Option<&Arc<dyn nexus_capability::WorkspaceExecutor>> =
             (*self.workspace_executor).as_ref();
 
         // V1.47 P0 (novel-quality-loop §5.5.6 / §8): persist ≥1 finding
@@ -1101,7 +1101,7 @@ impl ScheduleSupervisor {
         } else {
             // No configured provider: only presets WITHOUT prompt roles
             // may be enqueued (empty map passes the completeness gate).
-            let caps = crate::capability::CapabilityRegistry::with_builtins();
+            let caps = nexus_capability::CapabilityRegistry::with_builtins();
             if let Ok(loaded) = nexus_preset::load_embedded_preset(preset_id, &caps) {
                 let roles = nexus_preset::required_prompt_roles(&loaded.manifest);
                 if !roles.is_empty() {
@@ -1292,7 +1292,7 @@ impl ScheduleSupervisor {
         let Some(ref ws_dir) = *self.workspace_dir else {
             return;
         };
-        let executor: Option<&Arc<dyn crate::capability::WorkspaceExecutor>> =
+        let executor: Option<&Arc<dyn nexus_capability::WorkspaceExecutor>> =
             (*self.workspace_executor).as_ref();
 
         if let Ok(Some(work)) =
@@ -1357,7 +1357,7 @@ impl ScheduleSupervisor {
         } else {
             // No configured provider: only presets WITHOUT prompt roles
             // may be enqueued (empty map passes the completeness gate).
-            let caps = crate::capability::CapabilityRegistry::with_builtins();
+            let caps = nexus_capability::CapabilityRegistry::with_builtins();
             if let Ok(loaded) = nexus_preset::load_embedded_preset(preset_id, &caps) {
                 let roles = nexus_preset::required_prompt_roles(&loaded.manifest);
                 if !roles.is_empty() {

@@ -21,6 +21,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use nexus_capability::CapabilityRegistry;
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{
     KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
@@ -28,9 +29,31 @@ use nexus_knowledge::world_kb::knowledge_entry::{
 use nexus_knowledge::world_kb::{KbQuery, KbStore};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::{init_engine_pool, narrative_write};
-use nexus_orchestration::capability::CapabilityRegistry;
 use nexus_preset::load_embedded_preset;
 use serde_json::{json, Value};
+
+/// A runtime-deps registry with the EXPLICIT compute attachment (C3): the
+/// daemon-wide engine + warmed cache injected through
+/// `with_runtime_deps_and_wasm`. Plain registry constructors never build
+/// engines, so a test that drives the real executor attaches them here.
+fn registry_with_compute_attached(pool: sqlx::SqlitePool) -> CapabilityRegistry {
+    let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().expect("wasm engine"));
+    let cache = std::sync::Arc::new(nexus_wasm_host::ModuleCache::new());
+    cache
+        .warm_embedded(&engine)
+        .expect("embedded compute modules warm");
+    let deps = nexus_capability::CapabilityRuntimeDeps {
+        pool: Some(pool),
+        prompt_executor: None,
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+        daemon_tool_dispatch: None,
+        cdn_config: None,
+        workspace_executor: None,
+    };
+    CapabilityRegistry::with_runtime_deps_and_wasm(&deps, engine, cache)
+}
 
 /// Open a fresh migrated pool on a tempdir.
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
@@ -153,10 +176,25 @@ async fn combat_engine_preset_loads_and_resolves_capabilities() {
             .any(|c| c == "narrative.compute"),
         "combat-engine must require narrative.compute"
     );
-    // And the capability must be resolvable at runtime.
+    // And the capability must be KNOWN to this registry — in the corrected
+    // C3 contract shape the executable lookup misses it (the plain builtin
+    // registry attaches no engine binding), while the name stays reserved
+    // and known metadata resolves without constructing an executor.
     assert!(
-        registry.get("narrative.compute").is_some(),
-        "narrative.compute must be registered"
+        registry.get("narrative.compute").is_none(),
+        "get is runnable-only: narrative.compute has no binding in a plain registry"
+    );
+    assert!(
+        registry.is_reserved_only("narrative.compute"),
+        "narrative.compute is known-but-unbound: dispatch refuses WorkerUnavailable"
+    );
+    assert_eq!(
+        nexus_preset::capability_catalog::CapabilityCatalog::input_schema(
+            &registry,
+            "narrative.compute"
+        ),
+        Some(nexus_preset::capability_catalog::NARRATIVE_COMPUTE_INPUT_SCHEMA),
+        "known metadata resolves without constructing an executor"
     );
 }
 
@@ -186,7 +224,7 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
         "world must have exactly two computable characters"
     );
 
-    let registry = CapabilityRegistry::with_builtins_and_pool(pool.clone());
+    let registry = registry_with_compute_attached(pool.clone());
     let cap = registry
         .get("narrative.compute")
         .expect("narrative.compute registered");
@@ -267,7 +305,7 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
 async fn narrative_compute_e2e_rejects_missing_world() {
     let (pool, _dir) = fresh_pool().await;
     seed_creator(&pool, "ctr_e2e").await;
-    let registry = CapabilityRegistry::with_builtins_and_pool(pool);
+    let registry = registry_with_compute_attached(pool);
     let cap = registry.get("narrative.compute").unwrap();
     let err = cap
         .run(json!({
@@ -278,6 +316,6 @@ async fn narrative_compute_e2e_rejects_missing_world() {
         .unwrap_err();
     assert!(matches!(
         err,
-        nexus_orchestration::capability::CapabilityError::Forbidden(_)
+        nexus_capability::CapabilityError::Forbidden(_)
     ));
 }

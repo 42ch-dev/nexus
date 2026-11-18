@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nexus_orchestration::capability::WorkspaceStateProvider;
+use nexus_capability::WorkspaceStateProvider;
 
 use crate::session::WorkspaceSessionManager;
 

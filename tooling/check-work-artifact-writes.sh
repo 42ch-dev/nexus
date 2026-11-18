@@ -9,7 +9,8 @@
 # commit_work_bytes) is the only production Work byte path.
 #
 # Inventory (F-003): the six named top-level modules plus a glob of
-# `crates/nexus-orchestration/src/capability/builtins/*.rs`. Every globbed
+# `crates/nexus-capability/src/builtins/*.rs` (the capability tree moved
+# there in v249 C2; the old orchestration paths no longer exist). Every globbed
 # file is scanned by default, so a new builtin writer is covered without an
 # inventory edit. A file can only be skipped by an explicit opt-out row
 # (`path<TAB>-<TAB>0<TAB>disposition`) in the allowlist.
@@ -57,9 +58,9 @@ NAMED = [
     "crates/nexus-orchestration/src/completion_lock.rs",
     "crates/nexus-orchestration/src/narrative_index.rs",
     "crates/nexus-orchestration/src/quality_loop.rs",
-    "crates/nexus-orchestration/src/rules_layers.rs",
+    "crates/nexus-capability/src/rules_layers.rs",
 ]
-BUILTINS_GLOB = "crates/nexus-orchestration/src/capability/builtins/*.rs"
+BUILTINS_GLOB = "crates/nexus-capability/src/builtins/*.rs"
 
 WRITE_RE = re.compile(r"(?<![\w])(?:std::fs|tokio::fs|fs)::write\s*\(")
 TEST_ATTR_RE = re.compile(r"^\s*#\[cfg\((?:all\()?test")

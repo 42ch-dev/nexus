@@ -663,7 +663,7 @@ fn print_validate_verdict(resp: &serde_json::Value) {
 /// Moved from `system` (V1.153 P3) — the shared validator core, not
 /// re-implemented (AR-24).
 fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
-    use nexus_orchestration::CapabilityRegistry;
+    use nexus_capability::CapabilityRegistry;
     use nexus_preset::{
         loader_validate_manifest_compat, validate_assets_in_bundle, validate_path_safety,
         validate_preset_semantic, yaml_value_depth, ValidationResult as PresetValidationResult,
@@ -775,7 +775,7 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
 /// defect. An IR file carries no bundle root, so asset checks are skipped
 /// exactly as for a standalone YAML file.
 fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::Value> {
-    use nexus_orchestration::CapabilityRegistry;
+    use nexus_capability::CapabilityRegistry;
     use nexus_preset::validation::{validate_workflow_ir, validate_workflow_ir_path_safety};
     use nexus_preset::{export_preset, loader_validate_manifest_compat};
 

@@ -21,6 +21,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use nexus_capability::builtins::{
+    EssayProjectScaffold, GameBibleProjectScaffold, NovelProjectScaffold, ScriptProjectScaffold,
+};
+use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};
 use nexus_contracts::local::orchestration::{
     WorkArtifactCommitInput, WorkArtifactCommitOutput, WorkspaceCommitInput, WorkspaceCommitOutput,
     WorkspaceOpenInput, WorkspaceOpenOutput,
@@ -28,10 +32,6 @@ use nexus_contracts::local::orchestration::{
 use nexus_core::owner::executor::WorkspaceCommitExecutor;
 use nexus_execution::session::WorkspaceSessionManager;
 use nexus_local_db::works::{self, WorkRecord};
-use nexus_orchestration::capability::builtins::{
-    EssayProjectScaffold, GameBibleProjectScaffold, NovelProjectScaffold, ScriptProjectScaffold,
-};
-use nexus_orchestration::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use serde_json::json;
 use sqlx::SqlitePool;
 

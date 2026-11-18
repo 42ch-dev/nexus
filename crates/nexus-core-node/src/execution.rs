@@ -471,8 +471,8 @@ impl NativeCore {
             .iter()
             .map(|capability| {
                 let origin = match capability.origin() {
-                    nexus_orchestration::capability::CapabilityOrigin::Builtin => "builtin",
-                    nexus_orchestration::capability::CapabilityOrigin::User => "user",
+                    nexus_capability::CapabilityOrigin::Builtin => "builtin",
+                    nexus_capability::CapabilityOrigin::User => "user",
                 };
                 serde_json::json!({
                     "name": capability.name(),

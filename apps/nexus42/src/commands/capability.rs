@@ -6,7 +6,7 @@
 //! fronted remains (see `nexus-orchestration`).
 //!
 //! The descriptor contract is the shared `UserCapabilityDescriptor` from
-//! `nexus-orchestration` (AR-34 — nexus42 already depends on the crate, so
+//! `nexus-capability` (AR-34 — nexus42 already depends on the crate, so
 //! the CLI reuses the exact validator instead of hand-rolling a second
 //! copy); the manifest + `wasm_sha256` pairing reuses `nexus-module-manifest`
 //! (AR-39 — the single content-hash path). The CLI deliberately does NOT
@@ -33,10 +33,8 @@
 //! CLI graph stays libp2p-free.
 
 use clap::Subcommand;
+use nexus_capability::user_capability::{CapabilityDescriptorError, UserCapabilityDescriptor};
 use nexus_module_manifest::ModuleManifest;
-use nexus_orchestration::capability::user_capability::{
-    CapabilityDescriptorError, UserCapabilityDescriptor,
-};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 

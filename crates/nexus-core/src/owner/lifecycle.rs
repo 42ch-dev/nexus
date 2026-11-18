@@ -16,11 +16,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak};
 
-use nexus_contracts::{CoreCloseReport, CoreCloseReportState};
-use nexus_orchestration::capability::{
-    CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps, DaemonToolDispatch,
-    PromptExecutor, WorkspaceExecutor, WorkspaceStateProvider,
+use nexus_capability::{CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps};
+use nexus_capability::{
+    DaemonToolDispatch, PromptExecutor, WorkspaceExecutor, WorkspaceStateProvider,
 };
+use nexus_contracts::{CoreCloseReport, CoreCloseReportState};
 use nexus_orchestration::schedule::supervisor::{ScheduleRunStarter, ScheduleSupervisor};
 use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
 use nexus_provider_ports::ProviderPort;
@@ -1092,21 +1092,36 @@ impl CoreService {
         // The daemon owns the live holder (WASM singleton, user-cap scan,
         // hot-reload watcher). A core-only caller gets a bare builtin
         // registry so the engine still has a capability surface.
+        //
+        // C3: the fallback reuses the ONE shared engine/cache bundle this
+        // owner already holds (`RunnerDeps::compute_*`, installed by the
+        // hosted production factory) — a plain constructor that minted its
+        // own engine would fork the daemon's interrupt counter and warm
+        // cache per registry build. Without the bundle the registry is
+        // engine-less: compute rows stay registered and describable and
+        // invoking them refuses `WorkerUnavailable`.
         let capability_holder = if let Some(holder) = deps.capability_holder {
             holder
         } else {
-            let capabilities = Arc::new(CapabilityRegistry::with_runtime_deps(
-                &CapabilityRuntimeDeps {
-                    pool: Some(pool.clone()),
-                    prompt_executor: deps.prompt_executor.clone(),
-                    session_cancels: Arc::clone(&session_cancels),
-                    daemon_tool_dispatch: deps.daemon_tool_dispatch.clone(),
-                    cdn_config: None,
-                    workspace_executor: deps.workspace_executor.clone(),
-                },
-            ));
+            let runtime_deps = CapabilityRuntimeDeps {
+                pool: Some(pool.clone()),
+                prompt_executor: deps.prompt_executor.clone(),
+                session_cancels: Arc::clone(&session_cancels),
+                daemon_tool_dispatch: deps.daemon_tool_dispatch.clone(),
+                cdn_config: None,
+                workspace_executor: deps.workspace_executor.clone(),
+            };
+            #[cfg(feature = "compute")]
+            let capabilities = match (deps.compute_engine.clone(), deps.compute_cache.clone()) {
+                (Some(engine), Some(cache)) => {
+                    CapabilityRegistry::with_runtime_deps_and_wasm(&runtime_deps, engine, cache)
+                }
+                _ => CapabilityRegistry::with_runtime_deps(&runtime_deps),
+            };
+            #[cfg(not(feature = "compute"))]
+            let capabilities = CapabilityRegistry::with_runtime_deps(&runtime_deps);
             let holder = CapabilityRegistryHolder::new();
-            holder.swap(capabilities);
+            holder.swap(Arc::new(capabilities));
             holder
         };
 

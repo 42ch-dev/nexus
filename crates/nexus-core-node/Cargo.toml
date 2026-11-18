@@ -25,6 +25,7 @@ napi-derive = { workspace = true }
 # this Host/scheduler edge (architecture §Cohorts).
 nexus-core = { path = "../nexus-core", features = ["execution", "provider-host", "compute"] }
 nexus-contracts = { path = "../nexus-contracts" }
+nexus-capability = { path = "../nexus-capability" }
 nexus-agent-host = { path = "../nexus-agent-host" }
 nexus-provider-ports = { path = "../nexus-provider-ports" }
 tokio = { workspace = true }

@@ -22,8 +22,8 @@ use thiserror::Error;
 
 // Re-export for internal use.
 #[cfg(test)]
-use crate::capability::CapabilityError;
-use crate::capability::CapabilityRegistry;
+use nexus_capability::CapabilityError;
+use nexus_capability::CapabilityRegistry;
 use nexus_contracts::local::schedule::CoreContextPayload;
 use nexus_preset::source_identity::PresetSourceIdentity;
 use nexus_session_storage::run_state::{
@@ -616,7 +616,7 @@ pub trait OrchestrationEngine: Send + Sync {
     /// graphs fall back to the configured fixed state (if any).
     fn workspace_state_provider(
         &self,
-    ) -> Option<std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>> {
+    ) -> Option<std::sync::Arc<dyn nexus_capability::WorkspaceStateProvider>> {
         None
     }
 
@@ -673,12 +673,12 @@ pub struct EngineSharedState {
     /// Production prompt executor (A1) — used by the cancel path to await
     /// bounded owned-Host teardown before persisting terminal `Cancelled`
     /// (C-001). `None` for in-memory/test engines.
-    pub prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    pub prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     /// Live workspace state provider (v1.188 P3) — shared by the engine and
     /// every `EngineProxy` so wired preset graphs resolve
     /// `_context.workspace.*` against the daemon's workspace authority.
     pub workspace_state_provider:
-        Option<std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>>,
+        Option<std::sync::Arc<dyn nexus_capability::WorkspaceStateProvider>>,
     /// Creator-DB core-context store (v1.195 P0-T6) — the durable
     /// `creator_schedules` pointer + immutable `core_context_versions` rows.
     ///
@@ -743,7 +743,7 @@ impl EngineSharedState {
     /// same provider the daemon wired.
     pub fn set_workspace_state_provider(
         &mut self,
-        provider: std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>,
+        provider: std::sync::Arc<dyn nexus_capability::WorkspaceStateProvider>,
     ) {
         self.workspace_state_provider = Some(provider);
     }
@@ -3225,7 +3225,7 @@ struct EngineProxy {
 impl OrchestrationEngine for EngineProxy {
     fn workspace_state_provider(
         &self,
-    ) -> Option<std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>> {
+    ) -> Option<std::sync::Arc<dyn nexus_capability::WorkspaceStateProvider>> {
         self.state.workspace_state_provider.clone()
     }
 
@@ -3444,13 +3444,13 @@ pub struct GraphFlowEngine {
     /// builds snapshot `handle.get()` at graph-build time, so NEW graphs see
     /// hot-reloaded user capabilities while an in-flight session's graph
     /// keeps its session-start snapshot (in-flight honesty).
-    caps: crate::capability::CapabilityRegistryHolder,
+    caps: nexus_capability::CapabilityRegistryHolder,
     /// Daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
-    daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
+    daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
     /// Production prompt executor (A1) — wired into every inner graph
     /// `acp_prompt` node at wired-graph build time. `None` for
     /// in-memory/test engines (inner prompt nodes refuse).
-    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     /// Per-run coordinator cancellation tokens (A1) — the executor listens to
     /// the token for the current run concurrently with the Host stream.
     session_cancels: std::sync::Arc<
@@ -3491,7 +3491,7 @@ impl GraphFlowEngine {
     /// terminal/wait transitions persist authoritatively.
     pub fn new_with_storage(
         storage: Arc<dyn SessionStorage>,
-        caps: crate::capability::CapabilityRegistryHolder,
+        caps: nexus_capability::CapabilityRegistryHolder,
     ) -> Self {
         Self {
             state: Arc::new(EngineSharedState::new(storage)),
@@ -3515,7 +3515,7 @@ impl GraphFlowEngine {
     pub fn new_with_storage_and_workflow_store(
         storage: Arc<dyn SessionStorage>,
         workflow_store: Arc<dyn WorkflowStateStore>,
-        caps: crate::capability::CapabilityRegistryHolder,
+        caps: nexus_capability::CapabilityRegistryHolder,
     ) -> Self {
         Self {
             state: Arc::new(EngineSharedState::with_workflow_store(
@@ -3539,7 +3539,7 @@ impl GraphFlowEngine {
     pub fn new_with_storage_and_workflow_store_and_workspace(
         storage: Arc<dyn SessionStorage>,
         workflow_store: Arc<dyn WorkflowStateStore>,
-        caps: crate::capability::CapabilityRegistryHolder,
+        caps: nexus_capability::CapabilityRegistryHolder,
         workspace_root: std::path::PathBuf,
     ) -> Self {
         Self {
@@ -3589,7 +3589,7 @@ impl GraphFlowEngine {
     /// `host_tool` enter actions. Typically called once during daemon boot.
     pub fn set_daemon_tool_dispatch(
         &mut self,
-        dispatch: Arc<dyn crate::capability::DaemonToolDispatch>,
+        dispatch: Arc<dyn nexus_capability::DaemonToolDispatch>,
     ) {
         self.daemon_tool_dispatch = Some(dispatch);
     }
@@ -3602,7 +3602,7 @@ impl GraphFlowEngine {
     /// daemon boot.
     pub fn set_prompt_executor(
         &mut self,
-        executor: Arc<dyn crate::capability::PromptExecutor>,
+        executor: Arc<dyn nexus_capability::PromptExecutor>,
         session_cancels: std::sync::Arc<
             std::sync::RwLock<
                 std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
@@ -3634,7 +3634,7 @@ impl GraphFlowEngine {
     /// the ONE `EngineSharedState` that every `EngineProxy` clone shares.
     pub fn set_workspace_state_provider(
         &mut self,
-        provider: std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>,
+        provider: std::sync::Arc<dyn nexus_capability::WorkspaceStateProvider>,
     ) {
         match std::sync::Arc::get_mut(&mut self.state) {
             Some(state) => state.set_workspace_state_provider(provider),
@@ -4989,7 +4989,7 @@ impl GraphFlowEngine {
 impl OrchestrationEngine for GraphFlowEngine {
     fn workspace_state_provider(
         &self,
-    ) -> Option<std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>> {
+    ) -> Option<std::sync::Arc<dyn nexus_capability::WorkspaceStateProvider>> {
         self.state.workspace_state_provider.clone()
     }
 
@@ -5229,11 +5229,11 @@ impl ScriptedFinalizeExecutor {
 
 #[cfg(test)]
 #[async_trait]
-impl crate::capability::PromptExecutor for ScriptedFinalizeExecutor {
+impl nexus_capability::PromptExecutor for ScriptedFinalizeExecutor {
     async fn execute(
         &self,
-        _request: crate::capability::PromptRequest,
-    ) -> Result<crate::capability::PromptResult, CapabilityError> {
+        _request: nexus_capability::PromptRequest,
+    ) -> Result<nexus_capability::PromptResult, CapabilityError> {
         unreachable!("not used by cancel-path tests")
     }
 
@@ -5994,7 +5994,7 @@ mod tests {
     /// Helper: create a test engine with in-memory storage and built-in caps.
     fn test_engine() -> GraphFlowEngine {
         let storage: Arc<dyn SessionStorage> = Arc::new(InMemorySessionStorage::new());
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         GraphFlowEngine::new_with_storage(storage, caps)
@@ -6320,7 +6320,7 @@ mod tests {
     async fn r6_recovered_session_with_known_preset_has_runner() {
         // Test that recovery works for sessions started with known embedded presets.
         let storage: Arc<dyn SessionStorage> = Arc::new(InMemorySessionStorage::new());
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let engine = GraphFlowEngine::new_with_storage(storage.clone(), caps);
@@ -6368,7 +6368,7 @@ mod tests {
         // whose runner failed reconstruction (user presets stay
         // tracked-but-not-driven). `has_runner` is the seam.
         let storage: Arc<dyn SessionStorage> = Arc::new(InMemorySessionStorage::new());
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let engine = GraphFlowEngine::new_with_storage(storage.clone(), caps);
@@ -6465,7 +6465,7 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -6620,7 +6620,7 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -6742,7 +6742,7 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -6872,7 +6872,7 @@ mod tests {
                 Ok(()),
             ]));
 
-            let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
                 CapabilityRegistry::with_builtins(),
             ));
             let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7015,7 +7015,7 @@ mod tests {
             Err(CapabilityError::Internal("shutdown timeout".to_string())),
         ]));
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7082,7 +7082,7 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7229,7 +7229,7 @@ mod tests {
 
         let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(())]));
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7388,7 +7388,7 @@ mod tests {
 
         let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(())]));
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7515,7 +7515,7 @@ mod tests {
         // All finalizes succeed: root, child, grandchild.
         let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(()), Ok(()), Ok(())]));
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7700,7 +7700,7 @@ mod tests {
         // finalize successfully.
         let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(()), Ok(()), Ok(())]));
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7864,7 +7864,7 @@ mod tests {
 
         let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(())]));
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8029,7 +8029,7 @@ mod tests {
         // Root + rolled-back child both finalize successfully.
         let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(()), Ok(())]));
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8203,7 +8203,7 @@ mod tests {
             Ok(()),
         ]));
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8366,7 +8366,7 @@ mod tests {
 
         // Phase 1: a live engine spawns the nested tree and parks the
         // grandchild at a durable human wait (non-terminal, recoverable).
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let live = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8456,7 +8456,7 @@ mod tests {
         // Phase 2: a FRESH engine (restart) recovers ONLY the root summary
         // — the boot shape (`list_non_terminal_sessions` returns root rows
         // only). The child/grandchild rows are never supplied as summaries.
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let mut restarted = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8571,7 +8571,7 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let live = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8624,7 +8624,7 @@ mod tests {
 
         // Restart: fresh engine recovers only the root summary. First
         // cancel: root OK, child OK, grandchild FAILS. Retry: all OK.
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let mut restarted = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8765,7 +8765,7 @@ mod tests {
             CapabilityError::Internal("shutdown timeout".to_string()),
         )]));
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8867,7 +8867,7 @@ mod tests {
             Ok(()),
         ]));
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -9006,7 +9006,7 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -9246,7 +9246,7 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
-        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
         let engine = GraphFlowEngine::new_with_storage_and_workflow_store(

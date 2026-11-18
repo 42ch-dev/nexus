@@ -17,9 +17,9 @@
 
 #![allow(clippy::unwrap_used)]
 
+use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 use nexus_local_db::kb_extract_job::list_pending_for_world;
 use nexus_local_db::works::{self, WorkRecord};
-use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 use nexus_orchestration::quality_loop;
 use sqlx::SqlitePool;
 
@@ -176,15 +176,12 @@ fn write_workspace_with_chapter(body_text: &str) -> (tempfile::TempDir, String) 
 struct MockLlmExtractWorker;
 
 #[async_trait::async_trait]
-impl nexus_orchestration::capability::PromptExecutor for MockLlmExtractWorker {
+impl nexus_capability::PromptExecutor for MockLlmExtractWorker {
     async fn execute(
         &self,
-        _request: nexus_orchestration::capability::PromptRequest,
-    ) -> Result<
-        nexus_orchestration::capability::PromptResult,
-        nexus_orchestration::capability::CapabilityError,
-    > {
-        Ok(nexus_orchestration::capability::PromptResult {
+        _request: nexus_capability::PromptRequest,
+    ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError> {
+        Ok(nexus_capability::PromptResult {
             full_text: "{\"candidates\":[
                 {\"canonical_name\":\"Lin Xia\",\"block_type\":\"character\",\"summary\":\"A warrior\",\"confidence\":0.95,\"source_quote\":\"Lin Xia drew her blade at the Azure Gate.\"},
                 {\"canonical_name\":\"Azure Gate\",\"block_type\":\"scene\",\"summary\":\"The eastern gate\",\"confidence\":0.88,\"source_quote\":\"the Azure Gate groaned open\"}

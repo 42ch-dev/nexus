@@ -1002,7 +1002,7 @@ pub async fn write_completion_lock_for_work(
     workspace_dir: &std::path::Path,
     work: &WorkRecord,
     locked_at: &str,
-    executor: Option<&std::sync::Arc<dyn crate::capability::WorkspaceExecutor>>,
+    executor: Option<&std::sync::Arc<dyn nexus_capability::WorkspaceExecutor>>,
 ) -> Result<(), std::io::Error> {
     let work_ref = work.work_ref.as_deref().ok_or_else(|| {
         std::io::Error::new(
@@ -1169,7 +1169,7 @@ pub async fn promote_foreshadowing_for_schedule(
     pool: &SqlitePool,
     schedule_id: &str,
     workspace_dir: Option<&std::path::Path>,
-    executor: Option<&std::sync::Arc<dyn crate::capability::WorkspaceExecutor>>,
+    executor: Option<&std::sync::Arc<dyn nexus_capability::WorkspaceExecutor>>,
 ) -> Result<usize, AutoChainError> {
     use nexus_preset::preset_ids::NOVEL_WRITING_PRESET_ID;
 
@@ -1264,7 +1264,7 @@ async fn promote_outlines_in(
     outlines_dir: &std::path::Path,
     schedule_id: &str,
     work_ref: &str,
-    executor: Option<&std::sync::Arc<dyn crate::capability::WorkspaceExecutor>>,
+    executor: Option<&std::sync::Arc<dyn nexus_capability::WorkspaceExecutor>>,
 ) -> Result<usize, AutoChainError> {
     let mut entries: Vec<String> = std::fs::read_dir(outlines_dir)
         .map_err(|e| AutoChainError::InvalidState(format!("read {}: {e}", outlines_dir.display())))?

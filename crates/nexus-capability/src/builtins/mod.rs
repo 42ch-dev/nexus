@@ -1,0 +1,70 @@
+//! Built-in capability implementations.
+//!
+//! One module per built-in.
+
+mod acp_prompt;
+mod context_summarize;
+mod creator;
+mod essay_draft_status;
+mod essay_scaffold;
+mod fork;
+mod game_bible_scaffold;
+mod game_bible_section_status;
+mod judge_llm;
+mod judge_rule;
+mod kb_extract_work;
+mod llm_extract;
+mod narrative_compute;
+mod novel_chapter_transition;
+mod novel_scaffold;
+mod novel_scaffold_sanitize;
+mod outbox;
+pub mod registry;
+mod script_scaffold;
+mod script_section_status;
+mod soul_experience_aggregate;
+mod sync;
+mod timeline;
+pub mod work_commit;
+mod workspace;
+mod world;
+mod world_refs_validate;
+
+pub use acp_prompt::AcpPrompt;
+pub use context_summarize::ContextSummarize;
+pub use creator::{
+    CreatorCapabilityStore, CreatorInjectPrompt, CreatorReadMemory, CreatorWriteBrief,
+    CreatorWriteMemory,
+};
+pub use essay_draft_status::EssayDraftStatusFinalize;
+pub use essay_scaffold::EssayProjectScaffold;
+pub use fork::ForkCreate;
+pub use game_bible_scaffold::GameBibleProjectScaffold;
+pub use game_bible_section_status::GameBibleSectionStatusUpdate;
+pub use judge_llm::JudgeLlm;
+pub use judge_rule::JudgeRule;
+pub use kb_extract_work::KbExtractWork;
+pub use llm_extract::LlmExtract;
+pub use narrative_compute::NarrativeCompute;
+pub use novel_chapter_transition::NovelChapterTransition;
+pub use novel_scaffold::NovelProjectScaffold;
+pub use outbox::{OutboxCompact, OutboxFlush};
+pub use registry::{
+    embedded_snapshot_capabilities, embedded_snapshot_version, validate_cdn_url_static, CdnConfig,
+    CdnError, RegistryRefresh,
+};
+pub use script_scaffold::ScriptProjectScaffold;
+pub use script_section_status::ScriptSectionStatusUpdate;
+pub use soul_experience_aggregate::SoulExperienceAggregate;
+pub use sync::{SyncPull, SyncPush};
+pub use timeline::TimelineEventAppend;
+pub use workspace::{WorkspaceCommit, WorkspaceOpen};
+pub use world::{WorldDeltaApply, WorldDeltaPropose, WorldStateQuery};
+// WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S5
+// — world_refs_validate is exposed as a library function but not registered
+// as a Capability in the builtins registry; it is called directly by daemon
+// handlers. Acceptable until capability registration is unified.
+pub use world_refs_validate::{
+    validate_world_refs, ValidationStage, WorldRefFinding, WorldRefSeverity,
+    WorldRefsValidationParams, WorldRefsValidationResult,
+};

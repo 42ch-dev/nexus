@@ -8,7 +8,8 @@
 //! - No-match does NOT stall the session (deterministic fail)
 
 use graph_flow::SessionStorage;
-use nexus_orchestration::{CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
+use nexus_capability::CapabilityRegistry;
+use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
 fn test_capability_registry() -> CapabilityRegistry {
@@ -252,7 +253,7 @@ async fn labeled_no_match_does_not_stall_session() {
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let engine = GraphFlowEngine::new_with_storage(
         storage.clone(),
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(caps.clone()),
+        nexus_capability::CapabilityRegistryHolder::with_registry(caps.clone()),
     );
 
     let sid = engine
