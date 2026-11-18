@@ -3113,10 +3113,13 @@ pub struct CapabilityRow {
 /// mirrors the old `dispatch_tool()` behavior.
 pub struct CapabilityRegistry {
     rows: HashMap<&'static str, CapabilityRow>,
-    /// Consultations of the peer/user fallback lanes. Observation only — the
-    /// shipped struct carries no counter (`test-hooks` compiles it out); the
-    /// probe below increments it, so a test can prove the canonical
-    /// reservation never reaches those lanes.
+    /// Consultations of the peer/user fallback lanes.
+    ///
+    /// Compiled IN by `test-hooks`, which this crate's integration tests enable
+    /// through their dev-dependency self-reference; the flag must stay out of
+    /// shipped feature selections, so a normal build carries no counter at all.
+    /// Both entry paths increment it (`note_fallback_consultation`), so a test
+    /// can prove the canonical reservation never reaches those lanes.
     #[cfg(any(test, feature = "test-hooks"))]
     fallback_consultations: AtomicUsize,
 }
@@ -3136,10 +3139,32 @@ impl CapabilityRegistry {
     ///
     /// `test-hooks` only: counts lane consultations (a refused lane still
     /// records one), which is the invariant the canonical reservation owns.
+    /// The allowlist path (`spine_resolves`) and `dispatch` both feed it.
     #[cfg(any(test, feature = "test-hooks"))]
     #[must_use]
     pub fn fallback_consultations(&self) -> usize {
         self.fallback_consultations.load(Ordering::Relaxed)
+    }
+
+    /// Records one peer/user fallback-lane consultation.
+    ///
+    /// The single increment site: both entry paths call it immediately before
+    /// they ask a lane, so the probe measures the same decision in the
+    /// allowlist and in dispatch. It observes; it changes no behaviour.
+    fn note_fallback_consultation(&self) {
+        #[cfg(any(test, feature = "test-hooks"))]
+        self.fallback_consultations.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Whether `id` is a canonical host tool this registry binds no row for.
+    ///
+    /// The one canonical-miss decision shared by the allowlist
+    /// ([`Self::spine_resolves`]) and [`Self::dispatch`]: the namespace reserves
+    /// the id, so neither path may ask the peer or user lanes about it. A bound
+    /// canonical row is resolved by `lookup` and never reaches this test.
+    #[must_use]
+    fn canonical_miss(&self, id: &str) -> bool {
+        self.lookup(id).is_none() && lookup_host_tool(id).is_some()
     }
 
     /// Register a capability row.
@@ -3187,11 +3212,21 @@ impl CapabilityRegistry {
     /// capabilities (`origin() == User` only). An id is dispatchable iff it
     /// resolves here; unknown ids yield `not_supported` exactly like an
     /// unknown builtin.
+    ///
+    /// A canonical id this registry binds no row for is NOT dispatchable, and
+    /// the lanes are never asked about it: this is the same
+    /// [`Self::canonical_miss`] decision [`Self::dispatch`] uses, so the
+    /// caller-facing allowlist cannot report a reserved id as reachable while
+    /// dispatch refuses it.
     #[must_use]
     pub fn spine_resolves(&self, context: &ToolContext, id: &str) -> bool {
         if self.lookup(id).is_some() {
             return true;
         }
+        if self.canonical_miss(id) {
+            return false;
+        }
+        self.note_fallback_consultation();
         if peer_tools::peer_tool_registry().get(id).is_some() {
             return true;
         }
@@ -3239,19 +3274,15 @@ impl CapabilityRegistry {
     ) -> Result<serde_json::Value, NexusApiError> {
         let row = self.lookup(&req.tool_name);
         if row.is_none() {
-            // v1.249 S4: canonical membership wins over both fallback lanes. A
-            // reserved builtin id refuses here even when this build binds no
-            // handler for it (feature-gated binding), so the reservation is not
-            // left to each lane's own namespace rules — the user lane's name
-            // rule admits `fs/*` ids, so its occupancy of a canonical name must
-            // never decide the call.
-            if lookup_host_tool(&req.tool_name).is_none() {
-                // Test-only probe: this branch IS the fallback consultation, so
-                // a refused lane still records one. A test asserts it stays 0
-                // for a canonical id — the reservation's observable effect.
-                #[cfg(any(test, feature = "test-hooks"))]
-                self.fallback_consultations
-                    .fetch_add(1, Ordering::Relaxed);
+            // v1.249 S4: the canonical-miss decision owns the outcome on this
+            // path and on the allowlist (`spine_resolves`) alike. A reserved
+            // builtin id refuses even when this build binds no handler for it
+            // (feature-gated binding), so the reservation is not left to each
+            // lane's own namespace rules — the user lane's name rule admits
+            // `fs/*` ids, so its occupancy of a canonical name must never decide
+            // the call.
+            if !self.canonical_miss(&req.tool_name) {
+                self.note_fallback_consultation();
                 // Peer arm (AR-68 #4): reverse-invoke the owning responder.
                 if let Some(entry) = peer_tools::peer_tool_registry().get(&req.tool_name) {
                     return dispatch_peer_tool(&entry, req).await;
@@ -3270,10 +3301,12 @@ impl CapabilityRegistry {
         }
         let row = row.expect("row present");
 
-        // Centralized admission-gate accountability checkpoint.
-        // Each gate type MUST have a corresponding enforcement path (pipeline,
-        // handler, or caller). The invariant test below validates this mapping
-        // at registration time.
+        // Exhaustiveness checkpoint over the declared gates: the match below
+        // names every recognized `AdmissionGate` variant, so a new variant
+        // fails to compile here rather than shipping without a decision. It
+        // checks the DECLARATION, not that each gate has a runtime enforcement
+        // path — enforcement lives in `admission_pipeline`, the handlers and
+        // the caller, as the gate split above states.
         for gate in row.metadata.admission {
             debug_assert!(
                 matches!(
@@ -3536,9 +3569,10 @@ fn build_registry_inner(unbound: Option<HostToolId>) -> CapabilityRegistry {
 
 /// Builds the registry with one canonical tool deliberately left unbound.
 ///
-/// The id stays canonical — reserved and listed — but has no handler row, which
-/// is the state `dispatch` must refuse instead of resolving through the peer or
-/// user lane.
+/// The id stays canonical — reserved by the catalog — but has no handler row, so
+/// it is absent from this registry's runnable ids and binds nothing in the
+/// catalog's listing. That is the state `dispatch` and `spine_resolves` must
+/// refuse instead of resolving through the peer or user lane.
 #[cfg(any(test, feature = "test-hooks"))]
 #[must_use]
 pub fn build_registry_without(unbound: HostToolId) -> CapabilityRegistry {

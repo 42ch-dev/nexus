@@ -61,11 +61,10 @@ pub struct CatalogDescriptor {
     /// Authored tool summary for LLM/script consumers (replaces the
     /// `TestVector.description` reuse that ended with AR-78 #4).
     pub description: &'static str,
-    /// Real draft-2020-12 JSON-Schema text (root `"type":"object"`), or
-    /// `None` when the input schema is not yet authored — the catalog then
-    /// emits the named placeholder (`NAMED_PLACEHOLDER_INPUT`) and the id
-    /// MUST appear in `SCHEMA_REMAINDER_LEDGER` (lockstep-pinned).
-    pub input_schema: Option<&'static str>,
+    /// Real draft-2020-12 JSON-Schema text (root `"type":"object"`) for the
+    /// tool's input. REQUIRED: every canonical row authors one, so there is no
+    /// placeholder or omission path — a row without a schema does not compile.
+    pub input_schema: &'static str,
     /// Real draft-2020-12 JSON-Schema text for the success shape when the
     /// handler's output is a stable object worth pinning; `None` otherwise
     /// (omission is honest and rule-based — no ledger entry for outputs).
@@ -287,33 +286,14 @@ const ADMISSION_POOL_WRITE: &[AdmissionGate] = &[
     AdmissionGate::AuditLog,
 ];
 
-/// Named input-schema placeholder emitted by the catalog for a builtin row
-/// whose input schema is not yet authored (`input_schema: None`).
-///
-/// Draft-2020-12-valid (`$comment` is ignorable by validators) and
-/// machine-distinguishable from a real schema — never the silent
-/// `{"type":"object"}` placeholder of V1.174.
-pub const NAMED_PLACEHOLDER_INPUT: &str =
-    r#"{"type":"object","$comment":"nexus42:schema-pending"}"#;
-
-/// Catalog-source ledger of builtin ids whose input schema is not yet
-/// authored. Lockstep pin: `row.catalog.input_schema.is_none() ⇔ id ∈ LEDGER`
-/// (unit-tested both directions). Task 2 converted all static rows, so
-/// the ledger is empty — the pin stays as the guard against future rows
-/// being added without a schema. Test-only: the catalog route reads
-/// `NAMED_PLACEHOLDER_INPUT`, never this ledger.
-#[cfg(test)]
-#[allow(dead_code)] // lockstep pin: catalog rows with unauthored schemas must be recorded here
-pub(crate) const SCHEMA_REMAINDER_LEDGER: &[&str] = &[];
-
 /// The agent tool's input contract: `GenerateRequest` rendered as JSON Schema, plus the address
 /// the CLI and HTTP surfaces carry in arguments and the path.
 ///
 /// The schema is the committed wire contract itself, so the tool description IS the contract (D8):
 /// a model fills the request's fields instead of inventing a shape, and the schema cannot describe
-/// a request the kernel would not accept. `strategy_id` and `base_revision` are the two fields a
-/// tool call has to name explicitly — the tool has no path and no prior read — and they are added
-/// here rather than in a second schema file so there is one rendered contract, not two.
+/// a request the kernel would not accept. The tool adds only its own address field: `strategy_id`
+/// is the one field a tool call names that the wire schema does not, because the HTTP surface
+/// carries it in the path instead. Wire-level requiredness stays the committed schema's.
 pub(crate) fn tool_input_schema() -> &'static str {
     static SCHEMA: LazyLock<String> = LazyLock::new(|| {
         let mut schema: serde_json::Value = serde_json::from_str(include_str!(
@@ -341,10 +321,13 @@ pub(crate) fn tool_input_schema() -> &'static str {
                                 the path instead.",
             }),
         );
-        root.insert(
-            "required".to_owned(),
-            serde_json::json!(["strategy_id", "base_revision", "request"]),
-        );
+        // The tool's own address field is PREPENDED to the committed array: the
+        // wire schema keeps owning which request fields are required, and the
+        // rendered envelope stays what it was before the move.
+        let required = root["required"]
+            .as_array_mut()
+            .expect("the generate request schema declares required");
+        required.insert(0, serde_json::Value::String("strategy_id".to_owned()));
         schema.to_string()
     });
     SCHEMA.as_str()
@@ -362,7 +345,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_CONTEXT,
             catalog: CatalogDescriptor {
                 description: "Return the active creator id and workspace slug for the current session.",
-                input_schema: Some(r#"{"type":"object","properties":{}}"#),
+                input_schema: r#"{"type":"object","properties":{}}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"creator_id":{"type":"string"},"workspace_slug":{"type":"string"}},"required":["creator_id","workspace_slug"]}"#,
                 ),
@@ -380,7 +363,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_CONTEXT,
             catalog: CatalogDescriptor {
                 description: "Return workspace details: creator id, slug, path, runtime mode, and initialization state.",
-                input_schema: Some(r#"{"type":"object","properties":{}}"#),
+                input_schema: r#"{"type":"object","properties":{}}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"creator_id":{"type":"string"},"workspace_slug":{"type":"string"},"workspace_path":{"type":"string"},"runtime_mode":{"type":"string"},"initialized":{"type":"boolean"}},"required":["creator_id","workspace_slug","workspace_path","runtime_mode","initialized"]}"#,
                 ),
@@ -398,9 +381,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_WORKSPACE,
             catalog: CatalogDescriptor {
                 description: "Return the Work record fields exposed by the catalog: status, title, current stage, and stage status.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"work_id":{"type":"string"}},"required":["work_id"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"work_id":{"type":"string"}},"required":["work_id"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"work_id":{"type":"string"},"status":{"type":"string"},"title":{"type":"string"},"current_stage":{"type":"string"},"stage_status":{"type":"string"}},"required":["work_id","status","title","current_stage","stage_status"]}"#,
                 ),
@@ -418,9 +399,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_WRITE_WORKSPACE,
             catalog: CatalogDescriptor {
                 description: "Patch a work's title, inspiration log, or stage metadata (stage field itself is rejected).",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"work_id":{"type":"string"},"title":{"type":"string"},"inspiration_log":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"note":{"type":"string"},"source":{"type":"string"}},"anyOf":[{"required":["text"]},{"required":["note"]}]}},"stage_metadata":{"type":"object","properties":{"agent_notes":{"type":"string"},"research_summary_ref":{"type":"string"},"draft_outline_ref":{"type":"string"},"review_summary_ref":{"type":"string"},"last_agent_tool_request_id":{"type":"string"}},"additionalProperties":false}},"required":["work_id"],"additionalProperties":false}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"work_id":{"type":"string"},"title":{"type":"string"},"inspiration_log":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"note":{"type":"string"},"source":{"type":"string"}},"anyOf":[{"required":["text"]},{"required":["note"]}]}},"stage_metadata":{"type":"object","properties":{"agent_notes":{"type":"string"},"research_summary_ref":{"type":"string"},"draft_outline_ref":{"type":"string"},"review_summary_ref":{"type":"string"},"last_agent_tool_request_id":{"type":"string"}},"additionalProperties":false}},"required":["work_id"],"additionalProperties":false}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"work_id":{"type":"string"},"status":{"type":"string"},"title":{"type":"string"},"current_stage":{"type":"string"},"stage_status":{"type":"string"}},"required":["work_id","status","title","current_stage","stage_status"]}"#,
                 ),
@@ -438,9 +417,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_WORKSPACE,
             catalog: CatalogDescriptor {
                 description: "Return the schedule ids linked to a work and their count.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"work_id":{"type":"string"}},"required":["work_id"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"work_id":{"type":"string"}},"required":["work_id"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"work_id":{"type":"string"},"schedule_ids":{"type":"array","items":{"type":"string"}},"count":{"type":"integer"}},"required":["work_id","schedule_ids","count"]}"#,
                 ),
@@ -464,7 +441,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
                               exhaustion the result is the `lint_exhausted` payload with one \
                               actionable correction per violation, and nothing was persisted.",
                 // The rendered `GenerateRequest` contract (D8): the tool description IS the schema.
-                input_schema: Some(tool_input_schema()),
+                input_schema: tool_input_schema(),
                 // Omitted: the success shape is the WorkflowDocument contract, which is authored as
                 // its own `$ref`-addressed schema and cannot be carried here verbatim.
                 output_schema: None,
@@ -482,9 +459,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_CONTEXT,
             catalog: CatalogDescriptor {
                 description: "Assemble the current context moment; requires_platform requests platform-integrated assembly.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"work_id":{"type":"string"},"requires_platform":{"type":"boolean"}}}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"work_id":{"type":"string"},"requires_platform":{"type":"boolean"}}}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"mode":{"type":"string"},"creator_id":{"type":"string"},"assembled_at":{"type":"string"}},"required":["mode","creator_id","assembled_at"]}"#,
                 ),
@@ -502,9 +477,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_WORLD,
             catalog: CatalogDescriptor {
                 description: "Return the world snapshot fields exposed by the catalog: title, slug, status, fork flag, and creation time.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"world_id":{"type":"string"}},"required":["world_id"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"world_id":{"type":"string"}},"required":["world_id"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"world_id":{"type":"string"},"title":{"type":"string"},"slug":{"type":"string"},"status":{"type":"string"},"is_fork":{"type":"boolean"},"created_at":{"type":"string"}},"required":["world_id","title","slug","status","is_fork","created_at"]}"#,
                 ),
@@ -522,9 +495,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_WORLD,
             catalog: CatalogDescriptor {
                 description: "Return the most recent timeline events for a world (default 100, clamped to 500).",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"world_id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":500}},"required":["world_id"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"world_id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":500}},"required":["world_id"]}"#,
                 // Output is an event array, not a stable object — omitted per
                 // AR-78 #5 (output schema pinned only for stable object shapes).
                 output_schema: None,
@@ -542,9 +513,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_WORLD,
             catalog: CatalogDescriptor {
                 description: "Return the knowledge-base key blocks for an owned world.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"world_id":{"type":"string"}},"required":["world_id"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"world_id":{"type":"string"}},"required":["world_id"]}"#,
                 // Output is a key-block array, not a stable object — omitted per
                 // AR-78 #5 (output schema pinned only for stable object shapes).
                 output_schema: None,
@@ -562,9 +531,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_WORKSPACE,
             catalog: CatalogDescriptor {
                 description: "Return the manuscript chapter fields exposed by the catalog: status and planned word count.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1}},"required":["work_id","chapter"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1}},"required":["work_id","chapter"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer"},"volume":{"type":"integer"},"status":{"type":"string"},"planned_word_count":{"type":"integer"}},"required":["work_id","chapter","status","planned_word_count"]}"#,
                 ),
@@ -583,7 +550,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_CONTEXT,
             catalog: CatalogDescriptor {
                 description: "Return daemon runtime health: uptime, lifecycle context, registry size and ids, pool health.",
-                input_schema: Some(r#"{"type":"object","properties":{}}"#),
+                input_schema: r#"{"type":"object","properties":{}}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"uptime_seconds":{"type":"integer"},"started_at":{"type":"string"},"runtime_mode":{"type":"string"},"lifecycle_state":{"type":"string"},"registry_size":{"type":"integer"},"registry_ids":{"type":"array","items":{"type":"string"}},"pool_healthy":{"type":"boolean"}},"required":["uptime_seconds","started_at","runtime_mode","lifecycle_state","registry_size","registry_ids","pool_healthy"]}"#,
                 ),
@@ -601,9 +568,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_WRITE_WORLD,
             catalog: CatalogDescriptor {
                 description: "Upsert knowledge-base key blocks for an owned world.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"world_id":{"type":"string"},"blocks":{"type":"array","items":{"type":"object","properties":{"schema_version":{"type":"integer"},"entry_id":{"type":"string"},"world_id":{"type":"string"},"block_type":{"type":"string","enum":["character","ability","scene","organization","item","conflict","info_point","event","species","faction","magic_system","technology","deity","level","economy_tier","dialogue","beat","act","era"]},"canonical_name":{"type":"string"},"status":{"type":"string"},"revision":{"type":"integer"},"body":{"type":"object"},"source_anchor":{"type":"object"},"created_from_command_id":{"type":"string"},"created_at":{"type":"string"},"updated_at":{"type":"string"},"source_work_id":{"type":"string"},"source_chapter":{"type":"integer"},"source_provenance_kind":{"type":"string"},"extensions_nexus_extras":{"type":"object"},"modules":{"type":"object"}},"required":["schema_version","entry_id","world_id","block_type","canonical_name","status","created_at"]}}},"required":["world_id","blocks"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"world_id":{"type":"string"},"blocks":{"type":"array","items":{"type":"object","properties":{"schema_version":{"type":"integer"},"entry_id":{"type":"string"},"world_id":{"type":"string"},"block_type":{"type":"string","enum":["character","ability","scene","organization","item","conflict","info_point","event","species","faction","magic_system","technology","deity","level","economy_tier","dialogue","beat","act","era"]},"canonical_name":{"type":"string"},"status":{"type":"string"},"revision":{"type":"integer"},"body":{"type":"object"},"source_anchor":{"type":"object"},"created_from_command_id":{"type":"string"},"created_at":{"type":"string"},"updated_at":{"type":"string"},"source_work_id":{"type":"string"},"source_chapter":{"type":"integer"},"source_provenance_kind":{"type":"string"},"extensions_nexus_extras":{"type":"object"},"modules":{"type":"object"}},"required":["schema_version","entry_id","world_id","block_type","canonical_name","status","created_at"]}}},"required":["world_id","blocks"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"written":{"type":"integer"},"world_id":{"type":"string"},"suppressed_writes":{"type":"array","items":{"type":"object","properties":{"entry_id":{"type":"string"}},"required":["entry_id"]}}},"required":["written","world_id"]}"#,
                 ),
@@ -621,9 +586,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_WRITE_WORKSPACE,
             catalog: CatalogDescriptor {
                 description: "Update a manuscript chapter's content for a work.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1},"content":{"type":"string"}},"required":["work_id","chapter"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1},"content":{"type":"string"}},"required":["work_id","chapter"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer"},"volume":{"type":"integer"},"slug":{"type":"string"},"planned_word_count":{"type":"integer"},"actual_word_count":{"type":"integer"},"status":{"type":"string"},"outline_path":{"type":"string"},"body_path":{"type":"string"},"created_at":{"type":"string"},"updated_at":{"type":"string"}},"required":["work_id","chapter","planned_word_count","status","created_at","updated_at"]}"#,
                 ),
@@ -641,9 +604,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_WRITE_WORLD,
             catalog: CatalogDescriptor {
                 description: "Update metadata (title, visibility, time policy) for an owned world.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"world_id":{"type":"string"},"title":{"type":"string"},"visibility":{"type":"string","enum":["public","private","invited"]},"time_policy":{"type":"string","enum":["manual","auto_advance"]}},"required":["world_id"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"world_id":{"type":"string"},"title":{"type":"string"},"visibility":{"type":"string","enum":["public","private","invited"]},"time_policy":{"type":"string","enum":["manual","auto_advance"]}},"required":["world_id"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"world_id":{"type":"string"},"updated":{"type":"boolean"}},"required":["world_id","updated"]}"#,
                 ),
@@ -661,9 +622,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_WRITE_WORKSPACE,
             catalog: CatalogDescriptor {
                 description: "Link schedule ids to a work.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"work_id":{"type":"string"},"schedule_ids":{"type":"array","items":{"type":"string"}}},"required":["work_id","schedule_ids"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"work_id":{"type":"string"},"schedule_ids":{"type":"array","items":{"type":"string"}}},"required":["work_id","schedule_ids"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"work_id":{"type":"string"},"schedule_ids":{"type":"array","items":{"type":"string"}}},"required":["work_id","schedule_ids"]}"#,
                 ),
@@ -681,9 +640,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_WRITE_WORKSPACE,
             catalog: CatalogDescriptor {
                 description: "Mark a finding as resolved, optionally with a resolution note.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"finding_id":{"type":"string"},"resolution":{"type":"string"}},"required":["finding_id"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"finding_id":{"type":"string"},"resolution":{"type":"string"}},"required":["finding_id"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"finding_id":{"type":"string"},"resolved":{"type":"boolean"}},"required":["finding_id","resolved"]}"#,
                 ),
@@ -701,9 +658,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_POOL_WRITE,
             catalog: CatalogDescriptor {
                 description: "Add, remove, promote, or archive a work entry in the selection pool.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"work_id":{"type":"string"},"action":{"type":"string","enum":["add","remove","promote","archive"]}},"required":["work_id","action"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"work_id":{"type":"string"},"action":{"type":"string","enum":["add","remove","promote","archive"]}},"required":["work_id","action"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"work_id":{"type":"string"},"action":{"type":"string"},"success":{"type":"boolean"}},"required":["work_id","action","success"]}"#,
                 ),
@@ -721,9 +676,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_CONTEXT,
             catalog: CatalogDescriptor {
                 description: "Return the capability registry snapshot (synthetic or CDN-backed).",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"cacheAgeMs":{"type":"integer","minimum":0},"capabilityCount":{"type":"integer","minimum":0},"source":{"type":"string","enum":["synthetic","cdn","synthetic_fallback"]},"snapshotVersion":{"type":"string"},"generatedAt":{"type":"string","format":"date-time"},"fetchTimeoutMs":{"type":"integer","minimum":0},"maxRetries":{"type":"integer","minimum":0},"retryCount":{"type":"integer","minimum":0},"fallbackReason":{"type":"string"}},"required":["cacheAgeMs","capabilityCount","source","snapshotVersion","generatedAt"],"additionalProperties":false}"#,
                 ),
@@ -741,7 +694,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_WORKSPACE,
             catalog: CatalogDescriptor {
                 description: "List all manuscripts (works) for the active creator.",
-                input_schema: Some(r#"{"type":"object","properties":{}}"#),
+                input_schema: r#"{"type":"object","properties":{}}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"manuscripts":{"type":"array","items":{"type":"object"}},"count":{"type":"integer"}},"required":["manuscripts","count"]}"#,
                 ),
@@ -759,9 +712,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_WORKSPACE,
             catalog: CatalogDescriptor {
                 description: "Read a bounded line range from a manuscript chapter body.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1}},"required":["work_id","chapter"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1}},"required":["work_id","chapter"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer"},"volume":{"type":"integer"},"content":{"type":"string"},"range":{"type":"object","properties":{"start_line":{"type":"integer"},"end_line":{"type":"integer"}}},"total_lines":{"type":"integer"},"truncated":{"type":"boolean"}},"required":["work_id","chapter","volume","content","range","total_lines","truncated"]}"#,
                 ),
@@ -779,9 +730,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_WRITE_WORKSPACE,
             catalog: CatalogDescriptor {
                 description: "Write manuscript body content for a chapter within the size quota.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1},"content":{"type":"string"}},"required":["work_id","chapter","content"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1},"content":{"type":"string"}},"required":["work_id","chapter","content"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"written":{"type":"boolean"},"work_id":{"type":"string"},"chapter":{"type":"integer"},"volume":{"type":"integer"},"word_count":{"type":"integer"},"bytes_written":{"type":"integer"}},"required":["written","work_id","chapter","volume","word_count","bytes_written"]}"#,
                 ),
@@ -799,9 +748,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_WORKSPACE,
             catalog: CatalogDescriptor {
                 description: "Return the current manuscript phase and stage status for a work.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"work_id":{"type":"string"}},"required":["work_id"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"work_id":{"type":"string"}},"required":["work_id"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"work_id":{"type":"string"},"phase":{"type":"string"},"stage_status":{"type":"string"}},"required":["work_id","phase","stage_status"]}"#,
                 ),
@@ -819,9 +766,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_WRITE_WORKSPACE,
             catalog: CatalogDescriptor {
                 description: "Move a work forward to the next manuscript phase.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"work_id":{"type":"string"},"phase":{"type":"string","enum":["brainstorm","draft","review","finalize"]},"force":{"type":"boolean"}},"required":["work_id","phase"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"work_id":{"type":"string"},"phase":{"type":"string","enum":["brainstorm","draft","review","finalize"]},"force":{"type":"boolean"}},"required":["work_id","phase"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"work_id":{"type":"string"},"previous_phase":{"type":"string"},"current_phase":{"type":"string"},"stage_status":{"type":"string"},"transitioned":{"type":"boolean"}},"required":["work_id","previous_phase","current_phase","stage_status","transitioned"]}"#,
                 ),
@@ -839,7 +784,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_CONTEXT,
             catalog: CatalogDescriptor {
                 description: "Return the workspace root and the allowed roots (Works, Worlds, References, .nexus42).",
-                input_schema: Some(r#"{"type":"object","properties":{}}"#),
+                input_schema: r#"{"type":"object","properties":{}}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"workspace_root":{"type":"string"},"allowed_roots":{"type":"array","items":{"type":"string"}},"preset_id":{"type":"string"}},"required":["workspace_root","allowed_roots","preset_id"]}"#,
                 ),
@@ -857,7 +802,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_CONTEXT,
             catalog: CatalogDescriptor {
                 description: "Return agent-visible runtime health: mode, registry reachability, sync context, cloud flag.",
-                input_schema: Some(r#"{"type":"object","properties":{}}"#),
+                input_schema: r#"{"type":"object","properties":{}}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"runtime_mode":{"type":"string"},"registry_reachable":{"type":"boolean"},"registry_size":{"type":"integer"},"sync_state":{"type":"string"},"cloud_enabled":{"type":"boolean"},"pool_healthy":{"type":"boolean"}},"required":["runtime_mode","registry_reachable","registry_size","sync_state","cloud_enabled","pool_healthy"]}"#,
                 ),
@@ -875,9 +820,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_READ_CONTEXT,
             catalog: CatalogDescriptor {
                 description: "Propagate a correlation id (and optional session id) across tool calls.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"correlation_id":{"type":"string"},"session_id":{"type":"string"}}}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"correlation_id":{"type":"string"},"session_id":{"type":"string"}}}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"correlation_id":{"type":"string"},"session_id":{"type":"string"},"parent_request_id":{"type":"string"},"trace_timestamp":{"type":"string"},"propagated":{"type":"boolean"}},"required":["correlation_id","trace_timestamp","propagated"]}"#,
                 ),
@@ -895,9 +838,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_FS_READ,
             catalog: CatalogDescriptor {
                 description: "Read a text file within the workspace root and return its content.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}"#,
                 ),
@@ -915,9 +856,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
             admission: ADMISSION_FS_WRITE,
             catalog: CatalogDescriptor {
                 description: "Write text content to a file within the workspace root.",
-                input_schema: Some(
-                    r#"{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}"#,
-                ),
+                input_schema: r#"{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}"#,
                 output_schema: Some(
                     r#"{"type":"object","properties":{"written":{"type":"boolean"}},"required":["written"]}"#,
                 ),

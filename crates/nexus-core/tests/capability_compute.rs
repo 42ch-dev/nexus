@@ -1013,13 +1013,33 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         before,
         "a refused canonical dispatch must have zero domain effect"
     );
+
+    // The admission entry (Gate 1's allowlist resolver) makes the SAME decision
+    // and therefore must not consult the lanes either — same counter, no reset
+    // in between.
     assert!(
         !unbound.spine_resolves(&context, TOOL),
         "an unbound canonical id is not dispatchable (the allowlist gate must agree)"
     );
+    assert_eq!(
+        unbound.fallback_consultations(),
+        0,
+        "the allowlist path must not reach the peer/user lanes for a canonical id"
+    );
 
-    // Non-vacuity of the probe: a NON-canonical miss does consult the lanes
-    // (peer, then user), and the same registry records exactly that.
+    // Non-vacuity of the probe on the allowlist path: a NON-canonical miss does
+    // consult the lanes there.
+    assert!(
+        !unbound.spine_resolves(&context, "not.a.canonical.tool"),
+        "an unknown non-canonical id does not resolve"
+    );
+    assert_eq!(
+        unbound.fallback_consultations(),
+        1,
+        "the allowlist path must record a real fallback consultation"
+    );
+
+    // Non-vacuity on the dispatch path: the same registry records that too.
     let unknown = unbound
         .dispatch(&tool_request("not.a.canonical.tool", json!({})), &context, CREATOR)
         .await
@@ -1030,8 +1050,8 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
     );
     assert_eq!(
         unbound.fallback_consultations(),
-        1,
-        "the probe must record a real fallback consultation"
+        2,
+        "the dispatch path must record a real fallback consultation"
     );
 
     // Bind the same real builtin: its existing handler still runs, on the same
@@ -1042,6 +1062,86 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         .expect("the bound canonical row must run its real handler");
     assert_eq!(value["creator_id"], CREATOR);
     assert_eq!(value["workspace_slug"], SLUG);
+}
+
+/// `Access` — not a second name roster — decides which grant admits a real
+/// handler, and the decision is exercised in both directions.
+///
+/// The workspace policy grants only `nexus.*.read` (with `default = "ask"`, so an
+/// unlisted name is not a deny). A read tool is admitted through the real
+/// `execute_tool` path; a semantically valid `nexus.work.patch` — whose handler
+/// would persist the title through `CoreService::patch_work` — is refused with
+/// `policy_blocked`, and the Work row keeps its title. A read/write
+/// misclassification in the canonical `Access` column flips one of these two
+/// outcomes, so this case fails for it.
+#[tokio::test]
+#[serial_test::serial]
+async fn read_grant_admits_reads_and_refuses_a_write() {
+    let f = fixture().await;
+    let work_id = seed_work(&f).await;
+    let principal = f.core.active_principal().await.unwrap();
+
+    // The policy lives with the workspace the context resolves.
+    let workspace = nexus_home_layout::operational_workspace_dir(f.tmp.path(), CREATOR, SLUG);
+    std::fs::create_dir_all(workspace.join(".nexus42")).unwrap();
+    std::fs::write(
+        workspace.join(".nexus42").join("permissions.toml"),
+        "default = \"ask\"\n\n[grant]\n\"nexus.*.read\" = true\n",
+    )
+    .unwrap();
+
+    let context = ToolContext::new(
+        f.core.pool().clone(),
+        f.tmp.path().join(".nexus42"),
+        Some(workspace.to_string_lossy().into_owned()),
+        ToolRuntimeFacts {
+            is_initialized: true,
+            lifecycle_state: "Running".to_string(),
+            started_at: chrono::Utc::now().to_rfc3339(),
+            ..ToolRuntimeFacts::default()
+        },
+        Some(Arc::new(f.core.clone())),
+        None,
+    );
+
+    // A read is admitted by the read grant.
+    let info = execute_tool(&context, &tool_request("nexus.workspace.info", json!({})))
+        .await
+        .expect("a read grant must admit a read tool");
+    assert_eq!(info["workspace_slug"], SLUG);
+
+    let title_before = f
+        .core
+        .get_work(&principal, work_id.clone())
+        .await
+        .unwrap()
+        .title;
+
+    // The same grant does NOT admit a write; the handler never runs.
+    let err = execute_tool(
+        &context,
+        &tool_request(
+            "nexus.work.patch",
+            json!({ "work_id": work_id.clone(), "title": "retitled by a refused write" }),
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(&err, CoreError::Coded { code, .. } if code == "policy_blocked"),
+        "a write under a read-only grant must be policy_blocked, got {err:?}"
+    );
+
+    let title_after = f
+        .core
+        .get_work(&principal, work_id)
+        .await
+        .unwrap()
+        .title;
+    assert_eq!(
+        title_after, title_before,
+        "a policy-blocked patch must leave the Work unchanged"
+    );
 }
 
 /// A capability never fabricates success when its prompt executor fails: the
