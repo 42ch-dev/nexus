@@ -614,16 +614,16 @@ jobs:
           # An exempt symbol that gains a second direct write must fail the
           # expected-count check (exemption keys carry an exact hit count).
           count_dir="$tmpdir/count"
-          mkdir -p "$count_dir/crates/nexus-orchestration/src/capability/builtins"
-          printf 'struct ScaffoldTransaction;\nimpl Drop for ScaffoldTransaction {\n    fn drop(&mut self) {\n        std::fs::write(path, original);\n        std::fs::write(path, other);\n    }\n}\n' > "$count_dir/crates/nexus-orchestration/src/capability/builtins/essay_scaffold.rs"
+          mkdir -p "$count_dir/crates/nexus-capability/src/builtins"
+          printf 'struct ScaffoldTransaction;\nimpl Drop for ScaffoldTransaction {\n    fn drop(&mut self) {\n        std::fs::write(path, original);\n        std::fs::write(path, other);\n    }\n}\n' > "$count_dir/crates/nexus-capability/src/builtins/essay_scaffold.rs"
           if bash tooling/check-work-artifact-writes.sh "$count_dir"; then
             echo "::error::work artifact write guard ignored a second direct write in an exempt symbol"
             exit 1
           fi
           # Two direct writes on one line must count as two occurrences.
           same_line="$tmpdir/same-line"
-          mkdir -p "$same_line/crates/nexus-orchestration/src/capability/builtins"
-          printf 'struct ScaffoldTransaction;\nimpl Drop for ScaffoldTransaction {\n    fn drop(&mut self) {\n        std::fs::write(path, original); std::fs::write(path, other);\n    }\n}\n' > "$same_line/crates/nexus-orchestration/src/capability/builtins/essay_scaffold.rs"
+          mkdir -p "$same_line/crates/nexus-capability/src/builtins"
+          printf 'struct ScaffoldTransaction;\nimpl Drop for ScaffoldTransaction {\n    fn drop(&mut self) {\n        std::fs::write(path, original); std::fs::write(path, other);\n    }\n}\n' > "$same_line/crates/nexus-capability/src/builtins/essay_scaffold.rs"
           if bash tooling/check-work-artifact-writes.sh "$same_line"; then
             echo "::error::work artifact write guard counted one line as one write"
             exit 1
