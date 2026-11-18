@@ -42,11 +42,13 @@ below for the lanes that still execute a module.
 > [`42ch-dev/agent-toolkit`](https://github.com/42ch-dev/agent-toolkit)
 > repository (external — **no** agent skill ships in this repo).
 
-## Published crates
+## Independently versioned crates
 
-The three module crates are separately published Cargo packages, listed in
+The three module crates are separate Cargo packages, listed in
 `tooling/release/version-brackets.json` with independent literal versions and
-normal caret requirements:
+normal caret requirements. They are released independently of the product and of
+each other, but **none of them is published yet, and nothing in this repository
+can publish one**:
 
 ```toml
 [dependencies]
@@ -61,10 +63,12 @@ siblings; a local checkout is selected with a `path` override
 (`nexus-module-sdk = { version = "0.1", path = "../nexus-module-sdk" }`), which
 is how this repository consumes them.
 
-Release capability is implemented, not executed: package releases use the
+Release *planning* is implemented, not executed: a package release would use the
 `crate-release` label and `crate/<name>/v<version>` tags — never the product
-`v*` tag — and are planned from one reviewed source revision. Publication
-requires operator-configured credentials and is unconfigured today; see
+`v*` tag — and is planned from one reviewed source revision. There is no
+publication path here: `release-packages.mjs` offers `--check-only` and
+`--prepare` only, the publish seam has no in-repository client, and the registry
+destination, namespace and credentials are unconfigured. See
 [`docs/release.md` → Public Cargo packages](../docs/release.md#public-cargo-packages).
 
 ## Quick start (scaffold → build → validate → install)

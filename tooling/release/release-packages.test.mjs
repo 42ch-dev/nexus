@@ -779,6 +779,61 @@ test("preparation rewrites every declaration of a bumped prerequisite", () => {
   }
 });
 
+test("a quoted dependency key is read as the same declaration", () => {
+  // `"nexus-workflow-ir" = { … }` is the same TOML/Cargo dependency as the bare
+  // key, so it is handled (not refused): the same one-line rewrite applies.
+  const { dir } = fixture({ version: "0.4.2" });
+  try {
+    const manifest = "crates/nexus-pattern/Cargo.toml";
+    mutateRepoFile(dir, manifest, (contents) =>
+      contents.replace(/^nexus-workflow-ir = /m, '"nexus-workflow-ir" = '),
+    );
+    const result = preparePackageVersions(dir, {
+      packages: ["nexus-workflow-ir"],
+      versions: { "nexus-workflow-ir": "0.5.0" },
+    });
+    assert.equal(result.ok, true, JSON.stringify(result.refusals));
+    assert.match(
+      readRepoFile(dir, manifest),
+      /"nexus-workflow-ir" = \{ version = "0\.5\.0", path = "\.\.\/nexus-workflow-ir" \}/,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a renamed dependency on an inventory package refuses", () => {
+  // `alias = { package = "nexus-workflow-ir", … }` has no key the scanner can
+  // rewrite by name, so it refuses instead of skipping the edge.
+  const { dir } = fixture({ version: "0.4.2" });
+  try {
+    const manifest = "crates/nexus-pattern/Cargo.toml";
+    mutateRepoFile(dir, manifest, (contents) =>
+      contents.replace(
+        /^nexus-workflow-ir = .*$/m,
+        'local-ir = { package = "nexus-workflow-ir", version = "0.4.2", path = "../nexus-workflow-ir" }',
+      ),
+    );
+    const result = preparePackageVersions(dir, {
+      packages: ["nexus-workflow-ir"],
+      versions: { "nexus-workflow-ir": "0.5.0" },
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.changed, []);
+    assert.deepEqual(
+      result.refusals.map((row) => row.code),
+      ["dependency-form-unsupported"],
+    );
+    assert.match(
+      result.refusals[0].message,
+      /crates\/nexus-pattern\/Cargo\.toml:\d+: nexus-workflow-ir is depended on under another key/,
+    );
+    assert.match(readRepoFile(dir, manifest), /version = "0\.4\.2"/);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
 test("preparation refuses dependency declarations it cannot rewrite", () => {
   // Both replacements are valid Cargo (a trailing comment and a plain
   // requirement string), and both are forms this helper cannot rewrite in

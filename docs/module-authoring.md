@@ -35,7 +35,8 @@ reference, use the `compute-module-author` skill in the external
 repository (no agent skill ships in this repo). The ABI contract below stays
 normative — the SDK is a generator for it, not a replacement.
 
-The SDK, manifest and test crates are published independently (see
+The SDK, manifest and test crates are versioned independently and can be
+released independently (see
 [Public Cargo packages](release.md#public-cargo-packages)): depend on
 `nexus-module-sdk = "0.1"` in a module's `[dependencies]`, on
 `nexus-module-manifest = "0.1"` wherever manifests are validated, and on
@@ -44,6 +45,11 @@ never in a `wasm32` guest, which cannot compile Wasmtime. Each crate advances on
 its own version (its `CHANGELOG.md` says when), so a caret bound is the
 compatibility contract; a local checkout is selected with a `path` override
 alongside that bound.
+
+**None of these crates is on a registry today, and nothing in this repository
+can publish one.** The bounds above state the intended compatibility contract;
+until an operator-authorized delivery route exists, a `path` dependency (or a
+`[patch]`/vendor entry) is how a module builds against them.
 
 ## ABI at a glance
 

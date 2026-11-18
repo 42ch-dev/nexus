@@ -30,6 +30,33 @@ import {
 /** Repository-root-relative discovery path the checker reads. */
 const CONSUMER_FIXTURES_PATH = "tooling/release/fixtures/package-consumers";
 const CONSUMER_FIXTURES_DIR = join(REPO_ROOT, CONSUMER_FIXTURES_PATH);
+/** Checked-in accounting every fixture repo must carry. */
+const CONSUMER_ACCOUNTING_PATH = "tooling/release/fixtures/package-consumers.json";
+
+/**
+ * Accounting document for a fixture repo: every carrier entry, either with the
+ * fixture that consumes it or explicitly without one and why.
+ *
+ * @param {Record<string, string | null>} entries
+ * @returns {string}
+ */
+function consumerAccounting(entries) {
+  return `${JSON.stringify(
+    Object.fromEntries(
+      Object.entries(entries).map(([name, fixture]) => [
+        name,
+        fixture === null
+          ? {
+              fixture: null,
+              reason: "no runner of its own; another fixture resolves this archive",
+            }
+          : { fixture },
+      ]),
+    ),
+    null,
+    2,
+  )}\n`;
+}
 
 /** Kept in sync with the checker's scratch prefix. */
 const SCRATCH_PREFIX = "nexus-contract-package-";
@@ -75,6 +102,10 @@ function tinyFixture(options = {}) {
   if (options.withSource !== false) {
     files[`${TINY_CRATE_DIR}/src/lib.rs`] = "pub fn tiny() {}\n";
   }
+  // Declared fixture-less: the entry has no consumer and the accounting says so.
+  files[CONSUMER_ACCOUNTING_PATH] = consumerAccounting({
+    "nexus-tiny-contract": null,
+  });
   const dir = createTempRepo({ files });
   // Staging derives its path list from Git, as it does in a real checkout.
   initGitRepo(dir);
@@ -113,6 +144,11 @@ function consumerFixtureRepo(caseDir, entryName, options = {}) {
     join(CONSUMER_FIXTURES_DIR, caseDir, "consumer"),
     join(dir, CONSUMER_FIXTURES_PATH, entryName),
     { recursive: true },
+  );
+  writeRepoFile(
+    dir,
+    CONSUMER_ACCOUNTING_PATH,
+    consumerAccounting({ [entryName]: entryName }),
   );
   if (options.initGit !== false) {
     // Staging derives its path list from Git, as it does in a real checkout.
@@ -480,6 +516,15 @@ function realConsumerRepo(entryName, entries) {
     join(dir, CONSUMER_FIXTURES_PATH, entryName),
     { recursive: true },
   );
+  writeRepoFile(
+    dir,
+    CONSUMER_ACCOUNTING_PATH,
+    consumerAccounting(
+      Object.fromEntries(
+        entries.map((name) => [name, name === entryName ? entryName : null]),
+      ),
+    ),
+  );
   initGitRepo(dir);
   return dir;
 }
@@ -534,6 +579,15 @@ function moduleConsumerRepo(entryName, modules) {
     join(CONSUMER_FIXTURES_DIR, entryName),
     join(dir, CONSUMER_FIXTURES_PATH, entryName),
     { recursive: true },
+  );
+  writeRepoFile(
+    dir,
+    CONSUMER_ACCOUNTING_PATH,
+    consumerAccounting(
+      Object.fromEntries(
+        modules.map((name) => [name, name === entryName ? entryName : null]),
+      ),
+    ),
   );
   initGitRepo(dir);
   return dir;
@@ -908,6 +962,15 @@ test("an archive no passing consumer consumes fails as a pack-only result", () =
         2,
       )}\n`,
     );
+    // The second entry is declared fixture-less; nothing consumes it.
+    writeRepoFile(
+      dir,
+      CONSUMER_ACCOUNTING_PATH,
+      consumerAccounting({
+        "nexus-fixture-public": "nexus-fixture-public",
+        "nexus-tiny-contract": null,
+      }),
+    );
 
     const report = checkContractPackageability(dir);
     assert.equal(report.ok, false);
@@ -1047,6 +1110,11 @@ test("a patch a consumer declares but never resolves does not count as coverage"
       `${CONSUMER_FIXTURES_PATH}/nexus-tiny-contract/src/main.rs`,
       'fn main() {\n    println!("declared, never resolved");\n}\n',
     );
+    writeRepoFile(
+      dir,
+      CONSUMER_ACCOUNTING_PATH,
+      consumerAccounting({ "nexus-tiny-contract": "nexus-tiny-contract" }),
+    );
     initGitRepo(dir);
 
     const report = checkContractPackageability(dir);
@@ -1071,6 +1139,86 @@ test("a patch a consumer declares but never resolves does not count as coverage"
     );
     // Nothing resolved the archive, so no fixture is named as its proof.
     assert.equal(row.coveredBy, null);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a repository without the consumer accounting fails instead of packing", () => {
+  const dir = tinyFixture();
+  try {
+    rmSync(join(dir, CONSUMER_ACCOUNTING_PATH));
+    assert.throws(
+      () => checkContractPackageability(dir),
+      /consumer accounting failed: tooling\/release\/fixtures\/package-consumers\.json is missing/,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("removing a declared fixture fails until the accounting is edited", () => {
+  const dir = consumerFixtureRepo("positive-api-call", "nexus-fixture-public");
+  try {
+    // The fixture directory is deleted and the accounting still declares it:
+    // "fixtures were removed" must not read as "no fixtures by design".
+    rmSync(join(dir, CONSUMER_FIXTURES_PATH, "nexus-fixture-public"), {
+      recursive: true,
+      force: true,
+    });
+    assert.throws(
+      () => checkContractPackageability(dir),
+      /consumer accounting failed: .*nexus-fixture-public declares the fixture nexus-fixture-public, which is not in the tree/,
+    );
+
+    // The deliberate edit — declare the entry fixture-less, with a reason —
+    // makes the same tree a legitimate pack-only run.
+    writeRepoFile(
+      dir,
+      CONSUMER_ACCOUNTING_PATH,
+      consumerAccounting({ "nexus-fixture-public": null }),
+    );
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
+    assert.equal(report.consumerAccounting.fixtures.length, 0);
+    assert.deepEqual(
+      report.consumerAccounting.noFixture.map((row) => row.name),
+      ["nexus-fixture-public"],
+    );
+    const [row] = report.results;
+    assert.equal(row.consumer, null);
+    assert.equal(row.coveredBy, null);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("the consumer accounting must name every carrier entry once", () => {
+  const dir = tinyFixture();
+  try {
+    writeRepoFile(
+      dir,
+      CONSUMER_ACCOUNTING_PATH,
+      consumerAccounting({ "nexus-other-contract": null }),
+    );
+    assert.throws(
+      () => checkContractPackageability(dir),
+      /records nexus-other-contract, which is not a carrier entry/,
+    );
+    writeRepoFile(dir, CONSUMER_ACCOUNTING_PATH, "{}\n");
+    assert.throws(
+      () => checkContractPackageability(dir),
+      /nexus-tiny-contract is not recorded/,
+    );
+    writeRepoFile(
+      dir,
+      CONSUMER_ACCOUNTING_PATH,
+      `${JSON.stringify({ "nexus-tiny-contract": { fixture: null } })}\n`,
+    );
+    assert.throws(
+      () => checkContractPackageability(dir),
+      /nexus-tiny-contract has no fixture, so it needs a reason/,
+    );
   } finally {
     cleanupTempRepo(dir);
   }

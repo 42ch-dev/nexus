@@ -82,6 +82,19 @@ const PACKAGE_ARGS = ["package", "--no-verify", "--allow-dirty", "--offline"];
 const CONSUMER_FIXTURES_PATH = "tooling/release/fixtures/package-consumers";
 
 /**
+ * Checked-in accounting of the fixture set, one record per carrier entry:
+ *
+ *   { "<package>": { "fixture": "<dir name>" } }
+ *   { "<package>": { "fixture": null, "reason": "<why none>" } }
+ *
+ * It is what separates "this repository has no consumer fixture by design" from
+ * "the fixtures were removed": a declared fixture that is missing from the tree
+ * fails the run, and an entry the file does not mention fails too, so deleting a
+ * fixture means editing this file deliberately.
+ */
+const CONSUMER_ACCOUNTING_PATH = "tooling/release/fixtures/package-consumers.json";
+
+/**
  * Subdirectory of a consumer fixture whose crate is a `wasm32-unknown-unknown`
  * guest. A guest is a separate crate from the host consumer, so no host-side
  * dependency can reach the artifact.
@@ -179,6 +192,9 @@ function contractDependencies(manifestContents, entries) {
  * @property {boolean} ok
  * @property {PackageResult[]} results One row per contract entry, in carrier order.
  * @property {string | null} firstFailure Package name of the first failing crate.
+ * @property {{path: string; fixtures: string[]; noFixture: {name: string, reason: string}[]}}
+ *   consumerAccounting The checked-in fixture accounting the run was validated
+ *   against: entries with a fixture, and entries explicitly declared without one.
  * @property {{sha: string | null; clean: boolean; mismatch?: string[]}} source
  *   Revision the packed source came from, and whether the staged bytes are that
  *   revision's bytes: `clean` is true only for a tree with no uncommitted change
@@ -571,6 +587,88 @@ function inside(candidate, root) {
   const target = resolve(candidate);
   const base = resolve(root);
   return target === base || target.startsWith(`${base}${sep}`);
+}
+
+/**
+ * Read and validate the checked-in fixture accounting from the same staged tree
+ * the archives are packed from. Every carrier entry must appear exactly once,
+ * with either a fixture directory that exists in the tree or an explicit
+ * no-fixture record and reason; anything else fails closed. Without this, a
+ * repository could drop its fixtures and still report a clean pack-only run.
+ *
+ * @param {string} stageRoot
+ * @param {import("./version-surfaces.mjs").ContractBracketEntry[]} entries
+ * @returns {{fixtures: Map<string, string>, noFixture: Map<string, string>}}
+ */
+function readConsumerAccounting(stageRoot, entries) {
+  const path = join(stageRoot, CONSUMER_ACCOUNTING_PATH);
+  if (!existsSync(path)) {
+    throw new Error(
+      `consumer accounting failed: ${CONSUMER_ACCOUNTING_PATH} is missing; record every carrier entry there, with an explicit no-fixture reason where none exists`,
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `consumer accounting failed: ${CONSUMER_ACCOUNTING_PATH} is not JSON (${
+        error instanceof Error ? error.message : String(error)
+      })`,
+    );
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(
+      `consumer accounting failed: ${CONSUMER_ACCOUNTING_PATH} must be an object keyed by package name`,
+    );
+  }
+  const names = new Set(entries.map((entry) => entry.name));
+  /** @type {Map<string, string>} */
+  const fixtures = new Map();
+  /** @type {Map<string, string>} */
+  const noFixture = new Map();
+  for (const [name, record] of Object.entries(parsed)) {
+    if (!names.has(name)) {
+      throw new Error(
+        `consumer accounting failed: ${CONSUMER_ACCOUNTING_PATH} records ${name}, which is not a carrier entry`,
+      );
+    }
+    if (record === null || typeof record !== "object" || Array.isArray(record)) {
+      throw new Error(
+        `consumer accounting failed: ${CONSUMER_ACCOUNTING_PATH}: ${name} needs {"fixture": <dir> | null, "reason"?}`,
+      );
+    }
+    const fixture = record.fixture ?? null;
+    if (fixture === null) {
+      const reason = typeof record.reason === "string" ? record.reason.trim() : "";
+      if (reason.length === 0) {
+        throw new Error(
+          `consumer accounting failed: ${CONSUMER_ACCOUNTING_PATH}: ${name} has no fixture, so it needs a reason`,
+        );
+      }
+      if (existsSync(join(stageRoot, CONSUMER_FIXTURES_PATH, name))) {
+        throw new Error(
+          `consumer accounting failed: ${CONSUMER_ACCOUNTING_PATH}: ${name} is declared without a fixture, but ${CONSUMER_FIXTURES_PATH}/${name} exists; declare it or remove the directory`,
+        );
+      }
+      noFixture.set(name, reason);
+      continue;
+    }
+    if (typeof fixture !== "string" || !existsSync(join(stageRoot, CONSUMER_FIXTURES_PATH, fixture))) {
+      throw new Error(
+        `consumer accounting failed: ${CONSUMER_ACCOUNTING_PATH}: ${name} declares the fixture ${String(fixture)}, which is not in the tree`,
+      );
+    }
+    fixtures.set(name, fixture);
+  }
+  for (const entry of entries) {
+    if (!fixtures.has(entry.name) && !noFixture.has(entry.name)) {
+      throw new Error(
+        `consumer accounting failed: ${CONSUMER_ACCOUNTING_PATH}: ${entry.name} is not recorded; every carrier entry needs a fixture or an explicit no-fixture reason`,
+      );
+    }
+  }
+  return { fixtures, noFixture };
 }
 
 /**
@@ -1128,6 +1226,8 @@ export function checkContractPackageability(repoRoot) {
   const results = [];
   /** @type {Map<string, {root: string, sha256: string, version: string}>} */
   const archives = new Map();
+  /** @type {ReturnType<typeof readConsumerAccounting>} */
+  let consumer = { fixtures: new Map(), noFixture: new Map() };
   try {
     stageWorkingSource(repoRoot, stageRoot);
     // The copy happens after the status sample, so a file can change in
@@ -1140,6 +1240,10 @@ export function checkContractPackageability(repoRoot) {
         source = { sha: source.sha, clean: false, mismatch };
       }
     }
+
+    // The fixture set is a reviewed input, not something discovered by looking
+    // for whatever happens to be on disk: the accounting must name every entry.
+    consumer = readConsumerAccounting(stageRoot, entries);
 
     for (const entry of entries) {
       const inspected = packAndInspect({
@@ -1172,10 +1276,7 @@ export function checkContractPackageability(repoRoot) {
       }
     }
 
-    const hasConsumer = entries.some((entry) =>
-      existsSync(join(stageRoot, CONSUMER_FIXTURES_PATH, entry.name)),
-    );
-    if (hasConsumer && archives.size > 0) {
+    if (consumer.fixtures.size > 0 && archives.size > 0) {
       const policy = workspacePolicy(stageRoot);
       // Standalone contract crates (`modules/*`) are not workspace members, so
       // the staged workspace cannot report their `publish`; their archive's own
@@ -1186,10 +1287,10 @@ export function checkContractPackageability(repoRoot) {
         }
       }
       for (const row of results) {
-        if (!row.ok) {
+        if (!row.ok || !consumer.fixtures.has(row.name)) {
           continue;
         }
-        const consumer = runConsumer({
+        const evidence = runConsumer({
           repoRoot,
           stageRoot,
           scratchRoot,
@@ -1198,13 +1299,13 @@ export function checkContractPackageability(repoRoot) {
           archives,
           policy,
         });
-        if (consumer === null) {
+        if (evidence === null) {
           continue;
         }
-        row.consumer = consumer;
-        if (!consumer.ok) {
+        row.consumer = evidence;
+        if (!evidence.ok) {
           row.ok = false;
-          row.cause = consumer.cause;
+          row.cause = evidence.cause;
         }
       }
       // An entry with no fixture of its own is consumed by another entry's
@@ -1263,7 +1364,19 @@ export function checkContractPackageability(repoRoot) {
   }
 
   const firstFailure = results.find((result) => !result.ok)?.name ?? null;
-  return { ok: firstFailure === null, results, firstFailure, source };
+  return {
+    ok: firstFailure === null,
+    results,
+    firstFailure,
+    consumerAccounting: {
+      path: CONSUMER_ACCOUNTING_PATH,
+      fixtures: [...consumer.fixtures.keys()].sort(),
+      noFixture: [...consumer.noFixture]
+        .map(([name, reason]) => ({ name, reason }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    },
+    source,
+  };
 }
 
 /**
@@ -1317,7 +1430,16 @@ function main(argv) {
     return 0;
   }
 
-  const report = checkContractPackageability(resolveRepoRoot());
+  /** @type {PackageabilityReport} */
+  let report;
+  try {
+    report = checkContractPackageability(resolveRepoRoot());
+  } catch (error) {
+    console.error(
+      `refused: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return 1;
+  }
   if (report.source.mismatch !== undefined) {
     console.error(
       `warning: staged source differs from ${report.source.sha} at ${report.source.mismatch.length} path(s); the archives are not that revision's bytes`,

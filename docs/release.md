@@ -568,10 +568,28 @@ went wrong:
   target-specific or otherwise unused declaration);
 - `pack-only: no passing consumer consumes <name>` — no fixture named it at all.
 
-Both are failures, not pack-only passes. A repository with no consumer fixtures
-at all is still checked as pack-only, which is what the fixtures' own isolation
-tests are; that is the only case where an archive without consumer proof is
-accepted.
+Both are failures, not pack-only passes.
+
+**The fixture set is declared, not discovered.**
+`tooling/release/fixtures/package-consumers.json` records one entry per carrier
+package:
+
+```json
+{
+  "nexus-contracts": { "fixture": "nexus-contracts" },
+  "nexus-knowledge": { "fixture": null, "reason": "no runner of its own: …" }
+}
+```
+
+The checker reads that file from the staged tree and fails when an entry is
+missing from it, when it names a package outside the carrier, when a declared
+fixture directory is absent, or when an entry declared fixture-less has a
+directory anyway. A repository that declares no fixtures at all is a legitimate
+pack-only run, which is what the fixtures' own isolation tests are; a repository
+that *removed* its fixtures is a failure until someone edits this file
+deliberately. That is the difference between "no fixtures by design" and
+"fixtures were deleted", and it is why the pack-only path cannot be reached by
+accident.
 
 `--registry-state <json>` takes `{ "published": [{ "name", "version",
 "checksum" }], "writable": true }`. Without it, live registry state is *unknown*:

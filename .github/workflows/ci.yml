@@ -251,11 +251,11 @@ jobs:
           # so clippy above never fetches their graphs (e.g. `dlmalloc`).
           node -e 'for (const { manifest } of require("./tooling/release/version-brackets.json").contract) console.log(manifest)' \
             | while read -r manifest; do cargo fetch --manifest-path "$manifest"; done
-          # `--require-clean`: this step is the evidence source a release plan
-          # consumes, and the planner refuses a receipt whose staged tree is not
-          # the checked-out revision (`unclean-evidence`). Without the flag a
-          # symlink or mode drift would leave this step green while producing
-          # evidence nothing downstream can use.
+          # `--require-clean` makes the run refuse (exit 1, no report) unless
+          # the staged tree carries the checked-out revision's blobs, which is
+          # the `source.clean` a release plan requires. This step submits no
+          # JSON: it is a gate, not a receipt producer. It does not compare
+          # executable modes, and it does not prove LFS hydration.
           node tooling/release/check-contract-packageability.mjs --require-clean
       # The release scripts decide what a governed release writes, so their
       # fixtures (both version brackets, every carrier rejection, the

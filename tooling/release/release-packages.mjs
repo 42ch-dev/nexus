@@ -178,13 +178,21 @@ export function readSourceProvenance(repoRoot) {
  * `nexus-contracts` as both a normal and a dev dependency), so planning and
  * preparation both read the declarations here instead of the first match.
  *
- * The only form this helper reads is a bare-key single-line inline table with a
- * version requirement. Anything else that names the package as a dependency key
- * — a trailing comment, a table spread over several lines, a plain requirement
- * string, a dotted key — refuses by name: preparation rewrites bounds in place,
+ * The only form this helper reads is a single-line inline table under the
+ * package's own key, with a version requirement. The key may be bare or quoted
+ * (`nexus-contracts` and `"nexus-contracts"` are the same TOML key, and Cargo
+ * treats them identically), so a quoted key is read and rewritten as the same
+ * declaration rather than refused: the edit is the same one-line change.
+ *
+ * Everything else refuses by name, because preparation rewrites bounds in place
  * and a declaration it silently skipped is one it would leave pointed at the
- * old version. `requirement` is null for an inline table without a `version`
- * key, which the caller refuses as unversioned.
+ * old version: a trailing comment, a table spread over several lines, a plain
+ * requirement string, a dotted key, and a renamed dependency
+ * (`alias = { package = "<name>", … }`), whose key is not the package name and
+ * which this scan therefore cannot claim.
+ *
+ * `requirement` is null for an inline table without a `version` key, which the
+ * caller refuses as unversioned.
  *
  * @param {string} contents
  * @param {string} manifestPath
@@ -193,11 +201,20 @@ export function readSourceProvenance(repoRoot) {
  */
 function dependencyDeclarations(contents, manifestPath, name) {
   const escaped = escapeRegExp(name);
-  const keyLine = new RegExp(`^\\s*${escaped}\\s*[.=]`);
-  const inline = new RegExp(`^\\s*${escaped}\\s*=\\s*\\{([^}\\n]*)\\}\\s*$`);
+  const keyLine = new RegExp(`^\\s*"?${escaped}"?\\s*[.=]`);
+  const inline = new RegExp(
+    `^\\s*"?${escaped}"?\\s*=\\s*\\{([^}\\n]*)\\}\\s*$`,
+  );
+  const renamed = new RegExp(`\\bpackage\\s*=\\s*"${escaped}"`);
   /** @type {{ line: number; requirement: string | null }[]} */
   const declarations = [];
   contents.split("\n").forEach((line, index) => {
+    if (renamed.test(line)) {
+      throw new ReleaseRefusal(
+        "dependency-form-unsupported",
+        `${manifestPath}:${index + 1}: ${name} is depended on under another key; a renamed dependency has no bound this scan can rewrite`,
+      );
+    }
     if (!keyLine.test(line)) {
       return;
     }
@@ -232,7 +249,7 @@ function inventoryDependencies(contents, manifestPath, names) {
   const dependencies = [];
   for (const name of names) {
     const escaped = escapeRegExp(name);
-    if (new RegExp(`^\\s*\\[(?:.*\\.)?(?:dev-|build-)?dependencies\\.${escaped}\\]\\s*$`, "m").test(contents)) {
+    if (new RegExp(`^\\s*\\[(?:.*\\.)?(?:dev-|build-)?dependencies\\.(?:${escaped}|"${escaped}")\\]\\s*$`, "m").test(contents)) {
       throw new ReleaseRefusal(
         "dependency-form-unsupported",
         `${manifestPath}: ${name} uses a dependency table; an inline table with a version requirement is required`,
@@ -836,7 +853,7 @@ function replacePackageVersion(contents, manifestPath, version) {
  */
 function replaceDependencyRequirement(contents, manifestPath, name, version) {
   const pattern = new RegExp(
-    `^(\\s*${escapeRegExp(name)}\\s*=\\s*\\{[^}\\n]*?\\bversion\\s*=\\s*)"[^"]*"`,
+    `^(\\s*"?${escapeRegExp(name)}"?\\s*=\\s*\\{[^}\\n]*?\\bversion\\s*=\\s*)"[^"]*"`,
     "gm",
   );
   const declarations = dependencyDeclarations(contents, manifestPath, name);
