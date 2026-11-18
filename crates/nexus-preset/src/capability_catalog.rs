@@ -21,99 +21,109 @@ impl CapabilityCatalog for BuiltinCapabilityCatalog {
     }
 }
 
-/// The canonical builtin capability names — THE declaration (C3): the single
-/// authority that boot, rebuild, reservation and collision ownership iterate.
-/// Every name here resolves through [`builtin_input_schema`]; the registry's
-/// carried builtin rows are a subset of this declaration (a name may be
-/// declared while no handler object is constructed — it stays describable
-/// and reserved purely by this list).
-pub const BUILTIN_CAPABILITY_NAMES: &[&str] = &[
-    "acp.prompt",
-    "context.summarize",
-    "creator.inject_prompt",
-    "creator.read_memory",
-    "creator.write_brief",
-    "creator.write_memory",
-    "essay.draft_status.finalize",
-    "essay.project_scaffold",
-    "game_bible.project_scaffold",
-    "game_bible.section_status.update",
-    "judge.llm",
-    "judge.rule",
-    "kb.extract_work",
-    "narrative.compute",
-    "nexus.fork.create",
-    "nexus.llm.extract",
-    "nexus.timeline.event.append",
-    "nexus.world.delta.apply",
-    "nexus.world.delta.propose",
-    "nexus.world.state.query",
-    "novel.chapter_transition",
-    "novel.project_scaffold",
-    "outbox.compact",
-    "outbox.flush",
-    "registry.refresh",
-    "script.project_scaffold",
-    "script.section_status.update",
-    "soul.experience.aggregate",
-    "sync.pull",
-    "sync.push",
-    "workspace.commit",
-    "workspace.open",
+/// The canonical builtin capability declaration — THE single table (C3):
+/// one `(name, schema)` entry per builtin, from which BOTH public accessors
+/// derive (`builtin_names` iterates the first column, `builtin_input_schema`
+/// searches the table by name). A name added to one accessor but not the
+/// other is impossible by construction: there is no second place to declare
+/// it. Sorted by name, so [`builtin_input_schema`] may binary-search.
+///
+/// A builtin may be declared here while no handler object is constructed —
+/// it stays describable and reserved purely by being in this table.
+static BUILTIN_CAPABILITIES: &[(&str, &str)] = &[
+    ("acp.prompt", ACP_PROMPT_INPUT_SCHEMA),
+    ("context.summarize", CONTEXT_SUMMARIZE_INPUT_SCHEMA),
+    ("creator.inject_prompt", CREATOR_INJECT_PROMPT_INPUT_SCHEMA),
+    ("creator.read_memory", CREATOR_READ_MEMORY_INPUT_SCHEMA),
+    ("creator.write_brief", CREATOR_WRITE_BRIEF_INPUT_SCHEMA),
+    ("creator.write_memory", CREATOR_WRITE_MEMORY_INPUT_SCHEMA),
+    (
+        "essay.draft_status.finalize",
+        ESSAY_DRAFT_STATUS_FINALIZE_INPUT_SCHEMA,
+    ),
+    (
+        "essay.project_scaffold",
+        ESSAY_PROJECT_SCAFFOLD_INPUT_SCHEMA,
+    ),
+    (
+        "game_bible.project_scaffold",
+        GAME_BIBLE_PROJECT_SCAFFOLD_INPUT_SCHEMA,
+    ),
+    (
+        "game_bible.section_status.update",
+        GAME_BIBLE_SECTION_STATUS_UPDATE_INPUT_SCHEMA,
+    ),
+    ("judge.llm", JUDGE_LLM_INPUT_SCHEMA),
+    ("judge.rule", JUDGE_RULE_INPUT_SCHEMA),
+    ("kb.extract_work", KB_EXTRACT_WORK_INPUT_SCHEMA),
+    ("narrative.compute", NARRATIVE_COMPUTE_INPUT_SCHEMA),
+    ("nexus.fork.create", NEXUS_FORK_CREATE_INPUT_SCHEMA),
+    ("nexus.llm.extract", NEXUS_LLM_EXTRACT_INPUT_SCHEMA),
+    (
+        "nexus.timeline.event.append",
+        NEXUS_TIMELINE_EVENT_APPEND_INPUT_SCHEMA,
+    ),
+    (
+        "nexus.world.delta.apply",
+        NEXUS_WORLD_DELTA_APPLY_INPUT_SCHEMA,
+    ),
+    (
+        "nexus.world.delta.propose",
+        NEXUS_WORLD_DELTA_PROPOSE_INPUT_SCHEMA,
+    ),
+    (
+        "nexus.world.state.query",
+        NEXUS_WORLD_STATE_QUERY_INPUT_SCHEMA,
+    ),
+    (
+        "novel.chapter_transition",
+        NOVEL_CHAPTER_TRANSITION_INPUT_SCHEMA,
+    ),
+    (
+        "novel.project_scaffold",
+        NOVEL_PROJECT_SCAFFOLD_INPUT_SCHEMA,
+    ),
+    ("outbox.compact", OUTBOX_COMPACT_INPUT_SCHEMA),
+    ("outbox.flush", OUTBOX_FLUSH_INPUT_SCHEMA),
+    ("registry.refresh", REGISTRY_REFRESH_INPUT_SCHEMA),
+    (
+        "script.project_scaffold",
+        SCRIPT_PROJECT_SCAFFOLD_INPUT_SCHEMA,
+    ),
+    (
+        "script.section_status.update",
+        SCRIPT_SECTION_STATUS_UPDATE_INPUT_SCHEMA,
+    ),
+    (
+        "soul.experience.aggregate",
+        SOUL_EXPERIENCE_AGGREGATE_INPUT_SCHEMA,
+    ),
+    ("sync.pull", SYNC_PULL_INPUT_SCHEMA),
+    ("sync.push", SYNC_PUSH_INPUT_SCHEMA),
+    ("workspace.commit", WORKSPACE_COMMIT_INPUT_SCHEMA),
+    ("workspace.open", WORKSPACE_OPEN_INPUT_SCHEMA),
 ];
 
-/// Iterate the canonical builtin declaration (C3).
-///
-/// This is THE projection every builtin-name consumer must read — boot scan
-/// collision ownership, watcher rebuild collision ownership, registry
-/// reservation and dispatch's known-name discrimination all derive from it,
-/// never from constructed handler objects. Kept in lockstep with
-/// [`builtin_input_schema`]'s keys by the crate's declaration test (every
-/// name here resolves a schema) and by the capability registry's subset
-/// assertion (every carried builtin row names a declaration entry).
+/// Iterate the canonical builtin declaration (C3) — the name column of
+/// [`BUILTIN_CAPABILITIES`]. This is THE projection every builtin-name
+/// consumer must read: boot scan collision ownership, watcher rebuild
+/// collision ownership, registry reservation and dispatch's known-name
+/// discrimination all derive from it, never from constructed handler
+/// objects.
 #[must_use]
 pub fn builtin_names() -> impl Iterator<Item = &'static str> {
-    BUILTIN_CAPABILITY_NAMES.iter().copied()
+    BUILTIN_CAPABILITIES.iter().map(|(name, _)| *name)
 }
 
-/// Resolve the canonical builtin input schema. Unknown names fail closed.
+/// Resolve the canonical builtin input schema — the schema column of
+/// [`BUILTIN_CAPABILITIES`], searched by name. Unknown names fail closed.
 #[must_use]
 pub fn builtin_input_schema(name: &str) -> Option<&'static str> {
-    match name {
-        "acp.prompt" => Some(ACP_PROMPT_INPUT_SCHEMA),
-        "context.summarize" => Some(CONTEXT_SUMMARIZE_INPUT_SCHEMA),
-        "creator.inject_prompt" => Some(CREATOR_INJECT_PROMPT_INPUT_SCHEMA),
-        "creator.read_memory" => Some(CREATOR_READ_MEMORY_INPUT_SCHEMA),
-        "creator.write_brief" => Some(CREATOR_WRITE_BRIEF_INPUT_SCHEMA),
-        "creator.write_memory" => Some(CREATOR_WRITE_MEMORY_INPUT_SCHEMA),
-        "essay.draft_status.finalize" => Some(ESSAY_DRAFT_STATUS_FINALIZE_INPUT_SCHEMA),
-        "essay.project_scaffold" => Some(ESSAY_PROJECT_SCAFFOLD_INPUT_SCHEMA),
-        "game_bible.project_scaffold" => Some(GAME_BIBLE_PROJECT_SCAFFOLD_INPUT_SCHEMA),
-        "game_bible.section_status.update" => Some(GAME_BIBLE_SECTION_STATUS_UPDATE_INPUT_SCHEMA),
-        "judge.llm" => Some(JUDGE_LLM_INPUT_SCHEMA),
-        "judge.rule" => Some(JUDGE_RULE_INPUT_SCHEMA),
-        "kb.extract_work" => Some(KB_EXTRACT_WORK_INPUT_SCHEMA),
-        "narrative.compute" => Some(NARRATIVE_COMPUTE_INPUT_SCHEMA),
-        "nexus.fork.create" => Some(NEXUS_FORK_CREATE_INPUT_SCHEMA),
-        "nexus.llm.extract" => Some(NEXUS_LLM_EXTRACT_INPUT_SCHEMA),
-        "nexus.timeline.event.append" => Some(NEXUS_TIMELINE_EVENT_APPEND_INPUT_SCHEMA),
-        "nexus.world.delta.apply" => Some(NEXUS_WORLD_DELTA_APPLY_INPUT_SCHEMA),
-        "nexus.world.delta.propose" => Some(NEXUS_WORLD_DELTA_PROPOSE_INPUT_SCHEMA),
-        "nexus.world.state.query" => Some(NEXUS_WORLD_STATE_QUERY_INPUT_SCHEMA),
-        "novel.chapter_transition" => Some(NOVEL_CHAPTER_TRANSITION_INPUT_SCHEMA),
-        "novel.project_scaffold" => Some(NOVEL_PROJECT_SCAFFOLD_INPUT_SCHEMA),
-        "outbox.compact" => Some(OUTBOX_COMPACT_INPUT_SCHEMA),
-        "outbox.flush" => Some(OUTBOX_FLUSH_INPUT_SCHEMA),
-        "registry.refresh" => Some(REGISTRY_REFRESH_INPUT_SCHEMA),
-        "script.project_scaffold" => Some(SCRIPT_PROJECT_SCAFFOLD_INPUT_SCHEMA),
-        "script.section_status.update" => Some(SCRIPT_SECTION_STATUS_UPDATE_INPUT_SCHEMA),
-        "soul.experience.aggregate" => Some(SOUL_EXPERIENCE_AGGREGATE_INPUT_SCHEMA),
-        "sync.pull" => Some(SYNC_PULL_INPUT_SCHEMA),
-        "sync.push" => Some(SYNC_PUSH_INPUT_SCHEMA),
-        "workspace.commit" => Some(WORKSPACE_COMMIT_INPUT_SCHEMA),
-        "workspace.open" => Some(WORKSPACE_OPEN_INPUT_SCHEMA),
-        _ => None,
-    }
+    // The table is sorted by name (declaration order above).
+    BUILTIN_CAPABILITIES
+        .binary_search_by(|(declared, _)| (*declared).cmp(name))
+        .ok()
+        .map(|idx| BUILTIN_CAPABILITIES[idx].1)
 }
 
 /// Input schema for `acp.prompt`.
@@ -298,26 +308,41 @@ pub const WORKSPACE_OPEN_INPUT_SCHEMA: &str = r#"{"type":"object","properties":{
 mod tests {
     use super::*;
 
-    /// The declaration roster is in lockstep with the schema match: every
-    /// declared name resolves a schema — a roster entry missing from the
-    /// match would leave a builtin undescribable.
+    /// THE property (C3, single table): the roster and the schema lookup are
+    /// ONE declaration — every schema-table key appears in the roster and
+    /// vice versa, in the same order, and every entry resolves through the
+    /// public accessor.
+    ///
+    /// Under the previous two-handwritten-declarations arrangement this case
+    /// was FAILABLE: a key added only to the schema `match` made
+    /// `builtin_input_schema` answer while `builtin_names` — the reservation,
+    /// collision-ownership and dispatch-discriminator source — lacked it.
+    /// Collapsed into one table the equality holds by construction; the test
+    /// stays as the tripwire against a second handwritten list reappearing.
     #[test]
-    fn every_declared_name_resolves_a_schema() {
-        for name in BUILTIN_CAPABILITY_NAMES {
-            assert!(
-                builtin_input_schema(name).is_some(),
-                "declared builtin '{name}' has no input schema"
+    fn roster_and_schema_table_are_one_declaration() {
+        let roster: Vec<&str> = builtin_names().collect();
+        let schema_keys: Vec<&str> = BUILTIN_CAPABILITIES.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            roster, schema_keys,
+            "the roster and the schema table's keys are the same declaration, in the same order"
+        );
+        for (name, schema) in BUILTIN_CAPABILITIES {
+            assert_eq!(
+                builtin_input_schema(name),
+                Some(*schema),
+                "table entry '{name}' resolves through the public accessor"
             );
         }
+        // Unknown names fail closed through the same accessor.
+        assert_eq!(builtin_input_schema("not.a.declared.builtin"), None);
     }
 
-    /// Count anchor for the other direction (a match key without a roster
-    /// entry): the capability registry carries exactly this many builtin
-    /// rows and asserts every carried builtin name is IN this declaration —
-    /// a match key missing here surfaces there as a builtin outside the
-    /// declaration.
+    /// Count anchor shared with the capability registry: exactly 32 canonical
+    /// builtins — `registry_has_32_builtins` and its declaration-subset
+    /// assertion read the same table through `builtin_names`.
     #[test]
     fn declaration_has_thirty_two_canonical_names() {
-        assert_eq!(BUILTIN_CAPABILITY_NAMES.len(), 32);
+        assert_eq!(builtin_names().count(), 32);
     }
 }
