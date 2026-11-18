@@ -68,7 +68,7 @@ use nexus_wasm_host::{ComputeInput, ModuleCache, WasmEngine};
 #[cfg(feature = "wasm")]
 use serde::Deserialize;
 use serde_json::Value;
-#[cfg(feature = "wasm")]
+#[cfg(any(test, feature = "wasm"))]
 use serde_json::json;
 use std::sync::Arc;
 
@@ -564,15 +564,13 @@ async fn handle_compute_error(
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
-#[cfg(all(test, feature = "wasm"))]
+#[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    #[cfg(feature = "wasm")]
-use crate::state_delta;
+    use crate::state_delta;
     use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
-    #[cfg(feature = "wasm")]
-use nexus_knowledge::world_kb::KbStore;
+    use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::init_engine_pool;
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
@@ -582,6 +580,7 @@ use nexus_knowledge::world_kb::KbStore;
         (pool, dir)
     }
 
+    #[cfg(feature = "wasm")]
     fn test_contract_key_block(
         key_block_id: &str,
         world_id: &str,
@@ -855,6 +854,8 @@ use nexus_knowledge::world_kb::KbStore;
     // H1 / R-V161P3-CORR-002: create_new_key_blocks re-asserts world_id before
     // any insert, rejecting cross-world block injection from a (hypothetically
     // hostile or buggy) module.
+    // Exercises the gated compute helper; runs under `--features wasm`.
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn create_new_key_blocks_rejects_cross_world_injection() {
         let (pool, _dir) = fresh_pool().await;
@@ -868,6 +869,8 @@ use nexus_knowledge::world_kb::KbStore;
         assert!(kb_store.get_knowledge_entry("kb_hostile").await.is_err());
     }
 
+    // Exercises the gated compute helper; runs under `--features wasm`.
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn create_new_key_blocks_accepts_matching_world_id() {
         let (pool, _dir) = fresh_pool().await;
@@ -882,6 +885,8 @@ use nexus_knowledge::world_kb::KbStore;
         assert!(kb_store.get_knowledge_entry("kb_ok").await.is_ok());
     }
 
+    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_rejects_missing_world() {
         let (pool, _dir) = fresh_pool().await;
@@ -897,6 +902,8 @@ use nexus_knowledge::world_kb::KbStore;
         assert!(matches!(err, CapabilityError::Forbidden(_)));
     }
 
+    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_rejects_cross_creator() {
         let (pool, _dir) = fresh_pool().await;
@@ -914,6 +921,8 @@ use nexus_knowledge::world_kb::KbStore;
         assert!(matches!(err, CapabilityError::Forbidden(_)));
     }
 
+    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_rejects_no_computable_blocks() {
         let (pool, _dir) = fresh_pool().await;
@@ -930,6 +939,8 @@ use nexus_knowledge::world_kb::KbStore;
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
     }
 
+    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_invalid_input() {
         let (pool, _dir) = fresh_pool().await;
@@ -941,6 +952,8 @@ use nexus_knowledge::world_kb::KbStore;
     /// R5: only the admitted computable rows reach the compute input — another
     /// holder's private row does not, so a World whose only computable row is
     /// governed privately by another holder admits no computable entry at all.
+    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_excludes_other_holders_private_rows() {
         use nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE;
@@ -988,6 +1001,8 @@ use nexus_knowledge::world_kb::KbStore;
 
     /// R5 fail-closed: without an admitted scope the capability refuses instead
     /// of reading the World listing.
+    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_fails_closed_without_a_holder() {
         let (pool, _dir) = fresh_pool().await;
@@ -1025,6 +1040,8 @@ use nexus_knowledge::world_kb::KbStore;
 
     /// Full integration test: create world with 2 computable characters,
     /// run narrative.compute, verify output.
+    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_full_cycle() {
         let (pool, _dir) = fresh_pool().await;

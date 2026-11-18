@@ -42,7 +42,7 @@ sha2 = { workspace = true }
 tracing = { workspace = true }
 nexus-preset = { path = "../nexus-preset" }
 nexus-knowledge = { path = "../nexus-knowledge" }
-nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
+nexus-spoke-adapter = { path = "../nexus-spoke-adapter", default-features = false }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
