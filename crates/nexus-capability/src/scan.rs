@@ -152,8 +152,6 @@ fn scan_user_capabilities_inner(
     ),
     #[cfg(not(feature = "wasm"))] _executor: (),
 ) -> ScanOutcome {
-    #[cfg(not(feature = "wasm"))]
-    let _ = _executor;
     let mut outcome = ScanOutcome::default();
     let mut admitted_names: HashSet<String> = HashSet::new();
 

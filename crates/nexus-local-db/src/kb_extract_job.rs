@@ -539,9 +539,10 @@ pub enum UpsertOutcome {
     Unchanged(String),
 }
 
-/// List promotion candidates (any `promotion_status`) sourced from a specific
-/// chapter of a work. Used by `creator world kb rescan` to compute the diff baseline
-/// against the freshly-extracted candidate set.
+/// List promotion candidates (any `promotion_status`) for one chapter.
+///
+/// Used by `creator world kb rescan` to compute the diff baseline against the
+/// freshly-extracted candidate set.
 ///
 /// # Errors
 ///

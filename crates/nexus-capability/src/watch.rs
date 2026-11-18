@@ -235,8 +235,6 @@ fn rebuild_registry_inner(
     )>,
     #[cfg(not(feature = "wasm"))] _executor: (),
 ) -> (CapabilityRegistry, ScanOutcome) {
-    #[cfg(not(feature = "wasm"))]
-    let _ = _executor;
     // Collision ownership derives from THE DECLARATION (C3 contract), never
     // from constructed handler objects: the watcher rebuild gates against
     // the preset catalog's canonical names, so a builtin declared without a

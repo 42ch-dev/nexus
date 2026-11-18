@@ -204,29 +204,30 @@ fn probe_binary() -> PathBuf {
 /// building into `target/ci/`, so the boolean would resolve another profile's
 /// — possibly stale — artifact. The profile directory name is the truth.
 fn profile_from_exe(exe: &Path) -> Result<(PathBuf, String), String> {
+    let shown = exe.display();
     let deps = exe.parent().ok_or_else(|| {
-        format!("cannot infer the cargo profile from {exe:?}: no parent directory")
+        format!("cannot infer the cargo profile from {shown}: no parent directory")
     })?;
     if deps.file_name().and_then(|name| name.to_str()) != Some("deps") {
         return Err(format!(
-            "cannot infer the cargo profile from {exe:?}: expected the cargo test layout \
+            "cannot infer the cargo profile from {shown}: expected the cargo test layout \
              <target>/<profile>/deps/<binary>; set NEXUS42_RUNTIME_BIN to name the shipped artifact"
         ));
     }
     let profile_dir = deps.parent().ok_or_else(|| {
-        format!("cannot infer the cargo profile from {exe:?}: the deps directory has no parent")
+        format!("cannot infer the cargo profile from {shown}: the deps directory has no parent")
     })?;
     let profile = profile_dir
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| {
             format!(
-                "cannot infer the cargo profile from {exe:?}: the profile directory has no name"
+                "cannot infer the cargo profile from {shown}: the profile directory has no name"
             )
         })?;
     let target_root = profile_dir.parent().ok_or_else(|| {
         format!(
-            "cannot infer the cargo target directory from {exe:?}: the profile directory has no parent"
+            "cannot infer the cargo target directory from {shown}: the profile directory has no parent"
         )
     })?;
     Ok((target_root.to_path_buf(), profile.to_string()))
@@ -1078,8 +1079,15 @@ fn version_flag_prints_crate_version() {
     );
 }
 
+// One end-to-end scenario: seed, spawn, probe, assert. Splitting it would let a
+// later assertion pass against a runtime an earlier step never started.
+#[allow(clippy::too_many_lines)]
 #[test]
 fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
+    // The advertised list is an exact record, not a prefix: a trailing op
+    // (e.g. an unexpected served route) fails this line comparison.
+    const SERVED_OPS_LINE: &str = "SERVED_OPS=upsert,promote,relate,check,assemble,compute,\
+tools.nexus.list_observed_peers,tools.nexus.list_modules";
     let tmp = tempfile::tempdir().expect("temp dir");
     seed_home(tmp.path());
     // The retained half: stored scoped World + staged session (and, where the
@@ -1170,8 +1178,6 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
     );
     // The advertised list is an exact record, not a prefix: a trailing op
     // (e.g. an unexpected served route) fails this line comparison.
-    const SERVED_OPS_LINE: &str = "SERVED_OPS=upsert,promote,relate,check,assemble,compute,\
-tools.nexus.list_observed_peers,tools.nexus.list_modules";
     assert!(
         stdout.lines().any(|line| line.trim() == SERVED_OPS_LINE),
         "probe output missing the exact {SERVED_OPS_LINE:?} line:\n{stdout}\nstderr:\n{stderr}"

@@ -69,6 +69,9 @@ fn probe_manifest() -> HostCapabilityManifest {
 }
 
 #[tokio::main]
+// One linear arg-parse plus probe sequence; splitting it would scatter the
+// ordering the probe exists to observe.
+#[allow(clippy::too_many_lines)]
 async fn main() {
     let mut addr: Option<String> = None;
     let mut host_peer: Option<String> = None;
@@ -81,7 +84,7 @@ async fn main() {
             "--addr" => addr = Some(args.next().expect("--addr value")),
             "--host-peer" => host_peer = Some(args.next().expect("--host-peer value")),
             "--compute-session" => {
-                compute_session = Some(args.next().expect("--compute-session value"))
+                compute_session = Some(args.next().expect("--compute-session value"));
             }
             "--world" => compute_world = Some(args.next().expect("--world value")),
             "--print-peer-only" => print_peer_only = true,
