@@ -13,6 +13,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use nexus_capability::compute_input_builder::{ComputeBuildError, ComputeInputBuilder};
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{
     KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE,
@@ -21,8 +22,7 @@ use nexus_knowledge::world_kb::store::KnowledgeReadScope;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::init_engine_pool;
 use nexus_local_db::kb_store::SqliteKbStore;
-use nexus_orchestration::compute_input_builder::{ComputeBuildError, ComputeInputBuilder};
-use nexus_wasm_host::ModuleManifest;
+use nexus_module_manifest::ModuleManifest;
 use serde_json::{json, Map, Value};
 
 // ── Helpers ────────────────────────────────────────────────────────────

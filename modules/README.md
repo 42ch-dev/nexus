@@ -42,6 +42,36 @@ below for the lanes that still execute a module.
 > [`42ch-dev/agent-toolkit`](https://github.com/42ch-dev/agent-toolkit)
 > repository (external — **no** agent skill ships in this repo).
 
+## Independently versioned crates
+
+The three module crates are separate Cargo packages, listed in
+`tooling/release/version-brackets.json` with independent literal versions and
+normal caret requirements. They are released independently of the product and of
+each other, but **this repository declares no published version, provides no
+publication path and does not query the registry**, so it makes no claim about
+what a registry holds:
+
+```toml
+[dependencies]
+nexus-module-sdk = "0.1"      # authoring surface (wasm32 guest)
+nexus-module-manifest = "0.1" # manifest contract + validation
+```
+
+`nexus-module-test` is a **dev-dependency** for host-side ABI conformance tests
+(it needs Wasmtime, so it never belongs in a wasm32 guest). Each crate carries
+its own `CHANGELOG.md` and versions independently of the product and of its
+siblings; a local checkout is selected with a `path` override
+(`nexus-module-sdk = { version = "0.1", path = "../nexus-module-sdk" }`), which
+is how this repository consumes them.
+
+Release *planning* is implemented, not executed: a package release would use the
+`crate-release` label and `crate/<name>/v<version>` tags — never the product
+`v*` tag — and is planned from one reviewed source revision. There is no
+publication path here: `release-packages.mjs` offers `--check-only` and
+`--prepare` only, the publish seam has no in-repository client, and the registry
+destination, namespace and credentials are unconfigured. See
+[`docs/release.md` → Public Cargo packages](../docs/release.md#public-cargo-packages).
+
 ## Quick start (scaffold → build → validate → install)
 
 1. **Scaffold** — copy the template module (`modules/_template/`, an SDK

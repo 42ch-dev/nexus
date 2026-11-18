@@ -25,9 +25,9 @@
 //! | `author` | string | — | Author attribution. |
 //! | `host_functions` | array&lt;string&gt; | `[]` | Subset of `["kb_read", "narrative_query"]` the module may call. Only whitelisted names are linked into the instance. |
 //! | `battle_report_kind` | string | module-declared | Discriminator the module emits in `battle_report.kind`. |
-//! | `max_fuel` | integer | host `SandboxConfig` | Per-invocation fuel override. |
-//! | `max_memory_mib` | integer | host `SandboxConfig` | Per-invocation memory-cap override (MiB). |
-//! | `max_wall_time_ms` | integer | host `SandboxConfig` | Per-invocation wall-time override (ms). |
+//! | `max_fuel` | integer | host sandbox policy | Per-invocation fuel override. |
+//! | `max_memory_mib` | integer | host sandbox policy | Per-invocation memory-cap override (MiB). |
+//! | `max_wall_time_ms` | integer | host sandbox policy | Per-invocation wall-time override (ms). |
 //! | `wasm_sha256` | string | — | SHA-256 (64 lowercase hex chars) of the compiled `.wasm` bytes this manifest pairs with. Operators SHOULD set it: the loader then verifies content-based pairing and rejects a mismatched pair before it can be compiled or cached. Omitted (legacy manifests) → stat-fence fallback. |
 
 use std::collections::HashMap;

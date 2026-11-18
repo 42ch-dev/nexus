@@ -1,0 +1,15 @@
+[package]
+name = "nexus-fixture-anchor-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+nexus-fixture-anchor = "0.1.0"
+# `nexus-core` is a private workspace package (publish = false). A consumer of
+# the public archives must not pull it in, so the checker rejects the declared
+# private edge instead of resolving it from the original checkout.
+nexus-core = "0.1.0"
+
+# Standalone workspace root: the consumer inherits no product Cargo config.
+[workspace]

@@ -7,9 +7,9 @@
 
 #![allow(clippy::unwrap_used)]
 
+use nexus_capability::{CapabilityError, WorkspaceExecutor};
 use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::auto_chain::{mark_work_completed, ChainAction};
-use nexus_orchestration::capability::{CapabilityError, WorkspaceExecutor};
 use nexus_orchestration::completion_lock;
 use sqlx::SqlitePool;
 use tempfile::TempDir;

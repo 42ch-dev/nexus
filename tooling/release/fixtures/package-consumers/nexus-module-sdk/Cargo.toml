@@ -1,0 +1,16 @@
+[package]
+name = "nexus-module-sdk-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Host side of the pair. The guest is the separate `guest` member below, so a
+# host-only dependency can never reach the module artifact.
+[dependencies]
+nexus-module-sdk = "0.1.0"
+serde_json = "1"
+
+# Standalone workspace root: the consumer inherits no product Cargo config, and
+# `guest` is a member so one lockfile covers both sides.
+[workspace]
+members = ["guest"]

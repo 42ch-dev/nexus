@@ -1,0 +1,23 @@
+[package]
+name = "nexus-workflow-simulate"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Private pure IR simulator: deterministic reachability walk over a candidate workflow document."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+nexus-contracts = { path = "../nexus-contracts" }
+nexus-workflow-ir = { path = "../nexus-workflow-ir" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

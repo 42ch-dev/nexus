@@ -408,8 +408,9 @@ pub mod begin_immediate_report {
         static REPORT: Arc<Notify>;
     }
 
-    /// Arm `report` for every [`super::begin_immediate`] awaited inside `f`:
-    /// it notifies when that attempt is refused by a lock another writer holds
+    /// Arm `report` for every [`super::begin_immediate`] awaited inside `f`.
+    ///
+    /// It notifies when that attempt is refused by a lock another writer holds
     /// (SQLite's lock/busy codes 5/6) before the busy-timeout retry.
     pub async fn scope<F: Future>(report: Arc<Notify>, f: F) -> F::Output {
         REPORT.scope(report, f).await

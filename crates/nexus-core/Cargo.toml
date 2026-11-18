@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Transport-neutral World KB core service (v1.189 P1-T2)"
+publish = false
 
 [lints]
 workspace = true
@@ -31,9 +32,6 @@ execution = [
     "nexus-connect/peer-tools",
     "dep:nexus-orchestration",
     "dep:nexus-session-storage",
-    # The Simulate route is served at this execution edge only: the walk runs in-process,
-    # constructs no executor or provider, and stays out of the default/domain cohort.
-    "nexus-orchestration/simulate",
     "dep:nexus-provider-ports",
     "dep:graph-flow",
     "dep:tokio-util",
@@ -48,6 +46,11 @@ execution = [
     # nothing in `nexus-execution` names core.
     "dep:nexus-execution",
 ]
+# The authoring surface: Generate, Import, Approve and Simulate, and the private
+# pure simulator they bind to. Execution alone links none of it — the engine
+# cohort approves nothing — so a compute/execution-only consumer carries no
+# simulator, and the canonical Generate row stays reserved but unbound.
+strategy-authoring = ["execution", "dep:nexus-workflow-simulate"]
 # The crash/rendezvous seams the workspace-commit recovery proofs drive. They
 # are compiled out of a production build and enabled by this package's own
 # dev-dependency self-reference, exactly as the daemon did before the move.
@@ -61,22 +64,27 @@ test-hooks = [
     # provider.
     "nexus-memory-provider/test-hooks",
 ]
-compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute"]
-# Connect-host product cohort (v1.207 P2): the WS accept loop, per-session
-# monitoring and the peer-tools event lane the shipped `nexus-runtime` /
-# `nexus42 connect start` boot. This is the Connect-host surface only — it
-# carries NO rmcp: the reverse-invoke/operator MCP bridge is not a
-# Connect-host capability, so the product graph stays rmcp-free
+compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute", "nexus-capability/wasm"]
+# Connect-host product cohort (v1.207 P2; v249 cutover): the WS accept loop,
+# per-session monitoring and the peer-tools event lane the shipped
+# `nexus-runtime` / `nexus42 connect start` boot. This is the Connect-host
+# surface only — it carries NO rmcp: the reverse-invoke/operator MCP bridge is
+# not a Connect-host capability, so the product graph stays rmcp-free
 # (architecture §Cohorts; `tooling/check-graph-pins.sh` asserts rmcp ABSENT
-# from the nexus42 connect-host graph). `execution` is an explicit
-# prerequisite: the accept loop holds an orchestration capability registry.
-connect-host = ["execution", "nexus-connect/connect-host"]
+# from the nexus42 connect-host graph). V249: NO `execution` — the cohort
+# links the Connect protocol stack beside this crate's open domain; stored
+# principal/Actor/World/module scope checks stay in every cohort. Consumers
+# needing the durable operation id select `operation-id` explicitly (the app
+# product cohort already does).
+connect-host = ["nexus-connect/connect-host"]
 # Reverse-invoke/peer-control edge (v1.190 P4-T3): the full peer/MCP session
-# library = the `connect-host` transport cohort PLUS the rmcp bridge. The
-# embedded server (Model B) additionally needs `embedded-mcp`. The shipped
-# Connect-host product does NOT enable this cohort (it links no rmcp); only
-# the app-level MCP/peer library does.
-connect-client = ["connect-host", "nexus-connect/connect-client"]
+# library = the `connect-host` transport cohort PLUS the `execution` cohort
+# the retained owner methods need (`ExecutionHandle::start_peer_control` and
+# the lifecycle lane live in the execution-gated `owner` module) PLUS the rmcp
+# bridge. The embedded server (Model B) additionally needs `embedded-mcp`.
+# The shipped Connect-host product does NOT enable this cohort (it links no
+# rmcp and no engine); only the app-level MCP/peer library does.
+connect-client = ["execution", "connect-host", "nexus-connect/connect-client"]
 # Model B's sink/stream session channels (futures_channel::mpsc) ride the
 # rmcp transport module, which now lives in `nexus-connect`.
 embedded-mcp = ["connect-client", "nexus-connect/embedded-mcp"]
@@ -95,6 +103,11 @@ memory-remote = [
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+# V249: capability port/error contract moved to the private capability crate.
+# The executable WASM gate is selected explicitly by this crate's `compute`
+# feature (C3) — the default build carries the pure descriptor/scan surface
+# only and never pulls nexus-wasm-host.
+nexus-capability = { path = "../nexus-capability" }
 nexus-preset = { path = "../nexus-preset" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }
@@ -123,6 +136,8 @@ nexus-session-storage = { path = "../nexus-session-storage", optional = true }
 # Pattern registry reader + the candidate IR the Simulate walk reads.
 nexus-pattern = { path = "../nexus-pattern" }
 nexus-workflow-ir = { path = "../nexus-workflow-ir" }
+# The private pure walk the Simulate route and Approve/Import evidence bind to.
+nexus-workflow-simulate = { path = "../nexus-workflow-simulate", optional = true }
 # v1.229 N3 Task 1: the remote memory client's transport edges — the WS
 # transport speaks the spoke remote-adapter Transport, tungstenite is the
 # bounded WS wire. Nothing else in core links them.
@@ -214,6 +229,7 @@ nexus-config-metadata = { path = "../nexus-config-metadata" }
 # surface.
 nexus-core = { path = ".", features = [
     "execution",
+    "strategy-authoring",
     "compute",
     "test-hooks",
     "provider-host",
@@ -232,6 +248,9 @@ parking_lot = "0.13"
 # capability scan, so it needs the engine, the WAT compiler and the capability
 # scanner's dependencies.
 nexus-wasm-host = { path = "../nexus-wasm-host" }
+# `capability_compute` builds engines with non-default sandbox limits; the
+# policy type is owned by the private policy crate, not the wasm host.
+nexus-compute-policy = { path = "../nexus-compute-policy" }
 nexus-orchestration = { path = "../nexus-orchestration" }
 nexus-session-storage = { path = "../nexus-session-storage" }
 nexus-knowledge = { path = "../nexus-knowledge" }

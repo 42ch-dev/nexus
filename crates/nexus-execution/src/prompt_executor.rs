@@ -47,13 +47,10 @@ use nexus_agent_host::capability::model::{
 };
 use nexus_agent_host::config::TimeoutConfig;
 use nexus_agent_host::{HostFacade, HostOperationId, ProviderId};
-use nexus_orchestration::capability::{
-    CapabilityError, PromptExecutor, PromptRequest, PromptResult,
-};
-use nexus_orchestration::SessionId;
+use nexus_capability::{CapabilityError, PromptExecutor, PromptRequest, PromptResult};
 use nexus_session_storage::{
     run_state::{PromptAttempt, PromptPhase, WorkflowStateStore},
-    StorageError,
+    SessionId, StorageError,
 };
 
 /// Key for a lazily-reused Host session: the same run+role reuses its
@@ -1305,8 +1302,8 @@ mod tests {
         let (executor, sqlite, storage, _pool, _db) = test_executor(host.clone()).await;
         let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let session_cancels: std::sync::Arc<
             std::sync::RwLock<
@@ -1396,7 +1393,7 @@ mod tests {
             .expect("run exists");
         assert_eq!(
             final_record.status,
-            nexus_orchestration::engine::SessionStatus::Cancelled
+            nexus_session_storage::SessionStatus::Cancelled
         );
     }
 
@@ -1418,8 +1415,8 @@ mod tests {
         let (executor, sqlite, storage, pool, _db) = test_executor(host.clone()).await;
         let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let session_cancels: std::sync::Arc<
             std::sync::RwLock<
@@ -1518,12 +1515,12 @@ mod tests {
         let task_id = pre_step_root.current_task_id.clone();
         let execute_handle = tokio::spawn(async move {
             executor2
-                .execute(nexus_orchestration::capability::PromptRequest {
+                .execute(nexus_capability::PromptRequest {
                     run_id,
                     task_id,
                     agent_ref: None,
                     prompt: "hello".to_string(),
-                    tool_policy: nexus_orchestration::capability::ToolPolicy::AutoGrantAll,
+                    tool_policy: nexus_capability::ToolPolicy::AutoGrantAll,
                     cancellation: token,
                 })
                 .await
@@ -1569,7 +1566,7 @@ mod tests {
         assert!(
             matches!(
                 execute_result,
-                Err(nexus_orchestration::capability::CapabilityError::Cancelled)
+                Err(nexus_capability::CapabilityError::Cancelled)
             ),
             "execute must return the typed cancellation, got {execute_result:?}"
         );
@@ -1594,7 +1591,7 @@ mod tests {
             .expect("run exists");
         assert_eq!(
             final_record.status,
-            nexus_orchestration::engine::SessionStatus::Cancelled
+            nexus_session_storage::SessionStatus::Cancelled
         );
         assert!(
             final_record
@@ -1620,8 +1617,8 @@ mod tests {
         let (executor, sqlite, storage, pool, _db) = test_executor(host.clone()).await;
         let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let session_cancels: std::sync::Arc<
             std::sync::RwLock<
@@ -1716,12 +1713,12 @@ mod tests {
         let task_id = pre_step_root.current_task_id.clone();
         let execute_handle = tokio::spawn(async move {
             executor2
-                .execute(nexus_orchestration::capability::PromptRequest {
+                .execute(nexus_capability::PromptRequest {
                     run_id,
                     task_id,
                     agent_ref: None,
                     prompt: "hello".to_string(),
-                    tool_policy: nexus_orchestration::capability::ToolPolicy::AutoGrantAll,
+                    tool_policy: nexus_capability::ToolPolicy::AutoGrantAll,
                     cancellation: token,
                 })
                 .await
@@ -1774,7 +1771,7 @@ mod tests {
         assert!(
             matches!(
                 execute_result,
-                Err(nexus_orchestration::capability::CapabilityError::Cancelled)
+                Err(nexus_capability::CapabilityError::Cancelled)
             ),
             "execute must return the typed cancellation, got {execute_result:?}"
         );
@@ -1801,7 +1798,7 @@ mod tests {
             .expect("run exists");
         assert_eq!(
             final_record.status,
-            nexus_orchestration::engine::SessionStatus::Interrupted,
+            nexus_session_storage::SessionStatus::Interrupted,
             "unconfirmed cleanup must keep the run Interrupted, got {:?}",
             final_record.status
         );
@@ -1833,8 +1830,8 @@ mod tests {
         let (executor, sqlite, storage, _pool, _db) = test_executor(host.clone()).await;
         let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let session_cancels: std::sync::Arc<
             std::sync::RwLock<
@@ -1938,8 +1935,8 @@ mod tests {
         let (executor, sqlite, storage, _pool, _db) = test_executor(host.clone()).await;
         let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let session_cancels: std::sync::Arc<
             std::sync::RwLock<
@@ -2007,7 +2004,7 @@ mod tests {
             .expect("run exists");
         assert_eq!(
             interrupted.status,
-            nexus_orchestration::engine::SessionStatus::Interrupted
+            nexus_session_storage::SessionStatus::Interrupted
         );
         assert_eq!(
             host.session_count(),

@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Shared ADR-014 path layout helpers (~/.nexus42/creators/.../workspaces/...)"
+publish = false
 
 [lints]
 workspace = true

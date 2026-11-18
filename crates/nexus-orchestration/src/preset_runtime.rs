@@ -1,6 +1,6 @@
 //! Execution-only preset graph construction and provider binding creation.
 
-use crate::capability::CapabilityRegistry;
+use nexus_capability::CapabilityRegistry;
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
     WorkflowDocument, WorkflowNodeKind,
 };
@@ -27,7 +27,7 @@ pub fn default_bindings_for_preset(
     preset_id: &str,
     provider_id: &str,
 ) -> Option<std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>> {
-    let caps = crate::capability::CapabilityRegistry::with_builtins();
+    let caps = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset(preset_id, &caps).ok()?;
     let roles = required_prompt_roles(&loaded.manifest);
     if roles.is_empty() {
@@ -181,8 +181,8 @@ pub fn build_wired_outer_graph(
     loaded: &LoadedPreset,
     engine: &Arc<dyn crate::engine::OrchestrationEngine>,
     caps: &Arc<CapabilityRegistry>,
-    daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
-    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
+    prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
@@ -684,8 +684,8 @@ pub fn build_wired_outer_graph_from_ir(
     template_source: IrTemplateSource,
     engine: &Arc<dyn crate::engine::OrchestrationEngine>,
     caps: &Arc<CapabilityRegistry>,
-    daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
-    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
+    prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
@@ -1082,7 +1082,7 @@ fn build_inner_graphs(
     manifest: &PresetManifest,
     preset_id: &str,
     source_identity: Option<&nexus_preset::source_identity::PresetSourceIdentity>,
-    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
@@ -1130,7 +1130,7 @@ fn build_inner_graphs(
                                 node.tool_policy
                                     .as_ref()
                                     .and_then(|s| std::str::FromStr::from_str(s.as_str()).ok())
-                                    .unwrap_or(crate::tasks::ToolPolicy::AutoGrantReadOnly),
+                                    .unwrap_or(nexus_capability::ToolPolicy::AutoGrantReadOnly),
                             )
                             // Resolved template content (rendered at runtime)
                             .with_template(template)
@@ -1218,7 +1218,7 @@ mod tests {
     impl crate::engine::OrchestrationEngine for UnreachableEngine {
         async fn run_step(
             &self,
-            _: &crate::engine::SessionId,
+            _: &nexus_session_storage::SessionId,
         ) -> Result<crate::engine::StepOutcome, crate::engine::EngineError> {
             unimplemented!("wiring test must not execute engine steps")
         }
@@ -1226,25 +1226,25 @@ mod tests {
             &self,
             _: crate::engine::SessionKey,
             _: crate::engine::Context,
-        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+        ) -> Result<nexus_session_storage::SessionId, crate::engine::EngineError> {
             unimplemented!()
         }
         async fn start_session_with_graph(
             &self,
             _: &str,
             _: std::sync::Arc<graph_flow::Graph>,
-        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+        ) -> Result<nexus_session_storage::SessionId, crate::engine::EngineError> {
             unimplemented!()
         }
         async fn get_status(
             &self,
-            _: &crate::engine::SessionId,
-        ) -> Result<crate::engine::SessionStatus, crate::engine::EngineError> {
+            _: &nexus_session_storage::SessionId,
+        ) -> Result<nexus_session_storage::SessionStatus, crate::engine::EngineError> {
             unimplemented!()
         }
         async fn signal(
             &self,
-            _: &crate::engine::SessionId,
+            _: &nexus_session_storage::SessionId,
             _: crate::engine::EngineSignal,
         ) -> Result<(), crate::engine::EngineError> {
             unimplemented!()
@@ -1252,49 +1252,50 @@ mod tests {
         async fn list_active(
             &self,
             _: crate::engine::SessionFilter,
-        ) -> Result<Vec<crate::engine::SessionSummary>, crate::engine::EngineError> {
+        ) -> Result<Vec<nexus_session_storage::SessionSummary>, crate::engine::EngineError>
+        {
             unimplemented!()
         }
         async fn spawn_child_session(
             &self,
             _: crate::engine::ChildSessionParams,
-        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+        ) -> Result<nexus_session_storage::SessionId, crate::engine::EngineError> {
             unimplemented!()
         }
         async fn attach_existing_child_session(
             &self,
             _: &str,
             _: std::sync::Arc<graph_flow::Graph>,
-        ) -> Result<Option<crate::engine::SessionId>, crate::engine::EngineError> {
+        ) -> Result<Option<nexus_session_storage::SessionId>, crate::engine::EngineError> {
             unimplemented!("wiring test must not execute engine steps")
         }
         async fn start_session_with_preset(
             &self,
             _: &LoadedPreset,
-        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+        ) -> Result<nexus_session_storage::SessionId, crate::engine::EngineError> {
             unimplemented!()
         }
         async fn get_context(
             &self,
-            _: &crate::engine::SessionId,
+            _: &nexus_session_storage::SessionId,
         ) -> Result<graph_flow::Context, crate::engine::EngineError> {
             unimplemented!()
         }
         async fn get_current_task_id(
             &self,
-            _: &crate::engine::SessionId,
+            _: &nexus_session_storage::SessionId,
         ) -> Result<Option<String>, crate::engine::EngineError> {
             unimplemented!("wiring test must not query session cursors")
         }
-        async fn has_runner(&self, _: &crate::engine::SessionId) -> bool {
+        async fn has_runner(&self, _: &nexus_session_storage::SessionId) -> bool {
             unimplemented!("wiring test must not query runner existence")
         }
-        async fn recover_sessions(&self, _: Vec<crate::engine::SessionSummary>) {
+        async fn recover_sessions(&self, _: Vec<nexus_session_storage::SessionSummary>) {
             unimplemented!("wiring test must not recover sessions")
         }
         async fn ensure_recovered_runner(
             &self,
-            _: &crate::engine::SessionId,
+            _: &nexus_session_storage::SessionId,
         ) -> Result<(), crate::engine::EngineError> {
             unimplemented!("wiring test must not reattach runners")
         }
@@ -1302,7 +1303,7 @@ mod tests {
             &self,
             _: &LoadedPreset,
             _: &str,
-        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+        ) -> Result<nexus_session_storage::SessionId, crate::engine::EngineError> {
             unimplemented!()
         }
     }
@@ -1529,16 +1530,16 @@ states:
     }
 
     #[async_trait::async_trait]
-    impl crate::capability::PromptExecutor for RecordingExecutor {
+    impl nexus_capability::PromptExecutor for RecordingExecutor {
         async fn execute(
             &self,
-            request: crate::capability::PromptRequest,
-        ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError> {
+            request: nexus_capability::PromptRequest,
+        ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError> {
             self.calls
                 .lock()
                 .expect("recording executor lock")
                 .push((request.task_id.clone(), request.prompt.clone()));
-            Ok(crate::capability::PromptResult {
+            Ok(nexus_capability::PromptResult {
                 full_text: format!("{} output", request.task_id),
                 host_session_id: format!("host:{}", request.run_id),
                 operation_id: "op-1".to_string(),
@@ -1567,7 +1568,7 @@ states:
     impl crate::engine::OrchestrationEngine for ChildRunningEngine {
         async fn run_step(
             &self,
-            session_id: &crate::engine::SessionId,
+            session_id: &nexus_session_storage::SessionId,
         ) -> Result<crate::engine::StepOutcome, crate::engine::EngineError> {
             let result = {
                 let mut children = self.children.lock().await;
@@ -1601,7 +1602,7 @@ states:
         async fn spawn_child_session(
             &self,
             params: crate::engine::ChildSessionParams,
-        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+        ) -> Result<nexus_session_storage::SessionId, crate::engine::EngineError> {
             let id = {
                 let children = self.children.lock().await;
                 format!("{}:child:{}", params.parent_session_id, children.len() + 1)
@@ -1627,27 +1628,27 @@ states:
                 .lock()
                 .await
                 .insert(id.clone(), (params.inner_graph, session));
-            Ok(crate::engine::SessionId(id))
+            Ok(nexus_session_storage::SessionId(id))
         }
 
         async fn attach_existing_child_session(
             &self,
             _: &str,
             _: Arc<graph_flow::Graph>,
-        ) -> Result<Option<crate::engine::SessionId>, crate::engine::EngineError> {
+        ) -> Result<Option<nexus_session_storage::SessionId>, crate::engine::EngineError> {
             Ok(None)
         }
 
         async fn get_status(
             &self,
-            _: &crate::engine::SessionId,
-        ) -> Result<crate::engine::SessionStatus, crate::engine::EngineError> {
-            Ok(crate::engine::SessionStatus::Running)
+            _: &nexus_session_storage::SessionId,
+        ) -> Result<nexus_session_storage::SessionStatus, crate::engine::EngineError> {
+            Ok(nexus_session_storage::SessionStatus::Running)
         }
 
         async fn get_context(
             &self,
-            session_id: &crate::engine::SessionId,
+            session_id: &nexus_session_storage::SessionId,
         ) -> Result<graph_flow::Context, crate::engine::EngineError> {
             Ok(self
                 .children
@@ -1664,19 +1665,19 @@ states:
             &self,
             _: crate::engine::SessionKey,
             _: crate::engine::Context,
-        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+        ) -> Result<nexus_session_storage::SessionId, crate::engine::EngineError> {
             unimplemented!("inner-graph trace does not drive the outer engine")
         }
         async fn start_session_with_graph(
             &self,
             _: &str,
             _: Arc<graph_flow::Graph>,
-        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+        ) -> Result<nexus_session_storage::SessionId, crate::engine::EngineError> {
             unimplemented!("inner-graph trace does not drive the outer engine")
         }
         async fn signal(
             &self,
-            _: &crate::engine::SessionId,
+            _: &nexus_session_storage::SessionId,
             _: crate::engine::EngineSignal,
         ) -> Result<(), crate::engine::EngineError> {
             // `InnerGraphTask` resumes a paused child; the scripted child graph
@@ -1686,38 +1687,39 @@ states:
         async fn list_active(
             &self,
             _: crate::engine::SessionFilter,
-        ) -> Result<Vec<crate::engine::SessionSummary>, crate::engine::EngineError> {
+        ) -> Result<Vec<nexus_session_storage::SessionSummary>, crate::engine::EngineError>
+        {
             unimplemented!("inner-graph trace does not drive the outer engine")
         }
         async fn get_current_task_id(
             &self,
-            _: &crate::engine::SessionId,
+            _: &nexus_session_storage::SessionId,
         ) -> Result<Option<String>, crate::engine::EngineError> {
             unimplemented!("inner-graph trace does not query child cursors")
         }
-        async fn has_runner(&self, _: &crate::engine::SessionId) -> bool {
+        async fn has_runner(&self, _: &nexus_session_storage::SessionId) -> bool {
             unimplemented!("inner-graph trace does not query runner existence")
         }
-        async fn recover_sessions(&self, _: Vec<crate::engine::SessionSummary>) {
+        async fn recover_sessions(&self, _: Vec<nexus_session_storage::SessionSummary>) {
             unimplemented!("inner-graph trace does not recover sessions")
         }
         async fn ensure_recovered_runner(
             &self,
-            _: &crate::engine::SessionId,
+            _: &nexus_session_storage::SessionId,
         ) -> Result<(), crate::engine::EngineError> {
             unimplemented!("inner-graph trace does not reattach runners")
         }
         async fn start_session_with_preset(
             &self,
             _: &LoadedPreset,
-        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+        ) -> Result<nexus_session_storage::SessionId, crate::engine::EngineError> {
             unimplemented!("inner-graph trace does not start presets")
         }
         async fn start_session_with_preset_for_creator(
             &self,
             _: &LoadedPreset,
             _: &str,
-        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+        ) -> Result<nexus_session_storage::SessionId, crate::engine::EngineError> {
             unimplemented!("inner-graph trace does not start presets")
         }
     }
@@ -2422,12 +2424,13 @@ states:
             IrTemplateSource, OuterGraphProjection, ProjectedEdge, ProjectedTask,
         };
         use super::{ir_document, no_cancels, ChildRunningEngine, UnreachableEngine};
-        use crate::capability::{
-            Capability, CapabilityError, CapabilityRegistry, DaemonToolDispatch, PromptExecutor,
-            PromptRequest, PromptResult,
-        };
         use crate::engine::OrchestrationEngine;
         use graph_flow::{Context, ExecutionStatus, Graph, NextAction, Session};
+        use nexus_capability::CapabilityRegistry;
+        use nexus_capability::{
+            Capability, CapabilityError, DaemonToolDispatch, PromptExecutor, PromptRequest,
+            PromptResult,
+        };
         use nexus_preset::load_preset_from_str;
         use nexus_preset::manifest::PresetManifest;
         use std::collections::{BTreeMap, HashMap};
@@ -3017,7 +3020,7 @@ states:
             recorder: &Recorder,
             scripted: &[(&'static str, serde_json::Value)],
         ) -> Arc<CapabilityRegistry> {
-            crate::capability::test_support::registry_with(
+            nexus_capability::test_support::registry_with(
                 scripted
                     .iter()
                     .map(|(name, output)| {

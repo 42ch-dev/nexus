@@ -9,9 +9,11 @@ import {
   ROOT_PACKAGE_PATH,
   parseCargoLockPackageVersion,
   readSurfaceVersions,
+  readVersionBrackets,
   readWorkspaceMemberPackages,
 } from "./version-surfaces.mjs";
 import { bumpVersion } from "./bump-version.mjs";
+import { checkLockstep } from "./assert-lockstep-version.mjs";
 import {
   cleanupTempRepo,
   createTempRepo,
@@ -75,6 +77,38 @@ test("bumpVersion writes every version surface and reports the change", () => {
       parseCargoLockPackageVersion(lock, "nexus-module-manifest"),
       parseCargoLockPackageVersion(lockBefore, "nexus-module-manifest"),
     );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a product bump leaves every independent package literal and lock row alone", () => {
+  const dir = createTempRepo();
+  try {
+    const entries = readVersionBrackets(dir);
+    assert.equal(entries.length, 8);
+    const manifestsBefore = new Map(
+      entries.map((entry) => [entry.manifest, readRepoFile(dir, entry.manifest)]),
+    );
+    const report = bumpVersion({ repoRoot: dir, target: FIXTURE_TARGET_VERSION });
+    assert.equal(report.ok, true, report.problems.join("; "));
+
+    for (const entry of entries) {
+      assert.equal(
+        readRepoFile(dir, entry.manifest),
+        manifestsBefore.get(entry.manifest),
+        `${entry.name}: a product bump must not rewrite an independent package manifest`,
+      );
+    }
+    // A green lockstep after the bump proves each literal still equals the row
+    // of the lockfile that owns the crate: the root workspace for a member, the
+    // standalone crate's own lock otherwise.
+    const lockstep = checkLockstep(dir);
+    assert.equal(lockstep.ok, true, lockstep.problems.join("; "));
+    assert.equal(lockstep.contract.length, entries.length);
+    for (const row of lockstep.contract) {
+      assert.equal(row.version, FIXTURE_BASELINE_VERSION, row.name);
+    }
   } finally {
     cleanupTempRepo(dir);
   }

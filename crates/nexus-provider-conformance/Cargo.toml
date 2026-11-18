@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Neutral provider stream conformance runner: asserts normalized HostEvent invariants."
+publish = false
 
 [lints]
 workspace = true

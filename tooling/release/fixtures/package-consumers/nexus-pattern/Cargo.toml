@@ -1,0 +1,18 @@
+[package]
+name = "nexus-pattern-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# The archive-backed closure is declared directly: unpublished siblings can
+# only be patched in from their own archives when they are named here.
+# `blake3` is the IR asset-hash function, so the consumer can pin template
+# bytes to the hashes the packed fragments declare.
+[dependencies]
+blake3 = "1"
+nexus-contracts = "0.1.0"
+nexus-pattern = "0.1.0"
+nexus-workflow-ir = "0.1.0"
+
+# Standalone workspace root: the consumer inherits no product Cargo config.
+[workspace]

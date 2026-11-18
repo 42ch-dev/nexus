@@ -214,7 +214,7 @@ fn inspect_v1_human_wait_with_unreconstructable_source_degrades_actions() {
         )
         .await;
         // Valid-shape descriptor whose frozen version no longer matches.
-        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let caps = nexus_capability::CapabilityRegistry::with_builtins();
         let loaded =
             nexus_preset::load_embedded_preset("memory-augmented", &caps).expect("embedded preset");
         let descriptor = serde_json::json!({
@@ -1171,7 +1171,7 @@ fn inspect_v1_human_wait_stays_distinct_and_preserves_wait_token() {
         .await;
         // A v1 human wait carries a frozen descriptor; the shared projection
         // only offers `continue` when that source still verifies (P1-C).
-        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let caps = nexus_capability::CapabilityRegistry::with_builtins();
         let loaded =
             nexus_preset::load_embedded_preset("memory-augmented", &caps).expect("embedded preset");
         let descriptor = serde_json::json!({
@@ -1487,7 +1487,7 @@ fn inspect_v1_list_mode_recovery_classes_and_read_only() {
         .await;
         // A v1 human wait carries a frozen descriptor; the shared projection
         // only offers `continue` when that source still verifies (P1-C).
-        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let caps = nexus_capability::CapabilityRegistry::with_builtins();
         let loaded =
             nexus_preset::load_embedded_preset("memory-augmented", &caps).expect("embedded preset");
         let descriptor = serde_json::json!({

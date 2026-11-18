@@ -419,7 +419,7 @@ async fn try_fire_role(
                     return;
                 }
             } else {
-                let caps = crate::capability::CapabilityRegistry::with_builtins();
+                let caps = nexus_capability::CapabilityRegistry::with_builtins();
                 if let Ok(loaded) = nexus_preset::load_embedded_preset(preset_id, &caps) {
                     let roles = nexus_preset::required_prompt_roles(&loaded.manifest);
                     if !roles.is_empty() {

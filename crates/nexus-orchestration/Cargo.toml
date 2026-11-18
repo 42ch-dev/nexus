@@ -6,14 +6,10 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Orchestration engine (graph-flow adapter + capability registry + worker manager)."
+publish = false
 
 [lints]
 workspace = true
-
-[features]
-# Static Simulate: the reachability walk needs only the thin IR contract. Nothing
-# here constructs an executor or a provider, so the default build stays unchanged.
-simulate = ["dep:nexus-workflow-ir"]
 
 [dependencies]
 # 2026-09-10 dependency sweep (#276): 0.2.3 → 0.8.0. default-features=false
@@ -35,25 +31,23 @@ serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 nexus-contracts = { path = "../nexus-contracts" }
-# Optional: only the `simulate` walk reads a candidate IR document. No other feature
-# pulls it, and it carries no provider or execution edge.
-nexus-workflow-ir = { path = "../nexus-workflow-ir", optional = true }
 nexus-preset = { path = "../nexus-preset" }
 # Session identity/status types + StorageError contract moved out of engine.rs;
 # engine re-exports them so consumer paths stay unchanged.
 nexus-session-storage = { path = "../nexus-session-storage" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-knowledge = { path = "../nexus-knowledge" }
-# V1.145 P1a: narrative.compute converts WorldKbEntry↔spoke KnowledgeEntry via
-# the conversion seam that now lives in nexus-spoke-adapter (dep-graph reversal).
-nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
 nexus-local-db = { path = "../nexus-local-db" }
 # V1.60 P0: DF-46 — world.state.query uses the NarrativeGateway trait for
 # world/timeline reads via SqliteNarrativeGateway.
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
-# V1.61 P3: narrative.compute capability calls nexus-wasm-host for sandboxed WASM compute.
-nexus-wasm-host = { path = "../nexus-wasm-host" }
+# V249 C3: the compute binding lives in nexus-capability (its `wasm` feature)
+# and the conversion/clamp seams in nexus-capability/nexus-spoke-adapter — the
+# engine no longer carries direct WASM/spoke/compute-policy paths. Tests that
+# actually drive compute take the host through [dev-dependencies].
+# V249: capability port/error contract moved to the private capability crate.
+nexus-capability = { path = "../nexus-capability" }
 # V1.50 T-A P1: cron expression parsing + IANA TZ conversion for the daemon-side
 # cron evaluator (novel-writing three-role staggering). Same workspace deps as
 # `nexus42` (T-A P0 cron CLI validation).
@@ -73,6 +67,18 @@ uuid = { workspace = true }
 reqwest = { workspace = true, features = ["stream"] }
 
 [dev-dependencies]
+# The trajectory targets walk real preset IR through the private pure simulator;
+# both are test-only edges (no production consumer in this crate).
+nexus-workflow-ir = { path = "../nexus-workflow-ir" }
+nexus-workflow-simulate = { path = "../nexus-workflow-simulate" }
+# Cross-crate test hooks (RecordingExecutor, with_capabilities) and the wasm
+# compute path for the compute_e2e / engine-contract test targets (C3: the
+# only compute paths left in this crate are tests that explicitly drive it).
+nexus-capability = { path = "../nexus-capability", features = ["wasm", "test-hooks"] }
+# compute_e2e builds the explicit engine attachment; compute_input_builder
+# builds manifest fixtures on the pure manifest crate (AR-8/AR-39).
+nexus-wasm-host = { path = "../nexus-wasm-host" }
+nexus-module-manifest = { path = "../../modules/nexus-module-manifest" }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
 # Integration tests under tests/ need their own access to async runtime, DB pool

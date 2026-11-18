@@ -77,7 +77,21 @@ fn main() {
     // `nexus-spoke-adapter/build.rs` — the upstream cfg is per-crate and
     // does not propagate to dependents.
     println!("cargo::rustc-check-cfg=cfg(nexus42_no_wasm_target)");
+    // The requirement toggle must re-run this script when it changes (shell
+    // env is otherwise not a build-script input).
+    println!("cargo:rerun-if-env-changed=NEXUS42_REQUIRE_WASM_TARGET");
     if !has_wasm_target() {
+        // V249 QC3-F002: the retained-compute smoke half is compiled out under
+        // this cfg. A job that owns that proof must not stay green without it,
+        // so an explicit requirement turns the silent skip into a named build
+        // failure (CI sets this on the Connect runtime job).
+        assert!(
+            env::var_os("NEXUS42_REQUIRE_WASM_TARGET").is_none(),
+            "nexus42: NEXUS42_REQUIRE_WASM_TARGET is set but the \
+             wasm32-unknown-unknown target is not installed; the retained-compute \
+             smoke half would be silently skipped. Install it with: \
+             rustup target add wasm32-unknown-unknown"
+        );
         println!(
             "cargo:warning=nexus42: wasm32-unknown-unknown target not found; \
              skipping embedded-module compute interop tests. Install the target with: \

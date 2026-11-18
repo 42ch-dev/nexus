@@ -18,6 +18,7 @@
 #![cfg(all(feature = "execution", feature = "compute"))]
 #![allow(clippy::unwrap_used)]
 
+use nexus_compute_policy::SandboxConfig;
 use nexus_contracts::generated::daemon_api::compute::{
     clear_runs_query::{ClearRunsQuery, ClearRunsQueryStatus},
     list_runs_query::{ListRunsQuery, ListRunsQueryStatus},
@@ -27,14 +28,17 @@ use nexus_contracts::generated::daemon_api::compute::{
 use nexus_contracts::CreateWorkRequest;
 use nexus_contracts::ToolsApi;
 use nexus_core::owner::capabilities::{
-    execute_tool, host_tool_registry, ToolContext, ToolRuntimeFacts,
+    build_registry_without, execute_tool, host_tool_registry, ToolContext, ToolRuntimeFacts,
 };
 use nexus_core::owner::compute::{
     accept_compute_run, clear_compute_runs, compute_run, discard_compute_run, get_compute_run,
     list_compute_runs, recover_stuck_compute_runs, ComputeContext, ComputeRunRecoveryOutcome,
 };
+use nexus_core::tool_catalog::{
+    host_tool_catalog, lookup_host_tool, reserved_host_tool_ids, HostToolId,
+};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest};
-use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, SandboxConfig, WasmEngine};
+use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, WasmEngine};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
@@ -729,7 +733,7 @@ fn write_user_capability_trio(scan_root: &Path, name: &str, input_schema: &str) 
 #[tokio::test]
 #[serial_test::serial]
 async fn schema_invalid_arguments_never_reach_the_capability() {
-    use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
+    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 
     let f = fixture().await;
     // The descriptor contract (AR-34) requires a `wasm` module ref: without it
@@ -760,7 +764,7 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
     let (registry, outcome) =
         CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_root);
     {
-        use nexus_orchestration::capability::Capability as _;
+        use nexus_capability::Capability as _;
         assert!(
             outcome
                 .admitted
@@ -773,7 +777,7 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
 
     let mut context = f.context.clone();
     context.set_user_capabilities(Some(
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
+        nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
     ));
 
     let request = ToolsApi {
@@ -816,8 +820,8 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
 #[tokio::test]
 #[serial_test::serial]
 async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
-    use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
-    use nexus_orchestration::CapabilityRegistryHolder;
+    use nexus_capability::CapabilityRegistryHolder;
+    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 
     let f = fixture().await;
     let scan_root = f.tmp.path().join("hotcaps");
@@ -903,6 +907,248 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
     );
 }
 
+/// A canonical builtin this build binds no handler for refuses in the spine —
+/// the peer and user lanes are never even consulted for a reserved id.
+///
+/// The competing callable is real and observable: a user capability carrying
+/// the canonical id itself, scanned and admitted at boot on this context's
+/// holder (the only user-capability admission path). The unbound half uses the
+/// same production registration path with one canonical row's handler withheld
+/// ([`build_registry_without`], `test-hooks` only), so `lookup_host_tool` still
+/// resolves the id while `lookup` does not — the state a feature-gated build
+/// produces before its binding lands.
+///
+/// The ordering is measured, not inferred: `CapabilityRegistry::fallback_consultations`
+/// (a `test-hooks` counter at the peer/user branch) must stay 0 for the
+/// canonical miss, and a non-canonical miss on the same registry must raise it
+/// to 1 — so removing the canonical reservation fails this case even though the
+/// user lane's own `nexus.` rule would still refuse it and return the same
+/// error. The domain timeline count is also unchanged.
+///
+/// The same request then runs against the full registry with the SAME context:
+/// the real handler returns the workspace record, proving the reservation
+/// shadows nothing it binds.
+#[tokio::test]
+#[serial_test::serial]
+async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
+    use nexus_capability::Capability as _;
+    use nexus_capability::CapabilityRegistryHolder;
+    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
+
+    const TOOL: &str = "nexus.workspace.info";
+
+    let f = fixture().await;
+
+    // The colliding user callable: a real scanned bundle named exactly the
+    // canonical id. The scan admits it (the engine builtin set does not own the
+    // name), so the user lane the spine consults holds it under this id.
+    let scan_root = f.tmp.path().join("colliding_usercaps");
+    write_user_capability_trio(&scan_root, TOOL, r#"{"type":"object"}"#);
+    let deps = CapabilityRuntimeDeps {
+        pool: Some(f.core.pool().clone()),
+        prompt_executor: None,
+        session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        daemon_tool_dispatch: None,
+        cdn_config: None,
+        workspace_executor: None,
+    };
+    let (user_registry, outcome) =
+        CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_root);
+    assert!(
+        outcome.admitted.iter().any(|c| c.name() == TOOL),
+        "the colliding user capability must be admitted, skipped={:?}",
+        outcome.skipped
+    );
+    let mut context = f.context.clone();
+    context.set_user_capabilities(Some(CapabilityRegistryHolder::with_registry(Arc::new(
+        user_registry,
+    ))));
+    assert!(
+        context
+            .user_capabilities()
+            .is_some_and(|reg| reg.lookup(TOOL).is_some()),
+        "the competing callable must exist in the user lane for this case to mean anything"
+    );
+
+    // Canonical but unbound: the catalog reserves the id, the registry has no row.
+    assert!(
+        lookup_host_tool(TOOL).is_some(),
+        "{TOOL} must stay a canonical host tool"
+    );
+    let unbound = build_registry_without(HostToolId::WorkspaceInfo);
+    assert!(
+        unbound.lookup(TOOL).is_none(),
+        "the fixture withholds the handler binding"
+    );
+    assert_eq!(
+        unbound.len(),
+        host_tool_catalog().len() - 1,
+        "every other canonical row stays bound"
+    );
+
+    let before = timeline_event_count(f.core.pool()).await;
+    let request = tool_request(TOOL, json!({}));
+    assert_eq!(
+        unbound.fallback_consultations(),
+        0,
+        "the fixture starts with no fallback consultation"
+    );
+    let err = unbound
+        .dispatch(&request, &context, CREATOR)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, CoreError::Coded { code, .. } if code == "not_supported"),
+        "an unbound canonical id must be not_supported, got {err:?}"
+    );
+    // The discriminating assertion: the lanes are not even CONSULTED. With the
+    // canonical reservation removed, `dispatch` reaches the peer/user branch and
+    // this count rises to 1 (the user lane's own reservation then still refuses,
+    // so the returned error alone would not detect it).
+    assert_eq!(
+        unbound.fallback_consultations(),
+        0,
+        "a canonical id must not reach the peer/user lanes, got {err:?}"
+    );
+    assert!(
+        !format!("{err:?}").contains("no executor wired"),
+        "the competing user capability must never be invoked, got {err:?}"
+    );
+    assert_eq!(
+        timeline_event_count(f.core.pool()).await,
+        before,
+        "a refused canonical dispatch must have zero domain effect"
+    );
+
+    // The admission entry (Gate 1's allowlist resolver) makes the SAME decision
+    // and therefore must not consult the lanes either — same counter, no reset
+    // in between.
+    assert!(
+        !unbound.spine_resolves(&context, TOOL),
+        "an unbound canonical id is not dispatchable (the allowlist gate must agree)"
+    );
+    assert_eq!(
+        unbound.fallback_consultations(),
+        0,
+        "the allowlist path must not reach the peer/user lanes for a canonical id"
+    );
+
+    // Non-vacuity of the probe on the allowlist path: a NON-canonical miss does
+    // consult the lanes there.
+    assert!(
+        !unbound.spine_resolves(&context, "not.a.canonical.tool"),
+        "an unknown non-canonical id does not resolve"
+    );
+    assert_eq!(
+        unbound.fallback_consultations(),
+        1,
+        "the allowlist path must record a real fallback consultation"
+    );
+
+    // Non-vacuity on the dispatch path: the same registry records that too.
+    let unknown = unbound
+        .dispatch(
+            &tool_request("not.a.canonical.tool", json!({})),
+            &context,
+            CREATOR,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&unknown, CoreError::Coded { code, .. } if code == "not_supported"),
+        "an unknown non-canonical id stays not_supported, got {unknown:?}"
+    );
+    assert_eq!(
+        unbound.fallback_consultations(),
+        2,
+        "the dispatch path must record a real fallback consultation"
+    );
+
+    // Bind the same real builtin: its existing handler still runs, on the same
+    // context that still holds the colliding user capability.
+    let value = host_tool_registry()
+        .dispatch(&request, &context, CREATOR)
+        .await
+        .expect("the bound canonical row must run its real handler");
+    assert_eq!(value["creator_id"], CREATOR);
+    assert_eq!(value["workspace_slug"], SLUG);
+}
+
+/// `Access` — not a second name roster — decides which grant admits a real
+/// handler, and the decision is exercised in both directions.
+///
+/// The workspace policy grants only `nexus.*.read` (with `default = "ask"`, so an
+/// unlisted name is not a deny). A read tool is admitted through the real
+/// `execute_tool` path; a semantically valid `nexus.work.patch` — whose handler
+/// would persist the title through `CoreService::patch_work` — is refused with
+/// `policy_blocked`, and the Work row keeps its title. A read/write
+/// misclassification in the canonical `Access` column flips one of these two
+/// outcomes, so this case fails for it.
+#[tokio::test]
+#[serial_test::serial]
+async fn read_grant_admits_reads_and_refuses_a_write() {
+    let f = fixture().await;
+    let work_id = seed_work(&f).await;
+    let principal = f.core.active_principal().await.unwrap();
+
+    // The policy lives with the workspace the context resolves.
+    let workspace = nexus_home_layout::operational_workspace_dir(f.tmp.path(), CREATOR, SLUG);
+    std::fs::create_dir_all(workspace.join(".nexus42")).unwrap();
+    std::fs::write(
+        workspace.join(".nexus42").join("permissions.toml"),
+        "default = \"ask\"\n\n[grant]\n\"nexus.*.read\" = true\n",
+    )
+    .unwrap();
+
+    let context = ToolContext::new(
+        f.core.pool().clone(),
+        f.tmp.path().join(".nexus42"),
+        Some(workspace.to_string_lossy().into_owned()),
+        ToolRuntimeFacts {
+            is_initialized: true,
+            lifecycle_state: "Running".to_string(),
+            started_at: chrono::Utc::now().to_rfc3339(),
+            ..ToolRuntimeFacts::default()
+        },
+        Some(Arc::new(f.core.clone())),
+        None,
+    );
+
+    // A read is admitted by the read grant.
+    let info = execute_tool(&context, &tool_request("nexus.workspace.info", json!({})))
+        .await
+        .expect("a read grant must admit a read tool");
+    assert_eq!(info["workspace_slug"], SLUG);
+
+    let title_before = f
+        .core
+        .get_work(&principal, work_id.clone())
+        .await
+        .unwrap()
+        .title;
+
+    // The same grant does NOT admit a write; the handler never runs.
+    let err = execute_tool(
+        &context,
+        &tool_request(
+            "nexus.work.patch",
+            json!({ "work_id": work_id.clone(), "title": "retitled by a refused write" }),
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(&err, CoreError::Coded { code, .. } if code == "policy_blocked"),
+        "a write under a read-only grant must be policy_blocked, got {err:?}"
+    );
+
+    let title_after = f.core.get_work(&principal, work_id).await.unwrap().title;
+    assert_eq!(
+        title_after, title_before,
+        "a policy-blocked patch must leave the Work unchanged"
+    );
+}
+
 /// A capability never fabricates success when its prompt executor fails: the
 /// executor's typed error is surfaced out of `run()` verbatim.
 ///
@@ -921,10 +1167,8 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
 /// rather than standing in with heuristic candidates.
 #[tokio::test]
 async fn failing_prompt_executor_is_a_typed_failure_not_a_fabricated_success() {
-    use nexus_orchestration::capability::{
-        CapabilityError, CapabilityRegistry, CapabilityRuntimeDeps, PromptExecutor, PromptRequest,
-        PromptResult,
-    };
+    use nexus_capability::{CapabilityError, PromptExecutor, PromptRequest, PromptResult};
+    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 
     struct FailingExecutor;
 
@@ -4327,12 +4571,13 @@ const NEXUS_TOOL_IDS: &[&str] = &[
 /// MIGRATED from `cross_caller_e2e.rs::all_nexus_tool_ids_registered_in_capability_registry`
 /// and `::test_profile_sets_are_not_action_capabilities`.
 ///
-/// Preserved: the process-global host-tool registry holds exactly the declared
-/// `nexus.*` action roster (plus the two `fs/*` ids), and the `nexus.profile.*`
-/// grouping ids are metadata, never action capabilities with handler
-/// bindings. This is the registry the peer admission chain derives its
-/// reserved set from (`live_reserved_tool_ids`), so the peer surface can never
-/// shadow a builtin id.
+/// Preserved: the canonical catalog declares exactly the declared `nexus.*`
+/// action roster (plus the two `fs/*` ids), the process-global registry binds
+/// every canonical row, and the `nexus.profile.*` grouping ids are metadata,
+/// never action capabilities with handler bindings. This is the catalog the
+/// peer admission chain derives its reserved set from
+/// (`reserved_host_tool_ids`), so the peer surface can never shadow a builtin
+/// id — even one this build does not bind.
 ///
 /// Deleted with the retired host: the other `cross_caller_e2e` cases drove
 /// `HostToolExecutor` (`POST`-path and Schedule-path wrappers built from the
@@ -4341,17 +4586,37 @@ const NEXUS_TOOL_IDS: &[&str] = &[
 /// owned by this target (P2-T9).
 #[test]
 fn host_tool_registry_roster_is_the_declared_nexus_surface() {
-    let registry = host_tool_registry();
+    let reserved: Vec<&str> = reserved_host_tool_ids().collect();
+    assert_eq!(
+        reserved.len(),
+        29,
+        "the canonical catalog holds the 27 nexus.* ids plus the 2 fs/* ids"
+    );
     for tool_id in NEXUS_TOOL_IDS {
         assert!(
-            registry.lookup(tool_id).is_some(),
-            "Tool '{tool_id}' must be registered in the host-tool registry"
+            reserved.contains(tool_id),
+            "Tool '{tool_id}' must be in the canonical host-tool catalog"
+        );
+        assert!(
+            lookup_host_tool(tool_id).is_some(),
+            "Tool '{tool_id}' must resolve through lookup_host_tool"
+        );
+    }
+
+    // The live registry binds every canonical row, fs/* included.
+    let registry = host_tool_registry();
+    let catalog = host_tool_catalog();
+    for row in catalog {
+        assert!(
+            registry.lookup(row.id.as_str()).is_some(),
+            "canonical tool '{}' must be bound in the host-tool registry",
+            row.id.as_str()
         );
     }
     assert_eq!(
         registry.len(),
-        29,
-        "the registry holds the 27 nexus.* ids plus the 2 fs/* ids"
+        catalog.len(),
+        "the registry lists exactly the canonical rows"
     );
 
     for profile_id in [
@@ -4359,6 +4624,10 @@ fn host_tool_registry_roster_is_the_declared_nexus_surface() {
         "nexus.profile.writer",
         "nexus.profile.publisher",
     ] {
+        assert!(
+            lookup_host_tool(profile_id).is_none(),
+            "Profile-set id '{profile_id}' is grouping metadata, not an action capability"
+        );
         assert!(
             registry.lookup(profile_id).is_none(),
             "Profile-set id '{profile_id}' is grouping metadata, not an action capability"

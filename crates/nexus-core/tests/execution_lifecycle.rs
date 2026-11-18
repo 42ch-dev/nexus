@@ -12,15 +12,13 @@
 #![cfg(feature = "execution")]
 
 use async_trait::async_trait;
+use nexus_capability::{CapabilityError, PromptExecutor, PromptRequest, PromptResult};
 use nexus_contracts::{
     CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply,
 };
 use nexus_core::owner::ExecutionOpenError;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, ExecutionBuildObserver, RunnerDeps};
 use nexus_execution::workflow::{RunControlError, RunSignal};
-use nexus_orchestration::capability::{
-    CapabilityError, PromptExecutor, PromptRequest, PromptResult,
-};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use nexus_session_storage::run_state::WorkflowStateStore;
 use std::future::Future;
@@ -219,7 +217,7 @@ async fn seed_run_at(
         guarded.clone_pool(),
     ));
 
-    let sid = nexus_orchestration::SessionId(session_id.to_string());
+    let sid = nexus_session_storage::SessionId(session_id.to_string());
     let descriptor = nexus_session_storage::run_state::RunDescriptorV1 {
         creator_id: creator.to_string(),
         work_id: None,
@@ -318,7 +316,7 @@ async fn second_owner_and_restart_are_fenced() {
         owner_a.pool().clone(),
     ));
     let uncertain = store
-        .load_run(&nexus_orchestration::SessionId(
+        .load_run(&nexus_session_storage::SessionId(
             "test-preset:uncertain".into(),
         ))
         .await
@@ -909,7 +907,7 @@ async fn seed_restart_run(
     };
     store
         .start_run(
-            &nexus_orchestration::SessionId(session_id.to_string()),
+            &nexus_session_storage::SessionId(session_id.to_string()),
             &descriptor,
             checkpoint,
             &nexus_session_storage::run_state::RunStateV1::default(),
@@ -950,7 +948,7 @@ async fn read_restart_record(
     session_id: &str,
 ) -> nexus_session_storage::run_state::RunRecord {
     nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone()))
-        .load_run(&nexus_orchestration::SessionId(session_id.to_string()))
+        .load_run(&nexus_session_storage::SessionId(session_id.to_string()))
         .await
         .expect("read the run record")
         .expect("the run record exists")
@@ -988,7 +986,7 @@ async fn wait_for_applied_manual_wait(pool: &sqlx::SqlitePool, session_id: &str)
         session_id,
         "the run to park on the applied-only manual wait",
         |record| {
-            record.status == nexus_orchestration::engine::SessionStatus::WaitingForInput
+            record.status == nexus_session_storage::SessionStatus::WaitingForInput
                 && record
                     .state
                     .as_ref()
@@ -1032,7 +1030,7 @@ async fn admit_and_park(
     f: &Fixture,
     nexus_home: &Path,
     admitted: &nexus_session_storage::run_state::AppliedRunIdentity,
-) -> (nexus_orchestration::SessionId, String) {
+) -> (nexus_session_storage::SessionId, String) {
     let owner = open_engine_owner(f).await;
     let handle = owner
         .start_execution(
@@ -1218,7 +1216,7 @@ async fn a_restart_after_a_re_apply_refuses_instead_of_rebuilding_the_newer_docu
     let refusal = handle
         .coordinator()
         .signal_run(
-            &nexus_orchestration::SessionId(session_id.clone()),
+            &nexus_session_storage::SessionId(session_id.clone()),
             RunSignal::Continue {
                 wait_id: "irrelevant".to_string(),
             },
@@ -1344,7 +1342,7 @@ async fn a_restart_after_a_pinned_body_moved_refuses_naming_the_pin() {
     let refusal = handle
         .coordinator()
         .signal_run(
-            &nexus_orchestration::SessionId(session_id.clone()),
+            &nexus_session_storage::SessionId(session_id.clone()),
             RunSignal::Continue {
                 wait_id: "irrelevant".to_string(),
             },
@@ -1468,7 +1466,7 @@ async fn a_restart_compares_pins_in_the_owners_home_not_the_callers() {
 /// reconstruction refusal reason plus the position the run was left on.
 async fn restart_pin_refusal(
     f: &Fixture,
-    session_id: &nexus_orchestration::SessionId,
+    session_id: &nexus_session_storage::SessionId,
 ) -> (String, Option<String>) {
     let owner = open_engine_owner(f).await;
     let handle = owner
@@ -1553,7 +1551,7 @@ async fn a_restart_with_a_hashless_carrier_and_no_recorded_pin_refuses() {
     let refusal = handle
         .coordinator()
         .signal_run(
-            &nexus_orchestration::SessionId(session_id.clone()),
+            &nexus_session_storage::SessionId(session_id.clone()),
             RunSignal::Continue {
                 wait_id: "irrelevant".to_string(),
             },
@@ -1785,7 +1783,7 @@ async fn an_ir_only_descriptor_without_an_apply_refuses_recovery() {
     let refusal = handle
         .coordinator()
         .signal_run(
-            &nexus_orchestration::SessionId(session_id.clone()),
+            &nexus_session_storage::SessionId(session_id.clone()),
             RunSignal::Continue {
                 wait_id: "irrelevant".to_string(),
             },
@@ -1884,7 +1882,7 @@ async fn a_restart_after_a_successor_apply_refuses_the_admitted_run() {
     let record = read_restart_record(&pool, &session_id.0).await;
     assert_eq!(
         record.status,
-        nexus_orchestration::engine::SessionStatus::WaitingForInput,
+        nexus_session_storage::SessionStatus::WaitingForInput,
         "a refused reconstruction must leave the run on its preserved wait"
     );
     assert_eq!(
@@ -1959,7 +1957,7 @@ async fn a_restart_of_an_admitted_applied_run_recovers_the_applied_document() {
             let sid = sid.clone();
             async move {
                 read_restart_record(&pool, &sid).await.status
-                    == nexus_orchestration::engine::SessionStatus::Completed
+                    == nexus_session_storage::SessionStatus::Completed
             }
         },
     )
@@ -1970,7 +1968,7 @@ async fn a_restart_of_an_admitted_applied_run_recovers_the_applied_document() {
         .expect("the run row exists");
     assert_eq!(
         record.status,
-        nexus_orchestration::engine::SessionStatus::Completed,
+        nexus_session_storage::SessionStatus::Completed,
         "the rebuilt run must execute the applied document to its terminal node, got {:?}",
         record.status
     );
@@ -2027,7 +2025,7 @@ async fn wait_for_manual_wait(pool: &sqlx::SqlitePool, session_id: &str, node: &
         session_id,
         "the embedded run to park on its entry manual wait",
         |record| {
-            record.status == nexus_orchestration::engine::SessionStatus::WaitingForInput
+            record.status == nexus_session_storage::SessionStatus::WaitingForInput
                 && record
                     .state
                     .as_ref()
@@ -2049,7 +2047,7 @@ async fn admit_embedded_and_park(
     f: &Fixture,
     nexus_home: &Path,
     preset_id: &str,
-) -> (nexus_orchestration::SessionId, String) {
+) -> (nexus_session_storage::SessionId, String) {
     let owner = open_engine_owner(f).await;
     let handle = owner
         .start_execution(
@@ -2154,7 +2152,7 @@ async fn an_embedded_run_recovers_on_the_identity_admission_froze() {
         &session_id.0,
         "the recovered run to park on the document's next manual wait",
         |record| {
-            record.status == nexus_orchestration::engine::SessionStatus::WaitingForInput
+            record.status == nexus_session_storage::SessionStatus::WaitingForInput
                 && record
                     .state
                     .as_ref()
@@ -2249,7 +2247,7 @@ async fn a_changed_embedded_document_refuses_recovery_instead_of_the_yaml_graph(
     let record = read_restart_record(&pool, &session_id.0).await;
     assert_eq!(
         record.status,
-        nexus_orchestration::engine::SessionStatus::WaitingForInput,
+        nexus_session_storage::SessionStatus::WaitingForInput,
         "a refused reconstruction must leave the run on its preserved wait"
     );
     let session = read_restart_session(&pool, &session_id.0)
@@ -2487,7 +2485,7 @@ async fn close_fences_new_drive_admission() {
     // registered AFTER close returned `cleanup_confirmed: true`.
     let err = handle
         .coordinator()
-        .ensure_driving(&nexus_orchestration::SessionId("test-preset:c2".into()))
+        .ensure_driving(&nexus_session_storage::SessionId("test-preset:c2".into()))
         .await;
     assert!(
         matches!(err, Err(RunControlError::Closing)),

@@ -224,13 +224,20 @@ impl PeerToolRegistry {
     ///
     /// `reserved_tool_ids` is computed LIVE by the caller from the shared
     /// capability holder, so hot-reloaded capability names stay reserved.
-    pub fn admit_and_register(
+    ///
+    /// Generic over the caller's `BuildHasher` (C3 F-008): the admission
+    /// decision borrows the caller's sets without a normalization copy, and
+    /// the borrow flows to [`refuse_tool`]'s `contains` lookups. The merged
+    /// `reserved_tool_ids` set is constructed inside this crate with the std
+    /// hasher, so it stays concrete. All existing callers pass `std`-hasher
+    /// sets and are source-compatible (inference).
+    pub fn admit_and_register<S: std::hash::BuildHasher>(
         &self,
         peer_id: &str,
         manifest: &nexus_spoke_adapter::HostCapabilityManifest,
         responder: &Arc<dyn PeerResponder>,
-        daemon_capabilities: &HashSet<String>,
-        tool_allowlist: &HashSet<String>,
+        daemon_capabilities: &HashSet<String, S>,
+        tool_allowlist: &HashSet<String, S>,
         reserved_tool_ids: &HashSet<String>,
     ) -> AdmissionOutcome {
         if let SpokeResult::Reject(reject) = validate_manifest_tools(manifest) {
@@ -477,10 +484,10 @@ pub fn catalog_output_root_object(descriptor: &ToolDescriptor) -> bool {
 /// Order: grammar → reserved-ns → negotiated → allowlist. The duplicate-peer
 /// collision is deliberately NOT here: it is policy-aware and decided by
 /// [`collision_decision`].
-fn refuse_tool(
+fn refuse_tool<S: std::hash::BuildHasher>(
     id: &str,
-    daemon_capabilities: &HashSet<String>,
-    tool_allowlist: &HashSet<String>,
+    daemon_capabilities: &HashSet<String, S>,
+    tool_allowlist: &HashSet<String, S>,
     reserved_tool_ids: &HashSet<String>,
 ) -> Option<ToolRefusal> {
     if !matches!(parse_tool_capability_id(id), SpokeResult::Ok(_)) {

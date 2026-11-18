@@ -46,7 +46,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
-use nexus_orchestration::capability::watch::DigestPoll;
+use nexus_capability::watch::DigestPoll;
 use tokio::sync::Notify;
 
 use crate::config::{load_peer_keys, PeerToolsConfig};
@@ -1012,6 +1012,112 @@ mod tests {
 
     fn caps(ids: &[&str]) -> HashSet<String> {
         ids.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    /// Admission-boundary interleaving (C3 fix round 2): SNAPSHOT taken,
+    /// THEN a swap reserves and publishes `tools.demo.compute`, THEN the
+    /// decision runs. Through the live-reservation seam the decision refuses
+    /// the id; the same interleaving decided against the pre-swap snapshot
+    /// admits it, and the control leg proves the snapshot really is stale.
+    ///
+    /// Mutation direction this case discriminates: a decision whose set does
+    /// not come from the holder's live reservation — bypassing the seam,
+    /// passing `None`, or wiring the builtins only. Mutation-verified:
+    /// switching the seam's Some arm to the None arm fails the refusal leg.
+    ///
+    /// Stated limitation: the variant that re-reads the reservation outside
+    /// the seam but AFTER the swap is NOT discriminable single-threaded — on
+    /// this test's timeline the swap has completed before the decision, so
+    /// that re-read returns the same names. The real read-vs-register window
+    /// needs a concurrent swap; it is closed by the seam's lock semantics
+    /// (the decision holds `reserved` exclusively across derivation and
+    /// registration, so a swap serializes with it — see
+    /// `CapabilityRegistryHolder::with_live_reservation`), not by this test.
+    #[tokio::test]
+    async fn admission_decision_uses_the_reservation_at_decision_time() {
+        // gen0 over an empty scan dir: the holder reserves no user names.
+        let scan = tempfile::tempdir().unwrap();
+        let deps = nexus_capability::CapabilityRuntimeDeps {
+            pool: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+            daemon_tool_dispatch: None,
+            cdn_config: None,
+            workspace_executor: None,
+        };
+        let (reg0, outcome0) =
+            nexus_capability::watch::rebuild_registry_with_merge(&deps, scan.path(), &[]);
+        assert!(
+            outcome0.admitted.is_empty(),
+            "boot admits nothing from an empty dir"
+        );
+        let holder =
+            nexus_capability::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(reg0));
+
+        // SNAPSHOT: what a decision taken NOW would hold — no user names.
+        let builtin_ids: HashSet<String> = HashSet::new();
+        let stale_snapshot =
+            crate::table::live_reserved_tool_ids(builtin_ids.iter().cloned(), Some(&holder));
+        assert!(!stale_snapshot.contains("tools.demo.compute"));
+
+        // SWAP: a generation admitting tools.demo.compute reserves AND
+        // publishes it. (`tools.<ns>.<name>` is the peer-tool grammar AND a
+        // valid capability name, so the reserved id is one a peer could
+        // actually claim.)
+        nexus_capability::test_support::write_capability_dir(scan.path(), "tools.demo.compute");
+        let (reg1, outcome1) =
+            nexus_capability::watch::rebuild_registry_with_merge(&deps, scan.path(), &[]);
+        assert_eq!(
+            outcome1.admitted.len(),
+            1,
+            "the swap admits tools.demo.compute"
+        );
+        holder.swap(std::sync::Arc::new(reg1));
+
+        // DECISION at the boundary: through the seam, the id the swap just
+        // reserved is refused AT DECISION TIME — never against the snapshot.
+        let manifest = manifest_with_tools(&["tools.demo.compute"]);
+        let table = PeerToolTable::new();
+        let outcome = crate::table::admit_consistent_with_reservation(
+            &table,
+            Some(&holder),
+            &builtin_ids,
+            "peer-live",
+            &manifest,
+            &responder().await,
+            &caps(&["tools.demo.compute"]),
+            &caps(&["tools.demo.compute"]),
+        );
+        assert_eq!(
+            outcome,
+            crate::AdmissionOutcome::Admitted {
+                tool_ids: Vec::new()
+            },
+            "the id the swap reserved is refused at decision time"
+        );
+        assert!(
+            table.get("tools.demo.compute").is_none(),
+            "nothing was registered under the reserved id"
+        );
+
+        // Control: the STALE snapshot admits it — what the seam prevents.
+        let stale_outcome = table.admit_and_register(
+            "peer-stale",
+            &manifest,
+            &responder().await,
+            &caps(&["tools.demo.compute"]),
+            &caps(&["tools.demo.compute"]),
+            &stale_snapshot,
+        );
+        assert_eq!(
+            stale_outcome,
+            crate::AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.demo.compute".to_owned()]
+            },
+            "the control proves the snapshot really is stale — the defect the seam removes"
+        );
     }
 
     /// DF-92 end-to-end seam: a real on-disk edit + the production

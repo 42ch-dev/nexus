@@ -1,4 +1,4 @@
-use nexus_orchestration::capability::CapabilityRegistry;
+use nexus_capability::CapabilityRegistry;
 
 #[tokio::test]
 async fn registry_lookup_builtin_workspace_open() {

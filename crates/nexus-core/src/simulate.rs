@@ -2,15 +2,16 @@
 //!
 //! The request carries the whole candidate because nothing is applied yet, so this route
 //! reads, validates and returns; it persists nothing, mutates nothing and owns no revision.
-//! Fresh recording registry per call, no production holder swap, no executor and no provider.
+//! Fresh per call, and none at all: no capability registry, no production holder swap, no
+//! executor and no provider.
 
 use crate::{CoreError, CoreResult, CoreService, PresetError, Principal};
 use nexus_contracts::generated::daemon_api::orchestration::strategy_simulation_request::NexusWorkflowDocumentState;
 use nexus_contracts::{
     SimulationTrajectory, StrategySimulationRequest, WorkflowDocument as WireWorkflowDocument,
 };
-use nexus_orchestration::{simulate_document, CapabilityRegistryHolder, SimulationOptions};
 use nexus_workflow_ir::WorkflowDocument;
+use nexus_workflow_simulate::simulate_document;
 
 impl CoreService {
     /// Read the installed strategy as a candidate IR document.
@@ -86,13 +87,7 @@ impl CoreService {
                 field: "document".into(),
                 reason: error.to_string(),
             })?;
-        simulate_document(
-            &document,
-            &SimulationOptions {
-                capabilities: CapabilityRegistryHolder::new(),
-            },
-        )
-        .map_err(|error| CoreError::InvalidInput {
+        simulate_document(&document).map_err(|error| CoreError::InvalidInput {
             field: "document".into(),
             reason: error.to_string(),
         })

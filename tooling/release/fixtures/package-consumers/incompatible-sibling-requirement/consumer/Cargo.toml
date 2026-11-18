@@ -1,0 +1,12 @@
+[package]
+name = "nexus-fixture-sibling-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# The extracted archive is 0.1.0; a caret requirement on 0.2 cannot resolve.
+nexus-fixture-sibling = "0.2"
+
+# Standalone workspace root: the consumer inherits no product Cargo config.
+[workspace]

@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Peer Connect protocol: WS transport, accept loop, sessions, MCP bridge and the peer tool registry"
+publish = false
 
 [lints]
 workspace = true
@@ -29,9 +30,9 @@ transport = ["dep:spoke-connect", "dep:tokio", "dep:tokio-tungstenite", "dep:fut
 connect-host = [
     "peer-tools",
     "transport",
+    "dep:nexus-capability",
     "dep:nexus-contracts",
     "dep:nexus-home-layout",
-    "dep:nexus-orchestration",
     "dep:chrono",
     "dep:getrandom",
     "dep:serde",
@@ -58,7 +59,10 @@ nexus-contracts = { path = "../nexus-contracts", optional = true }
 nexus-home-layout = { path = "../nexus-home-layout", optional = true }
 # The shared capability registry holder and its digest-poll watcher: the
 # reserved-namespace derivation reads LIVE user-capability names from it.
-nexus-orchestration = { path = "../nexus-orchestration", optional = true }
+# V249 C3 moved both into `nexus-capability`, so the Connect library links the
+# capability crate directly and carries NO engine edge (the `capability` cohort
+# in `tooling/check-graph-pins.sh` pins that absence).
+nexus-capability = { path = "../nexus-capability", optional = true }
 chrono = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
@@ -76,6 +80,9 @@ rmcp = { version = "=3.9.0", default-features = false, features = ["server", "cl
 futures-channel = { version = "0.3", optional = true }
 
 [dev-dependencies]
+# `nexus-connect/src/watch.rs` tests use `nexus_capability::test_support`,
+# which the capability crate gates under `any(test, feature = "test-hooks")`.
+nexus-capability = { path = "../nexus-capability", features = ["test-hooks"] }
 tempfile.workspace = true
 # The accept-lane fixtures build fixed-seed Ed25519 keypairs.
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }

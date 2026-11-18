@@ -42,15 +42,14 @@ use async_trait::async_trait;
 use graph_flow::SessionStorage;
 use nexus_orchestration::engine::{
     EngineError, EngineSignal, FailedStepWitness, FailurePersistenceDisposition, FailureSettlement,
-    FailureSettlementSummary, OrchestrationEngine, SessionId, SessionStatus, SessionSummary,
-    StepOutcome,
+    FailureSettlementSummary, OrchestrationEngine, StepOutcome,
 };
 use nexus_orchestration::resume_rules;
 use nexus_orchestration::schedule::supervisor::{ScheduleRunStarter, SupervisorError};
 use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
 use nexus_session_storage::{
     run_state::{RunRecord, WorkflowStateStore},
-    StorageError,
+    SessionId, SessionStatus, SessionSummary, StorageError,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -1625,13 +1624,9 @@ impl WorkflowRunCoordinator {
             nexus_session_storage::run_state::AgentBinding,
         >,
         nexus_home: &std::path::Path,
-        caps: &nexus_orchestration::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
-        >,
-        prompt_executor: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
-        >,
+        caps: &nexus_capability::CapabilityRegistryHolder,
+        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
+        prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     ) -> Result<SessionId, RunControlError> {
         // A8 fail-closed: `_system.*` presets are never driven as user
         // sessions.
@@ -2447,13 +2442,9 @@ impl WorkflowRunCoordinator {
         schedule_id: &str,
         pool: &sqlx::SqlitePool,
         nexus_home: &std::path::Path,
-        caps: &nexus_orchestration::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
-        >,
-        prompt_executor: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
-        >,
+        caps: &nexus_capability::CapabilityRegistryHolder,
+        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
+        prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     ) -> Result<SessionId, RunControlError> {
         // C2: a closing coordinator admits no run. Checked BEFORE the row read
         // and the policy cutover below, so close can never race a durable
@@ -2489,12 +2480,12 @@ impl WorkflowRunCoordinator {
                 std::sync::Arc::new(pool.clone()),
             );
             let run_exists = store
-                .load_run(&nexus_orchestration::SessionId(sid.clone()))
+                .load_run(&SessionId(sid.clone()))
                 .await
                 .map_err(|e| RunControlError::Admission(e.to_string()))?
                 .is_some();
             if run_exists {
-                let sid = nexus_orchestration::SessionId(sid.clone());
+                let sid = SessionId(sid.clone());
                 self.ensure_driving(&sid).await?;
                 return Ok(sid);
             }
@@ -2583,7 +2574,7 @@ impl WorkflowRunCoordinator {
         row: &ScheduleAdmissionRow,
         pool: &sqlx::SqlitePool,
         nexus_home: &std::path::Path,
-        caps: &nexus_orchestration::CapabilityRegistryHolder,
+        caps: &nexus_capability::CapabilityRegistryHolder,
     ) -> Result<(), RunControlError> {
         // 1. Resolve the preset through the shared resolver.
         let registry = caps.get().ok_or_else(|| {
@@ -2743,13 +2734,9 @@ impl WorkflowRunCoordinator {
         schedule_id: &str,
         pool: &sqlx::SqlitePool,
         nexus_home: &std::path::Path,
-        caps: &nexus_orchestration::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
-        >,
-        prompt_executor: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
-        >,
+        caps: &nexus_capability::CapabilityRegistryHolder,
+        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
+        prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     ) -> Result<SessionId, RunControlError> {
         self.admit_schedule_inner(
             schedule_id,
@@ -2779,13 +2766,9 @@ impl WorkflowRunCoordinator {
         schedule_id: &str,
         pool: &sqlx::SqlitePool,
         nexus_home: &std::path::Path,
-        caps: &nexus_orchestration::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
-        >,
-        prompt_executor: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
-        >,
+        caps: &nexus_capability::CapabilityRegistryHolder,
+        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
+        prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
         legacy_opt_in: bool,
     ) -> Result<SessionId, RunControlError> {
         // C2: a closing coordinator admits no schedule run either. Checked
@@ -2876,12 +2859,12 @@ impl WorkflowRunCoordinator {
                 std::sync::Arc::new(pool.clone()),
             );
             let run_exists = store
-                .load_run(&nexus_orchestration::SessionId(sid.clone()))
+                .load_run(&SessionId(sid.clone()))
                 .await
                 .map_err(|e| RunControlError::Admission(e.to_string()))?
                 .is_some();
             if run_exists {
-                let sid = nexus_orchestration::SessionId(sid.clone());
+                let sid = SessionId(sid.clone());
                 self.ensure_driving(&sid).await?;
                 return Ok(sid);
             }
@@ -3691,11 +3674,11 @@ pub struct CoordinatorScheduleRunStarter {
     nexus_home: PathBuf,
     /// The capability registry the admission builds its wired graph with —
     /// the SAME holder the engine reads through.
-    caps: nexus_orchestration::CapabilityRegistryHolder,
+    caps: nexus_capability::CapabilityRegistryHolder,
     /// Optional daemon-side tool dispatch for the admitted graph.
-    daemon_tool_dispatch: Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
+    daemon_tool_dispatch: Option<Arc<dyn nexus_capability::DaemonToolDispatch>>,
     /// The production prompt executor (Host plane) for the admitted graph.
-    prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+    prompt_executor: Option<Arc<dyn nexus_capability::PromptExecutor>>,
 }
 
 impl CoordinatorScheduleRunStarter {
@@ -3704,9 +3687,9 @@ impl CoordinatorScheduleRunStarter {
     pub fn new(
         coordinator: &Arc<WorkflowRunCoordinator>,
         nexus_home: PathBuf,
-        caps: nexus_orchestration::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
-        prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+        caps: nexus_capability::CapabilityRegistryHolder,
+        daemon_tool_dispatch: Option<Arc<dyn nexus_capability::DaemonToolDispatch>>,
+        prompt_executor: Option<Arc<dyn nexus_capability::PromptExecutor>>,
     ) -> Self {
         Self {
             coordinator: Arc::downgrade(coordinator),
@@ -3907,7 +3890,7 @@ mod tests {
     }
 
     use nexus_orchestration::engine::{
-        ChildSessionParams, Context, EngineError, SessionFilter, SessionKey, SessionSummary,
+        ChildSessionParams, Context, EngineError, SessionFilter, SessionKey,
     };
 
     /// P4 T1: durable `Failed+cancel_requested+driver_failed` counts as cancel outcome
@@ -4602,8 +4585,8 @@ mod tests {
                 .build()
                 .expect("test graph build"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
             storage.clone(),
@@ -6412,8 +6395,8 @@ mod tests {
             Arc::new(RaceInjectingStore::new(real_store.clone(), storage.clone()));
 
         // Real engine over the race-injecting store + real coordinator.
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -6610,8 +6593,8 @@ mod tests {
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -6769,8 +6752,8 @@ mod tests {
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -6923,8 +6906,8 @@ mod tests {
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7051,8 +7034,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7162,8 +7145,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7246,8 +7229,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7359,8 +7342,8 @@ mod tests {
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let inner: Arc<dyn OrchestrationEngine> = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7467,8 +7450,8 @@ mod tests {
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let inner: Arc<dyn OrchestrationEngine> = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7582,8 +7565,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7705,8 +7688,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7832,8 +7815,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -7951,8 +7934,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8080,8 +8063,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8178,8 +8161,8 @@ mod tests {
             .expect("seed v0 context");
         storage.save(session).await.expect("seed v0 row");
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8356,8 +8339,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         // The engine sees the REAL v1 row through its store, but its session
         // storage reports the root as absent — the seam under test.
@@ -8505,8 +8488,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8636,8 +8619,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8764,8 +8747,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8890,8 +8873,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         // The phase-1 cancel-intent fence is committed by the ENGINE's store
         // (the coordinator's store handles the drive/failure commit), so the
@@ -9001,8 +8984,8 @@ mod tests {
             .expect("v0 error key");
         storage.save(session).await.expect("seed v0 row");
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -9297,8 +9280,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -9422,8 +9405,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -9528,8 +9511,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -9805,8 +9788,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -10201,8 +10184,8 @@ mod tests {
                 .build()
                 .expect("graph"),
         );
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -10445,8 +10428,8 @@ mod tests {
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -10599,8 +10582,8 @@ mod tests {
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(

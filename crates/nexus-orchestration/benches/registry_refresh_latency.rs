@@ -37,10 +37,8 @@ use std::hint::black_box;
 use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use nexus_orchestration::capability::{
-    builtins::registry::{CdnConfig, RegistryRefresh, DEFAULT_MAX_CDN_BODY_SIZE},
-    Capability,
-};
+use nexus_capability::builtins::registry::{CdnConfig, RegistryRefresh, DEFAULT_MAX_CDN_BODY_SIZE};
+use nexus_capability::Capability;
 
 /// V1.58 P0 fix-wave (QC3 F-004): explicit Criterion config instead of the
 /// default. The default Criterion config is 3s warm-up / 5s measurement /

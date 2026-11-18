@@ -47,7 +47,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use nexus_agent_host::config::TimeoutConfig;
 use nexus_agent_host::{HostFacade, ProviderId};
-use nexus_orchestration::capability::{PromptExecutor, WorkspaceExecutor, WorkspaceStateProvider};
+use nexus_capability::{PromptExecutor, WorkspaceExecutor, WorkspaceStateProvider};
 use nexus_provider_ports::ProviderPort;
 use nexus_session_storage::run_state::{RunRecord, WorkflowStateStore};
 use nexus_session_storage::storage::sqlite::SqliteSessionStorage;

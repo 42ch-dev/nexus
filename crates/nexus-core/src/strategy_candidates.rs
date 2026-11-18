@@ -21,10 +21,10 @@ use nexus_preset::workflow_ir::{import_preset_bundle, import_preset_manifest, Fs
 use nexus_workflow_ir::{content_hash, WorkflowDocument, WorkflowDocumentState};
 use sqlx::SqlitePool;
 
-#[cfg(feature = "execution")]
+#[cfg(feature = "strategy-authoring")]
 use nexus_contracts::SimulationTrajectory;
-#[cfg(feature = "execution")]
-use nexus_orchestration::{simulate_document, CapabilityRegistryHolder, SimulationOptions};
+#[cfg(feature = "strategy-authoring")]
+use nexus_workflow_simulate::simulate_document;
 
 use crate::error::local_db_err;
 use crate::{
@@ -322,7 +322,7 @@ impl CoreService {
 // ---------------------------------------------------------------------------
 
 /// Why a bundle import was refused. Nothing was written when one is returned.
-#[cfg(feature = "execution")]
+#[cfg(feature = "strategy-authoring")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PresetImportRefusal {
     /// The imported document does not pass the shared structural verdict Approve applies, so the
@@ -345,7 +345,7 @@ pub enum PresetImportRefusal {
     },
 }
 
-#[cfg(feature = "execution")]
+#[cfg(feature = "strategy-authoring")]
 impl PresetImportRefusal {
     /// The stable lowercase reason a client branches on.
     #[must_use]
@@ -399,7 +399,7 @@ impl PresetImportRefusal {
     }
 }
 
-#[cfg(feature = "execution")]
+#[cfg(feature = "strategy-authoring")]
 impl std::fmt::Display for PresetImportRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -425,7 +425,7 @@ impl std::fmt::Display for PresetImportRefusal {
 /// The trajectory is the deterministic walk of the SAME bytes that were stored, so a caller can
 /// pass it to [`CoreService::approve_strategy`] unchanged; recomputing it elsewhere is how a
 /// stored candidate and its approval evidence drift apart.
-#[cfg(feature = "execution")]
+#[cfg(feature = "strategy-authoring")]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StrategyCandidateImport {
     /// The committed candidate (row revision 1).
@@ -434,7 +434,7 @@ pub struct StrategyCandidateImport {
     pub trajectory: SimulationTrajectory,
 }
 
-#[cfg(feature = "execution")]
+#[cfg(feature = "strategy-authoring")]
 impl CoreService {
     /// Import the external bundle at `bundle_root` as this strategy's revision-1 candidate.
     ///
@@ -498,13 +498,7 @@ impl CoreService {
         if let Some(refusal) = crate::approve::structural_refusal(&document, &packages) {
             return Err(import_invalid(refusal).into_error());
         }
-        let trajectory = simulate_document(
-            &document,
-            &SimulationOptions {
-                capabilities: CapabilityRegistryHolder::new(),
-            },
-        )
-        .map_err(|error| {
+        let trajectory = simulate_document(&document).map_err(|error| {
             PresetImportRefusal::SimulationUnavailable {
                 reason: error.to_string(),
             }
@@ -522,7 +516,7 @@ impl CoreService {
 /// The import refusal a shared structural verdict becomes: an explicit invalid-document refusal
 /// keeps its violations, and a pin or slot finding (which no YAML bundle can carry today) is
 /// reported in the same list rather than dropped.
-#[cfg(feature = "execution")]
+#[cfg(feature = "strategy-authoring")]
 fn import_invalid(refusal: crate::approve::ApproveRefusal) -> PresetImportRefusal {
     match refusal {
         crate::approve::ApproveRefusal::InvalidDocument { violations } => {
@@ -536,7 +530,7 @@ fn import_invalid(refusal: crate::approve::ApproveRefusal) -> PresetImportRefusa
 
 /// A bundle that does not load is a `bundle` input refusal; the loader's own problems are named
 /// instead of only their count, so the caller knows which line of `preset.yaml` to fix.
-#[cfg(feature = "execution")]
+#[cfg(feature = "strategy-authoring")]
 fn bundle_load_error(error: &nexus_preset::PresetLoadError) -> CoreError {
     let reason = match error {
         nexus_preset::PresetLoadError::Validation { problems, .. } => problems

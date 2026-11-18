@@ -20,7 +20,7 @@
 //!
 //! The Draft overlay §3 summarizes the schema as `id | description | status |
 //! chapters` and claims alignment with the embedded template. The template is
-//! the on-disk ground truth (it is what [`crate::capability::builtins::NovelProjectScaffold`]
+//! the on-disk ground truth (it is what [`nexus_capability::builtins::NovelProjectScaffold`]
 //! writes and what the round-trip tests must reproduce), so this module
 //! implements the **template's 5-column** shape and maps the overlay semantics
 //! onto it: `Planted` + `Paid off` realize the overlay's single `chapters`
@@ -42,8 +42,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
-use crate::capability::builtins::work_commit::{commit_work_bytes, require_executor};
-use crate::capability::WorkspaceExecutor;
+use nexus_capability::builtins::work_commit::{commit_work_bytes, require_executor};
+use nexus_capability::WorkspaceExecutor;
 
 // ---------------------------------------------------------------------------
 // Canonical table geometry
@@ -1004,7 +1004,7 @@ mod tests {
     }
 
     fn executor() -> Arc<dyn WorkspaceExecutor> {
-        crate::capability::builtins::work_commit::test_support::RecordingExecutor::new()
+        nexus_capability::builtins::work_commit::test_support::RecordingExecutor::new()
     }
 
     #[tokio::test]
@@ -1115,7 +1115,7 @@ mod tests {
     async fn promote_outline_to_index_commits_the_index_through_the_port() {
         let (tmp, _work) = work_dir();
         let recording =
-            crate::capability::builtins::work_commit::test_support::RecordingExecutor::new();
+            nexus_capability::builtins::work_commit::test_support::RecordingExecutor::new();
         let exec: Arc<dyn WorkspaceExecutor> = recording.clone();
         promote_outline_to_index(tmp.path(), TEST_WORK_REF, "F001: the locket", Some(&exec))
             .await

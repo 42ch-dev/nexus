@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "The durable run engine: graph-flow run driving, workspace sessions and their commit authority, snapshot/OCC filesystem primitives, per-run event rings, and the background scheduler ownership"
+publish = false
 
 [lints]
 workspace = true
@@ -24,6 +25,7 @@ test-hooks = ["nexus-local-db/test-hooks"]
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+nexus-capability = { path = "../nexus-capability" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-orchestration = { path = "../nexus-orchestration" }
 nexus-session-storage = { path = "../nexus-session-storage" }

@@ -60,6 +60,8 @@ use nexus_agent_host::{
     HostSessionId, LaunchStrategy, ProviderCatalog, ProviderCatalogEntry, ProviderId, SessionState,
     TrustLevel,
 };
+use nexus_capability::{CapabilityError, DaemonToolDispatch};
+use nexus_capability::{CapabilityRegistry, CapabilityRegistryHolder};
 use nexus_contracts::generated::core::{
     CoreWorkflowEventBatchEventsItem, CoreWorkflowSubscribeRequest,
     CoreWorkflowSubscribeRequestLastEventId, CoreWorkflowSubscribeRequestRunId,
@@ -95,16 +97,13 @@ use nexus_execution::workflow::{
 use nexus_local_db::findings::{create_finding, Finding};
 use nexus_local_db::works::{create_work_atomic, WorkRecord};
 use nexus_local_db::writer_protocol::init_guarded_pool;
-use nexus_orchestration::capability::{CapabilityError, DaemonToolDispatch};
-use nexus_orchestration::engine::{
-    GraphFlowEngine, OrchestrationEngine, SessionStatus, SessionSummary,
-};
+use nexus_orchestration::engine::{GraphFlowEngine, OrchestrationEngine};
 use nexus_orchestration::preset_runtime::build_wired_outer_graph;
-use nexus_orchestration::{CapabilityRegistry, CapabilityRegistryHolder};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use nexus_session_storage::run_state::RunRecord;
 use nexus_session_storage::run_state::WorkflowStateStore;
 use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
+use nexus_session_storage::{SessionStatus, SessionSummary};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -509,9 +508,7 @@ async fn owner_fixture() -> OwnerFixture {
         TimeoutConfig::default(),
     ));
     let deps = RunnerDeps {
-        prompt_executor: Some(
-            executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>
-        ),
+        prompt_executor: Some(executor.clone() as Arc<dyn nexus_capability::PromptExecutor>),
         workspace_root: Some(nexus_home_layout::operational_workspace_dir(
             home, CREATOR, SLUG,
         )),
@@ -740,7 +737,7 @@ async fn durable_record(
     run_id: &str,
 ) -> nexus_session_storage::run_state::RunRecord {
     SqliteSessionStorage::new(Arc::new(pool.clone()))
-        .load_run(&nexus_orchestration::engine::SessionId(run_id.to_string()))
+        .load_run(&nexus_session_storage::SessionId(run_id.to_string()))
         .await
         .expect("durable run load")
         .expect("the admitted run row exists")
@@ -805,8 +802,7 @@ async fn admission_distinct_serial_rows_race_one_owned() {
     let pool = fixture.pool();
     let caps = fixture.handle.capability_holder();
     let home = fixture.nexus_home();
-    let executor =
-        fixture.executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>;
+    let executor = fixture.executor.clone() as Arc<dyn nexus_capability::PromptExecutor>;
 
     let (a, b) = tokio::join!(
         coordinator.admit_schedule(
@@ -2228,7 +2224,7 @@ async fn seed_prompt_run(
     };
     store
         .start_run(
-            &nexus_orchestration::SessionId(session_id.to_string()),
+            &nexus_session_storage::SessionId(session_id.to_string()),
             &descriptor,
             checkpoint,
             &nexus_session_storage::run_state::RunStateV1::default(),
@@ -2248,7 +2244,7 @@ async fn seed_prompt_run(
 #[allow(clippy::too_many_lines)] // one prompt-executor journey asserted end to end
 #[tokio::test]
 async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() {
-    use nexus_orchestration::capability::{PromptExecutor, PromptRequest, ToolPolicy};
+    use nexus_capability::{PromptExecutor, PromptRequest, ToolPolicy};
     use nexus_session_storage::run_state::AgentBinding;
 
     let tmp = tempfile::tempdir().unwrap();
@@ -2323,7 +2319,7 @@ async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() 
     // successfully completed prompt must not leave its durable `in_flight`
     // attempt marker behind.
     let state = store
-        .load_run(&nexus_orchestration::SessionId(
+        .load_run(&nexus_session_storage::SessionId(
             "retained:single-flight".to_string(),
         ))
         .await
@@ -2400,7 +2396,7 @@ async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() 
 /// typed refusal, never partial-output success.
 #[tokio::test]
 async fn prompt_executor_types_eof_after_initialize_as_a_launch_failure() {
-    use nexus_orchestration::capability::{PromptExecutor, PromptRequest, ToolPolicy};
+    use nexus_capability::{PromptExecutor, PromptRequest, ToolPolicy};
     use nexus_session_storage::run_state::AgentBinding;
 
     let tmp = tempfile::tempdir().unwrap();
@@ -2458,7 +2454,7 @@ async fn prompt_executor_types_eof_after_initialize_as_a_launch_failure() {
         "a failed launch must produce no prompt effect"
     );
     let state = store
-        .load_run(&nexus_orchestration::SessionId(
+        .load_run(&nexus_session_storage::SessionId(
             "retained:eof-launch".to_string(),
         ))
         .await
@@ -2501,7 +2497,7 @@ async fn prompt_executor_types_eof_after_initialize_as_a_launch_failure() {
 #[tokio::test]
 async fn graph_prompt_context_serializes_output_without_host_handles() {
     use graph_flow::Task as _;
-    use nexus_orchestration::capability::{PromptExecutor, ToolPolicy};
+    use nexus_capability::{PromptExecutor, ToolPolicy};
     use nexus_orchestration::tasks::InnerGraphNodeTask;
     use nexus_session_storage::run_state::AgentBinding;
     use std::sync::RwLock;
@@ -2559,7 +2555,7 @@ async fn graph_prompt_context_serializes_output_without_host_handles() {
 
     // Durable cleanup: the completed prompt owns no `in_flight` attempt.
     let state = store
-        .load_run(&nexus_orchestration::SessionId(run_id.to_string()))
+        .load_run(&nexus_session_storage::SessionId(run_id.to_string()))
         .await
         .expect("load run")
         .expect("record")
@@ -3062,8 +3058,7 @@ async fn public_schedule_reads_and_context_are_owned() {
     let coordinator = fixture.coordinator();
     let caps = fixture.handle.capability_holder();
     let home = fixture.nexus_home();
-    let executor =
-        fixture.executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>;
+    let executor = fixture.executor.clone() as Arc<dyn nexus_capability::PromptExecutor>;
 
     // ── 1. A durable pending row created through the PUBLIC add appears in the
     //       schedule list with its stored identity/status/policy and NO run. ──
@@ -3888,8 +3883,7 @@ async fn public_cancel_fences_late_workspace_commit() {
     let coordinator = fixture.coordinator();
     let caps = fixture.handle.capability_holder();
     let home = fixture.nexus_home();
-    let executor =
-        fixture.executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>;
+    let executor = fixture.executor.clone() as Arc<dyn nexus_capability::PromptExecutor>;
     write_preset_bundle(
         &home,
         CANCEL_WAIT_PRESET,
@@ -4428,7 +4422,7 @@ async fn wait_for_signalable_gate_park(pool: &sqlx::SqlitePool, run_id: &str) {
     use graph_flow::SessionStorage as _;
 
     let store = SqliteSessionStorage::new(Arc::new(pool.clone()));
-    let session_id = nexus_orchestration::engine::SessionId(run_id.to_string());
+    let session_id = nexus_session_storage::SessionId(run_id.to_string());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         let record = store
@@ -4490,8 +4484,7 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
     let coordinator = fixture.coordinator();
     let caps = fixture.handle.capability_holder();
     let home = fixture.nexus_home();
-    let executor =
-        fixture.executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>;
+    let executor = fixture.executor.clone() as Arc<dyn nexus_capability::PromptExecutor>;
     write_preset_bundle(
         &home,
         RESUME_PARK_PRESET,
@@ -5696,7 +5689,7 @@ async fn stage_run_row(
 /// becomes on the wire.
 fn run_record(run_id: &str, state_revision: u64) -> RunRecord {
     RunRecord {
-        session_id: nexus_orchestration::engine::SessionId(run_id.to_string()),
+        session_id: nexus_session_storage::SessionId(run_id.to_string()),
         status: SessionStatus::Running,
         state_revision,
         execution_version: 1,

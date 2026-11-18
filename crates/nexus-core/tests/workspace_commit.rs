@@ -14,6 +14,8 @@
 #![allow(clippy::unwrap_used)]
 
 use base64::Engine;
+use nexus_capability::WorkspaceExecutor;
+use nexus_capability::{CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps};
 use nexus_core::owner::executor::WorkspaceCommitExecutor;
 use nexus_execution::commit_fs::hash_bytes;
 use nexus_execution::session::{
@@ -23,9 +25,6 @@ use nexus_execution::session::{
 use nexus_execution::state_provider::CoreWorkspaceStateProvider;
 use nexus_execution::test_hooks::{
     set_after_delete_capture_hook, set_crash_point, set_owner_gate, OwnerGate,
-};
-use nexus_orchestration::capability::{
-    CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps, WorkspaceExecutor,
 };
 use nexus_orchestration::engine::GraphFlowEngine;
 use nexus_orchestration::OrchestrationEngine;

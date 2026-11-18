@@ -6,8 +6,9 @@
 //! - `run_step` correctly drives the state machine
 //! - `signal(Resume)` unblocks `WaitForInput`
 
+use nexus_capability::CapabilityRegistry;
 use nexus_orchestration::engine::StepOutcome;
-use nexus_orchestration::{CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
+use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
 /// Minimal two-state preset: `start` → `end`.
@@ -43,7 +44,7 @@ async fn linear_two_state_preset_executes_to_terminal() {
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let engine = GraphFlowEngine::new_with_storage(
         storage,
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
+        nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
     );
 
     let sid = engine
@@ -121,7 +122,7 @@ async fn capability_enter_state_composites_correctly() {
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let engine = GraphFlowEngine::new_with_storage(
         storage,
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
+        nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
     );
 
     let sid = engine

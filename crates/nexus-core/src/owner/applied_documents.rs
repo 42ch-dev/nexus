@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use nexus_execution::admission::{AppliedAdmission, AppliedAdmissionError, AppliedAdmissionPort};
-use nexus_orchestration::capability::{AppliedDocument, AppliedDocumentSource};
+use nexus_orchestration::applied_document::{AppliedDocument, AppliedDocumentSource};
 use nexus_preset::LoadedPreset;
 use nexus_session_storage::run_state::AppliedRunIdentity;
 

@@ -7,10 +7,8 @@
 //! it from the shipped bundle and `crates/nexus-preset/tests/workflow_ir_round_trip.rs` fails when
 //! that file drifts from the adapter's output, so this target cannot walk a stale sample.
 
-#![cfg(feature = "simulate")]
-
-use nexus_orchestration::{simulate_document, SimulationOptions};
 use nexus_workflow_ir::WorkflowDocument;
+use nexus_workflow_simulate::simulate_document;
 
 const GAME_NARRATIVE: &str =
     include_str!("../../nexus-preset/tests/fixtures/workflow-ir/game-narrative.workflow.ir.json");
@@ -20,13 +18,7 @@ fn sample() -> WorkflowDocument {
 }
 
 fn simulate(document: &WorkflowDocument) -> nexus_contracts::SimulationTrajectory {
-    simulate_document(
-        document,
-        &SimulationOptions {
-            capabilities: nexus_orchestration::CapabilityRegistryHolder::new(),
-        },
-    )
-    .expect("the sample simulates")
+    simulate_document(document).expect("the sample simulates")
 }
 
 #[test]

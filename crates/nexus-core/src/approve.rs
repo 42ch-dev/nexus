@@ -18,8 +18,8 @@
 //! conflict. The snapshot freezes bytes; it does not apply, bind a schedule or execute.
 
 use nexus_contracts::{ApprovedStrategySnapshot, SimulationTrajectory};
-use nexus_orchestration::{simulate_document, CapabilityRegistryHolder, SimulationOptions};
 use nexus_workflow_ir::{validate, Violation, WorkflowDocument};
+use nexus_workflow_simulate::simulate_document;
 use serde_json::Value;
 
 use crate::compose::{
@@ -422,13 +422,7 @@ impl CoreService {
             return Err(refusal.into_error());
         }
 
-        let recomputed = simulate_document(
-            &current.document,
-            &SimulationOptions {
-                capabilities: CapabilityRegistryHolder::new(),
-            },
-        )
-        .map_err(|error| {
+        let recomputed = simulate_document(&current.document).map_err(|error| {
             ApproveRefusal::SimulationUnavailable {
                 reason: error.to_string(),
             }

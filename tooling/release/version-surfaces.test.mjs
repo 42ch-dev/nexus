@@ -31,6 +31,7 @@ import {
   cleanupTempRepo,
   expectedMemberLockVersions,
   FIXTURE_BASELINE_VERSION,
+  readCargoPackageRows,
   readRepoFile,
   REPO_ROOT,
   writeRepoFile,
@@ -249,6 +250,115 @@ test("the version brackets carrier names manifests whose package names agree", (
     // Contract crates version independently: a literal, never inheritance.
     assert.equal(typeof parseCargoPackageVersion(contents, entry.manifest), "string", entry.name);
   }
+});
+
+/**
+ * The public packages the carrier names, in carrier order. `version-brackets.json`
+ * is the only inventory: a second pinned list here would let a carrier edit pass
+ * while the privacy and caret rules still partitioned by the stale copy. The
+ * eight-count below keeps "publishing one more crate is a new consumer
+ * commitment" a deliberate act without keeping a second roster.
+ */
+const PUBLIC_MANIFEST_PATHS = readVersionBrackets(REPO_ROOT).map(
+  (entry) => entry.manifest,
+);
+
+/** Approved public normal/build closure: repository edges only. */
+const PUBLIC_LOCAL_CLOSURE = {
+  "nexus-contracts": [],
+  "nexus-workflow-ir": ["nexus-contracts"],
+  "nexus-pattern": ["nexus-contracts", "nexus-workflow-ir"],
+  "nexus-knowledge": ["nexus-contracts"],
+  "nexus-narrative": ["nexus-contracts", "nexus-knowledge"],
+  "nexus-module-sdk": [],
+  "nexus-module-manifest": [],
+  "nexus-module-test": ["nexus-module-sdk"],
+};
+
+test("the carrier is exactly the eight approved public manifests", () => {
+  const entries = readVersionBrackets(REPO_ROOT);
+  assert.equal(entries.length, 8, "the public set is the eight approved packages");
+  assert.equal(
+    new Set(entries.map((entry) => entry.manifest)).size,
+    entries.length,
+    "each public package is one carrier entry",
+  );
+  for (const entry of entries) {
+    assert.equal(
+      typeof parseCargoPackageVersion(readRepoFile(REPO_ROOT, entry.manifest), entry.manifest),
+      "string",
+      `${entry.name}: a public package declares its own literal version`,
+    );
+  }
+});
+
+test("every package outside the eight public manifests is publish = false", () => {
+  const rows = readCargoPackageRows(REPO_ROOT);
+  const publicManifests = new Set(PUBLIC_MANIFEST_PATHS);
+  const privateRows = rows.filter((row) => !publicManifests.has(row.manifest));
+  assert.ok(privateRows.length >= 20, `expected the private inventory, got ${privateRows.length}`);
+  for (const row of privateRows) {
+    assert.deepEqual(
+      row.publish,
+      [],
+      `${row.manifest}: ${row.name} is not one of the eight public packages, so it must declare publish = false`,
+    );
+  }
+  const publicRows = rows.filter((row) => publicManifests.has(row.manifest));
+  assert.equal(publicRows.length, 8, "every approved public manifest must be a Cargo package");
+  for (const row of publicRows) {
+    assert.notDeepEqual(row.publish, [], `${row.name} is public and must stay publishable`);
+  }
+});
+
+test("the public normal/build closure is exactly the approved local edge set", () => {
+  assert.deepEqual(
+    Object.keys(PUBLIC_LOCAL_CLOSURE).sort(),
+    readVersionBrackets(REPO_ROOT).map((entry) => entry.name).sort(),
+    "the approved edge set covers exactly the carrier's packages",
+  );
+  const byName = new Map(readCargoPackageRows(REPO_ROOT).map((row) => [row.name, row]));
+  for (const [name, expected] of Object.entries(PUBLIC_LOCAL_CLOSURE)) {
+    const row = byName.get(name);
+    assert.ok(row, `${name}: missing from the Cargo package rows`);
+    const edges = row.dependencies
+      .filter((dep) => dep.path !== null && dep.kind !== "dev")
+      .map((dep) => dep.name)
+      .sort();
+    assert.deepEqual(edges, [...expected].sort(), `${name} normal/build edges`);
+  }
+});
+
+test("every public-to-public local edge carries a caret requirement", () => {
+  const rows = readCargoPackageRows(REPO_ROOT);
+  const publicManifests = new Set(PUBLIC_MANIFEST_PATHS);
+  const publicNames = new Set(
+    rows.filter((row) => publicManifests.has(row.manifest)).map((row) => row.name),
+  );
+  let checked = 0;
+  for (const row of rows.filter((row) => publicNames.has(row.name))) {
+    for (const dep of row.dependencies) {
+      // A dev-only edge to a private package is a development declaration that
+      // Cargo omits from a published manifest; its integration target moves to
+      // the private crate instead of inventing a version for it here.
+      if (dep.path === null || !publicNames.has(dep.name)) {
+        continue;
+      }
+      checked += 1;
+      assert.notEqual(
+        dep.req,
+        "*",
+        `${row.name} -> ${dep.name} (${dep.kind ?? "normal"}): needs a registry version requirement`,
+      );
+      assert.ok(
+        dep.req.startsWith("^"),
+        `${row.name} -> ${dep.name}: ${dep.req} is not a caret requirement`,
+      );
+    }
+  }
+  // IR→contracts, pattern→contracts+IR, knowledge→contracts (normal and dev),
+  // narrative→contracts+knowledge, module-test→SDK.
+  assert.equal(checked, 8, "every retained public local edge was checked");
 });
 
 /**

@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Session identity/status types and the storage error contract for the orchestration session store"
+publish = false
 
 [lints]
 workspace = true

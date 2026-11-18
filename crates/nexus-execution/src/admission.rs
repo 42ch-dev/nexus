@@ -15,7 +15,7 @@
 
 use async_trait::async_trait;
 use nexus_home_layout::strategy_intake::StrategyIntakeMode;
-use nexus_orchestration::capability::AppliedDocument;
+use nexus_orchestration::applied_document::AppliedDocument;
 use nexus_preset::LoadedPreset;
 
 /// What one admission resolved: the intake mode it runs under and the applied

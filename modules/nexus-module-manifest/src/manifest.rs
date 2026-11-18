@@ -28,9 +28,9 @@
 //! | `author` | string | — | Author attribution. |
 //! | `host_functions` | array&lt;string&gt; | `[]` | Subset of `["kb_read", "narrative_query"]` the module may call. Only whitelisted names are linked into the instance. |
 //! | `battle_report_kind` | string | module-declared | Discriminator the module emits in `battle_report.kind`. |
-//! | `max_fuel` | integer | host `SandboxConfig` | Per-invocation fuel override. |
-//! | `max_memory_mib` | integer | host `SandboxConfig` | Per-invocation memory-cap override (MiB). |
-//! | `max_wall_time_ms` | integer | host `SandboxConfig` | Per-invocation wall-time override (ms). |
+//! | `max_fuel` | integer | `SandboxConfig` default (10,000,000 fuel) | Per-invocation fuel override. |
+//! | `max_memory_mib` | integer | `SandboxConfig` default (64 MiB) | Per-invocation memory-cap override (MiB). |
+//! | `max_wall_time_ms` | integer | `SandboxConfig` default (30,000 ms) | Per-invocation wall-time override (ms). |
 //! | `wasm_sha256` | string | — | SHA-256 (64 lowercase hex chars) of the compiled `.wasm` bytes this manifest pairs with. Operators SHOULD set it: the loader then verifies content-based pairing and rejects a mismatched pair before it can be compiled or cached. Omitted (legacy manifests) → stat-fence fallback. |
 
 use std::collections::HashMap;
@@ -614,13 +614,11 @@ mod tests {
         }
     }
 
-    /// Shared invalid-manifest corpus (qc1 S-1): the file lives in
-    /// `nexus-module-sdk/tests/fixtures/` and is asserted by BOTH
-    /// validators (this crate and the SDK mirror) — a build break if the
-    /// corpus is deleted, so the two cannot silently diverge. Add new
-    /// invalid cases to the shared file, not just one side.
-    const INVALID_MANIFESTS: &str =
-        include_str!("../../nexus-module-sdk/tests/fixtures/invalid-manifests.json");
+    /// Invalid-manifest corpus (qc1 S-1): this package owns its copy; the SDK
+    /// mirror has an identical one, and `tooling/check-module-sdk-drift.sh`
+    /// asserts value parity — a build break if the corpus is deleted, so the
+    /// two cannot silently diverge. Add new invalid cases to both files.
+    const INVALID_MANIFESTS: &str = include_str!("../tests/fixtures/invalid-manifests.json");
 
     #[test]
     fn validate_rejects_shared_invalid_manifest_corpus() {

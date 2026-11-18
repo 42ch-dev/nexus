@@ -172,8 +172,7 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
     // The static half of the peer admission reserved set: this composition's
     // own host-tool roster (the protocol crate names no core registry).
     let builtin_tool_ids: std::collections::HashSet<String> =
-        nexus_core::owner::capabilities::host_tool_registry()
-            .ids()
+        nexus_core::tool_catalog::reserved_host_tool_ids()
             .map(ToOwned::to_owned)
             .collect();
     let peer_tools_lane = match nexus_connect::start_peer_tools_lane(

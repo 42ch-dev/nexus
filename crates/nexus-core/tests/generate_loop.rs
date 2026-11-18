@@ -5,13 +5,13 @@
 //! Plan: `.mstar/plans/canvas-p6-retirement.md` Part C (T5/T6); spec:
 //! `.mstar/iterations/v1.247-hygiene/specs/generate-and-lint-loop.md` §3–§7.
 
+#![cfg(feature = "strategy-authoring")]
+
 use std::sync::Mutex;
 
 use async_trait::async_trait;
+use nexus_capability::{CapabilityError, PromptExecutor, PromptRequest, PromptResult};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, GenerateRequest, Principal};
-use nexus_orchestration::capability::{
-    CapabilityError, PromptExecutor, PromptRequest, PromptResult,
-};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use tempfile::TempDir;

@@ -308,9 +308,10 @@ async fn start_server(
 
 /// The static reserved ids the production composition injects into the lane.
 ///
-/// The composing side owns the real roster (core's `host_tool_registry`); this
-/// crate must not reach it, so the fixture stands in for a builtin name the
-/// peer surface may never shadow. The id is grammar-valid on purpose, so
+/// The composing side owns the real roster (core's canonical
+/// `tool_catalog`); this crate must not reach it, so the fixture stands in for
+/// a builtin name the peer surface may never shadow. The id is grammar-valid
+/// on purpose, so
 /// `boot_lane_refuses_an_injected_reserved_id_that_is_negotiated_and_allowlisted`
 /// can only pass the refusal via supplied-set membership.
 fn builtin_tool_ids() -> HashSet<String> {

@@ -5,11 +5,12 @@ mod actor_knowledge;
 #[cfg(feature = "provider-host")]
 pub mod actor_sessions;
 mod actors;
-// v1.241 P3.5 Task 2: the apply write. Gated with approve — both are the P3 approval/apply
-// surface the daemon route exposes, and neither links without `execution`.
+// v1.241 P3.5 Task 2: the apply write stays execution-owned (approval/apply
+// recovery runs on the execution cohort). Approve itself is authoring: it
+// re-simulates the candidate, so it links only with `strategy-authoring`.
 #[cfg(feature = "execution")]
 mod apply;
-#[cfg(feature = "execution")]
+#[cfg(feature = "strategy-authoring")]
 mod approve;
 mod changes;
 mod chronology;
@@ -24,10 +25,10 @@ mod creators;
 mod error;
 mod findings;
 mod forks;
-// Generate produces a whole candidate through the three shared lint layers; layer 3 is the
-// orchestration buildability predicate apply gates on, so the module is execution-gated like
-// apply/approve/simulate rather than always compiled like compose.
-#[cfg(feature = "execution")]
+// Generate produces a whole candidate through the three shared lint layers; the authoring
+// surface that simulates and approves it lives on `strategy-authoring`, so Generate rides
+// that feature rather than the bare execution edge.
+#[cfg(feature = "strategy-authoring")]
 mod generate;
 mod home;
 #[cfg(feature = "provider-host")]
@@ -63,13 +64,14 @@ mod principal;
 mod provider_journal;
 mod reading;
 mod service;
-#[cfg(feature = "execution")]
+#[cfg(feature = "strategy-authoring")]
 mod simulate;
 mod soul;
 mod storage_status;
 mod strategy_candidates;
 mod sync;
 mod timeline;
+pub mod tool_catalog;
 mod works;
 mod world_kb;
 mod world_pack;
@@ -145,9 +147,10 @@ pub use compose::{
     BindSlotOp, ComposeDiagnostic, ComposeOp, ComposeOutcome, ComposeRefusal, NestOp,
     PatternPackageRef, ReplaceSubtreeOp, UnnestOp,
 };
-// Generate shares the compose registry and the CAS commit with Compose and needs the
-// orchestration buildability predicate, so it rides the same execution edge as apply/approve.
-#[cfg(feature = "execution")]
+// Generate shares the compose registry and the CAS commit with Compose, and the authoring
+// surface (simulate/approve/import) is what consumes its candidates, so it rides
+// `strategy-authoring`.
+#[cfg(feature = "strategy-authoring")]
 pub use generate::{Correction, GenerateExhaustion, GenerateOutcome, GenerateRequest};
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 pub use soul::CoreCharacterMind;

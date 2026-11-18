@@ -351,8 +351,7 @@ fn recovery_class_for(
             }
             // A v1 row's status must be a known A2 status; anything else is
             // corrupt/ambiguous and non-replayable (mirrors `load_run`).
-            let Some(status) = nexus_orchestration::engine::SessionStatus::from_db_str(status)
-            else {
+            let Some(status) = nexus_session_storage::SessionStatus::from_db_str(status) else {
                 return RecoveryClass::Unreadable;
             };
             resume_rules::classify_recovery(&status, state, gate_park_live)
@@ -724,8 +723,8 @@ fn frozen_source_reconstructable(bytes: Option<&[u8]>) -> bool {
 /// Capability registry for the daemon-free verification: built-ins plus the
 /// user-installed capabilities under `$HOME/.nexus42/capabilities`, so a
 /// user preset that requires a user capability still verifies (Greptile P1).
-fn ops_capability_registry() -> nexus_orchestration::capability::CapabilityRegistry {
-    use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
+fn ops_capability_registry() -> nexus_capability::CapabilityRegistry {
+    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 
     let Ok(nexus_home) = crate::config::nexus_home() else {
         return CapabilityRegistry::with_builtins();

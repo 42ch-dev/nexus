@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "ACP client host library (registry + transport + adapter) — provider-host cohort linkage."
+publish = false
 
 [lints]
 workspace = true

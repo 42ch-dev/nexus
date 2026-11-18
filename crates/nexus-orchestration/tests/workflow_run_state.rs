@@ -21,8 +21,7 @@
 
 use graph_flow::{Session, SessionStorage};
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument;
-use nexus_orchestration::capability::{AppliedDocument, AppliedDocumentSource};
-use nexus_orchestration::engine::{SessionId, SessionStatus};
+use nexus_orchestration::applied_document::{AppliedDocument, AppliedDocumentSource};
 use nexus_orchestration::OrchestrationEngine;
 use nexus_preset::source_identity::PresetSourceIdentity;
 use nexus_session_storage::run_state::{
@@ -31,6 +30,7 @@ use nexus_session_storage::run_state::{
 };
 use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
 use nexus_session_storage::StorageError as EngineError;
+use nexus_session_storage::{SessionId, SessionStatus};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -885,8 +885,8 @@ async fn engine_start_creates_v1_run() {
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistry::with_builtins(),
     ));
     let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc,
@@ -967,8 +967,8 @@ async fn resume_after_terminal_is_refused() {
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistry::with_builtins(),
     ));
     let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc,
@@ -1033,8 +1033,8 @@ async fn engine_wait_produces_durable_wait_token() {
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistry::with_builtins(),
     ));
     let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc,
@@ -1128,8 +1128,8 @@ async fn in_flight_marker_fences_control_signals_and_stale_transition() {
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistry::with_builtins(),
     ));
     let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc,
@@ -1671,8 +1671,8 @@ async fn engine_start_with_loaded_preset_builds_source_identity() {
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistry::with_builtins(),
     ));
     let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc,
@@ -1682,7 +1682,7 @@ async fn engine_start_with_loaded_preset_builds_source_identity() {
 
     // Load a real embedded preset (novel-writing) — exercises the actual
     // loader + source identity construction.
-    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded = nexus_preset::load_embedded_preset("novel-writing", &registry)
         .expect("novel-writing preset loads");
     assert!(
@@ -2009,8 +2009,8 @@ async fn engine_nested_child_creates_v1_run() {
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistry::with_builtins(),
     ));
     let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc,
@@ -2129,8 +2129,8 @@ async fn shadowed_directory_preset_resolves_directory_source_and_version() {
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistry::with_builtins(),
     ));
     let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc,
@@ -2326,8 +2326,8 @@ fn fresh_engine(
     let storage = Arc::new(SqliteSessionStorage::new(pool));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistry::with_builtins(),
     ));
     let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc,
@@ -2387,8 +2387,8 @@ async fn ordinary_cancel_rebases_graph_winners_at_intent_and_settlement() {
             inner: storage.clone(),
             reads_until_save: AtomicUsize::new(0),
         });
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
             racing.clone(),
@@ -2430,8 +2430,8 @@ async fn ordinary_pause_refuses_a_stale_graph_snapshot() {
         inner: storage.clone(),
         reads_until_save: AtomicUsize::new(0),
     });
-    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistry::with_builtins(),
     ));
     let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         racing.clone(),
@@ -3042,7 +3042,7 @@ async fn restart_hydrates_child_checkpoints() {
         let (_storage, engine) = fresh_engine(Arc::new(pool));
 
         // Recover the parent session — this must hydrate the children map.
-        let summary = nexus_orchestration::engine::SessionSummary {
+        let summary = nexus_session_storage::SessionSummary {
             session_id: parent_sid.clone(),
             creator_id: String::new(),
             preset_id: "novel-writing".to_string(),
@@ -3336,7 +3336,7 @@ async fn corrupt_child_is_non_replayable_during_recovery() {
 
     // Recovery must skip runner reconstruction for this parent (non-replayable)
     // and there must be no runner.
-    let summary = nexus_orchestration::engine::SessionSummary {
+    let summary = nexus_session_storage::SessionSummary {
         session_id: parent_sid.clone(),
         creator_id: String::new(),
         preset_id: "test-preset".to_string(),
@@ -3979,8 +3979,8 @@ states:
         let storage = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
         let storage_arc: Arc<dyn SessionStorage> = storage.clone();
         let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
             storage_arc,
@@ -4026,8 +4026,8 @@ states:
         let storage = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
         let storage_arc: Arc<dyn SessionStorage> = storage.clone();
         let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
             storage_arc,
@@ -4036,7 +4036,7 @@ states:
         );
         engine.set_nexus_home(nexus_home_dir.path().to_path_buf());
 
-        let summary = nexus_orchestration::engine::SessionSummary {
+        let summary = nexus_session_storage::SessionSummary {
             session_id: parent_sid.clone(),
             creator_id: String::new(),
             preset_id: "dir-preset".to_string(),
@@ -4067,8 +4067,8 @@ states:
         let storage = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
         let storage_arc: Arc<dyn SessionStorage> = storage.clone();
         let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
             storage_arc,
@@ -4077,7 +4077,7 @@ states:
         );
         engine.set_nexus_home(nexus_home_dir.path().to_path_buf());
 
-        let summary = nexus_orchestration::engine::SessionSummary {
+        let summary = nexus_session_storage::SessionSummary {
             session_id: parent_sid.clone(),
             creator_id: String::new(),
             preset_id: "dir-preset".to_string(),
@@ -5494,11 +5494,11 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let caps = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
+    let caps = Arc::new(nexus_capability::CapabilityRegistry::with_builtins());
     let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc.clone(),
         workflow_store.clone(),
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(caps.clone()),
+        nexus_capability::CapabilityRegistryHolder::with_registry(caps.clone()),
     );
 
     let mut loaded = nexus_preset::load_preset_from_str(converge_preset_yaml(), &caps)
@@ -5649,8 +5649,8 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistry::with_builtins(),
     ));
     let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc,
@@ -5766,15 +5766,12 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
 struct GoJudgeProvider;
 
 #[async_trait::async_trait]
-impl nexus_orchestration::capability::PromptExecutor for GoJudgeProvider {
+impl nexus_capability::PromptExecutor for GoJudgeProvider {
     async fn execute(
         &self,
-        _request: nexus_orchestration::capability::PromptRequest,
-    ) -> Result<
-        nexus_orchestration::capability::PromptResult,
-        nexus_orchestration::capability::CapabilityError,
-    > {
-        Ok(nexus_orchestration::capability::PromptResult {
+        _request: nexus_capability::PromptRequest,
+    ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError> {
+        Ok(nexus_capability::PromptResult {
             full_text: "Go ahead — first-token match routes label 'go'.".to_string(),
             host_session_id: "host-sess".to_string(),
             operation_id: "op-1".to_string(),
@@ -5794,8 +5791,8 @@ fn judge_registry_holder(
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
-) -> nexus_orchestration::CapabilityRegistryHolder {
-    let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
+) -> nexus_capability::CapabilityRegistryHolder {
+    let deps = nexus_capability::CapabilityRuntimeDeps {
         pool: None,
         prompt_executor: Some(std::sync::Arc::new(GoJudgeProvider)),
         session_cancels,
@@ -5803,8 +5800,8 @@ fn judge_registry_holder(
         cdn_config: None,
         workspace_executor: None,
     };
-    nexus_orchestration::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_runtime_deps(&deps),
+    nexus_capability::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
+        nexus_capability::CapabilityRegistry::with_runtime_deps(&deps),
     ))
 }
 
@@ -6042,8 +6039,8 @@ async fn engine_conditional_routed_manual_wait_keeps_token_despite_join_keys() {
     let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc.clone(),
         workflow_store.clone(),
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        nexus_capability::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         )),
     );
 
@@ -6069,7 +6066,7 @@ states:
   - id: done
     terminal: true
 "#;
-    let caps = std::sync::Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
+    let caps = std::sync::Arc::new(nexus_capability::CapabilityRegistry::with_builtins());
     let mut loaded =
         nexus_preset::load_preset_from_str(yaml, &caps).expect("conditional preset loads");
     loaded.source_identity = Some(
@@ -6226,8 +6223,8 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistry::with_builtins(),
     ));
     let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc,
@@ -6393,11 +6390,11 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
     let engine_after = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_b_dyn,
         storage_b_store,
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         )),
     );
-    let summary = nexus_orchestration::engine::SessionSummary {
+    let summary = nexus_session_storage::SessionSummary {
         session_id: parent_sid.clone(),
         creator_id: String::new(),
         preset_id: "novel-writing".to_string(),
@@ -7061,7 +7058,7 @@ async fn assert_applied_entry(
 async fn preset_entries_freeze_and_run_the_strategy_apply() {
     let (pool, _db) = fresh_pool().await;
     let (storage, mut engine) = fresh_engine(pool);
-    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded =
         nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
     let identity = AppliedRunIdentity {
@@ -7165,7 +7162,7 @@ fn user_bundle_preset(home: &std::path::Path, preset_id: &str) -> nexus_preset::
         ),
     )
     .expect("bundle yaml");
-    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded = nexus_preset::resolve_preset(preset_id, home, &registry).expect("bundle loads");
     assert!(
         matches!(
@@ -7240,7 +7237,7 @@ async fn preset_entry_does_not_gate_an_embedded_preset() {
     )
     .expect("home config");
     engine.set_nexus_home(home.path().to_path_buf());
-    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded =
         nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
 
@@ -7306,7 +7303,7 @@ async fn preset_entry_without_a_home_takes_ir_only() {
 #[tokio::test]
 async fn preset_entry_recovery_refuses_a_successor_and_rebuilds_the_admitted_apply() {
     let (pool, _db) = fresh_pool().await;
-    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded =
         nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
     let admitted = AppliedRunIdentity {
@@ -7390,7 +7387,7 @@ async fn preset_entry_recovery_refuses_a_successor_and_rebuilds_the_admitted_app
 async fn embedded_entry_freezes_the_d10_identity_without_a_configured_source() {
     let (pool, _db) = fresh_pool().await;
     let (storage, engine) = fresh_engine(pool);
-    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded =
         nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
     // Deliberately no `set_applied_document_source`: the compiled-in bytes are
@@ -7432,7 +7429,7 @@ async fn embedded_entry_freezes_the_d10_identity_without_a_configured_source() {
 /// no `applied_entry_probe` task, so the run cannot resume where it parked.
 #[tokio::test]
 async fn legacy_recovery_rebuilds_an_embedded_session_from_the_document() {
-    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded =
         nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
     let identity = AppliedRunIdentity {
@@ -7443,8 +7440,8 @@ async fn legacy_recovery_rebuilds_an_embedded_session_from_the_document() {
     // A no-store engine is the legacy recovery path's only caller.
     let mut admitted = nexus_orchestration::GraphFlowEngine::new_with_storage(
         storage.clone(),
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         )),
     );
     admitted.set_applied_document_source(Arc::new(FakeAppliedDocuments {
@@ -7463,8 +7460,8 @@ async fn legacy_recovery_rebuilds_an_embedded_session_from_the_document() {
 
     let mut recovered = nexus_orchestration::GraphFlowEngine::new_with_storage(
         storage.clone(),
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         )),
     );
     recovered.set_applied_document_source(Arc::new(FakeAppliedDocuments {
@@ -7503,7 +7500,7 @@ async fn legacy_recovery_rebuilds_an_embedded_session_from_the_document() {
 async fn store_recovery_refuses_a_legacy_embedded_row_the_source_cannot_resolve() {
     let (pool, _db) = fresh_pool().await;
     let (storage, mut engine) = fresh_engine(pool);
-    let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded =
         nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
     let session_id = SessionId("sess-legacy-embedded".to_string());

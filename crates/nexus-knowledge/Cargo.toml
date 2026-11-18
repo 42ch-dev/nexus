@@ -1,6 +1,6 @@
 [package]
 name = "nexus-knowledge"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -10,7 +10,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-nexus-contracts = { path = "../nexus-contracts" }
+nexus-contracts = { version = "0.1.0", path = "../nexus-contracts" }
 # V1.145 P1a: the WorldKbEntry↔KnowledgeEntry conversion seam + lifecycle
 # delegation moved OUT of this crate into `nexus-spoke-adapter` (orphan rule
 # → free functions + a local trait there). This reversed the former
@@ -34,7 +34,7 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 # V1.139 P1 T6 — spoke-operations parity tests moved to `nexus-spoke-adapter`
 # in V1.145 P1a (they exercise the conversion seam + lifecycle trait that now
 # live there). This crate's own tests no longer reference spoke-adapter.
-nexus-contracts = { path = "../nexus-contracts" }
+nexus-contracts = { version = "0.1.0", path = "../nexus-contracts" }
 # p4 t3 fix wave 1: the belief-member-probe allocation regression check counts
 # the current thread's allocations. The workspace lints forbid `unsafe_code`,
 # so a counting `GlobalAlloc` cannot be hand-rolled in this crate; this

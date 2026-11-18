@@ -12,7 +12,7 @@
 
 use std::path::Path;
 
-use nexus_orchestration::capability::{Capability, CapabilityError, WorkspaceExecutor};
+use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -99,16 +99,13 @@ async fn insert_test_work(pool: &sqlx::SqlitePool, work_id: &str) {
 fn make_cap(
     pool: sqlx::SqlitePool,
     works_root: &Path,
-) -> nexus_orchestration::capability::builtins::NovelProjectScaffold {
-    nexus_orchestration::capability::builtins::NovelProjectScaffold::new_with_root(
-        pool,
-        works_root.to_path_buf(),
-    )
-    .with_workspace_executor(Some(std::sync::Arc::new(DirectWriteExecutor {
-        workspace_root: works_root
-            .parent()
-            .map_or_else(std::path::PathBuf::new, std::path::Path::to_path_buf),
-    })))
+) -> nexus_capability::builtins::NovelProjectScaffold {
+    nexus_capability::builtins::NovelProjectScaffold::new_with_root(pool, works_root.to_path_buf())
+        .with_workspace_executor(Some(std::sync::Arc::new(DirectWriteExecutor {
+            workspace_root: works_root
+                .parent()
+                .map_or_else(std::path::PathBuf::new, std::path::Path::to_path_buf),
+        })))
 }
 
 /// Build scaffold input JSON.

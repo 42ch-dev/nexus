@@ -77,6 +77,9 @@ jobs:
               - '.sqlx/**'
               - 'strategy-samples/**'
               - 'tooling/check-*.sh'
+              # The guard's fixture regression runs in schema-consistency-check
+              # (gated by this filter), so a test-only edit must trigger it.
+              - 'tooling/check-graph-pins.test.mjs'
               - 'tooling/release/**'
               - 'tooling/work-artifact-write-allowlist.tsv'
               - '.github/workflows/ci.yml'
@@ -251,7 +254,12 @@ jobs:
           # so clippy above never fetches their graphs (e.g. `dlmalloc`).
           node -e 'for (const { manifest } of require("./tooling/release/version-brackets.json").contract) console.log(manifest)' \
             | while read -r manifest; do cargo fetch --manifest-path "$manifest"; done
-          node tooling/release/check-contract-packageability.mjs
+          # `--require-clean` makes the run refuse (exit 1, no report) unless
+          # the staged tree carries the checked-out revision's blobs, which is
+          # the `source.clean` a release plan requires. This step submits no
+          # JSON: it is a gate, not a receipt producer. It does not compare
+          # executable modes, and it does not prove LFS hydration.
+          node tooling/release/check-contract-packageability.mjs --require-clean
       # The release scripts decide what a governed release writes, so their
       # fixtures (both version brackets, every carrier rejection, the
       # packageability loop) must be green on the PR that changes them, not only
@@ -554,6 +562,82 @@ jobs:
       # provides it.
       - name: Check graph pins
         run: bash tooling/check-graph-pins.sh
+      # The arg-less matrix above does not assert the v1.249 domain invariants
+      # (session storage / Connect absent from the core closure, the provider's
+      # exact-one default-featured edge), and the fixture suite proves them only
+      # on synthetic workspaces. Run the cohort against the real workspace so a
+      # domain regression fails CI instead of waiting for a manual run.
+      - name: Check graph pins (domain cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort domain
+      # V1.249 compute-policy QC fix (QC3-S002): the policy leaf cohort runs
+      # against the real workspace too — the no-argument matrix above stays the
+      # sole full-matrix invocation.
+      - name: Check graph pins (policy cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort policy
+      # V1.249 S4 / QC3-F001: the catalog cohort's unique rows (`nexus-core ""`
+      # exact default feature set and the featureless spoke adapter) had no CI
+      # invocation. Every shipped cohort now runs against the real workspace;
+      # the no-argument matrix above stays the sole full-matrix invocation.
+      - name: Check graph pins (catalog cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort catalog
+      # V1.249 C4: the capability extraction's integration proof against the
+      # real workspace — the enabled Connect library resolves capability +
+      # transport and none of the five engine planes, the default capability
+      # crate carries no WASM edge, an explicit `wasm` selection binds the real
+      # host, and the native host keeps its factory dependencies. The no-arg
+      # matrix above remains the sole full-matrix invocation.
+      - name: Check graph pins (capability cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort capability
+      # V1.249 S6: the Connect product/library split against the real workspace
+      # — the shipped Connect-only runtime keeps core domain/storage and the
+      # explicit spoke compute (the real WASM host) while linking no
+      # engine/store/graph/authoring/Host/rmcp plane, and the enabled Connect
+      # library still depends back on none of core or those planes. This is
+      # also the row that pins `connect-host` does not imply `cli`; the larger
+      # CLI/native union stays in the source-owned no-argument matrix.
+      - name: Check graph pins (connect cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort connect
+      # V1.249 A3: the strategy-authoring surface as a SELECTION. The no-arg
+      # matrix and the synthetic suite below pin the shipped graphs, but neither
+      # runs the real cohort or the checker-owned consumer — a later CLI/native
+      # forwarding regression would keep them green. The cohort resolves the
+      # checked-in consumer manifest (both selections) and the two `cargo run`
+      # steps execute its runtime assertions.
+      #
+      # The consumer is its own workspace with its own 327-package lock, so the
+      # two `--offline` runs need ITS closure in the local registry cache. This
+      # job restores no Rust cache, and `check-wire-drift.sh` only builds
+      # `nexus-contracts`, so the closure is fetched explicitly here first: the
+      # download is bounded by this step's budget and warms the same CARGO_HOME
+      # the offline runs read. This is also the only CI compile of
+      # `nexus-core[execution]` WITHOUT `strategy-authoring`, so skipping the
+      # consumer would hide a cfg regression.
+      - name: Fetch the authoring consumer closure
+        timeout-minutes: 15
+        run: cargo fetch --locked --manifest-path tooling/fixtures/authoring-cohorts/Cargo.toml
+      - name: Check graph pins (authoring cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort authoring
+      - name: Authoring consumer (execution-only)
+        timeout-minutes: 15
+        run: cargo run --locked --offline --manifest-path tooling/fixtures/authoring-cohorts/Cargo.toml
+      - name: Authoring consumer (authoring)
+        timeout-minutes: 15
+        run: cargo run --locked --offline --manifest-path tooling/fixtures/authoring-cohorts/Cargo.toml --features authoring
+      # v1.249 R3 + compute-policy QC: the scoped cohort selectors and the
+      # `--manifest-path` override are proven on disposable real-Cargo
+      # workspaces — positive fixtures, one rejection per forbidden edge, the
+      # empty-graph positive control, invalid inputs and Cargo failure
+      # propagation. No fixture edits the shared checkout's manifests or
+      # lockfile.
+      - name: Graph pin guard regression
+        timeout-minutes: 10
+        run: node --test tooling/check-graph-pins.test.mjs
       # V1.236 P5-T2 (ADR #485 §6.1 P5): the Work artifact byte-write guard.
       # Prove the gate bites on synthetic fixtures (synthetic direct write,
       # mixed function, and an exempt symbol with a second write), then run it
@@ -579,16 +663,16 @@ jobs:
           # An exempt symbol that gains a second direct write must fail the
           # expected-count check (exemption keys carry an exact hit count).
           count_dir="$tmpdir/count"
-          mkdir -p "$count_dir/crates/nexus-orchestration/src/capability/builtins"
-          printf 'struct ScaffoldTransaction;\nimpl Drop for ScaffoldTransaction {\n    fn drop(&mut self) {\n        std::fs::write(path, original);\n        std::fs::write(path, other);\n    }\n}\n' > "$count_dir/crates/nexus-orchestration/src/capability/builtins/essay_scaffold.rs"
+          mkdir -p "$count_dir/crates/nexus-capability/src/builtins"
+          printf 'struct ScaffoldTransaction;\nimpl Drop for ScaffoldTransaction {\n    fn drop(&mut self) {\n        std::fs::write(path, original);\n        std::fs::write(path, other);\n    }\n}\n' > "$count_dir/crates/nexus-capability/src/builtins/essay_scaffold.rs"
           if bash tooling/check-work-artifact-writes.sh "$count_dir"; then
             echo "::error::work artifact write guard ignored a second direct write in an exempt symbol"
             exit 1
           fi
           # Two direct writes on one line must count as two occurrences.
           same_line="$tmpdir/same-line"
-          mkdir -p "$same_line/crates/nexus-orchestration/src/capability/builtins"
-          printf 'struct ScaffoldTransaction;\nimpl Drop for ScaffoldTransaction {\n    fn drop(&mut self) {\n        std::fs::write(path, original); std::fs::write(path, other);\n    }\n}\n' > "$same_line/crates/nexus-orchestration/src/capability/builtins/essay_scaffold.rs"
+          mkdir -p "$same_line/crates/nexus-capability/src/builtins"
+          printf 'struct ScaffoldTransaction;\nimpl Drop for ScaffoldTransaction {\n    fn drop(&mut self) {\n        std::fs::write(path, original); std::fs::write(path, other);\n    }\n}\n' > "$same_line/crates/nexus-capability/src/builtins/essay_scaffold.rs"
           if bash tooling/check-work-artifact-writes.sh "$same_line"; then
             echo "::error::work artifact write guard counted one line as one write"
             exit 1
@@ -800,19 +884,19 @@ jobs:
       - name: Run sample self-check (preset.yaml equals its workflow.json export)
         if: matrix.group == 'orchestration-core'
         run: cargo test -p nexus-orchestration --test sample_self_check
-      # I-000475: the preset round trips, the Simulate unit walk, the IR/YAML projection
+      # I-000475: the preset round trips, the private pure walk, the IR/YAML projection
       # parity proofs and both embedded-preset trajectories never ran in CI, so their green
-      # was local-only. The `simulate` feature is not in `Run tests`' package set, and
-      # `--lib simulation::` / `--lib ...parity` select zero tests when the feature is off,
-      # so every invocation here is feature-explicit. Measured 40s warm locally.
+      # was local-only. The SIMULATION CHECKS: the walk is now its own private crate (no
+      # feature gate on `nexus-orchestration`), and `--lib ...parity` selects zero tests
+      # without the targets named here. Measured 40s warm locally.
       - name: Run preset simulation and projection suites
         if: matrix.group == 'orchestration-core'
         timeout-minutes: 10
         run: |
           cargo test -p nexus-preset
-          cargo test -p nexus-orchestration --features simulate --lib simulation::
-          cargo test -p nexus-orchestration --features simulate --lib preset_runtime::tests::parity
-          cargo test -p nexus-orchestration --features simulate --test embedded_preset_trajectory --test sample_trajectory
+          cargo test -p nexus-workflow-simulate --lib
+          cargo test -p nexus-orchestration --lib preset_runtime::tests::parity
+          cargo test -p nexus-orchestration --test embedded_preset_trajectory --test sample_trajectory
       - name: Run tests
         run: cargo test ${{ matrix.packages }}
 
@@ -840,6 +924,10 @@ jobs:
       # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
       # Behaviour unchanged; local dev profiles untouched.
       CARGO_PROFILE_DEV_DEBUG: "0"
+      # V249 QC3-F002: this job owns the retained-compute proof, so a host
+      # without the wasm32 target is a named build failure (nexus42/build.rs)
+      # instead of a silently skipped smoke half.
+      NEXUS42_REQUIRE_WASM_TARGET: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:

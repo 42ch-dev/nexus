@@ -5,6 +5,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+# Distribution-only exclusion: the repository keeps and CI runs this schema
+# audit (tooling/check-wire-drift.sh); the packaged archive omits the test
+# because it reads the repository `schemas/` tree, which is not distributed.
+exclude = ["tests/schema_drift_detection.rs"]
 
 [lints]
 workspace = true

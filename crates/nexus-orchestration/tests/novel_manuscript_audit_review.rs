@@ -7,7 +7,7 @@
 //! 4. No `kb.extract_work` capability in review preset.
 //! 5. `world_binding` is optional (review works on worldless Works).
 
-use nexus_orchestration::capability::CapabilityRegistry;
+use nexus_capability::CapabilityRegistry;
 use nexus_preset::load_embedded_preset;
 use nexus_preset::manifest;
 
