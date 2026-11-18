@@ -54,6 +54,9 @@ nexus-narrative = { path = "../nexus-narrative" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
 # V1.61 P3: narrative.compute capability calls nexus-wasm-host for sandboxed WASM compute.
 nexus-wasm-host = { path = "../nexus-wasm-host" }
+# AR-38 host maxima for capability sandbox clamping come from the private
+# policy crate directly (not re-exported by the wasm host).
+nexus-compute-policy = { path = "../nexus-compute-policy" }
 # V1.50 T-A P1: cron expression parsing + IANA TZ conversion for the daemon-side
 # cron evaluator (novel-writing three-role staggering). Same workspace deps as
 # `nexus42` (T-A P0 cron CLI validation).

@@ -71,27 +71,44 @@ pub struct SandboxOverrides {
     pub wall_time_ms: Option<u64>,
 }
 
-/// Tighten sandbox overrides to the host maxima via `min(override, default)`
-/// — the same semantics as `WasmEngine::resolve_sandbox` (compute.rs L71-80).
-///
-/// The maxima are read from [`nexus_wasm_host::SandboxConfig::default()`]
-/// (AR-38: read, never duplicate). Absent fields stay absent (host defaults).
-/// `pub(crate)` because both the admission gate 4 (`admission.rs`) and
-/// `UserCapability::new` (F1 — re-clamp so a directly-constructed capability
-/// carries clamped bounds) apply it.
+/// Tighten sandbox overrides to the host maxima by delegating numeric
+/// resolution to the policy owner (`SandboxConfig::resolve`, which clamps
+/// memory in BYTES) and projecting the result back into descriptor units for
+/// present fields only (QC1-01: `clamp_sandbox` must not own a second clamp
+/// that compares MiB while `resolve` compares bytes). Absent fields stay
+/// absent (host defaults). Zero-override validation stays in
+/// `UserCapabilityDescriptor::validate`; the custom WASM engine base
+/// selection stays in `nexus-wasm-host`. `pub(crate)` because both the
+/// admission gate 4 (`admission.rs`) and `UserCapability::new` (F1 —
+/// re-clamp so a directly-constructed capability carries clamped bounds)
+/// apply it.
 #[must_use]
 pub(crate) fn clamp_sandbox(overrides: &SandboxOverrides) -> SandboxOverrides {
-    let defaults = nexus_wasm_host::SandboxConfig::default();
-    let max_wall_time_ms = u64::try_from(defaults.wall_time.as_millis()).unwrap_or(u64::MAX);
+    let resolved = resolve_sandbox_overrides(
+        overrides,
+        nexus_compute_policy::SandboxConfig::default(),
+    );
     SandboxOverrides {
-        fuel: overrides.fuel.map(|fuel| fuel.min(defaults.fuel)),
-        memory_mib: overrides
-            .memory_mib
-            .map(|memory_mib| memory_mib.min(defaults.memory_mib())),
+        fuel: overrides.fuel.map(|_| resolved.fuel),
+        memory_mib: overrides.memory_mib.map(|_| resolved.memory_mib()),
         wall_time_ms: overrides
             .wall_time_ms
-            .map(|wall_time_ms| wall_time_ms.min(max_wall_time_ms)),
+            .map(|_| u64::try_from(resolved.wall_time.as_millis()).unwrap_or(u64::MAX)),
     }
+}
+
+/// The single delegation point to the policy owner's byte comparison.
+///
+/// `pub(crate)` so the guard test can assert the resolved BYTES under a
+/// non-MiB-aligned cap — the one case where a MiB-granularity comparison and
+/// the owner's byte comparison differ, and the only assertion that fails if
+/// someone reintroduces an independent MiB clamp (QC1-01, round 2 item C).
+#[must_use]
+pub(crate) fn resolve_sandbox_overrides(
+    overrides: &SandboxOverrides,
+    base: nexus_compute_policy::SandboxConfig,
+) -> nexus_compute_policy::SandboxConfig {
+    base.resolve(overrides.fuel, overrides.memory_mib, overrides.wall_time_ms)
 }
 
 /// Reference to the compute module backing a user capability (AR-34).
@@ -474,10 +491,10 @@ impl Capability for UserCapability {
         // F1/AR-38: apply the clamped descriptor sandbox overrides onto the
         // manifest before `compute` — the invocation sandbox is resolved as
         // `min(manifest_override, host_default)` in `WasmEngine::resolve_sandbox`
-        // (compute.rs L71-80), so folding each present descriptor bound in
+        // (compute.rs L71-82), so folding each present descriptor bound in
         // via `min(existing, descriptor)` tightens the effective sandbox to
         // the capability's ceiling. Absent descriptor fields leave the
-        // manifest/host value untouched. No `sandbox.rs` change (AR-38).
+        // manifest/host value untouched.
         if let Some(sandbox) = &self.sandbox {
             if let Some(fuel) = sandbox.fuel {
                 manifest.max_fuel = Some(manifest.max_fuel.map_or(fuel, |m| m.min(fuel)));
@@ -1537,5 +1554,97 @@ mod tests {
         let descriptor = parse(&minimal_json()).expect("minimal descriptor must parse");
         let cap = UserCapability::new(&descriptor, PathBuf::new(), None, None);
         assert!(matches!(cap.origin(), CapabilityOrigin::User));
+    }
+
+    /// QC1-01 guard (round 2, item C): the clamp must resolve memory in
+    /// EXACT BYTES against a non-MiB-aligned cap. This is the discriminating
+    /// case: on the aligned default both a byte comparison and a
+    /// MiB-granularity comparison agree, but here the cap carries 12,345
+    /// bytes a MiB clamp would silently drop — asserting the exact byte
+    /// outcome FAILS the old independent MiB comparison.
+    #[test]
+    fn clamp_resolves_exact_bytes_on_non_aligned_cap() {
+        const MIB: usize = 1024 * 1024;
+        // A ceiling that is NOT MiB-aligned, built from the owner's other
+        // defaults so only the memory cap is the variable under test.
+        let defaults = nexus_compute_policy::SandboxConfig::default();
+        let base = nexus_compute_policy::SandboxConfig {
+            fuel: defaults.fuel,
+            max_memory_bytes: 4 * MIB + 12_345,
+            wall_time: defaults.wall_time,
+        };
+        // An override ABOVE the cap must keep the cap's exact bytes.
+        let resolved = resolve_sandbox_overrides(
+            &SandboxOverrides {
+                fuel: None,
+                memory_mib: Some(64),
+                wall_time_ms: None,
+            },
+            base,
+        );
+        assert_eq!(resolved.max_memory_bytes, 4 * MIB + 12_345);
+        // ...and an override BELOW the cap must clamp in exact bytes too.
+        let lowered = resolve_sandbox_overrides(
+            &SandboxOverrides {
+                fuel: None,
+                memory_mib: Some(2),
+                wall_time_ms: None,
+            },
+            base,
+        );
+        assert_eq!(lowered.max_memory_bytes, 2 * MIB);
+        // The descriptor projection stays the floored MiB of that byte
+        // result, never the byte-cap floor of an independent MiB min.
+        let clamped = SandboxOverrides {
+            fuel: None,
+            memory_mib: Some(64),
+            wall_time_ms: None,
+        };
+        let projected = resolve_sandbox_overrides(&clamped, base);
+        assert_eq!(projected.memory_mib(), 4);
+    }
+
+    /// QC1-01 guard: `clamp_sandbox` on the real default keeps the owner's
+    /// resolved values, boundary overrides pass through unchanged, and
+    /// absent stays absent.
+    #[test]
+    fn clamp_sandbox_matches_policy_resolve_projection() {
+        // At/above every maximum: clamps to the owner's default exactly.
+        let clamped = clamp_sandbox(&SandboxOverrides {
+            fuel: Some(99_000_000),
+            memory_mib: Some(999),
+            wall_time_ms: Some(999_999),
+        });
+        assert_eq!(clamped.fuel, Some(nexus_compute_policy::DEFAULT_FUEL));
+        assert_eq!(clamped.memory_mib, Some(nexus_compute_policy::DEFAULT_MEMORY_MIB));
+        // The byte ceiling the projection must round-trip (QC1-01: bytes, not
+        // a MiB-recomputed shadow).
+        assert_eq!(
+            nexus_compute_policy::SandboxConfig::default().max_memory_bytes,
+            64 * 1024 * 1024
+        );
+        assert_eq!(
+            clamped.wall_time_ms,
+            Some(u64::try_from(
+                nexus_compute_policy::DEFAULT_WALL_TIME.as_millis()
+            )
+            .unwrap())
+        );
+        // Below every maximum: tightening overrides pass through untouched.
+        let tighter = clamp_sandbox(&SandboxOverrides {
+            fuel: Some(1_000),
+            memory_mib: Some(2),
+            wall_time_ms: Some(5_000),
+        });
+        assert_eq!(
+            tighter,
+            SandboxOverrides {
+                fuel: Some(1_000),
+                memory_mib: Some(2),
+                wall_time_ms: Some(5_000)
+            }
+        );
+        // Absent stays absent — admission never invents host defaults.
+        assert_eq!(clamp_sandbox(&SandboxOverrides::default()), SandboxOverrides::default());
     }
 }

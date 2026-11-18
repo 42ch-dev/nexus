@@ -88,6 +88,8 @@
 #   (none)                        full pin matrix above — unchanged CI behavior
 #   --cohort <name>               run ONE scoped cohort instead of the matrix.
 #                                 `domain` = core with no default features.
+#                                 `policy` = the private std-only compute
+#                                 policy leaf with zero dependencies.
 #                                 Other plans add their cohorts as their real
 #                                 source lands; an unknown name fails.
 #   --manifest-path <Cargo.toml>  resolve every probe against that workspace.
@@ -115,6 +117,13 @@ fail() {
 # Single place every probe resolves its workspace, so `--manifest-path` reaches
 # all of them (fixture workspaces) and the default run stays byte-identical.
 cargo_tree() {
+  # QC-fix round 3 (QC2-F003): the wrapper carries NO network policy.
+  # Offline-ness is decided by the CALLER's environment, not by whether a
+  # manifest path was passed: fixture runs set `CARGO_NET_OFFLINE=true` in
+  # their spawn env (cargoEnv()), so path-only fixtures stay isolated, while
+  # repository probes — implicit or an explicit `--manifest-path` — resolve
+  # online, where a cold cache can fetch registry metadata for crates
+  # outside the probed tree.
   if [[ -n "${MANIFEST_PATH:-}" ]]; then
     cargo tree --manifest-path "$MANIFEST_PATH" "$@"
   else
@@ -239,21 +248,84 @@ assert_features() {
 assert_graph_nonempty() {
   local crate="$1"; shift
   local feats="$1"
-  local out status=0
-  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build 2>&1) || status=$?
+  local out err status=0
+  # QC-fix round 2 (E): the temp file is removed on BOTH paths via an EXIT
+  # trap — `fail` exits the script and would otherwise leak it.
+  # QC-fix round 3 (QC1-09): the target dir is passed EXPLICITLY — BSD
+  # mktemp ignores `TMPDIR`, so a bare `mktemp` never lands in the per-case
+  # dir the fixture suite inspects and the cleanup assertion is vacuous.
+  err=$(mktemp "${TMPDIR:-/tmp}/nexus-graph-pins-census.XXXXXXXX")
+  trap 'rm -f "$err"' EXIT
+  # QC-fix round 2 (B / QC2-F004): `--prefix none` makes the census
+  # rendering-independent — no Unicode glyphs and no ASCII `|--` prefixes,
+  # so line-anchored `name vX` rows are stable under any Cargo rendering.
+  # stderr stays OUT of the census (QC2-F002); the exit status carries the
+  # verdict.
+  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build --prefix none 2>"$err") || status=$?
   if [[ "$status" -ne 0 ]]; then
-    fail "graph probe for $crate ${feats:-<default>} failed (exit $status): $out"
+    fail "graph probe for $crate ${feats:-<default>} failed (exit $status): $out$(cat "$err")"
   fi
-  # Tree rows carry box-drawing prefixes, so match the `name vX` pair anywhere
-  # in the line and count each package once.
+  # QC2-F002: forward residual stderr on SUCCESS so legitimate warnings stay
+  # visible without entering the census.
+  if [[ -s "$err" ]]; then
+    cat "$err" >&2
+  fi
+  rm -f "$err"
+  trap - EXIT
+  # Line-anchored rows of an explicitly un-prefixed tree: path text cannot
+  # contribute a phantom package (QC2-F002), each package counted once.
   local packages
-  packages=$(grep -oE '[A-Za-z0-9_.-]+ v[0-9]' <<<"$out" | sed -E 's/ v[0-9]$//' | sort -u)
+  packages=$(grep -E '^[A-Za-z0-9_.-]+ v[0-9]' <<<"$out" \
+    | sed -E 's/^([A-Za-z0-9_.-]+) v[0-9].*/\1/' | sort -u)
   local rows
   rows=$(sed '/^$/d' <<<"$packages" | wc -l | tr -d ' ')
   if [[ "$rows" -lt 2 ]]; then
     fail "$crate ${feats:-<default>}: resolved graph names only $rows package(s); the absence pins would be vacuous: $out"
   fi
   echo "ok: $crate ${feats:-<default>} resolves $((rows - 1)) distinct dependency package(s)"
+}
+
+# assert_no_dependencies <crate> <features>
+# Positive root AND leaf proof in one probe: the package must resolve (an
+# absent or mistyped root fails the cargo tree invocation outright — no
+# vacuous green), and its resolved normal/build tree must name ONLY the root
+# itself — zero dependencies. Complements assert_graph_nonempty, which by
+# design requires at least one dependency and so cannot pin a true leaf.
+assert_no_dependencies() {
+  local crate="$1"; shift
+  local feats="$1"
+  local out err status=0
+  # QC-fix round 2 (E): EXIT trap so a failing census cleans up too.
+  # QC-fix round 3 (QC1-09): explicit target dir — BSD mktemp ignores TMPDIR.
+  err=$(mktemp "${TMPDIR:-/tmp}/nexus-graph-pins-census.XXXXXXXX")
+  trap 'rm -f "$err"' EXIT
+  # QC-fix round 2 (B / QC2-F004): `--prefix none` + line-anchored rows —
+  # identical under Unicode and ASCII rendering, so a `|--`-prefixed ASCII
+  # child row can never be dropped. stderr stays out of the census (QC2-F002).
+  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build --prefix none 2>"$err") || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    fail "graph probe for $crate ${feats:-<default>} failed (exit $status): $out$(cat "$err")"
+  fi
+  # QC2-F002: forward residual stderr on success, outside the census.
+  if [[ -s "$err" ]]; then
+    cat "$err" >&2
+  fi
+  rm -f "$err"
+  trap - EXIT
+  local packages
+  packages=$(grep -E '^[A-Za-z0-9_.-]+ v[0-9]' <<<"$out" \
+    | sed -E 's/^([A-Za-z0-9_.-]+) v[0-9].*/\1/' | sort -u)
+  local rows
+  rows=$(sed '/^$/d' <<<"$packages" | wc -l | tr -d ' ')
+  if [[ "$rows" -ne 1 ]]; then
+    fail "$crate ${feats:-<default>} must resolve with ZERO dependencies, got $rows package(s): $out"
+  fi
+  # QC-fix (QC2-F002): the sole row must BE the requested root — a census
+  # that matched anything else resolved the wrong graph.
+  if [[ "$packages" != "$crate" ]]; then
+    fail "$crate ${feats:-<default>}: zero-dependency census matched '$packages', expected the root itself"
+  fi
+  echo "ok: $crate ${feats:-<default>} resolves with zero dependencies (root only)"
 }
 
 # --- cohort selection / manifest override -----------------------------------
@@ -273,16 +345,16 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "usage: $0 [--cohort domain] [--manifest-path <Cargo.toml>]"
+      echo "usage: $0 [--cohort domain|policy] [--manifest-path <Cargo.toml>]"
       exit 0
       ;;
     *)
-      fail "unknown argument '$1' (usage: $0 [--cohort domain] [--manifest-path <Cargo.toml>])"
+      fail "unknown argument '$1' (usage: $0 [--cohort domain|policy] [--manifest-path <Cargo.toml>])"
       ;;
   esac
 done
-if [[ -n "$COHORT" && "$COHORT" != "domain" ]]; then
-  fail "unknown cohort '$COHORT' (known: domain)"
+if [[ -n "$COHORT" && "$COHORT" != "domain" && "$COHORT" != "policy" ]]; then
+  fail "unknown cohort '$COHORT' (known: domain, policy)"
 fi
 if [[ -n "$MANIFEST_PATH" && ! -f "$MANIFEST_PATH" ]]; then
   fail "manifest not found: $MANIFEST_PATH"
@@ -323,6 +395,44 @@ if [[ "$COHORT" == "domain" ]]; then
   assert_empty nexus-core "--no-default-features" rmcp
 
   echo "graph pins OK (cohort: domain)"
+  exit 0
+fi
+
+# --- scoped cohort: private compute policy (v1.249 compute-policy P2) -------
+# The private std-only policy leaf (v1.249): `nexus-compute-policy` resolves
+# as the positive root with ZERO normal/build dependencies, so ANY dependency
+# it gains — an engine, durable-execution, storage, Host, WASM or Connect
+# back-edge — fails this cohort. The workspace-member public packages must not
+# gain a private-policy edge either: the inverted probe keeps policy out of
+# their resolved graphs. The three legit private consumers (`nexus-core`
+# dev-only, `nexus-orchestration`, `nexus-wasm-host`) are intentionally NOT
+# probed here — their edges are real and pinned by their own cohorts. The
+# standalone non-workspace `nexus-module-{sdk,manifest,test}` crates cannot be
+# resolved with `-p` from this workspace, so their isolation stays with the
+# public-package readiness checks outside this guard.
+if [[ "$COHORT" == "policy" ]]; then
+  # QC-fix (v1.249 QC1-02 / QC2-F001): the leaf pin runs under EVERY target
+  # and EVERY feature selection, not just the host target with default
+  # features — a target- or feature-scoped dependency edge is invisible to
+  # the host-default selectors (the feature-gated fixture in
+  # check-graph-pins.test.mjs proves the widened selectors bite).
+  # QC2-F005: the public inverse checks below run the ALL-target union
+  # (`--target all`), which is conservative: a dependency that only exists on
+  # a platform that never ships the public package would still be counted.
+  assert_no_dependencies nexus-compute-policy "--all-features --target all"
+
+  # The eleven former `assert_empty nexus-compute-policy …` back-edge probes
+  # (nexus-orchestration, nexus-execution, nexus-session-storage, graph-flow,
+  # nexus-agent-host, nexus-acp-host, nexus-wasm-host, nexus-connect,
+  # spoke-connect, libp2p, rmcp) are DELETED: under a zero-dependency root
+  # each could only ever return absent, and the zero-dependency leaf pin
+  # above already refuses ANY dependency edge, including all eleven. The
+  # separate public-to-policy inverse control below stays.
+  for pkg in nexus-contracts nexus-workflow-ir nexus-pattern nexus-knowledge nexus-narrative; do
+    assert_empty "$pkg" "--all-features --target all" nexus-compute-policy
+  done
+
+  echo "graph pins OK (cohort: policy)"
   exit 0
 fi
 

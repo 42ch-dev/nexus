@@ -2,6 +2,7 @@
 members = [
     "crates/nexus-acp-host",
     "crates/nexus-agent-host",
+    "crates/nexus-compute-policy",
     "crates/nexus-config-metadata",
     "crates/nexus-connect",
     "crates/nexus-contracts",

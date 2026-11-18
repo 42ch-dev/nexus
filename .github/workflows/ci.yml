@@ -565,11 +565,18 @@ jobs:
       - name: Check graph pins (domain cohort)
         timeout-minutes: 10
         run: bash tooling/check-graph-pins.sh --cohort domain
-      # v1.249 R3: the scoped cohort selector and `--manifest-path` override are
-      # proven on disposable real-Cargo workspaces — a positive domain fixture,
-      # one rejection per forbidden domain edge, the empty-graph positive
-      # control, invalid inputs and Cargo failure propagation. No fixture edits
-      # the shared checkout's manifests or lockfile.
+      # V1.249 compute-policy QC fix (QC3-S002): the policy leaf cohort runs
+      # against the real workspace too — the no-argument matrix above stays the
+      # sole full-matrix invocation.
+      - name: Check graph pins (policy cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort policy
+      # v1.249 R3 + compute-policy QC: the scoped cohort selectors and the
+      # `--manifest-path` override are proven on disposable real-Cargo
+      # workspaces — positive fixtures, one rejection per forbidden edge, the
+      # empty-graph positive control, invalid inputs and Cargo failure
+      # propagation. No fixture edits the shared checkout's manifests or
+      # lockfile.
       - name: Graph pin guard regression
         timeout-minutes: 10
         run: node --test tooling/check-graph-pins.test.mjs

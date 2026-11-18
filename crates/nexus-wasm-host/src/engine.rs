@@ -6,10 +6,10 @@
 //! against a fresh [`Store`](wasmtime::Store), in line with the per-invocation
 //! sandbox decision (compass Q6).
 
+use nexus_compute_policy::SandboxConfig;
 use wasmtime::{Config, Engine, Module};
 
 use crate::error::{ComputeError, Result};
-use crate::sandbox::SandboxConfig;
 
 /// A WebAssembly module compiled by [`WasmEngine`].
 ///
