@@ -124,7 +124,7 @@ function domainCrates({ coreDeps = {}, coreDevDeps = {}, extra = {} } = {}) {
 }
 
 function runGuard(args, { env: envExtra } = {}) {
-  return spawnSync('bash', [GUARD, ...args], {
+  const run = spawnSync('bash', [GUARD, ...args], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
     env: { ...cargoEnv(), ...envExtra },
@@ -132,6 +132,15 @@ function runGuard(args, { env: envExtra } = {}) {
     timeout: 180_000,
     killSignal: 'SIGKILL',
   });
+  // QC1-06 (partial, round 3): a timeout or signal must not look like an
+  // ordinary nonzero refusal — `status: null` would satisfy `notEqual(…, 0)`
+  // silently in the negative tests. Surface the abort condition explicitly.
+  if (run.error || run.signal) {
+    throw new Error(
+      `guard run aborted: error=${run.error ? (run.error.code ?? run.error.message) : 'none'} signal=${run.signal ?? 'none'}`,
+    );
+  }
+  return run;
 }
 
 function domainRun(root) {
@@ -505,21 +514,33 @@ test('a target-scoped policy edge is caught by --target all', () => {
 });
 
 test('a failing census leaves no temp files behind', () => {
-  // Round 2 item E: the census stderr file must be cleaned up on the
-  // FAILURE path too (`fail` exits the script mid-probe).
+  // QC1-09 / QC2-F007 (round 3 blocker 1): the census's REAL cargo command
+  // must fail, so the script exits through `fail` with the EXIT trap armed.
+  // A valid graph (the round-2 shape) would let Cargo succeed, run the
+  // success-path `rm`, clear the trap, and stay green even if the trap were
+  // deleted — hiding exactly the regression this test exists to catch. A
+  // valid workspace with NO lockfile under `--locked` is that failure.
   const guardTmp = mkdtempSync(path.join(tmpdir(), 'nexus-graph-pins-guard-tmp-'));
-  const root = createWorkspace({
-    'nexus-compute-policy': { deps: { 'nexus-wasm-host': null } },
-    'nexus-wasm-host': { deps: {} },
-    'nexus-contracts': { deps: {} },
-    'nexus-workflow-ir': { deps: {} },
-    'nexus-pattern': { deps: {} },
-    'nexus-knowledge': { deps: {} },
-    'nexus-narrative': { deps: {} },
-  });
+  // Registered with the shared teardown the moment it is created, so no
+  // run (green or red) leaks the directory itself.
+  fixtures.push(guardTmp);
+  const root = createWorkspace(
+    {
+      'nexus-compute-policy': { deps: { 'nexus-wasm-host': null } },
+      'nexus-wasm-host': { deps: {} },
+      'nexus-contracts': { deps: {} },
+      'nexus-workflow-ir': { deps: {} },
+      'nexus-pattern': { deps: {} },
+      'nexus-knowledge': { deps: {} },
+      'nexus-narrative': { deps: {} },
+    },
+    { lockfile: false },
+  );
   const run = policyRun(root, { env: { TMPDIR: guardTmp } });
 
   assert.notEqual(run.status, 0);
-  assert.match(run.stdout, /graph pin failed/);
+  // The refusal names the failed census probe, not an ordinary pin breach.
+  assert.match(run.stdout, /graph probe for nexus-compute-policy .* failed \(exit \d+\)/);
+  assert.match(run.stdout, /--locked/);
   assert.deepEqual(readdirSync(guardTmp), [], `temp files leaked: ${readdirSync(guardTmp)}`);
 });

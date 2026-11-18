@@ -116,8 +116,10 @@ mod tests {
         assert_eq!(cfg.fuel, 10_000_000);
         // QC1-03 round 2 (D): the exact BYTE default, not the floored MiB
         // projection — `memory_mib()` alone would pass a drifted byte value.
+        // (Round 3, QC1-03 suggestion: the redundant `memory_mib() == 64`
+        // line is dropped; the projection stays covered by
+        // `with_memory_mib_converts_bytes`.)
         assert_eq!(cfg.max_memory_bytes, 67_108_864);
-        assert_eq!(cfg.memory_mib(), 64);
         assert_eq!(cfg.wall_time, Duration::from_secs(30));
     }
 

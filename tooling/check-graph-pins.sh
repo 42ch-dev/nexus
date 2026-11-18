@@ -117,14 +117,15 @@ fail() {
 # Single place every probe resolves its workspace, so `--manifest-path` reaches
 # all of them (fixture workspaces) and the default run stays byte-identical.
 cargo_tree() {
-  # QC-fix round 2 (A / QC1-05): `--offline` stays on the FIXTURE branch only.
-  # Fixture workspaces are path-only and already run with a prepared cache, so
-  # offline is safe there. Repository probes resolve the WHOLE workspace (they
-  # need registry metadata for crates outside the probed tree), and the
-  # hosting CI job has no rust-cache/fetch — a global `--offline` broke the
-  # legacy matrix on a cold cache.
+  # QC-fix round 3 (QC2-F003): the wrapper carries NO network policy.
+  # Offline-ness is decided by the CALLER's environment, not by whether a
+  # manifest path was passed: fixture runs set `CARGO_NET_OFFLINE=true` in
+  # their spawn env (cargoEnv()), so path-only fixtures stay isolated, while
+  # repository probes — implicit or an explicit `--manifest-path` — resolve
+  # online, where a cold cache can fetch registry metadata for crates
+  # outside the probed tree.
   if [[ -n "${MANIFEST_PATH:-}" ]]; then
-    cargo tree --manifest-path "$MANIFEST_PATH" --offline "$@"
+    cargo tree --manifest-path "$MANIFEST_PATH" "$@"
   else
     cargo tree "$@"
   fi
@@ -250,7 +251,10 @@ assert_graph_nonempty() {
   local out err status=0
   # QC-fix round 2 (E): the temp file is removed on BOTH paths via an EXIT
   # trap — `fail` exits the script and would otherwise leak it.
-  err=$(mktemp)
+  # QC-fix round 3 (QC1-09): the target dir is passed EXPLICITLY — BSD
+  # mktemp ignores `TMPDIR`, so a bare `mktemp` never lands in the per-case
+  # dir the fixture suite inspects and the cleanup assertion is vacuous.
+  err=$(mktemp "${TMPDIR:-/tmp}/nexus-graph-pins-census.XXXXXXXX")
   trap 'rm -f "$err"' EXIT
   # QC-fix round 2 (B / QC2-F004): `--prefix none` makes the census
   # rendering-independent — no Unicode glyphs and no ASCII `|--` prefixes,
@@ -292,7 +296,8 @@ assert_no_dependencies() {
   local feats="$1"
   local out err status=0
   # QC-fix round 2 (E): EXIT trap so a failing census cleans up too.
-  err=$(mktemp)
+  # QC-fix round 3 (QC1-09): explicit target dir — BSD mktemp ignores TMPDIR.
+  err=$(mktemp "${TMPDIR:-/tmp}/nexus-graph-pins-census.XXXXXXXX")
   trap 'rm -f "$err"' EXIT
   # QC-fix round 2 (B / QC2-F004): `--prefix none` + line-anchored rows —
   # identical under Unicode and ASCII rendering, so a `|--`-prefixed ASCII
