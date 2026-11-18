@@ -88,6 +88,11 @@
 #   (none)                        full pin matrix above — unchanged CI behavior
 #   --cohort <name>               run ONE scoped cohort instead of the matrix.
 #                                 `domain` = core with no default features.
+#                                 `catalog` = core with its DEFAULT features:
+#                                 the pure canonical host-tool catalog compiles
+#                                 into that cohort, so it keeps the core-local
+#                                 authority/storage edges and resolves no
+#                                 engine/Host/WASM/compute/Connect plane.
 #                                 Other plans add their cohorts as their real
 #                                 source lands; an unknown name fails.
 #   --manifest-path <Cargo.toml>  resolve every probe against that workspace.
@@ -273,16 +278,19 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "usage: $0 [--cohort domain] [--manifest-path <Cargo.toml>]"
+      echo "usage: $0 [--cohort catalog|domain] [--manifest-path <Cargo.toml>]"
       exit 0
       ;;
     *)
-      fail "unknown argument '$1' (usage: $0 [--cohort domain] [--manifest-path <Cargo.toml>])"
+      fail "unknown argument '$1' (usage: $0 [--cohort catalog|domain] [--manifest-path <Cargo.toml>])"
       ;;
   esac
 done
-if [[ -n "$COHORT" && "$COHORT" != "domain" ]]; then
-  fail "unknown cohort '$COHORT' (known: domain)"
+if [[ -n "$COHORT" ]]; then
+  case "$COHORT" in
+    domain | catalog) ;;
+    *) fail "unknown cohort '$COHORT' (known: catalog, domain)" ;;
+  esac
 fi
 if [[ -n "$MANIFEST_PATH" && ! -f "$MANIFEST_PATH" ]]; then
   fail "manifest not found: $MANIFEST_PATH"
@@ -323,6 +331,47 @@ if [[ "$COHORT" == "domain" ]]; then
   assert_empty nexus-core "--no-default-features" rmcp
 
   echo "graph pins OK (cohort: domain)"
+  exit 0
+fi
+
+# --- scoped cohort: canonical catalog (v1.249 S4) --------------------------
+# The cohort the pure canonical host-tool catalog compiles into: `nexus-core`
+# with its DEFAULT features. Its selection is empty today, so the shape matches
+# `domain`; the cohort stays separate so the catalog keeps its own proof when
+# the default selection grows. What it pins: the core-local authority/storage
+# edges still resolve, `nexus-spoke-adapter` keeps resolving with NO features
+# (the compute plane stays off), and no engine / Host / WASM / simulator /
+# Connect plane appears.
+if [[ "$COHORT" == "catalog" ]]; then
+  assert_graph_nonempty nexus-core ""
+  # Core's own resolved set stays the empty default.
+  assert_features nexus-core "" nexus-core "default"
+  # Positive authority + storage.
+  assert_exactly_one nexus-core "" nexus-memory-provider
+  assert_features nexus-core "" nexus-memory-provider "default"
+  assert_exactly_one nexus-core "" spoke-operations
+  # The adapter is a normal edge of the domain, but featureless: the compute
+  # half (`compute` → the WASM host) is what this pin keeps out.
+  assert_exactly_one nexus-core "" nexus-spoke-adapter
+  assert_features nexus-core "" nexus-spoke-adapter ""
+
+  # Engine + durable execution (the Simulate walk rides `nexus-orchestration`).
+  assert_empty nexus-core "" nexus-orchestration
+  assert_empty nexus-core "" nexus-execution
+  assert_empty nexus-core "" nexus-session-storage
+  assert_empty nexus-core "" graph-flow
+  # Host planes.
+  assert_empty nexus-core "" nexus-agent-host
+  assert_empty nexus-core "" nexus-acp-host
+  # Compute plane.
+  assert_empty nexus-core "" nexus-wasm-host
+  # Connect planes.
+  assert_empty nexus-core "" nexus-connect
+  assert_empty nexus-core "" spoke-connect
+  assert_empty nexus-core "" libp2p
+  assert_empty nexus-core "" rmcp
+
+  echo "graph pins OK (cohort: catalog)"
   exit 0
 fi
 

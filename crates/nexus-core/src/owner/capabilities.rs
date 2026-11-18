@@ -3205,7 +3205,9 @@ impl CapabilityRegistry {
     /// # Errors
     ///
     /// Returns a `Coded` refusal with code `not_supported`
-    /// if the tool is not registered. Individual handlers may return
+    /// if the tool is not registered, or if it is a canonical host tool this
+    /// build binds no handler for (the peer and user lanes are never consulted
+    /// for a reserved builtin id). Individual handlers may return
     /// other error variants (e.g. `Forbidden`, `InvalidInput`).
     pub async fn dispatch(
         &self,
@@ -3215,14 +3217,22 @@ impl CapabilityRegistry {
     ) -> Result<serde_json::Value, NexusApiError> {
         let row = self.lookup(&req.tool_name);
         if row.is_none() {
-            // Peer arm (AR-68 #4): reverse-invoke the owning responder.
-            if let Some(entry) = peer_tools::peer_tool_registry().get(&req.tool_name) {
-                return dispatch_peer_tool(&entry, req).await;
-            }
-            // User-capability arm (AR-68 #6): `Capability::run(arguments)`.
-            if let Some(reg) = context.user_capabilities() {
-                if let Ok(cap) = user_cap_catalog_admission(reg.get(&req.tool_name)) {
-                    return dispatch_user_cap(cap, req).await;
+            // v1.249 S4: canonical membership wins over both fallback lanes. A
+            // reserved builtin id refuses here even when this build binds no
+            // handler for it (feature-gated binding), so the reservation is not
+            // left to each lane's own namespace rules — the user lane's name
+            // rule admits `fs/*` ids, so its occupancy of a canonical name must
+            // never decide the call.
+            if lookup_host_tool(&req.tool_name).is_none() {
+                // Peer arm (AR-68 #4): reverse-invoke the owning responder.
+                if let Some(entry) = peer_tools::peer_tool_registry().get(&req.tool_name) {
+                    return dispatch_peer_tool(&entry, req).await;
+                }
+                // User-capability arm (AR-68 #6): `Capability::run(arguments)`.
+                if let Some(reg) = context.user_capabilities() {
+                    if let Ok(cap) = user_cap_catalog_admission(reg.get(&req.tool_name)) {
+                        return dispatch_user_cap(cap, req).await;
+                    }
                 }
             }
             return Err(NexusApiError::Coded {
@@ -3474,6 +3484,27 @@ pub fn host_tool_registry() -> &'static CapabilityRegistry {
 pub fn build_registry() -> CapabilityRegistry {
     let mut reg = CapabilityRegistry::new();
     for metadata in host_tool_catalog() {
+        reg.register(CapabilityRow {
+            metadata,
+            handler: handler_for(metadata.id),
+        });
+    }
+    reg
+}
+
+/// Builds the registry with one canonical tool deliberately left unbound.
+///
+/// The id stays canonical — reserved and listed — but has no handler row. That
+/// is the shape a feature-gated build produces before its binding lands, and
+/// the one `dispatch` must refuse instead of resolving through the peer or user
+/// lane.
+#[must_use]
+pub fn build_registry_without(unbound: HostToolId) -> CapabilityRegistry {
+    let mut reg = CapabilityRegistry::new();
+    for metadata in host_tool_catalog() {
+        if metadata.id == unbound {
+            continue;
+        }
         reg.register(CapabilityRow {
             metadata,
             handler: handler_for(metadata.id),

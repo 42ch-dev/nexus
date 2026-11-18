@@ -31,6 +31,21 @@ const DOMAIN_FORBIDDEN = [
   'rmcp',
 ];
 
+// The absence pins of the `catalog` cohort, in script order.
+const CATALOG_FORBIDDEN = [
+  'nexus-orchestration',
+  'nexus-execution',
+  'nexus-session-storage',
+  'graph-flow',
+  'nexus-agent-host',
+  'nexus-acp-host',
+  'nexus-wasm-host',
+  'nexus-connect',
+  'spoke-connect',
+  'libp2p',
+  'rmcp',
+];
+
 const scratchRoot = mkdtempSync(path.join(tmpdir(), 'nexus-graph-pins-scratch-'));
 const targetDir = path.join(scratchRoot, 'target');
 const fixtures = [];
@@ -48,7 +63,7 @@ function cargoEnv() {
   };
 }
 
-function manifestFor(name, { deps = {}, devDeps = {} } = {}) {
+function manifestFor(name, { deps = {}, devDeps = {}, features = ['default = []'] } = {}) {
   const lines = [
     '[package]',
     `name = "${name}"`,
@@ -59,7 +74,7 @@ function manifestFor(name, { deps = {}, devDeps = {} } = {}) {
     'path = "src/lib.rs"',
     '',
     '[features]',
-    'default = []',
+    ...features,
     '',
   ];
   for (const [section, entries] of [
@@ -126,6 +141,27 @@ function runGuard(args) {
 
 function domainRun(root) {
   return runGuard(['--cohort', 'domain', '--manifest-path', path.join(root, 'Cargo.toml')]);
+}
+
+// The real catalog shape: the domain edges plus the featureless spoke adapter
+// core imports the tool grammar from. The adapter's own `default` turns the
+// compute half on, so core's edge must pin `default-features = false` — that is
+// what keeps the WASM plane out of the catalog cohort.
+function catalogCrates({ coreDeps = {}, extra = {} } = {}) {
+  return domainCrates({
+    coreDeps: { 'nexus-spoke-adapter': ', default-features = false', ...coreDeps },
+    extra: {
+      'nexus-spoke-adapter': {
+        deps: {},
+        features: ['default = ["compute"]', 'compute = []'],
+      },
+      ...extra,
+    },
+  });
+}
+
+function catalogRun(root) {
+  return runGuard(['--cohort', 'catalog', '--manifest-path', path.join(root, 'Cargo.toml')]);
 }
 
 test('domain cohort passes on a domain-shaped workspace', () => {
@@ -196,6 +232,66 @@ test('an empty positive control fails instead of vacuously greening', () => {
 
   assert.notEqual(run.status, 0);
   assert.match(run.stdout, /absence pins would be vacuous/);
+});
+
+test('catalog cohort passes on a catalog-shaped workspace', () => {
+  const root = createWorkspace(catalogCrates());
+  const run = catalogRun(root);
+
+  assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+  // The positive controls assert a COUNT, so a collapsed graph cannot pass by
+  // matching a zero-row "success" — the exact false-green the domain cohort
+  // shipped before R3.
+  assert.match(run.stdout, /ok: nexus-core <default> resolves 3 distinct dependency package\(s\)/);
+  assert.match(run.stdout, /ok: nexus-core v0\.1\.0 feats=\[default\] for nexus-core <default>/);
+  assert.match(run.stdout, /ok: nexus-memory-provider v0\.1\.0 feats=\[default\] for nexus-core/);
+  assert.match(run.stdout, /ok: nexus-spoke-adapter v0\.1\.0 feats=\[\] for nexus-core/);
+  assert.match(run.stdout, /ok: spoke-operations single version .* for nexus-core/);
+  assert.match(run.stdout, /ok: nexus-wasm-host absent from nexus-core/);
+  assert.match(run.stdout, /ok: nexus-connect absent from nexus-core/);
+  assert.match(run.stdout, /graph pins OK \(cohort: catalog\)$/m);
+});
+
+test('each forbidden catalog edge fails the cohort', async (t) => {
+  for (const pkg of CATALOG_FORBIDDEN) {
+    await t.test(pkg, () => {
+      const root = createWorkspace(
+        catalogCrates({ coreDeps: { [pkg]: null }, extra: { [pkg]: { deps: {} } } }),
+      );
+      const run = catalogRun(root);
+
+      assert.notEqual(run.status, 0, `a real core -> ${pkg} edge was accepted`);
+      assert.match(run.stdout, /graph pin failed/);
+      assert.match(run.stdout, new RegExp(`${pkg} must be MISSING`));
+    });
+  }
+});
+
+test('catalog cohort fails when its graph is empty', () => {
+  const root = createWorkspace({ 'nexus-core': { deps: {}, devDeps: {} } });
+  const run = catalogRun(root);
+
+  assert.notEqual(run.status, 0);
+  assert.match(run.stdout, /absence pins would be vacuous/);
+});
+
+test('catalog cohort fails when a positive pin resolves no row', () => {
+  // The provider is a workspace member but core holds no edge to it: the
+  // exact-one probe resolves no row at all. The pin must fail and must never
+  // print its `ok:` line, so the happy-path `ok:` assertions above can never be
+  // satisfied by an empty result set.
+  const root = createWorkspace({
+    'nexus-core': { deps: { 'spoke-operations': null, 'nexus-spoke-adapter': null } },
+    'nexus-memory-provider': { deps: { 'spoke-operations': null } },
+    'nexus-spoke-adapter': { deps: {} },
+    'spoke-operations': { deps: {} },
+  });
+  const run = catalogRun(root);
+
+  assert.notEqual(run.status, 0);
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(run.stdout, /nexus-memory-provider/);
+  assert.doesNotMatch(run.stdout, /ok: nexus-memory-provider/);
 });
 
 test('unknown cohort is rejected before any Cargo probe', () => {

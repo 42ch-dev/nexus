@@ -27,13 +27,13 @@ use nexus_contracts::generated::daemon_api::compute::{
 use nexus_contracts::CreateWorkRequest;
 use nexus_contracts::ToolsApi;
 use nexus_core::owner::capabilities::{
-    execute_tool, host_tool_registry, ToolContext, ToolRuntimeFacts,
+    build_registry_without, execute_tool, host_tool_registry, ToolContext, ToolRuntimeFacts,
 };
 use nexus_core::owner::compute::{
     accept_compute_run, clear_compute_runs, compute_run, discard_compute_run, get_compute_run,
     list_compute_runs, recover_stuck_compute_runs, ComputeContext, ComputeRunRecoveryOutcome,
 };
-use nexus_core::tool_catalog::{host_tool_catalog, lookup_host_tool, reserved_host_tool_ids};
+use nexus_core::tool_catalog::{host_tool_catalog, lookup_host_tool, reserved_host_tool_ids, HostToolId};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest};
 use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, SandboxConfig, WasmEngine};
 use serde_json::json;
@@ -902,6 +902,114 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
         before,
         "a refused dispatch must have zero domain effect"
     );
+}
+
+/// A canonical builtin this build binds no handler for refuses in the spine —
+/// the peer and user lanes never answer for a reserved id.
+///
+/// The competing callable is real and observable: a user capability carrying
+/// the canonical id itself, scanned and admitted at boot on this context's
+/// holder (the only user-capability admission path). The unbound half uses the
+/// same canonical row with its handler deliberately withheld
+/// ([`build_registry_without`]), so `lookup_host_tool` still resolves the id
+/// while `lookup` does not — the state a feature-gated build produces before
+/// its binding lands. Two things make the refusal attributable:
+///
+/// - the error is the spine's `not_supported`, never the user lane's
+///   `service_unavailable` (what `run()` yields on the engine-less arm), so the
+///   competing callable was not invoked; and
+/// - the domain timeline count is unchanged, so the refusal had zero effect.
+///
+/// The same request then runs against the full registry with the SAME context:
+/// the real handler returns the workspace record, proving the reservation
+/// shadows nothing it binds.
+#[tokio::test]
+#[serial_test::serial]
+async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
+    use nexus_orchestration::capability::{
+        Capability as _, CapabilityRegistry, CapabilityRuntimeDeps,
+    };
+    use nexus_orchestration::CapabilityRegistryHolder;
+
+    const TOOL: &str = "nexus.workspace.info";
+
+    let f = fixture().await;
+
+    // The colliding user callable: a real scanned bundle named exactly the
+    // canonical id. The scan admits it (the engine builtin set does not own the
+    // name), so the user lane the spine consults holds it under this id.
+    let scan_root = f.tmp.path().join("colliding_usercaps");
+    write_user_capability_trio(&scan_root, TOOL, r#"{"type":"object"}"#);
+    let deps = CapabilityRuntimeDeps {
+        pool: Some(f.core.pool().clone()),
+        prompt_executor: None,
+        session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        daemon_tool_dispatch: None,
+        cdn_config: None,
+        workspace_executor: None,
+    };
+    let (user_registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_root);
+    assert!(
+        outcome.admitted.iter().any(|c| c.name() == TOOL),
+        "the colliding user capability must be admitted, skipped={:?}",
+        outcome.skipped
+    );
+    let mut context = f.context.clone();
+    context.set_user_capabilities(Some(CapabilityRegistryHolder::with_registry(Arc::new(
+        user_registry,
+    ))));
+    assert!(
+        context
+            .user_capabilities()
+            .is_some_and(|reg| reg.get(TOOL).is_some()),
+        "the competing callable must exist in the user lane for this case to mean anything"
+    );
+
+    // Canonical but unbound: the catalog reserves the id, the registry has no row.
+    assert!(
+        lookup_host_tool(TOOL).is_some(),
+        "{TOOL} must stay a canonical host tool"
+    );
+    let unbound = build_registry_without(HostToolId::WorkspaceInfo);
+    assert!(
+        unbound.lookup(TOOL).is_none(),
+        "the fixture withholds the handler binding"
+    );
+    assert_eq!(
+        unbound.len(),
+        host_tool_catalog().len() - 1,
+        "every other canonical row stays bound"
+    );
+
+    let before = timeline_event_count(f.core.pool()).await;
+    let request = tool_request(TOOL, json!({}));
+    let err = unbound.dispatch(&request, &context, CREATOR).await.unwrap_err();
+    assert!(
+        matches!(&err, CoreError::Coded { code, .. } if code == "not_supported"),
+        "an unbound canonical id must be not_supported, got {err:?}"
+    );
+    assert!(
+        !format!("{err:?}").contains("no executor wired"),
+        "the competing user capability must never be invoked, got {err:?}"
+    );
+    assert_eq!(
+        timeline_event_count(f.core.pool()).await,
+        before,
+        "a refused canonical dispatch must have zero domain effect"
+    );
+    assert!(
+        !unbound.spine_resolves(&context, TOOL),
+        "an unbound canonical id is not dispatchable (the allowlist gate must agree)"
+    );
+
+    // Bind the same real builtin: its existing handler still runs, on the same
+    // context that still holds the colliding user capability.
+    let value = host_tool_registry()
+        .dispatch(&request, &context, CREATOR)
+        .await
+        .expect("the bound canonical row must run its real handler");
+    assert_eq!(value["creator_id"], CREATOR);
+    assert_eq!(value["workspace_slug"], SLUG);
 }
 
 /// A capability never fabricates success when its prompt executor fails: the
