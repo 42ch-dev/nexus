@@ -138,19 +138,72 @@ impl PeerResponder for ConnectResponderAdapter {
     }
 }
 
-/// The reserved tool ids: the injected builtin host-tool ids plus the live
-/// capability reservation.
+/// The peer admission decision, consistent with the capability reservation
+/// AT THE MOMENT IT IS MADE (C3 fix round 2).
 ///
-/// The capability half reads the holder's [`CapabilityRegistryHolder::
-/// reserved_names`] (C3) — every canonical name ever swapped in, not just the
-/// current generation's rows — so a hot swap can never un-reserve a name:
-/// a capability whose dir was deleted (row dropped) or whose compute binding
-/// is unavailable (`wasm` off; invoking refuses `WorkerUnavailable`) keeps
-/// its name reserved against peer admission. The builtin set is a snapshot
-/// the composing side injects ([`crate::PeerResponderOptions::builtin_tool_ids`])
-/// — this crate never reads a host registry of its own, so the caller's
-/// boundary refuses an empty roster ([`crate::start_peer_tools_lane`]) instead
-/// of letting this function silently reserve nothing.
+/// When a holder is supplied, its reservation is held exclusively (via
+/// [`CapabilityRegistryHolder::with_live_reservation`]) across set derivation
+/// AND registration, so a concurrent hot swap serializes with the decision
+/// instead of slipping between a snapshot read and the insert: a swap
+/// completed before the call is fully visible, a swap arriving during it
+/// blocks until the decision has landed — and its name then stays admitted
+/// (first-stays, the same posture as the injected builtin roster). A decision
+/// that derived its set OUTSIDE this seam ships a stale snapshot; that is
+/// exactly the defect this shape removes.
+///
+/// Lock order: holder `reserved` (write) → peer-table `inner` (inside
+/// [`admit_and_register`]). [`CapabilityRegistryHolder::swap`] takes
+/// `reserved` → capability-registry `inner`; no taker of either inner lock
+/// ever wants `reserved` again, so the order cannot invert.
+///
+/// Without a holder there is no live reservation to serialize against; the
+/// builtin roster alone is the reserved set (the caller-side snapshot helper
+/// [`live_reserved_tool_ids`] covers exactly that case).
+#[allow(clippy::too_many_arguments)] // one decision, the eight admission inputs
+pub fn admit_consistent_with_reservation(
+    table: &PeerToolTable,
+    capability_registry: Option<&CapabilityRegistryHolder>,
+    builtin_tool_ids: &HashSet<String>,
+    peer_id: &str,
+    manifest: &nexus_spoke_adapter::HostCapabilityManifest,
+    responder: &Arc<dyn PeerResponder>,
+    daemon_capabilities: &HashSet<String>,
+    tool_allowlist: &HashSet<String>,
+) -> AdmissionOutcome {
+    let decide = |reserved: &HashSet<String>| {
+        table.admit_and_register(
+            peer_id,
+            manifest,
+            responder,
+            daemon_capabilities,
+            tool_allowlist,
+            reserved,
+        )
+    };
+    match capability_registry {
+        Some(holder) => holder.with_live_reservation(|live_reservation| {
+            let mut reserved: HashSet<String> = builtin_tool_ids.clone();
+            reserved.extend(live_reservation.iter().map(|name| (*name).to_owned()));
+            decide(&reserved)
+        }),
+        None => decide(&live_reserved_tool_ids(builtin_tool_ids.iter().cloned(), None)),
+    }
+}
+
+/// The caller-side reserved-tool-id SNAPSHOT: the injected builtin ids plus
+/// the holder's reservation, read once.
+///
+/// With a holder present, the live admission path is
+/// [`admit_consistent_with_reservation`] — the decision must be consistent
+/// with the reservation at the moment it is made, not with a pre-taken
+/// snapshot (a snapshot can miss a name a concurrent swap reserves before the
+/// registration lands). This helper remains for the no-holder case (builtin
+/// roster only) and as the snapshot half of tests that deliberately stage the
+/// race. The builtin set is a snapshot the composing side injects
+/// ([`crate::PeerResponderOptions::builtin_tool_ids`]) — this crate never
+/// reads a host registry of its own, so the caller's boundary refuses an
+/// empty roster ([`crate::start_peer_tools_lane`]) instead of letting this
+/// function silently reserve nothing.
 #[must_use]
 pub fn live_reserved_tool_ids(
     builtin_ids: impl IntoIterator<Item = String>,

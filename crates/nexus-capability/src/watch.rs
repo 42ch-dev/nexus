@@ -840,13 +840,17 @@ use crate::CapabilityOrigin;
         );
     }
 
-    /// The window INSIDE `swap`, observed deterministically through the two
-    /// half-steps: after the reserve half and BEFORE the publish half, the
-    /// incoming name is already reserved while the live generation still
-    /// lacks the row. Under the reverted ordering (extend after the pointer
-    /// write) the first assertion fails — the name would be absent from the
-    /// reservation exactly while the window is open and a peer handshake
-    /// could claim it.
+    /// INVARIANT PIN, not a regression test for the order inside `swap` (C3
+    /// fix round 2 relabel): this case drives the two half-steps manually in
+    /// the safe order, so changing only the composition inside `swap` cannot
+    /// make it fail. What it pins is the half-step SEMANTICS the safe
+    /// composition relies on: reserve_generation alone joins the live
+    /// reservation before publication, and the intermediate state (name
+    /// reserved, row not yet live) is observable. Discrimination against a
+    /// bad `swap` order is carried by the publication-path invariant —
+    /// `publish_refuses_an_unreserved_generation` pins the check, and the
+    /// existing `unbound_compute_name_remains_reserved_after_hot_swap` trips
+    /// it on every swap under a reverted order (mutation-verified).
     #[test]
     fn swap_reservation_precedes_publication() {
         let tmp = tempfile::tempdir().unwrap();
@@ -884,11 +888,14 @@ use crate::CapabilityOrigin;
         assert!(holder.reserved_names().contains("demo.compute"));
     }
 
-    /// The publication path itself enforces the ordering invariant: publishing
-    /// a generation whose names are NOT yet reserved fires the debug
-    /// invariant. This case pins the check — if the invariant is removed, or
-    /// the swap order reverts to extend-after-publish (where EVERY swap trips
-    /// it), the suite goes red here instead of leaving the window open.
+    /// INVARIANT PIN (C3 fix round 2 relabel): the publication path itself
+    /// enforces the ordering invariant — publishing a generation whose names
+    /// are NOT yet reserved fires the debug invariant. This case calls the
+    /// publish half directly, so it passes regardless of the order inside
+    /// `swap`; what it pins is that the CHECK EXISTS and fires. The order
+    /// discrimination is carried by `unbound_compute_name_remains_reserved_
+    /// after_hot_swap`, which runs full swaps and trips this invariant under
+    /// a reverted order (mutation-verified).
     #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "reserved before publication")]

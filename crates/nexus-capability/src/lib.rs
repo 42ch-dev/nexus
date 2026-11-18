@@ -1136,6 +1136,36 @@ impl CapabilityRegistryHolder {
             .clone()
     }
 
+    /// Run `f` with the live reservation held EXCLUSIVELY (C3 fix round 2:
+    /// the peer admission check-and-register seam).
+    ///
+    /// `f` sees the reservation as it is at call time and the holder
+    /// guarantees it cannot change until `f` returns: a concurrent
+    /// [`swap`](Self::swap)'s reserve half takes the same write lock, so it
+    /// serializes with the decision — a swap completed before `f` is fully
+    /// visible inside it, a swap arriving during `f` waits until the decision
+    /// has landed. This is what makes "reserved at decision time" TRUE
+    /// rather than "reserved at some earlier snapshot": a decision that
+    /// derives its set and registers under this closure can never admit an
+    /// id the reservation already holds.
+    ///
+    /// Lock order: `reserved` (write) is the OUTERMOST lock on every path
+    /// that takes it — `swap` goes `reserved` → registry-`inner`, the
+    /// admission closure goes `reserved` → peer-table inner — and no taker
+    /// of either inner lock ever wants `reserved` again, so the order cannot
+    /// invert. Hold `f` short and lock-only: it runs between a swap's
+    /// reserve and publish halves.
+    pub fn with_live_reservation<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(&std::collections::HashSet<&'static str>) -> T,
+    {
+        let guard = self
+            .reserved
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner); // poison-recovery (crate policy)
+        f(&guard)
+    }
+
     /// Reserve the canonical names of `registry` — the FIRST half of
     /// [`swap`](Self::swap), strictly before publication.
     ///

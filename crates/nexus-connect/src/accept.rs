@@ -50,7 +50,6 @@ use crate::config::{ConnectConfigError, PeerToolsConfig};
 use crate::error::{ConnectError, ConnectResult};
 use crate::identity::{self};
 use crate::session::PeerSessionManager;
-use crate::table::live_reserved_tool_ids;
 use crate::watch::{
     peer_config_digest, spawn_peer_config_watch, supervise_peer_config_watch, PeerConfigHolder,
     PeerConfigSnapshot,
@@ -506,20 +505,21 @@ async fn monitor_session(
                 generation.manifest.capabilities.iter().cloned().collect();
             let allowlist: std::collections::HashSet<String> =
                 generation.snapshot.config.tool_allowlist.iter().cloned().collect();
-            // W-A (V1.176 P1 QC fix): the reserved set is derived LIVE from
-            // the shared holder at admission time — hot-reloaded user-cap
-            // names stay reserved against peer admission.
-            let reserved = live_reserved_tool_ids(
-                options.builtin_tool_ids.iter().cloned(),
+            // The decision is consistent with the reservation AT THE MOMENT
+            // IT IS MADE (C3 fix round 2): the holder's reservation is held
+            // exclusively across set derivation and registration, so a
+            // concurrent hot swap serializes with the decision instead of
+            // slipping between a snapshot read and the insert. See
+            // `table::admit_consistent_with_reservation`.
+            match crate::table::admit_consistent_with_reservation(
+                &crate::peer_tool_table(),
                 options.capability_registry.as_ref(),
-            );
-            match crate::peer_tool_table().admit_and_register(
+                &options.builtin_tool_ids,
                 &peer_id,
                 &manifest,
                 &port,
                 &daemon_caps,
                 &allowlist,
-                &reserved,
             ) {
                 crate::AdmissionOutcome::Admitted { tool_ids } => tool_ids,
                 crate::AdmissionOutcome::ManifestInvalid { message } => {
