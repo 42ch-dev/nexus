@@ -13,7 +13,7 @@
 # the app-only `connect-client` / `embedded-mcp` Model A selectors. The pins
 # below therefore target the products that exist: ordinary CLI, Connect-only
 # runtime, optional CLI Connect, core domain, core MCP/peer library and the
-# native/TS host. Cohorts: `docs/specs/architecture/rust-core-service-boundary.md` §4.2.
+# native/TS host. Cohorts: `docs/specs/architecture/rust-core-service-boundary.md` §3.2.
 #
 # Pins (--edges normal,build):
 #   -p nexus42 (cli,default):
@@ -95,8 +95,9 @@
 #                                 the same assertions over disposable fixtures.
 #
 # The scoped cohort is what makes the target boundary checkable while the
-# source slices land: `domain` proves the applied-state/storage/memory authority
-# still resolves, and that no engine/Host/WASM/Connect plane does.
+# source slices land: `domain` proves the core-local storage/memory authority
+# still resolves (the applied run identity is execution-owned), and that no
+# engine/Host/WASM/Connect plane does.
 
 set -euo pipefail
 
@@ -174,7 +175,10 @@ assert_exactly_one() {
   local versions
   versions=$(grep "^$pkg v[0-9]" <<<"$out" | sed -E 's/.* v([^ ]+).*/\1/' | sort -u || true)
   local count
-  count=$(wc -l <<<"$versions" | tr -d ' ')
+  # Count NONEMPTY rows: `wc -l` over an empty here-string counts its trailing
+  # newline, so a successful query that matched no package reported one
+  # "version" and passed the exact-one pin. An empty set is zero, never one.
+  count=$(sed '/^$/d' <<<"$versions" | wc -l | tr -d ' ')
   if [[ "$status" -ne 0 ]]; then
     # Same absence tolerance as assert_empty: a package legitimately absent
     # from the resolved graph (feature off) exits 101 with the canonical
@@ -286,9 +290,11 @@ fi
 
 # --- scoped cohort: core domain (v1.249 R3) ---------------------------------
 # The domain boundary every other cohort may grow from: `nexus-core` with no
-# default features keeps the applied-state / storage / memory authority and
-# resolves NOTHING from the engine, Host, WASM or Connect planes. Cohort table:
-# `docs/specs/architecture/rust-core-service-boundary.md` §4.2.
+# default features keeps its core-local storage/memory authority and resolves
+# NOTHING from the engine, Host, WASM or Connect planes. The applied run
+# identity is execution-owned (`nexus-session-storage`), so it is pinned absent
+# with them. Cohort table:
+# `docs/specs/architecture/rust-core-service-boundary.md` §3.2.
 if [[ "$COHORT" == "domain" ]]; then
   assert_graph_nonempty nexus-core "--no-default-features"
   # `domain` selects no feature: core's own resolved set stays empty.

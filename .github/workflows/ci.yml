@@ -557,6 +557,14 @@ jobs:
       # provides it.
       - name: Check graph pins
         run: bash tooling/check-graph-pins.sh
+      # The arg-less matrix above does not assert the v1.249 domain invariants
+      # (session storage / Connect absent from the core closure, the provider's
+      # exact-one default-featured edge), and the fixture suite proves them only
+      # on synthetic workspaces. Run the cohort against the real workspace so a
+      # domain regression fails CI instead of waiting for a manual run.
+      - name: Check graph pins (domain cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort domain
       # v1.249 R3: the scoped cohort selector and `--manifest-path` override are
       # proven on disposable real-Cargo workspaces — a positive domain fixture,
       # one rejection per forbidden domain edge, the empty-graph positive

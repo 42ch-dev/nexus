@@ -141,6 +141,26 @@ test('domain cohort passes on a domain-shaped workspace', () => {
   assert.match(run.stdout, /graph pins OK \(cohort: domain\)$/m);
 });
 
+test('a missing provider forwarding edge is refused', () => {
+  // core keeps its direct spoke-operations edge and the package stays a
+  // workspace member; only nexus-memory-provider -> spoke-operations is gone.
+  // The forward half must stay green so the failure is attributable to the
+  // provider's required edge, not to the whole graph having collapsed.
+  const root = createWorkspace({
+    'nexus-core': { deps: { 'nexus-memory-provider': null, 'spoke-operations': null } },
+    'nexus-memory-provider': { deps: {} },
+    'spoke-operations': { deps: {} },
+  });
+  const run = domainRun(root);
+
+  assert.notEqual(run.status, 0, run.stdout);
+  assert.match(run.stdout, /ok: spoke-operations single version .* for nexus-core/);
+  assert.match(
+    run.stdout,
+    /spoke-operations expected in nexus-memory-provider--no-default-features graph, but absent/,
+  );
+});
+
 test('each forbidden domain edge fails the cohort', async (t) => {
   for (const pkg of DOMAIN_FORBIDDEN) {
     await t.test(pkg, () => {
