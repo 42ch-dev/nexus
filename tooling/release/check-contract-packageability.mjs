@@ -15,13 +15,15 @@
  *      extracts it outside the repository and packing tree, and reads the
  *      normalized manifest through `cargo metadata --no-deps`,
  *   4. runs the optional consumer fixture named after the entry
- *      (`tooling/release/fixtures/package-consumers/<name>/`) as a fresh
- *      workspace whose `[patch.crates-io]` entries point only at extracted
- *      selected archives, offline and locked, with `cargo run` or — when the
- *      fixture ships a `tests/` target, the only target kind that sees a
- *      dev-dependency — `cargo test`; a fixture that ships a `guest/` crate
- *      also gets that crate built for `wasm32-unknown-unknown` from the same
- *      archives, with the host consumer kept out of it.
+ *      (`tooling/release/fixtures/package-consumers/<name>/`, read from the same
+ *      staged tree the archives were packed from, so package and consumer
+ *      evidence share one set of reviewed inputs) as a fresh workspace whose
+ *      `[patch.crates-io]` entries point only at extracted selected archives,
+ *      offline and locked, with `cargo run` or — when the fixture ships a
+ *      `tests/` target, the only target kind that sees a dev-dependency —
+ *      `cargo test`; a fixture that ships a `guest/` crate also gets that crate
+ *      built for `wasm32-unknown-unknown` from the same archives, with the host
+ *      consumer kept out of it.
  *
  * Nothing downstream sees the original checkout or the packing tree: a
  * consumer that resolves an input from either fails, as does an archive that
@@ -37,7 +39,11 @@
  *
  * The whole scratch tree — packing copy, archives, extracted crates, consumer
  * roots, lockfiles and target dirs — is removed in `finally`; the report keeps
- * each archive hash, normalized dependency row and consumer provenance.
+ * each archive hash, normalized dependency row, consumer provenance and the
+ * revision the staged tree was verified against. A gitlink (`160000 commit`,
+ * e.g. an initialized skill submodule) is one tree entry: its subtree is
+ * skipped on both sides of that verification, because its contents are not part
+ * of this revision's tree.
  *
  * CLI: node tooling/release/check-contract-packageability.mjs
  *
@@ -635,7 +641,9 @@ function buildGuest({ consumerRoot, targetRoot, entryName, patchArgs }) {
 /**
  * Consume one extracted archive set with a fresh consumer workspace. Every
  * failure returns named evidence instead of throwing, so a Cargo failure can
- * never leave an empty passing report.
+ * never leave an empty passing report. `repoRoot` is only the escape detector's
+ * reference (a consumer must not resolve from the original checkout); the
+ * fixture itself is read from the verified stage.
  *
  * @param {{
  *   repoRoot: string;
@@ -657,7 +665,10 @@ function runConsumer({
   archives,
   policy,
 }) {
-  const fixturePath = join(repoRoot, CONSUMER_FIXTURES_PATH, entryName);
+  // Fixture existence and contents come from the same copied tree the archives
+  // were packed from, so package and consumer evidence share one set of
+  // reviewed inputs; the original checkout is no longer a consumer input.
+  const fixturePath = join(stageRoot, CONSUMER_FIXTURES_PATH, entryName);
   if (!existsSync(fixturePath)) {
     return null;
   }
@@ -919,12 +930,19 @@ function blobId(bytes) {
 
 /**
  * Every file and symlink under `directory`, relative and POSIX-joined, minus the
- * entries staging never copies (VCS metadata, build output, other checkouts).
+ * entries staging never copies (VCS metadata, build output, other checkouts) and
+ * minus the subtrees the revision records as gitlinks.
+ *
+ * A gitlink (`160000 commit`) is one tree entry, not a directory of tracked
+ * content, so an initialized submodule's files are not part of the revision and
+ * are not compared. Only paths the revision itself names are pruned — this is
+ * not a general "skip directories" exemption.
  *
  * @param {string} directory
+ * @param {Set<string>} gitlinks
  * @returns {string[]}
  */
-function stagedPaths(directory) {
+function stagedPaths(directory, gitlinks) {
   /** @type {string[]} */
   const paths = [];
   /** @param {string} relative */
@@ -932,7 +950,7 @@ function stagedPaths(directory) {
     const absolute = relative.length === 0 ? directory : join(directory, relative);
     for (const dirent of readdirSync(absolute, { withFileTypes: true })) {
       const path = relative.length === 0 ? dirent.name : `${relative}/${dirent.name}`;
-      if (SKIPPED_STAGE_ENTRIES.has(path.split("/")[0])) {
+      if (SKIPPED_STAGE_ENTRIES.has(path.split("/")[0]) || gitlinks.has(path)) {
         continue;
       }
       if (dirent.isDirectory()) {
@@ -956,7 +974,9 @@ function stagedPaths(directory) {
  * happens later.
  *
  * Symlinks are compared by their stored target. Ignored/scratch entries are
- * skipped exactly as {@link stageWorkingSource} skips them.
+ * skipped exactly as {@link stageWorkingSource} skips them. A gitlink subtree is
+ * skipped on both sides: the revision records one tree entry there, so an
+ * initialized submodule's contents are neither extras nor compared.
  *
  * @param {string} repoRoot
  * @param {string} sha
@@ -970,6 +990,8 @@ export function verifyStagedSource(repoRoot, sha, directory) {
   }
   /** @type {Map<string, {mode: string; id: string}>} */
   const revision = new Map();
+  /** @type {Set<string>} */
+  const gitlinks = new Set();
   for (const entry of listed.stdout.split("\0")) {
     if (entry.length === 0) {
       continue;
@@ -980,7 +1002,14 @@ export function verifyStagedSource(repoRoot, sha, directory) {
     }
     const [mode, type, id] = entry.slice(0, tab).split(" ");
     const path = entry.slice(tab + 1);
-    if (type !== "blob" || SKIPPED_STAGE_ENTRIES.has(path.split("/")[0])) {
+    if (SKIPPED_STAGE_ENTRIES.has(path.split("/")[0])) {
+      continue;
+    }
+    if (type === "commit") {
+      gitlinks.add(path);
+      continue;
+    }
+    if (type !== "blob") {
       continue;
     }
     revision.set(path, { mode, id });
@@ -988,7 +1017,7 @@ export function verifyStagedSource(repoRoot, sha, directory) {
 
   /** @type {string[]} */
   const mismatches = [];
-  const staged = stagedPaths(directory);
+  const staged = stagedPaths(directory, gitlinks);
   const stagedSet = new Set(staged);
   for (const path of staged) {
     const entry = revision.get(path);
@@ -1086,7 +1115,7 @@ export function checkContractPackageability(repoRoot) {
     }
 
     const hasConsumer = entries.some((entry) =>
-      existsSync(join(repoRoot, CONSUMER_FIXTURES_PATH, entry.name)),
+      existsSync(join(stageRoot, CONSUMER_FIXTURES_PATH, entry.name)),
     );
     if (hasConsumer && archives.size > 0) {
       const policy = workspacePolicy(stageRoot);

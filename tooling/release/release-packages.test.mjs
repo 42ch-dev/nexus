@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import { test } from "node:test";
@@ -17,6 +17,7 @@ import { readVersionBrackets } from "./version-surfaces.mjs";
 import {
   cleanupTempRepo,
   createTempRepo,
+  gitOk,
   initGitRepo,
   mutateRepoFile,
   readRepoFile,
@@ -658,6 +659,48 @@ test("a staged copy is verified against the revision in both directions", () => 
       missing.some((path) => path.startsWith("crates/nexus-knowledge/Cargo.toml (in ")),
       missing.slice(0, 5).join(","),
     );
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a gitlink is one tree entry, not a staged extra", () => {
+  // An initialized submodule: the revision records a single commit entry, while
+  // the worktree contains its files, which staging copies.
+  const upstream = mkdtempSync(join(tmpdir(), "nexus-submodule-"));
+  const { dir } = fixture();
+  const stage = mkdtempSync(join(tmpdir(), "nexus-stage-gitlink-"));
+  try {
+    mkdirSync(join(upstream, "skill"), { recursive: true });
+    writeFileSync(join(upstream, "skill/SKILL.md"), "# probe\n", "utf8");
+    gitOk(upstream, ["init", "-q", "-b", "main"]);
+    gitOk(upstream, ["add", "-A"]);
+    gitOk(upstream, ["-c", "user.email=fixture@example.com", "-c", "user.name=Fixture", "commit", "-qm", "init"]);
+    gitOk(dir, [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      "--quiet",
+      upstream,
+      ".agents/skills/probe",
+    ]);
+    gitOk(dir, ["add", "-A"]);
+    gitOk(dir, ["-c", "user.email=fixture@example.com", "-c", "user.name=Fixture", "commit", "-qm", "add submodule"]);
+    const sha = gitOk(dir, ["rev-parse", "HEAD"]);
+    const gitlinkRows = spawnSync("git", ["ls-tree", "-r", sha], { cwd: dir, encoding: "utf8" })
+      .stdout.split("\n")
+      .filter((line) => line.startsWith("160000"));
+    assert.equal(gitlinkRows.length, 1, gitlinkRows.join("|"));
+
+    cpSync(dir, stage, {
+      recursive: true,
+      filter: (source) => !source.split("/").includes(".git"),
+    });
+    // The stage really carries the submodule contents the walk must ignore.
+    assert.equal(readFileSync(join(stage, ".agents/skills/probe/skill/SKILL.md"), "utf8"), "# probe\n");
+    assert.deepEqual(verifyStagedSource(dir, sha, stage), []);
   } finally {
     rmSync(stage, { recursive: true, force: true });
     cleanupTempRepo(dir);
