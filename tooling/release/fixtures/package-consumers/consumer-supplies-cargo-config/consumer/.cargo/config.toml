@@ -1,0 +1,5 @@
+# A consumer that ships its own Cargo config can redirect resolution anywhere
+# (here: at a product source copy). The checker must reject the fixture before
+# Cargo reads this file, so this redirect can never satisfy the build.
+[patch.crates-io]
+nexus-fixture-config = { path = "../../../../crates/nexus-fixture-config" }

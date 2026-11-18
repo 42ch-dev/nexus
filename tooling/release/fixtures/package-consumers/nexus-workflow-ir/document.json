@@ -1,0 +1,47 @@
+{
+  "ir_version": 0,
+  "id": "prompt-step",
+  "version": 1,
+  "revision": 0,
+  "state": "candidate",
+  "meta": {
+    "description": "Draft an answer to a topic with one prompt step",
+    "kind": "creator",
+    "run_intents": [
+      "work_continue"
+    ],
+    "requires_capabilities": [
+      "acp.prompt"
+    ]
+  },
+  "entry": "prompt",
+  "terminal": [
+    "prompt"
+  ],
+  "nodes": [
+    {
+      "id": "prompt",
+      "kind": "inner_step",
+      "effect_class": "external",
+      "step_kind": "acp_prompt",
+      "template": "templates/prompt.md",
+      "tool_policy": "auto_grant_read_only"
+    }
+  ],
+  "edges": [],
+  "nests": [],
+  "assets": [
+    {
+      "id": "templates/prompt.md",
+      "path": "templates/prompt.md",
+      "kind": "template",
+      "content_hash": "639a21c5630949addecbd5d35cca7701abf587d31835a5224c6cb9232e8e0d99"
+    }
+  ],
+  "signals": [],
+  "roles": [],
+  "effect_summary": "external",
+  "provenance": {
+    "source": "compose"
+  }
+}

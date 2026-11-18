@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Port-only provider contracts (v1.189 P2-T1)"
+publish = false
 
 [lints]
 workspace = true

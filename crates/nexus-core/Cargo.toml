@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Transport-neutral World KB core service (v1.189 P1-T2)"
+publish = false
 
 [lints]
 workspace = true

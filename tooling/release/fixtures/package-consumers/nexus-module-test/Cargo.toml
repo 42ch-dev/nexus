@@ -1,0 +1,20 @@
+[package]
+name = "nexus-module-test-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Module-crate shape: `nexus-module-sdk` is the crate's own dependency (what a
+# compute module ships), while `nexus-module-test` is a host-target
+# dev-dependency — it must resolve for the test target only and never reach the
+# module artifact.
+[dependencies]
+nexus-module-sdk = "0.1.0"
+
+[dev-dependencies]
+nexus-module-test = "0.1.0"
+serde_json = "1"
+wat = "1"
+
+# Standalone workspace root: the consumer inherits no product Cargo config.
+[workspace]

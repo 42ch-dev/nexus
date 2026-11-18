@@ -1,0 +1,9 @@
+[package]
+name = "nexus-fixture-public"
+version = "0.1.0"
+edition = "2021"
+description = "Packageability fixture: public crate consumed from its archive."
+license = "Apache-2.0"
+
+# Standalone workspace root: the packed crate must not need the product tree.
+[workspace]

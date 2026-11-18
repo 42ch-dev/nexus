@@ -1,0 +1,107 @@
+name: Contract package release
+
+# Manual entry for the eight public Cargo packages. It plans a selected release
+# from one reviewed source revision — allowlist, versions, dependency order,
+# provenance, completed/pending split — and publishes nothing.
+#
+# Exit contract: a dispatch is a planning run. It succeeds (exit 0) when the
+# plan is valid — allowlist, versions, order, clean reviewed source — and the
+# printed `ready` line states exactly what still blocks publication. Supplying
+# both optional offline inputs (the checker's `--json` receipt and a registry
+# state file) turns the same run into a publishability gate: it then also
+# requires `ready` and fails otherwise. Neither outcome publishes anything.
+#
+# Registry publication is an irreversible operator action that needs protected
+# credentials and a namespace decision. Neither is configured here: this
+# workflow requests `contents: read`, reads no secret, tags nothing, and holds
+# no publish step. Package tags use the `crate/<name>/v<version>` namespace and
+# the `crate-release` label, never the product `v*` tag or `release` label that
+# drive `release.yml`. See `docs/release.md` → "Public Cargo packages".
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Reviewed full commit sha to plan (the checked-out revision)
+        required: true
+        type: string
+      packages:
+        description: Comma-separated package names from the eight-entry inventory
+        required: true
+        type: string
+      registry:
+        description: Target registry label
+        required: true
+        default: crates-io
+        type: choice
+        options:
+          - crates-io
+      registry_state:
+        description: Optional JSON registry view ({"published":[...],"writable":true}); empty means unknown
+        required: false
+        default: ""
+        type: string
+      archive_evidence:
+        description: Optional JSON from `check-contract-packageability.mjs --json` at this source
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contract-release-${{ inputs.registry }}-${{ inputs.packages }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    name: Plan the selected package release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source }}
+          fetch-depth: 1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Plan release from the reviewed source
+        # Dispatch inputs reach the shell as environment variables, never as
+        # interpolated script text: GitHub substitutes `${{ … }}` before the
+        # shell parses the script, so an input containing quotes or `$(…)`
+        # would otherwise run on the runner before the CLI validates it.
+        env:
+          SOURCE_SHA: ${{ inputs.source }}
+          PACKAGES: ${{ inputs.packages }}
+          REGISTRY: ${{ inputs.registry }}
+          REGISTRY_STATE_JSON: ${{ inputs.registry_state }}
+          ARCHIVE_EVIDENCE_JSON: ${{ inputs.archive_evidence }}
+        run: |
+          # `pipefail` matters: without it the `tee` status would hide a
+          # refused plan behind a green step. No `-u`: the optional input
+          # arrays expand empty on older bash, and every variable here has a
+          # dispatch default.
+          set -eo pipefail
+          inputs=()
+          if [ -n "$REGISTRY_STATE_JSON" ]; then
+            printf '%s' "$REGISTRY_STATE_JSON" > "$RUNNER_TEMP/registry-state.json"
+            inputs+=(--registry-state "$RUNNER_TEMP/registry-state.json")
+          fi
+          if [ -n "$ARCHIVE_EVIDENCE_JSON" ]; then
+            printf '%s' "$ARCHIVE_EVIDENCE_JSON" > "$RUNNER_TEMP/archive-evidence.json"
+            inputs+=(--archive-evidence "$RUNNER_TEMP/archive-evidence.json")
+          fi
+          gate=()
+          # Gate on input *presence*, never on `${#inputs[@]}`: one file adds two
+          # array elements, so counting elements inverts the condition.
+          if [ -n "$REGISTRY_STATE_JSON" ] && [ -n "$ARCHIVE_EVIDENCE_JSON" ]; then
+            # Both offline inputs present: demand a publishable plan.
+            gate+=(--require-publishable)
+          fi
+          node tooling/release/release-packages.mjs \
+            --check-only \
+            --source "$SOURCE_SHA" \
+            --packages "$PACKAGES" \
+            --registry "$REGISTRY" \
+            "${inputs[@]}" "${gate[@]}" | tee -a "$GITHUB_STEP_SUMMARY"

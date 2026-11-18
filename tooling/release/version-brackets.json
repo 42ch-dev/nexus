@@ -2,6 +2,9 @@
   "contract": [
     { "name": "nexus-contracts", "manifest": "crates/nexus-contracts/Cargo.toml" },
     { "name": "nexus-workflow-ir", "manifest": "crates/nexus-workflow-ir/Cargo.toml" },
+    { "name": "nexus-pattern", "manifest": "crates/nexus-pattern/Cargo.toml" },
+    { "name": "nexus-knowledge", "manifest": "crates/nexus-knowledge/Cargo.toml" },
+    { "name": "nexus-narrative", "manifest": "crates/nexus-narrative/Cargo.toml" },
     { "name": "nexus-module-sdk", "manifest": "modules/nexus-module-sdk/Cargo.toml" },
     { "name": "nexus-module-manifest", "manifest": "modules/nexus-module-manifest/Cargo.toml" },
     { "name": "nexus-module-test", "manifest": "modules/nexus-module-test/Cargo.toml" }

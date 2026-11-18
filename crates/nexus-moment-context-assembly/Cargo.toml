@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Per-moment context assembly for ACP sessions (Stage-0 local, optional cloud-stage)"
+publish = false
 
 [lints]
 workspace = true

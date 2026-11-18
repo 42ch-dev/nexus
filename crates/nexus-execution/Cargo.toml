@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "The durable run engine: graph-flow run driving, workspace sessions and their commit authority, snapshot/OCC filesystem primitives, per-run event rings, and the background scheduler ownership"
+publish = false
 
 [lints]
 workspace = true

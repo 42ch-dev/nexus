@@ -1,0 +1,13 @@
+{
+  "nexus-contracts": { "fixture": "nexus-contracts" },
+  "nexus-workflow-ir": { "fixture": "nexus-workflow-ir" },
+  "nexus-pattern": { "fixture": "nexus-pattern" },
+  "nexus-knowledge": {
+    "fixture": null,
+    "reason": "no runner of its own: the nexus-narrative fixture resolves this archive, and the coverage gate requires that resolution to pass before the row counts"
+  },
+  "nexus-narrative": { "fixture": "nexus-narrative" },
+  "nexus-module-sdk": { "fixture": "nexus-module-sdk" },
+  "nexus-module-manifest": { "fixture": "nexus-module-manifest" },
+  "nexus-module-test": { "fixture": "nexus-module-test" }
+}

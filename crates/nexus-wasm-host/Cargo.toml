@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Sandboxed WASM compute host (wasmtime) for Nexus narrative compute modules (V1.61)."
+publish = false
 
 [lints]
 workspace = true

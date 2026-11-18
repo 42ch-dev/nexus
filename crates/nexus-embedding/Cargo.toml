@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Embedding readiness contract (RN-OGA-3): EmbeddingProvider seam, embedding identity tuple, fail-closed derived-index protocol — no OSS execution"
+publish = false
 
 [lints]
 workspace = true

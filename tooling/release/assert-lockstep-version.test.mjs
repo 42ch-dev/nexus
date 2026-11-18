@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { posix } from "node:path";
 import {
   CARGO_LOCK_PATH,
   LOCKSTEP_PATHS,
@@ -281,7 +282,15 @@ test("the contract bracket reports the lockfile that owns each crate", () => {
         .sort(),
     );
     const byName = new Map(report.contract.map((row) => [row.name, row]));
-    assert.equal(byName.get(CONTRACT_CRATE)?.lock, CARGO_LOCK_PATH);
+    const memberNames = new Set(
+      readWorkspaceMemberPackages(dir).map((member) => member.name),
+    );
+    for (const entry of readVersionBrackets(dir)) {
+      const owningLock = memberNames.has(entry.name)
+        ? CARGO_LOCK_PATH
+        : posix.join(posix.dirname(entry.manifest), CARGO_LOCK_PATH);
+      assert.equal(byName.get(entry.name)?.lock, owningLock, `${entry.name} owning lock`);
+    }
     assert.equal(byName.get(STANDALONE_CRATE)?.lock, STANDALONE_LOCK);
 
     // The exemption is printed, not silent: a reader sees which lock pins the

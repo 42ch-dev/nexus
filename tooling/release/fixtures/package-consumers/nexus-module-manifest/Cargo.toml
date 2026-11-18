@@ -1,0 +1,12 @@
+[package]
+name = "nexus-module-manifest-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+nexus-module-manifest = "0.1.0"
+serde_json = "1"
+
+# Standalone workspace root: the consumer inherits no product Cargo config.
+[workspace]
