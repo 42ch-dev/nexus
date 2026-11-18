@@ -1,0 +1,9 @@
+[package]
+name = "nexus-fixture-escape"
+version = "0.1.0"
+edition = "2021"
+description = "Source copy the escape consumer would consume instead of the archive."
+license = "Apache-2.0"
+
+# Deliberately no `[workspace]` table: this copy sits inside the consumer's own
+# workspace root, and it is the source input the archive-only checker refuses.

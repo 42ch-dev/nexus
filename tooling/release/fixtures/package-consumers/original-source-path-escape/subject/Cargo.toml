@@ -1,0 +1,9 @@
+[package]
+name = "nexus-fixture-escape"
+version = "0.1.0"
+edition = "2021"
+description = "Packageability fixture: archive-only subject for the path-escape case."
+license = "Apache-2.0"
+
+# Standalone workspace root: the packed crate must not need the product tree.
+[workspace]

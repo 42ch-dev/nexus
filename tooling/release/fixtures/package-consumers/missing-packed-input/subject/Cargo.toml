@@ -1,0 +1,12 @@
+[package]
+name = "nexus-fixture-generated"
+version = "0.1.0"
+edition = "2021"
+description = "Packageability fixture: archive that omits a module its lib needs."
+license = "Apache-2.0"
+# Packaging-only include list: `src/generated/` is deliberately not packed, so
+# a real consumer build must fail on the missing generated input.
+include = ["Cargo.toml", "src/lib.rs"]
+
+# Standalone workspace root: the packed crate must not need the product tree.
+[workspace]
