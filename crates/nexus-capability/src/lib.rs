@@ -618,6 +618,7 @@ impl CapabilityRegistry {
     /// invocation. When `deps.pool` is absent, `narrative.compute` falls back
     /// to its standalone (`WorkerUnavailable`) form.
     #[must_use]
+    #[cfg(feature = "wasm")]
     pub fn with_runtime_deps_and_wasm(
         deps: &CapabilityRuntimeDeps,
         engine: std::sync::Arc<nexus_wasm_host::WasmEngine>,
@@ -646,6 +647,7 @@ impl CapabilityRegistry {
     /// directory or a bad descriptor never fails boot — bad entries land in
     /// `outcome.skipped` with named reasons (already `warn!`-logged).
     #[must_use]
+    #[cfg(feature = "wasm")]
     pub fn with_runtime_deps_and_wasm_and_user_caps(
         deps: &CapabilityRuntimeDeps,
         engine: std::sync::Arc<nexus_wasm_host::WasmEngine>,
@@ -655,8 +657,11 @@ impl CapabilityRegistry {
         let engine_handle = engine.clone();
         let module_cache_handle = module_cache.clone();
         let mut reg = Self::with_runtime_deps_and_wasm(deps, engine, module_cache);
-        let outcome =
-            reg.append_user_caps(scan_dir, Some(&engine_handle), Some(&module_cache_handle));
+        let outcome = reg.append_user_caps_with_executor(
+            scan_dir,
+            Some(&engine_handle),
+            Some(&module_cache_handle),
+        );
         (reg, outcome)
     }
 
@@ -673,7 +678,7 @@ impl CapabilityRegistry {
         scan_dir: &std::path::Path,
     ) -> (Self, scan::ScanOutcome) {
         let mut reg = Self::with_runtime_deps(deps);
-        let outcome = reg.append_user_caps(scan_dir, None, None);
+        let outcome = reg.append_user_caps(scan_dir);
         (reg, outcome)
     }
 
@@ -692,7 +697,19 @@ impl CapabilityRegistry {
     /// is **skipped inside the scan** (builtin wins — AR-36/AR-43). Each
     /// collision lands in `outcome.skipped` with the named `NameCollision`
     /// reason and is `warn!`-logged before the append.
-    fn append_user_caps(
+    fn append_user_caps(&mut self, scan_dir: &std::path::Path) -> scan::ScanOutcome {
+        let builtin_names: std::collections::HashSet<&str> =
+            self.capabilities.iter().map(|c| c.name()).collect();
+        let outcome = scan::scan_user_capabilities(scan_dir, &builtin_names);
+        self.append_user_cap_entries(&outcome.admitted);
+        outcome
+    }
+
+    /// Engine boot arm of [`append_user_caps`]: forwards the daemon-wide
+    /// executor handles into the scan so `UserCapability::new_with_executor`
+    /// carries them from construction (AR-37).
+    #[cfg(feature = "wasm")]
+    fn append_user_caps_with_executor(
         &mut self,
         scan_dir: &std::path::Path,
         engine: Option<&std::sync::Arc<nexus_wasm_host::WasmEngine>>,
@@ -700,13 +717,12 @@ impl CapabilityRegistry {
     ) -> scan::ScanOutcome {
         let builtin_names: std::collections::HashSet<&str> =
             self.capabilities.iter().map(|c| c.name()).collect();
-        let outcome = scan::scan_user_capabilities(scan_dir, &builtin_names, engine, module_cache);
-        // V1.176 P1 (AR-92 #4): the outcome keeps its concrete admitted
-        // entries (cloned into the registry) so the boot site can seed the
-        // watcher's last-good mirror from them — the scan is the single
-        // admission path for both boot and hot reload. The boot-site
-        // aggregate log (`log_scan_outcome`) therefore reports the admitted
-        // count it was documented to report.
+        let outcome = scan::scan_user_capabilities_with_executor(
+            scan_dir,
+            &builtin_names,
+            engine,
+            module_cache,
+        );
         self.append_user_cap_entries(&outcome.admitted);
         outcome
     }
@@ -969,6 +985,7 @@ impl CapabilityRegistry {
 
     /// Create a registry from an explicit capability set (for testing and
     /// the engine-contract integration cases that inject a probe registry).
+    #[cfg(any(test, feature = "test-hooks"))]
     #[must_use]
     pub fn with_capabilities(caps: Vec<Box<dyn Capability>>) -> Self {
         let mut reg = Self {
@@ -1111,7 +1128,9 @@ impl CapabilityRegistryHolder {
 mod tests {
     use super::*;
     use crate::test_support::write_capability_dir;
-    use crate::{CapabilityError, CapabilityOrigin};
+    #[cfg(feature = "wasm")]
+    use crate::CapabilityError;
+    use crate::CapabilityOrigin;
 
 
     #[test]
@@ -1338,6 +1357,7 @@ mod tests {
         assert_eq!(rows, 1, "no duplicate catalog row");
     }
 
+#[cfg(feature = "wasm")]
     #[tokio::test]
     async fn with_runtime_deps_and_wasm_and_user_caps_indexes_and_executor_wired() {
         let tmp = tempfile::tempdir().unwrap();

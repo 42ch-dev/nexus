@@ -175,28 +175,77 @@ pub fn digest_from_admitted(outcome: &ScanOutcome) -> DigestPoll {
 #[must_use]
 pub fn rebuild_registry_with_merge(
     deps: &CapabilityRuntimeDeps,
-    engine: Option<&std::sync::Arc<nexus_wasm_host::WasmEngine>>,
-    module_cache: Option<&std::sync::Arc<nexus_wasm_host::ModuleCache>>,
     scan_dir: &Path,
     mirror: &[UserCapability],
 ) -> (CapabilityRegistry, ScanOutcome) {
-    let mut reg = match (engine, module_cache) {
-        (Some(engine), Some(cache)) => CapabilityRegistry::with_runtime_deps_and_wasm(
+    #[cfg(feature = "wasm")]
+    {
+        return rebuild_registry_inner(
+            CapabilityRegistry::with_runtime_deps(deps),
+            scan_dir,
+            mirror,
+            None,
+        );
+    }
+    #[cfg(not(feature = "wasm"))]
+    rebuild_registry_inner(
+        CapabilityRegistry::with_runtime_deps(deps),
+        scan_dir,
+        mirror,
+        (),
+    )
+}
+
+/// Engine boot arm of [`rebuild_registry_with_merge`] (feature `wasm`):
+/// rebuilds the builtins through [`CapabilityRegistry::with_runtime_deps_and_wasm`]
+/// and forwards the daemon-wide executor handles into the scan (AR-37).
+#[must_use]
+#[cfg(feature = "wasm")]
+pub fn rebuild_registry_with_merge_with_executor(
+    deps: &CapabilityRuntimeDeps,
+    engine: &std::sync::Arc<nexus_wasm_host::WasmEngine>,
+    module_cache: &std::sync::Arc<nexus_wasm_host::ModuleCache>,
+    scan_dir: &Path,
+    mirror: &[UserCapability],
+) -> (CapabilityRegistry, ScanOutcome) {
+    rebuild_registry_inner(
+        CapabilityRegistry::with_runtime_deps_and_wasm(
             deps,
             std::sync::Arc::clone(engine),
-            std::sync::Arc::clone(cache),
+            std::sync::Arc::clone(module_cache),
         ),
-        // Engine-less arm (AR-44). qc3 S-5: with `deps.pool` present this
-        // rebuilds a fresh `NarrativeCompute` (its own `WasmEngine` +
-        // `ModuleCache::warm_embedded`) per reload — production exposure is
-        // ~nil because this arm is only taken when the daemon-wide
-        // `WasmEngine::new()` already failed at boot, and `with_pool` then
-        // fails the same way and degrades to `engine: None` cheaply; tests
-        // use `pool: None` → the no-op `NarrativeCompute::new()`.
-        _ => CapabilityRegistry::with_runtime_deps(deps),
-    };
+        scan_dir,
+        mirror,
+        Some((engine, module_cache)),
+    )
+}
+
+#[must_use]
+fn rebuild_registry_inner(
+    mut reg: CapabilityRegistry,
+    scan_dir: &Path,
+    mirror: &[UserCapability],
+    #[cfg(feature = "wasm")] executor: Option<(
+        &std::sync::Arc<nexus_wasm_host::WasmEngine>,
+        &std::sync::Arc<nexus_wasm_host::ModuleCache>,
+    )>,
+    #[cfg(not(feature = "wasm"))] _executor: (),
+) -> (CapabilityRegistry, ScanOutcome) {
+    #[cfg(not(feature = "wasm"))]
+    let _ = _executor;
     let builtin_names: HashSet<&str> = reg.capabilities.iter().map(|c| c.name()).collect();
-    let scan = scan::scan_user_capabilities(scan_dir, &builtin_names, engine, module_cache);
+    #[cfg(feature = "wasm")]
+    let scan = match executor {
+        Some((engine, module_cache)) => scan::scan_user_capabilities_with_executor(
+            scan_dir,
+            &builtin_names,
+            Some(engine),
+            Some(module_cache),
+        ),
+        None => scan::scan_user_capabilities(scan_dir, &builtin_names),
+    };
+    #[cfg(not(feature = "wasm"))]
+    let scan = scan::scan_user_capabilities(scan_dir, &builtin_names);
     let merged = merge_user_caps(&scan, mirror);
     let outcome = ScanOutcome {
         admitted: merged.clone(),
@@ -456,14 +505,14 @@ use crate::CapabilityOrigin;
         write_capability_dir(tmp.path(), "demo.pull");
         write_capability_dir(tmp.path(), "gone.cap");
         let deps = test_deps();
-        let (_, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, tmp.path(), &[]);
+        let (_, boot_outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
         let mirror = boot_outcome.admitted;
 
         // Break demo.pull's trio (invalid descriptor) and delete gone.cap.
         std::fs::remove_dir_all(tmp.path().join("gone.cap")).unwrap();
         std::fs::write(tmp.path().join("demo.pull/capability.json"), "{ not json").unwrap();
 
-        let (_, hot_outcome) = rebuild_registry_with_merge(&deps, None, None, tmp.path(), &mirror);
+        let (_, hot_outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &mirror);
         // demo.pull skipped with the boot vocabulary reason, gone.cap dropped.
         assert_eq!(hot_outcome.skipped.len(), 1);
         assert_eq!(hot_outcome.skipped[0].name, "demo.pull");
@@ -491,12 +540,12 @@ use crate::CapabilityOrigin;
         let tmp = tempfile::tempdir().unwrap();
         write_capability_dir(tmp.path(), "demo.pull");
         let deps = test_deps();
-        let (_, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, tmp.path(), &[]);
+        let (_, boot_outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
         let mirror = boot_outcome.admitted;
         // Rebuild unchanged: the name is admitted again, and the merge must
         // NOT duplicate it (new entry wins, mirror copy dropped).
         let (reg, hot_outcome) =
-            rebuild_registry_with_merge(&deps, None, None, tmp.path(), &mirror);
+            rebuild_registry_with_merge(&deps, tmp.path(), &mirror);
         assert_eq!(
             hot_outcome.skipped,
             [] as [crate::scan::SkippedCapability; 0]
@@ -514,7 +563,7 @@ use crate::CapabilityOrigin;
         write_capability_dir(tmp.path(), "demo.pull");
         write_capability_dir(tmp.path(), "gone.cap");
         let deps = test_deps();
-        let (_, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, tmp.path(), &[]);
+        let (_, boot_outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
         let mirror = boot_outcome.admitted;
         assert_eq!(mirror.len(), 2, "both names admitted at boot");
 
@@ -566,7 +615,7 @@ use crate::CapabilityOrigin;
             CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, tmp.path());
         // Hot path with an EMPTY prior mirror (nothing to carry/drop).
         let (hot_reg, hot_outcome) =
-            rebuild_registry_with_merge(&deps, None, None, tmp.path(), &[]);
+            rebuild_registry_with_merge(&deps, tmp.path(), &[]);
 
         assert_eq!(
             boot_outcome.skipped,
@@ -597,7 +646,7 @@ use crate::CapabilityOrigin;
         let tmp = tempfile::tempdir().unwrap();
         write_capability_dir(tmp.path(), "demo.pull");
         let deps = test_deps();
-        let (reg, outcome) = rebuild_registry_with_merge(&deps, None, None, tmp.path(), &[]);
+        let (reg, outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
         let mirror = outcome.admitted.clone();
         assert!(!mirror.is_empty());
 
@@ -607,7 +656,7 @@ use crate::CapabilityOrigin;
         // then break the trio on disk and swap.
         let held = holder.get().expect("registry present before swap");
         std::fs::write(tmp.path().join("demo.pull/capability.json"), "{ not json").unwrap();
-        let (reg2, outcome2) = rebuild_registry_with_merge(&deps, None, None, tmp.path(), &mirror);
+        let (reg2, outcome2) = rebuild_registry_with_merge(&deps, tmp.path(), &mirror);
         assert_eq!(
             outcome2.skipped.len(),
             1,
@@ -646,7 +695,7 @@ use crate::CapabilityOrigin;
         let mut mirror = mirror
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let (reg, outcome) = rebuild_registry_with_merge(deps, None, None, scan_dir, &mirror);
+        let (reg, outcome) = rebuild_registry_with_merge(deps, scan_dir, &mirror);
         holder.swap(std::sync::Arc::new(reg));
         *mirror = outcome.admitted;
     }
@@ -869,7 +918,7 @@ use crate::CapabilityOrigin;
         std::fs::create_dir_all(&scan_dir).unwrap();
         write_capability_dir(&scan_dir, "demo.pull");
         let deps = test_deps();
-        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, &scan_dir, &[]);
+        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, &scan_dir, &[]);
         let holder = CapabilityRegistryHolder::new();
         holder.swap(std::sync::Arc::new(reg));
         let mirror: std::sync::Arc<std::sync::Mutex<Vec<UserCapability>>> =
@@ -925,7 +974,7 @@ use crate::CapabilityOrigin;
         std::fs::create_dir_all(&scan_dir).unwrap();
         write_capability_dir(&scan_dir, "demo.pull");
         let deps = test_deps();
-        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, &scan_dir, &[]);
+        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, &scan_dir, &[]);
         let holder = CapabilityRegistryHolder::new();
         holder.swap(std::sync::Arc::new(reg));
         let mirror: std::sync::Arc<std::sync::Mutex<Vec<UserCapability>>> =
@@ -994,7 +1043,7 @@ use crate::CapabilityOrigin;
         std::fs::create_dir_all(&scan_dir).unwrap();
         write_capability_dir(&scan_dir, "alpha.cap");
         let deps = test_deps();
-        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, &scan_dir, &[]);
+        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, &scan_dir, &[]);
         let holder = CapabilityRegistryHolder::new();
         holder.swap(std::sync::Arc::new(reg));
         let mirror: std::sync::Arc<std::sync::Mutex<Vec<UserCapability>>> =
@@ -1085,7 +1134,7 @@ use crate::CapabilityOrigin;
         std::fs::create_dir_all(&scan_dir).unwrap();
         write_capability_dir(&scan_dir, "alpha.cap");
         let deps = test_deps();
-        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, &scan_dir, &[]);
+        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, &scan_dir, &[]);
         let holder = CapabilityRegistryHolder::new();
         holder.swap(std::sync::Arc::new(reg));
         let mirror: std::sync::Arc<std::sync::Mutex<Vec<UserCapability>>> =
@@ -1178,7 +1227,7 @@ use crate::CapabilityOrigin;
         std::fs::create_dir_all(&scan_dir).unwrap();
         write_capability_dir(&scan_dir, "alpha.cap");
         let deps = test_deps();
-        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, &scan_dir, &[]);
+        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, &scan_dir, &[]);
         let holder = CapabilityRegistryHolder::new();
         holder.swap(std::sync::Arc::new(reg));
         let mirror: std::sync::Arc<std::sync::Mutex<Vec<UserCapability>>> =
@@ -1219,7 +1268,7 @@ use crate::CapabilityOrigin;
         std::fs::create_dir_all(&scan_dir).unwrap();
         write_capability_dir(&scan_dir, "demo.pull");
         let deps = test_deps();
-        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, &scan_dir, &[]);
+        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, &scan_dir, &[]);
         let holder = CapabilityRegistryHolder::new();
         holder.swap(std::sync::Arc::new(reg));
         let mirror: std::sync::Arc<std::sync::Mutex<Vec<UserCapability>>> =

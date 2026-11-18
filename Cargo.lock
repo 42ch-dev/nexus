@@ -3661,6 +3661,7 @@ dependencies = [
  "nexus-creator-memory",
  "nexus-knowledge",
  "nexus-local-db",
+ "nexus-module-manifest",
  "nexus-narrative",
  "nexus-preset",
  "nexus-spoke-adapter",

@@ -11,6 +11,19 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+default = []
+# WASM compute (nexus-wasm-host) and the code that executes or admits wasm
+# modules: the sandboxed narrative.compute executor wiring, user-capability
+# executor, the registry wasm constructors, the manifest hash pairing in
+# admission and ComputeInputBuilder. AC1: off by default — the default build
+# carries no WASM dependency; real compute consumers enable it explicitly.
+wasm = ["dep:nexus-wasm-host"]
+# Exposes the test-only support surface (builtins::work_commit test recorder,
+# CapabilityRegistry::with_capabilities) to cross-crate tests. Never enabled
+# by production builds.
+test-hooks = []
+
 [lib]
 path = "src/lib.rs"
 
@@ -33,8 +46,11 @@ nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
-nexus-wasm-host = { path = "../nexus-wasm-host" }
+nexus-wasm-host = { path = "../nexus-wasm-host", optional = true }
 nexus-compute-policy = { path = "../nexus-compute-policy" }
+# Pure manifest metadata/validation surface (AR-8): gates 2–4 of admission and
+# ComputeInputBuilder use this with or without the `wasm` feature.
+nexus-module-manifest = { path = "../../modules/nexus-module-manifest" }
 uuid = { workspace = true }
 handlebars = { workspace = true }
 blake3 = { workspace = true }

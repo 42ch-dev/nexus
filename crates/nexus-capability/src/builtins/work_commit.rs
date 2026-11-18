@@ -301,6 +301,7 @@ pub async fn commit_work_bytes(
 }
 
 /// Recording test executor for the builtin modules' own tests.
+#[cfg(any(test, feature = "test-hooks"))]
 pub mod test_support {
     use std::path::Path;
 

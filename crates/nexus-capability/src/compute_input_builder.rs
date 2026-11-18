@@ -23,7 +23,7 @@ use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
 use nexus_narrative::NarrativeGateway;
 use nexus_spoke_adapter::conversion::knowledge_record_to_spoke;
-use nexus_wasm_host::ModuleManifest;
+use nexus_module_manifest::ModuleManifest;
 use serde_json::{Map, Value};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
@@ -85,7 +85,7 @@ impl From<nexus_knowledge::world_kb::KbStoreError> for ComputeBuildError {
 /// # use nexus_capability::compute_input_builder::ComputeInputBuilder;
 /// # use serde_json::Map;
 /// # let pool: sqlx::SqlitePool = unimplemented!();
-/// # let manifest: nexus_wasm_host::ModuleManifest = unimplemented!();
+/// # let manifest: nexus_module_manifest::ModuleManifest = unimplemented!();
 /// # let selection: nexus_knowledge::world_kb::store::KnowledgeReadScope = unimplemented!();
 /// let builder = ComputeInputBuilder::new(pool, "wld_abc123", manifest, Map::new(), selection);
 /// let input = builder.build().await?;

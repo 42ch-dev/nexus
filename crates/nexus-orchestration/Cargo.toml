@@ -78,6 +78,9 @@ uuid = { workspace = true }
 reqwest = { workspace = true, features = ["stream"] }
 
 [dev-dependencies]
+# Cross-crate test hooks (RecordingExecutor, with_capabilities) and the wasm
+# compute path for the compute_input_builder / engine-contract test targets.
+nexus-capability = { path = "../nexus-capability", features = ["wasm", "test-hooks"] }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
 # Integration tests under tests/ need their own access to async runtime, DB pool

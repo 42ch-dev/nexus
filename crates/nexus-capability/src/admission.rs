@@ -96,7 +96,10 @@ pub fn admit(
         )));
     }
 
-    // AR-43 gate 2: module file pairing presence.
+    // AR-43 gate 2: module file pairing presence. The manifest types are the
+    // shared `nexus-module-manifest` surface (pure metadata — no WASM engine),
+    // so gates 2–4 run identically with the `wasm` feature off; only the
+    // executable binding behind `run()` is gated (WorkerUnavailable).
     let manifest_path = dir.join("manifest.json");
     let wasm_path = dir.join(format!("{}.wasm", descriptor.wasm.module_id));
     if !manifest_path.is_file() {
@@ -119,7 +122,8 @@ pub fn admit(
     let manifest_json = std::fs::read(&manifest_path).map_err(|e| {
         AdmissionError::HashMismatch(format!("cannot read {}: {e}", manifest_path.display()))
     })?;
-    let manifest: nexus_wasm_host::ModuleManifest = serde_json::from_slice(&manifest_json)
+    let manifest: nexus_module_manifest::ModuleManifest =
+        serde_json::from_slice(&manifest_json)
         .map_err(|e| {
             AdmissionError::HashMismatch(format!("cannot parse {}: {e}", manifest_path.display()))
         })?;

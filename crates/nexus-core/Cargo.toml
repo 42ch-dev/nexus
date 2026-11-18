@@ -96,7 +96,7 @@ memory-remote = [
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
 # V249: capability port/error contract moved to the private capability crate.
-nexus-capability = { path = "../nexus-capability" }
+nexus-capability = { path = "../nexus-capability", features = ["wasm"] }
 nexus-preset = { path = "../nexus-preset" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }

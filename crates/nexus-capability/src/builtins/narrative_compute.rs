@@ -49,23 +49,36 @@
 //! with `event_type: StateUpdate`, title `"compute_error"`, and a summary
 //! containing the error details. The error is also logged at `warn` level.
 
+#[cfg(feature = "wasm")]
 use crate::builtins::world::{admitted_creator_view_scope, ensure_world_owned};
 use crate::{Capability, CapabilityError};
+#[cfg(feature = "wasm")]
 use crate::state_delta;
 use async_trait::async_trait;
+#[cfg(feature = "wasm")]
 use nexus_knowledge::world_kb::KbStore;
+#[cfg(feature = "wasm")]
 use nexus_narrative::NarrativeGateway;
-use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
+#[cfg(feature = "wasm")]
+use nexus_spoke_adapter::conversion::knowledge_record_to_spoke;
+#[cfg(feature = "wasm")]
+use nexus_spoke_adapter::conversion::spoke_to_knowledge_record;
+#[cfg(feature = "wasm")]
 use nexus_wasm_host::{ComputeInput, ModuleCache, WasmEngine};
+#[cfg(feature = "wasm")]
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
+#[cfg(feature = "wasm")]
+use serde_json::json;
 use std::sync::Arc;
 
 /// Maximum size in bytes for the serialized `battle_report` field (64 KiB).
 /// R-V161P0-LOW-003: freeform `battle_report` cap to prevent unbounded output.
+#[cfg(feature = "wasm")]
 const BATTLE_REPORT_MAX_BYTES: usize = 64 * 1024;
 
 /// Input for `narrative.compute`.
+#[cfg(feature = "wasm")]
 #[derive(Debug, Deserialize)]
 struct NarrativeComputeInput {
     world_id: String,
@@ -81,6 +94,7 @@ struct NarrativeComputeInput {
 }
 
 #[allow(clippy::missing_const_for_fn)]
+#[cfg(feature = "wasm")]
 fn default_module_id() -> String {
     String::from("basic-combat")
 }
@@ -88,11 +102,18 @@ fn default_module_id() -> String {
 /// Execute a WASM compute module for a world's computable `KnowledgeEntryRecord`s.
 #[derive(Clone)]
 pub struct NarrativeCompute {
+    // The pool is consumed by the gated executor body; on a no-WASM build the
+    // field only carries the constructor input for a `wasm`-enabled consumer.
+    #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
     pool: Option<Arc<sqlx::SqlitePool>>,
+    /// The sandboxed WASM engine (feature `wasm`; absent otherwise and on the
+    /// engine-less arm — `run()` then fails closed with `WorkerUnavailable`).
+    #[cfg(feature = "wasm")]
     engine: Option<Arc<WasmEngine>>,
     /// Daemon-wide compilation cache (R-V161P3-PERF-002). When present, the
     /// module for an invocation is resolved by id from this cache instead of
     /// recompiling on every `run()`.
+    #[cfg(feature = "wasm")]
     module_cache: Option<Arc<ModuleCache>>,
 }
 
@@ -101,7 +122,9 @@ impl NarrativeCompute {
     pub const fn new() -> Self {
         Self {
             pool: None,
+            #[cfg(feature = "wasm")]
             engine: None,
+            #[cfg(feature = "wasm")]
             module_cache: None,
         }
     }
@@ -116,6 +139,17 @@ impl NarrativeCompute {
     /// singleton engine + cache at boot.
     #[must_use]
     pub fn with_pool(pool: sqlx::SqlitePool) -> Self {
+        #[cfg(not(feature = "wasm"))]
+        {
+            // No-WASM build: no engine to construct; the capability stays
+            // registered and `run()` fails closed with `WorkerUnavailable`.
+            return Self {
+                pool: Some(Arc::new(pool)),
+            };
+        }
+
+        #[cfg(feature = "wasm")]
+        {
         let engine = match WasmEngine::new() {
             Ok(e) => Arc::new(e),
             Err(e) => {
@@ -136,6 +170,7 @@ impl NarrativeCompute {
             engine: Some(engine),
             module_cache: Some(cache),
         }
+        }
     }
 
     /// Construct with a pool and a **shared, daemon-wide** `WasmEngine` +
@@ -145,6 +180,7 @@ impl NarrativeCompute {
     /// embedded and user modules) and hands them to every `NarrativeCompute`
     /// instance so module compilation happens exactly once process-wide.
     #[must_use]
+    #[cfg(feature = "wasm")]
     pub fn with_pool_and_engine(
         pool: sqlx::SqlitePool,
         engine: Arc<WasmEngine>,
@@ -178,6 +214,10 @@ impl Capability for NarrativeCompute {
 
     #[allow(clippy::too_many_lines)]
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        // WASM executor body (feature `wasm`): parses the AR-37 input, then
+        // resolves the engine/cache and runs the admitted module fail-closed.
+        #[cfg(feature = "wasm")]
+        {
         let parsed: NarrativeComputeInput = serde_json::from_value(input)
             .map_err(|e| CapabilityError::InputInvalid(format!("narrative.compute input: {e}")))?;
 
@@ -372,6 +412,17 @@ impl Capability for NarrativeCompute {
             "timeline_events_created": evt_count,
             "new_key_blocks_created": new_kb_count,
         }))
+        }
+
+        #[cfg(not(feature = "wasm"))]
+        {
+            let _ = input;
+            tracing::warn!(
+                "narrative.compute: executor not wired; WASM support not compiled in \
+                 (nexus-capability feature `wasm` disabled)"
+            );
+            Err(CapabilityError::WorkerUnavailable)
+        }
     }
 }
 
@@ -390,6 +441,7 @@ impl Capability for NarrativeCompute {
 /// `world_id` is the sole trusted source.
 ///
 /// Returns the number of blocks created.
+#[cfg(feature = "wasm")]
 async fn create_new_key_blocks(
     pool: &sqlx::SqlitePool,
     world_id: &str,
@@ -433,6 +485,7 @@ async fn create_new_key_blocks(
 /// gateway.
 ///
 /// Returns the number of events created.
+#[cfg(feature = "wasm")]
 async fn append_timeline_events(
     pool: &sqlx::SqlitePool,
     world_id: &str,
@@ -469,6 +522,7 @@ async fn append_timeline_events(
 /// `TimelineEvent` with `event_type: StateUpdate` and `title: "compute_error"`
 /// is inserted into the world timeline, and the capability returns
 /// `CapabilityError::TransientExternal`.
+#[cfg(feature = "wasm")]
 async fn handle_compute_error(
     pool: &sqlx::SqlitePool,
     world_id: &str,
@@ -510,13 +564,15 @@ async fn handle_compute_error(
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
-#[cfg(test)]
+#[cfg(all(test, feature = "wasm"))]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::state_delta;
+    #[cfg(feature = "wasm")]
+use crate::state_delta;
     use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
-    use nexus_knowledge::world_kb::KbStore;
+    #[cfg(feature = "wasm")]
+use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::init_engine_pool;
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {

@@ -104,18 +104,53 @@ pub struct ScanOutcome {
 ///   `AdmissionError` reason — never a panic, never a boot failure, never a
 ///   half-registered entry (AC-V172-2).
 ///
-/// `engine`/`module_cache` are the daemon-wide executor handles (AR-37) —
-/// `Some`/`Some` on the engine boot arm so every admitted capability can run
-/// its module, `None`/`None` on the engine-less arm (AR-44) so `run()` returns
-/// `WorkerUnavailable`.
+/// `scan_user_capabilities` is the engine-less arm (AR-44): admitted user
+/// capabilities register discoverable; their `run()` returns
+/// `WorkerUnavailable`. The engine boot arm is
+/// [`scan_user_capabilities_with_executor`] (feature `wasm`).
 #[must_use]
 #[allow(clippy::implicit_hasher)] // same builder-agnostic set contract as `admit`
-pub fn scan_user_capabilities(
+pub fn scan_user_capabilities(dir: &Path, builtin_names: &HashSet<&str>) -> ScanOutcome {
+    #[cfg(feature = "wasm")]
+    {
+        return scan_user_capabilities_inner(dir, builtin_names, (None, None));
+    }
+    #[cfg(not(feature = "wasm"))]
+    scan_user_capabilities_inner(dir, builtin_names, ())
+}
+
+/// Engine boot arm of [`scan_user_capabilities`] (feature `wasm`, AR-37):
+/// forwards the daemon-wide executor handles so every admitted capability
+/// can run its module.
+#[must_use]
+#[cfg(feature = "wasm")]
+#[allow(clippy::implicit_hasher)]
+pub fn scan_user_capabilities_with_executor(
     dir: &Path,
     builtin_names: &HashSet<&str>,
     engine: Option<&std::sync::Arc<nexus_wasm_host::WasmEngine>>,
     module_cache: Option<&std::sync::Arc<nexus_wasm_host::ModuleCache>>,
 ) -> ScanOutcome {
+    scan_user_capabilities_inner(
+        dir,
+        builtin_names,
+        (engine.cloned(), module_cache.cloned()),
+    )
+}
+
+#[must_use]
+#[allow(clippy::implicit_hasher)]
+fn scan_user_capabilities_inner(
+    dir: &Path,
+    builtin_names: &HashSet<&str>,
+    #[cfg(feature = "wasm")] executor: (
+        Option<std::sync::Arc<nexus_wasm_host::WasmEngine>>,
+        Option<std::sync::Arc<nexus_wasm_host::ModuleCache>>,
+    ),
+    #[cfg(not(feature = "wasm"))] _executor: (),
+) -> ScanOutcome {
+    #[cfg(not(feature = "wasm"))]
+    let _ = _executor;
     let mut outcome = ScanOutcome::default();
     let mut admitted_names: HashSet<String> = HashSet::new();
 
@@ -258,12 +293,16 @@ pub fn scan_user_capabilities(
         // The engine arm passes Some/Some so run() executes the module; the
         // engine-less arm passes None/None (AR-44) so run() returns
         // WorkerUnavailable.
-        outcome.admitted.push(UserCapability::new(
+        #[cfg(feature = "wasm")]
+        let admitted_cap = UserCapability::new_with_executor(
             &descriptor,
             path,
-            engine.cloned(),
-            module_cache.cloned(),
-        ));
+            executor.0.clone(),
+            executor.1.clone(),
+        );
+        #[cfg(not(feature = "wasm"))]
+        let admitted_cap = UserCapability::new(&descriptor, path);
+        outcome.admitted.push(admitted_cap);
         // V1.176 PR wave 2 (Greptile P1): the admission-time stat snapshot
         // captured above rides the outcome so the watcher's baseline is
         // scan-time ground truth (see `digest_from_admitted`).
@@ -359,7 +398,7 @@ mod tests {
     fn scan_valid_trio_admits_with_declared_name() {
         let tmp = tempfile::tempdir().unwrap();
         write_capability_dir(tmp.path(), "demo.pull");
-        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
+        let outcome = scan_user_capabilities(tmp.path(), &builtins());
         assert_eq!(outcome.admitted.len(), 1, "one admitted");
         assert!(
             outcome.skipped.is_empty(),
@@ -375,7 +414,7 @@ mod tests {
     #[test]
     fn scan_empty_dir_returns_empty_outcome() {
         let tmp = tempfile::tempdir().unwrap();
-        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
+        let outcome = scan_user_capabilities(tmp.path(), &builtins());
         assert!(outcome.admitted.is_empty());
         assert_eq!(
             outcome.skipped,
@@ -387,7 +426,7 @@ mod tests {
     fn scan_missing_dir_returns_empty_outcome_not_panic() {
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp.path().join("does-not-exist");
-        let outcome = scan_user_capabilities(&missing, &builtins(), None, None);
+        let outcome = scan_user_capabilities(&missing, &builtins());
         assert!(outcome.admitted.is_empty());
         assert_eq!(
             outcome.skipped,
@@ -405,7 +444,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("capabilities");
         std::fs::write(&path, b"not a directory").unwrap();
-        let outcome = scan_user_capabilities(&path, &builtins(), None, None);
+        let outcome = scan_user_capabilities(&path, &builtins());
         assert!(
             outcome.transient,
             "top-level non-NotFound read failure must mark the outcome transient"
@@ -423,7 +462,7 @@ mod tests {
         let dir = tmp.path().join("broken.cap");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("capability.json"), "{ not json").unwrap();
-        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
+        let outcome = scan_user_capabilities(tmp.path(), &builtins());
         assert!(outcome.admitted.is_empty());
         assert_eq!(outcome.skipped.len(), 1);
         assert_eq!(outcome.skipped[0].name, "broken.cap");
@@ -447,7 +486,7 @@ mod tests {
             descriptor_json("BadName", FAKE_SHA),
         )
         .unwrap();
-        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
+        let outcome = scan_user_capabilities(tmp.path(), &builtins());
         assert!(outcome.admitted.is_empty());
         assert_eq!(outcome.skipped.len(), 1);
         assert!(
@@ -469,7 +508,7 @@ mod tests {
             descriptor_json("other.name", FAKE_SHA),
         )
         .unwrap();
-        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
+        let outcome = scan_user_capabilities(tmp.path(), &builtins());
         assert!(outcome.admitted.is_empty());
         assert_eq!(outcome.skipped.len(), 1);
         assert!(
@@ -488,7 +527,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         write_capability_dir(tmp.path(), "sync.pull"); // builtin name (gate 1)
         write_capability_dir(tmp.path(), "demo.pull"); // valid, admitted
-        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
+        let outcome = scan_user_capabilities(tmp.path(), &builtins());
         let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(
             names,
@@ -513,7 +552,7 @@ mod tests {
         write_capability_dir(tmp.path(), "_system.cap");
         write_capability_dir(tmp.path(), ".hidden.cap");
         write_capability_dir(tmp.path(), "visible.cap");
-        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
+        let outcome = scan_user_capabilities(tmp.path(), &builtins());
         let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(names, vec!["visible.cap"]);
         assert_eq!(
@@ -540,7 +579,7 @@ mod tests {
             descriptor_json("a.dup", FAKE_SHA),
         )
         .unwrap();
-        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
+        let outcome = scan_user_capabilities(tmp.path(), &builtins());
         let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(
             names,
@@ -569,7 +608,7 @@ mod tests {
         write_capability_dir(tmp.path(), "zeta.cap");
         write_capability_dir(tmp.path(), "alpha.cap");
         write_capability_dir(tmp.path(), "mike.cap");
-        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
+        let outcome = scan_user_capabilities(tmp.path(), &builtins());
         let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(
             names,
