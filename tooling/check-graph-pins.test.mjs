@@ -317,9 +317,27 @@ test('catalog cohort fails when a positive pin resolves no row', () => {
 
 // The two shipped authoring selectors plus the core they forward to. The
 // manifests are raw because the shape under test IS the feature wiring: a
-// selector's forwarding edge and core's optional simulator dep, which the
-// shared `manifestFor` helper cannot express (no optional-dep form).
-function authoringCrates({ nodeForwards = true, computeLinksSimulator = false } = {}) {
+// selector's forwarding edge, core's optional simulator dep and the plain
+// store dep that gives each selection a non-empty census.
+//
+// `plainDep` / `computeLeaf` exist so a case can make ONE negative root
+// vacuous: the compute row needs a dep of its own, the no-default row needs a
+// non-optional one, and each control must be provably able to fail.
+function authoringCrates({
+  nodeForwards = true,
+  nodeIndependentSimulator = false,
+  computeLinksSimulator = false,
+  plainDep = true,
+  computeLeaf = true,
+} = {}) {
+  const coreDeps = [
+    ...(plainDep ? ['core-store = { path = "../core-store" }'] : []),
+    'nexus-workflow-simulate = { path = "../nexus-workflow-simulate", optional = true }',
+    ...(computeLeaf ? ['compute-leaf = { path = "../compute-leaf", optional = true }'] : []),
+  ];
+  const compute = computeLinksSimulator
+    ? '["dep:nexus-workflow-simulate"]'
+    : `[${computeLeaf ? '"dep:compute-leaf"' : ''}]`;
   const core = `[package]
 name = "nexus-core"
 version = "0.1.0"
@@ -328,13 +346,13 @@ edition = "2021"
 [features]
 default = []
 execution = []
-compute = ["${computeLinksSimulator ? 'dep:nexus-workflow-simulate' : 'execution'}"]
+compute = ${compute}
 strategy-authoring = ["execution", "dep:nexus-workflow-simulate"]
 
 [dependencies]
-nexus-workflow-simulate = { path = "../nexus-workflow-simulate", optional = true }
+${coreDeps.join('\n')}
 `;
-  const selector = (name, feature, forwards) => `[package]
+  const selector = (name, feature, forwards, extraDeps = '') => `[package]
 name = "${name}"
 version = "0.1.0"
 edition = "2021"
@@ -345,12 +363,25 @@ ${feature} = [${forwards ? '"nexus-core/strategy-authoring"' : ''}]
 
 [dependencies]
 nexus-core = { path = "../nexus-core" }
-`;
+${extraDeps}`;
   return {
     'nexus-core': { manifest: core },
     nexus42: { manifest: selector('nexus42', 'cli', true) },
-    'nexus-core-node': { manifest: selector('nexus-core-node', 'host', nodeForwards) },
+    'nexus-core-node': {
+      manifest: selector(
+        'nexus-core-node',
+        'host',
+        nodeForwards,
+        // A non-optional simulator dep: the row that must fail is feature
+        // containment, never the earlier exact-one probe.
+        nodeIndependentSimulator
+          ? 'nexus-workflow-simulate = { path = "../nexus-workflow-simulate" }'
+          : '',
+      ),
+    },
     'nexus-workflow-simulate': { deps: {} },
+    ...(plainDep ? { 'core-store': { deps: {} } } : {}),
+    ...(computeLeaf ? { 'compute-leaf': { deps: {} } } : {}),
   };
 }
 
@@ -368,21 +399,59 @@ test('authoring cohort passes and reads the checked-in consumer', () => {
   assert.match(run.stdout, /ok: nexus-core selects feature strategy-authoring for nexus-core-node <default>/);
   assert.match(run.stdout, /ok: nexus-workflow-simulate single version \(0\.1\.0\) for nexus42/);
   assert.match(run.stdout, /ok: nexus-workflow-simulate single version \(0\.1\.0\) for nexus-core-node/);
-  // Negative rows: no non-authoring selection links the simulator.
+  // Negative rows: no non-authoring selection links the simulator, and each
+  // carries its own positive census on the same root and selection.
+  assert.match(run.stdout, /ok: nexus-core --features compute resolves \d+ distinct dependency package\(s\)/);
   assert.match(run.stdout, /ok: nexus-workflow-simulate absent from nexus-core --features compute/);
+  assert.match(run.stdout, /ok: nexus-core --no-default-features resolves \d+ distinct dependency package\(s\)/);
+  assert.match(run.stdout, /ok: nexus-workflow-simulate absent from nexus-core --no-default-features/);
   // The consumer rows resolve the CHECKED-IN fixture, not this workspace, so
-  // the pinned core sets are the real consumer's.
+  // the pinned core sets are the real consumer's (`test-hooks` is the checker's
+  // own `observable` feature, selecting the lane-consultation counter).
   assert.match(
     run.stdout,
-    /ok: nexus-core v0\.1\.0 feats=\[execution,nexus-connect,operation-id\] for authoring-cohorts <default>/,
+    /ok: nexus-core v0\.1\.0 feats=\[execution,nexus-connect,operation-id,test-hooks\] for authoring-cohorts <default>/,
   );
   assert.match(
     run.stdout,
-    /ok: nexus-core v0\.1\.0 feats=\[execution,nexus-connect,operation-id,strategy-authoring\] for authoring-cohorts --features authoring/,
+    /ok: nexus-core v0\.1\.0 feats=\[execution,nexus-connect,operation-id,strategy-authoring,test-hooks\] for authoring-cohorts --features authoring/,
   );
   assert.match(run.stdout, /ok: nexus-agent-host absent from authoring-cohorts --features authoring/);
   assert.match(run.stdout, /ok: nexus-wasm-host absent from authoring-cohorts --features authoring/);
   assert.match(run.stdout, /graph pins OK \(cohort: authoring\)$/m);
+});
+
+test('the compute negative row fails when its root graph is vacuous', () => {
+  // No plain dep and no compute leaf: `--features compute` resolves the root
+  // alone, which `assert_empty` would otherwise report as "absent".
+  const root = createWorkspace(authoringCrates({ plainDep: false, computeLeaf: false }));
+  const run = authoringRun(root);
+
+  assert.notEqual(run.status, 0, run.stdout);
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(
+    run.stdout,
+    /nexus-core --features compute: resolved graph names only 1 package\(s\); the absence pins would be vacuous/,
+  );
+  assert.doesNotMatch(run.stdout, /ok: nexus-workflow-simulate absent from nexus-core --features compute/);
+});
+
+test('the no-default negative row fails when its root graph is vacuous', () => {
+  // The compute leaf keeps that row non-empty, so the failure can only be the
+  // no-default census.
+  const root = createWorkspace(authoringCrates({ plainDep: false }));
+  const run = authoringRun(root);
+
+  assert.notEqual(run.status, 0, run.stdout);
+  assert.match(run.stdout, /ok: nexus-core --features compute resolves 1 distinct dependency package\(s\)/);
+  assert.match(
+    run.stdout,
+    /nexus-core --no-default-features: resolved graph names only 1 package\(s\); the absence pins would be vacuous/,
+  );
+  assert.doesNotMatch(
+    run.stdout,
+    /ok: nexus-workflow-simulate absent from nexus-core --no-default-features/,
+  );
 });
 
 test('dropping the native selector authoring edge fails the cohort', () => {
@@ -398,6 +467,24 @@ test('dropping the native selector authoring edge fails the cohort', () => {
   // The CLI row still printed its ok line, so the failure is attributable to
   // the native selector rather than to a collapsed fixture.
   assert.match(run.stdout, /ok: nexus-core selects feature strategy-authoring for nexus42/);
+});
+
+test('a native selector with the simulator but without the authoring feature fails on containment', () => {
+  // The simulator is linked independently, so the earlier exact-one row passes
+  // and the ONLY possible failure is feature containment. Without that check a
+  // "selected the simulator some other way" graph would green the cohort.
+  const root = createWorkspace(
+    authoringCrates({ nodeForwards: false, nodeIndependentSimulator: true }),
+  );
+  const run = authoringRun(root);
+
+  assert.notEqual(run.status, 0, run.stdout);
+  assert.match(run.stdout, /ok: nexus-workflow-simulate single version \(0\.1\.0\) for nexus-core-node/);
+  assert.match(
+    run.stdout,
+    /graph pin failed: nexus-core for nexus-core-node <default>: expected feature 'strategy-authoring'/,
+  );
+  assert.doesNotMatch(run.stdout, /ok: nexus-core selects feature strategy-authoring for nexus-core-node/);
 });
 
 test('a compute selection that links the simulator fails the cohort', () => {
@@ -783,6 +870,9 @@ function capabilityCrates({ connectDeps = {}, capabilityDeps = {}, extra = {} } 
         'operation-id = []',
         'execution = ["operation-id", "nexus-connect/peer-tools"]',
         'compute = ["execution", "dep:nexus-wasm-host"]',
+        // v1.249 A3: the node host selects the authoring surface, so the
+        // synthetic core declares what the real one forwards.
+        'strategy-authoring = ["execution"]',
       ],
       deps: { 'nexus-connect': ', optional = true', 'nexus-wasm-host': ', optional = true' },
     },
@@ -791,7 +881,8 @@ function capabilityCrates({ connectDeps = {}, capabilityDeps = {}, extra = {} } 
         'nexus-capability': null,
         'nexus-wasm-host': null,
         'nexus-agent-host': null,
-        'nexus-core': ', features = ["execution", "provider-host", "compute"]',
+        'nexus-core':
+          ', features = ["execution", "provider-host", "compute", "strategy-authoring"]',
       },
     },
     ...extra,

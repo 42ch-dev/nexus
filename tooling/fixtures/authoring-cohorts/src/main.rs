@@ -11,6 +11,10 @@
 //!   catalog in BOTH selections (the catalog compiles in every cohort);
 //! - **runnable**: the registry binds the row, and the allowlist
 //!   (`spine_resolves`) agrees with it, only where the authoring surface links;
+//! - **reservation**: neither entry path asks the peer/user fallback lanes about
+//!   the canonical id (a zero delta on the registry's lane-consultation
+//!   counter, with a live-counter control), so the refusal below is an early
+//!   canonical miss rather than a fall-through that found nothing;
 //! - **dispatch**: without authoring the dispatch refuses with the
 //!   canonical-miss `not_supported`; with authoring it reaches the real Generate
 //!   kernel and commits candidate revision 1 with its `generate` provenance;
@@ -175,14 +179,27 @@ async fn main() {
         "the Generate row is bound iff strategy-authoring is linked"
     );
     assert_eq!(
-        registry.spine_resolves(&context, GENERATE_TOOL),
-        bound,
-        "the allowlist decision must match the binding"
-    );
-    assert_eq!(
         registry.ids().any(|id| id == GENERATE_TOOL),
         bound,
         "the runnable id list must match the binding"
+    );
+
+    // RESERVATION, not just the refusal. `not_supported` alone cannot tell an
+    // early canonical-miss refusal from a fall-through that asked the peer and
+    // user lanes and found nothing there — both return the same code. The
+    // registry's lane-consultation counter distinguishes them, so both entry
+    // paths (allowlist and dispatch) are pinned to a ZERO delta for the
+    // canonical id.
+    //
+    // The counter is compiled in by core's `test-hooks`, selected by this
+    // checker's own `observable` feature (tooling-only, `publish = false`,
+    // never a shipped selection). No other test-hooks seam is armed.
+    let consulted = || host_tool_registry().fallback_consultations();
+    let lanes_before = consulted();
+    assert_eq!(
+        registry.spine_resolves(&context, GENERATE_TOOL),
+        bound,
+        "the allowlist decision must match the binding"
     );
 
     // Dispatch: the reserved-but-unbound row refuses through the canonical-miss
@@ -199,6 +216,25 @@ async fn main() {
         ),
     )
     .await;
+
+    assert_eq!(
+        consulted(),
+        lanes_before,
+        "a canonical id must never reach the peer/user fallback lanes (allowlist + dispatch)"
+    );
+
+    // CONTROL: a non-canonical, unbound id DOES consult the lanes, so a counter
+    // that never moved would prove nothing. Without this arm the zero delta
+    // above would also pass on a build where the counter is dead.
+    assert!(
+        !registry.spine_resolves(&context, "tools.not-a-real-peer-tool"),
+        "an unregistered peer-grammar id must not resolve"
+    );
+    assert_eq!(
+        consulted(),
+        lanes_before + 1,
+        "the lane counter must observe exactly the one real consultation"
+    );
 
     #[cfg(feature = "authoring")]
     let dispatch = {

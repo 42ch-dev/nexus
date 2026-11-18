@@ -61,11 +61,14 @@
 #   in-process embedded server; implies connect-client):
 #     same pins as connect-client
 #   -p nexus-core-node (native/TS host): nexus-core resolves
-#     feats=[compute,default,execution,nexus-connect,operation-id,provider-host]
+#     feats=[compute,default,execution,nexus-connect,operation-id,provider-host,
+#     strategy-authoring]
 #     — the node-owned selection gains the hosted production factory's
 #     Host-plane half (v1.195 P0-T5) and the WASM compute runtime its factory
 #     installs (v1.195 P2-T3); v1.244 adds the `nexus-connect` forward through
-#     `execution`. The default/domain and Connect cohorts below keep
+#     `execution`; v1.249 A3 adds `strategy-authoring` (the native host serves
+#     the authoring routes, and execution alone links none of them). The
+#     default/domain and Connect cohorts below keep
 #     nexus-agent-host and nexus-wasm-host absent.
 #
 # Feature evidence (resolved feature set on the inverted probe row):
@@ -594,7 +597,7 @@ if [[ "$COHORT" == "capability" ]]; then
   assert_exactly_one nexus-core-node "" nexus-capability
   assert_exactly_one nexus-core-node "" nexus-wasm-host
   assert_exactly_one nexus-core-node "" nexus-agent-host
-  assert_features nexus-core-node "" nexus-core "compute,default,execution,nexus-connect,operation-id,provider-host"
+  assert_features nexus-core-node "" nexus-core "compute,default,execution,nexus-connect,operation-id,provider-host,strategy-authoring"
 
   echo "graph pins OK (cohort: capability)"
   exit 0
@@ -629,20 +632,26 @@ if [[ "$COHORT" == "authoring" ]]; then
   assert_exactly_one nexus-core-node "" nexus-workflow-simulate
   assert_features_include nexus-core-node "" nexus-core strategy-authoring
 
-  # (2) Non-authoring selections link no simulator.
+  # (2) Non-authoring selections link no simulator. Each negative row carries
+  # its OWN positive control: `assert_empty` tolerates Cargo's unmatched-package
+  # diagnostic, so an empty or otherwise unresolvable root would report "absent"
+  # exactly like a valid selection. The census runs first, on the same root and
+  # the same feature selection, so a vacuous negative fails instead of greening.
+  assert_graph_nonempty nexus-core "--features compute"
   assert_empty nexus-core "--features compute" nexus-workflow-simulate
+  assert_graph_nonempty nexus-core "--no-default-features"
   assert_empty nexus-core "--no-default-features" nexus-workflow-simulate
 
   # (3) The consumer, against ITS OWN manifest — the checked-in file is the
   # subject here, so a caller's `--manifest-path` cannot substitute for it.
   MANIFEST_PATH="$AUTHORING_CONSUMER_MANIFEST"
   assert_graph_nonempty authoring-cohorts ""
-  assert_features authoring-cohorts "" nexus-core "execution,nexus-connect,operation-id"
+  assert_features authoring-cohorts "" nexus-core "execution,nexus-connect,operation-id,test-hooks"
   assert_empty authoring-cohorts "" nexus-workflow-simulate
   assert_empty authoring-cohorts "" nexus-agent-host
   assert_empty authoring-cohorts "" nexus-wasm-host
   assert_exactly_one authoring-cohorts "--features authoring" nexus-workflow-simulate
-  assert_features authoring-cohorts "--features authoring" nexus-core "execution,nexus-connect,operation-id,strategy-authoring"
+  assert_features authoring-cohorts "--features authoring" nexus-core "execution,nexus-connect,operation-id,strategy-authoring,test-hooks"
   assert_empty authoring-cohorts "--features authoring" nexus-agent-host
   assert_empty authoring-cohorts "--features authoring" nexus-wasm-host
 
@@ -780,7 +789,10 @@ assert_exactly_one nexus-core "--no-default-features" nexus-memory-provider
 # `execution` implies `operation-id` (v1.207 P3-T1), so it appears in the set;
 # v1.244, `execution` is also the feature that turns on the optional
 # `nexus-connect` edge, so its implicit feature name appears there too.
-assert_features nexus-core-node "" nexus-core "compute,default,execution,nexus-connect,operation-id,provider-host"
+# v1.249 A3: the node host serves the authoring routes, so it selects
+# `strategy-authoring` explicitly — execution alone links no authoring surface.
+# The set stays EXACT, so any other selection change still fails this pin.
+assert_features nexus-core-node "" nexus-core "compute,default,execution,nexus-connect,operation-id,provider-host,strategy-authoring"
 # The cohort edge is real, not a feature-flag claim: the Host plane the hosted
 # factory composes resolves in the node cohort.
 assert_exactly_one nexus-core-node "" nexus-agent-host

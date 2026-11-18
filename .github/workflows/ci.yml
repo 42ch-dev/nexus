@@ -585,6 +585,23 @@ jobs:
       - name: Check graph pins (capability cohort)
         timeout-minutes: 10
         run: bash tooling/check-graph-pins.sh --cohort capability
+      # V1.249 A3: the strategy-authoring surface as a SELECTION. The no-arg
+      # matrix and the synthetic suite below pin the shipped graphs, but neither
+      # runs the real cohort or the checker-owned consumer — a later CLI/native
+      # forwarding regression would keep them green. The cohort resolves the
+      # checked-in consumer manifest (both selections) and the two `cargo run`
+      # steps execute its runtime assertions, locked and offline. This job's
+      # earlier `check-wire-drift.sh` already fetched the registry index, so
+      # `--offline` resolves from the prepared cache; no new job is added.
+      - name: Check graph pins (authoring cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort authoring
+      - name: Authoring consumer (execution-only)
+        timeout-minutes: 15
+        run: cargo run --locked --offline --manifest-path tooling/fixtures/authoring-cohorts/Cargo.toml
+      - name: Authoring consumer (authoring)
+        timeout-minutes: 15
+        run: cargo run --locked --offline --manifest-path tooling/fixtures/authoring-cohorts/Cargo.toml --features authoring
       # v1.249 R3 + compute-policy QC: the scoped cohort selectors and the
       # `--manifest-path` override are proven on disposable real-Cargo
       # workspaces — positive fixtures, one rejection per forbidden edge, the

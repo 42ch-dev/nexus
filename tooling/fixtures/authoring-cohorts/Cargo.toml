@@ -14,9 +14,15 @@ publish = false
 [workspace]
 
 [features]
-default = ["execution"]
+default = ["execution", "observable"]
 execution = ["nexus-core/execution"]
-authoring = ["execution", "nexus-core/strategy-authoring"]
+authoring = ["execution", "observable", "nexus-core/strategy-authoring"]
+# Core's `test-hooks` compiles the registry's peer/user lane-consultation
+# counter in. This consumer is a checker (publish = false, tooling-only, never a
+# shipped selection): the counter is what makes the reservation discriminating —
+# "not_supported" alone cannot tell an early canonical-miss refusal from a
+# fall-through that found nothing. No other test-hooks seam is armed here.
+observable = ["nexus-core/test-hooks"]
 
 [dependencies]
 # `default-features = false`: the domain default is empty, so the selection
