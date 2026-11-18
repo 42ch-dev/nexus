@@ -9,6 +9,8 @@ import {
   REPO_ROOT,
   cleanupTempRepo,
   createTempRepo,
+  git,
+  initGitRepo,
   writeRepoFile,
 } from "./test-harness.mjs";
 
@@ -60,7 +62,10 @@ function tinyFixture(options = {}) {
   if (options.withSource !== false) {
     files[`${TINY_CRATE_DIR}/src/lib.rs`] = "pub fn tiny() {}\n";
   }
-  return createTempRepo({ files });
+  const dir = createTempRepo({ files });
+  // Staging derives its path list from Git, as it does in a real checkout.
+  initGitRepo(dir);
+  return dir;
 }
 
 /**
@@ -70,9 +75,11 @@ function tinyFixture(options = {}) {
  *
  * @param {string} caseDir Fixture case directory name.
  * @param {string} entryName Contract carrier and discovery name.
+ * @param {{ initGit?: boolean }} [options] `initGit: false` lets a test add
+ *   ignored inputs before the single initial commit.
  * @returns {string}
  */
-function consumerFixtureRepo(caseDir, entryName) {
+function consumerFixtureRepo(caseDir, entryName, options = {}) {
   const dir = createTempRepo();
   const subjectDir = `fixtures/${entryName}`;
   cpSync(join(CONSUMER_FIXTURES_DIR, caseDir, "subject"), join(dir, subjectDir), {
@@ -94,6 +101,10 @@ function consumerFixtureRepo(caseDir, entryName) {
     join(dir, CONSUMER_FIXTURES_PATH, entryName),
     { recursive: true },
   );
+  if (options.initGit !== false) {
+    // Staging derives its path list from Git, as it does in a real checkout.
+    initGitRepo(dir);
+  }
   return dir;
 }
 
@@ -181,6 +192,38 @@ test("a manifest that is not a crate fails instead of being skipped", () => {
   }
 });
 
+test("staging fails closed when Git cannot list the working source", () => {
+  const dir = createTempRepo();
+  try {
+    writeRepoFile(dir, `${TINY_CRATE_DIR}/Cargo.toml`, TINY_MANIFEST);
+    writeRepoFile(dir, `${TINY_CRATE_DIR}/src/lib.rs`, "pub fn tiny() {}\n");
+    writeRepoFile(
+      dir,
+      VERSION_BRACKETS_PATH,
+      `${JSON.stringify(
+        {
+          contract: [
+            {
+              name: "nexus-tiny-contract",
+              manifest: `${TINY_CRATE_DIR}/Cargo.toml`,
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    // No `initGitRepo`: a source tree Git cannot list must fail closed instead
+    // of falling back to a verbatim, ignore-blind copy.
+    assert.throws(
+      () => checkContractPackageability(dir),
+      /staging failed: git ls-files failed/,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
 test("a consumer builds and runs the public API of the selected archive", () => {
   const dir = consumerFixtureRepo("positive-api-call", "nexus-fixture-public");
   try {
@@ -202,6 +245,41 @@ test("a consumer builds and runs the public API of the selected archive", () => 
     );
     assert.equal(consumed.source, `archive:${row.archive.sha256}`);
     assert.ok(consumed.manifest.includes("archives"));
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("staging leaves gitignored working files out of the packed archive", () => {
+  const dir = consumerFixtureRepo("positive-api-call", "nexus-fixture-public", {
+    initGit: false,
+  });
+  try {
+    // A build script the archive must not carry. If the gitignored file leaked
+    // into staging, Cargo would pack it and the consumer build would run it.
+    writeRepoFile(dir, ".gitignore", "build.rs\n");
+    writeRepoFile(
+      dir,
+      "fixtures/nexus-fixture-public/build.rs",
+      'fn main() {\n    panic!("ignored build script must not be packed");\n}\n',
+    );
+    initGitRepo(dir);
+    assert.equal(
+      git(dir, [
+        "check-ignore",
+        "-q",
+        "fixtures/nexus-fixture-public/build.rs",
+      ]).status,
+      0,
+      "the probe build script must be gitignored",
+    );
+
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
+    const [row] = report.results;
+    assert.equal(row.archive.file, "nexus-fixture-public-0.1.0.crate");
+    assert.equal(row.consumer.ok, true);
+    assert.equal(row.consumer.cause, null);
   } finally {
     cleanupTempRepo(dir);
   }
@@ -292,6 +370,35 @@ test("a path dependency is refused even when its source exists", () => {
       row.consumer.cause,
       /path dependency nexus-fixture-escape/,
     );
+    assert.equal(row.cause, row.consumer.cause);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a consumer-supplied Cargo config is refused before any resolution", () => {
+  const dir = consumerFixtureRepo(
+    "consumer-supplies-cargo-config",
+    "nexus-fixture-config",
+  );
+  try {
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, false);
+    assert.equal(report.firstFailure, "nexus-fixture-config");
+
+    const [row] = report.results;
+    assert.equal(row.ok, false);
+    assert.equal(row.consumer.ok, false);
+    assert.match(
+      row.consumer.cause,
+      /consumer fixture supplies its own Cargo config/,
+    );
+    // The guard fires before any Cargo invocation: nothing was declared,
+    // patched or resolved, and Cargo produced no output.
+    assert.deepEqual(row.consumer.declared, []);
+    assert.deepEqual(row.consumer.patched, []);
+    assert.deepEqual(row.consumer.resolved, []);
+    assert.equal(row.consumer.output, "");
     assert.equal(row.cause, row.consumer.cause);
   } finally {
     cleanupTempRepo(dir);

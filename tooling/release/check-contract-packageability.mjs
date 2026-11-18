@@ -5,8 +5,10 @@
  *
  * For each entry in `VERSION_BRACKETS_PATH` this
  *
- *   1. copies the current working tree into a disposable packing tree, so the
- *      archive carries the source that exists now rather than stale Git HEAD,
+ *   1. copies the source Git would ship — tracked files with their working-tree
+ *      contents plus untracked files that are not ignored — into a disposable
+ *      packing tree, so the archive carries the source that exists now rather
+ *      than stale Git HEAD, and never a gitignored local file,
  *   2. runs `cargo package --no-verify --allow-dirty --offline` there into a
  *      throwaway `--target-dir`,
  *   3. keeps the produced `.crate` through the whole run, records its SHA-256,
@@ -44,8 +46,10 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -161,6 +165,9 @@ function run(command, args, cwd) {
     cwd,
     encoding: "utf8",
     env: { ...process.env, CARGO_TERM_COLOR: "never" },
+    // The staging path list is a whole checkout; the default pipe buffer is
+    // smaller than a big `git ls-files` result.
+    maxBuffer: 64 * 1024 * 1024,
   });
   if (result.error !== undefined) {
     return {
@@ -226,22 +233,66 @@ function packageScratchParent() {
 }
 
 /**
- * Copy the current working tree into a disposable packing tree. Excluded
- * entries are not product source; everything else is copied verbatim so an
- * archive never depends on what Git has staged or committed.
+ * Paths Git would ship for the current working source: tracked files (with any
+ * uncommitted modifications) plus untracked files that are not ignored. Git is
+ * only asked for the path list; every byte copied comes from the working tree,
+ * so an archive never carries stale HEAD or index content.
+ *
+ * A failed listing fails closed: falling back to a verbatim walk would put
+ * gitignored local files back into archives and machine-local hashes.
+ *
+ * @param {string} repoRoot
+ * @returns {string[]}
+ */
+function workingSourcePaths(repoRoot) {
+  const listed = run(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    repoRoot,
+  );
+  if (!listed.ok) {
+    throw new Error(
+      `staging failed: git ls-files failed (${
+        firstErrorLine(listed.output) ?? "Git could not list the working source"
+      }); refusing to pack an unfiltered working tree`,
+    );
+  }
+  return listed.stdout.split("\0").filter((path) => path.length > 0);
+}
+
+/**
+ * Copy the source Git would ship into a disposable packing tree. The skip set
+ * stays as a guard for VCS/build entries even if a checkout tracks one, and
+ * executable bits and symlinks are preserved because packed build scripts and
+ * tools depend on them.
  *
  * @param {string} repoRoot
  * @param {string} stageRoot
  */
 function stageWorkingSource(repoRoot, stageRoot) {
   mkdirSync(stageRoot, { recursive: true });
-  for (const entry of readdirSync(repoRoot, { withFileTypes: true })) {
-    if (SKIPPED_STAGE_ENTRIES.has(entry.name)) {
+  for (const path of workingSourcePaths(repoRoot)) {
+    if (SKIPPED_STAGE_ENTRIES.has(path.split("/")[0])) {
       continue;
     }
-    cpSync(join(repoRoot, entry.name), join(stageRoot, entry.name), {
-      recursive: true,
-    });
+    const source = join(repoRoot, path);
+    /** @type {import("node:fs").Stats} */
+    let stats;
+    try {
+      stats = lstatSync(source);
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        // Listed by Git but already removed from the working tree.
+        continue;
+      }
+      throw error;
+    }
+    const destination = join(stageRoot, path);
+    mkdirSync(dirname(destination), { recursive: true });
+    cpSync(source, destination, { recursive: true });
+    if (!stats.isSymbolicLink()) {
+      chmodSync(destination, stats.mode);
+    }
   }
 }
 
