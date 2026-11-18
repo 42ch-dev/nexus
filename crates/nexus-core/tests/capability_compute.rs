@@ -966,7 +966,7 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
     assert!(
         context
             .user_capabilities()
-            .is_some_and(|reg| reg.get(TOOL).is_some()),
+            .is_some_and(|reg| reg.lookup(TOOL).is_some()),
         "the competing callable must exist in the user lane for this case to mean anything"
     );
 

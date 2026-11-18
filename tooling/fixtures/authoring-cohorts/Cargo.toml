@@ -6,11 +6,13 @@ publish = false
 
 # Checker-owned consumer, NOT a product and NOT a core test target: its own
 # workspace keeps it out of the repository workspace, so `cargo run` here
-# builds exactly the dependency set a consumer selects. `default = ["execution"]`
-# is the execution-only consumer; `authoring` adds core's `strategy-authoring`
-# surface on top. `tooling/check-graph-pins.sh --cohort authoring` asserts both
-# resolved core feature sets, and `src/main.rs` asserts the runtime behaviour
-# each one must produce.
+# builds exactly the dependency set a consumer selects. `default` is the
+# execution-only consumer *plus* `observable`, which forwards core's
+# `test-hooks` and compiles the lane-consultation counter this checker reads;
+# `authoring` adds core's `strategy-authoring` surface on top.
+# `tooling/check-graph-pins.sh --cohort authoring` asserts both resolved core
+# feature sets, and `src/main.rs` asserts the runtime behaviour each one must
+# produce.
 [workspace]
 
 [features]

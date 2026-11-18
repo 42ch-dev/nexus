@@ -3237,7 +3237,7 @@ impl CapabilityRegistry {
         }
         context
             .user_capabilities()
-            .is_some_and(|reg| user_cap_catalog_admission(reg.get(id)).is_ok())
+            .is_some_and(|reg| user_cap_catalog_admission(reg.lookup(id)).is_ok())
     }
 
     /// Dispatch a tool request through the registry.
@@ -3294,7 +3294,7 @@ impl CapabilityRegistry {
                 }
                 // User-capability arm (AR-68 #6): `Capability::run(arguments)`.
                 if let Some(reg) = context.user_capabilities() {
-                    if let Ok(cap) = user_cap_catalog_admission(reg.get(&req.tool_name)) {
+                    if let Ok(cap) = user_cap_catalog_admission(reg.lookup(&req.tool_name)) {
                         return dispatch_user_cap(cap, req).await;
                     }
                 }

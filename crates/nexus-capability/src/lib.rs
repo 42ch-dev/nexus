@@ -1056,10 +1056,21 @@ impl CapabilityRegistry {
     /// effect via [`is_reserved_only`](Self::is_reserved_only).
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&dyn Capability> {
+        self.lookup(name).filter(|cap| cap.runnable())
+    }
+
+    /// Look up an ADMITTED row regardless of whether this build binds an
+    /// executor for it.
+    ///
+    /// [`get`](Self::get) is the executable view (C3 contract). Dispatch needs
+    /// the admitted view: a row admitted without a binding must still be found
+    /// so the protocol answers `WorkerUnavailable` instead of falling through
+    /// to the unknown-id `not_supported` refusal.
+    #[must_use]
+    pub fn lookup(&self, name: &str) -> Option<&dyn Capability> {
         let idx = self.index.as_ref()?;
         let pos = idx.get(name)?;
-        let cap = self.capabilities[*pos].as_ref();
-        cap.runnable().then_some(cap)
+        Some(self.capabilities[*pos].as_ref())
     }
 
     /// Iterate over the EXECUTABLE capabilities (C3 contract) — rows whose

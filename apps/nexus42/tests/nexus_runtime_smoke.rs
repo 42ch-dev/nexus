@@ -196,41 +196,49 @@ fn probe_binary() -> PathBuf {
     target.join(profile).join("examples").join(exe)
 }
 
-/// Infer `<target>/<profile>` from the running test binary's path
-/// (`<target>/<profile>/deps/<binary>`).
+/// Infer `<target>/<profile>` from the running test binary's path.
 ///
 /// A compile-time `debug_assertions` switch is NOT enough: a custom profile
 /// (e.g. `--profile ci`) that inherits `dev` keeps debug assertions on while
 /// building into `target/ci/`, so the boolean would resolve another profile's
 /// — possibly stale — artifact. The profile directory name is the truth.
+///
+/// Both cargo layouts put the profile directly after the target root:
+/// `<target>/<profile>/deps/<binary>` and
+/// `<target>/<profile>/build/<crate>/<hash>/out/<binary>`. The second is what
+/// `current_exe()` reports when a build script's output directory owns the
+/// invoked path, which is what the Linux CI runner hands this test — a
+/// `deps`-only assumption fails there.
 fn profile_from_exe(exe: &Path) -> Result<(PathBuf, String), String> {
     let shown = exe.display();
-    let deps = exe.parent().ok_or_else(|| {
-        format!("cannot infer the cargo profile from {shown}: no parent directory")
-    })?;
-    if deps.file_name().and_then(|name| name.to_str()) != Some("deps") {
-        return Err(format!(
-            "cannot infer the cargo profile from {shown}: expected the cargo test layout \
-             <target>/<profile>/deps/<binary>; set NEXUS42_RUNTIME_BIN to name the shipped artifact"
-        ));
-    }
-    let profile_dir = deps.parent().ok_or_else(|| {
-        format!("cannot infer the cargo profile from {shown}: the deps directory has no parent")
-    })?;
-    let profile = profile_dir
-        .file_name()
-        .and_then(|name| name.to_str())
+    let components: Vec<std::path::Component<'_>> = exe.components().collect();
+    let target_index = components
+        .iter()
+        .position(|component| component.as_os_str() == "target")
         .ok_or_else(|| {
             format!(
-                "cannot infer the cargo profile from {shown}: the profile directory has no name"
+                "cannot infer the cargo profile from {shown}: no `target` component to anchor \
+                 on; set NEXUS42_RUNTIME_BIN to name the shipped artifact"
             )
         })?;
-    let target_root = profile_dir.parent().ok_or_else(|| {
-        format!(
-            "cannot infer the cargo target directory from {shown}: the profile directory has no parent"
-        )
-    })?;
-    Ok((target_root.to_path_buf(), profile.to_string()))
+    let profile = components
+        .get(target_index + 1)
+        .and_then(|component| component.as_os_str().to_str())
+        .ok_or_else(|| {
+            format!("cannot infer the cargo profile from {shown}: nothing follows `target`")
+        })?;
+    let marker = components
+        .get(target_index + 2)
+        .and_then(|component| component.as_os_str().to_str());
+    if !matches!(marker, Some("deps" | "build")) {
+        return Err(format!(
+            "cannot infer the cargo profile from {shown}: expected `deps` or `build` after \
+             <target>/<profile>, found {}; set NEXUS42_RUNTIME_BIN to name the shipped artifact",
+            marker.unwrap_or("<nothing>")
+        ));
+    }
+    let target_root: PathBuf = components[..=target_index].iter().collect();
+    Ok((target_root, profile.to_string()))
 }
 
 /// The `<target>/<profile>` of the binary that is actually running.
@@ -381,6 +389,12 @@ fn profile_from_exe_infers_the_profile_directory_and_rejects_other_layouts() {
             "/w/target",
             "ci",
         ),
+        // The Linux CI runner reports the build script's output directory.
+        (
+            "/home/runner/work/nexus/nexus/target/debug/build/nexus42/e614ca/out/nexus_runtime_smoke-e614ca",
+            "/home/runner/work/nexus/nexus/target",
+            "debug",
+        ),
     ] {
         assert_eq!(
             profile_from_exe(Path::new(exe)),
@@ -390,10 +404,11 @@ fn profile_from_exe_infers_the_profile_directory_and_rejects_other_layouts() {
     for layout in [
         "/w/target/debug/nexus_runtime_smoke",
         "/w/nexus_runtime_smoke",
+        "/w/target/debug/examples/nexus_runtime_smoke",
     ] {
         let error =
             profile_from_exe(Path::new(layout)).expect_err("an ambiguous layout must fail closed");
-        assert!(error.contains("expected the cargo test layout"), "{error}");
+        assert!(error.contains("expected `deps` or `build`"), "{error}");
     }
     assert_eq!(profile_build_args("debug"), Vec::<String>::new());
     assert_eq!(profile_build_args("release"), vec!["--release".to_string()]);
