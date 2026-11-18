@@ -86,9 +86,16 @@ async fn main() {
     assert_eq!(worlds[0].world_id, WORLD_ID);
     assert_eq!(worlds[0].title, "The Ashen Vale");
 
-    // A missing world is a named refusal, not an empty projection.
-    let missing = gateway.get_world_state("wld_absent").await;
-    assert!(matches!(missing, Err(NarrativeError::NotFound { .. })));
+    // A missing world is a named refusal, not an empty projection, and the
+    // public variant exposes the missing identity — so assert the payload
+    // instead of accepting any `NotFound`.
+    match gateway.get_world_state("wld_absent").await {
+        Err(NarrativeError::NotFound { resource }) => {
+            assert_eq!(resource, "world wld_absent");
+        }
+        Err(other) => panic!("a missing world must refuse with NotFound, got {other:?}"),
+        Ok(state) => panic!("a missing world must not project, got {state:?}"),
+    }
 
     println!("nexus-narrative read back world {WORLD_ID} with entry {entry_id}");
 }

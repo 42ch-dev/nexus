@@ -8,7 +8,19 @@ use std::path::PathBuf;
 use nexus_pattern::{scan_pattern_packages, PatternPackage};
 use nexus_workflow_ir::IR_VERSION;
 
-/// Canonical content hash pin of `prompt-step`'s committed fragment.
+/// Expected canonical hash of the consumer-local copy of `prompt-step`'s
+/// fragment (`patterns/prompt-step/workflow.ir.json`, next to this program).
+///
+/// What it proves: an independent oracle for the hashing algorithm — the
+/// expected value is written here by hand and never computed through the API
+/// under test, so a consistently wrong canonicalization cannot pass.
+///
+/// What it does not prove: nothing about packaging or synchronisation. The
+/// product's shipped inputs live at
+/// `crates/nexus-pattern/tests/fixtures/patterns/` — a different copy — so an
+/// archive that omits them still passes this program, and a product fragment
+/// edit does not change this value or fail here. Archive-backed evidence for
+/// those product inputs belongs to K5.
 const PROMPT_STEP_HASH: &str = "b89e9707bf2d39e27bf825f74c8bfac37acbdf1f7109614d0942fb8613212a04";
 
 fn fixture_root() -> PathBuf {
