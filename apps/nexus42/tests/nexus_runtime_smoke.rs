@@ -49,18 +49,17 @@ const NEXUS_DIR: &str = ".nexus42";
 /// How long the spawned runtime may take to print readiness.
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The retained-compute fixture the opt-in probe half drives: one stored
-/// scoped World, one staged compute session and the deterministic
-/// `basic-combat` module installed host-locally. The allowlist row below
-/// scopes the probe peer to this World/module and grants the stored Creator,
-/// with an op scope of EXACTLY `upsert` + `compute` — so the probe's `check`
-/// invoke still produces the locked `op_unsupported` refusal.
+/// The retained fixture the opt-in probe half drives: one stored scoped
+/// World, one staged compute session and the deterministic `basic-combat`
+/// module installed host-locally (module install only where the wasm32 target
+/// exists). The allowlist row below scopes the probe peer to this
+/// World/module and grants the stored Creator, with an op scope of EXACTLY
+/// `upsert` + `compute` — so the probe's `check` invoke still produces the
+/// locked `op_unsupported` refusal while the follow-up `upsert` proves the
+/// session stays usable.
 const COMPUTE_CREATOR: &str = "ctr_smoke";
 const COMPUTE_WORLD: &str = "wld_smoke";
 const COMPUTE_MODULE: &str = "basic-combat";
-/// Only the wasm-target half passes this id to the probe (and stages it), so
-/// a no-wasm build would otherwise carry it as dead code.
-#[cfg(not(nexus42_no_wasm_target))]
 const COMPUTE_SESSION: &str = "ses_smoke";
 
 /// Seed a hermetic `~/.nexus42` home for the spawned runtime: the CLI
@@ -125,13 +124,15 @@ fn install_compute_module(home: &Path) {
 }
 
 /// Seed the workspace the spawned runtime opens with the stored authority the
-/// compute lane reads: a Creator + holder row, the scoped World, and the
-/// staged compute session. Staged through an engine-owned pool (the
-/// `compute_sessions` table is engine-writer-fenced) which is closed and its
-/// OS admission released before the runtime starts — the runtime keeps its
-/// own direct (cooperative) pool.
-#[cfg(not(nexus42_no_wasm_target))]
-fn seed_compute_workspace(home: &Path) {
+/// retained half reads: a Creator + holder row, the scoped World, and the
+/// staged compute session. The module is installed only when the wasm32 target
+/// exists; the World/session rows are safe (and unused) on a no-wasm host and
+/// are what make the session-alive `upsert` possible there. Staged through an
+/// engine-owned pool (the `compute_sessions` table is engine-writer-fenced)
+/// which is closed and its OS admission released before the runtime starts —
+/// the runtime keeps its own direct (cooperative) pool.
+fn seed_scoped_workspace(home: &Path) {
+    #[cfg(not(nexus42_no_wasm_target))]
     install_compute_module(home);
     let db_path = nexus42::paths::state_db_path(home, COMPUTE_CREATOR, "default");
     if let Some(parent) = db_path.parent() {
@@ -200,12 +201,133 @@ fn probe_binary() -> PathBuf {
     target.join(profile).join("examples").join(exe)
 }
 
+/// Build (once per run) and return the SHIPPED Connect-only runtime binary.
+///
+/// `CARGO_BIN_EXE_nexus-runtime` is not that artifact inside `cargo test`:
+/// resolver v2 unifies this package's dev-dependency features
+/// (`nexus-core[execution,test-hooks]`) into the test build, so the spawned
+/// binary could link a wider graph than the product ships. This runs a
+/// bin-only `--no-default-features --features connect-host` build in its own
+/// cargo invocation and returns the artifact by path. `NEXUS42_RUNTIME_BIN`
+/// overrides it (e.g. a CI-packaged artifact).
+fn shipped_runtime_binary() -> PathBuf {
+    if let Some(path) = std::env::var_os("NEXUS42_RUNTIME_BIN") {
+        let path = PathBuf::from(path);
+        assert!(
+            path.is_file(),
+            "NEXUS42_RUNTIME_BIN does not name a file: {}",
+            path.display()
+        );
+        return path;
+    }
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let build = Command::new(cargo)
+        .args([
+            "build",
+            "--locked",
+            "-p",
+            "nexus42",
+            "--bin",
+            "nexus-runtime",
+            "--no-default-features",
+            "--features",
+            "connect-host",
+        ])
+        // Relative `CARGO_TARGET_DIR` values resolve like `probe_binary`'s.
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("run cargo build for the shipped Connect-only runtime");
+    assert!(
+        build.status.success(),
+        "shipped Connect-only runtime build failed ({})\nstdout:\n{}\nstderr:\n{}",
+        build.status,
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map_or_else(|| manifest_dir.join("../../target"), PathBuf::from);
+    target
+        .join(profile)
+        .join(format!("nexus-runtime{}", std::env::consts::EXE_SUFFIX))
+}
+
+/// Parse the probe's `COMPUTE_OK session=<id> entry=kb_atk current_hp=<n>`
+/// line and return the reported HP. Requires exactly ONE matching line and a
+/// complete integer token: a neighbouring value (`150`, `1500`) therefore
+/// never compares equal to `15`.
+fn compute_current_hp(stdout: &str, session: &str) -> Result<i64, String> {
+    let prefix = format!("COMPUTE_OK session={session} entry=kb_atk current_hp=");
+    let mut values = stdout
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix(&prefix));
+    let raw = values
+        .next()
+        .ok_or_else(|| format!("missing one {prefix}<n> line"))?;
+    if values.next().is_some() {
+        return Err(format!("duplicate {prefix}<n> lines"));
+    }
+    raw.parse::<i64>()
+        .map_err(|e| format!("current_hp is not a complete integer ({raw:?}): {e}"))
+}
+
+/// The retained-compute assertion the smoke test makes: exactly one result
+/// line for `session`, and the value must be the deterministic `15`.
+///
+/// Shared with the neighbouring-value control below, so a regression of the
+/// smoke assertion to a substring/prefix match fails the control too.
+fn assert_compute_result(stdout: &str, session: &str) -> Result<(), String> {
+    match compute_current_hp(stdout, session)? {
+        15 => Ok(()),
+        other => Err(format!(
+            "deterministic compute result must be exactly 15, got {other}"
+        )),
+    }
+}
+
+/// The retained-compute assertion's negative control: a neighbouring HP value
+/// must never satisfy the exact comparison the smoke test makes.
+#[test]
+fn compute_result_control_rejects_a_neighbouring_value() {
+    let line = |hp: &str| format!("COMPUTE_OK session=ses_smoke entry=kb_atk current_hp={hp}");
+
+    assert_eq!(assert_compute_result(&line("15"), "ses_smoke"), Ok(()));
+    for neighbour in ["150", "1500", "1500 ", "15x", "-15"] {
+        assert!(
+            assert_compute_result(&line(neighbour), "ses_smoke").is_err(),
+            "{neighbour:?} must fail the exact current_hp=15 assertion"
+        );
+    }
+    assert!(
+        assert_compute_result(&line("15"), "ses_other").is_err(),
+        "another session id must not match"
+    );
+    assert!(
+        assert_compute_result(&format!("{}\n{}", line("15"), line("15")), "ses_smoke").is_err(),
+        "duplicate compute lines must be rejected"
+    );
+}
+
+/// A no-wasm build cannot run the retained-compute half. Keep that visible as
+/// an IGNORED, named test instead of letting the half silently disappear from
+/// a green run; CI additionally sets `NEXUS42_REQUIRE_WASM_TARGET=1`, which
+/// turns the same condition into a build failure.
+#[cfg(nexus42_no_wasm_target)]
+#[test]
+#[ignore = "retained compute half not executed: wasm32-unknown-unknown target missing"]
+fn skipped_retained_compute_half_requires_wasm32_unknown_unknown() {}
+
 /// Spawn the real `nexus-runtime` binary against `home` (via the
 /// `NEXUS42_HOME` override) and wait for the stdout readiness block.
 /// Returns the child (still running), the readiness lines, and the printed
 /// `listen:` multiaddrs.
 fn spawn_runtime(home: &Path) -> (Child, Vec<String>, Vec<String>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_nexus-runtime"))
+    let mut child = Command::new(shipped_runtime_binary())
         .env("NEXUS42_HOME", home)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -747,10 +869,10 @@ fn version_flag_prints_crate_version() {
 fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
     let tmp = tempfile::tempdir().expect("temp dir");
     seed_home(tmp.path());
-    // The retained-compute half: installed deterministic module + stored
-    // scoped World + staged session, all before the runtime opens the DB.
-    #[cfg(not(nexus42_no_wasm_target))]
-    seed_compute_workspace(tmp.path());
+    // The retained half: stored scoped World + staged session (and, where the
+    // wasm32 target exists, the installed deterministic module), all before
+    // the runtime opens the DB.
+    seed_scoped_workspace(tmp.path());
 
     // Boot the real binary against the temp home. The guard kills the
     // child on EVERY exit path — success or panic — never orphaning it.
@@ -812,14 +934,19 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
         probe_path.display()
     );
     let mut probe = Command::new(&probe_path);
-    probe.args(["--addr", &listen_addrs[0], "--host-peer", host_peer]);
-    #[cfg(not(nexus42_no_wasm_target))]
+    // `--world` is always supplied: the probe proves the session still works
+    // after the refusal with an in-scope `upsert`. The compute session is
+    // added only where the module can be installed.
     probe.args([
-        "--compute-session",
-        COMPUTE_SESSION,
+        "--addr",
+        &listen_addrs[0],
+        "--host-peer",
+        host_peer,
         "--world",
         COMPUTE_WORLD,
     ]);
+    #[cfg(not(nexus42_no_wasm_target))]
+    probe.args(["--compute-session", COMPUTE_SESSION]);
     let out = probe.output().expect("run runtime_smoke_probe");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -828,11 +955,15 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
         status.success(),
         "probe failed (status {status})\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
-    for expected in [
-        "DIAL_OK",
-        "SERVED_OPS=upsert,promote,relate,check,assemble,compute",
-        "SESSION_OK",
-    ] {
+    // The advertised list is an exact record, not a prefix: a trailing op
+    // (e.g. an unexpected served route) fails this line comparison.
+    const SERVED_OPS_LINE: &str = "SERVED_OPS=upsert,promote,relate,check,assemble,compute,\
+tools.nexus.list_observed_peers,tools.nexus.list_modules";
+    assert!(
+        stdout.lines().any(|line| line.trim() == SERVED_OPS_LINE),
+        "probe output missing the exact {SERVED_OPS_LINE:?} line:\n{stdout}\nstderr:\n{stderr}"
+    );
+    for expected in ["DIAL_OK", "SESSION_OK", "UPSERT_OK", "SESSION_ALIVE_OK"] {
         assert!(
             stdout.contains(expected),
             "probe output missing {expected:?}:\n{stdout}\nstderr:\n{stderr}"
@@ -841,17 +972,23 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
     // 3b. A REAL retained compute op ran end-to-end in the spawned process:
     //     the probe seeded both combatants over the served `upsert` and the
     //     host's compute lane executed the installed deterministic module,
-    //     returning the staged 30 HP − (ATK 20 − DEF 5) = 15.
+    //     returning the staged 30 HP − (ATK 20 − DEF 5) = 15. The value is
+    //     parsed and compared exactly, so 150/1500 cannot satisfy it (the
+    //     neighbouring-value control above covers the matcher itself).
     #[cfg(not(nexus42_no_wasm_target))]
-    {
-        let compute_ok = format!("COMPUTE_OK session={COMPUTE_SESSION} entry=kb_atk current_hp=15");
-        for expected in ["UPSERT_OK".to_string(), compute_ok] {
-            assert!(
-                stdout.contains(&expected),
-                "probe output missing {expected:?}:\n{stdout}\nstderr:\n{stderr}"
-            );
-        }
-    }
+    assert_eq!(
+        assert_compute_result(&stdout, COMPUTE_SESSION),
+        Ok(()),
+        "the deterministic compute result must be exactly 15 HP:\n{stdout}\nstderr:\n{stderr}"
+    );
+    // On a no-wasm host the compute half is absent by construction, and the
+    // ignored test above names that skip; this assertion keeps the absence
+    // explicit rather than letting a stray COMPUTE_OK line imply it ran.
+    #[cfg(nexus42_no_wasm_target)]
+    assert!(
+        !stdout.contains("COMPUTE_OK"),
+        "compute cannot run without the wasm32 target:\n{stdout}"
+    );
     // `_guard` drops here (and on any panic unwind above): the child is
     // killed and reaped on every path.
 }

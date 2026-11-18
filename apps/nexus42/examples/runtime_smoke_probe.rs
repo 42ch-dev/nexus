@@ -10,7 +10,8 @@
 //! DIAL_OK session=<id> remote=<id>   # signed-hello handshake completed
 //! SERVED_OPS=upsert,promote,relate,check,assemble,compute   # manifest extensions.nexus.served_ops
 //! SESSION_OK                         # session still usable after refusals
-//! UPSERT_OK                          # --compute-session: combatants seeded
+//! UPSERT_OK                          # --world: in-scope write after the refusal
+//! SESSION_ALIVE_OK                   # the session still works after a refusal
 //! COMPUTE_OK session=<id> entry=<id> current_hp=<n>  # real retained compute
 //! ```
 //!
@@ -24,11 +25,13 @@
 //!     --addr /ip4/127.0.0.1/tcp/<host-port> --host-peer <host-peer-id>
 //! ```
 //!
-//! The optional `--compute-session <id> --world <world-id>` pair adds the
-//! retained-compute half the hermetic smoke test drives: the probe seeds two
-//! combatants over the served `upsert` op and runs `compute` against the
-//! session the host's workspace has staged. It is opt-in because the packaged
-//! probe also dials hosts that staged no compute fixture.
+//! The optional `--world <world-id>` half writes two combatants through the
+//! served `upsert` op after the refusal and prints `SESSION_ALIVE_OK` — proof
+//! the session is still usable. Adding `--compute-session <id>` then runs
+//! `compute` against the session the host's workspace has staged. Both are
+//! opt-in because the packaged probe also dials hosts that staged no compute
+//! fixture, and a host without the wasm32 target can still prove session
+//! survival after a refusal.
 
 use libp2p::identity::Keypair;
 use spoke_connect::{parse_multiaddr, ConnectConfig, SpokeConnectNode};
@@ -178,12 +181,13 @@ async fn main() {
         }
     }
 
-    // Opt-in retained-compute half: the host stages the compute session in its
-    // workspace DB, and this probe supplies only the two stored entries and
-    // the request. The module bytes live host-locally (never peer-supplied).
-    if let (Some(session_id), Some(world)) = (compute_session, compute_world) {
-        if let Err(error) = run_compute(&session, &session_id, &world).await {
-            println!("COMPUTE_FAILED: {error}");
+    // Opt-in retained half: `--world` seeds two stored entries through the
+    // served `upsert` op (the session-alive proof after the refusal above);
+    // `--compute-session` additionally runs the real compute lane. The module
+    // bytes live host-locally (never peer-supplied).
+    if let Some(world) = compute_world {
+        if let Err(error) = run_retained_ops(&session, compute_session.as_deref(), &world).await {
+            println!("RETAINED_OP_FAILED: {error}");
             node.shutdown().await.expect("shutdown");
             std::process::exit(1);
         }
@@ -222,11 +226,13 @@ fn combat_entry(
     })
 }
 
-/// Seed `kb_atk`/`kb_def` through the served `upsert` op and run the staged
-/// `compute` session. Deterministic math: 30 HP − (ATK 20 − DEF 5) = 15.
-async fn run_compute(
+/// Seed `kb_atk`/`kb_def` through the served `upsert` op (the in-scope write
+/// that proves the session still works after the refusal) and, when a compute
+/// session is supplied, run the staged `compute`. Deterministic math:
+/// 30 HP − (ATK 20 − DEF 5) = 15.
+async fn run_retained_ops(
     session: &spoke_connect::PeerSession,
-    session_id: &str,
+    session_id: Option<&str>,
     world: &str,
 ) -> Result<(), String> {
     session
@@ -242,6 +248,11 @@ async fn run_compute(
         .await
         .map_err(|e| format!("upsert rejected: {e:?}"))?;
     println!("UPSERT_OK");
+    println!("SESSION_ALIVE_OK");
+
+    let Some(session_id) = session_id else {
+        return Ok(());
+    };
 
     let computed = session
         .invoke(

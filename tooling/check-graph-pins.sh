@@ -597,9 +597,11 @@ fi
 #      installs: the capability crate, the WASM host behind core's `compute`
 #      feature, the Agent Host, and core's exact resolved feature set.
 #
-# The Connect product staying engine-free is NOT asserted here: `nexus-core`'s
-# own `connect-host` cohort still links `execution` by declaration and S6 owns
-# that roster prerequisite cut. This cohort proves the library graph C4 owns.
+# The Connect product staying engine-free is NOT asserted here: that claim
+# belongs to the `connect` cohort, whose product half pins the shipped
+# `connect-host` selector and its engine absence. This cohort proves the
+# library graph C4 owns; the S6 cut (core `connect-host` no longer implying
+# `execution`) has landed, so no prerequisite is outstanding here.
 if [[ "$COHORT" == "capability" ]]; then
   CONNECT_ENABLED="--no-default-features --features connect-client,embedded-mcp"
   assert_graph_nonempty nexus-connect "$CONNECT_ENABLED"
