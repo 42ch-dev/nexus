@@ -740,9 +740,10 @@ test('each forbidden Connect-plane edge fails the cohort', async (t) => {
   }
 });
 
-test('a WASM edge in the default capability build fails the cohort', () => {
-  // The gate is the `wasm` feature, not a naming convention: a normal
-  // (non-optional) nexus-wasm-host edge must make the default cohort red.
+test('an unconditional WASM edge fails the explicit no-default row first', () => {
+  // Control for the feature gate itself: with the host as a NORMAL dependency
+  // the `--no-default-features` row (which runs first) is already red — a
+  // feature cannot be the only thing keeping the host out.
   const run = capabilityRun(
     createWorkspace(
       capabilityCrates({
@@ -756,9 +757,35 @@ test('a WASM edge in the default capability build fails the cohort', () => {
     ),
   );
 
-  assert.notEqual(run.status, 0, 'a default-enabled capability -> nexus-wasm-host edge was accepted');
+  assert.notEqual(run.status, 0, 'an unconditional capability -> nexus-wasm-host edge was accepted');
   assert.match(run.stdout, /graph pin failed/);
   assert.match(run.stdout, /nexus-wasm-host must be MISSING from nexus-capability--no-default-features/);
+});
+
+test('a `default`-selected WASM edge fails the default row only', () => {
+  // The asymmetry the finding requires: `default = ["wasm"]` changes ONLY the
+  // default selection. Probing both configurations with `--no-default-features`
+  // would leave this fixture green; the separate default row is what catches it.
+  const run = capabilityRun(
+    createWorkspace(
+      capabilityCrates({
+        extra: {
+          'nexus-capability': {
+            features: ['default = ["wasm"]', 'wasm = ["dep:nexus-wasm-host"]'],
+            deps: { 'nexus-preset': null, 'nexus-wasm-host': ', optional = true' },
+          },
+        },
+      }),
+    ),
+  );
+
+  assert.notEqual(run.status, 0, 'a default-selected WASM edge was accepted');
+  // The no-default row ran earlier and stayed green...
+  assert.match(run.stdout, /ok: nexus-wasm-host absent from nexus-capability --no-default-features/);
+  // ...and the DEFAULT selection is the row that failed.
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(run.stdout, /nexus-wasm-host must be MISSING from nexus-capability graph/);
+  assert.match(run.stdout, /found 1 entry/);
 });
 
 test('the capability cohort fails when the Connect library loses its capability edge', () => {

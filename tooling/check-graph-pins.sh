@@ -503,9 +503,12 @@ fi
 #      the capability tree out of orchestration, so the library edge onto
 #      orchestration is obsolete rather than optional; this cohort is what
 #      keeps it from coming back.
-#  (2) The DEFAULT capability crate carries no WASM edge. `nexus-wasm-host` is
-#      an optional dependency bound only by the `wasm` feature, so the absence
-#      pin is the visible proof of that gate.
+#  (2) The capability crate carries no WASM edge in EITHER selection: the
+#      explicit `--no-default-features` build and the ordinary DEFAULT build
+#      (the one `cargo build -p nexus-capability` produces) are separate rows,
+#      because the claim "default excludes WASM" is about the default one.
+#      `nexus-wasm-host` is an optional dependency bound only by the `wasm`
+#      feature, so each absence pin is the visible proof of that gate.
 #  (3) An EXPLICIT compute selection binds the REAL WASM host — one version, not
 #      a stand-in — so "compute-off by default" cannot decay into "compute
 #      gone".
@@ -527,8 +530,21 @@ if [[ "$COHORT" == "capability" ]]; then
   assert_empty nexus-connect "$CONNECT_ENABLED" nexus-session-storage
   assert_empty nexus-connect "$CONNECT_ENABLED" graph-flow
 
+  # Row (2), two SELECTIONS with two claims — never one row standing in for the
+  # other (`--no-default-features` and the default selection coincide today only
+  # because `nexus-capability` declares `default = []`; a future
+  # `default = ["wasm"]` changes the ordinary build alone).
+  #
+  # Explicit `--no-default-features`: the bare crate carries no WASM edge.
   assert_graph_nonempty nexus-capability "--no-default-features"
   assert_empty nexus-capability "--no-default-features" nexus-wasm-host
+  # DEFAULT selection (no flag): the build `cargo build -p nexus-capability`
+  # produces carries no WASM edge. This is the row the claim "default excludes
+  # WASM" belongs to; the fixture suite flips `default = ["wasm"]` to prove it
+  # fails while the row above still passes.
+  assert_graph_nonempty nexus-capability ""
+  assert_empty nexus-capability "" nexus-wasm-host
+  # Row (3): an EXPLICIT compute selection binds the REAL WASM host.
   assert_exactly_one nexus-capability "--features wasm" nexus-wasm-host
 
   assert_exactly_one nexus-core-node "" nexus-capability
