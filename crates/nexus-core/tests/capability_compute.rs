@@ -33,6 +33,7 @@ use nexus_core::owner::compute::{
     accept_compute_run, clear_compute_runs, compute_run, discard_compute_run, get_compute_run,
     list_compute_runs, recover_stuck_compute_runs, ComputeContext, ComputeRunRecoveryOutcome,
 };
+use nexus_core::tool_catalog::{host_tool_catalog, lookup_host_tool, reserved_host_tool_ids};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest};
 use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, SandboxConfig, WasmEngine};
 use serde_json::json;
@@ -4327,12 +4328,13 @@ const NEXUS_TOOL_IDS: &[&str] = &[
 /// MIGRATED from `cross_caller_e2e.rs::all_nexus_tool_ids_registered_in_capability_registry`
 /// and `::test_profile_sets_are_not_action_capabilities`.
 ///
-/// Preserved: the process-global host-tool registry holds exactly the declared
-/// `nexus.*` action roster (plus the two `fs/*` ids), and the `nexus.profile.*`
-/// grouping ids are metadata, never action capabilities with handler
-/// bindings. This is the registry the peer admission chain derives its
-/// reserved set from (`live_reserved_tool_ids`), so the peer surface can never
-/// shadow a builtin id.
+/// Preserved: the canonical catalog declares exactly the declared `nexus.*`
+/// action roster (plus the two `fs/*` ids), the process-global registry binds
+/// every canonical row, and the `nexus.profile.*` grouping ids are metadata,
+/// never action capabilities with handler bindings. This is the catalog the
+/// peer admission chain derives its reserved set from
+/// (`reserved_host_tool_ids`), so the peer surface can never shadow a builtin
+/// id — even one this build does not bind.
 ///
 /// Deleted with the retired host: the other `cross_caller_e2e` cases drove
 /// `HostToolExecutor` (`POST`-path and Schedule-path wrappers built from the
@@ -4341,17 +4343,37 @@ const NEXUS_TOOL_IDS: &[&str] = &[
 /// owned by this target (P2-T9).
 #[test]
 fn host_tool_registry_roster_is_the_declared_nexus_surface() {
-    let registry = host_tool_registry();
+    let reserved: Vec<&str> = reserved_host_tool_ids().collect();
+    assert_eq!(
+        reserved.len(),
+        29,
+        "the canonical catalog holds the 27 nexus.* ids plus the 2 fs/* ids"
+    );
     for tool_id in NEXUS_TOOL_IDS {
         assert!(
-            registry.lookup(tool_id).is_some(),
-            "Tool '{tool_id}' must be registered in the host-tool registry"
+            reserved.contains(tool_id),
+            "Tool '{tool_id}' must be in the canonical host-tool catalog"
+        );
+        assert!(
+            lookup_host_tool(tool_id).is_some(),
+            "Tool '{tool_id}' must resolve through lookup_host_tool"
+        );
+    }
+
+    // The live registry binds every canonical row, fs/* included.
+    let registry = host_tool_registry();
+    let catalog = host_tool_catalog();
+    for row in catalog {
+        assert!(
+            registry.lookup(row.id.as_str()).is_some(),
+            "canonical tool '{}' must be bound in the host-tool registry",
+            row.id.as_str()
         );
     }
     assert_eq!(
         registry.len(),
-        29,
-        "the registry holds the 27 nexus.* ids plus the 2 fs/* ids"
+        catalog.len(),
+        "the registry lists exactly the canonical rows"
     );
 
     for profile_id in [
@@ -4359,6 +4381,10 @@ fn host_tool_registry_roster_is_the_declared_nexus_surface() {
         "nexus.profile.writer",
         "nexus.profile.publisher",
     ] {
+        assert!(
+            lookup_host_tool(profile_id).is_none(),
+            "Profile-set id '{profile_id}' is grouping metadata, not an action capability"
+        );
         assert!(
             registry.lookup(profile_id).is_none(),
             "Profile-set id '{profile_id}' is grouping metadata, not an action capability"
