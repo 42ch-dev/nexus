@@ -9,6 +9,10 @@
 //! PROBE_PEER_ID=<peer-id>            # --print-peer-only (allowlist seed)
 //! DIAL_OK session=<id> remote=<id>   # signed-hello handshake completed
 //! SERVED_OPS=upsert,promote,relate,check,assemble,compute   # manifest extensions.nexus.served_ops
+//! UNSERVED_REFUSAL_CODE=<code>       # a truly unserved op's wire refusal
+//! UNSERVED_REFUSAL_MESSAGE=<reason>
+//! OP_SCOPE_REFUSAL_CODE=<code>       # a SERVED op this peer may not use
+//! OP_SCOPE_REFUSAL_MESSAGE=<reason>
 //! SESSION_OK                         # session still usable after refusals
 //! UPSERT_OK                          # --world: in-scope write after the refusal
 //! SESSION_ALIVE_OK                   # the session still works after a refusal
@@ -165,13 +169,27 @@ async fn main() {
         .map_or_default(|ops| ops.iter().filter_map(|op| op.as_str()).collect());
     println!("SERVED_OPS={}", served_ops.join(","));
 
-    // Session usable after the reads: a non-served op is refused with the
-    // `op_unsupported` wire envelope (N-C0 refusal contract).
+    // Refusal attribution (QC1-02). The wire family collapses every denial
+    // into `op_unsupported`; the message is the observable discriminator, so
+    // report BOTH a truly unserved op and a served op this peer's `op_scope`
+    // excludes. The smoke asserts the second is specifically the op-scope
+    // denial, not request validation.
+    match session.invoke("project", serde_json::json!({})).await {
+        Err(spoke_connect::InvokeError::Wire(envelope)) if envelope.code == "op_unsupported" => {
+            report_refusal("UNSERVED_REFUSAL", &envelope);
+        }
+        other => {
+            println!("REFUSAL_UNEXPECTED: project {other:?}");
+            node.shutdown().await.expect("shutdown");
+            std::process::exit(1);
+        }
+    }
     match session
         .invoke("check", serde_json::json!({ "extensions": {} }))
         .await
     {
         Err(spoke_connect::InvokeError::Wire(envelope)) if envelope.code == "op_unsupported" => {
+            report_refusal("OP_SCOPE_REFUSAL", &envelope);
             println!("SESSION_OK");
         }
         other => {
@@ -194,6 +212,19 @@ async fn main() {
     }
 
     node.shutdown().await.expect("shutdown");
+}
+
+/// Print one refusal's code and reason on separate machine-readable lines.
+///
+/// The product keeps ONE `op_unsupported` code for served-op, op-scope and
+/// payload denials (no cross-peer scope leak); the reason text is what
+/// distinguishes "not provided" from "outside the granted scope".
+fn report_refusal(
+    tag: &str,
+    envelope: &spoke_schemas::connect::connect_invoke_response::ErrorEnvelope,
+) {
+    println!("{tag}_CODE={}", envelope.code);
+    println!("{tag}_MESSAGE={}", envelope.message);
 }
 
 /// One wire-shape combatant: the flat `body.attributes` the installed

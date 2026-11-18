@@ -201,6 +201,35 @@ fn probe_binary() -> PathBuf {
     target.join(profile).join("examples").join(exe)
 }
 
+/// The profile directory the running test binary was built for.
+const fn test_profile() -> &'static str {
+    if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    }
+}
+
+/// The SHIPPED Connect-only runtime artifact for `profile`, or a named error.
+///
+/// Never falls back to another profile's binary: a release test that silently
+/// spawned a stale debug artifact would prove behaviour of code this run never
+/// compiled.
+fn profile_artifact(target_dir: &Path, profile: &str) -> Result<PathBuf, String> {
+    let artifact = target_dir
+        .join(profile)
+        .join(format!("nexus-runtime{}", std::env::consts::EXE_SUFFIX));
+    if artifact.is_file() {
+        Ok(artifact)
+    } else {
+        Err(format!(
+            "shipped Connect-only runtime artifact missing for the {profile} profile at {}; \
+             the smoke was built as {profile} and refuses to fall back to another profile's binary",
+            artifact.display()
+        ))
+    }
+}
+
 /// Build (once per run) and return the SHIPPED Connect-only runtime binary.
 ///
 /// `CARGO_BIN_EXE_nexus-runtime` is not that artifact inside `cargo test`:
@@ -208,8 +237,10 @@ fn probe_binary() -> PathBuf {
 /// (`nexus-core[execution,test-hooks]`) into the test build, so the spawned
 /// binary could link a wider graph than the product ships. This runs a
 /// bin-only `--no-default-features --features connect-host` build in its own
-/// cargo invocation and returns the artifact by path. `NEXUS42_RUNTIME_BIN`
-/// overrides it (e.g. a CI-packaged artifact).
+/// cargo invocation — with `--release` when the test itself is release — and
+/// returns that exact profile's artifact (`profile_artifact` fails closed
+/// otherwise). `NEXUS42_RUNTIME_BIN` overrides it (e.g. a CI-packaged
+/// artifact).
 fn shipped_runtime_binary() -> PathBuf {
     if let Some(path) = std::env::var_os("NEXUS42_RUNTIME_BIN") {
         let path = PathBuf::from(path);
@@ -221,8 +252,10 @@ fn shipped_runtime_binary() -> PathBuf {
         return path;
     }
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let release = !cfg!(debug_assertions);
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let build = Command::new(cargo)
+    let mut build = Command::new(cargo);
+    build
         .args([
             "build",
             "--locked",
@@ -235,7 +268,11 @@ fn shipped_runtime_binary() -> PathBuf {
             "connect-host",
         ])
         // Relative `CARGO_TARGET_DIR` values resolve like `probe_binary`'s.
-        .current_dir(&manifest_dir)
+        .current_dir(&manifest_dir);
+    if release {
+        build.arg("--release");
+    }
+    let build = build
         .output()
         .expect("run cargo build for the shipped Connect-only runtime");
     assert!(
@@ -245,16 +282,37 @@ fn shipped_runtime_binary() -> PathBuf {
         String::from_utf8_lossy(&build.stdout),
         String::from_utf8_lossy(&build.stderr)
     );
-    let profile = if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "release"
-    };
     let target = std::env::var_os("CARGO_TARGET_DIR")
         .map_or_else(|| manifest_dir.join("../../target"), PathBuf::from);
-    target
-        .join(profile)
-        .join(format!("nexus-runtime{}", std::env::consts::EXE_SUFFIX))
+    profile_artifact(&target, test_profile()).unwrap_or_else(|error| panic!("{error}"))
+}
+
+/// The fail-closed profile controls: the required profile's artifact is used,
+/// and another profile's existing binary is never substituted.
+#[test]
+fn profile_artifact_refuses_to_fall_back_to_another_profile() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let exe = format!("nexus-runtime{}", std::env::consts::EXE_SUFFIX);
+    std::fs::create_dir_all(dir.path().join("debug")).expect("mkdir debug");
+    std::fs::write(dir.path().join("debug").join(&exe), b"debug").expect("write debug");
+
+    let error = profile_artifact(dir.path(), "release")
+        .expect_err("a release run must not resolve the debug artifact");
+    assert!(
+        error.contains("missing for the release profile") && error.contains("refuses to fall back"),
+        "{error}"
+    );
+    assert_eq!(
+        profile_artifact(dir.path(), "debug").unwrap(),
+        dir.path().join("debug").join(&exe)
+    );
+
+    std::fs::create_dir_all(dir.path().join("release")).expect("mkdir release");
+    std::fs::write(dir.path().join("release").join(&exe), b"release").expect("write release");
+    assert_eq!(
+        profile_artifact(dir.path(), "release").unwrap(),
+        dir.path().join("release").join(&exe)
+    );
 }
 
 /// Parse the probe's `COMPUTE_OK session=<id> entry=kb_atk current_hp=<n>`
@@ -311,6 +369,74 @@ fn compute_result_control_rejects_a_neighbouring_value() {
         assert_compute_result(&format!("{}\n{}", line("15"), line("15")), "ses_smoke").is_err(),
         "duplicate compute lines must be rejected"
     );
+}
+
+/// One `<key>=<value>` line printed by the probe, requiring exactly one.
+fn probe_value<'a>(stdout: &'a str, key: &str) -> Result<&'a str, String> {
+    let prefix = format!("{key}=");
+    let mut values = stdout
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix(&prefix));
+    let value = values
+        .next()
+        .ok_or_else(|| format!("missing {key}= line"))?;
+    if values.next().is_some() {
+        return Err(format!("duplicate {key}= lines"));
+    }
+    Ok(value)
+}
+
+/// The refusal the smoke's authorization claim requires: the op is SERVED but
+/// excluded by this peer's `op_scope`. The product keeps one `op_unsupported`
+/// code for every denial (no cross-peer scope leak), so the wire reason is the
+/// observable discriminator — request validation or an unserved op must NOT
+/// satisfy this assertion.
+fn assert_out_of_scope_refusal(code: &str, message: &str) -> Result<(), String> {
+    if code != "op_unsupported" {
+        return Err(format!(
+            "refusal code {code:?} is not the op_unsupported family"
+        ));
+    }
+    if message != "op denied: op check is not in this peer's op_scope" {
+        return Err(format!(
+            "refusal message {message:?} is not the op-scope denial"
+        ));
+    }
+    Ok(())
+}
+
+/// The refusal-attribution control: an unserved-op or payload denial must not
+/// pass as the authorization-boundary refusal the smoke claims.
+#[test]
+fn refusal_control_rejects_an_unserved_or_payload_denial() {
+    assert_eq!(
+        assert_out_of_scope_refusal(
+            "op_unsupported",
+            "op denied: op check is not in this peer's op_scope"
+        ),
+        Ok(())
+    );
+    for (code, message) in [
+        (
+            "op_unsupported",
+            "op project is not supported: this host serves the core connect ops",
+        ),
+        (
+            "op_unsupported",
+            "op denied: invoke payload carries no verifiable world scope (writes need \
+             extensions.nexus.world_id on every entry/relation; check/assemble need \
+             scope.scope_id); cannot verify world scope",
+        ),
+        (
+            "invalid_input",
+            "op denied: op check is not in this peer's op_scope",
+        ),
+    ] {
+        assert!(
+            assert_out_of_scope_refusal(code, message).is_err(),
+            "{message:?} must not satisfy the out-of-scope refusal assertion"
+        );
+    }
 }
 
 /// A no-wasm build cannot run the retained-compute half. Keep that visible as
@@ -969,6 +1095,29 @@ tools.nexus.list_observed_peers,tools.nexus.list_modules";
             "probe output missing {expected:?}:\n{stdout}\nstderr:\n{stderr}"
         );
     }
+    // Refusal attribution (QC1-02): the same `op_unsupported` code covers an
+    // unserved op, an out-of-scope op and a malformed payload. The smoke only
+    // claims the authorization boundary, so it must see the SERVED op refused
+    // by this peer's `op_scope` reason — with the unserved control printed
+    // alongside to show the two reasons are really different.
+    assert_eq!(
+        probe_value(&stdout, "UNSERVED_REFUSAL_CODE").unwrap_or_default(),
+        "op_unsupported"
+    );
+    assert!(
+        probe_value(&stdout, "UNSERVED_REFUSAL_MESSAGE")
+            .unwrap_or_default()
+            .starts_with("op project is not supported:"),
+        "the unserved control must be the served-op gate (not a scope denial):\n{stdout}"
+    );
+    assert_eq!(
+        assert_out_of_scope_refusal(
+            probe_value(&stdout, "OP_SCOPE_REFUSAL_CODE").unwrap_or_default(),
+            probe_value(&stdout, "OP_SCOPE_REFUSAL_MESSAGE").unwrap_or_default(),
+        ),
+        Ok(()),
+        "the refusal must be the out-of-scope denial, not request validation:\n{stdout}\nstderr:\n{stderr}"
+    );
     // 3b. A REAL retained compute op ran end-to-end in the spawned process:
     //     the probe seeded both combatants over the served `upsert` and the
     //     host's compute lane executed the installed deterministic module,
