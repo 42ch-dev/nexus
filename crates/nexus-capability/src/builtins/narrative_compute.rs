@@ -182,6 +182,18 @@ impl Capability for NarrativeCompute {
     fn name(&self) -> &'static str {
         "narrative.compute"
     }
+
+    /// Executable only when the daemon-wide engine + cache were injected
+    /// (C3 contract): pool-bound or standalone instances are reserved-only
+    /// rows — describable metadata, refusing dispatch with
+    /// `WorkerUnavailable` before any effect.
+    fn runnable(&self) -> bool {
+        #[cfg(feature = "wasm")]
+        return self.engine.is_some() && self.module_cache.is_some();
+        #[cfg(not(feature = "wasm"))]
+        return false;
+    }
+
     fn input_schema(&self) -> &'static str {
         nexus_preset::capability_catalog::NARRATIVE_COMPUTE_INPUT_SCHEMA
     }

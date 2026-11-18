@@ -68,9 +68,27 @@ impl Task for CapabilityTask {
         let name: String = context.get("_capability_name").unwrap_or_default();
         let input: Value = context.get("_capability_input").unwrap_or(Value::Null);
 
-        let cap = self.registry.get(&name).ok_or_else(|| {
-            graph_flow::GraphError::TaskExecutionFailed(format!("capability not found: {name}"))
-        })?;
+        // Resolve the capability (C3 contract): a reserved-only name —
+        // admitted without a binding in this build — refuses BEFORE any
+        // effect with the same TaskResult shape run() would produce for its
+        // worker refusal; unknown names keep the existing not-found refusal.
+        let cap = match self.registry.get(&name) {
+            Some(cap) => cap,
+            None if self.registry.is_reserved_only(&name) => {
+                let unavailable = CapabilityError::WorkerUnavailable;
+                context.set("_capability_error", format!("{unavailable}"))?;
+                return Ok(TaskResult::new_with_status(
+                    Some(format!("capability error: {unavailable}")),
+                    NextAction::Continue,
+                    Some(format!("capability '{name}' failed: {unavailable}")),
+                ));
+            }
+            None => {
+                return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "capability not found: {name}"
+                )));
+            }
+        };
 
         // A capability invocation may perform an external effect (capability
         // calls can trigger provider/prompt/host activity). Mark the step as
@@ -529,13 +547,29 @@ impl LlmJudgeTask {
             }
         }
 
-        // 3. Resolve the capability from the registry.
-        let cap = self.registry.get(&self.capability_name).ok_or_else(|| {
-            graph_flow::GraphError::TaskExecutionFailed(format!(
-                "judge capability '{}' not found in registry",
-                self.capability_name
-            ))
-        })?;
+        // 3. Resolve the capability from the registry (C3 contract: a
+        // reserved-only name — admitted without a binding in this build —
+        // refuses with the existing WorkerUnavailable BEFORE any effect;
+        // unknown names keep the existing not-found refusal).
+        let cap = match self.registry.get(&self.capability_name) {
+            Some(cap) => cap,
+            None if self.registry.is_reserved_only(&self.capability_name) => {
+                tracing::warn!(
+                    capability = %self.capability_name,
+                    "judge capability reserved without a binding; returning NOGO"
+                );
+                return Ok((
+                    false,
+                    "judge.llm: worker unavailable — cannot evaluate, waiting".to_string(),
+                ));
+            }
+            None => {
+                return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "judge capability '{}' not found in registry",
+                    self.capability_name
+                )));
+            }
+        };
 
         // 4. Invoke the capability.
         match cap.run(input).await {

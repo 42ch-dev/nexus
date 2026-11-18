@@ -88,12 +88,27 @@ impl Task for PresetCapabilityTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        let cap = self.registry.get(self.name).ok_or_else(|| {
-            graph_flow::GraphError::TaskExecutionFailed(format!(
-                "capability not found: {}",
-                self.name
-            ))
-        })?;
+        // C3 contract: a reserved-only name — admitted without a binding in
+        // this build — refuses BEFORE any effect with the same TaskResult
+        // shape run() would produce for its worker refusal; unknown names
+        // keep the existing not-found refusal.
+        let cap = match self.registry.get(self.name) {
+            Some(cap) => cap,
+            None if self.registry.is_reserved_only(self.name) => {
+                let unavailable = nexus_capability::CapabilityError::WorkerUnavailable;
+                return Ok(TaskResult::new_with_status(
+                    Some(format!("{} failed: {unavailable}", self.name)),
+                    NextAction::Continue,
+                    Some(format!("capability '{}' failed: {unavailable}", self.name)),
+                ));
+            }
+            None => {
+                return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "capability not found: {}",
+                    self.name
+                )));
+            }
+        };
 
         match cap.run(Value::Null).await {
             Ok(_output) => {

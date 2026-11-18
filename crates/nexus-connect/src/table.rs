@@ -211,7 +211,7 @@ pub fn live_reserved_tool_ids(
 ) -> HashSet<String> {
     let mut reserved: HashSet<String> = builtin_ids.into_iter().collect();
     if let Some(holder) = capability_registry {
-        reserved.extend(holder.reserved_names().into_iter().map(String::from));
+        reserved.extend(holder.reserved_names().map(str::to_owned));
     }
     reserved
 }

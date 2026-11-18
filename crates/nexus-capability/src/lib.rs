@@ -351,6 +351,20 @@ pub trait Capability: Send + Sync {
         CapabilityOrigin::Builtin
     }
 
+    /// Whether this instance carries an EXECUTABLE binding in this build
+    /// (C3 contract: `get`/`iter` are real executable lookups and must not
+    /// yield a row that can only refuse).
+    ///
+    /// The default is `true` — every pool/prompt-backed builtin is runnable
+    /// by construction. Only the compute-bound rows (`narrative.compute`,
+    /// user capabilities) override it: they are `false` when their engine
+    /// binding is unavailable (`wasm` off, or no engine was injected), in
+    /// which case the row survives only in the reservation
+    /// ([`CapabilityRegistry::reserved_names`]) and the metadata surface.
+    fn runnable(&self) -> bool {
+        true
+    }
+
     /// Execute the capability with the given input.
     ///
     /// Returns a JSON `Value` on success or a [`CapabilityError`].
@@ -1025,22 +1039,72 @@ impl CapabilityRegistry {
         self.index = Some(idx);
     }
 
-    /// Look up a capability by its dot-separated name.
+    /// Look up a capability by its dot-separated name — a REAL EXECUTABLE
+    /// lookup (C3 contract).
     ///
-    /// Uses the pre-built `HashMap` index for O(1) amortized lookups.
+    /// Uses the pre-built `HashMap` index for O(1) amortized lookups, then
+    /// yields the row only if it carries an executable binding in this
+    /// build ([`Capability::runnable`]). A name admitted without a binding
+    /// (`wasm` off, or no engine injected) does NOT appear here — it survives
+    /// in [`reserved_names`](Self::reserved_names) and the metadata surface,
+    /// and workflow dispatch resolves it to `WorkerUnavailable` before any
+    /// effect via [`is_reserved_only`](Self::is_reserved_only).
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&dyn Capability> {
         let idx = self.index.as_ref()?;
         let pos = idx.get(name)?;
-        Some(self.capabilities[*pos].as_ref())
+        let cap = self.capabilities[*pos].as_ref();
+        cap.runnable().then_some(cap)
     }
 
-    /// Iterate over all registered capabilities.
+    /// Iterate over the EXECUTABLE capabilities (C3 contract) — rows whose
+    /// binding is unavailable in this build are not yielded; the full
+    /// canonical + admitted-user name projection is
+    /// [`reserved_names`](Self::reserved_names).
     pub fn iter(&self) -> impl Iterator<Item = &dyn Capability> {
-        self.capabilities.iter().map(std::convert::AsRef::as_ref)
+        self.capabilities
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .filter(|cap| cap.runnable())
     }
 
-    /// Return the number of registered capabilities.
+    /// Whether `name` exists ONLY as a reservation in this build: admitted
+    /// and describable, but with no executable binding — `get` answers
+    /// `None` for it (C3 contract).
+    ///
+    /// This is the dispatch protocol's discriminator: workflow dispatch
+    /// resolves `get() == None` through this predicate — `true` means the
+    /// name is KNOWN and the invocation must return the existing
+    /// [`CapabilityError::WorkerUnavailable`] BEFORE any effect; `false`
+    /// means the name is unknown and the caller keeps its existing not-found
+    /// refusal. Derived from the declaration set (the full index), never
+    /// from compiled bindings.
+    #[must_use]
+    pub fn is_reserved_only(&self, name: &str) -> bool {
+        self.get(name).is_none()
+            && self
+                .index
+                .as_ref()
+                .is_some_and(|idx| idx.contains_key(name))
+    }
+
+    /// The FULL canonical + admitted-user name projection of THIS generation
+    /// (C3 contract): every declared row's name, including reserved-only
+    /// compute-capable rows whose binding is unavailable in this build. The
+    /// hot-reload ACCUMULATION across generations lives on
+    /// [`CapabilityRegistryHolder::reserved_names`].
+    pub fn reserved_names(&self) -> impl Iterator<Item = &'static str> {
+        // Row names are `&'static str` (builtin literals + interned user
+        // strings): snapshotted into an owned Vec, so the iterator captures
+        // no borrow of the registry.
+        let names: Vec<&'static str> = self.capabilities.iter().map(|cap| cap.name()).collect();
+        names.into_iter()
+    }
+
+    /// Return the number of registered rows — the full carrier set,
+    /// INCLUDING reserved-only rows (compute-capable names whose binding is
+    /// unavailable in this build). This is the bookkeeping count, not the
+    /// executable count; [`iter`](Self::iter) yields the executable subset.
     #[must_use]
     pub fn len(&self) -> usize {
         self.capabilities.len()
@@ -1054,8 +1118,14 @@ impl CapabilityRegistry {
 }
 
 impl nexus_preset::capability_catalog::CapabilityCatalog for CapabilityRegistry {
+    /// Known metadata WITHOUT constructing executors (C3 contract): the
+    /// schema resolves for any declared row — including reserved-only
+    /// compute-capable names — because it reads the descriptor surface, not
+    /// the executable lookup.
     fn input_schema(&self, name: &str) -> Option<&str> {
-        self.get(name).map(Capability::input_schema)
+        let idx = self.index.as_ref()?;
+        let pos = idx.get(name)?;
+        Some(self.capabilities[*pos].input_schema())
     }
 }
 
@@ -1118,22 +1188,28 @@ impl CapabilityRegistryHolder {
             .clone()
     }
 
-    /// Every canonical name ever swapped into this holder (C3).
-    ///
-    /// The set only **grows**: builtin names enter at the boot swap, and every
-    /// user capability a hot swap admits joins the live reservation and stays
-    /// reserved across later generations — even when a generation drops the
-    /// row (deleted dir) or when the name's compute binding was never
-    /// available (`wasm` off; invoking then refuses `WorkerUnavailable`,
-    /// never a missing row). Reservation consumers (the peer-tool id check)
-    /// MUST read this set instead of the live generation's rows, so a hot
-    /// swap can never un-reserve a canonical name.
-    #[must_use]
-    pub fn reserved_names(&self) -> std::collections::HashSet<&'static str> {
-        self.reserved
+    /// Every canonical name ever swapped into this holder — the FULL
+    /// projection (C3 contract): builtin names from boot plus every user
+    /// name any hot swap admitted, INCLUDING compute-capable names whose
+    /// binding is unavailable (`wasm` off; invoking refuses
+    /// `WorkerUnavailable`) and rows a later generation dropped (deleted
+    /// dir). The set only **grows**. Reservation consumers (the peer-tool id
+    /// check) MUST read this projection instead of the executable
+    /// [`CapabilityRegistry::iter`], so a hot swap can never un-reserve a
+    /// canonical name.
+    pub fn reserved_names(&self) -> impl Iterator<Item = &'static str> {
+        // Names are `&'static str`, so the snapshot needs no lock lifetime:
+        // collected under a short read guard, then streamed without holding
+        // the lock (an admission closure can run under the write lock while
+        // a caller still iterates an older projection).
+        let names: Vec<&'static str> = self
+            .reserved
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner) // poison-recovery (crate policy)
-            .clone()
+            .iter()
+            .copied()
+            .collect();
+        names.into_iter()
     }
 
     /// Run `f` with the live reservation held EXCLUSIVELY (C3 fix round 2:
@@ -1169,6 +1245,13 @@ impl CapabilityRegistryHolder {
     /// Reserve the canonical names of `registry` — the FIRST half of
     /// [`swap`](Self::swap), strictly before publication.
     ///
+    /// The names come from the FULL declaration projection
+    /// ([`CapabilityRegistry::reserved_names`]), never from the
+    /// runnable-only `iter`: a row admitted without a binding in this build
+    /// must still join the reservation, or a peer could claim its name (C3
+    /// contract: reservations derive from declarations, not from compiled
+    /// bindings).
+    ///
     /// Reserving first is what closes the admission window: a concurrent
     /// reservation consumer (`live_reserved_tool_ids`) can only ever observe
     /// a SUPERSET of the live rows' names. Over-reserving a not-yet-published
@@ -1178,7 +1261,7 @@ impl CapabilityRegistryHolder {
     /// let a peer tool claim one in the gap — an admission a later extension
     /// cannot undo.
     pub(crate) fn reserve_generation(&self, registry: &CapabilityRegistry) {
-        let incoming = registry.iter().map(|c| c.name());
+        let incoming = registry.reserved_names();
         self.reserved
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) // poison-recovery (crate policy)
@@ -1196,9 +1279,10 @@ impl CapabilityRegistryHolder {
     pub(crate) fn publish_generation(&self, registry: std::sync::Arc<CapabilityRegistry>) {
         debug_assert!(
             {
-                let incoming: std::collections::HashSet<&'static str> =
-                    registry.iter().map(|c| c.name()).collect();
-                self.reserved_names().is_superset(&incoming)
+                let incoming: Vec<&'static str> = registry.reserved_names().collect();
+                incoming
+                    .iter()
+                    .all(|name| self.reserved_names().any(|reserved| reserved == *name))
             },
             "reserved before publication: a generation must never go live with \
              unreserved canonical names"
@@ -1291,13 +1375,18 @@ mod tests {
             "nexus.world.delta.apply",
             "nexus.timeline.event.append",
             "nexus.fork.create",
-            "narrative.compute",
         ] {
             assert!(
                 reg.get(name).is_some(),
                 "expected builtin '{name}' to be registered"
             );
         }
+        // `narrative.compute` in the plain builtin registry carries NO engine
+        // binding (real compute attaches the daemon-wide singleton): the
+        // executable lookup misses it (C3 contract), the name stays reserved.
+        assert!(reg.get("narrative.compute").is_none());
+        assert!(reg.is_reserved_only("narrative.compute"));
+        assert!(reg.reserved_names().any(|n| n == "narrative.compute"));
     }
 
     #[test]
@@ -1321,9 +1410,11 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        // V1.186 removed the obsolete `acp.session_load` placeholder from the
-        // prior 34; v231 removed `nexus.reference.refresh` (33→32).
-        assert_eq!(names.len(), 32);
+        // Runnable-only iteration (C3 contract): 31 builtins execute from the
+        // plain registry; `narrative.compute` carries no engine binding here
+        // and is not yielded (V1.186 removed `acp.session_load`; v231 removed
+        // `nexus.reference.refresh`; 33→32 carried rows, 31 executable).
+        assert_eq!(names.len(), 31);
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
@@ -1337,12 +1428,14 @@ mod tests {
         // V1.60 P0 DF-46 orchestration capabilities.
         assert!(names.contains(&"nexus.world.state.query"));
         assert!(names.contains(&"nexus.fork.create"));
-        // V1.61 P3 narrative.compute.
-        assert!(names.contains(&"narrative.compute"));
         // V1.63 P2 essay.draft_status.finalize.
         assert!(names.contains(&"essay.draft_status.finalize"));
         // V1.67 P2 script.section_status.update.
         assert!(names.contains(&"script.section_status.update"));
+        // And the compute-capable name is not in the executable projection —
+        // it lives in the reservation instead.
+        assert!(!names.contains(&"narrative.compute"));
+        assert!(reg.reserved_names().any(|n| n == "narrative.compute"));
     }
 
     /// The runtime-deps registry is the supported executable path for the
@@ -1391,8 +1484,8 @@ mod tests {
     // The trio fixture is the shared `test_support::write_capability_dir`
     // (qc1 S-1): one writer for the in-crate test modules.
 
-    #[test]
-    fn with_runtime_deps_and_user_caps_appends_after_builtins() {
+    #[tokio::test]
+    async fn with_runtime_deps_and_user_caps_appends_after_builtins() {
         let tmp = tempfile::tempdir().unwrap();
         write_capability_dir(tmp.path(), "demo.pull");
         let deps = CapabilityRuntimeDeps {
@@ -1405,10 +1498,9 @@ mod tests {
             cdn_config: None,
             workspace_executor: None,
         };
-        // Base builtin count of the runtime-deps constructor (34 — the shared
-        // `build_with_narrative_compute` vec).
-        let base = CapabilityRegistry::with_runtime_deps(&deps);
-        let base_len = base.len();
+        let mut reg = CapabilityRegistry::with_runtime_deps(&deps);
+        let base_len = reg.len();
+        let base_names: Vec<&str> = reg.iter().map(Capability::name).collect();
         let (reg, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, tmp.path());
         assert!(
             outcome.skipped.is_empty(),
@@ -1417,20 +1509,37 @@ mod tests {
         );
         assert_eq!(reg.len(), base_len + 1, "base builtins + 1 user capability");
         // Builtins first, then the appended user capability (AR-36 order).
+        // The runnable projection is UNCHANGED (C3 contract): the user
+        // capability admits without a binding in this build, so it is a
+        // reserved-only row — carried, reserved, describable, not executable.
         let names: Vec<&str> = reg.iter().map(Capability::name).collect();
-        let base_names: Vec<&str> = base.iter().map(Capability::name).collect();
         assert_eq!(
-            &names[..base_len],
-            &base_names[..],
-            "prefix must equal the base registry's builtin order (S-005 tightened assertion)"
+            names, base_names,
+            "the executable projection is the builtin set; the unbound user row is not yielded"
         );
-        assert_eq!(names[base_len], "demo.pull");
-        // Eager index rebuilt: lookup works for both.
-        assert!(reg.get("narrative.compute").is_some());
-        assert!(reg.get("demo.pull").is_some());
+        // Carried and reserved: the eager index holds it (declaration set),
+        // the reservation holds it, and the lookup misses it.
+        assert!(reg.get("demo.pull").is_none());
+        assert!(reg.is_reserved_only("demo.pull"));
+        assert!(reg.reserved_names().any(|n| n == "demo.pull"));
+        // Known metadata resolves without constructing an executor.
+        assert_eq!(
+            nexus_preset::capability_catalog::CapabilityCatalog::input_schema(&reg, "demo.pull"),
+            Some(r#"{"type":"object"}"#),
+        );
         // Registered through the index (not just iterated).
-        let cap = reg.get("demo.pull").expect("user cap indexed");
-        assert_eq!(cap.input_schema(), r#"{"type":"object"}"#);
+        assert!(reg.get("demo.pull").is_none());
+        let reserved_row = reg
+            .capabilities
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .find(|cap| cap.name() == "demo.pull")
+            .expect("user cap carried");
+        let err = reserved_row.run(serde_json::json!({})).await.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::WorkerUnavailable),
+            "dispatch of the reserved-only name refuses WorkerUnavailable: {err:?}"
+        );
     }
 
     #[test]

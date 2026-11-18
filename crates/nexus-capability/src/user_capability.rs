@@ -428,6 +428,17 @@ impl Capability for UserCapability {
         self.name
     }
 
+    /// Executable only when the daemon-wide engine + cache were injected
+    /// (C3 contract): a user capability admitted without a binding is a
+    /// reserved-only row — describable metadata, refusing dispatch with
+    /// `WorkerUnavailable` before any effect.
+    fn runnable(&self) -> bool {
+        #[cfg(feature = "wasm")]
+        return self.engine.is_some() && self.module_cache.is_some();
+        #[cfg(not(feature = "wasm"))]
+        return false;
+    }
+
     fn input_schema(&self) -> &'static str {
         self.input_schema
     }

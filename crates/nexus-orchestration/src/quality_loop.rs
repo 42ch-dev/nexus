@@ -748,6 +748,12 @@ pub(crate) async fn run_llm_extract(
     let Some(registry) = registry else {
         return LlmExtractOutcome::WorkerUnavailable;
     };
+    if registry.is_reserved_only(capability_name) {
+        // Known extraction capability admitted without a binding in this
+        // build (C3 contract): the existing worker refusal BEFORE any
+        // effect — never a stand-in and never a heuristic fallback.
+        return LlmExtractOutcome::WorkerUnavailable;
+    }
     let Some(cap) = registry.get(capability_name) else {
         // A missing extraction capability is not a worker outage: refuse rather
         // than stand in with heuristic candidates (review I2).

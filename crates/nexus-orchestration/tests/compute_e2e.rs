@@ -176,10 +176,25 @@ async fn combat_engine_preset_loads_and_resolves_capabilities() {
             .any(|c| c == "narrative.compute"),
         "combat-engine must require narrative.compute"
     );
-    // And the capability must be resolvable at runtime.
+    // And the capability must be KNOWN to this registry — in the corrected
+    // C3 contract shape the executable lookup misses it (the plain builtin
+    // registry attaches no engine binding), while the name stays reserved
+    // and known metadata resolves without constructing an executor.
     assert!(
-        registry.get("narrative.compute").is_some(),
-        "narrative.compute must be registered"
+        registry.get("narrative.compute").is_none(),
+        "get is runnable-only: narrative.compute has no binding in a plain registry"
+    );
+    assert!(
+        registry.is_reserved_only("narrative.compute"),
+        "narrative.compute is known-but-unbound: dispatch refuses WorkerUnavailable"
+    );
+    assert_eq!(
+        nexus_preset::capability_catalog::CapabilityCatalog::input_schema(
+            &registry,
+            "narrative.compute"
+        ),
+        Some(nexus_preset::capability_catalog::NARRATIVE_COMPUTE_INPUT_SCHEMA),
+        "known metadata resolves without constructing an executor"
     );
 }
 

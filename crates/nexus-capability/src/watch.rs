@@ -444,10 +444,15 @@ use crate::CapabilityOrigin;
         .unwrap();
     }
 
-    /// User-capability names a registry serves (origin-filtered), sorted.
+    /// User-capability names a registry CARRIES (origin-filtered, sorted) —
+    /// the declaration set, not the executable lookup: a user capability
+    /// admitted without a binding is carried (and reserved) even though
+    /// `get`/`iter` do not yield it (C3 contract).
     fn user_cap_names(registry: &CapabilityRegistry) -> Vec<String> {
         let mut names: Vec<String> = registry
+            .capabilities
             .iter()
+            .map(std::convert::AsRef::as_ref)
             .filter(|c| c.origin() == CapabilityOrigin::User)
             .map(|c| c.name().to_string())
             .collect();
@@ -690,10 +695,21 @@ use crate::CapabilityOrigin;
         );
         holder.swap(std::sync::Arc::new(reg2));
 
-        // The pre-swap snapshot still resolves and the call finishes against
-        // last-good (engine-less arm → the AR-44 stub contract).
-        let held_cap = held.get("demo.pull").expect("snapshot keeps the name");
-        let err = held_cap.run(serde_json::json!({})).await.unwrap_err();
+        // The pre-swap snapshot still carries last-good for the name and the
+        // invocation completes honestly against the held snapshot's own row
+        // (engine-less arm → the AR-44 stub contract; the executable lookup
+        // misses because the row has no binding in this build — C3 contract).
+        assert!(
+            held.get("demo.pull").is_none() && held.is_reserved_only("demo.pull"),
+            "the snapshot keeps the name: describable, reserved, not executable"
+        );
+        let held_row = held
+            .capabilities
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .find(|cap| cap.name() == "demo.pull")
+            .expect("snapshot keeps the row");
+        let err = held_row.run(serde_json::json!({})).await.unwrap_err();
         assert!(
             matches!(err, crate::CapabilityError::WorkerUnavailable),
             "call completes honestly against the held snapshot: {err:?}"
@@ -701,29 +717,36 @@ use crate::CapabilityOrigin;
         // And the swapped registry carries last-good for the same name.
         let live = holder.get().expect("swapped registry present");
         assert!(
-            live.get("demo.pull").is_some(),
+            live.is_reserved_only("demo.pull"),
             "last-good admission survives the failed replacement (PL-9)"
         );
     }
 
     // -------------------------------------------------------------------------
-    // Unbound compute name stays reserved across hot swaps (C3)
+    // Unbound compute name stays reserved across hot swaps (C3, corrected)
     // -------------------------------------------------------------------------
 
-    /// C3 missing-edge case: namespace/effect evidence over the holder's
-    /// live reservation — no counts, no source text.
+    /// C3 missing-edge case, in the CORRECTED contract shape (I-000544):
+    /// `get`/`iter` are real executable lookups, so a row without a binding
+    /// is NOT yielded; the name survives in `reserved_names` (the full
+    /// projection) and the metadata surface; workflow dispatch of the name
+    /// refuses `WorkerUnavailable` BEFORE any effect.
     ///
-    /// 1. A compute-capable user capability admits WITHOUT a binding (`wasm`
-    ///    off in this build): its row stays describable, invoking refuses
-    ///    `WorkerUnavailable` (never a missing row), and the swap reserves
-    ///    the name. The builtin compute name is reserved the same way.
-    /// 2. A hot swap that REPLACES the entry (new schema + new module bytes)
-    ///    keeps the name reserved, while a retained pre-swap generation still
-    ///    resolves — and can only ever dispatch through — its OWN row.
-    /// 3. A hot swap that DROPS the row (dir deleted) leaves the name
-    ///    reserved: unclaimable with no binding and no live row.
+    /// 1. Hot-admit a compute-capable user capability without a binding:
+    ///    executable lookup misses, the name joins the live reservation,
+    ///    known metadata still resolves, and the stored row's invocation is
+    ///    the typed worker refusal (what dispatch produces, via
+    ///    `is_reserved_only`, before any effect). The builtin compute name is
+    ///    reserved the same way.
+    /// 2. A hot swap that REPLACES the entry keeps the name reserved; a
+    ///    retained pre-swap generation still resolves only its OWN row
+    ///    through the metadata surface — never the swapped-in entry.
+    /// 3. A hot swap that DROPS the row leaves the name reserved: metadata
+    ///    gone, reservation intact.
     #[tokio::test]
     async fn unbound_compute_name_remains_reserved_after_hot_swap() {
+        use nexus_preset::capability_catalog::CapabilityCatalog;
+
         let tmp = tempfile::tempdir().unwrap();
         let deps = test_deps();
 
@@ -734,7 +757,7 @@ use crate::CapabilityOrigin;
             "boot admits nothing from an empty dir"
         );
         let holder = CapabilityRegistryHolder::with_registry(std::sync::Arc::new(reg0));
-        assert!(!holder.reserved_names().contains("demo.compute"));
+        assert!(!holder.reserved_names().any(|n| n == "demo.compute"));
 
         // 1. Hot-admit a compute-capable user capability with no binding.
         write_trio_with_schema(
@@ -751,25 +774,53 @@ use crate::CapabilityOrigin;
         );
         holder.swap(std::sync::Arc::new(reg1));
         assert!(
-            holder.reserved_names().contains("demo.compute"),
+            holder.reserved_names().any(|n| n == "demo.compute"),
             "the hot-admitted user name joins the actual live reservation"
         );
         assert!(
-            holder.reserved_names().contains("narrative.compute"),
+            holder.reserved_names().any(|n| n == "narrative.compute"),
             "the builtin compute name is reserved too, also without a binding here"
         );
 
-        // Effect: invoking the unbound name refuses WorkerUnavailable — a
-        // real row answering with the typed refusal, never a missing row.
+        // CORRECTED shape: the executable lookup misses the unbound row, and
+        // the name exists only as a reservation — the dispatch discriminator
+        // (a workflow dispatch of this name returns WorkerUnavailable BEFORE
+        // any effect; enforced at the orchestration dispatch sites).
         let gen1 = holder.get().expect("live generation with the admitted row");
-        let unbound = gen1
-            .get("demo.compute")
-            .expect("the unbound compute row stays describable");
-        assert_eq!(unbound.input_schema(), GEN_ONE_SCHEMA);
-        let err = unbound.run(serde_json::json!({})).await.unwrap_err();
+        assert!(
+            gen1.get("demo.compute").is_none(),
+            "get is runnable-only: an unbound row is not yielded"
+        );
+        assert!(
+            gen1.is_reserved_only("demo.compute"),
+            "the name is known-but-unbound: dispatch refuses WorkerUnavailable before any effect"
+        );
+        assert!(
+            gen1.iter().all(|cap| cap.name() != "demo.compute"),
+            "iter is runnable-only too"
+        );
+
+        // Metadata does not shrink: known metadata resolves WITHOUT the
+        // executor (the CapabilityCatalog reads the descriptor surface).
+        assert_eq!(
+            CapabilityCatalog::input_schema(&gen1, "demo.compute"),
+            Some(GEN_ONE_SCHEMA),
+            "known metadata resolves without constructing an executor"
+        );
+
+        // Effect evidence at the row level: the stored row's invocation is
+        // the typed worker refusal — exactly the refusal workflow dispatch
+        // produces for this name, before any effect.
+        let stored_row = gen1
+            .capabilities
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .find(|cap| cap.name() == "demo.compute")
+            .expect("the reserved-only row is still carried");
+        let err = stored_row.run(serde_json::json!({})).await.unwrap_err();
         assert!(
             matches!(err, crate::CapabilityError::WorkerUnavailable),
-            "unbound compute name refuses with WorkerUnavailable, got {err:?}"
+            "the unbound invocation refuses with WorkerUnavailable, got {err:?}"
         );
 
         // 2. Replace the entry and hot-swap it in; retain the pre-swap
@@ -784,38 +835,22 @@ use crate::CapabilityOrigin;
         let (reg2, _) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
         holder.swap(std::sync::Arc::new(reg2));
         assert!(
-            holder.reserved_names().contains("demo.compute"),
+            holder.reserved_names().any(|n| n == "demo.compute"),
             "the replacement keeps the name reserved"
         );
         let gen2 = holder.get().expect("swapped-in generation");
         assert_eq!(
-            gen2.get("demo.compute")
-                .expect("swapped-in row")
-                .input_schema(),
-            GEN_TWO_SCHEMA,
-            "the swapped-in entry is the new generation's row"
+            CapabilityCatalog::input_schema(&gen2, "demo.compute"),
+            Some(GEN_TWO_SCHEMA),
+            "the swapped-in metadata is the new generation's"
         );
-        // Namespace evidence: the retained generation resolves only its OWN
-        // row — the swapped-in entry is unreachable through it.
+        // Namespace evidence: the retained generation's metadata surface
+        // resolves only its OWN row — the swapped-in entry is unreachable
+        // through it.
         assert_eq!(
-            gen1_retained
-                .get("demo.compute")
-                .expect("retained row")
-                .input_schema(),
-            GEN_ONE_SCHEMA,
+            CapabilityCatalog::input_schema(&gen1_retained, "demo.compute"),
+            Some(GEN_ONE_SCHEMA),
             "a retained old generation cannot dispatch through the swapped-in entry"
-        );
-        // Effect: dispatch through the retained generation runs ITS row (its
-        // own unbound refusal), not the swapped-in module's semantics.
-        let err = gen1_retained
-            .get("demo.compute")
-            .expect("retained row")
-            .run(serde_json::json!({}))
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(err, crate::CapabilityError::WorkerUnavailable),
-            "the retained generation's dispatch completes against its own row: {err:?}"
         );
 
         // 3. Drop the row (dir deleted) and hot-swap the rebuild.
@@ -834,8 +869,13 @@ use crate::CapabilityOrigin;
             live.get("demo.compute").is_none(),
             "the live generation no longer serves the dropped row"
         );
+        assert_eq!(
+            CapabilityCatalog::input_schema(&live, "demo.compute"),
+            None,
+            "the dropped row's metadata is gone"
+        );
         assert!(
-            holder.reserved_names().contains("demo.compute"),
+            holder.reserved_names().any(|n| n == "demo.compute"),
             "the compute name remains reserved after the hot swap dropped its row"
         );
     }
@@ -861,7 +901,7 @@ use crate::CapabilityOrigin;
             "boot admits nothing from an empty dir"
         );
         let holder = CapabilityRegistryHolder::with_registry(std::sync::Arc::new(reg0));
-        assert!(!holder.reserved_names().contains("demo.compute"));
+        assert!(!holder.reserved_names().any(|n| n == "demo.compute"));
 
         write_capability_dir(tmp.path(), "demo.compute");
         let (reg1, _) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
@@ -869,7 +909,7 @@ use crate::CapabilityOrigin;
         // Half-step 1: reserve only — the name joins the live reservation.
         holder.reserve_generation(&reg1);
         assert!(
-            holder.reserved_names().contains("demo.compute"),
+            holder.reserved_names().any(|n| n == "demo.compute"),
             "the incoming name is reserved BEFORE the generation is published"
         );
         assert!(
@@ -881,11 +921,15 @@ use crate::CapabilityOrigin;
             "publication has not happened while the reservation is already in place"
         );
 
-        // Half-step 2: publish — the row appears, reservation already holds.
+        // Half-step 2: publish — the row is carried (reserved-only: the
+        // fixture admits without a binding) and the reservation already holds.
         holder.publish_generation(std::sync::Arc::new(reg1));
         let live = holder.get().expect("published generation");
-        assert!(live.get("demo.compute").is_some());
-        assert!(holder.reserved_names().contains("demo.compute"));
+        assert!(
+            live.is_reserved_only("demo.compute"),
+            "the published row is carried and describable (no binding in this build)"
+        );
+        assert!(holder.reserved_names().any(|n| n == "demo.compute"));
     }
 
     /// INVARIANT PIN (C3 fix round 2 relabel): the publication path itself
