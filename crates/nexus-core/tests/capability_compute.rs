@@ -905,20 +905,22 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
 }
 
 /// A canonical builtin this build binds no handler for refuses in the spine —
-/// the peer and user lanes never answer for a reserved id.
+/// the peer and user lanes are never even consulted for a reserved id.
 ///
 /// The competing callable is real and observable: a user capability carrying
 /// the canonical id itself, scanned and admitted at boot on this context's
 /// holder (the only user-capability admission path). The unbound half uses the
-/// same canonical row with its handler deliberately withheld
-/// ([`build_registry_without`]), so `lookup_host_tool` still resolves the id
-/// while `lookup` does not — the state a feature-gated build produces before
-/// its binding lands. Two things make the refusal attributable:
+/// same production registration path with one canonical row's handler withheld
+/// ([`build_registry_without`], `test-hooks` only), so `lookup_host_tool` still
+/// resolves the id while `lookup` does not — the state a feature-gated build
+/// produces before its binding lands.
 ///
-/// - the error is the spine's `not_supported`, never the user lane's
-///   `service_unavailable` (what `run()` yields on the engine-less arm), so the
-///   competing callable was not invoked; and
-/// - the domain timeline count is unchanged, so the refusal had zero effect.
+/// The ordering is measured, not inferred: `CapabilityRegistry::fallback_consultations`
+/// (a `test-hooks` counter at the peer/user branch) must stay 0 for the
+/// canonical miss, and a non-canonical miss on the same registry must raise it
+/// to 1 — so removing the canonical reservation fails this case even though the
+/// user lane's own `nexus.` rule would still refuse it and return the same
+/// error. The domain timeline count is also unchanged.
 ///
 /// The same request then runs against the full registry with the SAME context:
 /// the real handler returns the workspace record, proving the reservation
@@ -983,10 +985,24 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
 
     let before = timeline_event_count(f.core.pool()).await;
     let request = tool_request(TOOL, json!({}));
+    assert_eq!(
+        unbound.fallback_consultations(),
+        0,
+        "the fixture starts with no fallback consultation"
+    );
     let err = unbound.dispatch(&request, &context, CREATOR).await.unwrap_err();
     assert!(
         matches!(&err, CoreError::Coded { code, .. } if code == "not_supported"),
         "an unbound canonical id must be not_supported, got {err:?}"
+    );
+    // The discriminating assertion: the lanes are not even CONSULTED. With the
+    // canonical reservation removed, `dispatch` reaches the peer/user branch and
+    // this count rises to 1 (the user lane's own reservation then still refuses,
+    // so the returned error alone would not detect it).
+    assert_eq!(
+        unbound.fallback_consultations(),
+        0,
+        "a canonical id must not reach the peer/user lanes, got {err:?}"
     );
     assert!(
         !format!("{err:?}").contains("no executor wired"),
@@ -1000,6 +1016,22 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
     assert!(
         !unbound.spine_resolves(&context, TOOL),
         "an unbound canonical id is not dispatchable (the allowlist gate must agree)"
+    );
+
+    // Non-vacuity of the probe: a NON-canonical miss does consult the lanes
+    // (peer, then user), and the same registry records exactly that.
+    let unknown = unbound
+        .dispatch(&tool_request("not.a.canonical.tool", json!({})), &context, CREATOR)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&unknown, CoreError::Coded { code, .. } if code == "not_supported"),
+        "an unknown non-canonical id stays not_supported, got {unknown:?}"
+    );
+    assert_eq!(
+        unbound.fallback_consultations(),
+        1,
+        "the probe must record a real fallback consultation"
     );
 
     // Bind the same real builtin: its existing handler still runs, on the same

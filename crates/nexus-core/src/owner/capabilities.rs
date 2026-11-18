@@ -46,6 +46,10 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::too_many_lines)]
 
+// Test-only observation of the fallback lanes (see `fallback_consultations`).
+#[cfg(any(test, feature = "test-hooks"))]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use super::work_artifact::{
     classify_work_path, FsWorkArtifactPort, RecordedMutation, RecordingWorkArtifactPort,
     WorkArtifactPort, WorkArtifactWrite, WorkPath,
@@ -3109,6 +3113,12 @@ pub struct CapabilityRow {
 /// mirrors the old `dispatch_tool()` behavior.
 pub struct CapabilityRegistry {
     rows: HashMap<&'static str, CapabilityRow>,
+    /// Consultations of the peer/user fallback lanes. Observation only — the
+    /// shipped struct carries no counter (`test-hooks` compiles it out); the
+    /// probe below increments it, so a test can prove the canonical
+    /// reservation never reaches those lanes.
+    #[cfg(any(test, feature = "test-hooks"))]
+    fallback_consultations: AtomicUsize,
 }
 
 impl CapabilityRegistry {
@@ -3117,7 +3127,19 @@ impl CapabilityRegistry {
     pub fn new() -> Self {
         Self {
             rows: HashMap::new(),
+            #[cfg(any(test, feature = "test-hooks"))]
+            fallback_consultations: AtomicUsize::new(0),
         }
+    }
+
+    /// How many dispatches consulted the peer/user fallback lanes.
+    ///
+    /// `test-hooks` only: counts lane consultations (a refused lane still
+    /// records one), which is the invariant the canonical reservation owns.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub fn fallback_consultations(&self) -> usize {
+        self.fallback_consultations.load(Ordering::Relaxed)
     }
 
     /// Register a capability row.
@@ -3224,6 +3246,12 @@ impl CapabilityRegistry {
             // rule admits `fs/*` ids, so its occupancy of a canonical name must
             // never decide the call.
             if lookup_host_tool(&req.tool_name).is_none() {
+                // Test-only probe: this branch IS the fallback consultation, so
+                // a refused lane still records one. A test asserts it stays 0
+                // for a canonical id — the reservation's observable effect.
+                #[cfg(any(test, feature = "test-hooks"))]
+                self.fallback_consultations
+                    .fetch_add(1, Ordering::Relaxed);
                 // Peer arm (AR-68 #4): reverse-invoke the owning responder.
                 if let Some(entry) = peer_tools::peer_tool_registry().get(&req.tool_name) {
                     return dispatch_peer_tool(&entry, req).await;
@@ -3482,8 +3510,22 @@ pub fn host_tool_registry() -> &'static CapabilityRegistry {
 /// external callers should use `host_tool_registry()` instead.
 #[must_use]
 pub fn build_registry() -> CapabilityRegistry {
+    build_registry_inner(None)
+}
+
+/// The ONE registration path: every canonical row bound, except the optional
+/// `unbound` one.
+///
+/// `unbound` is the feature-gated binding shape (a canonical tool whose
+/// handler has not landed). Production always passes `None`; the `test-hooks`
+/// wrapper below is how a test names the row, so the fixture can never drift
+/// from the real registration rules.
+fn build_registry_inner(unbound: Option<HostToolId>) -> CapabilityRegistry {
     let mut reg = CapabilityRegistry::new();
     for metadata in host_tool_catalog() {
+        if unbound == Some(metadata.id) {
+            continue;
+        }
         reg.register(CapabilityRow {
             metadata,
             handler: handler_for(metadata.id),
@@ -3494,23 +3536,13 @@ pub fn build_registry() -> CapabilityRegistry {
 
 /// Builds the registry with one canonical tool deliberately left unbound.
 ///
-/// The id stays canonical — reserved and listed — but has no handler row. That
-/// is the shape a feature-gated build produces before its binding lands, and
-/// the one `dispatch` must refuse instead of resolving through the peer or user
-/// lane.
+/// The id stays canonical — reserved and listed — but has no handler row, which
+/// is the state `dispatch` must refuse instead of resolving through the peer or
+/// user lane.
+#[cfg(any(test, feature = "test-hooks"))]
 #[must_use]
 pub fn build_registry_without(unbound: HostToolId) -> CapabilityRegistry {
-    let mut reg = CapabilityRegistry::new();
-    for metadata in host_tool_catalog() {
-        if metadata.id == unbound {
-            continue;
-        }
-        reg.register(CapabilityRow {
-            metadata,
-            handler: handler_for(metadata.id),
-        });
-    }
-    reg
+    build_registry_inner(Some(unbound))
 }
 
 /// The real handler for one canonical tool.
