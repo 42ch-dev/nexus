@@ -327,6 +327,8 @@ function authoringCrates({
   nodeForwards = true,
   nodeIndependentSimulator = false,
   computeLinksSimulator = false,
+  connectForwards = false,
+  connectSimulatorDep = false,
   plainDep = true,
   computeLeaf = true,
 } = {}) {
@@ -352,7 +354,7 @@ strategy-authoring = ["execution", "dep:nexus-workflow-simulate"]
 [dependencies]
 ${coreDeps.join('\n')}
 `;
-  const selector = (name, feature, forwards, extraDeps = '') => `[package]
+  const selector = (name, feature, forwards, extraDeps = '', connectHost = '[]') => `[package]
 name = "${name}"
 version = "0.1.0"
 edition = "2021"
@@ -360,13 +362,26 @@ edition = "2021"
 [features]
 default = ["${feature}"]
 ${feature} = [${forwards ? '"nexus-core/strategy-authoring"' : ''}]
+connect-host = ${connectHost}
 
 [dependencies]
 nexus-core = { path = "../nexus-core" }
 ${extraDeps}`;
   return {
     'nexus-core': { manifest: core },
-    nexus42: { manifest: selector('nexus42', 'cli', true) },
+    nexus42: {
+      manifest: selector(
+        'nexus42',
+        'cli',
+        true,
+        // A stray direct simulator dep: the feature stays unselected, so only
+        // the Connect-only row's package-absence probe can fail.
+        connectSimulatorDep
+          ? 'nexus-workflow-simulate = { path = "../nexus-workflow-simulate" }'
+          : '',
+        connectForwards ? '["nexus-core/strategy-authoring"]' : '[]',
+      ),
+    },
     'nexus-core-node': {
       manifest: selector(
         'nexus-core-node',
@@ -407,14 +422,16 @@ test('authoring cohort passes and reads the checked-in consumer', () => {
   assert.match(run.stdout, /ok: nexus-workflow-simulate absent from nexus-core --no-default-features/);
   // The consumer rows resolve the CHECKED-IN fixture, not this workspace, so
   // the pinned core sets are the real consumer's (`test-hooks` is the checker's
-  // own `observable` feature, selecting the lane-consultation counter).
+  // own `observable` feature, selecting the lane-consultation counter). The
+  // version is NOT pinned: it is the real package's, and a routine bump with an
+  // unchanged feature set must stay green.
   assert.match(
     run.stdout,
-    /ok: nexus-core v0\.1\.0 feats=\[execution,nexus-connect,operation-id,test-hooks\] for authoring-cohorts <default>/,
+    /ok: nexus-core v\S+ feats=\[execution,nexus-connect,operation-id,test-hooks\] for authoring-cohorts <default>/,
   );
   assert.match(
     run.stdout,
-    /ok: nexus-core v0\.1\.0 feats=\[execution,nexus-connect,operation-id,strategy-authoring,test-hooks\] for authoring-cohorts --features authoring/,
+    /ok: nexus-core v\S+ feats=\[execution,nexus-connect,operation-id,strategy-authoring,test-hooks\] for authoring-cohorts --features authoring/,
   );
   assert.match(run.stdout, /ok: nexus-agent-host absent from authoring-cohorts --features authoring/);
   assert.match(run.stdout, /ok: nexus-wasm-host absent from authoring-cohorts --features authoring/);
@@ -496,6 +513,35 @@ test('a compute selection that links the simulator fails the cohort', () => {
   assert.match(
     run.stdout,
     /nexus-workflow-simulate must be MISSING from nexus-core--features compute/,
+  );
+});
+
+test('a Connect-only selection that forwards authoring fails the cohort', () => {
+  // Connect alone forwards core's authoring feature. The simulator comes with
+  // it, so the feature probe must be the row's FIRST half and it must fire.
+  const root = createWorkspace(authoringCrates({ connectForwards: true }));
+  const run = authoringRun(root);
+
+  assert.notEqual(run.status, 0, run.stdout);
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(
+    run.stdout,
+    /nexus-core for nexus42 --no-default-features --features connect-host: feature 'strategy-authoring' must stay unselected/,
+  );
+  assert.doesNotMatch(run.stdout, /ok: nexus42 keeps feature strategy-authoring unselected/);
+});
+
+test('a Connect-only selection that links the simulator directly fails the cohort', () => {
+  // The package arrives without the feature, so the feature probe passes and
+  // only the package-absence probe can catch the run-only row.
+  const root = createWorkspace(authoringCrates({ connectSimulatorDep: true }));
+  const run = authoringRun(root);
+
+  assert.notEqual(run.status, 0, run.stdout);
+  assert.match(run.stdout, /ok: nexus-core keeps feature strategy-authoring unselected for nexus42 --no-default-features --features connect-host/);
+  assert.match(
+    run.stdout,
+    /nexus-workflow-simulate must be MISSING from nexus42--no-default-features --features connect-host/,
   );
 });
 

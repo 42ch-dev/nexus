@@ -24,8 +24,9 @@
 //! `tooling/check-graph-pins.sh --cohort authoring` states the other half: the
 //! resolved core feature set each selection produces.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use nexus_contracts::ToolsApi;
 use nexus_core::owner::capabilities::{
@@ -92,6 +93,46 @@ fn legal_request() -> Value {
     })
 }
 
+/// A disposable home this checker owns alone.
+///
+/// The directory is allocated atomically — a fresh unique name created with
+/// `create_dir`, never a predictable PID path this run first deletes: another
+/// run's surviving tree (PID reuse after a failure) must never be touched.
+/// Removal is owned (`Drop`) so it happens on the success tail and on a panic
+/// alike; declared first in `main`, it drops AFTER the pool and store, so the
+/// engine claims are released before the tree goes away.
+struct DisposableHome {
+    path: PathBuf,
+}
+
+impl DisposableHome {
+    fn new() -> Self {
+        let base = std::env::temp_dir();
+        for attempt in 0..64u32 {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_nanos())
+                .unwrap_or(0);
+            let candidate = base.join(format!(
+                "nexus-authoring-cohort-{}-{nanos}-{attempt}",
+                std::process::id()
+            ));
+            match std::fs::create_dir(&candidate) {
+                Ok(()) => return Self { path: candidate },
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("allocate the disposable home: {error}"),
+            }
+        }
+        panic!("allocate the disposable home: 64 unique names were already taken");
+    }
+}
+
+impl Drop for DisposableHome {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
 /// The disposable home the core can open: the active-creator config and the
 /// operational workspace directory `CoreService::open` expects.
 fn prepare_home(home: &Path) {
@@ -117,17 +158,16 @@ fn prepare_home(home: &Path) {
 
 #[tokio::main]
 async fn main() {
-    let home = std::env::temp_dir().join(format!("nexus-authoring-cohort-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&home);
-    prepare_home(&home);
+    let home = DisposableHome::new();
+    prepare_home(&home.path);
     // The engine-owned core and its store: the tool spine writes its audit row
     // through a guarded connection, and the workspace gate admits exactly the
     // engine/migration writer, so this consumer opens the same product access
     // level the daemon's owner does instead of a direct writer that would be
     // fenced at the first audit insert.
-    let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, SLUG);
+    let db_path = nexus_home_layout::workspace_state_db_path(&home.path, CREATOR, SLUG);
     let core = CoreService::open(CoreOpenOptions {
-        user_home: home.clone(),
+        user_home: home.path.clone(),
         access: CoreAccess::EngineOwner,
         memory: None,
     })
@@ -143,9 +183,9 @@ async fn main() {
     let pool = store.clone_pool();
     let context = ToolContext::new(
         pool.clone(),
-        home.join(".nexus42"),
+        home.path.join(".nexus42"),
         Some(
-            nexus_home_layout::operational_workspace_dir(&home, CREATOR, SLUG)
+            nexus_home_layout::operational_workspace_dir(&home.path, CREATOR, SLUG)
                 .display()
                 .to_string(),
         ),
@@ -201,6 +241,31 @@ async fn main() {
         bound,
         "the allowlist decision must match the binding"
     );
+    assert_eq!(
+        consulted(),
+        lanes_before,
+        "the allowlist must never ask the peer/user lanes about a canonical id"
+    );
+
+    // Direct dispatch, on its own entry path. In the execution-only selection
+    // `execute_tool` refuses at Gate 1 (the allowlist above) and never calls
+    // `CapabilityRegistry::dispatch`, so this is the ONLY probe that reaches
+    // dispatch's missing-row branch — the branch the canonical-miss guard owns.
+    #[cfg(not(feature = "authoring"))]
+    {
+        let direct = registry
+            .dispatch(&request(GENERATE_TOOL, json!({})), &context, CREATOR)
+            .await;
+        assert!(
+            matches!(&direct, Err(nexus_core::CoreError::Coded { code, .. }) if code == "not_supported"),
+            "direct dispatch of the reserved id must refuse with the canonical miss, got {direct:?}"
+        );
+        assert_eq!(
+            consulted(),
+            lanes_before,
+            "direct dispatch of a canonical id must never ask the peer/user lanes"
+        );
+    }
 
     // Dispatch: the reserved-but-unbound row refuses through the canonical-miss
     // decision; the bound row reaches the real Generate kernel.
@@ -220,7 +285,7 @@ async fn main() {
     assert_eq!(
         consulted(),
         lanes_before,
-        "a canonical id must never reach the peer/user fallback lanes (allowlist + dispatch)"
+        "the public entry path must never ask the peer/user lanes about a canonical id"
     );
 
     // CONTROL: a non-canonical, unbound id DOES consult the lanes, so a counter
@@ -233,7 +298,25 @@ async fn main() {
     assert_eq!(
         consulted(),
         lanes_before + 1,
-        "the lane counter must observe exactly the one real consultation"
+        "the allowlist must observe exactly the one real consultation"
+    );
+    // The same control on the direct dispatch path: without it the zero delta
+    // above would also pass on a build where dispatch's lane call is dead.
+    let direct_control = registry
+        .dispatch(
+            &request("tools.not-a-real-peer-tool", json!({})),
+            &context,
+            CREATOR,
+        )
+        .await;
+    assert!(
+        matches!(&direct_control, Err(nexus_core::CoreError::Coded { code, .. }) if code == "not_supported"),
+        "direct dispatch of an unregistered id must refuse, got {direct_control:?}"
+    );
+    assert_eq!(
+        consulted(),
+        lanes_before + 2,
+        "dispatch must observe exactly the one real consultation for a non-canonical id"
     );
 
     #[cfg(feature = "authoring")]
@@ -287,8 +370,8 @@ async fn main() {
         dispatch,
     );
 
+    // The engine claims release before the owned home goes away (guard drops last).
     drop(context);
     pool.close().await;
     drop(store);
-    let _ = std::fs::remove_dir_all(&home);
 }

@@ -106,9 +106,9 @@
 #                                 dependency set.
 #                                 `authoring` = the strategy-authoring surface
 #                                 as a SELECTION: the CLI and native selectors
-#                                 that carry it, the compute/execution
-#                                 selections that must not, and the
-#                                 checker-owned consumer in
+#                                 that carry it, the compute/execution and
+#                                 Connect-only selections that must not, and
+#                                 the checker-owned consumer in
 #                                 `tooling/fixtures/authoring-cohorts` under
 #                                 both of its selections (its own manifest, so
 #                                 `--manifest-path` never substitutes for it).
@@ -291,6 +291,34 @@ assert_features_include() {
     fail "$pkg for $crate ${feats:-<default>}: expected feature '$want', got '$pairs'"
   fi
   echo "ok: $pkg selects feature $want for $crate ${feats:-<default>}"
+}
+
+# assert_features_exclude <crate> <features...> <package> <feature>
+# Asserts the package's ONE resolved feature list does NOT contain <feature>.
+# The negative twin of assert_features_include: a feature-level absence cannot
+# be expressed by the package probes above, and an exact whole-set pin would
+# restate features this cohort does not own.
+assert_features_exclude() {
+  local crate="$1"; shift
+  local feats="$1"; shift
+  local pkg="$1"; shift
+  local unwanted="$1"
+  local out status=0
+  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build -i "$pkg" -f "{p} feats=[{f}]" 2>&1) || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    fail "feature probe for $pkg in $crate ${feats:-<default>} failed (exit $status): $out"
+  fi
+  local pairs
+  pairs=$(grep -oE "^$pkg v[^ ]+( \([^)]*\))? feats=\[[^]]*\]" <<<"$out" | sort -u)
+  local count
+  count=$(sed '/^$/d' <<<"$pairs" | wc -l | tr -d ' ')
+  if [[ "$count" -ne 1 ]]; then
+    fail "$pkg for $crate ${feats:-<default>}: expected exactly one resolved feature row, got $count ($(tr '\n' ';' <<<"$pairs"))"
+  fi
+  if grep -qE "feats=\[([^]]*,)?$unwanted(,[^]]*)?\]" <<<"$pairs"; then
+    fail "$pkg for $crate ${feats:-<default>}: feature '$unwanted' must stay unselected, got '$pairs'"
+  fi
+  echo "ok: $pkg keeps feature $unwanted unselected for $crate ${feats:-<default>}"
 }
 
 # assert_graph_nonempty <crate> <features>
@@ -617,7 +645,11 @@ fi
 # (2) A selection without it stays clean. `nexus-core` with `compute` — the
 #     widest non-authoring plane — and with no default features resolve NO
 #     simulator, so the retired A1 intermediate ("compute links the
-#     simulator") cannot come back silently.
+#     simulator") cannot come back silently. The Connect-only runtime
+#     (`nexus42 --no-default-features --features connect-host`) resolves
+#     neither the simulator nor core's authoring feature, so the run-only
+#     Connect consumer the plan promises stays simulator-free under its own
+#     shipped selector.
 # (3) The checker-owned consumer. `tooling/fixtures/authoring-cohorts` is its
 #     own workspace with one path edge on `nexus-core` — the shape a real
 #     caller has, not a core test target. Its DEFAULT is execution-only;
@@ -641,6 +673,14 @@ if [[ "$COHORT" == "authoring" ]]; then
   assert_empty nexus-core "--features compute" nexus-workflow-simulate
   assert_graph_nonempty nexus-core "--no-default-features"
   assert_empty nexus-core "--no-default-features" nexus-workflow-simulate
+  # The Connect-only runtime is the third run-only plane. It must stay
+  # simulator-free in BOTH halves: the package absent from the graph, and the
+  # authoring feature absent from core's resolved set — forwarding only the
+  # feature would pull the package with it, and a stray direct dependency would
+  # arrive without the feature, so neither probe alone covers the row.
+  assert_graph_nonempty nexus42 "--no-default-features --features connect-host"
+  assert_features_exclude nexus42 "--no-default-features --features connect-host" nexus-core strategy-authoring
+  assert_empty nexus42 "--no-default-features --features connect-host" nexus-workflow-simulate
 
   # (3) The consumer, against ITS OWN manifest — the checked-in file is the
   # subject here, so a caller's `--manifest-path` cannot substitute for it.

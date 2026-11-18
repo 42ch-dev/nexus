@@ -97,12 +97,33 @@ states:
  */
 function seedHome() {
   const home = mkdtempSync(join(tmpdir(), 'nexus-authoring-native-'));
+  // `--locked --offline`: the seed resolves from the prepared local cache the
+  // build prerequisites populated, never from the caller's registry config. The
+  // explicit timeout + SIGKILL keeps a wedged cargo from blocking this
+  // synchronous call past the suite's own budget, and both pipes are captured
+  // so a failure reports the child's status and output.
   const seed = spawnSync(
     'cargo',
-    ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home],
-    { cwd: repoRoot, stdio: 'inherit' },
+    [
+      'run',
+      '-q',
+      '--locked',
+      '--offline',
+      '-p',
+      'nexus-core-node',
+      '--bin',
+      'native-wire-fixture-seed',
+      '--',
+      home,
+    ],
+    { cwd: repoRoot, encoding: 'utf8', timeout: 180_000, killSignal: 'SIGKILL' },
   );
-  assert.equal(seed.status, 0, seed.stderr?.toString());
+  if (seed.error || seed.signal) {
+    throw new Error(
+      `native seed aborted: error=${seed.error ? (seed.error.code ?? seed.error.message) : 'none'} signal=${seed.signal ?? 'none'}\n${seed.stdout}\n${seed.stderr}`,
+    );
+  }
+  assert.equal(seed.status, 0, `native seed failed: ${seed.stdout}\n${seed.stderr}`);
 
   const nexusHome = join(home, '.nexus42');
   writePreset(nexusHome, STRATEGY);
@@ -132,6 +153,11 @@ describe('native authoring boundary', () => {
   let service;
 
   before(async () => {
+    // Clear inherited service authentication: the service resolves
+    // NEXUS42_DAEMON_API_KEY even with `allowRemote: false`, and a nonempty
+    // value selects `keyed_all`. Every fetch below is keyless loopback, so a
+    // developer/CI key would 401 before authoring was ever reached.
+    delete process.env.NEXUS42_DAEMON_API_KEY;
     home = seedHome();
     const { startService } = await import(join(serviceRoot, 'dist', 'index.js'));
     service = await startService({ home, host: '127.0.0.1', port: 0, allowRemote: false });
@@ -156,10 +182,12 @@ describe('native authoring boundary', () => {
   test('generate → simulate → approve persists revision and hash, and stale evidence writes nothing', async () => {
     // The native boundary itself: the staged addon opened the core and the hosted owner
     // established an engine epoch. Without this the rest would be a mock-route assertion.
-    assert.notEqual(
-      service.service.engineEpoch,
-      null,
-      'the native addon must report an established execution owner',
+    // A positive epoch is the owner proof: `null` is "not projected yet" and `0` is the
+    // no-owner/domain-only sentinel the service publishes, so both would pass a null check
+    // while every deterministic authoring call still succeeded.
+    assert.ok(
+      Number.isInteger(service.service.engineEpoch) && service.service.engineEpoch > 0,
+      `the native addon must report an established execution owner, got ${service.service.engineEpoch}`,
     );
 
     const generated = await call('POST', generatePath, {
@@ -186,6 +214,56 @@ describe('native authoring boundary', () => {
     assert.ok(
       Array.isArray(trajectory.nodes_visited) && trajectory.nodes_visited.length > 0,
       'the walk visits the document, so the trajectory is not an empty shell',
+    );
+
+    // Stale evidence FIRST, while the candidate hash is UNAPPROVED. Persistence
+    // keys the approval on the current candidate hash with `ON CONFLICT DO
+    // NOTHING`, so a premature freeze replayed after a good approval is a no-op
+    // and cannot be observed. Before any approval exists it has nowhere to hide:
+    // it would insert an approval row or move the candidate, and the read-back
+    // below compares the COMPLETE payloads the refusal must leave untouched.
+    const candidateBefore = await call('GET', candidatePath);
+    assert.equal(candidateBefore.status, 200, candidateBefore.text.slice(0, 600));
+    assert.equal(
+      candidateBefore.payload.revision,
+      document.revision,
+      'the candidate row is the CAS revision',
+    );
+    const approvalsBefore = await call('GET', approvalsPath);
+    assert.equal(approvalsBefore.status, 200, approvalsBefore.text.slice(0, 600));
+    assert.equal(
+      approvalsBefore.payload.items.length,
+      0,
+      'the stale case must run before any approval exists',
+    );
+
+    const stale = await call('POST', approvePath, {
+      base_revision: document.revision,
+      trajectory: { ...trajectory, ir_content_hash: '0'.repeat(64) },
+    });
+    assert.equal(
+      stale.status,
+      422,
+      `stale evidence is a typed refusal, never a success: ${stale.text.slice(0, 600)}`,
+    );
+    assert.equal(stale.payload.error.code, 'invalid_input');
+    assert.equal(stale.payload.error.details?.reason, 'simulation_stale');
+    assert.equal(stale.payload.error.details?.recorded_content_hash, '0'.repeat(64));
+    assert.equal(stale.payload.error.details?.current_content_hash, trajectory.ir_content_hash);
+
+    const candidateAfterRefusal = await call('GET', candidatePath);
+    assert.equal(candidateAfterRefusal.status, 200, candidateAfterRefusal.text.slice(0, 600));
+    assert.deepEqual(
+      candidateAfterRefusal.payload,
+      candidateBefore.payload,
+      'a refused approve leaves the complete candidate payload identical',
+    );
+    const approvalsAfterRefusal = await call('GET', approvalsPath);
+    assert.equal(approvalsAfterRefusal.status, 200, approvalsAfterRefusal.text.slice(0, 600));
+    assert.deepEqual(
+      approvalsAfterRefusal.payload.items,
+      approvalsBefore.payload.items,
+      'a refused approve writes no approval row and consumes no candidate revision',
     );
 
     const approved = await call('POST', approvePath, {
@@ -219,35 +297,6 @@ describe('native authoring boundary', () => {
       applied.payload.newest_approval?.content_hash,
       trajectory.ir_content_hash,
       'the status read reports the same persisted hash',
-    );
-
-    // Stale evidence: the same revision, a trajectory for other bytes. The refusal must
-    // name the stale hash and leave every stored row exactly as the read above found it.
-    const stale = await call('POST', approvePath, {
-      base_revision: document.revision,
-      trajectory: { ...trajectory, ir_content_hash: '0'.repeat(64) },
-    });
-    assert.equal(
-      stale.status,
-      422,
-      `stale evidence is a typed refusal, never a success: ${stale.text.slice(0, 600)}`,
-    );
-    assert.equal(stale.payload.error.code, 'invalid_input');
-    assert.equal(stale.payload.error.details?.reason, 'simulation_stale');
-    assert.equal(stale.payload.error.details?.recorded_content_hash, '0'.repeat(64));
-    assert.equal(stale.payload.error.details?.current_content_hash, trajectory.ir_content_hash);
-
-    const approvalsAfter = await call('GET', approvalsPath);
-    assert.deepEqual(
-      approvalsAfter.payload.items,
-      approvals.payload.items,
-      'a refused approve writes no row and consumes no candidate revision',
-    );
-    const candidateAfter = await call('GET', candidatePath);
-    assert.equal(
-      candidateAfter.payload.revision,
-      document.revision,
-      'the candidate row is unchanged by the refusal',
     );
   });
 });
