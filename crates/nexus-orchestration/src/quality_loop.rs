@@ -33,9 +33,9 @@
 //! are **not** inserted into `kb_extract_jobs`.
 
 use crate::auto_chain::AutoChainError;
-use nexus_capability::extraction_target::{ExtractionTarget, resolve_extraction_target};
-use nexus_capability::CapabilityRegistry;
+use nexus_capability::extraction_target::{resolve_extraction_target, ExtractionTarget};
 use nexus_capability::CapabilityError;
+use nexus_capability::CapabilityRegistry;
 use nexus_local_db::kb_extract_job::{insert_pending_with_llm, is_idempotent};
 use nexus_local_db::kb_relationships::{
     resolve_entity_by_canonical_name, upsert_extraction_relationship,

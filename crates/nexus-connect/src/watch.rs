@@ -1058,10 +1058,8 @@ mod tests {
 
         // SNAPSHOT: what a decision taken NOW would hold — no user names.
         let builtin_ids: HashSet<String> = HashSet::new();
-        let stale_snapshot = crate::table::live_reserved_tool_ids(
-            builtin_ids.iter().cloned(),
-            Some(&holder),
-        );
+        let stale_snapshot =
+            crate::table::live_reserved_tool_ids(builtin_ids.iter().cloned(), Some(&holder));
         assert!(!stale_snapshot.contains("tools.demo.compute"));
 
         // SWAP: a generation admitting tools.demo.compute reserves AND
@@ -1071,7 +1069,11 @@ mod tests {
         nexus_capability::test_support::write_capability_dir(scan.path(), "tools.demo.compute");
         let (reg1, outcome1) =
             nexus_capability::watch::rebuild_registry_with_merge(&deps, scan.path(), &[]);
-        assert_eq!(outcome1.admitted.len(), 1, "the swap admits tools.demo.compute");
+        assert_eq!(
+            outcome1.admitted.len(),
+            1,
+            "the swap admits tools.demo.compute"
+        );
         holder.swap(std::sync::Arc::new(reg1));
 
         // DECISION at the boundary: through the seam, the id the swap just

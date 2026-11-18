@@ -88,10 +88,8 @@ pub struct SandboxOverrides {
 /// apply it.
 #[must_use]
 pub(crate) fn clamp_sandbox(overrides: &SandboxOverrides) -> SandboxOverrides {
-    let resolved = resolve_sandbox_overrides(
-        overrides,
-        nexus_compute_policy::SandboxConfig::default(),
-    );
+    let resolved =
+        resolve_sandbox_overrides(overrides, nexus_compute_policy::SandboxConfig::default());
     SandboxOverrides {
         fuel: overrides.fuel.map(|_| resolved.fuel),
         memory_mib: overrides.memory_mib.map(|_| resolved.memory_mib()),
@@ -473,7 +471,6 @@ impl Capability for UserCapability {
             Err(CapabilityError::WorkerUnavailable)
         }
     }
-
 }
 
 impl UserCapability {
@@ -525,8 +522,7 @@ impl UserCapability {
         // content-hash implementation (`nexus-module-manifest`); a mismatch —
         // or a manifest whose declared hash no longer equals the descriptor's
         // admitted hash — fails closed as `InputInvalid`.
-        let manifest: nexus_module_manifest::ModuleManifest =
-            serde_json::from_str(&manifest_json)
+        let manifest: nexus_module_manifest::ModuleManifest = serde_json::from_str(&manifest_json)
             .map_err(|e| {
                 CapabilityError::InputInvalid(format!(
                     "module '{}' not loaded in capability '{}': parse {}: {e}",
@@ -1144,7 +1140,10 @@ mod tests {
     /// mapping is stateless, T2's executor supplies the handles).
     #[cfg(feature = "wasm")]
     fn cap() -> UserCapability {
-        UserCapability::new(&parse(&minimal_json()).expect("minimal descriptor must parse"), PathBuf::new())
+        UserCapability::new(
+            &parse(&minimal_json()).expect("minimal descriptor must parse"),
+            PathBuf::new(),
+        )
     }
 
     /// Round-trip: a full input maps `worldId` → `world_ref.world_id`,
@@ -1274,7 +1273,7 @@ mod tests {
 
     /// `from_compute_output` maps the 4-part wire envelope verbatim
     /// (`state_delta`, `timeline_events`, `new_key_blocks`, `battle_report`).
-#[cfg(feature = "wasm")]
+    #[cfg(feature = "wasm")]
     #[test]
     #[cfg(feature = "wasm")]
     fn from_compute_output_serializes_four_part_envelope_verbatim() {
@@ -1403,7 +1402,7 @@ mod tests {
     /// basic-combat module and returns the expected 4-part output (the
     /// `basic_combat.rs` assertions). The admitted-with-engine path no longer
     /// returns the P0 stub's `WorkerUnavailable` (PL-10 closed).
-#[cfg(feature = "wasm")]
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn run_executes_embedded_module_and_returns_four_part_output() {
         if !embedded_available() {
@@ -1477,7 +1476,7 @@ mod tests {
     /// AR-37 module-missing at `run()`: a capability whose dir lacks
     /// `manifest.json`/`<module-id>.wasm` (edited after admission) fails
     /// fail-closed with `InputInvalid`, never the engine path.
-#[cfg(feature = "wasm")]
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn run_module_missing_after_admission_returns_input_invalid() {
         if !embedded_available() {
@@ -1525,7 +1524,7 @@ mod tests {
     /// below `~50_000` are consumed during instantiation and surface as
     /// `Internal`; `100_000` is the smallest round budget on the
     /// `compute`-trap side.)
-#[cfg(feature = "wasm")]
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn descriptor_fuel_override_is_enforced_at_run() {
         if !embedded_available() {
@@ -1564,7 +1563,7 @@ mod tests {
     /// `.wasm` bytes swapped while `manifest.json` and `capability.json` keep
     /// the admitted hash — must fail closed at `run()` with `InputInvalid`
     /// before any compile/cache path executes unverified bytes.
-#[cfg(feature = "wasm")]
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn run_rejects_module_bytes_changed_after_admission() {
         if !embedded_available() {
@@ -1695,7 +1694,10 @@ mod tests {
             wall_time_ms: Some(999_999),
         });
         assert_eq!(clamped.fuel, Some(nexus_compute_policy::DEFAULT_FUEL));
-        assert_eq!(clamped.memory_mib, Some(nexus_compute_policy::DEFAULT_MEMORY_MIB));
+        assert_eq!(
+            clamped.memory_mib,
+            Some(nexus_compute_policy::DEFAULT_MEMORY_MIB)
+        );
         // The byte ceiling the projection must round-trip (QC1-01: bytes, not
         // a MiB-recomputed shadow).
         assert_eq!(
@@ -1704,10 +1706,7 @@ mod tests {
         );
         assert_eq!(
             clamped.wall_time_ms,
-            Some(u64::try_from(
-                nexus_compute_policy::DEFAULT_WALL_TIME.as_millis()
-            )
-            .unwrap())
+            Some(u64::try_from(nexus_compute_policy::DEFAULT_WALL_TIME.as_millis()).unwrap())
         );
         // Below every maximum: tightening overrides pass through untouched.
         let tighter = clamp_sandbox(&SandboxOverrides {
@@ -1724,6 +1723,9 @@ mod tests {
             }
         );
         // Absent stays absent — admission never invents host defaults.
-        assert_eq!(clamp_sandbox(&SandboxOverrides::default()), SandboxOverrides::default());
+        assert_eq!(
+            clamp_sandbox(&SandboxOverrides::default()),
+            SandboxOverrides::default()
+        );
     }
 }

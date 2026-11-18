@@ -186,7 +186,10 @@ pub fn admit_consistent_with_reservation(
             reserved.extend(live_reservation.iter().map(|name| (*name).to_owned()));
             decide(&reserved)
         }),
-        None => decide(&live_reserved_tool_ids(builtin_tool_ids.iter().cloned(), None)),
+        None => decide(&live_reserved_tool_ids(
+            builtin_tool_ids.iter().cloned(),
+            None,
+        )),
     }
 }
 

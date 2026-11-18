@@ -51,9 +51,9 @@
 
 #[cfg(feature = "wasm")]
 use crate::builtins::world::{admitted_creator_view_scope, ensure_world_owned};
-use crate::{Capability, CapabilityError};
 #[cfg(feature = "wasm")]
 use crate::state_delta;
+use crate::{Capability, CapabilityError};
 use async_trait::async_trait;
 #[cfg(feature = "wasm")]
 use nexus_knowledge::world_kb::KbStore;
@@ -67,9 +67,9 @@ use nexus_spoke_adapter::conversion::spoke_to_knowledge_record;
 use nexus_wasm_host::{ComputeInput, ModuleCache, WasmEngine};
 #[cfg(feature = "wasm")]
 use serde::Deserialize;
-use serde_json::Value;
 #[cfg(any(test, feature = "wasm"))]
 use serde_json::json;
+use serde_json::Value;
 use std::sync::Arc;
 
 /// Maximum size in bytes for the serialized `battle_report` field (64 KiB).
@@ -207,117 +207,119 @@ impl Capability for NarrativeCompute {
         // resolves the engine/cache and runs the admitted module fail-closed.
         #[cfg(feature = "wasm")]
         {
-        let parsed: NarrativeComputeInput = serde_json::from_value(input)
-            .map_err(|e| CapabilityError::InputInvalid(format!("narrative.compute input: {e}")))?;
+            let parsed: NarrativeComputeInput = serde_json::from_value(input).map_err(|e| {
+                CapabilityError::InputInvalid(format!("narrative.compute input: {e}"))
+            })?;
 
-        let pool = self
-            .pool
-            .as_ref()
-            .ok_or(CapabilityError::WorkerUnavailable)?;
+            let pool = self
+                .pool
+                .as_ref()
+                .ok_or(CapabilityError::WorkerUnavailable)?;
 
-        let engine = self
-            .engine
-            .as_ref()
-            .ok_or(CapabilityError::WorkerUnavailable)?;
+            let engine = self
+                .engine
+                .as_ref()
+                .ok_or(CapabilityError::WorkerUnavailable)?;
 
-        tracing::info!(
-            world_id = %parsed.world_id,
-            module_id = %parsed.module_id,
-            "narrative.compute admitted"
-        );
+            tracing::info!(
+                world_id = %parsed.world_id,
+                module_id = %parsed.module_id,
+                "narrative.compute admitted"
+            );
 
-        // Admission gate: creator must own the world.
-        ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
+            // Admission gate: creator must own the world.
+            ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
-        // 1. Read computable KnowledgeEntries from the KB store.
-        // The compute payload is model-facing, so its rows are read through the
-        // admitted Creator ActorView: another holder's `owner-private` World row
-        // never reaches the module, and a caller whose selection cannot be
-        // resolved refuses here instead of widening to the World listing.
-        let selection =
-            admitted_creator_view_scope(pool, &parsed.creator_id, &parsed.world_id).await?;
-        let kb_store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
-        let q =
-            nexus_knowledge::world_kb::KbQuery::new(&parsed.world_id).with_computable(Some(true));
-        let computable_blocks = kb_store
-            .query_with_scope(&q, &selection)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("kb query computable: {e}")))?;
+            // 1. Read computable KnowledgeEntries from the KB store.
+            // The compute payload is model-facing, so its rows are read through the
+            // admitted Creator ActorView: another holder's `owner-private` World row
+            // never reaches the module, and a caller whose selection cannot be
+            // resolved refuses here instead of widening to the World listing.
+            let selection =
+                admitted_creator_view_scope(pool, &parsed.creator_id, &parsed.world_id).await?;
+            let kb_store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
+            let q = nexus_knowledge::world_kb::KbQuery::new(&parsed.world_id)
+                .with_computable(Some(true));
+            let computable_blocks = kb_store
+                .query_with_scope(&q, &selection)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("kb query computable: {e}")))?;
 
-        if computable_blocks.items.is_empty() {
-            return Err(CapabilityError::InputInvalid(
-                "no computable knowledge entries found in world".to_string(),
-            ));
-        }
+            if computable_blocks.items.is_empty() {
+                return Err(CapabilityError::InputInvalid(
+                    "no computable knowledge entries found in world".to_string(),
+                ));
+            }
 
-        // Domain KnowledgeEntries are serialized into the compute envelope's
-        // `key_blocks` items (opaque JSON objects; spoke-adapter-architecture
-        // spec §3.4) inline below.
+            // Domain KnowledgeEntries are serialized into the compute envelope's
+            // `key_blocks` items (opaque JSON objects; spoke-adapter-architecture
+            // spec §3.4) inline below.
 
-        // 2. Read narrative state (timeline position, root branch).
-        let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new((**pool).clone());
-        let world_state = gw
-            .get_world_state(&parsed.world_id)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("world state read: {e}")))?;
+            // 2. Read narrative state (timeline position, root branch).
+            let gw =
+                nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new((**pool).clone());
+            let world_state = gw
+                .get_world_state(&parsed.world_id)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("world state read: {e}")))?;
 
-        let branch_id = world_state
-            .fork_branch_id
-            .clone()
-            .unwrap_or_else(|| "fbk_root".to_string());
+            let branch_id = world_state
+                .fork_branch_id
+                .clone()
+                .unwrap_or_else(|| "fbk_root".to_string());
 
-        let narrative_state = json!({
-            "world_id": parsed.world_id,
-            "branch_id": branch_id,
-            "timeline_position": "0", // V1.61: default to start of timeline
-        });
+            let narrative_state = json!({
+                "world_id": parsed.world_id,
+                "branch_id": branch_id,
+                "timeline_position": "0", // V1.61: default to start of timeline
+            });
 
-        // 3. Build ComputeInput envelope and invoke WASM.
-        // The compute envelope's world_ref/narrative_state are typify-inlined
-        // copies (`ComputeInputWorldRef`, `ComputeInputNarrativeState`) that
-        // are wire-equivalent to the domain contract types; JSON round-trips
-        // bridge them (drift gate proves equivalence). `key_blocks` items are
-        // opaque JSON objects (spoke-adapter-architecture spec §3.4).
-        let compute_input = ComputeInput {
-            schema_version: std::num::NonZeroU64::new(1)
-                .expect("schema_version literal 1 is non-zero"),
-            world_ref: serde_json::from_value(json!({"world_id": parsed.world_id}))
-                .expect("world_ref round-trips"),
-            key_blocks: computable_blocks
-                .items
-                .into_iter()
-                .map(
-                    |kb: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord| {
-                        // V1.139 P0: ComputeInput.key_blocks is opaque spoke-
-                        // KnowledgeEntry JSON (the spoke $ref is unresolved at
-                        // codegen). Convert domain KnowledgeEntryRecord → spoke
-                        // KnowledgeEntry (sole conversion seam, now a free
-                        // function in nexus-spoke-adapter — V1.145 P1a) → JSON
-                        // object map.
-                        let spoke: nexus_knowledge::world_kb::KnowledgeEntry =
-                            knowledge_record_to_spoke(&kb);
-                        serde_json::to_value(&spoke)
-                            .ok()
-                            .and_then(|v| v.as_object().cloned())
-                            .unwrap_or_default()
-                    },
-                )
-                .collect(),
-            narrative_state: Some(
-                serde_json::from_value(narrative_state)
-                    .expect("narrative_state round-trips to ComputeInputNarrativeState"),
-            ),
-            invocation: parsed.invocation_params.map_or_default(|v| {
-                serde_json::from_value(v).expect("invocation round-trips to Map")
-            }),
-        };
+            // 3. Build ComputeInput envelope and invoke WASM.
+            // The compute envelope's world_ref/narrative_state are typify-inlined
+            // copies (`ComputeInputWorldRef`, `ComputeInputNarrativeState`) that
+            // are wire-equivalent to the domain contract types; JSON round-trips
+            // bridge them (drift gate proves equivalence). `key_blocks` items are
+            // opaque JSON objects (spoke-adapter-architecture spec §3.4).
+            let compute_input = ComputeInput {
+                schema_version: std::num::NonZeroU64::new(1)
+                    .expect("schema_version literal 1 is non-zero"),
+                world_ref: serde_json::from_value(json!({"world_id": parsed.world_id}))
+                    .expect("world_ref round-trips"),
+                key_blocks: computable_blocks
+                    .items
+                    .into_iter()
+                    .map(
+                        |kb: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord| {
+                            // V1.139 P0: ComputeInput.key_blocks is opaque spoke-
+                            // KnowledgeEntry JSON (the spoke $ref is unresolved at
+                            // codegen). Convert domain KnowledgeEntryRecord → spoke
+                            // KnowledgeEntry (sole conversion seam, now a free
+                            // function in nexus-spoke-adapter — V1.145 P1a) → JSON
+                            // object map.
+                            let spoke: nexus_knowledge::world_kb::KnowledgeEntry =
+                                knowledge_record_to_spoke(&kb);
+                            serde_json::to_value(&spoke)
+                                .ok()
+                                .and_then(|v| v.as_object().cloned())
+                                .unwrap_or_default()
+                        },
+                    )
+                    .collect(),
+                narrative_state: Some(
+                    serde_json::from_value(narrative_state)
+                        .expect("narrative_state round-trips to ComputeInputNarrativeState"),
+                ),
+                invocation: parsed.invocation_params.map_or_default(|v| {
+                    serde_json::from_value(v).expect("invocation round-trips to Map")
+                }),
+            };
 
-        // Resolve the compiled module + manifest from the daemon-wide cache
-        // (R-V161P3-PERF-002: compile once, reuse). Modules are pre-warmed at
-        // daemon boot (embedded + user-installed); a cache miss means the
-        // requested module id is neither embedded nor installed under
-        // `~/.nexus42/modules/`.
-        let module_cache = self.module_cache.as_ref().ok_or_else(|| {
+            // Resolve the compiled module + manifest from the daemon-wide cache
+            // (R-V161P3-PERF-002: compile once, reuse). Modules are pre-warmed at
+            // daemon boot (embedded + user-installed); a cache miss means the
+            // requested module id is neither embedded nor installed under
+            // `~/.nexus42/modules/`.
+            let module_cache = self.module_cache.as_ref().ok_or_else(|| {
             tracing::warn!(
                 module_id = %parsed.module_id,
                 "narrative.compute: no module cache wired (capability constructed without engine)"
@@ -325,82 +327,85 @@ impl Capability for NarrativeCompute {
             CapabilityError::WorkerUnavailable
         })?;
 
-        let cached = module_cache.get(&parsed.module_id).ok_or_else(|| {
-            CapabilityError::InputInvalid(format!(
+            let cached = module_cache.get(&parsed.module_id).ok_or_else(|| {
+                CapabilityError::InputInvalid(format!(
             "module '{}' not loaded; ensure it is embedded or installed under ~/.nexus42/modules/",
             parsed.module_id
         ))
-        })?;
-        let module = cached.module.clone();
-        let manifest = cached.manifest.clone();
+            })?;
+            let module = cached.module.clone();
+            let manifest = cached.manifest.clone();
 
-        // Invoke compute with graceful error handling.
-        let output = match engine.compute(&module, &manifest, &compute_input) {
-            Ok(o) => o,
-            Err(e) => {
-                return handle_compute_error(
-                    pool,
-                    &parsed.world_id,
-                    &parsed.creator_id,
-                    &branch_id,
-                    &e.to_string(),
-                )
-                .await;
+            // Invoke compute with graceful error handling.
+            let output = match engine.compute(&module, &manifest, &compute_input) {
+                Ok(o) => o,
+                Err(e) => {
+                    return handle_compute_error(
+                        pool,
+                        &parsed.world_id,
+                        &parsed.creator_id,
+                        &branch_id,
+                        &e.to_string(),
+                    )
+                    .await;
+                }
+            };
+
+            // 4. Validate battle_report size (R-V161P0-LOW-003).
+            if let Ok(report_bytes) = serde_json::to_vec(&output.battle_report) {
+                if report_bytes.len() > BATTLE_REPORT_MAX_BYTES {
+                    return Err(CapabilityError::InputInvalid(format!(
+                        "battle_report too large: {} bytes (max {} bytes)",
+                        report_bytes.len(),
+                        BATTLE_REPORT_MAX_BYTES
+                    )));
+                }
             }
-        };
 
-        // 4. Validate battle_report size (R-V161P0-LOW-003).
-        if let Ok(report_bytes) = serde_json::to_vec(&output.battle_report) {
-            if report_bytes.len() > BATTLE_REPORT_MAX_BYTES {
-                return Err(CapabilityError::InputInvalid(format!(
-                    "battle_report too large: {} bytes (max {} bytes)",
-                    report_bytes.len(),
-                    BATTLE_REPORT_MAX_BYTES
-                )));
-            }
-        }
+            // 5. Apply state_delta to KB state fields.
+            let applied = state_delta::apply_state_delta_pool(pool, &output.state_delta).await?;
 
-        // 5. Apply state_delta to KB state fields.
-        let applied = state_delta::apply_state_delta_pool(pool, &output.state_delta).await?;
+            // 6. Create new KnowledgeEntries from output.
+            let new_kb_count =
+                create_new_key_blocks(pool, &parsed.world_id, &output.new_key_blocks)
+                    .await
+                    .map_err(|e| {
+                        CapabilityError::Internal(format!("create new key_blocks: {e}"))
+                    })?;
 
-        // 6. Create new KnowledgeEntries from output.
-        let new_kb_count = create_new_key_blocks(pool, &parsed.world_id, &output.new_key_blocks)
+            // 7. Append timeline events from output.
+            let evt_count = append_timeline_events(
+                pool,
+                &parsed.world_id,
+                &parsed.creator_id,
+                &branch_id,
+                &output
+                    .timeline_events
+                    .iter()
+                    .map(|evt| {
+                        serde_json::from_value(serde_json::to_value(evt).unwrap_or_default())
+                            .expect("NexusTimelineEvent round-trips to TimelineEvent")
+                    })
+                    .collect::<Vec<nexus_contracts::TimelineEvent>>(),
+            )
             .await
-            .map_err(|e| CapabilityError::Internal(format!("create new key_blocks: {e}")))?;
+            .map_err(|e| CapabilityError::Internal(format!("append timeline events: {e}")))?;
 
-        // 7. Append timeline events from output.
-        let evt_count = append_timeline_events(
-            pool,
-            &parsed.world_id,
-            &parsed.creator_id,
-            &branch_id,
-            &output
-                .timeline_events
-                .iter()
-                .map(|evt| {
-                    serde_json::from_value(serde_json::to_value(evt).unwrap_or_default())
-                        .expect("NexusTimelineEvent round-trips to TimelineEvent")
-                })
-                .collect::<Vec<nexus_contracts::TimelineEvent>>(),
-        )
-        .await
-        .map_err(|e| CapabilityError::Internal(format!("append timeline events: {e}")))?;
+            tracing::info!(
+                world_id = %parsed.world_id,
+                module_id = %parsed.module_id,
+                state_delta_applied = applied,
+                timeline_events_created = evt_count,
+                new_key_blocks_created = new_kb_count,
+                "narrative.compute completed"
+            );
 
-        tracing::info!(
-            world_id = %parsed.world_id,
-            module_id = %parsed.module_id,
-            state_delta_applied = applied,
-            timeline_events_created = evt_count,
-            new_key_blocks_created = new_kb_count,
-            "narrative.compute completed"
-        );
-
-        Ok(json!({
-            "battle_report": output.battle_report,
-            "state_delta_applied": applied,
-            "timeline_events_created": evt_count,
-            "new_key_blocks_created": new_kb_count,
-        }))
+            Ok(json!({
+                "battle_report": output.battle_report,
+                "state_delta_applied": applied,
+                "timeline_events_created": evt_count,
+                "new_key_blocks_created": new_kb_count,
+            }))
         }
 
         #[cfg(not(feature = "wasm"))]

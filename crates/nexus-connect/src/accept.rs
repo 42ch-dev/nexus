@@ -672,7 +672,7 @@ fn register_subscribe_handler(
                             message: "last_event_id must be a string when provided".to_owned(),
                             details: None,
                         },
-                    )
+                    );
                 }
             };
             let (epoch, resumed_from, subscription) = match events

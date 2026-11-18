@@ -31,8 +31,8 @@
 
 use crate::scan::{self, dir_file_digest, ScanOutcome};
 use crate::user_capability::UserCapability;
-use crate::{CapabilityRegistry, CapabilityRuntimeDeps};
 use crate::Capability;
+use crate::{CapabilityRegistry, CapabilityRuntimeDeps};
 use std::collections::HashSet;
 use std::future::Future;
 use std::path::Path;
@@ -391,8 +391,8 @@ where
 mod tests {
     use super::*;
     use crate::test_support::write_capability_dir;
+    use crate::CapabilityOrigin;
     use crate::CapabilityRegistryHolder;
-use crate::CapabilityOrigin;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn test_deps() -> CapabilityRuntimeDeps {
@@ -575,8 +575,7 @@ use crate::CapabilityOrigin;
         let mirror = boot_outcome.admitted;
         // Rebuild unchanged: the name is admitted again, and the merge must
         // NOT duplicate it (new entry wins, mirror copy dropped).
-        let (reg, hot_outcome) =
-            rebuild_registry_with_merge(&deps, tmp.path(), &mirror);
+        let (reg, hot_outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &mirror);
         assert_eq!(
             hot_outcome.skipped,
             [] as [crate::scan::SkippedCapability; 0]
@@ -645,8 +644,7 @@ use crate::CapabilityOrigin;
         let (boot_reg, boot_outcome) =
             CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, tmp.path());
         // Hot path with an EMPTY prior mirror (nothing to carry/drop).
-        let (hot_reg, hot_outcome) =
-            rebuild_registry_with_merge(&deps, tmp.path(), &[]);
+        let (hot_reg, hot_outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
 
         assert_eq!(
             boot_outcome.skipped,
@@ -857,10 +855,7 @@ use crate::CapabilityOrigin;
         std::fs::remove_dir_all(tmp.path().join("demo.compute")).unwrap();
         let (reg3, outcome3) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
         assert!(
-            outcome3
-                .admitted
-                .iter()
-                .all(|c| c.name() != "demo.compute"),
+            outcome3.admitted.iter().all(|c| c.name() != "demo.compute"),
             "the dropped dir admits nothing"
         );
         holder.swap(std::sync::Arc::new(reg3));

@@ -12,11 +12,11 @@
 //! - If `_trace_file` is present in context, append start/finish trace events
 //!   best-effort using the DTOs from `nexus-contracts::local::acp_runtime::trace`.
 
-use nexus_capability::CapabilityRegistry;
-use nexus_capability::{CapabilityError, ToolPolicy};
 use crate::engine::OrchestrationEngine;
 use async_trait::async_trait;
 use graph_flow::{Graph, NextAction, Task, TaskResult};
+use nexus_capability::CapabilityRegistry;
+use nexus_capability::{CapabilityError, ToolPolicy};
 use nexus_preset::manifest::{ConvergeConfig, ConvergeStrategy};
 use nexus_preset::manifest::{EnterAction, ExitWhen, MergeKind, NextTarget, StateDefinition};
 use nexus_session_storage::SessionId;
@@ -718,14 +718,16 @@ impl LlmExtractTask {
         // capability refuses a missing target rather than extracting under an
         // invented policy, so the task surfaces that refusal to its caller.
         let target = match context.get::<serde_json::Value>("_extract_target") {
-            Some(value) => match nexus_capability::extraction_target::ExtractionTarget::from_context(&value) {
-                Ok(target) => target,
-                Err(e) => {
-                    return Ok(crate::quality_loop::LlmExtractOutcome::Refused(format!(
-                        "extract target: {e}"
-                    )));
+            Some(value) => {
+                match nexus_capability::extraction_target::ExtractionTarget::from_context(&value) {
+                    Ok(target) => target,
+                    Err(e) => {
+                        return Ok(crate::quality_loop::LlmExtractOutcome::Refused(format!(
+                            "extract target: {e}"
+                        )));
+                    }
                 }
-            },
+            }
             None => {
                 return Ok(crate::quality_loop::LlmExtractOutcome::Refused(
                     "missing trusted extraction target: the orchestration caller must resolve \

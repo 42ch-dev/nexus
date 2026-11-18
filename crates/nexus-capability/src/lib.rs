@@ -749,10 +749,7 @@ impl CapabilityRegistry {
     /// ([`append_user_caps`]) and the hot-reload watcher
     /// (`rebuild_registry_with_merge`, V1.176 P1 M-3) so the boxing stays in
     /// one place.
-    fn append_user_cap_entries(
-        &mut self,
-        admitted: &[crate::user_capability::UserCapability],
-    ) {
+    fn append_user_cap_entries(&mut self, admitted: &[crate::user_capability::UserCapability]) {
         for cap in admitted {
             self.capabilities
                 .push(Box::new(cap.clone()) as Box<dyn Capability>);
@@ -1165,9 +1162,7 @@ pub struct CapabilityRegistryHolder {
     /// from boot plus every user name any hot swap admitted. Union-only;
     /// names are `&'static str` (builtin literals + interned user strings),
     /// so the set adds no per-swap allocation beyond the entry itself.
-    reserved: std::sync::Arc<
-        std::sync::RwLock<std::collections::HashSet<&'static str>>,
-    >,
+    reserved: std::sync::Arc<std::sync::RwLock<std::collections::HashSet<&'static str>>>,
 }
 
 impl CapabilityRegistryHolder {
@@ -1329,7 +1324,6 @@ mod tests {
     #[cfg(feature = "wasm")]
     use crate::CapabilityError;
     use crate::CapabilityOrigin;
-
 
     #[test]
     fn registry_has_32_builtins() {
@@ -1580,7 +1574,7 @@ mod tests {
         assert_eq!(rows, 1, "no duplicate catalog row");
     }
 
-#[cfg(feature = "wasm")]
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn with_runtime_deps_and_wasm_and_user_caps_indexes_and_executor_wired() {
         let tmp = tempfile::tempdir().unwrap();
