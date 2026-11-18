@@ -165,7 +165,10 @@ function assertCandidate(payload, strategyId, surface) {
   assert.ok(Array.isArray(payload.warnings), `warnings ride the output — ${detail}`);
 }
 
-describe('generate one-kernel drift guard (P6-T10)', () => {
+// Three legs (CLI, route, agent tool) each boot a full core to prove they reach
+// one generate kernel; that is the point of the guard, so the cost stays. The
+// file needs headroom over the runner's global 180 s test timeout.
+describe('generate one-kernel drift guard (P6-T10)', { timeout: 600_000 }, () => {
   let home;
   let service;
 
