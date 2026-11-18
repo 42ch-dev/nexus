@@ -49,19 +49,34 @@ const NEXUS_DIR: &str = ".nexus42";
 /// How long the spawned runtime may take to print readiness.
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The retained fixture the opt-in probe half drives: one stored scoped
+/// World, one staged compute session and the deterministic `basic-combat`
+/// module installed host-locally (module install only where the wasm32 target
+/// exists). The allowlist row below scopes the probe peer to this
+/// World/module and grants the stored Creator, with an op scope of EXACTLY
+/// `upsert` + `compute` — so the probe's `check` invoke still produces the
+/// locked `op_unsupported` refusal while the follow-up `upsert` proves the
+/// session stays usable.
+const COMPUTE_CREATOR: &str = "ctr_smoke";
+const COMPUTE_WORLD: &str = "wld_smoke";
+const COMPUTE_MODULE: &str = "basic-combat";
+const COMPUTE_SESSION: &str = "ses_smoke";
+
 /// Seed a hermetic `~/.nexus42` home for the spawned runtime: the CLI
 /// config keys the boot resolves the active workspace from (same keys the
-/// creator app writes), plus the Connect allowlist holding the fixed-seed
-/// probe peer.
+/// creator app writes), plus the scoped Connect allowlist holding the
+/// fixed-seed probe peer.
 fn seed_home(tmp: &Path) {
     let nexus = tmp.join(NEXUS_DIR);
     std::fs::create_dir_all(&nexus).expect("create nexus home");
 
     std::fs::write(
         nexus.join("config.toml"),
-        "active_creator_id = \"ctr_smoke\"\n\
+        format!(
+            "active_creator_id = \"{COMPUTE_CREATOR}\"\n\
          [active_workspace_slug_by_creator]\n\
-         ctr_smoke = \"default\"\n",
+         {COMPUTE_CREATOR} = \"default\"\n"
+        ),
     )
     .expect("write config.toml");
 
@@ -69,7 +84,19 @@ fn seed_home(tmp: &Path) {
     std::fs::create_dir_all(&connect_dir).expect("create connect dir");
     std::fs::write(
         connect_dir.join("allowlist.json"),
-        format!("{{\"peer_ids\": [\"{DIALER_PEER_ID}\"]}}"),
+        format!(
+            r#"{{"peer_ids": [{{
+                "peer_id": "{DIALER_PEER_ID}",
+                "world_scope": ["{COMPUTE_WORLD}"],
+                "op_scope": ["upsert", "compute"],
+                "module_scope": ["{COMPUTE_MODULE}"],
+                "grant": {{
+                    "creator_id": "{COMPUTE_CREATOR}",
+                    "actor": {{ "kind": "creator", "id": "{COMPUTE_CREATOR}" }},
+                    "world_id": "{COMPUTE_WORLD}"
+                }}
+            }}]}}"#
+        ),
     )
     .expect("write allowlist.json");
 
@@ -81,18 +108,86 @@ fn seed_home(tmp: &Path) {
     std::fs::write(connect_dir.join("daemon.json"), "{\"port\": 0}").expect("write daemon.json");
 }
 
+/// Install the embedded deterministic module into the hermetic home's
+/// host-local store (`~/.nexus42/modules/<id>/`) — the operator-install step
+/// the compute route requires (bytes are never peer-supplied).
+#[cfg(not(nexus42_no_wasm_target))]
+fn install_compute_module(home: &Path) {
+    let dir = nexus_home_layout::user_modules_dir(home).join(COMPUTE_MODULE);
+    std::fs::create_dir_all(&dir).expect("mkdir module store dir");
+    let bytes = nexus_wasm_host::embedded_module_bytes(COMPUTE_MODULE)
+        .unwrap_or_else(|| panic!("embedded module {COMPUTE_MODULE:?} must ship bytes"));
+    let manifest = nexus_wasm_host::embedded_module_manifest(COMPUTE_MODULE)
+        .unwrap_or_else(|| panic!("embedded module {COMPUTE_MODULE:?} must ship a manifest"));
+    std::fs::write(dir.join(format!("{COMPUTE_MODULE}.wasm")), bytes).expect("write module wasm");
+    std::fs::write(dir.join("manifest.json"), manifest).expect("write module manifest");
+}
+
+/// Seed the workspace the spawned runtime opens with the stored authority the
+/// retained half reads: a Creator + holder row, the scoped World, and the
+/// staged compute session. The module is installed only when the wasm32 target
+/// exists; the World/session rows are safe (and unused) on a no-wasm host and
+/// are what make the session-alive `upsert` possible there. Staged through an
+/// engine-owned pool (the `compute_sessions` table is engine-writer-fenced)
+/// which is closed and its OS admission released before the runtime starts —
+/// the runtime keeps its own direct (cooperative) pool.
+fn seed_scoped_workspace(home: &Path) {
+    #[cfg(not(nexus42_no_wasm_target))]
+    install_compute_module(home);
+    let db_path = nexus42::paths::state_db_path(home, COMPUTE_CREATOR, "default");
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent).expect("mkdir workspace state dir");
+    }
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("compute staging runtime");
+
+    runtime.block_on(async {
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .expect("engine-owned workspace DB initializes");
+        let pool = guarded.clone_pool();
+        nexus_local_db::creators::ensure_creator_row(&pool, COMPUTE_CREATOR, "smoke creator")
+            .await
+            .expect("seed the acting Creator and its holder");
+        nexus_local_db::kb_store::seed::world(
+            &pool,
+            COMPUTE_WORLD,
+            COMPUTE_CREATOR,
+            "Smoke World",
+            "smoke",
+            "private",
+            "manual",
+        )
+        .await;
+        let state = serde_json::json!({
+            "module_id": COMPUTE_MODULE,
+            "attacker_id": "kb_atk",
+            "defender_id": "kb_def",
+            "character": { "current_hp": 30, "max_hp": 30 },
+        });
+        nexus_local_db::compute_session::insert_compute_session(
+            &pool,
+            COMPUTE_SESSION,
+            "kb_atk",
+            &state.to_string(),
+        )
+        .await
+        .expect("stage the compute session");
+        pool.close().await;
+        drop(guarded);
+        nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
+    });
+}
+
 /// The `runtime_smoke_probe` example binary — compiled by cargo (with
 /// `connect-host` on) when the test target builds; resolved through the
 /// standard workspace target layout.
 fn probe_binary() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let profile = if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "release"
-    };
-    let target = std::env::var_os("CARGO_TARGET_DIR")
-        .map_or_else(|| manifest_dir.join("../../target"), PathBuf::from);
+    // Same profile inference as the shipped host artifact: a custom profile's
+    // probe lives under its own directory, never under `debug`.
+    let (target, profile) = running_profile().unwrap_or_else(|error| panic!("{error}"));
     let exe = if cfg!(windows) {
         "runtime_smoke_probe.exe"
     } else {
@@ -101,12 +196,351 @@ fn probe_binary() -> PathBuf {
     target.join(profile).join("examples").join(exe)
 }
 
+/// Infer `<target>/<profile>` from the running test binary's path
+/// (`<target>/<profile>/deps/<binary>`).
+///
+/// A compile-time `debug_assertions` switch is NOT enough: a custom profile
+/// (e.g. `--profile ci`) that inherits `dev` keeps debug assertions on while
+/// building into `target/ci/`, so the boolean would resolve another profile's
+/// — possibly stale — artifact. The profile directory name is the truth.
+fn profile_from_exe(exe: &Path) -> Result<(PathBuf, String), String> {
+    let deps = exe.parent().ok_or_else(|| {
+        format!("cannot infer the cargo profile from {exe:?}: no parent directory")
+    })?;
+    if deps.file_name().and_then(|name| name.to_str()) != Some("deps") {
+        return Err(format!(
+            "cannot infer the cargo profile from {exe:?}: expected the cargo test layout \
+             <target>/<profile>/deps/<binary>; set NEXUS42_RUNTIME_BIN to name the shipped artifact"
+        ));
+    }
+    let profile_dir = deps.parent().ok_or_else(|| {
+        format!("cannot infer the cargo profile from {exe:?}: the deps directory has no parent")
+    })?;
+    let profile = profile_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            format!(
+                "cannot infer the cargo profile from {exe:?}: the profile directory has no name"
+            )
+        })?;
+    let target_root = profile_dir.parent().ok_or_else(|| {
+        format!(
+            "cannot infer the cargo target directory from {exe:?}: the profile directory has no parent"
+        )
+    })?;
+    Ok((target_root.to_path_buf(), profile.to_string()))
+}
+
+/// The `<target>/<profile>` of the binary that is actually running.
+fn running_profile() -> Result<(PathBuf, String), String> {
+    let exe = std::env::current_exe()
+        .map_err(|error| format!("cannot read the running test binary path: {error}"))?;
+    profile_from_exe(&exe)
+}
+
+/// The cargo arguments that build into `profile`'s directory.
+fn profile_build_args(profile: &str) -> Vec<String> {
+    match profile {
+        "debug" => Vec::new(),
+        "release" => vec!["--release".to_string()],
+        other => vec!["--profile".to_string(), other.to_string()],
+    }
+}
+
+/// The SHIPPED Connect-only runtime artifact for `profile`, or a named error.
+///
+/// Never falls back to another profile's binary: a release test that silently
+/// spawned a stale debug artifact would prove behaviour of code this run never
+/// compiled.
+fn profile_artifact(target_dir: &Path, profile: &str) -> Result<PathBuf, String> {
+    let artifact = target_dir
+        .join(profile)
+        .join(format!("nexus-runtime{}", std::env::consts::EXE_SUFFIX));
+    if artifact.is_file() {
+        Ok(artifact)
+    } else {
+        Err(format!(
+            "shipped Connect-only runtime artifact missing for the {profile} profile at {}; \
+             the smoke was built as {profile} and refuses to fall back to another profile's binary",
+            artifact.display()
+        ))
+    }
+}
+
+/// Build (once per run) and return the SHIPPED Connect-only runtime binary.
+///
+/// `CARGO_BIN_EXE_nexus-runtime` is not that artifact inside `cargo test`:
+/// resolver v2 unifies this package's dev-dependency features
+/// (`nexus-core[execution,test-hooks]`) into the test build, so the spawned
+/// binary could link a wider graph than the product ships. This runs a
+/// bin-only `--no-default-features --features connect-host` build in its own
+/// cargo invocation — with `--release` when the test itself is release — and
+/// returns that exact profile's artifact (`profile_artifact` fails closed
+/// otherwise). `NEXUS42_RUNTIME_BIN` overrides it (e.g. a CI-packaged
+/// artifact).
+fn shipped_runtime_binary() -> PathBuf {
+    if let Some(path) = std::env::var_os("NEXUS42_RUNTIME_BIN") {
+        let path = PathBuf::from(path);
+        assert!(
+            path.is_file(),
+            "NEXUS42_RUNTIME_BIN does not name a file: {}",
+            path.display()
+        );
+        return path;
+    }
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let (target, profile) = running_profile().unwrap_or_else(|error| panic!("{error}"));
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let mut build = Command::new(cargo);
+    build
+        .args([
+            "build",
+            "--locked",
+            "-p",
+            "nexus42",
+            "--bin",
+            "nexus-runtime",
+            "--no-default-features",
+            "--features",
+            "connect-host",
+        ])
+        .args(profile_build_args(&profile))
+        // Pin the target root the inference resolved, so a relative
+        // `CARGO_TARGET_DIR` cannot land the artifact elsewhere.
+        .env("CARGO_TARGET_DIR", &target)
+        .current_dir(&manifest_dir);
+    let build = build
+        .output()
+        .expect("run cargo build for the shipped Connect-only runtime");
+    assert!(
+        build.status.success(),
+        "shipped Connect-only runtime build failed ({})\nstdout:\n{}\nstderr:\n{}",
+        build.status,
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    profile_artifact(&target, &profile).unwrap_or_else(|error| panic!("{error}"))
+}
+
+/// The fail-closed profile controls: the required profile's artifact is used,
+/// and another profile's existing binary is never substituted.
+#[test]
+fn profile_artifact_refuses_to_fall_back_to_another_profile() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let exe = format!("nexus-runtime{}", std::env::consts::EXE_SUFFIX);
+    std::fs::create_dir_all(dir.path().join("debug")).expect("mkdir debug");
+    std::fs::write(dir.path().join("debug").join(&exe), b"debug").expect("write debug");
+
+    let error = profile_artifact(dir.path(), "release")
+        .expect_err("a release run must not resolve the debug artifact");
+    assert!(
+        error.contains("missing for the release profile") && error.contains("refuses to fall back"),
+        "{error}"
+    );
+    assert_eq!(
+        profile_artifact(dir.path(), "debug").unwrap(),
+        dir.path().join("debug").join(&exe)
+    );
+
+    let custom_error = profile_artifact(dir.path(), "ci")
+        .expect_err("a custom profile must not resolve the debug artifact");
+    assert!(
+        custom_error.contains("missing for the ci profile")
+            && custom_error.contains("refuses to fall back"),
+        "{custom_error}"
+    );
+
+    std::fs::create_dir_all(dir.path().join("release")).expect("mkdir release");
+    std::fs::write(dir.path().join("release").join(&exe), b"release").expect("write release");
+    assert_eq!(
+        profile_artifact(dir.path(), "release").unwrap(),
+        dir.path().join("release").join(&exe)
+    );
+}
+
+/// The inference the smoke uses: the profile directory name comes from the
+/// running binary's path, custom profiles included, and a layout that does not
+/// name it fails closed instead of guessing a profile.
+#[test]
+fn profile_from_exe_infers_the_profile_directory_and_rejects_other_layouts() {
+    for (exe, target, profile) in [
+        (
+            "/w/target/debug/deps/nexus_runtime_smoke-abc",
+            "/w/target",
+            "debug",
+        ),
+        (
+            "/w/target/release/deps/nexus_runtime_smoke-abc",
+            "/w/target",
+            "release",
+        ),
+        (
+            "/w/target/ci/deps/nexus_runtime_smoke-abc",
+            "/w/target",
+            "ci",
+        ),
+    ] {
+        assert_eq!(
+            profile_from_exe(Path::new(exe)),
+            Ok((PathBuf::from(target), profile.to_string()))
+        );
+    }
+    for layout in [
+        "/w/target/debug/nexus_runtime_smoke",
+        "/w/nexus_runtime_smoke",
+    ] {
+        let error =
+            profile_from_exe(Path::new(layout)).expect_err("an ambiguous layout must fail closed");
+        assert!(error.contains("expected the cargo test layout"), "{error}");
+    }
+    assert_eq!(profile_build_args("debug"), Vec::<String>::new());
+    assert_eq!(profile_build_args("release"), vec!["--release".to_string()]);
+    assert_eq!(
+        profile_build_args("ci"),
+        vec!["--profile".to_string(), "ci".to_string()]
+    );
+}
+
+/// Parse the probe's `COMPUTE_OK session=<id> entry=kb_atk current_hp=<n>`
+/// line and return the reported HP. Requires exactly ONE matching line and a
+/// complete integer token: a neighbouring value (`150`, `1500`) therefore
+/// never compares equal to `15`.
+fn compute_current_hp(stdout: &str, session: &str) -> Result<i64, String> {
+    let prefix = format!("COMPUTE_OK session={session} entry=kb_atk current_hp=");
+    let mut values = stdout
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix(&prefix));
+    let raw = values
+        .next()
+        .ok_or_else(|| format!("missing one {prefix}<n> line"))?;
+    if values.next().is_some() {
+        return Err(format!("duplicate {prefix}<n> lines"));
+    }
+    raw.parse::<i64>()
+        .map_err(|e| format!("current_hp is not a complete integer ({raw:?}): {e}"))
+}
+
+/// The retained-compute assertion the smoke test makes: exactly one result
+/// line for `session`, and the value must be the deterministic `15`.
+///
+/// Shared with the neighbouring-value control below, so a regression of the
+/// smoke assertion to a substring/prefix match fails the control too.
+fn assert_compute_result(stdout: &str, session: &str) -> Result<(), String> {
+    match compute_current_hp(stdout, session)? {
+        15 => Ok(()),
+        other => Err(format!(
+            "deterministic compute result must be exactly 15, got {other}"
+        )),
+    }
+}
+
+/// The retained-compute assertion's negative control: a neighbouring HP value
+/// must never satisfy the exact comparison the smoke test makes.
+#[test]
+fn compute_result_control_rejects_a_neighbouring_value() {
+    let line = |hp: &str| format!("COMPUTE_OK session=ses_smoke entry=kb_atk current_hp={hp}");
+
+    assert_eq!(assert_compute_result(&line("15"), "ses_smoke"), Ok(()));
+    for neighbour in ["150", "1500", "1500 ", "15x", "-15"] {
+        assert!(
+            assert_compute_result(&line(neighbour), "ses_smoke").is_err(),
+            "{neighbour:?} must fail the exact current_hp=15 assertion"
+        );
+    }
+    assert!(
+        assert_compute_result(&line("15"), "ses_other").is_err(),
+        "another session id must not match"
+    );
+    assert!(
+        assert_compute_result(&format!("{}\n{}", line("15"), line("15")), "ses_smoke").is_err(),
+        "duplicate compute lines must be rejected"
+    );
+}
+
+/// One `<key>=<value>` line printed by the probe, requiring exactly one.
+fn probe_value<'a>(stdout: &'a str, key: &str) -> Result<&'a str, String> {
+    let prefix = format!("{key}=");
+    let mut values = stdout
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix(&prefix));
+    let value = values
+        .next()
+        .ok_or_else(|| format!("missing {key}= line"))?;
+    if values.next().is_some() {
+        return Err(format!("duplicate {key}= lines"));
+    }
+    Ok(value)
+}
+
+/// The refusal the smoke's authorization claim requires: the op is SERVED but
+/// excluded by this peer's `op_scope`. The product keeps one `op_unsupported`
+/// code for every denial (no cross-peer scope leak), so the wire reason is the
+/// observable discriminator — request validation or an unserved op must NOT
+/// satisfy this assertion.
+fn assert_out_of_scope_refusal(code: &str, message: &str) -> Result<(), String> {
+    if code != "op_unsupported" {
+        return Err(format!(
+            "refusal code {code:?} is not the op_unsupported family"
+        ));
+    }
+    if message != "op denied: op check is not in this peer's op_scope" {
+        return Err(format!(
+            "refusal message {message:?} is not the op-scope denial"
+        ));
+    }
+    Ok(())
+}
+
+/// The refusal-attribution control: an unserved-op or payload denial must not
+/// pass as the authorization-boundary refusal the smoke claims.
+#[test]
+fn refusal_control_rejects_an_unserved_or_payload_denial() {
+    assert_eq!(
+        assert_out_of_scope_refusal(
+            "op_unsupported",
+            "op denied: op check is not in this peer's op_scope"
+        ),
+        Ok(())
+    );
+    for (code, message) in [
+        (
+            "op_unsupported",
+            "op project is not supported: this host serves the core connect ops",
+        ),
+        (
+            "op_unsupported",
+            "op denied: invoke payload carries no verifiable world scope (writes need \
+             extensions.nexus.world_id on every entry/relation; check/assemble need \
+             scope.scope_id); cannot verify world scope",
+        ),
+        (
+            "invalid_input",
+            "op denied: op check is not in this peer's op_scope",
+        ),
+    ] {
+        assert!(
+            assert_out_of_scope_refusal(code, message).is_err(),
+            "{message:?} must not satisfy the out-of-scope refusal assertion"
+        );
+    }
+}
+
+/// A no-wasm build cannot run the retained-compute half. Keep that visible as
+/// an IGNORED, named test instead of letting the half silently disappear from
+/// a green run; CI additionally sets `NEXUS42_REQUIRE_WASM_TARGET=1`, which
+/// turns the same condition into a build failure.
+#[cfg(nexus42_no_wasm_target)]
+#[test]
+#[ignore = "retained compute half not executed: wasm32-unknown-unknown target missing"]
+fn skipped_retained_compute_half_requires_wasm32_unknown_unknown() {}
+
 /// Spawn the real `nexus-runtime` binary against `home` (via the
 /// `NEXUS42_HOME` override) and wait for the stdout readiness block.
 /// Returns the child (still running), the readiness lines, and the printed
 /// `listen:` multiaddrs.
 fn spawn_runtime(home: &Path) -> (Child, Vec<String>, Vec<String>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_nexus-runtime"))
+    let mut child = Command::new(shipped_runtime_binary())
         .env("NEXUS42_HOME", home)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -648,6 +1082,10 @@ fn version_flag_prints_crate_version() {
 fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
     let tmp = tempfile::tempdir().expect("temp dir");
     seed_home(tmp.path());
+    // The retained half: stored scoped World + staged session (and, where the
+    // wasm32 target exists, the installed deterministic module), all before
+    // the runtime opens the DB.
+    seed_scoped_workspace(tmp.path());
 
     // Boot the real binary against the temp home. The guard kills the
     // child on EVERY exit path — success or panic — never orphaning it.
@@ -702,16 +1140,27 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
         .expect("peer_id line")
         .trim();
 
-    let probe = probe_binary();
+    let probe_path = probe_binary();
     assert!(
-        probe.exists(),
+        probe_path.exists(),
         "probe example not built — expected at {}",
-        probe.display()
+        probe_path.display()
     );
-    let out = Command::new(&probe)
-        .args(["--addr", &listen_addrs[0], "--host-peer", host_peer])
-        .output()
-        .expect("run runtime_smoke_probe");
+    let mut probe = Command::new(&probe_path);
+    // `--world` is always supplied: the probe proves the session still works
+    // after the refusal with an in-scope `upsert`. The compute session is
+    // added only where the module can be installed.
+    probe.args([
+        "--addr",
+        &listen_addrs[0],
+        "--host-peer",
+        host_peer,
+        "--world",
+        COMPUTE_WORLD,
+    ]);
+    #[cfg(not(nexus42_no_wasm_target))]
+    probe.args(["--compute-session", COMPUTE_SESSION]);
+    let out = probe.output().expect("run runtime_smoke_probe");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let status = out.status;
@@ -719,16 +1168,63 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
         status.success(),
         "probe failed (status {status})\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
-    for expected in [
-        "DIAL_OK",
-        "SERVED_OPS=upsert,promote,relate,check,assemble,compute",
-        "SESSION_OK",
-    ] {
+    // The advertised list is an exact record, not a prefix: a trailing op
+    // (e.g. an unexpected served route) fails this line comparison.
+    const SERVED_OPS_LINE: &str = "SERVED_OPS=upsert,promote,relate,check,assemble,compute,\
+tools.nexus.list_observed_peers,tools.nexus.list_modules";
+    assert!(
+        stdout.lines().any(|line| line.trim() == SERVED_OPS_LINE),
+        "probe output missing the exact {SERVED_OPS_LINE:?} line:\n{stdout}\nstderr:\n{stderr}"
+    );
+    for expected in ["DIAL_OK", "SESSION_OK", "UPSERT_OK", "SESSION_ALIVE_OK"] {
         assert!(
             stdout.contains(expected),
             "probe output missing {expected:?}:\n{stdout}\nstderr:\n{stderr}"
         );
     }
+    // Refusal attribution (QC1-02): the same `op_unsupported` code covers an
+    // unserved op, an out-of-scope op and a malformed payload. The smoke only
+    // claims the authorization boundary, so it must see the SERVED op refused
+    // by this peer's `op_scope` reason — with the unserved control printed
+    // alongside to show the two reasons are really different.
+    assert_eq!(
+        probe_value(&stdout, "UNSERVED_REFUSAL_CODE").unwrap_or_default(),
+        "op_unsupported"
+    );
+    assert!(
+        probe_value(&stdout, "UNSERVED_REFUSAL_MESSAGE")
+            .unwrap_or_default()
+            .starts_with("op project is not supported:"),
+        "the unserved control must be the served-op gate (not a scope denial):\n{stdout}"
+    );
+    assert_eq!(
+        assert_out_of_scope_refusal(
+            probe_value(&stdout, "OP_SCOPE_REFUSAL_CODE").unwrap_or_default(),
+            probe_value(&stdout, "OP_SCOPE_REFUSAL_MESSAGE").unwrap_or_default(),
+        ),
+        Ok(()),
+        "the refusal must be the out-of-scope denial, not request validation:\n{stdout}\nstderr:\n{stderr}"
+    );
+    // 3b. A REAL retained compute op ran end-to-end in the spawned process:
+    //     the probe seeded both combatants over the served `upsert` and the
+    //     host's compute lane executed the installed deterministic module,
+    //     returning the staged 30 HP − (ATK 20 − DEF 5) = 15. The value is
+    //     parsed and compared exactly, so 150/1500 cannot satisfy it (the
+    //     neighbouring-value control above covers the matcher itself).
+    #[cfg(not(nexus42_no_wasm_target))]
+    assert_eq!(
+        assert_compute_result(&stdout, COMPUTE_SESSION),
+        Ok(()),
+        "the deterministic compute result must be exactly 15 HP:\n{stdout}\nstderr:\n{stderr}"
+    );
+    // On a no-wasm host the compute half is absent by construction, and the
+    // ignored test above names that skip; this assertion keeps the absence
+    // explicit rather than letting a stray COMPUTE_OK line imply it ran.
+    #[cfg(nexus42_no_wasm_target)]
+    assert!(
+        !stdout.contains("COMPUTE_OK"),
+        "compute cannot run without the wasm32 target:\n{stdout}"
+    );
     // `_guard` drops here (and on any panic unwind above): the child is
     // killed and reaped on every path.
 }

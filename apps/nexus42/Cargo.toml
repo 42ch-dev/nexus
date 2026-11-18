@@ -244,8 +244,9 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 # a smaller graph is prohibited). `cli,connect-host` is the optional CLI
 # Connect build: the same parser plus the `connect` group.
 #
-# The retired lattice (`basic-cli`, `legacy-cli`, `web-embed`,
-# `connect-client`, `embedded-mcp`) is gone with the daemon composition.
+# The retired daemon lattice (`basic-cli`, `legacy-cli`, `web-embed`) is gone
+# with the daemon composition; the `connect-client` / `embedded-mcp` cohorts
+# below are the v249 library cohorts, not the retired daemon markers.
 [features]
 default = ["cli"]
 cli = [
@@ -311,6 +312,24 @@ connect-host = [
   "dep:spoke-connect",
   "dep:spoke-schemas",
   "dep:libp2p",
+]
+# v249 cutover: the app-level MCP/peer library cohort — the Connect-host
+# surface PLUS the rmcp reverse-invoke bridge PLUS the core execution cohort
+# the retained owner methods need (`ExecutionHandle::start_peer_control` and
+# the lifecycle lane live in the execution-gated `owner` module). NOT the
+# shipped Connect-host product: that stays the `connect-host` cohort above,
+# rmcp- and engine-free.
+connect-client = [
+  "connect-host",
+  "nexus-core/connect-client",
+  "nexus-connect/connect-client",
+]
+# v249 cutover: Model B's embedded MCP server shell (sink/stream session
+# channels) rides the client cohort.
+embedded-mcp = [
+  "connect-client",
+  "nexus-core/embedded-mcp",
+  "nexus-connect/embedded-mcp",
 ]
 # v1.229 N3 Task 11 (C11, approval 05ED): the CLI's real remote memory client
 # so `creator memory list|show` can dial the selected remote provider. NON-

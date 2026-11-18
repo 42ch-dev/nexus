@@ -65,21 +65,26 @@ test-hooks = [
     "nexus-memory-provider/test-hooks",
 ]
 compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute", "nexus-capability/wasm"]
-# Connect-host product cohort (v1.207 P2): the WS accept loop, per-session
-# monitoring and the peer-tools event lane the shipped `nexus-runtime` /
-# `nexus42 connect start` boot. This is the Connect-host surface only — it
-# carries NO rmcp: the reverse-invoke/operator MCP bridge is not a
-# Connect-host capability, so the product graph stays rmcp-free
+# Connect-host product cohort (v1.207 P2; v249 cutover): the WS accept loop,
+# per-session monitoring and the peer-tools event lane the shipped
+# `nexus-runtime` / `nexus42 connect start` boot. This is the Connect-host
+# surface only — it carries NO rmcp: the reverse-invoke/operator MCP bridge is
+# not a Connect-host capability, so the product graph stays rmcp-free
 # (architecture §Cohorts; `tooling/check-graph-pins.sh` asserts rmcp ABSENT
-# from the nexus42 connect-host graph). `execution` is an explicit
-# prerequisite: the accept loop holds an orchestration capability registry.
-connect-host = ["execution", "nexus-connect/connect-host"]
+# from the nexus42 connect-host graph). V249: NO `execution` — the cohort
+# links the Connect protocol stack beside this crate's open domain; stored
+# principal/Actor/World/module scope checks stay in every cohort. Consumers
+# needing the durable operation id select `operation-id` explicitly (the app
+# product cohort already does).
+connect-host = ["nexus-connect/connect-host"]
 # Reverse-invoke/peer-control edge (v1.190 P4-T3): the full peer/MCP session
-# library = the `connect-host` transport cohort PLUS the rmcp bridge. The
-# embedded server (Model B) additionally needs `embedded-mcp`. The shipped
-# Connect-host product does NOT enable this cohort (it links no rmcp); only
-# the app-level MCP/peer library does.
-connect-client = ["connect-host", "nexus-connect/connect-client"]
+# library = the `connect-host` transport cohort PLUS the `execution` cohort
+# the retained owner methods need (`ExecutionHandle::start_peer_control` and
+# the lifecycle lane live in the execution-gated `owner` module) PLUS the rmcp
+# bridge. The embedded server (Model B) additionally needs `embedded-mcp`.
+# The shipped Connect-host product does NOT enable this cohort (it links no
+# rmcp and no engine); only the app-level MCP/peer library does.
+connect-client = ["execution", "connect-host", "nexus-connect/connect-client"]
 # Model B's sink/stream session channels (futures_channel::mpsc) ride the
 # rmcp transport module, which now lives in `nexus-connect`.
 embedded-mcp = ["connect-client", "nexus-connect/embedded-mcp"]

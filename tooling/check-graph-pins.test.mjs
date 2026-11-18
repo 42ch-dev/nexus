@@ -1048,3 +1048,275 @@ test('the capability cohort fails when its graph is empty', () => {
   assert.notEqual(run.status, 0);
   assert.match(run.stdout, /absence pins would be vacuous/);
 });
+
+// --- connect cohort (v1.249 S6) --------------------------------------------
+
+// The real Connect product/library shape. The app's `connect-host` selection
+// links the core domain, the explicit spoke compute (`nexus-spoke-adapter/
+// compute` → the WASM host) and the Connect transport; the enabled
+// `nexus-connect` library links its capability/transport planes and no core.
+//
+// The switches exist so ONE fixture case can make exactly one row fail:
+// `forgotCompute` drops the explicit compute edge, `connectHostAddsCli` makes
+// the selector imply the CLI cohort, `productCoreDep` drops the app's core edge
+// (the product must never be core-free), and `productDeps` / `libraryDeps`
+// inject one real forbidden edge.
+function connectCrates({
+  productDeps = {},
+  libraryDeps = {},
+  forgotCompute = false,
+  connectHostAddsCli = false,
+  productCoreDep = true,
+} = {}) {
+  const connectHost = [
+    ...(productCoreDep ? ['"nexus-core/connect-host"'] : []),
+    '"dep:nexus-connect"',
+    '"nexus-connect/connect-host"',
+    '"dep:spoke-connect"',
+    '"dep:libp2p"',
+    '"dep:nexus-spoke-adapter"',
+    ...(forgotCompute ? [] : ['"nexus-spoke-adapter/compute"']),
+    '"dep:nexus-wasm-host"',
+    ...(connectHostAddsCli ? ['"cli"'] : []),
+  ];
+  const productDepLines = [
+    ...(productCoreDep ? ['nexus-core = { path = "../nexus-core" }'] : []),
+    'nexus-memory-provider = { path = "../nexus-memory-provider" }',
+    'nexus-local-db = { path = "../nexus-local-db" }',
+    'spoke-operations = { path = "../spoke-operations" }',
+    'nexus-connect = { path = "../nexus-connect", optional = true }',
+    'spoke-connect = { path = "../spoke-connect", optional = true }',
+    'libp2p = { path = "../libp2p", optional = true }',
+    'nexus-spoke-adapter = { path = "../nexus-spoke-adapter", default-features = false, optional = true }',
+    'nexus-wasm-host = { path = "../nexus-wasm-host", optional = true }',
+    ...Object.entries(productDeps).map(([dep, extra]) => `${dep} = { path = "../${dep}"${extra ?? ''} }`),
+  ];
+  const libraryDepLines = [
+    'nexus-capability = { path = "../nexus-capability", optional = true }',
+    'spoke-connect = { path = "../spoke-connect", optional = true }',
+    'libp2p = { path = "../libp2p", optional = true }',
+    'rmcp = { path = "../rmcp", optional = true }',
+    ...Object.entries(libraryDeps).map(([dep, extra]) => `${dep} = { path = "../${dep}"${extra ?? ''} }`),
+  ];
+  const app = `[package]
+name = "nexus42"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+cli = []
+connect-host = [${connectHost.join(', ')}]
+
+[dependencies]
+${productDepLines.join('\n')}
+`;
+  const core = `[package]
+name = "nexus-core"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+connect-host = ["nexus-connect/connect-host"]
+operation-id = []
+
+[dependencies]
+nexus-connect = { path = "../nexus-connect", optional = true }
+`;
+  const connect = `[package]
+name = "nexus-connect"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+peer-tools = []
+transport = []
+connect-host = ["peer-tools", "transport", "dep:nexus-capability", "dep:spoke-connect", "dep:libp2p"]
+connect-client = ["connect-host", "dep:rmcp"]
+embedded-mcp = ["connect-client"]
+
+[dependencies]
+${libraryDepLines.join('\n')}
+`;
+  return {
+    nexus42: { manifest: app },
+    'nexus-core': { manifest: core },
+    'nexus-connect': { manifest: connect },
+    'nexus-memory-provider': {
+      features: ['default = []', 'compute = []'],
+      deps: { 'spoke-operations': null },
+    },
+    'nexus-local-db': { deps: {} },
+    'spoke-operations': { deps: {} },
+    'nexus-spoke-adapter': {
+      features: ['default = []', 'compute = ["dep:nexus-wasm-host"]'],
+      deps: { 'nexus-wasm-host': ', optional = true' },
+    },
+    'nexus-wasm-host': { deps: {} },
+    'nexus-capability': { deps: {} },
+    'spoke-connect': { deps: {} },
+    libp2p: { deps: {} },
+    rmcp: { deps: {} },
+  };
+}
+
+function connectRun(root) {
+  return runGuard(['--cohort', 'connect', '--manifest-path', path.join(root, 'Cargo.toml')]);
+}
+
+test('connect cohort passes on a connect-shaped workspace', () => {
+  const run = connectRun(createWorkspace(connectCrates()));
+
+  assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+  // Product positive controls: the shipped Connect product RETAINS core
+  // domain/storage and the explicit spoke compute.
+  assert.match(
+    run.stdout,
+    /ok: nexus42 --no-default-features --features connect-host resolves \d+ distinct dependency package\(s\)/,
+  );
+  assert.match(run.stdout, /ok: nexus-core single version .* for nexus42 --no-default-features --features connect-host/);
+  assert.match(run.stdout, /ok: nexus-memory-provider single version .* for nexus42/);
+  assert.match(
+    run.stdout,
+    /ok: nexus-spoke-adapter v0\.1\.0 feats=\[compute\] for nexus42 --no-default-features --features connect-host/,
+  );
+  assert.match(run.stdout, /ok: nexus-wasm-host single version .* for nexus42/);
+  // Connect-only selector identity.
+  assert.match(
+    run.stdout,
+    /ok: nexus42 v0\.1\.0 feats=\[connect-host\] for nexus42 --no-default-features --features connect-host/,
+  );
+  // Product absences.
+  assert.match(run.stdout, /ok: rmcp absent from nexus42 --no-default-features --features connect-host/);
+  assert.match(run.stdout, /ok: nexus-workflow-simulate absent from nexus42 --no-default-features --features connect-host/);
+  // Library positive controls + core absence.
+  assert.match(
+    run.stdout,
+    /ok: nexus-connect --no-default-features --features connect-client,embedded-mcp resolves \d+ distinct dependency package\(s\)/,
+  );
+  assert.match(run.stdout, /ok: nexus-capability single version .* for nexus-connect/);
+  assert.match(run.stdout, /ok: rmcp single version .* for nexus-connect/);
+  assert.match(
+    run.stdout,
+    /ok: nexus-core absent from nexus-connect --no-default-features --features connect-client,embedded-mcp/,
+  );
+  assert.match(run.stdout, /graph pins OK \(cohort: connect\)$/m);
+});
+
+// The eight planes the Connect product must not link back (v1.249 S6), in
+// script order.
+const CONNECT_PRODUCT_FORBIDDEN = [
+  'nexus-orchestration',
+  'nexus-execution',
+  'nexus-session-storage',
+  'graph-flow',
+  'nexus-workflow-simulate',
+  'nexus-agent-host',
+  'nexus-acp-host',
+  'rmcp',
+];
+
+test('each forbidden Connect product edge fails the cohort', async (t) => {
+  for (const pkg of CONNECT_PRODUCT_FORBIDDEN) {
+    await t.test(pkg, () => {
+      const crates = connectCrates({ productDeps: { [pkg]: null } });
+      // The injected package is a real workspace member so the edge resolves;
+      // `rmcp` and the engine crates already exist, the rest get a leaf.
+      crates[pkg] ??= { deps: {} };
+      const run = connectRun(createWorkspace(crates));
+
+      assert.notEqual(run.status, 0, `a real nexus42 -> ${pkg} edge was accepted`);
+      assert.match(run.stdout, /graph pin failed/);
+      assert.match(
+        run.stdout,
+        new RegExp(`${pkg} must be MISSING from nexus42--no-default-features --features connect-host`),
+      );
+    });
+  }
+});
+
+// The five planes the enabled Connect library must not depend back on
+// (v1.249 C4/S6), in script order.
+const CONNECT_LIBRARY_FORBIDDEN = [
+  'nexus-core',
+  'nexus-orchestration',
+  'nexus-execution',
+  'nexus-session-storage',
+  'graph-flow',
+];
+
+test('each forbidden Connect library back-edge fails the cohort', async (t) => {
+  for (const pkg of CONNECT_LIBRARY_FORBIDDEN) {
+    await t.test(pkg, () => {
+      const crates = connectCrates({ libraryDeps: { [pkg]: null } });
+      // The only reverse edge in the happy fixture is core's optional
+      // `nexus-connect` dependency; flatten core to a leaf so the injected
+      // library edge is not a manifest cycle. All product rows still resolve
+      // (the app's direct edges carry the positive rows).
+      crates['nexus-core'] = {
+        features: ['default = []', 'connect-host = []', 'operation-id = []'],
+        deps: {},
+      };
+      crates[pkg] ??= { deps: {} };
+      const run = connectRun(createWorkspace(crates));
+
+      assert.notEqual(run.status, 0, `a real nexus-connect -> ${pkg} edge was accepted`);
+      assert.match(run.stdout, /graph pin failed/);
+      assert.match(
+        run.stdout,
+        new RegExp(`${pkg} must be MISSING from nexus-connect--no-default-features --features connect-client,embedded-mcp`),
+      );
+    });
+  }
+});
+
+test('the Connect product fails when the explicit spoke compute edge is dropped', () => {
+  const run = connectRun(createWorkspace(connectCrates({ forgotCompute: true })));
+
+  assert.notEqual(run.status, 0, 'a Connect product without explicit spoke compute was accepted');
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(
+    run.stdout,
+    /nexus-spoke-adapter for nexus42 --no-default-features --features connect-host: expected feats=\[compute\], got 'feats=\[\]'/,
+  );
+});
+
+test('the Connect-only selector fails when it implies the CLI cohort', () => {
+  const run = connectRun(createWorkspace(connectCrates({ connectHostAddsCli: true })));
+
+  assert.notEqual(run.status, 0, 'a connect-host selector that implies cli was accepted');
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(
+    run.stdout,
+    /nexus42 for nexus42 --no-default-features --features connect-host: expected feats=\[connect-host\], got 'feats=\[cli,connect-host\]'/,
+  );
+});
+
+test('the Connect product fails when core is dropped (never a core-free product)', () => {
+  const run = connectRun(createWorkspace(connectCrates({ productCoreDep: false })));
+
+  assert.notEqual(run.status, 0, 'a core-free Connect product was accepted');
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(
+    run.stdout,
+    /nexus-core expected in nexus42--no-default-features --features connect-host graph, but absent/,
+  );
+});
+
+test('the connect cohort fails when its graph is empty', () => {
+  // Declared features, zero dependencies: the absence pins would be vacuous.
+  const run = connectRun(
+    createWorkspace({
+      'nexus-connect': {
+        features: ['default = []', 'connect-client = []', 'embedded-mcp = ["connect-client"]'],
+        deps: {},
+      },
+      nexus42: { features: ['default = []', 'connect-host = []'], deps: {} },
+    }),
+  );
+
+  assert.notEqual(run.status, 0);
+  assert.match(run.stdout, /absence pins would be vacuous/);
+});

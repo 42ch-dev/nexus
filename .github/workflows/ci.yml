@@ -576,6 +576,13 @@ jobs:
       - name: Check graph pins (policy cohort)
         timeout-minutes: 10
         run: bash tooling/check-graph-pins.sh --cohort policy
+      # V1.249 S4 / QC3-F001: the catalog cohort's unique rows (`nexus-core ""`
+      # exact default feature set and the featureless spoke adapter) had no CI
+      # invocation. Every shipped cohort now runs against the real workspace;
+      # the no-argument matrix above stays the sole full-matrix invocation.
+      - name: Check graph pins (catalog cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort catalog
       # V1.249 C4: the capability extraction's integration proof against the
       # real workspace — the enabled Connect library resolves capability +
       # transport and none of the five engine planes, the default capability
@@ -585,6 +592,16 @@ jobs:
       - name: Check graph pins (capability cohort)
         timeout-minutes: 10
         run: bash tooling/check-graph-pins.sh --cohort capability
+      # V1.249 S6: the Connect product/library split against the real workspace
+      # — the shipped Connect-only runtime keeps core domain/storage and the
+      # explicit spoke compute (the real WASM host) while linking no
+      # engine/store/graph/authoring/Host/rmcp plane, and the enabled Connect
+      # library still depends back on none of core or those planes. This is
+      # also the row that pins `connect-host` does not imply `cli`; the larger
+      # CLI/native union stays in the source-owned no-argument matrix.
+      - name: Check graph pins (connect cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort connect
       # V1.249 A3: the strategy-authoring surface as a SELECTION. The no-arg
       # matrix and the synthetic suite below pin the shipped graphs, but neither
       # runs the real cohort or the checker-owned consumer — a later CLI/native
@@ -907,6 +924,10 @@ jobs:
       # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
       # Behaviour unchanged; local dev profiles untouched.
       CARGO_PROFILE_DEV_DEBUG: "0"
+      # V249 QC3-F002: this job owns the retained-compute proof, so a host
+      # without the wasm32 target is a named build failure (nexus42/build.rs)
+      # instead of a silently skipped smoke half.
+      NEXUS42_REQUIRE_WASM_TARGET: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
