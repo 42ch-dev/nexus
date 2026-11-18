@@ -219,7 +219,7 @@ test("dependency order precedes consumers and ignores the caller's order", () =>
 });
 
 test("unknown selection, wrong registry and malformed source refuse", () => {
-  const { dir, sha } = fixture();
+  const { dir } = fixture();
   try {
     const plan = planPackageRelease(dir, {
       packages: ["nexus-core", "not-a-package"],
