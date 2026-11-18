@@ -47,8 +47,8 @@
 //! NOT derivable from persisted data and is never part of a verdict here —
 //! consumers carry it as the separate `runner_check` caveat.
 
-use nexus_session_storage::SessionStatus;
 use nexus_session_storage::run_state::RunStateV1;
+use nexus_session_storage::SessionStatus;
 use serde_json::{Map, Value};
 
 /// Canonical A7 recovery classification (v1.186 P0, Task 2).

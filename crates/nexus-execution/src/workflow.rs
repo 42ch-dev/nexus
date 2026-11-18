@@ -1625,12 +1625,8 @@ impl WorkflowRunCoordinator {
         >,
         nexus_home: &std::path::Path,
         caps: &nexus_capability::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<
-            std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>,
-        >,
-        prompt_executor: Option<
-            std::sync::Arc<dyn nexus_capability::PromptExecutor>,
-        >,
+        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
+        prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     ) -> Result<SessionId, RunControlError> {
         // A8 fail-closed: `_system.*` presets are never driven as user
         // sessions.
@@ -2447,12 +2443,8 @@ impl WorkflowRunCoordinator {
         pool: &sqlx::SqlitePool,
         nexus_home: &std::path::Path,
         caps: &nexus_capability::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<
-            std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>,
-        >,
-        prompt_executor: Option<
-            std::sync::Arc<dyn nexus_capability::PromptExecutor>,
-        >,
+        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
+        prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     ) -> Result<SessionId, RunControlError> {
         // C2: a closing coordinator admits no run. Checked BEFORE the row read
         // and the policy cutover below, so close can never race a durable
@@ -2743,12 +2735,8 @@ impl WorkflowRunCoordinator {
         pool: &sqlx::SqlitePool,
         nexus_home: &std::path::Path,
         caps: &nexus_capability::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<
-            std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>,
-        >,
-        prompt_executor: Option<
-            std::sync::Arc<dyn nexus_capability::PromptExecutor>,
-        >,
+        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
+        prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     ) -> Result<SessionId, RunControlError> {
         self.admit_schedule_inner(
             schedule_id,
@@ -2779,12 +2767,8 @@ impl WorkflowRunCoordinator {
         pool: &sqlx::SqlitePool,
         nexus_home: &std::path::Path,
         caps: &nexus_capability::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<
-            std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>,
-        >,
-        prompt_executor: Option<
-            std::sync::Arc<dyn nexus_capability::PromptExecutor>,
-        >,
+        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
+        prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
         legacy_opt_in: bool,
     ) -> Result<SessionId, RunControlError> {
         // C2: a closing coordinator admits no schedule run either. Checked

@@ -18,6 +18,7 @@
 #![cfg(all(feature = "execution", feature = "compute"))]
 #![allow(clippy::unwrap_used)]
 
+use nexus_compute_policy::SandboxConfig;
 use nexus_contracts::generated::daemon_api::compute::{
     clear_runs_query::{ClearRunsQuery, ClearRunsQueryStatus},
     list_runs_query::{ListRunsQuery, ListRunsQueryStatus},
@@ -33,8 +34,9 @@ use nexus_core::owner::compute::{
     accept_compute_run, clear_compute_runs, compute_run, discard_compute_run, get_compute_run,
     list_compute_runs, recover_stuck_compute_runs, ComputeContext, ComputeRunRecoveryOutcome,
 };
-use nexus_compute_policy::SandboxConfig;
-use nexus_core::tool_catalog::{host_tool_catalog, lookup_host_tool, reserved_host_tool_ids, HostToolId};
+use nexus_core::tool_catalog::{
+    host_tool_catalog, lookup_host_tool, reserved_host_tool_ids, HostToolId,
+};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest};
 use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, WasmEngine};
 use serde_json::json;
@@ -818,8 +820,8 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
 #[tokio::test]
 #[serial_test::serial]
 async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
-    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
     use nexus_capability::CapabilityRegistryHolder;
+    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 
     let f = fixture().await;
     let scan_root = f.tmp.path().join("hotcaps");
@@ -929,9 +931,9 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
 #[tokio::test]
 #[serial_test::serial]
 async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
-    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
     use nexus_capability::Capability as _;
     use nexus_capability::CapabilityRegistryHolder;
+    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 
     const TOOL: &str = "nexus.workspace.info";
 
@@ -950,7 +952,8 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         cdn_config: None,
         workspace_executor: None,
     };
-    let (user_registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_root);
+    let (user_registry, outcome) =
+        CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_root);
     assert!(
         outcome.admitted.iter().any(|c| c.name() == TOOL),
         "the colliding user capability must be admitted, skipped={:?}",
@@ -990,7 +993,10 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         0,
         "the fixture starts with no fallback consultation"
     );
-    let err = unbound.dispatch(&request, &context, CREATOR).await.unwrap_err();
+    let err = unbound
+        .dispatch(&request, &context, CREATOR)
+        .await
+        .unwrap_err();
     assert!(
         matches!(&err, CoreError::Coded { code, .. } if code == "not_supported"),
         "an unbound canonical id must be not_supported, got {err:?}"
@@ -1041,7 +1047,11 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
 
     // Non-vacuity on the dispatch path: the same registry records that too.
     let unknown = unbound
-        .dispatch(&tool_request("not.a.canonical.tool", json!({})), &context, CREATOR)
+        .dispatch(
+            &tool_request("not.a.canonical.tool", json!({})),
+            &context,
+            CREATOR,
+        )
         .await
         .unwrap_err();
     assert!(
@@ -1132,12 +1142,7 @@ async fn read_grant_admits_reads_and_refuses_a_write() {
         "a write under a read-only grant must be policy_blocked, got {err:?}"
     );
 
-    let title_after = f
-        .core
-        .get_work(&principal, work_id)
-        .await
-        .unwrap()
-        .title;
+    let title_after = f.core.get_work(&principal, work_id).await.unwrap().title;
     assert_eq!(
         title_after, title_before,
         "a policy-blocked patch must leave the Work unchanged"
@@ -1162,8 +1167,8 @@ async fn read_grant_admits_reads_and_refuses_a_write() {
 /// rather than standing in with heuristic candidates.
 #[tokio::test]
 async fn failing_prompt_executor_is_a_typed_failure_not_a_fabricated_success() {
-    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
     use nexus_capability::{CapabilityError, PromptExecutor, PromptRequest, PromptResult};
+    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 
     struct FailingExecutor;
 

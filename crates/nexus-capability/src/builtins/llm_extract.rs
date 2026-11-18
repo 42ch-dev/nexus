@@ -17,8 +17,8 @@
 //!    — no heuristic fallback inside the capability (the caller's review-time
 //!    hook owns the fallback decision; see `quality_loop`).
 
-use crate::{Capability, CapabilityError, PromptExecutor, PromptRequest, ToolPolicy};
 use crate::extraction_target::ExtractionTarget;
+use crate::{Capability, CapabilityError, PromptExecutor, PromptRequest, ToolPolicy};
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
 use nexus_knowledge::world_kb::{
@@ -356,8 +356,7 @@ impl Capability for LlmExtract {
         // token refuses with `CancellationUnavailable` — a fresh token would
         // be uncancellable by any coordinator (never mint one here). The run
         // admission path (engine start/spawn/recovery) registers the token.
-        let cancellation =
-            crate::resolve_session_cancellation(&self.session_cancels, session_id)?;
+        let cancellation = crate::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
         // v1.191 P1 T13 (durable §8): the trusted job/task target policy and
         // the admitted source identity. Both arrive as trusted context from

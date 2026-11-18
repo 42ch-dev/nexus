@@ -5,11 +5,11 @@
 //! Fresh recording registry per call, no production holder swap, no executor and no provider.
 
 use crate::{CoreError, CoreResult, CoreService, PresetError, Principal};
+use nexus_capability::CapabilityRegistryHolder;
 use nexus_contracts::generated::daemon_api::orchestration::strategy_simulation_request::NexusWorkflowDocumentState;
 use nexus_contracts::{
     SimulationTrajectory, StrategySimulationRequest, WorkflowDocument as WireWorkflowDocument,
 };
-use nexus_capability::CapabilityRegistryHolder;
 use nexus_orchestration::{simulate_document, SimulationOptions};
 use nexus_workflow_ir::WorkflowDocument;
 

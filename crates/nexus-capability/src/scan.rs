@@ -131,11 +131,7 @@ pub fn scan_user_capabilities_with_executor(
     engine: Option<&std::sync::Arc<nexus_wasm_host::WasmEngine>>,
     module_cache: Option<&std::sync::Arc<nexus_wasm_host::ModuleCache>>,
 ) -> ScanOutcome {
-    scan_user_capabilities_inner(
-        dir,
-        builtin_names,
-        (engine.cloned(), module_cache.cloned()),
-    )
+    scan_user_capabilities_inner(dir, builtin_names, (engine.cloned(), module_cache.cloned()))
 }
 
 #[must_use]
@@ -416,10 +412,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let outcome = scan_user_capabilities(tmp.path(), &builtins());
         assert!(outcome.admitted.is_empty());
-        assert_eq!(
-            outcome.skipped,
-            [] as [crate::scan::SkippedCapability; 0]
-        );
+        assert_eq!(outcome.skipped, [] as [crate::scan::SkippedCapability; 0]);
     }
 
     #[test]
@@ -428,10 +421,7 @@ mod tests {
         let missing = tmp.path().join("does-not-exist");
         let outcome = scan_user_capabilities(&missing, &builtins());
         assert!(outcome.admitted.is_empty());
-        assert_eq!(
-            outcome.skipped,
-            [] as [crate::scan::SkippedCapability; 0]
-        );
+        assert_eq!(outcome.skipped, [] as [crate::scan::SkippedCapability; 0]);
     }
     /// Bugbot High (V1.176 PR wave): a top-level non-`NotFound` `read_dir`
     /// failure (EACCES/EMFILE race — here: a regular file → ENOTDIR, the
@@ -450,10 +440,7 @@ mod tests {
             "top-level non-NotFound read failure must mark the outcome transient"
         );
         assert!(outcome.admitted.is_empty());
-        assert_eq!(
-            outcome.skipped,
-            [] as [crate::scan::SkippedCapability; 0]
-        );
+        assert_eq!(outcome.skipped, [] as [crate::scan::SkippedCapability; 0]);
     }
 
     #[test]
@@ -555,10 +542,7 @@ mod tests {
         let outcome = scan_user_capabilities(tmp.path(), &builtins());
         let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(names, vec!["visible.cap"]);
-        assert_eq!(
-            outcome.skipped,
-            [] as [crate::scan::SkippedCapability; 0]
-        );
+        assert_eq!(outcome.skipped, [] as [crate::scan::SkippedCapability; 0]);
     }
 
     /// M1 (QC wave): two dirs cannot both declare the same descriptor name
@@ -615,9 +599,6 @@ mod tests {
             vec!["alpha.cap", "mike.cap", "zeta.cap"],
             "admitted in deterministic sorted order"
         );
-        assert_eq!(
-            outcome.skipped,
-            [] as [crate::scan::SkippedCapability; 0]
-        );
+        assert_eq!(outcome.skipped, [] as [crate::scan::SkippedCapability; 0]);
     }
 }

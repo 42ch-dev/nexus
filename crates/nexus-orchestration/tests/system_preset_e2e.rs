@@ -6,9 +6,7 @@
 
 use graph_flow::SessionStorage;
 use nexus_capability::CapabilityRegistry;
-use nexus_orchestration::{
-    system_preset, GraphFlowEngine, OrchestrationEngine,
-};
+use nexus_orchestration::{system_preset, GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
 /// Run the system preset graph and verify it reaches terminal state.

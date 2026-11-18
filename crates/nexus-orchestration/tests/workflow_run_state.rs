@@ -5770,10 +5770,7 @@ impl nexus_capability::PromptExecutor for GoJudgeProvider {
     async fn execute(
         &self,
         _request: nexus_capability::PromptRequest,
-    ) -> Result<
-        nexus_capability::PromptResult,
-        nexus_capability::CapabilityError,
-    > {
+    ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError> {
         Ok(nexus_capability::PromptResult {
             full_text: "Go ahead — first-token match routes label 'go'.".to_string(),
             host_session_id: "host-sess".to_string(),

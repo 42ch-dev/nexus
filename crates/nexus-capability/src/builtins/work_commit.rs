@@ -365,9 +365,7 @@ pub mod test_support {
 
         /// [`Self::at`] whose commits signal [`Self::reached`] and then never
         /// finish — a scaffold suspended mid-write, ready to be cancelled.
-        pub fn hanging_at(
-            workspace_root: impl Into<std::path::PathBuf>,
-        ) -> std::sync::Arc<Self> {
+        pub fn hanging_at(workspace_root: impl Into<std::path::PathBuf>) -> std::sync::Arc<Self> {
             std::sync::Arc::new(Self {
                 hang: Some(std::sync::Arc::new(tokio::sync::Notify::new())),
                 workspace_root: Some(workspace_root.into()),

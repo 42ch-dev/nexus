@@ -79,6 +79,9 @@ rmcp = { version = "=3.9.0", default-features = false, features = ["server", "cl
 futures-channel = { version = "0.3", optional = true }
 
 [dev-dependencies]
+# `nexus-connect/src/watch.rs` tests use `nexus_capability::test_support`,
+# which the capability crate gates under `any(test, feature = "test-hooks")`.
+nexus-capability = { path = "../nexus-capability", features = ["test-hooks"] }
 tempfile.workspace = true
 # The accept-lane fixtures build fixed-seed Ed25519 keypairs.
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }

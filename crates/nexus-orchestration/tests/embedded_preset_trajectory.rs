@@ -7,8 +7,8 @@
 
 #![cfg(feature = "simulate")]
 
-use nexus_orchestration::preset_runtime::{validate_ir_buildability, IrTemplateSource};
 use nexus_capability::CapabilityRegistryHolder;
+use nexus_orchestration::preset_runtime::{validate_ir_buildability, IrTemplateSource};
 use nexus_orchestration::{simulate_document, SimulationOptions};
 use nexus_preset::capability_catalog::BuiltinCapabilityCatalog;
 use nexus_preset::workflow_ir::import_preset_manifest;

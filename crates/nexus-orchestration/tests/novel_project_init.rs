@@ -100,15 +100,12 @@ fn make_cap(
     pool: sqlx::SqlitePool,
     works_root: &Path,
 ) -> nexus_capability::builtins::NovelProjectScaffold {
-    nexus_capability::builtins::NovelProjectScaffold::new_with_root(
-        pool,
-        works_root.to_path_buf(),
-    )
-    .with_workspace_executor(Some(std::sync::Arc::new(DirectWriteExecutor {
-        workspace_root: works_root
-            .parent()
-            .map_or_else(std::path::PathBuf::new, std::path::Path::to_path_buf),
-    })))
+    nexus_capability::builtins::NovelProjectScaffold::new_with_root(pool, works_root.to_path_buf())
+        .with_workspace_executor(Some(std::sync::Arc::new(DirectWriteExecutor {
+            workspace_root: works_root
+                .parent()
+                .map_or_else(std::path::PathBuf::new, std::path::Path::to_path_buf),
+        })))
 }
 
 /// Build scaffold input JSON.

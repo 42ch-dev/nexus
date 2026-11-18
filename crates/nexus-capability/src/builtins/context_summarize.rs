@@ -151,8 +151,7 @@ impl Capability for ContextSummarize {
         // token refuses with `CancellationUnavailable` — a fresh token would
         // be uncancellable by any coordinator (never mint one here). The run
         // admission path (engine start/spawn/recovery) registers the token.
-        let cancellation =
-            crate::resolve_session_cancellation(&self.session_cancels, session_id)?;
+        let cancellation = crate::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
         // Execute through the Host plane.
         let result = executor

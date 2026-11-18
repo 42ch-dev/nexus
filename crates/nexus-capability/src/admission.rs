@@ -12,9 +12,7 @@
 //! gate that **never** rejects: over-max overrides are tightened DOWN to the
 //! host maxima, never silently raised.
 
-use crate::user_capability::{
-    clamp_sandbox, CapabilityDescriptorError, UserCapabilityDescriptor,
-};
+use crate::user_capability::{clamp_sandbox, CapabilityDescriptorError, UserCapabilityDescriptor};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -122,8 +120,7 @@ pub fn admit(
     let manifest_json = std::fs::read(&manifest_path).map_err(|e| {
         AdmissionError::HashMismatch(format!("cannot read {}: {e}", manifest_path.display()))
     })?;
-    let manifest: nexus_module_manifest::ModuleManifest =
-        serde_json::from_slice(&manifest_json)
+    let manifest: nexus_module_manifest::ModuleManifest = serde_json::from_slice(&manifest_json)
         .map_err(|e| {
             AdmissionError::HashMismatch(format!("cannot parse {}: {e}", manifest_path.display()))
         })?;

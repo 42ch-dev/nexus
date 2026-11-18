@@ -256,10 +256,7 @@ async fn e2e_restart_durability_context_persists() {
         .expect("status should be queryable");
 
     assert!(
-        !matches!(
-            status_before,
-            nexus_session_storage::SessionStatus::Running
-        ),
+        !matches!(status_before, nexus_session_storage::SessionStatus::Running),
         "session should have settled into a non-running state"
     );
 

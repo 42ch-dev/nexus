@@ -1252,7 +1252,8 @@ mod tests {
         async fn list_active(
             &self,
             _: crate::engine::SessionFilter,
-        ) -> Result<Vec<nexus_session_storage::SessionSummary>, crate::engine::EngineError> {
+        ) -> Result<Vec<nexus_session_storage::SessionSummary>, crate::engine::EngineError>
+        {
             unimplemented!()
         }
         async fn spawn_child_session(
@@ -1686,7 +1687,8 @@ states:
         async fn list_active(
             &self,
             _: crate::engine::SessionFilter,
-        ) -> Result<Vec<nexus_session_storage::SessionSummary>, crate::engine::EngineError> {
+        ) -> Result<Vec<nexus_session_storage::SessionSummary>, crate::engine::EngineError>
+        {
             unimplemented!("inner-graph trace does not drive the outer engine")
         }
         async fn get_current_task_id(
@@ -2422,13 +2424,13 @@ states:
             IrTemplateSource, OuterGraphProjection, ProjectedEdge, ProjectedTask,
         };
         use super::{ir_document, no_cancels, ChildRunningEngine, UnreachableEngine};
+        use crate::engine::OrchestrationEngine;
+        use graph_flow::{Context, ExecutionStatus, Graph, NextAction, Session};
         use nexus_capability::CapabilityRegistry;
         use nexus_capability::{
             Capability, CapabilityError, DaemonToolDispatch, PromptExecutor, PromptRequest,
             PromptResult,
         };
-        use crate::engine::OrchestrationEngine;
-        use graph_flow::{Context, ExecutionStatus, Graph, NextAction, Session};
         use nexus_preset::load_preset_from_str;
         use nexus_preset::manifest::PresetManifest;
         use std::collections::{BTreeMap, HashMap};

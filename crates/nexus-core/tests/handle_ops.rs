@@ -19,6 +19,7 @@
 #![allow(clippy::unwrap_used)]
 
 use async_trait::async_trait;
+use nexus_capability::{CapabilityError, PromptExecutor, PromptRequest, PromptResult};
 use nexus_contracts::local::schedule::http::{
     AddScheduleRequest, AgentBindingDto, ScheduleConcurrencyRequest, SignalScheduleRequest,
 };
@@ -27,9 +28,6 @@ use nexus_contracts::{
 };
 use nexus_core::owner::ExecutionHandle;
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, RunnerDeps};
-use nexus_capability::{
-    CapabilityError, PromptExecutor, PromptRequest, PromptResult,
-};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use std::sync::Arc;
 use tempfile::TempDir;

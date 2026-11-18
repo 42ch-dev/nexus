@@ -16,9 +16,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak};
 
-use nexus_contracts::{CoreCloseReport, CoreCloseReportState};
 use nexus_capability::{CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps};
-use nexus_capability::{DaemonToolDispatch, PromptExecutor, WorkspaceExecutor, WorkspaceStateProvider};
+use nexus_capability::{
+    DaemonToolDispatch, PromptExecutor, WorkspaceExecutor, WorkspaceStateProvider,
+};
+use nexus_contracts::{CoreCloseReport, CoreCloseReportState};
 use nexus_orchestration::schedule::supervisor::{ScheduleRunStarter, ScheduleSupervisor};
 use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
 use nexus_provider_ports::ProviderPort;
@@ -1111,9 +1113,9 @@ impl CoreService {
             };
             #[cfg(feature = "compute")]
             let capabilities = match (deps.compute_engine.clone(), deps.compute_cache.clone()) {
-                (Some(engine), Some(cache)) => CapabilityRegistry::with_runtime_deps_and_wasm(
-                    &runtime_deps, engine, cache,
-                ),
+                (Some(engine), Some(cache)) => {
+                    CapabilityRegistry::with_runtime_deps_and_wasm(&runtime_deps, engine, cache)
+                }
                 _ => CapabilityRegistry::with_runtime_deps(&runtime_deps),
             };
             #[cfg(not(feature = "compute"))]

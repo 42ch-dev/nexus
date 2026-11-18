@@ -17,9 +17,9 @@
 
 #![allow(clippy::unwrap_used)]
 
+use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 use nexus_local_db::kb_extract_job::list_pending_for_world;
 use nexus_local_db::works::{self, WorkRecord};
-use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 use nexus_orchestration::quality_loop;
 use sqlx::SqlitePool;
 
@@ -180,10 +180,7 @@ impl nexus_capability::PromptExecutor for MockLlmExtractWorker {
     async fn execute(
         &self,
         _request: nexus_capability::PromptRequest,
-    ) -> Result<
-        nexus_capability::PromptResult,
-        nexus_capability::CapabilityError,
-    > {
+    ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError> {
         Ok(nexus_capability::PromptResult {
             full_text: "{\"candidates\":[
                 {\"canonical_name\":\"Lin Xia\",\"block_type\":\"character\",\"summary\":\"A warrior\",\"confidence\":0.95,\"source_quote\":\"Lin Xia drew her blade at the Azure Gate.\"},

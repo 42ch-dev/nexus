@@ -383,6 +383,7 @@ pub mod extraction_target;
 pub mod rules_layers;
 pub mod scan;
 pub mod state_delta;
+#[cfg(any(test, feature = "test-hooks"))]
 pub mod test_support;
 pub mod user_capability;
 pub mod watch;

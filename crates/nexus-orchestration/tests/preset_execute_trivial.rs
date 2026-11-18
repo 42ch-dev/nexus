@@ -6,8 +6,8 @@
 //! - `run_step` correctly drives the state machine
 //! - `signal(Resume)` unblocks `WaitForInput`
 
-use nexus_orchestration::engine::StepOutcome;
 use nexus_capability::CapabilityRegistry;
+use nexus_orchestration::engine::StepOutcome;
 use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 

@@ -10,12 +10,12 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use nexus_capability::{CapabilityError, WorkspaceExecutor};
 use nexus_contracts::local::orchestration::{
     WorkArtifactCommitInput, WorkArtifactCommitOutput, WorkspaceCommitInput, WorkspaceCommitOutput,
     WorkspaceOpenInput, WorkspaceOpenOutput, WorkspaceOpenSnapshot,
 };
 use nexus_home_layout;
-use nexus_capability::{CapabilityError, WorkspaceExecutor};
 
 use super::work_artifact::{
     FsWorkArtifactPort, RecordedMutation, RecordingWorkArtifactPort, WorkArtifactPort,

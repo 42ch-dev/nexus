@@ -346,10 +346,7 @@ impl nexus_capability::PromptExecutor for MockReviewExtract {
     async fn execute(
         &self,
         request: nexus_capability::PromptRequest,
-    ) -> Result<
-        nexus_capability::PromptResult,
-        nexus_capability::CapabilityError,
-    > {
+    ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError> {
         *self.run_id.lock().expect("run id lock") = request.run_id;
         if self.pending {
             std::future::pending::<()>().await;

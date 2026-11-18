@@ -33,8 +33,8 @@
 //! `CARGO_MANIFEST_DIR` so the test passes regardless of the invoking working
 //! directory.
 
-use nexus_contracts::generated::daemon_api::orchestration::WorkflowDocument;
 use nexus_capability::CapabilityRegistry;
+use nexus_contracts::generated::daemon_api::orchestration::WorkflowDocument;
 use nexus_preset::manifest::{EnterAction, ExitWhen, NextTarget, PresetManifest};
 use nexus_preset::workflow_ir::import_preset_manifest;
 use nexus_preset::{

@@ -47,9 +47,7 @@ use nexus_agent_host::capability::model::{
 };
 use nexus_agent_host::config::TimeoutConfig;
 use nexus_agent_host::{HostFacade, HostOperationId, ProviderId};
-use nexus_capability::{
-    CapabilityError, PromptExecutor, PromptRequest, PromptResult,
-};
+use nexus_capability::{CapabilityError, PromptExecutor, PromptRequest, PromptResult};
 use nexus_session_storage::{
     run_state::{PromptAttempt, PromptPhase, WorkflowStateStore},
     SessionId, StorageError,

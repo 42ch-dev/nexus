@@ -51,6 +51,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::owner::lifecycle::ExecutionHandle;
 use crate::principal::Principal;
 use crate::service::CoreService;
+use nexus_capability::compute_input_builder::ComputeInputBuilder;
 use nexus_contracts::generated::daemon_api::compute::{
     clear_runs_query::ClearRunsQuery,
     clear_runs_response::ClearRunsResponse,
@@ -75,7 +76,6 @@ use nexus_local_db::operation_receipts::{
     settle_operation, BeginOutcome, OperationReceipt, RecoveryDecision, CONSUMER_COMPUTE_RUN,
     STATUS_FAILED, STATUS_FINISHED,
 };
-use nexus_capability::compute_input_builder::ComputeInputBuilder;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

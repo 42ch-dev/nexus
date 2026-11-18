@@ -6,8 +6,8 @@
 //! - `output_binding` is read from child context and written to parent
 //! - `engine.spawn_child_session` + `engine.get_context` work on trait + impl
 
-use nexus_orchestration::engine::StepOutcome;
 use nexus_capability::CapabilityRegistry;
+use nexus_orchestration::engine::StepOutcome;
 use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
@@ -20,10 +20,7 @@ impl nexus_capability::PromptExecutor for EchoExecutor {
     async fn execute(
         &self,
         request: nexus_capability::PromptRequest,
-    ) -> Result<
-        nexus_capability::PromptResult,
-        nexus_capability::CapabilityError,
-    > {
+    ) -> Result<nexus_capability::PromptResult, nexus_capability::CapabilityError> {
         Ok(nexus_capability::PromptResult {
             full_text: format!("inner_node:{}:echo_output", request.task_id),
             host_session_id: "host-test".to_string(),

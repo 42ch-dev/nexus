@@ -83,8 +83,5 @@ pub fn write_capability_dir(root: &Path, name: &str) {
 pub fn registry_with(
     caps: Vec<Box<dyn super::Capability>>,
 ) -> std::sync::Arc<super::CapabilityRegistry> {
-    let mut registry = super::CapabilityRegistry::empty();
-    registry.capabilities.extend(caps);
-    registry.build_index();
-    std::sync::Arc::new(registry)
+    std::sync::Arc::new(super::CapabilityRegistry::with_capabilities(caps))
 }

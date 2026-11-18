@@ -60,6 +60,8 @@ use nexus_agent_host::{
     HostSessionId, LaunchStrategy, ProviderCatalog, ProviderCatalogEntry, ProviderId, SessionState,
     TrustLevel,
 };
+use nexus_capability::{CapabilityError, DaemonToolDispatch};
+use nexus_capability::{CapabilityRegistry, CapabilityRegistryHolder};
 use nexus_contracts::generated::core::{
     CoreWorkflowEventBatchEventsItem, CoreWorkflowSubscribeRequest,
     CoreWorkflowSubscribeRequestLastEventId, CoreWorkflowSubscribeRequestRunId,
@@ -95,10 +97,8 @@ use nexus_execution::workflow::{
 use nexus_local_db::findings::{create_finding, Finding};
 use nexus_local_db::works::{create_work_atomic, WorkRecord};
 use nexus_local_db::writer_protocol::init_guarded_pool;
-use nexus_capability::{CapabilityError, DaemonToolDispatch};
 use nexus_orchestration::engine::{GraphFlowEngine, OrchestrationEngine};
 use nexus_orchestration::preset_runtime::build_wired_outer_graph;
-use nexus_capability::{CapabilityRegistry, CapabilityRegistryHolder};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use nexus_session_storage::run_state::RunRecord;
 use nexus_session_storage::run_state::WorkflowStateStore;
@@ -508,9 +508,7 @@ async fn owner_fixture() -> OwnerFixture {
         TimeoutConfig::default(),
     ));
     let deps = RunnerDeps {
-        prompt_executor: Some(
-            executor.clone() as Arc<dyn nexus_capability::PromptExecutor>
-        ),
+        prompt_executor: Some(executor.clone() as Arc<dyn nexus_capability::PromptExecutor>),
         workspace_root: Some(nexus_home_layout::operational_workspace_dir(
             home, CREATOR, SLUG,
         )),
@@ -804,8 +802,7 @@ async fn admission_distinct_serial_rows_race_one_owned() {
     let pool = fixture.pool();
     let caps = fixture.handle.capability_holder();
     let home = fixture.nexus_home();
-    let executor =
-        fixture.executor.clone() as Arc<dyn nexus_capability::PromptExecutor>;
+    let executor = fixture.executor.clone() as Arc<dyn nexus_capability::PromptExecutor>;
 
     let (a, b) = tokio::join!(
         coordinator.admit_schedule(
@@ -3061,8 +3058,7 @@ async fn public_schedule_reads_and_context_are_owned() {
     let coordinator = fixture.coordinator();
     let caps = fixture.handle.capability_holder();
     let home = fixture.nexus_home();
-    let executor =
-        fixture.executor.clone() as Arc<dyn nexus_capability::PromptExecutor>;
+    let executor = fixture.executor.clone() as Arc<dyn nexus_capability::PromptExecutor>;
 
     // ── 1. A durable pending row created through the PUBLIC add appears in the
     //       schedule list with its stored identity/status/policy and NO run. ──
@@ -3887,8 +3883,7 @@ async fn public_cancel_fences_late_workspace_commit() {
     let coordinator = fixture.coordinator();
     let caps = fixture.handle.capability_holder();
     let home = fixture.nexus_home();
-    let executor =
-        fixture.executor.clone() as Arc<dyn nexus_capability::PromptExecutor>;
+    let executor = fixture.executor.clone() as Arc<dyn nexus_capability::PromptExecutor>;
     write_preset_bundle(
         &home,
         CANCEL_WAIT_PRESET,
@@ -4489,8 +4484,7 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
     let coordinator = fixture.coordinator();
     let caps = fixture.handle.capability_holder();
     let home = fixture.nexus_home();
-    let executor =
-        fixture.executor.clone() as Arc<dyn nexus_capability::PromptExecutor>;
+    let executor = fixture.executor.clone() as Arc<dyn nexus_capability::PromptExecutor>;
     write_preset_bundle(
         &home,
         RESUME_PARK_PRESET,

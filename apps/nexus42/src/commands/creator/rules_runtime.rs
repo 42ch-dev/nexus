@@ -26,9 +26,9 @@ use crate::commands::creator::works::{active_work_id_core, FindingsCommand, Rule
 use crate::config::CliConfig;
 use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
+use nexus_capability::WorkspaceExecutor;
 use nexus_contracts::FindingsApi;
 use nexus_core::{CoreService, ListFindingsQuery, Principal};
-use nexus_capability::WorkspaceExecutor;
 
 /// Handle `creator works findings …` (V1.48 P2).
 ///

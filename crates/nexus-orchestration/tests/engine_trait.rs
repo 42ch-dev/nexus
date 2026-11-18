@@ -1,7 +1,5 @@
 use nexus_capability::CapabilityRegistry;
-use nexus_orchestration::{
-    engine::SessionFilter, GraphFlowEngine, OrchestrationEngine,
-};
+use nexus_orchestration::{engine::SessionFilter, GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
 #[tokio::test]

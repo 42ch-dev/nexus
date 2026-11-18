@@ -385,21 +385,24 @@ impl Capability for KbExtractWork {
         // controlling Creator must still own the target World, and the audience
         // is the service's in-scope default. Resolved before the model's
         // candidate can name anything — the model never reaches this pair.
-        let target =
-            match crate::extraction_target::resolve_extraction_target(pool, &job.creator_id, &world_id)
-                .await
-            {
-                Ok(target) => target,
-                Err(e) => {
-                    let _ = nexus_local_db::mark_extract_job_failed(
-                        pool,
-                        &job_id,
-                        &format!("Extraction target refused: {e}"),
-                    )
-                    .await;
-                    return Err(e);
-                }
-            };
+        let target = match crate::extraction_target::resolve_extraction_target(
+            pool,
+            &job.creator_id,
+            &world_id,
+        )
+        .await
+        {
+            Ok(target) => target,
+            Err(e) => {
+                let _ = nexus_local_db::mark_extract_job_failed(
+                    pool,
+                    &job_id,
+                    &format!("Extraction target refused: {e}"),
+                )
+                .await;
+                return Err(e);
+            }
+        };
 
         // The admitted source bundle and the source anchor both come from the
         // actual Work artifact: the text the orchestrator loaded plus the job's

@@ -38,12 +38,9 @@ impl Capability for RecordingCap {
     }
 }
 
-fn recording_registry(
-    hits: &Arc<std::sync::atomic::AtomicUsize>,
-) -> Arc<CapabilityRegistry> {
-    let reg = CapabilityRegistry::with_capabilities(vec![Box::new(RecordingCap {
-        hits: hits.clone(),
-    })]);
+fn recording_registry(hits: &Arc<std::sync::atomic::AtomicUsize>) -> Arc<CapabilityRegistry> {
+    let reg =
+        CapabilityRegistry::with_capabilities(vec![Box::new(RecordingCap { hits: hits.clone() })]);
     Arc::new(reg)
 }
 
@@ -145,9 +142,8 @@ async fn preflight_t1_recording_registries_are_per_run_and_isolate_dispatch_betw
         second_caps.get("judge.rule").is_none(),
         "no builtins in the second recording registry"
     );
-    let second_loaded =
-        nexus_preset::load_preset_from_str(T1_PROBE_PRESET, second_caps.as_ref())
-            .expect("preset loads against the second registry");
+    let second_loaded = nexus_preset::load_preset_from_str(T1_PROBE_PRESET, second_caps.as_ref())
+        .expect("preset loads against the second registry");
     let second_engine = GraphFlowEngine::new_with_storage(
         Arc::new(graph_flow::InMemorySessionStorage::new()),
         CapabilityRegistryHolder::with_registry(second_caps.clone()),

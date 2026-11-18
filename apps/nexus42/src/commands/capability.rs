@@ -33,10 +33,8 @@
 //! CLI graph stays libp2p-free.
 
 use clap::Subcommand;
+use nexus_capability::user_capability::{CapabilityDescriptorError, UserCapabilityDescriptor};
 use nexus_module_manifest::ModuleManifest;
-use nexus_capability::user_capability::{
-    CapabilityDescriptorError, UserCapabilityDescriptor,
-};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
