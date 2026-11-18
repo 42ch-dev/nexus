@@ -1,6 +1,7 @@
 //! nexus-orchestration — engine adapter, capability registry, graph executor.
 //! Authoritative design: `docs/specs/orchestration/orchestration-engine.md`.
 
+pub mod applied_document;
 pub mod auto_chain;
 pub mod auto_chronology;
 pub mod capability;
@@ -36,7 +37,7 @@ pub use capability::{
 };
 pub use engine::{
     ChildSessionParams, EngineError, FailedStepWitness, FailurePersistenceDisposition,
-    FailureSettlement, FailureSettlementSummary, GraphFlowEngine, OrchestrationEngine, SessionId,
+    FailureSettlement, FailureSettlementSummary, GraphFlowEngine, OrchestrationEngine,
 };
 #[cfg(feature = "simulate")]
 pub use simulation::{simulate_document, SimulationError, SimulationOptions};

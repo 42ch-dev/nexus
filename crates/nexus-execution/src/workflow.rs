@@ -42,15 +42,14 @@ use async_trait::async_trait;
 use graph_flow::SessionStorage;
 use nexus_orchestration::engine::{
     EngineError, EngineSignal, FailedStepWitness, FailurePersistenceDisposition, FailureSettlement,
-    FailureSettlementSummary, OrchestrationEngine, SessionId, SessionStatus, SessionSummary,
-    StepOutcome,
+    FailureSettlementSummary, OrchestrationEngine, StepOutcome,
 };
 use nexus_orchestration::resume_rules;
 use nexus_orchestration::schedule::supervisor::{ScheduleRunStarter, SupervisorError};
 use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
 use nexus_session_storage::{
     run_state::{RunRecord, WorkflowStateStore},
-    StorageError,
+    SessionId, SessionStatus, SessionSummary, StorageError,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -2489,12 +2488,12 @@ impl WorkflowRunCoordinator {
                 std::sync::Arc::new(pool.clone()),
             );
             let run_exists = store
-                .load_run(&nexus_orchestration::SessionId(sid.clone()))
+                .load_run(&SessionId(sid.clone()))
                 .await
                 .map_err(|e| RunControlError::Admission(e.to_string()))?
                 .is_some();
             if run_exists {
-                let sid = nexus_orchestration::SessionId(sid.clone());
+                let sid = SessionId(sid.clone());
                 self.ensure_driving(&sid).await?;
                 return Ok(sid);
             }
@@ -2876,12 +2875,12 @@ impl WorkflowRunCoordinator {
                 std::sync::Arc::new(pool.clone()),
             );
             let run_exists = store
-                .load_run(&nexus_orchestration::SessionId(sid.clone()))
+                .load_run(&SessionId(sid.clone()))
                 .await
                 .map_err(|e| RunControlError::Admission(e.to_string()))?
                 .is_some();
             if run_exists {
-                let sid = nexus_orchestration::SessionId(sid.clone());
+                let sid = SessionId(sid.clone());
                 self.ensure_driving(&sid).await?;
                 return Ok(sid);
             }
@@ -3907,7 +3906,7 @@ mod tests {
     }
 
     use nexus_orchestration::engine::{
-        ChildSessionParams, Context, EngineError, SessionFilter, SessionKey, SessionSummary,
+        ChildSessionParams, Context, EngineError, SessionFilter, SessionKey,
     };
 
     /// P4 T1: durable `Failed+cancel_requested+driver_failed` counts as cancel outcome

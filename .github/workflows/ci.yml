@@ -77,6 +77,9 @@ jobs:
               - '.sqlx/**'
               - 'strategy-samples/**'
               - 'tooling/check-*.sh'
+              # The guard's fixture regression runs in schema-consistency-check
+              # (gated by this filter), so a test-only edit must trigger it.
+              - 'tooling/check-graph-pins.test.mjs'
               - 'tooling/release/**'
               - 'tooling/work-artifact-write-allowlist.tsv'
               - '.github/workflows/ci.yml'
@@ -554,6 +557,22 @@ jobs:
       # provides it.
       - name: Check graph pins
         run: bash tooling/check-graph-pins.sh
+      # The arg-less matrix above does not assert the v1.249 domain invariants
+      # (session storage / Connect absent from the core closure, the provider's
+      # exact-one default-featured edge), and the fixture suite proves them only
+      # on synthetic workspaces. Run the cohort against the real workspace so a
+      # domain regression fails CI instead of waiting for a manual run.
+      - name: Check graph pins (domain cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort domain
+      # v1.249 R3: the scoped cohort selector and `--manifest-path` override are
+      # proven on disposable real-Cargo workspaces — a positive domain fixture,
+      # one rejection per forbidden domain edge, the empty-graph positive
+      # control, invalid inputs and Cargo failure propagation. No fixture edits
+      # the shared checkout's manifests or lockfile.
+      - name: Graph pin guard regression
+        timeout-minutes: 10
+        run: node --test tooling/check-graph-pins.test.mjs
       # V1.236 P5-T2 (ADR #485 §6.1 P5): the Work artifact byte-write guard.
       # Prove the gate bites on synthetic fixtures (synthetic direct write,
       # mixed function, and an exempt symbol with a second write), then run it

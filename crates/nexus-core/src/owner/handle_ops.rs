@@ -64,12 +64,12 @@ use nexus_contracts::local::schedule::{
     ScheduleStatus,
 };
 use nexus_contracts::CoreRunEventsRequest;
-use nexus_orchestration::engine::SessionId;
 use nexus_orchestration::preset_gates::{
     evaluate_gates, GateEvalError, PresetInput, PreviousPresetLookup, PreviousPresetResult,
     WorkSnapshot,
 };
 use nexus_orchestration::schedule::supervisor::ScheduleCancelDisposition;
+use nexus_session_storage::SessionId;
 
 use crate::error::{CoreError, CoreResult};
 use crate::owner::capabilities::ToolContext;

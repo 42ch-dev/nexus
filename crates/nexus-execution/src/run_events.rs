@@ -1265,7 +1265,7 @@ fn current_epoch() -> Uuid {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_orchestration::engine::{SessionId, SessionStatus};
+    use nexus_session_storage::{SessionId, SessionStatus};
 
     fn mk_record(run_id: &str, status: SessionStatus, revision: u64) -> RunRecord {
         RunRecord {
