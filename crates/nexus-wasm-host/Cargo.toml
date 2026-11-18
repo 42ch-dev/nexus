@@ -12,6 +12,9 @@ workspace = true
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+# Private std-only sandbox policy: default limits + override resolution
+# (`SandboxConfig`). The host keeps enforcement (fuel, `StoreLimits`, watchdog).
+nexus-compute-policy = { path = "../nexus-compute-policy" }
 # V1.170 P0 (AR-8): shared manifest contract + wasm_sha256 injection, extracted
 # from this crate. Non-workspace path dep — legal because the root workspace
 # `exclude`s the crate (AR-1).

@@ -72,16 +72,16 @@ pub struct SandboxOverrides {
 }
 
 /// Tighten sandbox overrides to the host maxima via `min(override, default)`
-/// — the same semantics as `WasmEngine::resolve_sandbox` (compute.rs L71-80).
+/// — the same semantics as `WasmEngine::resolve_sandbox` (compute.rs L71-82).
 ///
-/// The maxima are read from [`nexus_wasm_host::SandboxConfig::default()`]
+/// The maxima are read from [`nexus_compute_policy::SandboxConfig::default()`]
 /// (AR-38: read, never duplicate). Absent fields stay absent (host defaults).
 /// `pub(crate)` because both the admission gate 4 (`admission.rs`) and
 /// `UserCapability::new` (F1 — re-clamp so a directly-constructed capability
 /// carries clamped bounds) apply it.
 #[must_use]
 pub(crate) fn clamp_sandbox(overrides: &SandboxOverrides) -> SandboxOverrides {
-    let defaults = nexus_wasm_host::SandboxConfig::default();
+    let defaults = nexus_compute_policy::SandboxConfig::default();
     let max_wall_time_ms = u64::try_from(defaults.wall_time.as_millis()).unwrap_or(u64::MAX);
     SandboxOverrides {
         fuel: overrides.fuel.map(|fuel| fuel.min(defaults.fuel)),
@@ -474,10 +474,10 @@ impl Capability for UserCapability {
         // F1/AR-38: apply the clamped descriptor sandbox overrides onto the
         // manifest before `compute` — the invocation sandbox is resolved as
         // `min(manifest_override, host_default)` in `WasmEngine::resolve_sandbox`
-        // (compute.rs L71-80), so folding each present descriptor bound in
+        // (compute.rs L71-82), so folding each present descriptor bound in
         // via `min(existing, descriptor)` tightens the effective sandbox to
         // the capability's ceiling. Absent descriptor fields leave the
-        // manifest/host value untouched. No `sandbox.rs` change (AR-38).
+        // manifest/host value untouched.
         if let Some(sandbox) = &self.sandbox {
             if let Some(fuel) = sandbox.fuel {
                 manifest.max_fuel = Some(manifest.max_fuel.map_or(fuel, |m| m.min(fuel)));

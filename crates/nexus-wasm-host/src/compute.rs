@@ -69,20 +69,15 @@ impl WasmEngine {
     /// boundaries.
     #[must_use]
     pub fn resolve_sandbox(&self, manifest: &ModuleManifest) -> ResolvedSandbox {
-        let base = self.default_sandbox();
+        let resolved = self.default_sandbox().resolve(
+            manifest.max_fuel,
+            manifest.max_memory_mib,
+            manifest.max_wall_time_ms,
+        );
         ResolvedSandbox {
-            fuel: manifest.max_fuel.map_or(base.fuel, |f| f.min(base.fuel)),
-            max_memory_bytes: manifest
-                .max_memory_mib
-                .map_or(base.max_memory_bytes, |mib| {
-                    usize::try_from(mib)
-                        .unwrap_or(0)
-                        .saturating_mul(1024 * 1024)
-                        .min(base.max_memory_bytes)
-                }),
-            wall_time: manifest.max_wall_time_ms.map_or(base.wall_time, |ms| {
-                Duration::from_millis(ms).min(base.wall_time)
-            }),
+            fuel: resolved.fuel,
+            max_memory_bytes: resolved.max_memory_bytes,
+            wall_time: resolved.wall_time,
         }
     }
 
@@ -736,6 +731,7 @@ mod tests {
     use super::*;
     use crate::error::ComputeError;
     use crate::manifest::ModuleSchemas;
+    use nexus_compute_policy::{DEFAULT_FUEL, DEFAULT_MEMORY_MIB, DEFAULT_WALL_TIME};
     use serde_json::json;
 
     // ------------------------------------------------------------------
@@ -1348,17 +1344,22 @@ mod tests {
         }
     }
 
+    /// The default wall-time cap in milliseconds (the manifest override unit).
+    fn wall_time_ms(duration: Duration) -> u64 {
+        u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+    }
+
     #[test]
     fn resolve_sandbox_absent_overrides_use_host_defaults() {
         let engine = WasmEngine::new().unwrap();
         let manifest = make_manifest("no-overrides", None, None, None);
         let resolved = engine.resolve_sandbox(&manifest);
-        assert_eq!(resolved.fuel, crate::sandbox::DEFAULT_FUEL);
+        assert_eq!(resolved.fuel, DEFAULT_FUEL);
         assert_eq!(
             resolved.max_memory_bytes,
-            (crate::sandbox::DEFAULT_MEMORY_MIB as usize) * 1024 * 1024
+            (DEFAULT_MEMORY_MIB as usize) * 1024 * 1024
         );
-        assert_eq!(resolved.wall_time, crate::sandbox::DEFAULT_WALL_TIME);
+        assert_eq!(resolved.wall_time, DEFAULT_WALL_TIME);
     }
 
     #[test]
@@ -1366,29 +1367,25 @@ mod tests {
         let engine = WasmEngine::new().unwrap();
         let manifest = make_manifest(
             "over-the-limit",
-            Some(crate::sandbox::DEFAULT_FUEL * 10), // 10× host default
-            Some(crate::sandbox::DEFAULT_MEMORY_MIB * 4), // 4× host default
-            Some(
-                u64::try_from(crate::sandbox::DEFAULT_WALL_TIME.as_millis()).unwrap_or(u64::MAX)
-                    * 5,
-            ), // 5× host default
+            Some(DEFAULT_FUEL * 10), // 10× host default
+            Some(DEFAULT_MEMORY_MIB * 4), // 4× host default
+            Some(wall_time_ms(DEFAULT_WALL_TIME) * 5), // 5× host default
         );
         let resolved = engine.resolve_sandbox(&manifest);
-        assert_eq!(resolved.fuel, crate::sandbox::DEFAULT_FUEL);
+        assert_eq!(resolved.fuel, DEFAULT_FUEL);
         assert_eq!(
             resolved.max_memory_bytes,
-            (crate::sandbox::DEFAULT_MEMORY_MIB as usize) * 1024 * 1024
+            (DEFAULT_MEMORY_MIB as usize) * 1024 * 1024
         );
-        assert_eq!(resolved.wall_time, crate::sandbox::DEFAULT_WALL_TIME);
+        assert_eq!(resolved.wall_time, DEFAULT_WALL_TIME);
     }
 
     #[test]
     fn resolve_sandbox_lower_than_host_manifest_wins() {
         let engine = WasmEngine::new().unwrap();
-        let half_fuel = crate::sandbox::DEFAULT_FUEL / 2;
-        let half_mem_mib = crate::sandbox::DEFAULT_MEMORY_MIB / 2;
-        let half_wall_ms =
-            u64::try_from(crate::sandbox::DEFAULT_WALL_TIME.as_millis()).unwrap_or(u64::MAX) / 2;
+        let half_fuel = DEFAULT_FUEL / 2;
+        let half_mem_mib = DEFAULT_MEMORY_MIB / 2;
+        let half_wall_ms = wall_time_ms(DEFAULT_WALL_TIME) / 2;
         let manifest = make_manifest(
             "under-the-limit",
             Some(half_fuel),
@@ -1411,15 +1408,15 @@ mod tests {
     fn resolve_sandbox_mixed_overrides() {
         // Fuel lower (wins), memory higher (clamped), wall-time absent (default).
         let engine = WasmEngine::new().unwrap();
-        let low_fuel = crate::sandbox::DEFAULT_FUEL / 4;
-        let high_mem = crate::sandbox::DEFAULT_MEMORY_MIB * 8;
+        let low_fuel = DEFAULT_FUEL / 4;
+        let high_mem = DEFAULT_MEMORY_MIB * 8;
         let manifest = make_manifest("mixed", Some(low_fuel), Some(high_mem), None);
         let resolved = engine.resolve_sandbox(&manifest);
         assert_eq!(resolved.fuel, low_fuel);
         assert_eq!(
             resolved.max_memory_bytes,
-            (crate::sandbox::DEFAULT_MEMORY_MIB as usize) * 1024 * 1024
+            (DEFAULT_MEMORY_MIB as usize) * 1024 * 1024
         );
-        assert_eq!(resolved.wall_time, crate::sandbox::DEFAULT_WALL_TIME);
+        assert_eq!(resolved.wall_time, DEFAULT_WALL_TIME);
     }
 }

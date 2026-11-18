@@ -422,7 +422,7 @@ mod tests {
         );
         let admitted = admit(&descriptor, &tmp.path().join("demo.pull"), &builtins())
             .expect("clamping never rejects");
-        let defaults = nexus_wasm_host::SandboxConfig::default();
+        let defaults = nexus_compute_policy::SandboxConfig::default();
         let sandbox = admitted
             .descriptor
             .sandbox

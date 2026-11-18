@@ -9,6 +9,24 @@
 //! See [`AGENTS.md`](../AGENTS.md) for the full design (compass grill decisions
 //! Q1/Q6/Q8, module ABI, host-function whitelist).
 //!
+//! # Sandbox guards
+//!
+//! Every `compute()` call runs in a fresh, fully isolated instance with three
+//! independent guards:
+//!
+//! 1. **Fuel** — instruction-level budget. Every executed wasm instruction
+//!    consumes fuel; the instance traps with `Trap::OutOfFuel` once depleted.
+//!    This is the primary compute-bound guard and bounds CPU work.
+//! 2. **Memory cap** — total linear-memory ceiling, enforced via wasmtime's
+//!    `StoreLimits` resource limiter. Prevents runaway allocation / OOM.
+//! 3. **Wall-time** — enforced via epoch interruption: a watchdog thread calls
+//!    `Engine::increment_epoch()` after the deadline, trapping the instance
+//!    (`Trap::Interrupt`). Hard cap on real time.
+//!
+//! The *amounts* — defaults and how manifest overrides resolve against them —
+//! are owned by [`nexus_compute_policy::SandboxConfig`]; this crate enforces
+//! them, it does not decide them.
+//!
 //! # Example
 //!
 //! ```no_run
@@ -38,7 +56,6 @@ mod host;
 mod manifest;
 mod module_cache;
 mod registry;
-mod sandbox;
 
 pub use embedded::{embedded_module_bytes, embedded_module_ids, embedded_module_manifest};
 pub use engine::{WasmEngine, WasmModule};
@@ -50,7 +67,6 @@ pub use nexus_contracts::generated::daemon_api::compute::{
     module_detail::ModuleDetail, module_summary::ModuleSummary,
 };
 pub use registry::{get_module, list_modules};
-pub use sandbox::SandboxConfig;
 
 // Re-export the compute ABI types from nexus-contracts so consumers depend on a
 // single crate. These are the generated wire types for `schemas/daemon-api/compute/`.

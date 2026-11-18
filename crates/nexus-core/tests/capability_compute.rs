@@ -33,8 +33,9 @@ use nexus_core::owner::compute::{
     accept_compute_run, clear_compute_runs, compute_run, discard_compute_run, get_compute_run,
     list_compute_runs, recover_stuck_compute_runs, ComputeContext, ComputeRunRecoveryOutcome,
 };
+use nexus_compute_policy::SandboxConfig;
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest};
-use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, SandboxConfig, WasmEngine};
+use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, WasmEngine};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;

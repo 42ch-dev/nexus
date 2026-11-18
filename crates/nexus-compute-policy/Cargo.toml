@@ -1,0 +1,17 @@
+[package]
+name = "nexus-compute-policy"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Private std-only compute sandbox policy: default limits and override resolution."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]

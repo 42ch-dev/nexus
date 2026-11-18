@@ -3682,6 +3682,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-compute-policy"
+version = "0.1.0"
+
+[[package]]
 name = "nexus-config-metadata"
 version = "0.1.0"
 dependencies = [
@@ -3746,6 +3750,7 @@ dependencies = [
  "nexus-acp-host",
  "nexus-agent-host",
  "nexus-cloud-sync",
+ "nexus-compute-policy",
  "nexus-config-metadata",
  "nexus-connect",
  "nexus-contracts",
@@ -4055,6 +4060,7 @@ dependencies = [
  "handlebars",
  "hex",
  "include_dir",
+ "nexus-compute-policy",
  "nexus-contracts",
  "nexus-creator-memory",
  "nexus-home-layout",
@@ -4185,6 +4191,7 @@ name = "nexus-wasm-host"
 version = "0.1.0"
 dependencies = [
  "include_dir",
+ "nexus-compute-policy",
  "nexus-contracts",
  "nexus-module-manifest",
  "serde",

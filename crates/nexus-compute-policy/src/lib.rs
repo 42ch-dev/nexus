@@ -1,16 +1,17 @@
-//! Sandbox configuration for a single compute invocation (compass Q6).
+//! Compute sandbox policy: the default limits and how module/manifest
+//! overrides resolve against them (compass Q6).
 //!
-//! Every `compute()` call runs in a fresh, fully isolated instance with three
-//! independent guards:
+//! This crate is **private policy only** — plain `std`, no runtime. The
+//! enforcement lives in its consumers: `nexus-wasm-host` owns fuel, traps, the
+//! `StoreLimits` memory cap and the epoch watchdog, while
+//! `nexus-orchestration` projects the same maxima onto capability descriptors.
+//!
+//! The three limits are independent; each resolves on its own:
 //!
 //! 1. **Fuel** — instruction-level budget. Every executed wasm instruction
 //!    consumes fuel; the instance traps with `Trap::OutOfFuel` once depleted.
-//!    This is the primary compute-bound guard and bounds CPU work.
-//! 2. **Memory cap** — total linear-memory ceiling, enforced via wasmtime's
-//!    `StoreLimits` resource limiter. Prevents runaway allocation / OOM.
-//! 3. **Wall-time** — enforced via epoch interruption: a watchdog thread calls
-//!    `Engine::increment_epoch()` after the deadline, trapping the instance
-//!    (`Trap::Interrupt`). Hard cap on real time.
+//! 2. **Memory cap** — total linear-memory ceiling in bytes.
+//! 3. **Wall-time** — hard real-time cap for a single invocation.
 
 use std::time::Duration;
 
@@ -30,9 +31,8 @@ pub const DEFAULT_WALL_TIME: Duration = Duration::from_secs(30);
 /// Sandbox limits applied to a single compute invocation.
 ///
 /// All limits are enforced independently; a breach of any one traps the
-/// instance and is reported as a [`ComputeError`](crate::ComputeError) variant.
-/// Instances are never reused (per-invocation sandbox), so limits always start
-/// from a clean slate.
+/// instance. Instances are never reused (per-invocation sandbox), so limits
+/// always start from a clean slate.
 #[derive(Debug, Clone, Copy)]
 pub struct SandboxConfig {
     /// Instruction-level fuel budget.
@@ -55,6 +55,39 @@ impl SandboxConfig {
             wall_time: DEFAULT_WALL_TIME,
         }
     }
+
+    /// Resolve optional overrides against this configuration as the base.
+    ///
+    /// An override may only **tighten** a limit, never raise it: the effective
+    /// value is `min(override, base)`. Absent overrides keep the base value.
+    /// A MiB override that cannot be represented saturates rather than wrapping;
+    /// the result is still capped by this configuration's memory cap.
+    #[must_use]
+    pub fn resolve(
+        self,
+        fuel: Option<u64>,
+        memory_mib: Option<u32>,
+        wall_time_ms: Option<u64>,
+    ) -> Self {
+        Self {
+            fuel: fuel.map_or(self.fuel, |f| f.min(self.fuel)),
+            max_memory_bytes: memory_mib.map_or(self.max_memory_bytes, |mib| {
+                usize::try_from(mib)
+                    .unwrap_or(0)
+                    .saturating_mul(1024 * 1024)
+                    .min(self.max_memory_bytes)
+            }),
+            wall_time: wall_time_ms.map_or(self.wall_time, |ms| {
+                Duration::from_millis(ms).min(self.wall_time)
+            }),
+        }
+    }
+
+    /// Returns the configured memory cap in MiB (rounded down).
+    #[must_use]
+    pub fn memory_mib(&self) -> u32 {
+        u32::try_from(self.max_memory_bytes / (1024 * 1024)).unwrap_or(u32::MAX)
+    }
 }
 
 impl Default for SandboxConfig {
@@ -64,14 +97,6 @@ impl Default for SandboxConfig {
             max_memory_bytes: (DEFAULT_MEMORY_MIB as usize) * 1024 * 1024,
             wall_time: DEFAULT_WALL_TIME,
         }
-    }
-}
-
-impl SandboxConfig {
-    /// Returns the configured memory cap in MiB (rounded down).
-    #[must_use]
-    pub fn memory_mib(&self) -> u32 {
-        u32::try_from(self.max_memory_bytes / (1024 * 1024)).unwrap_or(u32::MAX)
     }
 }
 
