@@ -571,6 +571,15 @@ jobs:
       - name: Check graph pins (policy cohort)
         timeout-minutes: 10
         run: bash tooling/check-graph-pins.sh --cohort policy
+      # V1.249 C4: the capability extraction's integration proof against the
+      # real workspace — the enabled Connect library resolves capability +
+      # transport and none of the five engine planes, the default capability
+      # crate carries no WASM edge, an explicit `wasm` selection binds the real
+      # host, and the native host keeps its factory dependencies. The no-arg
+      # matrix above remains the sole full-matrix invocation.
+      - name: Check graph pins (capability cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort capability
       # v1.249 R3 + compute-policy QC: the scoped cohort selectors and the
       # `--manifest-path` override are proven on disposable real-Cargo
       # workspaces — positive fixtures, one rejection per forbidden edge, the

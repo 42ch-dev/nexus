@@ -3739,7 +3739,6 @@ dependencies = [
  "nexus-capability",
  "nexus-contracts",
  "nexus-home-layout",
- "nexus-orchestration",
  "nexus-spoke-adapter",
  "parking_lot 0.13.0",
  "rmcp",

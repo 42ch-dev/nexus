@@ -32,7 +32,6 @@ connect-host = [
     "dep:nexus-capability",
     "dep:nexus-contracts",
     "dep:nexus-home-layout",
-    "dep:nexus-orchestration",
     "dep:chrono",
     "dep:getrandom",
     "dep:serde",
@@ -59,7 +58,9 @@ nexus-contracts = { path = "../nexus-contracts", optional = true }
 nexus-home-layout = { path = "../nexus-home-layout", optional = true }
 # The shared capability registry holder and its digest-poll watcher: the
 # reserved-namespace derivation reads LIVE user-capability names from it.
-nexus-orchestration = { path = "../nexus-orchestration", optional = true }
+# V249 C3 moved both into `nexus-capability`, so the Connect library links the
+# capability crate directly and carries NO engine edge (the `capability` cohort
+# in `tooling/check-graph-pins.sh` pins that absence).
 nexus-capability = { path = "../nexus-capability", optional = true }
 chrono = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
