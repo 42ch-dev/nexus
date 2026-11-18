@@ -170,32 +170,61 @@ pub fn admit_consistent_with_reservation<S: std::hash::BuildHasher>(
     daemon_capabilities: &HashSet<String, S>,
     tool_allowlist: &HashSet<String, S>,
 ) -> AdmissionOutcome {
-    // `admit_and_register` takes std-hasher sets; the caller's hasher is
-    // build-agnostic, so normalize the three read-only inputs once (small
-    // rosters, low-frequency decision path).
-    let builtin_tool_ids: HashSet<String> = builtin_tool_ids.iter().cloned().collect();
-    let daemon_capabilities: HashSet<String> = daemon_capabilities.iter().cloned().collect();
-    let tool_allowlist: HashSet<String> = tool_allowlist.iter().cloned().collect();
-    let decide = |reserved: &HashSet<String>| {
+    /// One dispatch through [`PeerToolRegistry::admit_and_register`], over
+    /// the caller's borrowed sets and the ONE merged reserved set. No
+    /// normalization copy exists: the caller's sets are borrowed as-is.
+    fn dispatch_admission<S: std::hash::BuildHasher>(
+        table: &PeerToolTable,
+        peer_id: &str,
+        manifest: &nexus_spoke_adapter::HostCapabilityManifest,
+        responder: &Arc<dyn PeerResponder>,
+        daemon_capabilities: &HashSet<String, S>,
+        tool_allowlist: &HashSet<String, S>,
+        builtin_tool_ids: &HashSet<String, S>,
+        live_reservation: Option<&std::collections::HashSet<&'static str>>,
+    ) -> AdmissionOutcome {
+        // The ONE allocation per decision (pre-existing in every shape of
+        // this seam): the merged reserved set — builtin ∪ live — must be
+        // materialized because `admit_and_register` takes it by reference.
+        let mut reserved: HashSet<String> = builtin_tool_ids.iter().cloned().collect();
+        if let Some(live) = live_reservation {
+            reserved.extend(live.iter().map(|name| (*name).to_owned()));
+        }
         table.admit_and_register(
             peer_id,
             manifest,
             responder,
-            &daemon_capabilities,
-            &tool_allowlist,
-            reserved,
+            daemon_capabilities,
+            tool_allowlist,
+            &reserved,
         )
-    };
-    // The builtin roster is hash-build-agnostic input; the live reservation
-    // is only ever read with the std hasher inside the holder.
-    let builtin_roster = live_reserved_tool_ids(builtin_tool_ids.iter().cloned(), None);
+    }
+
     capability_registry.map_or_else(
-        || decide(&builtin_roster),
+        || {
+            dispatch_admission(
+                table,
+                peer_id,
+                manifest,
+                responder,
+                daemon_capabilities,
+                tool_allowlist,
+                builtin_tool_ids,
+                None,
+            )
+        },
         |holder| {
             holder.with_live_reservation(|live_reservation| {
-                let mut reserved = builtin_roster.clone();
-                reserved.extend(live_reservation.iter().map(|name| (*name).to_owned()));
-                decide(&reserved)
+                dispatch_admission(
+                    table,
+                    peer_id,
+                    manifest,
+                    responder,
+                    daemon_capabilities,
+                    tool_allowlist,
+                    builtin_tool_ids,
+                    Some(live_reservation),
+                )
             })
         },
     )
