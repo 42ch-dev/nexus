@@ -77,10 +77,12 @@ function manifestFor(name, { deps = {}, devDeps = {}, features = ['default = []'
     ...features,
     '',
   ];
-  for (const [section, entries] of [
+  /** @type {Array<[string, Record<string, string | null>]>} */
+  const sections = [
     ['dependencies', deps],
     ['dev-dependencies', devDeps],
-  ]) {
+  ];
+  for (const [section, entries] of sections) {
     const names = Object.entries(entries);
     if (names.length === 0) continue;
     lines.push(`[${section}]`);
