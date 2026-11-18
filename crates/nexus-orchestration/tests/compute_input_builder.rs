@@ -22,7 +22,7 @@ use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::init_engine_pool;
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_capability::compute_input_builder::{ComputeBuildError, ComputeInputBuilder};
-use nexus_wasm_host::ModuleManifest;
+use nexus_module_manifest::ModuleManifest;
 use serde_json::{json, Map, Value};
 
 // ── Helpers ────────────────────────────────────────────────────────────

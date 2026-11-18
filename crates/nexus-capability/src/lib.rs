@@ -592,10 +592,13 @@ impl CapabilityRegistry {
     /// and worker provider are available. Capabilities without runtime deps
     /// are constructed in their default (standalone) form.
     ///
-    /// `narrative.compute` is constructed via [`builtins::NarrativeCompute::with_pool`],
-    /// which builds its own `WasmEngine` + per-instance module cache. For the
-    /// daemon-wide singleton engine + cache (P-last T1, closes
-    /// R-V161P3-PERF-001), use [`CapabilityRegistry::with_runtime_deps_and_wasm`].
+    /// `narrative.compute` registers pool-bound but **engine-less** (C3): a
+    /// plain constructor never mints an engine, so this constructor cannot
+    /// create a second engine or a per-reload one. Real compute attachment is
+    /// explicit — [`CapabilityRegistry::with_runtime_deps_and_wasm`] injects
+    /// the daemon-wide singleton engine + cache; without it, invoking
+    /// `narrative.compute` refuses `WorkerUnavailable` while the row stays
+    /// registered and describable.
     #[must_use]
     #[allow(clippy::too_many_lines)]
     pub fn with_runtime_deps(deps: &CapabilityRuntimeDeps) -> Self {
@@ -970,9 +973,11 @@ impl CapabilityRegistry {
                         builtins::ForkCreate::with_pool(pool.clone())
                     }),
             ),
-            // V1.61 P3: narrative.compute — injected by the caller
-            // (`with_runtime_deps` builds a per-instance engine + cache;
-            // `with_runtime_deps_and_wasm` injects the daemon-wide singleton).
+            // V1.61 P3: narrative.compute — the caller decides the compute
+            // attachment: `with_runtime_deps` registers the pool-bound but
+            // engine-less form (WorkerUnavailable on invoke); only
+            // `with_runtime_deps_and_wasm` injects the daemon-wide singleton
+            // engine + cache (C3: never a second or per-reload engine).
             Box::new(narrative_compute),
         ];
         let mut reg = Self {
@@ -1076,9 +1081,23 @@ impl nexus_preset::capability_catalog::CapabilityCatalog for CapabilityRegistry 
 ///
 /// Boot creates exactly **one** holder and shares it with `WorkspaceState`,
 /// the engine, and the watcher (AR-92 #2/#6).
+///
+/// The holder also owns the **live reservation** (`reserved_names`, C3): the
+/// union of every canonical name ever swapped in. A compute-capable name
+/// stays reserved even while its binding is unavailable (`wasm` off — the
+/// row still answers, invoking refuses `WorkerUnavailable`) and even after a
+/// later generation drops the row (deleted capability dir), so metadata never
+/// shrinks with executable entries.
 #[derive(Clone, Default)]
 pub struct CapabilityRegistryHolder {
     inner: std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<CapabilityRegistry>>>>,
+    /// Every canonical name ever swapped into this holder — builtin names
+    /// from boot plus every user name any hot swap admitted. Union-only;
+    /// names are `&'static str` (builtin literals + interned user strings),
+    /// so the set adds no per-swap allocation beyond the entry itself.
+    reserved: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashSet<&'static str>>,
+    >,
 }
 
 impl CapabilityRegistryHolder {
@@ -1099,11 +1118,34 @@ impl CapabilityRegistryHolder {
             .clone()
     }
 
+    /// Every canonical name ever swapped into this holder (C3).
+    ///
+    /// The set only **grows**: builtin names enter at the boot swap, and every
+    /// user capability a hot swap admits joins the live reservation and stays
+    /// reserved across later generations — even when a generation drops the
+    /// row (deleted dir) or when the name's compute binding was never
+    /// available (`wasm` off; invoking then refuses `WorkerUnavailable`,
+    /// never a missing row). Reservation consumers (the peer-tool id check)
+    /// MUST read this set instead of the live generation's rows, so a hot
+    /// swap can never un-reserve a canonical name.
+    #[must_use]
+    pub fn reserved_names(&self) -> std::collections::HashSet<&'static str> {
+        self.reserved
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) // poison-recovery (crate policy)
+            .clone()
+    }
+
     /// Atomically swap in a freshly rebuilt registry (write lock; held only
     /// for the pointer write — AR-92 #7). The previous generation is dropped
     /// AFTER the write lock is released so a last-reference drop (tearing
     /// down a full builtin+user registry) never stalls readers (M-1).
     pub fn swap(&self, registry: std::sync::Arc<CapabilityRegistry>) {
+        // Reserve the incoming generation's canonical names BEFORE the
+        // pointer write: a hot-admitted user name joins the live reservation
+        // on the same swap that publishes its row, and a compute-capable name
+        // stays reserved even when a later generation drops the row.
+        let incoming: Vec<&'static str> = registry.iter().map(|c| c.name()).collect();
         let mut guard = self
             .inner
             .write()
@@ -1111,6 +1153,10 @@ impl CapabilityRegistryHolder {
         let previous = (*guard).replace(registry);
         drop(guard);
         drop(previous);
+        self.reserved
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend(incoming);
     }
 
     /// Create a holder pre-populated with `registry` — boot convenience:

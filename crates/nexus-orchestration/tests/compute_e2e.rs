@@ -32,6 +32,29 @@ use nexus_capability::CapabilityRegistry;
 use nexus_preset::load_embedded_preset;
 use serde_json::{json, Value};
 
+/// A runtime-deps registry with the EXPLICIT compute attachment (C3): the
+/// daemon-wide engine + warmed cache injected through
+/// `with_runtime_deps_and_wasm`. Plain registry constructors never build
+/// engines, so a test that drives the real executor attaches them here.
+fn registry_with_compute_attached(pool: sqlx::SqlitePool) -> CapabilityRegistry {
+    let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().expect("wasm engine"));
+    let cache = std::sync::Arc::new(nexus_wasm_host::ModuleCache::new());
+    cache
+        .warm_embedded(&engine)
+        .expect("embedded compute modules warm");
+    let deps = nexus_capability::CapabilityRuntimeDeps {
+        pool: Some(pool),
+        prompt_executor: None,
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+        daemon_tool_dispatch: None,
+        cdn_config: None,
+        workspace_executor: None,
+    };
+    CapabilityRegistry::with_runtime_deps_and_wasm(&deps, engine, cache)
+}
+
 /// Open a fresh migrated pool on a tempdir.
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -186,7 +209,7 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
         "world must have exactly two computable characters"
     );
 
-    let registry = CapabilityRegistry::with_builtins_and_pool(pool.clone());
+    let registry = registry_with_compute_attached(pool.clone());
     let cap = registry
         .get("narrative.compute")
         .expect("narrative.compute registered");
@@ -267,7 +290,7 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
 async fn narrative_compute_e2e_rejects_missing_world() {
     let (pool, _dir) = fresh_pool().await;
     seed_creator(&pool, "ctr_e2e").await;
-    let registry = CapabilityRegistry::with_builtins_and_pool(pool);
+    let registry = registry_with_compute_attached(pool);
     let cap = registry.get("narrative.compute").unwrap();
     let err = cap
         .run(json!({

@@ -418,6 +418,32 @@ use crate::CapabilityOrigin;
             .collect()
     }
 
+    /// Input schemas that differ BETWEEN generations of the same capability
+    /// name, so the catalog surface itself discriminates which row a
+    /// generation resolves (the shared writer's fixed schemas would make two
+    /// generations indistinguishable).
+    const GEN_ONE_SCHEMA: &str = r#"{"type":"object","generation":1}"#;
+    const GEN_TWO_SCHEMA: &str = r#"{"type":"object","generation":2}"#;
+
+    /// Write a hash-consistent trio whose descriptor declares `schema` — the
+    /// generation-discriminating fixture used by the reservation test.
+    fn write_trio_with_schema(root: &Path, name: &str, schema: &str, wasm: &[u8]) {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let sha = crate::test_support::write_module_pair_with_bytes(&dir, wasm);
+        let descriptor = serde_json::json!({
+            "name": name,
+            "inputSchema": schema,
+            "outputSchema": r#"{"type":"object"}"#,
+            "wasm": { "moduleId": "basic-combat", "wasmSha256": sha },
+        });
+        std::fs::write(
+            dir.join("capability.json"),
+            serde_json::to_string(&descriptor).unwrap(),
+        )
+        .unwrap();
+    }
+
     /// User-capability names a registry serves (origin-filtered), sorted.
     fn user_cap_names(registry: &CapabilityRegistry) -> Vec<String> {
         let mut names: Vec<String> = registry
@@ -677,6 +703,140 @@ use crate::CapabilityOrigin;
         assert!(
             live.get("demo.pull").is_some(),
             "last-good admission survives the failed replacement (PL-9)"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Unbound compute name stays reserved across hot swaps (C3)
+    // -------------------------------------------------------------------------
+
+    /// C3 missing-edge case: namespace/effect evidence over the holder's
+    /// live reservation — no counts, no source text.
+    ///
+    /// 1. A compute-capable user capability admits WITHOUT a binding (`wasm`
+    ///    off in this build): its row stays describable, invoking refuses
+    ///    `WorkerUnavailable` (never a missing row), and the swap reserves
+    ///    the name. The builtin compute name is reserved the same way.
+    /// 2. A hot swap that REPLACES the entry (new schema + new module bytes)
+    ///    keeps the name reserved, while a retained pre-swap generation still
+    ///    resolves — and can only ever dispatch through — its OWN row.
+    /// 3. A hot swap that DROPS the row (dir deleted) leaves the name
+    ///    reserved: unclaimable with no binding and no live row.
+    #[tokio::test]
+    async fn unbound_compute_name_remains_reserved_after_hot_swap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let deps = test_deps();
+
+        // Boot with an empty scan dir: no user name is reserved yet.
+        let (reg0, outcome0) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
+        assert!(
+            outcome0.admitted.is_empty(),
+            "boot admits nothing from an empty dir"
+        );
+        let holder = CapabilityRegistryHolder::with_registry(std::sync::Arc::new(reg0));
+        assert!(!holder.reserved_names().contains("demo.compute"));
+
+        // 1. Hot-admit a compute-capable user capability with no binding.
+        write_trio_with_schema(
+            tmp.path(),
+            "demo.compute",
+            GEN_ONE_SCHEMA,
+            b"gen one module bytes",
+        );
+        let (reg1, outcome1) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
+        assert_eq!(
+            outcome1.admitted.len(),
+            1,
+            "the unbound compute capability admits (metadata gates are binding-independent)"
+        );
+        holder.swap(std::sync::Arc::new(reg1));
+        assert!(
+            holder.reserved_names().contains("demo.compute"),
+            "the hot-admitted user name joins the actual live reservation"
+        );
+        assert!(
+            holder.reserved_names().contains("narrative.compute"),
+            "the builtin compute name is reserved too, also without a binding here"
+        );
+
+        // Effect: invoking the unbound name refuses WorkerUnavailable — a
+        // real row answering with the typed refusal, never a missing row.
+        let gen1 = holder.get().expect("live generation with the admitted row");
+        let unbound = gen1
+            .get("demo.compute")
+            .expect("the unbound compute row stays describable");
+        assert_eq!(unbound.input_schema(), GEN_ONE_SCHEMA);
+        let err = unbound.run(serde_json::json!({})).await.unwrap_err();
+        assert!(
+            matches!(err, crate::CapabilityError::WorkerUnavailable),
+            "unbound compute name refuses with WorkerUnavailable, got {err:?}"
+        );
+
+        // 2. Replace the entry and hot-swap it in; retain the pre-swap
+        //    generation exactly as an in-flight dispatch would hold it.
+        let gen1_retained = holder.get().expect("generation before the replacement");
+        write_trio_with_schema(
+            tmp.path(),
+            "demo.compute",
+            GEN_TWO_SCHEMA,
+            b"gen two module bytes",
+        );
+        let (reg2, _) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
+        holder.swap(std::sync::Arc::new(reg2));
+        assert!(
+            holder.reserved_names().contains("demo.compute"),
+            "the replacement keeps the name reserved"
+        );
+        let gen2 = holder.get().expect("swapped-in generation");
+        assert_eq!(
+            gen2.get("demo.compute")
+                .expect("swapped-in row")
+                .input_schema(),
+            GEN_TWO_SCHEMA,
+            "the swapped-in entry is the new generation's row"
+        );
+        // Namespace evidence: the retained generation resolves only its OWN
+        // row — the swapped-in entry is unreachable through it.
+        assert_eq!(
+            gen1_retained
+                .get("demo.compute")
+                .expect("retained row")
+                .input_schema(),
+            GEN_ONE_SCHEMA,
+            "a retained old generation cannot dispatch through the swapped-in entry"
+        );
+        // Effect: dispatch through the retained generation runs ITS row (its
+        // own unbound refusal), not the swapped-in module's semantics.
+        let err = gen1_retained
+            .get("demo.compute")
+            .expect("retained row")
+            .run(serde_json::json!({}))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, crate::CapabilityError::WorkerUnavailable),
+            "the retained generation's dispatch completes against its own row: {err:?}"
+        );
+
+        // 3. Drop the row (dir deleted) and hot-swap the rebuild.
+        std::fs::remove_dir_all(tmp.path().join("demo.compute")).unwrap();
+        let (reg3, outcome3) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
+        assert!(
+            outcome3
+                .admitted
+                .iter()
+                .all(|c| c.name() != "demo.compute"),
+            "the dropped dir admits nothing"
+        );
+        holder.swap(std::sync::Arc::new(reg3));
+        let live = holder.get().expect("live generation after the drop");
+        assert!(
+            live.get("demo.compute").is_none(),
+            "the live generation no longer serves the dropped row"
+        );
+        assert!(
+            holder.reserved_names().contains("demo.compute"),
+            "the compute name remains reserved after the hot swap dropped its row"
         );
     }
 

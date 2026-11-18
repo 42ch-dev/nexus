@@ -44,19 +44,15 @@ nexus-preset = { path = "../nexus-preset" }
 nexus-session-storage = { path = "../nexus-session-storage" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-knowledge = { path = "../nexus-knowledge" }
-# V1.145 P1a: narrative.compute converts WorldKbEntry↔spoke KnowledgeEntry via
-# the conversion seam that now lives in nexus-spoke-adapter (dep-graph reversal).
-nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
 nexus-local-db = { path = "../nexus-local-db" }
 # V1.60 P0: DF-46 — world.state.query uses the NarrativeGateway trait for
 # world/timeline reads via SqliteNarrativeGateway.
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
-# V1.61 P3: narrative.compute capability calls nexus-wasm-host for sandboxed WASM compute.
-nexus-wasm-host = { path = "../nexus-wasm-host" }
-# AR-38 host maxima for capability sandbox clamping come from the private
-# policy crate directly (not re-exported by the wasm host).
-nexus-compute-policy = { path = "../nexus-compute-policy" }
+# V249 C3: the compute binding lives in nexus-capability (its `wasm` feature)
+# and the conversion/clamp seams in nexus-capability/nexus-spoke-adapter — the
+# engine no longer carries direct WASM/spoke/compute-policy paths. Tests that
+# actually drive compute take the host through [dev-dependencies].
 # V249: capability port/error contract moved to the private capability crate.
 nexus-capability = { path = "../nexus-capability" }
 # V1.50 T-A P1: cron expression parsing + IANA TZ conversion for the daemon-side
@@ -79,8 +75,13 @@ reqwest = { workspace = true, features = ["stream"] }
 
 [dev-dependencies]
 # Cross-crate test hooks (RecordingExecutor, with_capabilities) and the wasm
-# compute path for the compute_input_builder / engine-contract test targets.
+# compute path for the compute_e2e / engine-contract test targets (C3: the
+# only compute paths left in this crate are tests that explicitly drive it).
 nexus-capability = { path = "../nexus-capability", features = ["wasm", "test-hooks"] }
+# compute_e2e builds the explicit engine attachment; compute_input_builder
+# builds manifest fixtures on the pure manifest crate (AR-8/AR-39).
+nexus-wasm-host = { path = "../nexus-wasm-host" }
+nexus-module-manifest = { path = "../../modules/nexus-module-manifest" }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
 # Integration tests under tests/ need their own access to async runtime, DB pool

@@ -138,15 +138,19 @@ impl PeerResponder for ConnectResponderAdapter {
     }
 }
 
-/// The reserved tool ids: the injected builtin host-tool ids plus live
-/// user-capability names.
+/// The reserved tool ids: the injected builtin host-tool ids plus the live
+/// capability reservation.
 ///
-/// Computed LIVE so a capability hot-added after the peer lane spawned is
-/// immediately reserved against. The builtin set is a snapshot the composing
-/// side injects ([`crate::PeerResponderOptions::builtin_tool_ids`]) — this
-/// crate never reads a host registry of its own, so the caller's boundary
-/// refuses an empty roster ([`crate::start_peer_tools_lane`]) instead of
-/// letting this function silently reserve nothing.
+/// The capability half reads the holder's [`CapabilityRegistryHolder::
+/// reserved_names`] (C3) — every canonical name ever swapped in, not just the
+/// current generation's rows — so a hot swap can never un-reserve a name:
+/// a capability whose dir was deleted (row dropped) or whose compute binding
+/// is unavailable (`wasm` off; invoking refuses `WorkerUnavailable`) keeps
+/// its name reserved against peer admission. The builtin set is a snapshot
+/// the composing side injects ([`crate::PeerResponderOptions::builtin_tool_ids`])
+/// — this crate never reads a host registry of its own, so the caller's
+/// boundary refuses an empty roster ([`crate::start_peer_tools_lane`]) instead
+/// of letting this function silently reserve nothing.
 #[must_use]
 pub fn live_reserved_tool_ids(
     builtin_ids: impl IntoIterator<Item = String>,
@@ -154,9 +158,7 @@ pub fn live_reserved_tool_ids(
 ) -> HashSet<String> {
     let mut reserved: HashSet<String> = builtin_ids.into_iter().collect();
     if let Some(holder) = capability_registry {
-        if let Some(reg) = holder.get() {
-            reserved.extend(reg.iter().map(|cap| cap.name().to_owned()));
-        }
+        reserved.extend(holder.reserved_names().into_iter().map(String::from));
     }
     reserved
 }

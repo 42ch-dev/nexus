@@ -129,47 +129,24 @@ impl NarrativeCompute {
         }
     }
 
-    /// Construct with a pool and a fresh `WasmEngine`, warming a per-instance
-    /// module cache from the embedded modules (R-V161P3-PERF-001/002).
+    /// Construct with a pool only — the pure/pool-bound constructor (C3).
     ///
-    /// The `WasmEngine` and the populated cache are reused across all
-    /// `compute()` calls on this capability instance (compass Q6: a fresh
-    /// sandboxed instance is still built per call). Use
-    /// [`NarrativeCompute::with_pool_and_engine`] to inject a daemon-wide
-    /// singleton engine + cache at boot.
+    /// **No engine is constructed here**, in any build: a plain constructor
+    /// that minted its own `WasmEngine` would fork the daemon's ONE engine
+    /// (interrupt counter, warm cache) on every registry rebuild — a second,
+    /// per-reload engine. The executable compute attachment is explicit:
+    /// [`NarrativeCompute::with_pool_and_engine`] injects the daemon-wide
+    /// singleton engine + cache, and until then `run()` fails closed with
+    /// `WorkerUnavailable` while the capability stays registered and
+    /// describable.
     #[must_use]
     pub fn with_pool(pool: sqlx::SqlitePool) -> Self {
-        #[cfg(not(feature = "wasm"))]
-        {
-            // No-WASM build: no engine to construct; the capability stays
-            // registered and `run()` fails closed with `WorkerUnavailable`.
-            return Self {
-                pool: Some(Arc::new(pool)),
-            };
-        }
-
-        #[cfg(feature = "wasm")]
-        {
-        let engine = match WasmEngine::new() {
-            Ok(e) => Arc::new(e),
-            Err(e) => {
-                tracing::warn!(error = %e, "narrative.compute: WasmEngine init failed");
-                return Self {
-                    pool: Some(Arc::new(pool)),
-                    engine: None,
-                    module_cache: None,
-                };
-            }
-        };
-        let cache = Arc::new(ModuleCache::new());
-        if let Err(e) = cache.warm_embedded(&engine) {
-            tracing::warn!(error = %e, "narrative.compute: embedded module warmup had errors");
-        }
         Self {
             pool: Some(Arc::new(pool)),
-            engine: Some(engine),
-            module_cache: Some(cache),
-        }
+            #[cfg(feature = "wasm")]
+            engine: None,
+            #[cfg(feature = "wasm")]
+            module_cache: None,
         }
     }
 
@@ -569,15 +546,34 @@ async fn handle_compute_error(
 mod tests {
     use super::*;
     use crate::state_delta;
+    #[cfg(feature = "wasm")]
     use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
+    #[cfg(feature = "wasm")]
     use nexus_knowledge::world_kb::KbStore;
+    #[cfg(feature = "wasm")]
     use nexus_local_db::init_engine_pool;
 
+    // Fixtures below serve only the executor-driven (wasm) cases; gating them
+    // keeps the default-build test surface warning-free (C3).
+    #[cfg(feature = "wasm")]
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
         (pool, dir)
+    }
+
+    /// The explicit compute attachment real executor runs need (C3): a
+    /// pool-bound capability over a real engine + warmed cache — exactly what
+    /// the production runtime injects. Plain constructors never build engines.
+    #[cfg(feature = "wasm")]
+    fn with_real_engine(pool: sqlx::SqlitePool) -> NarrativeCompute {
+        let engine = std::sync::Arc::new(WasmEngine::new().expect("test wasm engine"));
+        let cache = std::sync::Arc::new(ModuleCache::new());
+        if let Err(e) = cache.warm_embedded(&engine) {
+            tracing::warn!(error = %e, "test embedded module warmup had errors");
+        }
+        NarrativeCompute::with_pool_and_engine(pool, engine, cache)
     }
 
     #[cfg(feature = "wasm")]
@@ -607,6 +603,7 @@ mod tests {
     /// Seed the creator **and its registry holder**: the compute input resolves
     /// an admitted `ActorView` selection, which fails closed without the holder
     /// row.
+    #[cfg(feature = "wasm")]
     async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
         nexus_local_db::ensure_creator_row(pool, creator_id, "Test Creator")
             .await
@@ -614,6 +611,7 @@ mod tests {
     }
 
     /// Seed only the stored `creators` row, with no registry holder.
+    #[cfg(feature = "wasm")]
     async fn seed_creator_without_holder(pool: &sqlx::SqlitePool, creator_id: &str) {
         sqlx::query(
             "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
@@ -628,6 +626,7 @@ mod tests {
 
     /// Seed one computable World-row `KnowledgeEntry` with an explicit
     /// governance pair (`None`/`None` is the shared row).
+    #[cfg(feature = "wasm")]
     async fn seed_computable_row(
         pool: &sqlx::SqlitePool,
         world_id: &str,
@@ -651,6 +650,7 @@ mod tests {
             .unwrap();
     }
 
+    #[cfg(feature = "wasm")]
     async fn seed_world(pool: &sqlx::SqlitePool, owner: &str, world_id: &str) {
         nexus_local_db::narrative_write::create_world(
             pool,
@@ -670,6 +670,7 @@ mod tests {
             .unwrap();
     }
 
+    #[cfg(feature = "wasm")]
     async fn seed_computable_character(
         pool: &sqlx::SqlitePool,
         world_id: &str,
@@ -891,7 +892,7 @@ mod tests {
     async fn narrative_compute_rejects_missing_world() {
         let (pool, _dir) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
-        let cap = NarrativeCompute::with_pool(pool);
+        let cap = with_real_engine(pool);
         let err = cap
             .run(json!({
                 "world_id": "wld_missing",
@@ -910,7 +911,7 @@ mod tests {
         seed_creator(&pool, "ctr_a").await;
         seed_creator(&pool, "ctr_b").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
-        let cap = NarrativeCompute::with_pool(pool);
+        let cap = with_real_engine(pool);
         let err = cap
             .run(json!({
                 "world_id": "wld_a",
@@ -928,7 +929,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
-        let cap = NarrativeCompute::with_pool(pool);
+        let cap = with_real_engine(pool);
         let err = cap
             .run(json!({
                 "world_id": "wld_a",
@@ -944,7 +945,7 @@ mod tests {
     #[tokio::test]
     async fn narrative_compute_invalid_input() {
         let (pool, _dir) = fresh_pool().await;
-        let cap = NarrativeCompute::with_pool(pool);
+        let cap = with_real_engine(pool);
         let err = cap.run(json!(42)).await.unwrap_err();
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
     }
@@ -981,7 +982,7 @@ mod tests {
             .unwrap();
         assert_eq!(unscoped.len(), 1, "the private computable row exists");
 
-        let cap = NarrativeCompute::with_pool(pool);
+        let cap = with_real_engine(pool);
         let err = cap
             .run(json!({
                 "world_id": "wld_a",
@@ -1010,7 +1011,7 @@ mod tests {
         seed_world(&pool, "ctr_a", "wld_a").await;
         seed_computable_row(&pool, "wld_a", "Shared", None, None).await;
 
-        let cap = NarrativeCompute::with_pool(pool);
+        let cap = with_real_engine(pool);
         let err = cap
             .run(json!({
                 "world_id": "wld_a",
@@ -1052,7 +1053,7 @@ mod tests {
         let _kb_a = seed_computable_character(&pool, "wld_a", "Hero", 100, 80).await;
         let _kb_b = seed_computable_character(&pool, "wld_a", "Villain", 120, 120).await;
 
-        let cap = NarrativeCompute::with_pool(pool.clone());
+        let cap = with_real_engine(pool.clone());
 
         // The basic-combat module expects two combatants; if it runs successfully
         // it will return state_delta + battle_report. If it traps (e.g., because
