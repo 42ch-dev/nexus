@@ -118,4 +118,34 @@ mod tests {
         assert_eq!(cfg.max_memory_bytes, 8 * 1024 * 1024);
         assert_eq!(cfg.memory_mib(), 8);
     }
+
+    #[test]
+    fn resolve_preserves_non_mib_host_byte_ceiling() {
+        // Host ceiling that is NOT MiB-aligned: 5 MiB + 12,345 bytes.
+        let base = SandboxConfig {
+            fuel: DEFAULT_FUEL,
+            max_memory_bytes: 5 * 1024 * 1024 + 12_345,
+            wall_time: DEFAULT_WALL_TIME,
+        };
+
+        // A manifest request higher than the base must keep the EXACT
+        // original byte ceiling: the min() runs on bytes, so no round-up or
+        // round-down may pass through the MiB conversion.
+        let clamped = base.resolve(None, Some(64), None);
+        assert_eq!(clamped.max_memory_bytes, 5 * 1024 * 1024 + 12_345);
+        assert_eq!(clamped.fuel, DEFAULT_FUEL);
+        assert_eq!(clamped.wall_time, DEFAULT_WALL_TIME);
+
+        // A request strictly lower than the base still clamps (controls the
+        // control above), in exact bytes, not rounded MiB.
+        let lowered = base.resolve(None, Some(2), None);
+        assert_eq!(lowered.max_memory_bytes, 2 * 1024 * 1024);
+
+        // Absent overrides keep every base limit untouched, including the
+        // unaligned byte ceiling.
+        let untouched = base.resolve(None, None, None);
+        assert_eq!(untouched.max_memory_bytes, 5 * 1024 * 1024 + 12_345);
+        assert_eq!(untouched.fuel, DEFAULT_FUEL);
+        assert_eq!(untouched.wall_time, DEFAULT_WALL_TIME);
+    }
 }
