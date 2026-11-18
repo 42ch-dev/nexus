@@ -55,7 +55,10 @@ pub trait ScheduleRunStarter: Send + Sync {
     /// # Errors
     /// Returns [`SupervisorError`] on any admission failure (not eligible,
     /// inactive creator/workspace, policy refusal, engine/store error).
-    async fn start(&self, schedule_id: &str) -> Result<crate::engine::SessionId, SupervisorError>;
+    async fn start(
+        &self,
+        schedule_id: &str,
+    ) -> Result<nexus_session_storage::SessionId, SupervisorError>;
 }
 
 /// Error type for supervisor operations.
@@ -1788,7 +1791,7 @@ impl ScheduleSupervisor {
         let mut reconciled = 0usize;
         for (schedule_id, session_id) in rows {
             let record = match store
-                .load_run(&crate::engine::SessionId(session_id.clone()))
+                .load_run(&nexus_session_storage::SessionId(session_id.clone()))
                 .await
             {
                 Ok(Some(record)) => record,
@@ -1804,9 +1807,9 @@ impl ScheduleSupervisor {
                 }
             };
             let terminal_status = match record.status {
-                crate::engine::SessionStatus::Completed => ScheduleStatus::Completed,
-                crate::engine::SessionStatus::Failed => ScheduleStatus::Failed,
-                crate::engine::SessionStatus::Cancelled => ScheduleStatus::Cancelled,
+                nexus_session_storage::SessionStatus::Completed => ScheduleStatus::Completed,
+                nexus_session_storage::SessionStatus::Failed => ScheduleStatus::Failed,
+                nexus_session_storage::SessionStatus::Cancelled => ScheduleStatus::Cancelled,
                 // Unconfirmed cancel/cleanup is NOT a successful cancel
                 // (A5): the schedule row is deliberately left non-terminal
                 // so public inspect projects the run's

@@ -1152,7 +1152,7 @@ impl CoreService {
                 ),
             );
         engine.set_applied_document_source(Arc::clone(&applied_documents)
-            as Arc<dyn nexus_orchestration::capability::AppliedDocumentSource>);
+            as Arc<dyn nexus_orchestration::applied_document::AppliedDocumentSource>);
         let engine = Arc::new(engine);
 
         let mut coordinator = WorkflowRunCoordinator::new(

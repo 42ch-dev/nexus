@@ -50,10 +50,9 @@ use nexus_agent_host::{HostFacade, HostOperationId, ProviderId};
 use nexus_orchestration::capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,
 };
-use nexus_orchestration::SessionId;
 use nexus_session_storage::{
     run_state::{PromptAttempt, PromptPhase, WorkflowStateStore},
-    StorageError,
+    SessionId, StorageError,
 };
 
 /// Key for a lazily-reused Host session: the same run+role reuses its
@@ -1396,7 +1395,7 @@ mod tests {
             .expect("run exists");
         assert_eq!(
             final_record.status,
-            nexus_orchestration::engine::SessionStatus::Cancelled
+            nexus_session_storage::SessionStatus::Cancelled
         );
     }
 
@@ -1594,7 +1593,7 @@ mod tests {
             .expect("run exists");
         assert_eq!(
             final_record.status,
-            nexus_orchestration::engine::SessionStatus::Cancelled
+            nexus_session_storage::SessionStatus::Cancelled
         );
         assert!(
             final_record
@@ -1801,7 +1800,7 @@ mod tests {
             .expect("run exists");
         assert_eq!(
             final_record.status,
-            nexus_orchestration::engine::SessionStatus::Interrupted,
+            nexus_session_storage::SessionStatus::Interrupted,
             "unconfirmed cleanup must keep the run Interrupted, got {:?}",
             final_record.status
         );
@@ -2007,7 +2006,7 @@ mod tests {
             .expect("run exists");
         assert_eq!(
             interrupted.status,
-            nexus_orchestration::engine::SessionStatus::Interrupted
+            nexus_session_storage::SessionStatus::Interrupted
         );
         assert_eq!(
             host.session_count(),

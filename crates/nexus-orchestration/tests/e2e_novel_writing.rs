@@ -37,7 +37,7 @@ fn setup_engine() -> (
 /// `start_session_with_preset` in tests must seed them explicitly (C-V133P2-01).
 async fn seed_novel_writing_preset_input(
     engine: &Arc<nexus_orchestration::GraphFlowEngine>,
-    session_id: &nexus_orchestration::engine::SessionId,
+    session_id: &nexus_session_storage::SessionId,
 ) {
     let ctx = engine
         .get_context(session_id)
@@ -83,7 +83,7 @@ async fn seed_novel_writing_preset_input(
 async fn start_novel_writing_session(
     engine: &Arc<nexus_orchestration::GraphFlowEngine>,
     loaded: &nexus_preset::LoadedPreset,
-) -> nexus_orchestration::engine::SessionId {
+) -> nexus_session_storage::SessionId {
     let session_id = engine
         .start_session_with_preset(loaded)
         .await
@@ -96,7 +96,7 @@ async fn start_novel_writing_session(
 /// Returns the last step outcome.
 async fn run_until_wait_or_terminal(
     engine: &Arc<nexus_orchestration::GraphFlowEngine>,
-    session_id: &nexus_orchestration::engine::SessionId,
+    session_id: &nexus_session_storage::SessionId,
     max_steps: usize,
 ) -> Vec<nexus_orchestration::engine::StepOutcome> {
     let mut outcomes = Vec::new();
@@ -143,7 +143,7 @@ async fn e2e_novel_writing_traverses_all_outer_states() {
         .expect("get_status should succeed");
 
     assert!(
-        !matches!(status, nexus_orchestration::engine::SessionStatus::Running),
+        !matches!(status, nexus_session_storage::SessionStatus::Running),
         "session should not be in Running state after steps"
     );
 }
@@ -184,7 +184,7 @@ async fn e2e_chapter_scoped_pipeline_executes() {
         .await
         .expect("get_status should succeed");
     assert!(
-        !matches!(status, nexus_orchestration::engine::SessionStatus::Running),
+        !matches!(status, nexus_session_storage::SessionStatus::Running),
         "session should not be running after steps"
     );
 }
@@ -228,10 +228,10 @@ async fn e2e_schedule_advance_past_outlining() {
     assert!(
         matches!(
             status,
-            nexus_orchestration::engine::SessionStatus::Completed
-                | nexus_orchestration::engine::SessionStatus::Paused
-                | nexus_orchestration::engine::SessionStatus::WaitingForInput
-                | nexus_orchestration::engine::SessionStatus::Failed
+            nexus_session_storage::SessionStatus::Completed
+                | nexus_session_storage::SessionStatus::Paused
+                | nexus_session_storage::SessionStatus::WaitingForInput
+                | nexus_session_storage::SessionStatus::Failed
         ),
         "session should be in a non-running state after test execution (got {status:?})"
     );
@@ -258,7 +258,7 @@ async fn e2e_restart_durability_context_persists() {
     assert!(
         !matches!(
             status_before,
-            nexus_orchestration::engine::SessionStatus::Running
+            nexus_session_storage::SessionStatus::Running
         ),
         "session should have settled into a non-running state"
     );
@@ -266,7 +266,7 @@ async fn e2e_restart_durability_context_persists() {
     // If waiting, signal advance to simulate resume after restart.
     if matches!(
         status_before,
-        nexus_orchestration::engine::SessionStatus::WaitingForInput
+        nexus_session_storage::SessionStatus::WaitingForInput
     ) {
         engine
             .signal(
