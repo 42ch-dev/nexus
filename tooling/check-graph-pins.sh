@@ -83,6 +83,20 @@
 # verify the SHIPPED graph only.
 #
 # Run from the repository root. Requires a Rust toolchain + `cargo`.
+#
+# Arguments (v1.249 R3):
+#   (none)                        full pin matrix above — unchanged CI behavior
+#   --cohort <name>               run ONE scoped cohort instead of the matrix.
+#                                 `domain` = core with no default features.
+#                                 Other plans add their cohorts as their real
+#                                 source lands; an unknown name fails.
+#   --manifest-path <Cargo.toml>  resolve every probe against that workspace.
+#                                 Used by `check-graph-pins.test.mjs` to run
+#                                 the same assertions over disposable fixtures.
+#
+# The scoped cohort is what makes the target boundary checkable while the
+# source slices land: `domain` proves the applied-state/storage/memory authority
+# still resolves, and that no engine/Host/WASM/Connect plane does.
 
 set -euo pipefail
 
@@ -94,6 +108,17 @@ export CARGO_TARGET_DIR
 fail() {
   echo "::error::graph pin failed: $1"
   exit 1
+}
+
+# cargo_tree <args...>
+# Single place every probe resolves its workspace, so `--manifest-path` reaches
+# all of them (fixture workspaces) and the default run stays byte-identical.
+cargo_tree() {
+  if [[ -n "${MANIFEST_PATH:-}" ]]; then
+    cargo tree --manifest-path "$MANIFEST_PATH" "$@"
+  else
+    cargo tree "$@"
+  fi
 }
 
 # assert_empty <spec> <features> <package>
@@ -108,7 +133,7 @@ assert_empty() {
   # `|| status=$?` (not a bare capture) so a failing cargo tree does NOT
   # trip `set -e` before we can inspect its status (QC-fix S-a); `status`
   # defaults to 0 so `set -u` stays satisfied on success.
-  out=$(cargo tree -p "$crate" $feats --locked --edges normal,build -i "$pkg" 2>&1) || status=$?
+  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build -i "$pkg" 2>&1) || status=$?
   local count
   # Only count `<pkg> v<ver>` rows (an empty `-i` report prints a bare
   # "package not found" line; tree output also carries parent crate rows
@@ -145,7 +170,7 @@ assert_exactly_one() {
   local out status=0
   # `|| status=$?` so a failing cargo tree does NOT trip `set -e` before
   # the status check (QC-fix S-a); `status` defaults to 0 for success.
-  out=$(cargo tree -p "$crate" $feats --locked --edges normal,build -i "$pkg" 2>&1) || status=$?
+  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build -i "$pkg" 2>&1) || status=$?
   local versions
   versions=$(grep "^$pkg v[0-9]" <<<"$out" | sed -E 's/.* v([^ ]+).*/\1/' | sort -u || true)
   local count
@@ -178,7 +203,7 @@ assert_features() {
   local pkg="$1"; shift
   local want_feats="$1"
   local out status=0
-  out=$(cargo tree -p "$crate" $feats --locked --edges normal,build -i "$pkg" -f "{p} feats=[{f}]" 2>&1) || status=$?
+  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build -i "$pkg" -f "{p} feats=[{f}]" 2>&1) || status=$?
   if [[ "$status" -ne 0 ]]; then
     fail "feature probe for $pkg in $crate ${feats:-<default>} failed (exit $status): $out"
   fi
@@ -200,6 +225,100 @@ assert_features() {
   fi
   echo "ok: $pkg v$got_ver $got_feats for $crate ${feats:-<default>}"
 }
+
+# assert_graph_nonempty <crate> <features>
+# Positive control for every absence pin: `cargo tree -i <pkg>` reports the
+# same "did not match any packages" for a package that is absent from the
+# resolved graph AND for a probe whose root resolved nothing, so a cohort with
+# an empty graph would false-green the whole block. Require the resolved
+# normal/build tree to name at least one package besides the root.
+assert_graph_nonempty() {
+  local crate="$1"; shift
+  local feats="$1"
+  local out status=0
+  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build 2>&1) || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    fail "graph probe for $crate ${feats:-<default>} failed (exit $status): $out"
+  fi
+  # Tree rows carry box-drawing prefixes, so match the `name vX` pair anywhere
+  # in the line and count each package once.
+  local packages
+  packages=$(grep -oE '[A-Za-z0-9_.-]+ v[0-9]' <<<"$out" | sed -E 's/ v[0-9]$//' | sort -u)
+  local rows
+  rows=$(sed '/^$/d' <<<"$packages" | wc -l | tr -d ' ')
+  if [[ "$rows" -lt 2 ]]; then
+    fail "$crate ${feats:-<default>}: resolved graph names only $rows package(s); the absence pins would be vacuous: $out"
+  fi
+  echo "ok: $crate ${feats:-<default>} resolves $((rows - 1)) distinct dependency package(s)"
+}
+
+# --- cohort selection / manifest override -----------------------------------
+
+COHORT=""
+MANIFEST_PATH=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --cohort)
+      [[ $# -ge 2 ]] || fail "--cohort requires a name"
+      COHORT="$2"
+      shift 2
+      ;;
+    --manifest-path)
+      [[ $# -ge 2 ]] || fail "--manifest-path requires a Cargo.toml path"
+      MANIFEST_PATH="$2"
+      shift 2
+      ;;
+    -h|--help)
+      echo "usage: $0 [--cohort domain] [--manifest-path <Cargo.toml>]"
+      exit 0
+      ;;
+    *)
+      fail "unknown argument '$1' (usage: $0 [--cohort domain] [--manifest-path <Cargo.toml>])"
+      ;;
+  esac
+done
+if [[ -n "$COHORT" && "$COHORT" != "domain" ]]; then
+  fail "unknown cohort '$COHORT' (known: domain)"
+fi
+if [[ -n "$MANIFEST_PATH" && ! -f "$MANIFEST_PATH" ]]; then
+  fail "manifest not found: $MANIFEST_PATH"
+fi
+
+# --- scoped cohort: core domain (v1.249 R3) ---------------------------------
+# The domain boundary every other cohort may grow from: `nexus-core` with no
+# default features keeps the applied-state / storage / memory authority and
+# resolves NOTHING from the engine, Host, WASM or Connect planes. Cohort table:
+# `docs/specs/architecture/rust-core-service-boundary.md` §4.2.
+if [[ "$COHORT" == "domain" ]]; then
+  assert_graph_nonempty nexus-core "--no-default-features"
+  # `domain` selects no feature: core's own resolved set stays empty.
+  assert_features nexus-core "--no-default-features" nexus-core ""
+  assert_exactly_one nexus-core "--no-default-features" nexus-memory-provider
+  assert_features nexus-core "--no-default-features" nexus-memory-provider "default"
+  assert_exactly_one nexus-core "--no-default-features" spoke-operations
+  # The provider's own forwarding edge is what carries `MemoryPort` into the
+  # domain graph; pin it separately from core's direct spoke-operations edge.
+  assert_exactly_one nexus-memory-provider "--no-default-features" spoke-operations
+
+  # Engine + durable execution. The Simulate walk rides `nexus-orchestration`
+  # (`nexus-orchestration/simulate`), so its absence is this pin.
+  assert_empty nexus-core "--no-default-features" nexus-orchestration
+  assert_empty nexus-core "--no-default-features" nexus-execution
+  assert_empty nexus-core "--no-default-features" nexus-session-storage
+  assert_empty nexus-core "--no-default-features" graph-flow
+  # Host planes.
+  assert_empty nexus-core "--no-default-features" nexus-agent-host
+  assert_empty nexus-core "--no-default-features" nexus-acp-host
+  assert_empty nexus-core "--no-default-features" nexus-wasm-host
+  # Connect planes.
+  assert_empty nexus-core "--no-default-features" nexus-connect
+  assert_empty nexus-core "--no-default-features" spoke-connect
+  assert_empty nexus-core "--no-default-features" libp2p
+  assert_empty nexus-core "--no-default-features" rmcp
+
+  echo "graph pins OK (cohort: domain)"
+  exit 0
+fi
 
 # --- ordinary CLI (cli,default) --------------------------------------------
 
