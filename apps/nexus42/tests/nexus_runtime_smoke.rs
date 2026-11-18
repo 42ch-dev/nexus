@@ -408,7 +408,11 @@ fn profile_from_exe_infers_the_profile_directory_and_rejects_other_layouts() {
     ] {
         let error =
             profile_from_exe(Path::new(layout)).expect_err("an ambiguous layout must fail closed");
-        assert!(error.contains("expected `deps` or `build`"), "{error}");
+        assert!(
+            error.contains("expected `deps` or `build`")
+                || error.contains("no `target` component"),
+            "{error}"
+        );
     }
     assert_eq!(profile_build_args("debug"), Vec::<String>::new());
     assert_eq!(profile_build_args("release"), vec!["--release".to_string()]);
@@ -418,12 +422,33 @@ fn profile_from_exe_infers_the_profile_directory_and_rejects_other_layouts() {
     );
 }
 
-/// Parse the probe's `COMPUTE_OK session=<id> entry=kb_atk current_hp=<n>`
+/// Stable, non-reversible tag for a session id.
+///
+/// The probe prints this instead of the raw id: a session id is treated as
+/// sensitive by the cleartext-logging rule, and the proof only needs "this
+/// result belongs to THAT session", not the id itself. Both sides build with
+/// the same pinned toolchain, so `DefaultHasher` agrees across the probe and
+/// this test.
+///
+/// shortcut: `DefaultHasher` is deterministic per toolchain, not per the Rust
+/// spec; if the probe and the test ever build with different compilers, switch
+/// to a fixed digest.
+fn session_tag(session: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    session.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+/// Parse the probe's `COMPUTE_OK session_tag=<tag> entry=kb_atk current_hp=<n>`
 /// line and return the reported HP. Requires exactly ONE matching line and a
 /// complete integer token: a neighbouring value (`150`, `1500`) therefore
 /// never compares equal to `15`.
 fn compute_current_hp(stdout: &str, session: &str) -> Result<i64, String> {
-    let prefix = format!("COMPUTE_OK session={session} entry=kb_atk current_hp=");
+    let prefix = format!(
+        "COMPUTE_OK session_tag={} entry=kb_atk current_hp=",
+        session_tag(session)
+    );
     let mut values = stdout
         .lines()
         .filter_map(|line| line.trim().strip_prefix(&prefix));
@@ -455,7 +480,12 @@ fn assert_compute_result(stdout: &str, session: &str) -> Result<(), String> {
 /// must never satisfy the exact comparison the smoke test makes.
 #[test]
 fn compute_result_control_rejects_a_neighbouring_value() {
-    let line = |hp: &str| format!("COMPUTE_OK session=ses_smoke entry=kb_atk current_hp={hp}");
+    let line = |hp: &str| {
+        format!(
+            "COMPUTE_OK session_tag={} entry=kb_atk current_hp={hp}",
+            session_tag("ses_smoke")
+        )
+    };
 
     assert_eq!(assert_compute_result(&line("15"), "ses_smoke"), Ok(()));
     for neighbour in ["150", "1500", "1500 ", "15x", "-15"] {

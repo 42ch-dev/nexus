@@ -16,7 +16,7 @@
 //! SESSION_OK                         # session still usable after refusals
 //! UPSERT_OK                          # --world: in-scope write after the refusal
 //! SESSION_ALIVE_OK                   # the session still works after a refusal
-//! COMPUTE_OK session=<id> entry=<id> current_hp=<n>  # real retained compute
+//! COMPUTE_OK session_tag=<16hex> entry=<id> current_hp=<n>  # real retained compute
 //! ```
 //!
 //! The identity comes from a fixed Ed25519 seed (default 7) so the host's
@@ -308,6 +308,16 @@ async fn run_retained_ops(
                 computed.payload
             )
         })?;
-    println!("COMPUTE_OK session={session_id} entry=kb_atk current_hp={current_hp}");
+    // Print a tag, not the raw id: a session id is sensitive for the
+    // cleartext-logging rule, and the proof only needs "this result belongs to
+    // THAT session". The test derives the same tag with `DefaultHasher`, so
+    // both sides must build with the same pinned toolchain.
+    let session_tag = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        session_id.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    };
+    println!("COMPUTE_OK session_tag={session_tag} entry=kb_atk current_hp={current_hp}");
     Ok(())
 }
