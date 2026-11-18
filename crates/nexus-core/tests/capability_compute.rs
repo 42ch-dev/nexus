@@ -762,7 +762,7 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
     let (registry, outcome) =
         CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_root);
     {
-        use nexus_orchestration::capability::Capability as _;
+        use nexus_capability::Capability as _;
         assert!(
             outcome
                 .admitted
@@ -929,9 +929,8 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
 #[tokio::test]
 #[serial_test::serial]
 async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
-    use nexus_orchestration::capability::{
-        Capability as _, CapabilityRegistry, CapabilityRuntimeDeps,
-    };
+    use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
+    use nexus_capability::Capability as _;
     use nexus_orchestration::CapabilityRegistryHolder;
 
     const TOOL: &str = "nexus.workspace.info";
@@ -1163,10 +1162,8 @@ async fn read_grant_admits_reads_and_refuses_a_write() {
 /// rather than standing in with heuristic candidates.
 #[tokio::test]
 async fn failing_prompt_executor_is_a_typed_failure_not_a_fabricated_success() {
-    use nexus_orchestration::capability::{
-        CapabilityError, CapabilityRegistry, CapabilityRuntimeDeps, PromptExecutor, PromptRequest,
-        PromptResult,
-    };
+    use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
+    use nexus_capability::{CapabilityError, PromptExecutor, PromptRequest, PromptResult};
 
     struct FailingExecutor;
 

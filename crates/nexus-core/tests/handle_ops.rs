@@ -27,7 +27,7 @@ use nexus_contracts::{
 };
 use nexus_core::owner::ExecutionHandle;
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, RunnerDeps};
-use nexus_orchestration::capability::{
+use nexus_capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,
 };
 use nexus_provider_ports::{ProviderPort, ProviderResult};

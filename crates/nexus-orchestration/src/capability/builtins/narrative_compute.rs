@@ -50,7 +50,7 @@
 //! containing the error details. The error is also logged at `warn` level.
 
 use crate::capability::builtins::world::{admitted_creator_view_scope, ensure_world_owned};
-use crate::capability::{Capability, CapabilityError};
+use nexus_capability::{Capability, CapabilityError};
 use crate::state_delta;
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::KbStore;

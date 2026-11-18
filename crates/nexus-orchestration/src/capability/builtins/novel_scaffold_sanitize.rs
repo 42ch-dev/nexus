@@ -8,7 +8,7 @@
 //!
 //! Fixes QC findings C-1, C-4, and W-2.
 
-use crate::capability::CapabilityError;
+use nexus_capability::CapabilityError;
 
 /// Maximum slug length (matches typical filesystem path budget).
 pub const SLUG_MAX_LEN: usize = 64;

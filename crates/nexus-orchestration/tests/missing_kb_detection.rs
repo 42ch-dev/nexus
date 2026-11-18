@@ -18,7 +18,7 @@ use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::list_pending_for_world;
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::works::{self, WorkRecord};
-use nexus_orchestration::capability::{CapabilityError, WorkspaceExecutor};
+use nexus_capability::{CapabilityError, WorkspaceExecutor};
 use nexus_orchestration::quality_loop;
 use sqlx::SqlitePool;
 

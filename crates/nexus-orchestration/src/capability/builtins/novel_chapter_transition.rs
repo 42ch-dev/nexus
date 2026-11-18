@@ -7,7 +7,7 @@
 //! Design: novel-writing/workflow-profile.md §4.1.2 (truth model), §5.1 (finalize gate).
 
 use super::work_commit::{commit_work_bytes, require_executor};
-use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
+use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;

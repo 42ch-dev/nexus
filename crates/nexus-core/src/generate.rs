@@ -24,7 +24,7 @@ use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
     WorkflowDocumentEffectSummary, WorkflowDocumentId, WorkflowDocumentState, WorkflowEdge,
     WorkflowMeta, WorkflowNestBinding, WorkflowNode,
 };
-use nexus_orchestration::capability::{PromptExecutor, PromptRequest, ToolPolicy};
+use nexus_capability::{PromptExecutor, PromptRequest, ToolPolicy};
 use nexus_orchestration::preset_runtime::{
     validate_ir_buildability, IrOuterGraphError, IrTemplateSource,
 };

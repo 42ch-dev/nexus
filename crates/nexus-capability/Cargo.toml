@@ -1,0 +1,22 @@
+[package]
+name = "nexus-capability"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Private capability port and error contract: Capability trait, provider ports, ToolPolicy, session cancellation resolver."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio-util = { workspace = true }
+nexus-contracts = { path = "../nexus-contracts" }

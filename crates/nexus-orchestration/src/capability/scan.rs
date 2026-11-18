@@ -342,7 +342,7 @@ pub(crate) fn skip(outcome: &mut ScanOutcome, name: &str, reason: String) {
 mod tests {
     use super::*;
     use crate::capability::test_support::{descriptor_json, write_capability_dir};
-    use crate::capability::Capability;
+    use nexus_capability::Capability;
 
     /// The builtin-name set the registry passes into the scan (a small,
     /// realistic subset used by the scan tests; `sync.pull` collides).

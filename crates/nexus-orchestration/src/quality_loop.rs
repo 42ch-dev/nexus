@@ -33,7 +33,8 @@
 //! are **not** inserted into `kb_extract_jobs`.
 
 use crate::auto_chain::AutoChainError;
-use crate::capability::{CapabilityError, CapabilityRegistry};
+use crate::capability::CapabilityRegistry;
+use nexus_capability::CapabilityError;
 use nexus_knowledge::world_kb::KnowledgeGovernance;
 use nexus_local_db::kb_extract_job::{insert_pending_with_llm, is_idempotent};
 use nexus_local_db::kb_relationships::{
@@ -727,7 +728,7 @@ pub async fn detect_missing_kb_on_finalize(
     schedule_id: &str,
     workspace_dir: Option<&std::path::Path>,
     registry: Option<&CapabilityRegistry>,
-    executor: Option<&std::sync::Arc<dyn crate::capability::WorkspaceExecutor>>,
+    executor: Option<&std::sync::Arc<dyn nexus_capability::WorkspaceExecutor>>,
 ) -> Result<usize, AutoChainError> {
     let Some(ctx) = load_finalize_context(pool, schedule_id, workspace_dir).await? else {
         return Ok(0);
@@ -1708,7 +1709,7 @@ async fn write_missing_kb_log(
     workspace_dir: Option<&std::path::Path>,
     ctx: &ChapterContext,
     missing: &[KbCandidate],
-    executor: Option<&std::sync::Arc<dyn crate::capability::WorkspaceExecutor>>,
+    executor: Option<&std::sync::Arc<dyn nexus_capability::WorkspaceExecutor>>,
 ) -> Result<usize, String> {
     if missing.is_empty() {
         return Ok(0);

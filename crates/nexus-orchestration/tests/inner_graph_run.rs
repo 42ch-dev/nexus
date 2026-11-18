@@ -15,15 +15,15 @@ use std::sync::Arc;
 struct EchoExecutor;
 
 #[async_trait::async_trait]
-impl nexus_orchestration::capability::PromptExecutor for EchoExecutor {
+impl nexus_capability::PromptExecutor for EchoExecutor {
     async fn execute(
         &self,
-        request: nexus_orchestration::capability::PromptRequest,
+        request: nexus_capability::PromptRequest,
     ) -> Result<
-        nexus_orchestration::capability::PromptResult,
-        nexus_orchestration::capability::CapabilityError,
+        nexus_capability::PromptResult,
+        nexus_capability::CapabilityError,
     > {
-        Ok(nexus_orchestration::capability::PromptResult {
+        Ok(nexus_capability::PromptResult {
             full_text: format!("inner_node:{}:echo_output", request.task_id),
             host_session_id: "host-test".to_string(),
             operation_id: "op-test".to_string(),

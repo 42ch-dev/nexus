@@ -201,7 +201,7 @@ pub struct ToolContext {
     /// tool that needs a model passes exactly this, so the tool cannot reach a
     /// second Host client the engine does not know about, and cannot invent a
     /// heuristic substitute when the transport supplied none.
-    pub(crate) prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+    pub(crate) prompt_executor: Option<Arc<dyn nexus_capability::PromptExecutor>>,
 }
 
 impl ToolContext {
@@ -241,7 +241,7 @@ impl ToolContext {
     #[must_use]
     pub fn with_prompt_executor(
         mut self,
-        prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+        prompt_executor: Option<Arc<dyn nexus_capability::PromptExecutor>>,
     ) -> Self {
         self.prompt_executor = prompt_executor;
         self
@@ -383,7 +383,7 @@ impl ToolContext {
 
     /// The prompt executor this context's transport attached, if any.
     #[must_use]
-    pub fn prompt_executor(&self) -> Option<&dyn nexus_orchestration::capability::PromptExecutor> {
+    pub fn prompt_executor(&self) -> Option<&dyn nexus_capability::PromptExecutor> {
         self.prompt_executor.as_deref()
     }
 }
@@ -1755,7 +1755,7 @@ async fn execute_registry_refresh(
     _context: &ToolContext,
     _creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
-    use nexus_orchestration::capability::Capability;
+    use nexus_capability::Capability;
     let cap = nexus_orchestration::capability::builtins::RegistryRefresh::new();
     let input = serde_json::json!({"force": false});
     cap.run(input).await.map_err(|e| NexusApiError::Internal {
@@ -3429,10 +3429,10 @@ fn validate_user_cap_arguments(schema_json: &str, arguments: &Value) -> Result<(
 /// `Capability::run(arguments)`. `CapabilityError` maps to the closest
 /// `NexusApiError` variant.
 async fn dispatch_user_cap(
-    cap: &dyn nexus_orchestration::capability::Capability,
+    cap: &dyn nexus_capability::Capability,
     req: &ToolsApi,
 ) -> Result<Value, NexusApiError> {
-    use nexus_orchestration::capability::CapabilityError;
+    use nexus_capability::CapabilityError;
     // AR-76 #2/#4 (W-A): the structural gate fires before any adapter I/O —
     // same refusal vocabulary as the peer arm.
     if let Err(message) = validate_user_cap_arguments(cap.input_schema(), &req.parameters) {
@@ -3469,10 +3469,10 @@ async fn dispatch_user_cap(
 /// Fail-closed — a non-admitted capability is neither dispatchable nor
 /// listed.
 pub fn user_cap_catalog_admission(
-    cap: Option<&dyn nexus_orchestration::capability::Capability>,
-) -> Result<&dyn nexus_orchestration::capability::Capability, UserCapCatalogRefusal> {
+    cap: Option<&dyn nexus_capability::Capability>,
+) -> Result<&dyn nexus_capability::Capability, UserCapCatalogRefusal> {
     let cap = cap.ok_or(UserCapCatalogRefusal::NotUserCapability)?;
-    if cap.origin() != nexus_orchestration::capability::CapabilityOrigin::User {
+    if cap.origin() != nexus_capability::CapabilityOrigin::User {
         return Err(UserCapCatalogRefusal::NotUserCapability);
     }
     let name = cap.name();

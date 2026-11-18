@@ -6,7 +6,7 @@
 //! lives in `nexus-cloud-sync` and is wired when the CLI enables the
 //! `legacy-sync` feature.
 
-use crate::capability::{Capability, CapabilityError};
+use nexus_capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use serde_json::Value;
 

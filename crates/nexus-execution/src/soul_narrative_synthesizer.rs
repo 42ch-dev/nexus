@@ -18,7 +18,8 @@ use nexus_creator_memory::soul_narrative::{
 };
 use nexus_creator_memory::MemoryBearerRef;
 use nexus_creator_memory::MemoryError;
-use nexus_orchestration::capability::{CapabilityError, CapabilityRegistry};
+use nexus_orchestration::capability::CapabilityRegistry;
+use nexus_capability::CapabilityError;
 use serde_json::json;
 use std::sync::Arc;
 

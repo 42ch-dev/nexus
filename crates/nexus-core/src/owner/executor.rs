@@ -15,7 +15,7 @@ use nexus_contracts::local::orchestration::{
     WorkspaceOpenInput, WorkspaceOpenOutput, WorkspaceOpenSnapshot,
 };
 use nexus_home_layout;
-use nexus_orchestration::capability::{CapabilityError, WorkspaceExecutor};
+use nexus_capability::{CapabilityError, WorkspaceExecutor};
 
 use super::work_artifact::{
     FsWorkArtifactPort, RecordedMutation, RecordingWorkArtifactPort, WorkArtifactPort,

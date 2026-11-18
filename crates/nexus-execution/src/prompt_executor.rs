@@ -47,7 +47,7 @@ use nexus_agent_host::capability::model::{
 };
 use nexus_agent_host::config::TimeoutConfig;
 use nexus_agent_host::{HostFacade, HostOperationId, ProviderId};
-use nexus_orchestration::capability::{
+use nexus_capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,
 };
 use nexus_session_storage::{
@@ -1517,12 +1517,12 @@ mod tests {
         let task_id = pre_step_root.current_task_id.clone();
         let execute_handle = tokio::spawn(async move {
             executor2
-                .execute(nexus_orchestration::capability::PromptRequest {
+                .execute(nexus_capability::PromptRequest {
                     run_id,
                     task_id,
                     agent_ref: None,
                     prompt: "hello".to_string(),
-                    tool_policy: nexus_orchestration::capability::ToolPolicy::AutoGrantAll,
+                    tool_policy: nexus_capability::ToolPolicy::AutoGrantAll,
                     cancellation: token,
                 })
                 .await
@@ -1568,7 +1568,7 @@ mod tests {
         assert!(
             matches!(
                 execute_result,
-                Err(nexus_orchestration::capability::CapabilityError::Cancelled)
+                Err(nexus_capability::CapabilityError::Cancelled)
             ),
             "execute must return the typed cancellation, got {execute_result:?}"
         );
@@ -1715,12 +1715,12 @@ mod tests {
         let task_id = pre_step_root.current_task_id.clone();
         let execute_handle = tokio::spawn(async move {
             executor2
-                .execute(nexus_orchestration::capability::PromptRequest {
+                .execute(nexus_capability::PromptRequest {
                     run_id,
                     task_id,
                     agent_ref: None,
                     prompt: "hello".to_string(),
-                    tool_policy: nexus_orchestration::capability::ToolPolicy::AutoGrantAll,
+                    tool_policy: nexus_capability::ToolPolicy::AutoGrantAll,
                     cancellation: token,
                 })
                 .await
@@ -1773,7 +1773,7 @@ mod tests {
         assert!(
             matches!(
                 execute_result,
-                Err(nexus_orchestration::capability::CapabilityError::Cancelled)
+                Err(nexus_capability::CapabilityError::Cancelled)
             ),
             "execute must return the typed cancellation, got {execute_result:?}"
         );

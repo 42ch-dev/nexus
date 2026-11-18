@@ -6,10 +6,11 @@
 //! prompt echo.
 
 use graph_flow::Task;
-use nexus_orchestration::capability::{
+use nexus_capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,
 };
-use nexus_orchestration::tasks::{AcpPromptTask, ToolPolicy};
+use nexus_orchestration::tasks::AcpPromptTask;
+use nexus_capability::ToolPolicy;
 
 /// Mock executor returning a deterministic non-echo transformation.
 struct MockExecutor;

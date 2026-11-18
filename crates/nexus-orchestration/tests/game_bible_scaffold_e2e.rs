@@ -14,7 +14,7 @@
 use sqlx::Row;
 
 use nexus_orchestration::capability::builtins::GameBibleProjectScaffold;
-use nexus_orchestration::capability::{Capability, CapabilityError, WorkspaceExecutor};
+use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -18,7 +18,7 @@ use nexus_contracts::{
 use nexus_core::owner::ExecutionOpenError;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, ExecutionBuildObserver, RunnerDeps};
 use nexus_execution::workflow::{RunControlError, RunSignal};
-use nexus_orchestration::capability::{
+use nexus_capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,
 };
 use nexus_provider_ports::{ProviderPort, ProviderResult};

@@ -17,7 +17,7 @@
 //!    — no heuristic fallback inside the capability (the caller's review-time
 //!    hook owns the fallback decision; see `quality_loop`).
 
-use crate::capability::{Capability, CapabilityError, PromptExecutor, PromptRequest, ToolPolicy};
+use nexus_capability::{Capability, CapabilityError, PromptExecutor, PromptRequest, ToolPolicy};
 use crate::quality_loop::ExtractionTarget;
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
@@ -357,7 +357,7 @@ impl Capability for LlmExtract {
         // be uncancellable by any coordinator (never mint one here). The run
         // admission path (engine start/spawn/recovery) registers the token.
         let cancellation =
-            crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
+            nexus_capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
         // v1.191 P1 T13 (durable §8): the trusted job/task target policy and
         // the admitted source identity. Both arrive as trusted context from
@@ -747,8 +747,8 @@ mod tests {
         async fn execute(
             &self,
             _request: PromptRequest,
-        ) -> Result<crate::capability::PromptResult, CapabilityError> {
-            Ok(crate::capability::PromptResult {
+        ) -> Result<nexus_capability::PromptResult, CapabilityError> {
+            Ok(nexus_capability::PromptResult {
                 full_text: self.response.clone(),
                 host_session_id: "host-sess".to_string(),
                 operation_id: "op-1".to_string(),
@@ -963,9 +963,9 @@ mod tests {
         async fn execute(
             &self,
             request: PromptRequest,
-        ) -> Result<crate::capability::PromptResult, CapabilityError> {
+        ) -> Result<nexus_capability::PromptResult, CapabilityError> {
             *self.captured.lock().expect("capture lock") = request.run_id;
-            Ok(crate::capability::PromptResult {
+            Ok(nexus_capability::PromptResult {
                 full_text: "{\"candidates\":[]}".to_string(),
                 host_session_id: "host-sess".to_string(),
                 operation_id: "op-1".to_string(),
@@ -1011,9 +1011,9 @@ mod tests {
         async fn execute(
             &self,
             request: PromptRequest,
-        ) -> Result<crate::capability::PromptResult, CapabilityError> {
+        ) -> Result<nexus_capability::PromptResult, CapabilityError> {
             *self.run_id.lock().expect("run id lock") = request.run_id;
-            Ok(crate::capability::PromptResult {
+            Ok(nexus_capability::PromptResult {
                 full_text: self.response.clone(),
                 host_session_id: "host-sess".to_string(),
                 operation_id: "op-1".to_string(),

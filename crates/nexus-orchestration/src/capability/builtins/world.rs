@@ -18,7 +18,7 @@
 //! §8 Open Item line 223): the agent proposes, the runtime applies under a
 //! transaction with ownership re-check.
 
-use crate::capability::{Capability, CapabilityError};
+use nexus_capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::store::KnowledgeReadScope;
 use nexus_knowledge::world_kb::KbStore;

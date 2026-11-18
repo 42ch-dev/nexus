@@ -31,7 +31,8 @@
 
 use crate::capability::scan::{self, dir_file_digest, ScanOutcome};
 use crate::capability::user_capability::UserCapability;
-use crate::capability::{Capability, CapabilityRegistry, CapabilityRuntimeDeps};
+use crate::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
+use nexus_capability::Capability;
 use std::collections::HashSet;
 use std::future::Future;
 use std::path::Path;
@@ -341,7 +342,8 @@ where
 mod tests {
     use super::*;
     use crate::capability::test_support::write_capability_dir;
-    use crate::capability::{CapabilityOrigin, CapabilityRegistryHolder};
+    use crate::capability::CapabilityRegistryHolder;
+use nexus_capability::CapabilityOrigin;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn test_deps() -> CapabilityRuntimeDeps {
@@ -618,7 +620,7 @@ mod tests {
         let held_cap = held.get("demo.pull").expect("snapshot keeps the name");
         let err = held_cap.run(serde_json::json!({})).await.unwrap_err();
         assert!(
-            matches!(err, crate::capability::CapabilityError::WorkerUnavailable),
+            matches!(err, nexus_capability::CapabilityError::WorkerUnavailable),
             "call completes honestly against the held snapshot: {err:?}"
         );
         // And the swapped registry carries last-good for the same name.

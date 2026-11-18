@@ -30,11 +30,7 @@ pub mod sync_module;
 pub mod system_preset;
 pub mod tasks;
 
-pub use capability::{
-    Capability, CapabilityError, CapabilityRegistry, CapabilityRegistryHolder,
-    CapabilityRuntimeDeps, PromptExecutor, PromptPermissionScope, PromptRequest, PromptResult,
-    ToolPolicy, WorkspaceExecutor,
-};
+pub use capability::{CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps};
 pub use engine::{
     ChildSessionParams, EngineError, FailedStepWitness, FailurePersistenceDisposition,
     FailureSettlement, FailureSettlementSummary, GraphFlowEngine, OrchestrationEngine,

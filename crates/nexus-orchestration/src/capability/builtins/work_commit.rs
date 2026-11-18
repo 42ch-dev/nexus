@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use nexus_contracts::local::orchestration::WorkArtifactCommitInput;
 use sqlx::SqlitePool;
 
-use crate::capability::{CapabilityError, WorkspaceExecutor};
+use nexus_capability::{CapabilityError, WorkspaceExecutor};
 
 /// The injected executor, or the house "provider not wired" refusal.
 ///
@@ -311,7 +311,7 @@ pub mod test_support {
         WorkspaceCommitOutput, WorkspaceOpenInput, WorkspaceOpenOutput,
     };
 
-    use crate::capability::{CapabilityError, WorkspaceExecutor};
+    use nexus_capability::{CapabilityError, WorkspaceExecutor};
 
     /// Writes each artifact where the core port would put it and records the
     /// commit; `fail_on` simulates the port's missing-work-row refusal.
@@ -450,7 +450,7 @@ mod tests {
     use super::test_support::RecordingExecutor;
     use super::*;
     use crate::capability::builtins::{EssayProjectScaffold, NovelProjectScaffold};
-    use crate::capability::Capability;
+    use nexus_capability::Capability;
     use nexus_local_db::works::{self, WorkRecord};
     use serde_json::json;
 

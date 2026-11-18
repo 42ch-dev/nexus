@@ -8,7 +8,7 @@
 //!
 //! Design: DF-32, plan J1.
 
-use crate::capability::{Capability, CapabilityError};
+use nexus_capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_contracts::local::orchestration::{JudgeRuleInput, JudgeRuleOutput};
 use serde_json::Value;

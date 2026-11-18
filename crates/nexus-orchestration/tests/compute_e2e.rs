@@ -278,6 +278,6 @@ async fn narrative_compute_e2e_rejects_missing_world() {
         .unwrap_err();
     assert!(matches!(
         err,
-        nexus_orchestration::capability::CapabilityError::Forbidden(_)
+        nexus_capability::CapabilityError::Forbidden(_)
     ));
 }

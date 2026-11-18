@@ -6,7 +6,7 @@
 //! backed by `Arc<SqlitePool>`) for real persistence. When no store is
 //! injected (standalone/test mode), capabilities return stub responses.
 
-use crate::capability::{Capability, CapabilityError};
+use nexus_capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_contracts::local::orchestration::{
     CreatorInjectPromptInput, CreatorInjectPromptOutput, CreatorReadMemoryInput,

@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, GenerateRequest, Principal};
-use nexus_orchestration::capability::{
+use nexus_capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,
 };
 use serde_json::{json, Value};

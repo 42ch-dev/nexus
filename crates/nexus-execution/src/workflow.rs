@@ -1626,10 +1626,10 @@ impl WorkflowRunCoordinator {
         nexus_home: &std::path::Path,
         caps: &nexus_orchestration::CapabilityRegistryHolder,
         daemon_tool_dispatch: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
+            std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>,
         >,
         prompt_executor: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
+            std::sync::Arc<dyn nexus_capability::PromptExecutor>,
         >,
     ) -> Result<SessionId, RunControlError> {
         // A8 fail-closed: `_system.*` presets are never driven as user
@@ -2448,10 +2448,10 @@ impl WorkflowRunCoordinator {
         nexus_home: &std::path::Path,
         caps: &nexus_orchestration::CapabilityRegistryHolder,
         daemon_tool_dispatch: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
+            std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>,
         >,
         prompt_executor: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
+            std::sync::Arc<dyn nexus_capability::PromptExecutor>,
         >,
     ) -> Result<SessionId, RunControlError> {
         // C2: a closing coordinator admits no run. Checked BEFORE the row read
@@ -2744,10 +2744,10 @@ impl WorkflowRunCoordinator {
         nexus_home: &std::path::Path,
         caps: &nexus_orchestration::CapabilityRegistryHolder,
         daemon_tool_dispatch: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
+            std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>,
         >,
         prompt_executor: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
+            std::sync::Arc<dyn nexus_capability::PromptExecutor>,
         >,
     ) -> Result<SessionId, RunControlError> {
         self.admit_schedule_inner(
@@ -2780,10 +2780,10 @@ impl WorkflowRunCoordinator {
         nexus_home: &std::path::Path,
         caps: &nexus_orchestration::CapabilityRegistryHolder,
         daemon_tool_dispatch: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
+            std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>,
         >,
         prompt_executor: Option<
-            std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
+            std::sync::Arc<dyn nexus_capability::PromptExecutor>,
         >,
         legacy_opt_in: bool,
     ) -> Result<SessionId, RunControlError> {
@@ -3692,9 +3692,9 @@ pub struct CoordinatorScheduleRunStarter {
     /// the SAME holder the engine reads through.
     caps: nexus_orchestration::CapabilityRegistryHolder,
     /// Optional daemon-side tool dispatch for the admitted graph.
-    daemon_tool_dispatch: Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
+    daemon_tool_dispatch: Option<Arc<dyn nexus_capability::DaemonToolDispatch>>,
     /// The production prompt executor (Host plane) for the admitted graph.
-    prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+    prompt_executor: Option<Arc<dyn nexus_capability::PromptExecutor>>,
 }
 
 impl CoordinatorScheduleRunStarter {
@@ -3704,8 +3704,8 @@ impl CoordinatorScheduleRunStarter {
         coordinator: &Arc<WorkflowRunCoordinator>,
         nexus_home: PathBuf,
         caps: nexus_orchestration::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
-        prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+        daemon_tool_dispatch: Option<Arc<dyn nexus_capability::DaemonToolDispatch>>,
+        prompt_executor: Option<Arc<dyn nexus_capability::PromptExecutor>>,
     ) -> Self {
         Self {
             coordinator: Arc::downgrade(coordinator),

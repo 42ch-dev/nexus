@@ -9,7 +9,7 @@
 //! or directly from the CLI. No LLM invocation occurs inside this capability;
 //! if LLM polish is desired, chain `context.summarize` afterwards.
 
-use crate::capability::{Capability, CapabilityError};
+use nexus_capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_creator_memory::MemoryBearerRef;
 use serde_json::{json, Value};

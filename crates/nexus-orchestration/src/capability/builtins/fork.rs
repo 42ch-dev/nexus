@@ -25,7 +25,7 @@
 //! pattern.
 
 use crate::capability::builtins::world::ensure_world_owned;
-use crate::capability::{Capability, CapabilityError};
+use nexus_capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};

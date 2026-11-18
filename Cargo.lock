@@ -3648,6 +3648,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-capability"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "nexus-contracts",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio-util",
+]
+
+[[package]]
 name = "nexus-cloud-domain"
 version = "0.1.0"
 dependencies = [
@@ -3749,6 +3760,7 @@ dependencies = [
  "libc",
  "nexus-acp-host",
  "nexus-agent-host",
+ "nexus-capability",
  "nexus-cloud-sync",
  "nexus-compute-policy",
  "nexus-config-metadata",
@@ -3804,6 +3816,7 @@ dependencies = [
  "napi-build",
  "napi-derive",
  "nexus-agent-host",
+ "nexus-capability",
  "nexus-contracts",
  "nexus-core",
  "nexus-creator-memory",
@@ -3875,6 +3888,7 @@ dependencies = [
  "graph-flow",
  "hex",
  "nexus-agent-host",
+ "nexus-capability",
  "nexus-contracts",
  "nexus-creator-memory",
  "nexus-execution",
@@ -4060,6 +4074,7 @@ dependencies = [
  "handlebars",
  "hex",
  "include_dir",
+ "nexus-capability",
  "nexus-compute-policy",
  "nexus-contracts",
  "nexus-creator-memory",
@@ -4234,6 +4249,7 @@ dependencies = [
  "libp2p",
  "nexus-acp-host",
  "nexus-agent-host",
+ "nexus-capability",
  "nexus-cloud-sync",
  "nexus-connect",
  "nexus-contracts",

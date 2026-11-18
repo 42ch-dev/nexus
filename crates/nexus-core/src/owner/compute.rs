@@ -1588,8 +1588,8 @@ fn map_build_error(e: nexus_orchestration::compute_input_builder::ComputeBuildEr
 }
 
 /// Map a state-delta application failure onto the core taxonomy.
-fn map_delta_error(e: nexus_orchestration::capability::CapabilityError) -> CoreError {
-    use nexus_orchestration::capability::CapabilityError;
+fn map_delta_error(e: nexus_capability::CapabilityError) -> CoreError {
+    use nexus_capability::CapabilityError;
     match e {
         CapabilityError::InputInvalid(msg) => coded_refusal("invalid_input", msg),
         other => CoreError::Internal {

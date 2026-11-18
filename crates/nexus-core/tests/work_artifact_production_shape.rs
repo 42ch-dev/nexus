@@ -31,7 +31,7 @@ use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::capability::builtins::{
     EssayProjectScaffold, GameBibleProjectScaffold, NovelProjectScaffold, ScriptProjectScaffold,
 };
-use nexus_orchestration::capability::{Capability, CapabilityError, WorkspaceExecutor};
+use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};
 use serde_json::json;
 use sqlx::SqlitePool;
 

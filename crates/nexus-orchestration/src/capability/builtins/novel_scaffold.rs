@@ -6,7 +6,8 @@
 
 use super::novel_scaffold_sanitize::{validate_total_chapters, validate_work_ref};
 use super::work_commit::{claim_work_ref, commit_work_bytes, require_executor, resolve_works_dirs};
-use crate::capability::{path_is_occupied, Capability, CapabilityError, WorkspaceExecutor};
+use crate::capability::path_is_occupied;
+use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use nexus_local_db::{work_chapters, works};
 use serde::Deserialize;

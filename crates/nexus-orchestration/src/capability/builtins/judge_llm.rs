@@ -9,7 +9,7 @@
 //! 2. **Standalone (no executor)**: returns `WorkerUnavailable` — no heuristic
 //!    matching on input text.
 
-use crate::capability::{Capability, CapabilityError, PromptExecutor, PromptRequest, ToolPolicy};
+use nexus_capability::{Capability, CapabilityError, PromptExecutor, PromptRequest, ToolPolicy};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -140,7 +140,7 @@ impl Capability for JudgeLlm {
         // be uncancellable by any coordinator (never mint one here). The run
         // admission path (engine start/spawn/recovery) registers the token.
         let cancellation =
-            crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
+            nexus_capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
         // Build judge prompt with GO/NOGO framing.
         let judge_prompt = format!(
@@ -346,9 +346,9 @@ mod tests {
         async fn execute(
             &self,
             request: PromptRequest,
-        ) -> Result<crate::capability::PromptResult, CapabilityError> {
+        ) -> Result<nexus_capability::PromptResult, CapabilityError> {
             *self.captured_run_id.lock().expect("capture lock") = request.run_id;
-            Ok(crate::capability::PromptResult {
+            Ok(nexus_capability::PromptResult {
                 full_text: "GO — the evaluation passes.".to_string(),
                 host_session_id: "host-sess".to_string(),
                 operation_id: "op-1".to_string(),
@@ -375,8 +375,8 @@ mod tests {
         async fn execute(
             &self,
             _request: PromptRequest,
-        ) -> Result<crate::capability::PromptResult, CapabilityError> {
-            Ok(crate::capability::PromptResult {
+        ) -> Result<nexus_capability::PromptResult, CapabilityError> {
+            Ok(nexus_capability::PromptResult {
                 full_text: "NO — stop and review.".to_string(),
                 host_session_id: "host-sess".to_string(),
                 operation_id: "op-1".to_string(),

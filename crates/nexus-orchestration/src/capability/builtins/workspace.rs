@@ -1,6 +1,6 @@
 //! `workspace.open` and `workspace.commit` capabilities (v1.188 P3).
 
-use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
+use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use nexus_contracts::local::orchestration::{WorkspaceCommitInput, WorkspaceOpenInput};
 use serde_json::Value;
@@ -107,7 +107,7 @@ impl Capability for WorkspaceCommit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capability::WorkspaceExecutor;
+    use nexus_capability::WorkspaceExecutor;
     use async_trait::async_trait;
     use nexus_contracts::local::orchestration::{
         WorkspaceCommitOutput, WorkspaceOpenInput, WorkspaceOpenOutput,

@@ -5766,15 +5766,15 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
 struct GoJudgeProvider;
 
 #[async_trait::async_trait]
-impl nexus_orchestration::capability::PromptExecutor for GoJudgeProvider {
+impl nexus_capability::PromptExecutor for GoJudgeProvider {
     async fn execute(
         &self,
-        _request: nexus_orchestration::capability::PromptRequest,
+        _request: nexus_capability::PromptRequest,
     ) -> Result<
-        nexus_orchestration::capability::PromptResult,
-        nexus_orchestration::capability::CapabilityError,
+        nexus_capability::PromptResult,
+        nexus_capability::CapabilityError,
     > {
-        Ok(nexus_orchestration::capability::PromptResult {
+        Ok(nexus_capability::PromptResult {
             full_text: "Go ahead — first-token match routes label 'go'.".to_string(),
             host_session_id: "host-sess".to_string(),
             operation_id: "op-1".to_string(),

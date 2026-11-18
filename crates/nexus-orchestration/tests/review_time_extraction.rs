@@ -342,24 +342,24 @@ struct MockReviewExtract {
 }
 
 #[async_trait::async_trait]
-impl nexus_orchestration::capability::PromptExecutor for MockReviewExtract {
+impl nexus_capability::PromptExecutor for MockReviewExtract {
     async fn execute(
         &self,
-        request: nexus_orchestration::capability::PromptRequest,
+        request: nexus_capability::PromptRequest,
     ) -> Result<
-        nexus_orchestration::capability::PromptResult,
-        nexus_orchestration::capability::CapabilityError,
+        nexus_capability::PromptResult,
+        nexus_capability::CapabilityError,
     > {
         *self.run_id.lock().expect("run id lock") = request.run_id;
         if self.pending {
             std::future::pending::<()>().await;
         }
         if self.failing {
-            return Err(nexus_orchestration::capability::CapabilityError::Internal(
+            return Err(nexus_capability::CapabilityError::Internal(
                 "host prompt worker failed".to_string(),
             ));
         }
-        Ok(nexus_orchestration::capability::PromptResult {
+        Ok(nexus_capability::PromptResult {
             full_text: self.response.clone(),
             host_session_id: "host-sess".to_string(),
             operation_id: "op-1".to_string(),
@@ -372,7 +372,7 @@ impl nexus_orchestration::capability::PromptExecutor for MockReviewExtract {
 /// cancellable run.
 fn review_registry(
     schedule_id: &str,
-    executor: std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
+    executor: std::sync::Arc<dyn nexus_capability::PromptExecutor>,
 ) -> nexus_orchestration::capability::CapabilityRegistry {
     let mut cancels = std::collections::HashMap::new();
     cancels.insert(

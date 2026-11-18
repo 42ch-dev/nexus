@@ -12,7 +12,7 @@
 
 use std::path::Path;
 
-use nexus_orchestration::capability::{Capability, CapabilityError, WorkspaceExecutor};
+use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};
 
 // ---------------------------------------------------------------------------
 // Helpers

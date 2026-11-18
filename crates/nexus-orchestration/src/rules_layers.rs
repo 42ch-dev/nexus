@@ -20,7 +20,7 @@ use std::path::Path;
 
 use nexus_contracts::local::orchestration::WorkArtifactCommitInput;
 
-use crate::capability::{CapabilityError, WorkspaceExecutor};
+use nexus_capability::{CapabilityError, WorkspaceExecutor};
 
 /// Embedded default scaffold for `Works/<work_ref>/AGENTS.md`.
 ///

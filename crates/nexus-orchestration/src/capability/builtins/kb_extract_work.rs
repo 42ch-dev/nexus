@@ -12,7 +12,7 @@
 //!
 //! Design: plan `2026-05-26-v1.30-kb-extract-lifecycle-hardening.md` §K4.
 
-use crate::capability::{Capability, CapabilityError};
+use nexus_capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};

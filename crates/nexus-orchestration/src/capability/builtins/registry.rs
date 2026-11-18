@@ -16,7 +16,7 @@
 //! The CDN URL is thread-safe global state set once at daemon boot via
 //! [`set_cdn_url`]. The capability reads it at invocation time.
 
-use crate::capability::{Capability, CapabilityError};
+use nexus_capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures_util::StreamExt;

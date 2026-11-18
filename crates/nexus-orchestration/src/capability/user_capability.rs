@@ -15,7 +15,7 @@
 //! number of DISTINCT admitted strings across the daemon run, NOT by the
 //! hot-reload count.
 
-use crate::capability::{Capability, CapabilityError, CapabilityOrigin};
+use nexus_capability::{Capability, CapabilityError, CapabilityOrigin};
 use nexus_contracts::generated::daemon_api::compute::compute_input::{
     ComputeInputWorldRef, ComputeInputWorldRefWorldId,
 };

@@ -15,7 +15,7 @@
 //! `nexus-local-db` (W3: one `kb_key_blocks` write-path family); this module
 //! owns the semantic merge.
 
-use crate::capability::CapabilityError;
+use nexus_capability::CapabilityError;
 use nexus_contracts::generated::daemon_api::compute::compute_output::ComputeOutputStateDeltaItem as ComputeOutputStateDelta;
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::KbStore;

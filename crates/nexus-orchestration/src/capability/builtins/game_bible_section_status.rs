@@ -31,7 +31,7 @@
 
 use super::novel_scaffold_sanitize::validate_work_ref;
 use super::work_commit::{commit_work_bytes, require_executor, resolve_works_dirs};
-use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
+use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

@@ -18,7 +18,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::capability::builtins::work_commit::{commit_work_bytes, require_executor};
-use crate::capability::WorkspaceExecutor;
+use nexus_capability::WorkspaceExecutor;
 
 /// Current schema version for the completion-lock file.
 const CURRENT_SCHEMA_VERSION: u32 = 1;

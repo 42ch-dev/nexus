@@ -24,6 +24,7 @@ test-hooks = ["nexus-local-db/test-hooks"]
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+nexus-capability = { path = "../nexus-capability" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-orchestration = { path = "../nexus-orchestration" }
 nexus-session-storage = { path = "../nexus-session-storage" }

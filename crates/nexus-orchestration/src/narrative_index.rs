@@ -43,7 +43,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use crate::capability::builtins::work_commit::{commit_work_bytes, require_executor};
-use crate::capability::WorkspaceExecutor;
+use nexus_capability::WorkspaceExecutor;
 
 // ---------------------------------------------------------------------------
 // Canonical table geometry

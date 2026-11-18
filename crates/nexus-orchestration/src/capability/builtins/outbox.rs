@@ -7,7 +7,7 @@
 //! Semantics and test vectors are documented in the Draft overlay spec:
 //! `docs/specs/runtime/outbox-consolidation.md` §4–5.
 
-use crate::capability::{Capability, CapabilityError};
+use nexus_capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use serde_json::Value;
 
