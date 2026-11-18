@@ -11,11 +11,6 @@ publish = false
 [lints]
 workspace = true
 
-[features]
-# Static Simulate: the reachability walk needs only the thin IR contract. Nothing
-# here constructs an executor or a provider, so the default build stays unchanged.
-simulate = ["dep:nexus-workflow-ir"]
-
 [dependencies]
 # 2026-09-10 dependency sweep (#276): 0.2.3 → 0.8.0. default-features=false
 # disables upstream's new `postgres` default (production storage is the
@@ -36,9 +31,6 @@ serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 nexus-contracts = { path = "../nexus-contracts" }
-# Optional: only the `simulate` walk reads a candidate IR document. No other feature
-# pulls it, and it carries no provider or execution edge.
-nexus-workflow-ir = { path = "../nexus-workflow-ir", optional = true }
 nexus-preset = { path = "../nexus-preset" }
 # Session identity/status types + StorageError contract moved out of engine.rs;
 # engine re-exports them so consumer paths stay unchanged.
@@ -75,6 +67,10 @@ uuid = { workspace = true }
 reqwest = { workspace = true, features = ["stream"] }
 
 [dev-dependencies]
+# The trajectory targets walk real preset IR through the private pure simulator;
+# both are test-only edges (no production consumer in this crate).
+nexus-workflow-ir = { path = "../nexus-workflow-ir" }
+nexus-workflow-simulate = { path = "../nexus-workflow-simulate" }
 # Cross-crate test hooks (RecordingExecutor, with_capabilities) and the wasm
 # compute path for the compute_e2e / engine-contract test targets (C3: the
 # only compute paths left in this crate are tests that explicitly drive it).

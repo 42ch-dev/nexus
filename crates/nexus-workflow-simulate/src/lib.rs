@@ -2,9 +2,9 @@
 //!
 //! Nothing executes here. No node is entered, no capability is dispatched and no production
 //! executor or provider is constructed: the walk reads the document's nodes, edges and nest
-//! bindings and predicts what a default-branch run *would* reach. The per-call registry in
-//! [`SimulationOptions`] is the seam preflight T1 established (D9) — it is never resolved
-//! against, which is what makes a zero dispatch count structural rather than incidental.
+//! bindings and predicts what a default-branch run *would* reach. This crate links no capability
+//! registry and no engine, which is what makes a zero dispatch count structural rather than
+//! incidental.
 //!
 //! Static predictions are an over-approximation: a predicted wait may never fire, and a
 //! judge's non-default branches (and everything reachable only through them) are invisible.
@@ -15,7 +15,6 @@
 //! reject a producer that materialized a deferred body *and* made it edge-reachable; that body
 //! would then be walked and rolled up.
 
-use nexus_capability::CapabilityRegistryHolder;
 use nexus_contracts::generated::daemon_api::orchestration::simulation_trajectory::{
     SimulationPredictedWait, SimulationPredictedWaitReason,
 };
@@ -30,13 +29,6 @@ use std::collections::{HashMap, HashSet};
 const SIMULATION_LEVEL: &str = "reachability";
 /// Trajectory contract revision for this shape.
 const SCHEMA_VERSION: i64 = 1;
-
-/// Per-call simulation inputs. The registry is required so a future walkable node can only
-/// ever dispatch through the caller's own recording registry, never a shared production one.
-pub struct SimulationOptions {
-    /// Fresh per-call registry; this walk never dispatches a capability through it.
-    pub capabilities: CapabilityRegistryHolder,
-}
 
 /// A deterministic reason the trajectory cannot be produced.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -64,11 +56,7 @@ pub enum SimulationError {
 /// computed.
 pub fn simulate_document(
     document: &WorkflowDocument,
-    options: &SimulationOptions,
 ) -> Result<SimulationTrajectory, SimulationError> {
-    // Borrowed for the walk's lifetime and never read: nothing here resolves a capability (D9).
-    let _ = &options.capabilities;
-
     let mut by_id: HashMap<&str, &WorkflowNode> = HashMap::with_capacity(document.nodes.len());
     for node in &document.nodes {
         by_id.insert(node.id.as_str(), node);

@@ -34,7 +34,7 @@ execution = [
     "dep:nexus-session-storage",
     # The Simulate route is served at this execution edge only: the walk runs in-process,
     # constructs no executor or provider, and stays out of the default/domain cohort.
-    "nexus-orchestration/simulate",
+    "dep:nexus-workflow-simulate",
     "dep:nexus-provider-ports",
     "dep:graph-flow",
     "dep:tokio-util",
@@ -129,6 +129,8 @@ nexus-session-storage = { path = "../nexus-session-storage", optional = true }
 # Pattern registry reader + the candidate IR the Simulate walk reads.
 nexus-pattern = { path = "../nexus-pattern" }
 nexus-workflow-ir = { path = "../nexus-workflow-ir" }
+# The private pure walk the Simulate route and Approve/Import evidence bind to.
+nexus-workflow-simulate = { path = "../nexus-workflow-simulate", optional = true }
 # v1.229 N3 Task 1: the remote memory client's transport edges — the WS
 # transport speaks the spoke remote-adapter Transport, tungstenite is the
 # bounded WS wire. Nothing else in core links them.

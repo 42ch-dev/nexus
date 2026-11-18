@@ -22,10 +22,9 @@ use nexus_workflow_ir::{content_hash, WorkflowDocument, WorkflowDocumentState};
 use sqlx::SqlitePool;
 
 #[cfg(feature = "execution")]
-use nexus_capability::CapabilityRegistryHolder;
-#[cfg(feature = "execution")]
 use nexus_contracts::SimulationTrajectory;
-use nexus_orchestration::{simulate_document, SimulationOptions};
+#[cfg(feature = "execution")]
+use nexus_workflow_simulate::simulate_document;
 
 use crate::error::local_db_err;
 use crate::{
@@ -499,13 +498,7 @@ impl CoreService {
         if let Some(refusal) = crate::approve::structural_refusal(&document, &packages) {
             return Err(import_invalid(refusal).into_error());
         }
-        let trajectory = simulate_document(
-            &document,
-            &SimulationOptions {
-                capabilities: CapabilityRegistryHolder::new(),
-            },
-        )
-        .map_err(|error| {
+        let trajectory = simulate_document(&document).map_err(|error| {
             PresetImportRefusal::SimulationUnavailable {
                 reason: error.to_string(),
             }

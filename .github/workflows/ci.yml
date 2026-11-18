@@ -840,19 +840,19 @@ jobs:
       - name: Run sample self-check (preset.yaml equals its workflow.json export)
         if: matrix.group == 'orchestration-core'
         run: cargo test -p nexus-orchestration --test sample_self_check
-      # I-000475: the preset round trips, the Simulate unit walk, the IR/YAML projection
+      # I-000475: the preset round trips, the private pure walk, the IR/YAML projection
       # parity proofs and both embedded-preset trajectories never ran in CI, so their green
-      # was local-only. The `simulate` feature is not in `Run tests`' package set, and
-      # `--lib simulation::` / `--lib ...parity` select zero tests when the feature is off,
-      # so every invocation here is feature-explicit. Measured 40s warm locally.
+      # was local-only. The SIMULATION CHECKS: the walk is now its own private crate (no
+      # feature gate on `nexus-orchestration`), and `--lib ...parity` selects zero tests
+      # without the targets named here. Measured 40s warm locally.
       - name: Run preset simulation and projection suites
         if: matrix.group == 'orchestration-core'
         timeout-minutes: 10
         run: |
           cargo test -p nexus-preset
-          cargo test -p nexus-orchestration --features simulate --lib simulation::
-          cargo test -p nexus-orchestration --features simulate --lib preset_runtime::tests::parity
-          cargo test -p nexus-orchestration --features simulate --test embedded_preset_trajectory --test sample_trajectory
+          cargo test -p nexus-workflow-simulate --lib
+          cargo test -p nexus-orchestration --lib preset_runtime::tests::parity
+          cargo test -p nexus-orchestration --test embedded_preset_trajectory --test sample_trajectory
       - name: Run tests
         run: cargo test ${{ matrix.packages }}
 

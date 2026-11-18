@@ -17,9 +17,6 @@ pub mod quality_loop;
 pub mod resume_rules;
 pub mod review_report;
 pub mod schedule;
-/// Static Simulate (feature `simulate`): reachability walk over a candidate IR.
-#[cfg(feature = "simulate")]
-pub mod simulation;
 pub mod skill_link;
 pub mod skill_sync;
 pub mod stage_gates;
@@ -31,8 +28,6 @@ pub use engine::{
     ChildSessionParams, EngineError, FailedStepWitness, FailurePersistenceDisposition,
     FailureSettlement, FailureSettlementSummary, GraphFlowEngine, OrchestrationEngine,
 };
-#[cfg(feature = "simulate")]
-pub use simulation::{simulate_document, SimulationError, SimulationOptions};
 pub use stage_gates::{
     build_preset_input, build_stage_schedule_label, preset_for_stage, WorkFields,
 };
