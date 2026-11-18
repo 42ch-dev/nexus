@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, posix } from "node:path";
 import { test } from "node:test";
-import { dirname, posix } from "node:path";
 import {
   PACKAGE_RELEASE_LABEL,
   planPackageRelease,
@@ -16,7 +17,9 @@ import {
   cleanupTempRepo,
   createTempRepo,
   initGitRepo,
+  mutateRepoFile,
   readRepoFile,
+  removeRepoFile,
   runReleaseScript,
   writeRepoFile,
 } from "./test-harness.mjs";
@@ -39,47 +42,73 @@ const CONTRACTS_PUBLISHED = { name: "nexus-contracts", version: "9.8.7", checksu
 const CHANGELOG = "# Changelog\n\n## [Unreleased]\n\n### Features\n- **test**: fixture entry\n";
 
 /**
- * Temp repo with the release surfaces, a changelog per inventory package and a
- * commit, so provenance is the fixture's own HEAD.
+ * A preload that denies the network at the JS module surface, so a CLI run can
+ * be observed rather than string-scanned.
+ */
+const DENY_NETWORK_PRELOAD = `
+import net from "node:net";
+import tls from "node:tls";
+import http from "node:http";
+import https from "node:https";
+import dns from "node:dns";
+const denied = (name) => () => {
+  throw new Error("network denied: " + name);
+};
+net.connect = net.createConnection = denied("net.connect");
+tls.connect = denied("tls.connect");
+http.request = http.get = denied("http.request");
+https.request = https.get = denied("https.request");
+dns.lookup = dns.resolve = denied("dns");
+globalThis.fetch = async () => {
+  throw new Error("network denied: fetch");
+};
+`;
+
+/**
+ * Temp repo with the release surfaces, a changelog per inventory package, the
+ * caller's mutations, then one commit — so provenance is the fixture's own HEAD
+ * and the tree is clean.
  *
- * @param {{ version?: string; files?: Record<string, string> }} [options]
+ * @param {{ version?: string; files?: Record<string, string>; mutate?: (dir: string) => void }} [options]
  * @returns {{ dir: string; sha: string }}
  */
 function fixture(options = {}) {
-  const dir = createTempRepo(options);
+  const dir = createTempRepo({ version: options.version, files: options.files });
   for (const entry of readVersionBrackets(dir)) {
     writeRepoFile(dir, posix.join(posix.dirname(entry.manifest), "CHANGELOG.md"), CHANGELOG);
   }
-  for (const [path, contents] of Object.entries(options.files ?? {})) {
-    writeRepoFile(dir, path, contents);
-  }
+  options.mutate?.(dir);
   return { dir, sha: initGitRepo(dir) };
 }
 
 /**
- * Verifier evidence for the packages named, all verified at `sha`.
+ * Packageability evidence in the shape `check-contract-packageability.mjs
+ * --json` prints.
  *
  * @param {string} sha
  * @param {{ name: string; version: string; checksum?: string }[]} rows
+ * @param {{ clean?: boolean }} [source]
  */
-function evidence(sha, rows) {
+function evidence(sha, rows, source = {}) {
   return {
-    sourceSha: sha,
+    ok: true,
+    source: { sha, clean: source.clean ?? true },
     results: rows.map((row) => ({
       name: row.name,
       ok: true,
       archive: { sha256: row.checksum ?? "a".repeat(64) },
       package: { version: row.version },
     })),
+    firstFailure: null,
   };
 }
 
 /**
  * Isolated publication protocol fixture: the only `publishSelected` client any
- * test uses. It records uploads, can refuse one name, and deliberately has no
- * withdraw/yank operation.
+ * test uses. It records uploads, can refuse an upload or a confirmation read,
+ * and deliberately has no withdraw/yank operation.
  */
-function fixtureRegistry({ published = [], refuse } = {}) {
+function fixtureRegistry({ published = [], refuse, readFailure } = {}) {
   const rows = [...published];
   const uploads = [];
   return {
@@ -93,8 +122,34 @@ function fixtureRegistry({ published = [], refuse } = {}) {
       uploads.push(`${entry.name}@${entry.version}`);
     },
     async read(name, version) {
+      if (readFailure?.name === name) {
+        if (readFailure.mode === "throw") {
+          throw new Error("registry read timed out");
+        }
+        return { checksum: "f".repeat(64) };
+      }
       return rows.find((row) => row.name === name && row.version === version) ?? null;
     },
+  };
+}
+
+/**
+ * Run one Node script directly, for the denial negative control.
+ *
+ * @param {string} scriptPath
+ * @param {string} cwd
+ * @param {Record<string, string>} env
+ */
+function spawnNode(scriptPath, cwd, env) {
+  const result = spawnSync(process.execPath, [scriptPath], {
+    cwd,
+    env: { ...process.env, ...env },
+    encoding: "utf8",
+  });
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
   };
 }
 
@@ -104,6 +159,14 @@ function fixtureRegistry({ published = [], refuse } = {}) {
  */
 function refusalCodes(plan) {
   return plan.refusals.map((refusal) => refusal.code);
+}
+
+/**
+ * @param {ReturnType<typeof planPackageRelease>} plan
+ * @returns {string[]}
+ */
+function blockerCodes(plan) {
+  return plan.blockers.map((blocker) => blocker.code);
 }
 
 test("package tags and labels stay out of the product v* namespace", () => {
@@ -137,12 +200,17 @@ test("dependency order precedes consumers and ignores the caller's order", () =>
     assert.ok(index("nexus-workflow-ir") < index("nexus-pattern"));
     assert.ok(index("nexus-knowledge") < index("nexus-narrative"));
     assert.ok(index("nexus-module-sdk") < index("nexus-module-test"));
-    // module-manifest has no inventory dependency; it is bound to no consumer.
     assert.ok(index("nexus-module-manifest") >= 0);
     for (const row of plan.packages) {
       assert.equal(row.tag, `crate/${row.name}/v${row.version}`);
       assert.equal(row.version, "9.8.7");
     }
+    // A valid plan is not a publishable one: no registry view and no archive
+    // evidence leave every row blocked, and the reason says so.
+    assert.equal(plan.ok, true);
+    assert.equal(plan.ready, false);
+    assert.ok(blockerCodes(plan).includes("archive-unverified"));
+    assert.match(plan.packages[0].reason, /registry state unknown/);
   } finally {
     cleanupTempRepo(dir);
   }
@@ -157,6 +225,7 @@ test("unknown selection, wrong registry and malformed source refuse", () => {
       registry: "crates.io",
     });
     assert.equal(plan.ok, false);
+    assert.equal(plan.ready, false);
     assert.deepEqual(refusalCodes(plan).sort(), [
       "invalid-source",
       "unclean-source",
@@ -169,10 +238,56 @@ test("unknown selection, wrong registry and malformed source refuse", () => {
   }
 });
 
-test("a prerequisite that is neither selected nor published refuses", () => {
-  const { dir, sha } = fixture();
+test("an incompatible selected prerequisite refuses instead of passing", () => {
+  const { dir, sha } = fixture({
+    mutate: (root) =>
+      mutateRepoFile(root, "crates/nexus-narrative/Cargo.toml", (contents) =>
+        contents.replace('nexus-knowledge = { version = "9.8.7"', 'nexus-knowledge = { version = "9.9.0"'),
+      ),
+  });
   try {
     const plan = planPackageRelease(dir, {
+      packages: ["nexus-knowledge", "nexus-narrative"],
+      sourceSha: sha,
+      registry: "crates-io",
+    });
+    assert.equal(plan.ok, false);
+    assert.equal(plan.ready, false);
+    assert.ok(refusalCodes(plan).includes("incompatible-prerequisite"));
+    assert.match(
+      plan.refusals.find((refusal) => refusal.code === "incompatible-prerequisite").message,
+      /requires nexus-knowledge 9\.9\.0, but the selected nexus-knowledge is 9\.8\.7/,
+    );
+    const narrative = plan.packages.find((row) => row.name === "nexus-narrative");
+    assert.equal(
+      narrative.prerequisites.find((row) => row.name === "nexus-knowledge").resolved,
+      "incompatible",
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("an unverified or absent prerequisite blocks publication", async () => {
+  const { dir, sha } = fixture();
+  try {
+    const onlyPattern = planPackageRelease(dir, {
+      packages: ["nexus-pattern"],
+      sourceSha: sha,
+      registry: "crates-io",
+    });
+    assert.equal(onlyPattern.ok, true);
+    assert.equal(onlyPattern.ready, false);
+    assert.ok(blockerCodes(onlyPattern).includes("prerequisite-unverified"));
+    assert.ok(
+      onlyPattern.packages[0].prerequisites.every((row) => row.resolved === "unverified"),
+    );
+    const blocked = await publishSelected(onlyPattern, fixtureRegistry());
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.refusals[0].code, "not-ready");
+    assert.deepEqual(blocked.pending, ["nexus-pattern@9.8.7"]);
+
+    const known = planPackageRelease(dir, {
       packages: ["nexus-pattern"],
       sourceSha: sha,
       registry: {
@@ -180,21 +295,10 @@ test("a prerequisite that is neither selected nor published refuses", () => {
         published: [{ name: "nexus-contracts", version: "9.8.7", checksum: "b".repeat(64) }],
       },
     });
-    assert.equal(plan.ok, false);
-    assert.deepEqual(refusalCodes(plan), ["unmet-prerequisite"]);
-    assert.match(plan.refusals[0].message, /nexus-workflow-ir/);
-    assert.ok(plan.packages[0].prerequisites.some((row) => row.resolved === "missing"));
-
-    // An unknown registry view may not claim either way: the prerequisite
-    // stays unverified instead of inventing absence.
-    const unknown = planPackageRelease(dir, {
-      packages: ["nexus-pattern"],
-      sourceSha: sha,
-      registry: "crates-io",
-    });
-    assert.equal(unknown.ok, true);
-    assert.deepEqual(unknown.pending, ["nexus-pattern@9.8.7"]);
-    assert.ok(unknown.packages[0].prerequisites.every((row) => row.resolved !== "missing"));
+    assert.equal(known.ok, false);
+    assert.deepEqual(refusalCodes(known), ["unmet-prerequisite"]);
+    assert.match(known.refusals[0].message, /nexus-workflow-ir/);
+    assert.ok(known.packages[0].prerequisites.some((row) => row.resolved === "missing"));
   } finally {
     cleanupTempRepo(dir);
   }
@@ -218,34 +322,51 @@ test("a selected version older than the registry refuses as out of order", () =>
   }
 });
 
-test("unclean selected inputs and a source mismatch refuse", () => {
+test("any uncommitted source, an unreadable checkout and a wrong source refuse", () => {
   const { dir, sha } = fixture();
   try {
-    writeRepoFile(dir, "crates/nexus-knowledge/CHANGELOG.md", `${CHANGELOG}\n- **test**: dirty\n`);
-    const plan = planPackageRelease(dir, {
+    // A crate outside the selection still feeds the packed archives.
+    mutateRepoFile(dir, "crates/nexus-core/src/lib.rs", (contents) => `${contents}\n// local edit\n`);
+    const dirty = planPackageRelease(dir, {
       packages: ["nexus-knowledge"],
       sourceSha: sha,
       registry: "crates-io",
     });
-    assert.equal(plan.ok, false);
-    assert.deepEqual(refusalCodes(plan), ["unclean-provenance"]);
-    assert.match(plan.refusals[0].message, /crates\/nexus-knowledge\/CHANGELOG\.md/);
+    assert.equal(dirty.ok, false);
+    assert.deepEqual(refusalCodes(dirty), ["unclean-provenance"]);
+    assert.match(dirty.refusals[0].message, /crates\/nexus-core\/src\/lib\.rs/);
 
     const committed = initGitRepo(dir);
-    const mismatched = planPackageRelease(dir, {
+    const wrongSource = planPackageRelease(dir, {
       packages: ["nexus-knowledge"],
       sourceSha: sha,
       registry: "crates-io",
     });
-    assert.equal(mismatched.ok, false);
-    assert.deepEqual(refusalCodes(mismatched), ["unclean-source"]);
-    assert.equal(readSourceProvenance(dir, ["crates/nexus-knowledge/Cargo.toml"]).sha, committed);
+    assert.deepEqual(refusalCodes(wrongSource), ["unclean-source"]);
+    assert.equal(readSourceProvenance(dir).sha, committed);
+    assert.deepEqual(readSourceProvenance(dir).dirty, []);
   } finally {
     cleanupTempRepo(dir);
   }
 });
 
-test("archive evidence from another source or version refuses", () => {
+test("a checkout whose status cannot be read refuses instead of failing open", () => {
+  const dir = createTempRepo();
+  try {
+    const plan = planPackageRelease(dir, {
+      packages: ["nexus-knowledge"],
+      sourceSha: "0".repeat(40),
+      registry: "crates-io",
+    });
+    assert.equal(plan.ok, false);
+    assert.deepEqual(refusalCodes(plan), ["source-unreadable"]);
+    assert.match(plan.refusals[0].message, /cannot read HEAD/);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("archive evidence must come from the reviewed clean revision", () => {
   const { dir, sha } = fixture();
   try {
     const otherSource = planPackageRelease(dir, {
@@ -257,6 +378,22 @@ test("archive evidence from another source or version refuses", () => {
       ]),
     });
     assert.deepEqual(refusalCodes(otherSource), ["source-mismatch"]);
+
+    const unclean = planPackageRelease(dir, {
+      packages: ["nexus-knowledge"],
+      sourceSha: sha,
+      registry: "crates-io",
+      evidence: evidence(sha, [{ name: "nexus-knowledge", version: "9.8.7" }], { clean: false }),
+    });
+    assert.deepEqual(refusalCodes(unclean), ["unclean-evidence"]);
+
+    const unreadable = planPackageRelease(dir, {
+      packages: ["nexus-knowledge"],
+      sourceSha: sha,
+      registry: "crates-io",
+      evidence: { ok: true, source: { sha, clean: true } },
+    });
+    assert.deepEqual(refusalCodes(unreadable), ["evidence-unreadable"]);
 
     const otherVersion = planPackageRelease(dir, {
       packages: ["nexus-knowledge"],
@@ -287,6 +424,7 @@ test("content match skips, mismatched or unmatched content refuses", () => {
     assert.deepEqual(refusalCodes(accepted), []);
     assert.deepEqual(accepted.completed, ["nexus-knowledge@9.8.7"]);
     assert.deepEqual(accepted.pending, []);
+    assert.equal(accepted.ready, true);
 
     const mismatched = planPackageRelease(dir, {
       packages: ["nexus-knowledge"],
@@ -322,6 +460,7 @@ test("a read-only registry refuses pending uploads as a permission failure", () 
       packages: ["nexus-knowledge"],
       sourceSha: sha,
       registry: { name: "crates-io", published: [CONTRACTS_PUBLISHED], writable: false },
+      evidence: evidence(sha, [{ name: "nexus-knowledge", version: "9.8.7" }]),
     });
     assert.equal(plan.ok, false);
     assert.deepEqual(refusalCodes(plan), ["permissions"]);
@@ -347,6 +486,7 @@ test("publication stops on the first failure and resume skips matched content", 
       evidence: evidence(sha, rows),
     });
     assert.deepEqual(refusalCodes(plan), []);
+    assert.equal(plan.ready, true);
     assert.deepEqual(plan.pending, ["nexus-knowledge@9.8.7", "nexus-narrative@9.8.7"]);
 
     const client = fixtureRegistry({ published: prepublished, refuse: "nexus-narrative" });
@@ -367,7 +507,7 @@ test("publication stops on the first failure and resume skips matched content", 
     });
     assert.deepEqual(resumed.completed, ["nexus-knowledge@9.8.7"]);
     assert.deepEqual(resumed.pending, ["nexus-narrative@9.8.7"]);
-    client.rows.splice(client.rows.findIndex((row) => row.name === "nexus-narrative"), 1);
+    assert.equal(resumed.ready, true);
     const retried = fixtureRegistry({ published: client.rows });
     const finished = await publishSelected(resumed, retried);
     assert.equal(finished.ok, true);
@@ -378,7 +518,48 @@ test("publication stops on the first failure and resume skips matched content", 
   }
 });
 
-test("publication refuses a plan that did not pass and an entry without an archive", async () => {
+test("an unconfirmed upload stays pending and keeps the completed report", async () => {
+  const { dir, sha } = fixture();
+  try {
+    const rows = [
+      { name: "nexus-contracts", version: "9.8.7" },
+      { name: "nexus-knowledge", version: "9.8.7" },
+      { name: "nexus-narrative", version: "9.8.7" },
+    ];
+    const prepublished = [CONTRACTS_PUBLISHED];
+    const plan = planPackageRelease(dir, {
+      packages: ["nexus-knowledge", "nexus-narrative"],
+      sourceSha: sha,
+      registry: { name: "crates-io", published: prepublished, writable: true },
+      evidence: evidence(sha, rows),
+    });
+    assert.equal(plan.ready, true);
+
+    // The confirmation read throws after the upload landed.
+    const throwing = fixtureRegistry({ published: prepublished, readFailure: { name: "nexus-knowledge", mode: "throw" } });
+    const thrown = await publishSelected(plan, throwing);
+    assert.equal(thrown.ok, false);
+    assert.deepEqual(thrown.completed, []);
+    assert.deepEqual(thrown.pending, ["nexus-knowledge@9.8.7", "nexus-narrative@9.8.7"]);
+    assert.equal(thrown.failed, "nexus-knowledge@9.8.7");
+    assert.equal(thrown.refusals[0].code, "upload-unconfirmed");
+    assert.match(thrown.refusals[0].message, /confirmation read failed/);
+
+    // The read answers, but not with the reviewed content.
+    const mismatched = fixtureRegistry({ published: prepublished, readFailure: { name: "nexus-narrative", mode: "mismatch" } });
+    const wrong = await publishSelected(plan, mismatched);
+    assert.equal(wrong.ok, false);
+    assert.deepEqual(wrong.completed, ["nexus-knowledge@9.8.7"]);
+    assert.deepEqual(wrong.pending, ["nexus-narrative@9.8.7"]);
+    assert.equal(wrong.failed, "nexus-narrative@9.8.7");
+    assert.equal(wrong.refusals[0].code, "upload-unconfirmed");
+    assert.match(wrong.refusals[0].message, /expected a{64}/);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("publication refuses a refused plan and a plan that is not ready", async () => {
   const { dir, sha } = fixture();
   try {
     const refused = planPackageRelease(dir, {
@@ -390,15 +571,15 @@ test("publication refuses a plan that did not pass and an entry without an archi
     assert.equal(blocked.ok, false);
     assert.equal(blocked.refusals[0].code, "unknown-selection");
 
-    const noArchive = planPackageRelease(dir, {
+    const notReady = planPackageRelease(dir, {
       packages: ["nexus-knowledge"],
       sourceSha: sha,
       registry: "crates-io",
     });
     const client = fixtureRegistry();
-    const missing = await publishSelected(noArchive, client);
-    assert.equal(missing.ok, false);
-    assert.equal(missing.refusals[0].code, "missing-archive");
+    const unready = await publishSelected(notReady, client);
+    assert.equal(unready.ok, false);
+    assert.equal(unready.refusals[0].code, "not-ready");
     assert.deepEqual(client.uploads, []);
   } finally {
     cleanupTempRepo(dir);
@@ -448,7 +629,7 @@ test("preparation writes only selected literals, dependency bounds and changelog
   }
 });
 
-test("preparation refuses non-increasing versions and a package without a changelog", () => {
+test("preparation refuses a non-increasing version and a missing changelog", () => {
   const { dir } = fixture({ version: "0.4.2" });
   try {
     const notGreater = preparePackageVersions(dir, {
@@ -465,55 +646,16 @@ test("preparation refuses non-increasing versions and a package without a change
     });
     assert.deepEqual(unknown.refusals.map((row) => row.code), ["unknown-selection"]);
 
+    const before = readRepoFile(dir, "crates/nexus-knowledge/Cargo.toml");
+    removeRepoFile(dir, "crates/nexus-knowledge/CHANGELOG.md");
     const missing = preparePackageVersions(dir, {
       packages: ["nexus-knowledge"],
       versions: { "nexus-knowledge": "0.5.0" },
     });
-    assert.equal(missing.ok, true);
-    assert.match(readRepoFile(dir, "crates/nexus-knowledge/CHANGELOG.md"), /## \[0\.5\.0\]/);
-  } finally {
-    cleanupTempRepo(dir);
-  }
-});
-
-test("check-only CLI plans offline from the reviewed source", () => {
-  const { dir, sha } = fixture();
-  try {
-    const run = runReleaseScript(
-      "release-packages.mjs",
-      [
-        "--check-only",
-        "--source",
-        sha,
-        "--packages",
-        "nexus-pattern,nexus-knowledge,nexus-narrative",
-        "--registry",
-        "crates-io",
-      ],
-      dir,
-      { env: { CARGO_REGISTRY_TOKEN: "" } },
-    );
-    assert.equal(run.status, 0, run.stderr);
-    assert.match(run.stdout, /archive evidence absent/);
-    assert.match(run.stdout, /order {5}nexus-pattern, nexus-knowledge, nexus-narrative/);
-    assert.match(run.stdout, /pending {3}nexus-pattern@9\.8\.7, nexus-knowledge@9\.8\.7, nexus-narrative@9\.8\.7/);
-    assert.match(run.stdout, /credentials unconfigured/);
-
-    const unknown = runReleaseScript(
-      "release-packages.mjs",
-      ["--check-only", "--source", sha, "--packages", "nexus-core", "--registry", "crates-io"],
-      dir,
-    );
-    assert.equal(unknown.status, 1);
-    assert.match(unknown.stderr, /refused: unknown-selection/);
-
-    const usage = runReleaseScript(
-      "release-packages.mjs",
-      ["--check-only", "--packages", "nexus-knowledge", "--registry", "crates-io"],
-      dir,
-    );
-    assert.equal(usage.status, 2);
-    assert.match(usage.stderr, /--source is required/);
+    assert.equal(missing.ok, false);
+    assert.deepEqual(missing.refusals.map((row) => row.code), ["changelog-missing"]);
+    assert.deepEqual(missing.changed, []);
+    assert.equal(readRepoFile(dir, "crates/nexus-knowledge/Cargo.toml"), before);
   } finally {
     cleanupTempRepo(dir);
   }
@@ -530,7 +672,10 @@ test("prepare CLI applies the selection and leaves product files alone", () => {
     );
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /modules\/nexus-module-sdk\/Cargo\.toml/);
-    assert.equal(readRepoFile(dir, "modules/nexus-module-sdk/CHANGELOG.md").includes("## [0.4.3] - "), true);
+    assert.equal(
+      readRepoFile(dir, "modules/nexus-module-sdk/CHANGELOG.md").includes("## [0.4.3] - "),
+      true,
+    );
     PRODUCT_FILES.forEach((path, index) => {
       assert.equal(readRepoFile(dir, path), productBefore[index], `${path} must not change`);
     });
@@ -539,17 +684,168 @@ test("prepare CLI applies the selection and leaves product files alone", () => {
   }
 });
 
-test("the helper holds no registry client, credential or network path", () => {
-  const source = readFileSync(join(dirname(new URL(import.meta.url).pathname), "release-packages.mjs"), "utf8");
-  for (const token of [
-    "node:http",
-    "node:https",
-    "node:net",
-    "fetch(",
-    "CARGO_REGISTRY_TOKEN",
-    "cargo",
-    "git push",
-  ]) {
-    assert.equal(source.includes(token), false, `release-packages.mjs must not contain "${token}"`);
+test("check-only CLI plans from the reviewed source and exits on readiness", () => {
+  const { dir, sha } = fixture();
+  const scratch = mkdtempSync(join(tmpdir(), "nexus-release-cli-"));
+  try {
+    const planned = runReleaseScript(
+      "release-packages.mjs",
+      [
+        "--check-only",
+        "--source",
+        sha,
+        "--packages",
+        "nexus-pattern,nexus-knowledge,nexus-narrative",
+        "--registry",
+        "crates-io",
+      ],
+      dir,
+      { env: { CARGO_REGISTRY_TOKEN: "" } },
+    );
+    assert.equal(planned.status, 1, planned.stderr);
+    assert.match(planned.stdout, /archive evidence absent/);
+    assert.match(planned.stdout, /order {5}nexus-pattern, nexus-knowledge, nexus-narrative/);
+    assert.match(planned.stdout, /ready {5}no/);
+    assert.match(planned.stdout, /prerequisite-unverified/);
+    assert.match(planned.stdout, /credentials unconfigured/);
+
+    // The operator route for exact-match resume: registry state plus the
+    // checker's JSON report, both outside the packed tree.
+    const statePath = join(scratch, "registry-state.json");
+    writeFileSync(
+      statePath,
+      JSON.stringify({ published: [CONTRACTS_PUBLISHED], writable: true }),
+      "utf8",
+    );
+    const evidencePath = join(scratch, "evidence.json");
+    writeFileSync(
+      evidencePath,
+      JSON.stringify(
+        evidence(sha, [
+          { name: "nexus-knowledge", version: "9.8.7" },
+          { name: "nexus-narrative", version: "9.8.7" },
+        ]),
+      ),
+      "utf8",
+    );
+    const ready = runReleaseScript(
+      "release-packages.mjs",
+      [
+        "--check-only",
+        "--source",
+        sha,
+        "--packages",
+        "nexus-knowledge,nexus-narrative",
+        "--registry",
+        "crates-io",
+        "--registry-state",
+        statePath,
+        "--archive-evidence",
+        evidencePath,
+      ],
+      dir,
+    );
+    assert.equal(ready.status, 0, ready.stderr);
+    assert.match(ready.stdout, /ready {5}yes/);
+    assert.match(ready.stdout, /pending {3}nexus-knowledge@9\.8\.7, nexus-narrative@9\.8\.7/);
+
+    const unknown = runReleaseScript(
+      "release-packages.mjs",
+      ["--check-only", "--source", sha, "--packages", "nexus-core", "--registry", "crates-io"],
+      dir,
+    );
+    assert.equal(unknown.status, 1);
+    assert.match(unknown.stderr, /refused: unknown-selection/);
+
+    const usage = runReleaseScript(
+      "release-packages.mjs",
+      ["--check-only", "--packages", "nexus-knowledge", "--registry", "crates-io"],
+      dir,
+    );
+    assert.equal(usage.status, 2);
+    assert.match(usage.stderr, /--source is required/);
+
+    const brokenEvidence = runReleaseScript(
+      "release-packages.mjs",
+      [
+        "--check-only",
+        "--source",
+        sha,
+        "--packages",
+        "nexus-knowledge",
+        "--registry",
+        "crates-io",
+        "--archive-evidence",
+        join(scratch, "missing.json"),
+      ],
+      dir,
+    );
+    assert.equal(brokenEvidence.status, 2);
+    assert.match(brokenEvidence.stderr, /--archive-evidence .*unusable/);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+    cleanupTempRepo(dir);
+  }
+});
+
+test("the supported CLI paths run with the network denied, and the denial is real", () => {
+  const { dir, sha } = fixture();
+  const scratch = mkdtempSync(join(tmpdir(), "nexus-release-net-"));
+  try {
+    const preload = join(scratch, "deny-network.mjs");
+    writeFileSync(preload, DENY_NETWORK_PRELOAD, "utf8");
+    const env = { NODE_OPTIONS: `--import ${preload}` };
+
+    // Negative control: without this, a passing denied run would prove nothing.
+    const probe = join(scratch, "probe.mjs");
+    writeFileSync(
+      probe,
+      'try {\n  await fetch("http://127.0.0.1:9/");\n  console.log("NETWORK-REACHABLE");\n} catch (error) {\n  console.log(`denied: ${error.message}`);\n  process.exit(1);\n}\n',
+      "utf8",
+    );
+    const probeRun = spawnNode(probe, dir, env);
+    assert.equal(probeRun.status, 1);
+    assert.match(probeRun.stdout, /denied: network denied: fetch/);
+
+    const statePath = join(scratch, "registry-state.json");
+    writeFileSync(statePath, JSON.stringify({ published: [CONTRACTS_PUBLISHED], writable: true }), "utf8");
+    const evidencePath = join(scratch, "evidence.json");
+    writeFileSync(
+      evidencePath,
+      JSON.stringify(evidence(sha, [{ name: "nexus-knowledge", version: "9.8.7" }])),
+      "utf8",
+    );
+    const planned = runReleaseScript(
+      "release-packages.mjs",
+      [
+        "--check-only",
+        "--source",
+        sha,
+        "--packages",
+        "nexus-knowledge",
+        "--registry",
+        "crates-io",
+        "--registry-state",
+        statePath,
+        "--archive-evidence",
+        evidencePath,
+      ],
+      dir,
+      { env },
+    );
+    assert.equal(planned.status, 0, planned.stderr);
+    assert.match(planned.stdout, /ready {5}yes/);
+
+    const withoutState = runReleaseScript(
+      "release-packages.mjs",
+      ["--check-only", "--source", sha, "--packages", "nexus-knowledge", "--registry", "crates-io"],
+      dir,
+      { env },
+    );
+    assert.equal(withoutState.status, 1, withoutState.stderr);
+    assert.match(withoutState.stdout, /ready {5}no/);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+    cleanupTempRepo(dir);
   }
 });

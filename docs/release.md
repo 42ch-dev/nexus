@@ -463,31 +463,67 @@ node tooling/release/release-packages.mjs --check-only \
   --registry crates-io
 ```
 
-`--source` is the reviewed full commit sha and must equal `HEAD`; a selected
-manifest or changelog with an uncommitted change refuses as unclean
-provenance. `.github/workflows/contract-release.yml` is the manual entry: it
-checks out the given sha and runs the same plan. It requests `contents: read`,
-reads no secret and has no publish step.
+`--source` is the reviewed full commit sha and must equal `HEAD`, and the whole
+worktree must carry no uncommitted change — the packageability checker packs the
+working tree, so a modified crate source or an untracked file anywhere can
+change archive bytes, dependency edges or ordering. Only a clean tree at that
+revision lets the archive hashes be attributed to it.
+
+The plan separates *valid* from *publishable*: `ok` means no refusal, `ready`
+additionally means every prerequisite has a satisfying selected or
+known-published version and every pending row has a verified archive. The plan
+exits `0` only when it is ready, `1` for a refusal or a blocker, `2` for a usage
+error, and it prints a `ready` line with one line per blocker.
+
+The archive side comes from the packageability checker:
+
+```sh
+node tooling/release/check-contract-packageability.mjs --json > /tmp/evidence.json
+node tooling/release/release-packages.mjs --check-only \
+  --source "$(git rev-parse HEAD)" \
+  --packages nexus-knowledge,nexus-narrative --registry crates-io \
+  --registry-state /tmp/registry-state.json --archive-evidence /tmp/evidence.json
+```
+
+`--json` prints the same report as JSON and changes nothing about the human
+output or the exit code. It records the revision it packed and whether that tree
+was clean (`source.sha`, `source.clean`), so the plan can bind the archive
+hashes to the reviewed revision instead of trusting a label. What that proves is
+exactly this: the hashes were produced from a clean tree at that commit. It does
+not prove who ran the checker, and it does not prove registry state.
+
+`--registry-state <json>` takes `{ "published": [{ "name", "version",
+"checksum" }], "writable": true }`. Without it, live registry state is *unknown*:
+every selected package is reported `pending` with the reason `registry state
+unknown; content not matched`, no registry claim is made, and prerequisites stay
+`unverified`, which blocks publication rather than assuming absence.
+
+`.github/workflows/contract-release.yml` is the manual entry: it checks out the
+given sha and runs the same plan. It requests `contents: read`, reads no secret,
+has no publish step, and passes its dispatch inputs as environment variables so
+an input can never reach the shell as code.
 
 What the plan refuses, and why:
 
 | Refusal | Meaning |
 |---------|---------|
 | `unknown-selection` | a name outside the eight-entry inventory |
-| `unclean-source` / `unclean-provenance` | `--source` is not `HEAD`, or a selected input has uncommitted changes |
+| `invalid-source` | `--source` is not a full 40-hex commit sha |
+| `source-unreadable` | the checkout or its status could not be read (fail closed, never "clean") |
+| `unclean-source` / `unclean-provenance` | `--source` is not `HEAD`, or any file in the packed tree is uncommitted |
+| `source-mismatch` / `unclean-evidence` / `evidence-unreadable` | the archive evidence was packed from another revision, from a dirty tree, or is not a checker report |
 | `version-inherited` | a selected package inherits the workspace version instead of its own literal |
 | `unversioned-dependency` | a package relationship has no registry requirement |
+| `incompatible-prerequisite` | a *selected* prerequisite's version does not satisfy its consumer's requirement |
 | `unmet-prerequisite` | a prerequisite is neither selected nor present at the registry at a satisfying version |
 | `stale-version` | the registry already carries a greater version than the manifest |
 | `content-mismatch` / `content-unverified` | the published archive differs from the reviewed one, or cannot be compared without archive evidence |
 | `permissions` | the registry view declares the selection read-only |
+| `not-ready` | publication was attempted on a plan whose blockers were unresolved |
 
-Add `--registry-state <json>` with `{ "published": [{ "name", "version",
-"checksum" }], "writable": true }` to let the plan content-match against known
-registry rows. Without it, live registry state is *unknown*: every selected
-package is reported pending and no registry claim is made. Archive checksums
-come from the packageability report (`checkContractPackageability`), which is
-why the plan cannot skip an already-published version on its own.
+Blockers (not refusals) name what still stands between a valid plan and an
+upload: `prerequisite-unverified` (registry state unknown for an unselected
+prerequisite) and `archive-unverified` (a pending row has no verified archive).
 
 ### Publish (operator action, currently unconfigured)
 
@@ -507,7 +543,13 @@ registry checksum, and stops at the first failure. A multi-package upload is
 - nothing is withdrawn or yanked automatically — a bad archive is not repaired
   by deleting a version;
 - a resume re-plans against the registry and skips only pairs whose published
-  checksum matches the reviewed archive byte for byte.
+  checksum matches the reviewed archive byte for byte;
+- an upload whose confirmation read fails, or whose read reports a different
+  checksum, stays **pending** — its outcome is unknown, so only a new plan's
+  exact content match may treat it as done.
+
+Every outcome carries the full completed/pending split, so an interrupted run
+can be reported honestly and re-entered from the registry state.
 
 ### Prepare versions
 
@@ -525,7 +567,13 @@ that would no longer accept those versions, and the selected changelogs (the
 `## [Unreleased]` section becomes `## [<version>] - <date>`, with a fresh empty
 `## [Unreleased]` above it). Product version surfaces, lockfiles and unrelated
 packages are untouched; a target version that is not strictly greater than the
-current literal refuses.
+current literal refuses, and so does a selected package without a changelog.
+
+Preparation does not rewrite lockfiles: they are generated. The same pull request
+must let Cargo regenerate the affected locks — `cargo update --workspace
+--offline` for the root and the standalone `modules/*` roots whose dependents
+resolve the bumped package — or a `--locked` build rejects the prepared
+checkout.
 
 ## Signing arrival
 

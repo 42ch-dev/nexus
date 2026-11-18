@@ -50,9 +50,17 @@ jobs:
         with:
           node-version: 24
       - name: Plan release from the reviewed source
+        # Dispatch inputs reach the shell as environment variables, never as
+        # interpolated script text: GitHub substitutes `${{ … }}` before the
+        # shell parses the script, so an input containing quotes or `$(…)`
+        # would otherwise run on the runner before the CLI validates it.
+        env:
+          SOURCE_SHA: ${{ inputs.source }}
+          PACKAGES: ${{ inputs.packages }}
+          REGISTRY: ${{ inputs.registry }}
         run: |
           node tooling/release/release-packages.mjs \
             --check-only \
-            --source "${{ inputs.source }}" \
-            --packages "${{ inputs.packages }}" \
-            --registry "${{ inputs.registry }}" | tee -a "$GITHUB_STEP_SUMMARY"
+            --source "$SOURCE_SHA" \
+            --packages "$PACKAGES" \
+            --registry "$REGISTRY" | tee -a "$GITHUB_STEP_SUMMARY"

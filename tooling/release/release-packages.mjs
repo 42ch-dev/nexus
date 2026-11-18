@@ -13,23 +13,37 @@
  * client from the caller. The CLI offers `--check-only` and `--prepare` only,
  * so no path in this file can read a token or upload an archive.
  *
+ * Provenance: the whole worktree must be clean at `--source`/`sourceSha`. The
+ * checker packs working source, so only a clean tree lets archive hashes be
+ * attributed to a revision; an unreadable revision or status refuses instead of
+ * reporting a clean tree it could not observe.
+ *
  * Registry view shape (`registry` argument / `--registry-state`):
  *   { name: "crates-io", published?: { name, version, checksum }[] | null,
  *     writable?: boolean }
  * `published: null` (the CLI default) means "unknown": nothing is claimed about
- * live registry state, so every selected package stays pending and only
- * repository facts are asserted. `writable: false` is an explicit permission
+ * live registry state, so every selected package stays pending with that reason
+ * and unselected prerequisites stay `unverified` — which blocks publication
+ * instead of assuming absence. `writable: false` is an explicit permission
  * refusal; absent means unconfigured, which is disclosed, not fabricated.
+ *
+ * Archive evidence (`evidence` argument / `--archive-evidence`) is the JSON that
+ * `check-contract-packageability.mjs --json` prints: it carries the revision it
+ * packed and whether that tree was clean, plus each archive's sha256.
+ *
+ * A plan has two verdicts: `ok` (no refusal) and `ready` (also every
+ * prerequisite resolved to a satisfying selected or known-published version and
+ * every pending row has a verified archive). Only publication needs `ready`.
  *
  * CLI:
  *   node tooling/release/release-packages.mjs --check-only \
  *     --source <40-hex sha> --packages a,b --registry crates-io \
- *     [--registry-state <json>]
+ *     [--registry-state <json>] [--archive-evidence <json>]
  *   node tooling/release/release-packages.mjs --prepare --packages a,b \
  *     --versions a=1.2.3,b=1.2.4 [--date YYYY-MM-DD]
  *
- * Exit 0 for a produced plan or applied preparation, 1 for a refusal, 2 for a
- * usage error.
+ * Exit 0 for a ready plan or applied preparation, 1 for a refusal or a
+ * blocker, 2 for a usage error.
  */
 
 import { spawnSync } from "node:child_process";
@@ -113,16 +127,21 @@ function git(repoRoot, args) {
 }
 
 /**
- * Reviewed source revision plus the selected package inputs that differ from
- * it. A selected manifest or changelog with an uncommitted change means the
- * claimed revision does not describe the bytes about to be released, so the
- * plan refuses instead of planning from a guess.
+ * Reviewed source revision plus every uncommitted change in the worktree.
+ *
+ * The whole tree, not the selection: the packageability checker stages the
+ * tracked/untracked working source of the entire repository, so any modified or
+ * untracked source file can change archive bytes, dependency edges or ordering.
+ * A worktree with no change is the only state in which the archive hashes can
+ * be attributed to `sha`.
+ *
+ * Both reads fail closed: an unreadable revision or status refuses instead of
+ * reporting a clean tree it could not observe.
  *
  * @param {string} repoRoot
- * @param {string[]} paths repository-relative inputs of the selection
  * @returns {{ sha: string; dirty: string[] }}
  */
-export function readSourceProvenance(repoRoot, paths) {
+export function readSourceProvenance(repoRoot) {
   const head = git(repoRoot, ["rev-parse", "HEAD"]);
   if (!head.ok) {
     throw new ReleaseRefusal(
@@ -130,13 +149,17 @@ export function readSourceProvenance(repoRoot, paths) {
       `${repoRoot}: cannot read HEAD; a Git checkout is required for provenance`,
     );
   }
-  const status = git(repoRoot, ["status", "--porcelain", "--", ...paths]);
-  const dirty = status.ok
-    ? status.stdout
-        .split("\n")
-        .filter((line) => line.length > 0)
-        .map((line) => line.slice(3))
-    : [];
+  const status = git(repoRoot, ["status", "--porcelain"]);
+  if (!status.ok) {
+    throw new ReleaseRefusal(
+      "source-unreadable",
+      `${repoRoot}: git status failed; uncommitted source cannot be ruled out`,
+    );
+  }
+  const dirty = status.stdout
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => line.slice(3));
   return { sha: head.stdout.trim(), dirty };
 }
 
@@ -383,23 +406,28 @@ export function planPackageRelease(repoRoot, options) {
     selected.add(name);
   }
 
-  if (evidence !== null && evidence.sourceSha !== options.sourceSha) {
-    refuse(
-      "source-mismatch",
-      `archive evidence was produced from ${evidence.sourceSha}, not ${options.sourceSha}`,
-    );
+  if (evidence !== null) {
+    const packed = evidence.source;
+    if (typeof packed?.sha !== "string" || packed.sha !== options.sourceSha) {
+      refuse(
+        "source-mismatch",
+        `archive evidence was packed from ${packed?.sha ?? "an unreadable revision"}, not ${options.sourceSha}`,
+      );
+    }
+    if (packed?.clean !== true) {
+      refuse(
+        "unclean-evidence",
+        "archive evidence was packed from a working tree with uncommitted changes, so its hashes are not the reviewed revision's bytes",
+      );
+    }
+    if (!Array.isArray(evidence.results)) {
+      refuse("evidence-unreadable", "archive evidence carries no results array");
+    }
   }
 
   let provenance = { sha: "", dirty: /** @type {string[]} */ ([]) };
-  const selectedRows = rows.filter((row) => selected.has(row.name));
   try {
-    provenance = readSourceProvenance(repoRoot, [
-      "tooling/release/version-brackets.json",
-      ...selectedRows.flatMap((row) => [
-        row.manifest,
-        join(dirname(row.manifest), "CHANGELOG.md"),
-      ]),
-    ]);
+    provenance = readSourceProvenance(repoRoot);
   } catch (error) {
     refuse(error.code ?? "source-unreadable", error.message);
   }
@@ -412,7 +440,9 @@ export function planPackageRelease(repoRoot, options) {
   if (provenance.dirty.length > 0) {
     refuse(
       "unclean-provenance",
-      `selected package inputs are not committed: ${provenance.dirty.join(", ")}`,
+      `${provenance.dirty.length} uncommitted change(s) in the packed source tree: ${provenance.dirty
+        .slice(0, 5)
+        .join(", ")}${provenance.dirty.length > 5 ? ", …" : ""}`,
     );
   }
 
@@ -452,7 +482,10 @@ export function planPackageRelease(repoRoot, options) {
     }
     const sameVersion = rowsPublished.find((published) => published.version === row.version);
     let status = /** @type {"completed" | "pending"} */ ("pending");
-    let reason = "not published at the selected registry";
+    const registryKnown = registry.published !== null && registry.published !== undefined;
+    let reason = registryKnown
+      ? "not published at the selected registry"
+      : "registry state unknown; content not matched";
     if (sameVersion !== undefined) {
       if (archive === null) {
         refuse(
@@ -471,15 +504,28 @@ export function planPackageRelease(repoRoot, options) {
         reason = "published with identical content";
       }
     }
-    /** @type {{ name: string; requirement: string; resolved: string }[]} */
+    /** @type {{ name: string; requirement: string; resolved: string; version: string | null }[]} */
     const prerequisites = [];
     for (const dependency of row.dependencies) {
       if (!byName.has(dependency.name)) {
         continue;
       }
-      let resolved = selected.has(dependency.name) ? "selected" : "unknown";
-      if (!selected.has(dependency.name) && registry.published !== null && registry.published !== undefined) {
-        const satisfied = publishedRows(registry.published, dependency.name).some((published) =>
+      const dependencyRow = byName.get(dependency.name);
+      let resolved;
+      if (selected.has(dependency.name)) {
+        // A selected prerequisite is what the same run publishes first, so its
+        // version has to satisfy this consumer's own requirement — otherwise
+        // the consumer would be packed against a version it cannot use.
+        const satisfies = caretAccepts(dependency.requirement, /** @type {{version: string}} */ (dependencyRow).version);
+        resolved = satisfies ? "selected" : "incompatible";
+        if (!satisfies) {
+          refuse(
+            "incompatible-prerequisite",
+            `${name}: requires ${dependency.name} ${dependency.requirement}, but the selected ${dependency.name} is ${/** @type {{version: string}} */ (dependencyRow).version}`,
+          );
+        }
+      } else if (registryKnown) {
+        const satisfied = publishedRows(registry.published ?? null, dependency.name).some((published) =>
           caretAccepts(dependency.requirement, published.version),
         );
         if (!satisfied) {
@@ -489,11 +535,16 @@ export function planPackageRelease(repoRoot, options) {
           );
         }
         resolved = satisfied ? "published" : "missing";
+      } else {
+        // Nothing is known about the registry, so this plan cannot claim the
+        // prerequisite exists; it stays unresolved and blocks publication.
+        resolved = "unverified";
       }
       prerequisites.push({
         name: dependency.name,
         requirement: dependency.requirement,
         resolved,
+        version: dependencyRow?.version ?? null,
       });
     }
     planned.push({
@@ -517,8 +568,34 @@ export function planPackageRelease(repoRoot, options) {
     );
   }
 
+  /**
+   * Publication readiness: a plan can be correct and still not publishable.
+   * Every prerequisite needs a satisfying selected or known-published version,
+   * and every pending row needs the verified archive it would upload.
+   *
+   * @type {{ code: string; message: string }[]}
+   */
+  const blockers = [];
+  for (const row of planned) {
+    for (const prerequisite of row.prerequisites) {
+      if (prerequisite.resolved === "unverified" || prerequisite.resolved === "missing") {
+        blockers.push({
+          code: "prerequisite-unverified",
+          message: `${row.name} needs ${prerequisite.name} ${prerequisite.requirement}; registry state is unknown, so it cannot be shown to exist`,
+        });
+      }
+    }
+    if (row.status === "pending" && row.archiveSha256 === null) {
+      blockers.push({
+        code: "archive-unverified",
+        message: `${row.name}@${row.version} has no verified archive in the evidence; run the packageability checker and pass its JSON report`,
+      });
+    }
+  }
+
   return {
     ok: refusals.length === 0,
+    ready: refusals.length === 0 && blockers.length === 0,
     registry: registryName,
     label: PACKAGE_RELEASE_LABEL,
     sourceSha: options.sourceSha,
@@ -528,16 +605,21 @@ export function planPackageRelease(repoRoot, options) {
     packages: planned,
     completed,
     pending,
+    blockers,
     credentials: registry.writable === true ? "write" : "unconfigured",
     refusals,
   };
 }
 
 /**
- * Publish the pending rows of an accepted plan, prerequisite first, confirming
- * each upload before its consumer. Registry publication is irreversible: a
- * failure leaves the remaining rows pending for an operator-authorized resume
- * and never withdraws what already landed.
+ * Publish the pending rows of an accepted, ready plan, prerequisite first,
+ * confirming each upload before its consumer. Registry publication is
+ * irreversible: a failure leaves the remaining rows pending for an
+ * operator-authorized resume and never withdraws what already landed.
+ *
+ * Every returned outcome carries the full completed/pending split — including
+ * an upload whose confirmation read failed, which stays pending because only a
+ * new plan's exact content match may treat it as done.
  *
  * `client` is the only publication seam. This helper never constructs one; the
  * isolated protocol fixture in `release-packages.test.mjs` supplies it.
@@ -547,80 +629,100 @@ export function planPackageRelease(repoRoot, options) {
  */
 export async function publishSelected(plan, client) {
   const completed = [...plan.completed];
-  /** @type {string[]} */
-  const pending = [];
   if (!plan.ok) {
     return {
       ok: false,
       completed,
       pending: [...plan.pending],
       failed: null,
+      blockers: plan.blockers,
       refusals: plan.refusals,
     };
   }
+  if (!plan.ready) {
+    return {
+      ok: false,
+      completed,
+      pending: [...plan.pending],
+      failed: null,
+      blockers: plan.blockers,
+      refusals: [
+        {
+          code: "not-ready",
+          message: `${plan.blockers.length} blocker(s) leave the selection unpublishable; resolve them and re-plan`,
+        },
+      ],
+    };
+  }
   const entries = plan.packages.filter((entry) => entry.status === "pending");
-  for (const entry of entries) {
-    if (entry.archiveSha256 === null) {
-      return {
-        ok: false,
-        completed,
-        pending: [...pending, ...entries.slice(entries.indexOf(entry)).map((row) => `${row.name}@${row.version}`)],
-        failed: `${entry.name}@${entry.version}`,
-        refusals: [
-          {
-            code: "missing-archive",
-            message: `${entry.name}@${entry.version} has no verified archive; nothing may be uploaded`,
-          },
-        ],
-      };
-    }
+  /** @param {number} index */
+  const remaining = (index) =>
+    entries.slice(index).map((row) => `${row.name}@${row.version}`);
+  for (const [index, entry] of entries.entries()) {
+    const pair = `${entry.name}@${entry.version}`;
     try {
       await client.publish({
         name: entry.name,
         version: entry.version,
         tag: entry.tag,
-        archiveSha256: entry.archiveSha256,
+        archiveSha256: /** @type {string} */ (entry.archiveSha256),
       });
     } catch (error) {
       return {
         ok: false,
         completed,
-        pending: entries
-          .slice(entries.indexOf(entry))
-          .map((row) => `${row.name}@${row.version}`),
-        failed: `${entry.name}@${entry.version}`,
+        pending: remaining(index),
+        failed: pair,
+        blockers: [],
         refusals: [
           {
             code: "publish-failed",
-            message: `${entry.name}@${entry.version}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
+            message: `${pair}: ${error instanceof Error ? error.message : String(error)}`,
           },
         ],
       };
     }
-    const confirmed = await client.read(entry.name, entry.version);
+    /** @type {{ checksum?: string } | null} */
+    let confirmed;
+    try {
+      confirmed = await client.read(entry.name, entry.version);
+    } catch (error) {
+      return {
+        ok: false,
+        completed,
+        pending: remaining(index),
+        failed: pair,
+        blockers: [],
+        refusals: [
+          {
+            code: "upload-unconfirmed",
+            message: `${pair}: the confirmation read failed (${
+              error instanceof Error ? error.message : String(error)
+            }); its upload state is unknown, so re-plan and resume only on an exact content match`,
+          },
+        ],
+      };
+    }
     if (confirmed?.checksum !== entry.archiveSha256) {
       return {
         ok: false,
         completed,
-        pending: entries
-          .slice(entries.indexOf(entry) + 1)
-          .map((row) => `${row.name}@${row.version}`),
-        failed: `${entry.name}@${entry.version}`,
+        pending: remaining(index),
+        failed: pair,
+        blockers: [],
         refusals: [
           {
             code: "upload-unconfirmed",
-            message: `${entry.name}@${entry.version}: registry reports ${
+            message: `${pair}: registry reports ${
               confirmed?.checksum ?? "nothing"
-            } after upload, expected ${entry.archiveSha256}`,
+            } after upload, expected ${entry.archiveSha256}; re-plan and resume only on an exact content match`,
           },
         ],
       };
     }
-    completed.push(`${entry.name}@${entry.version}`);
+    completed.push(pair);
   }
-  return { ok: true, completed, pending, failed: null, refusals: [] };
+  return { ok: true, completed, pending: [], failed: null, blockers: [], refusals: [] };
 }
 
 /**
@@ -816,7 +918,9 @@ function printPlan(plan) {
   console.log(
     `Package release plan — registry ${plan.registry}, label ${plan.label}, archive evidence ${plan.archiveEvidence}`,
   );
-  console.log(`source    ${plan.sourceSha} (dirty inputs: ${plan.source.dirty.length})`);
+  console.log(
+    `source    ${plan.sourceSha} (uncommitted changes: ${plan.source.dirty.length})`,
+  );
   console.log(`order     ${plan.order.join(", ")}`);
   for (const row of plan.packages) {
     console.log(
@@ -832,11 +936,15 @@ function printPlan(plan) {
   }
   console.log(`completed ${plan.completed.length === 0 ? "<none>" : plan.completed.join(", ")}`);
   console.log(`pending   ${plan.pending.length === 0 ? "<none>" : plan.pending.join(", ")}`);
+  console.log(
+    `ready     ${plan.ready ? "yes" : "no"}${plan.ready ? "" : ` — ${plan.blockers.length} blocker(s)`}`,
+  );
+  for (const blocker of plan.blockers) {
+    console.log(`      ${blocker.code}: ${blocker.message}`);
+  }
   console.log(`credentials ${plan.credentials} (publication is an operator action outside this check)`);
-  if (plan.refusals.length > 0) {
-    for (const refusal of plan.refusals) {
-      console.error(`refused: ${refusal.code}: ${refusal.message}`);
-    }
+  for (const refusal of plan.refusals) {
+    console.error(`refused: ${refusal.code}: ${refusal.message}`);
   }
 }
 
@@ -853,6 +961,7 @@ function parseArgs(argv) {
     "--packages",
     "--registry",
     "--registry-state",
+    "--archive-evidence",
     "--versions",
     "--date",
   ]);
@@ -891,12 +1000,17 @@ function main(argv) {
       [
         "Usage:",
         "  node tooling/release/release-packages.mjs --check-only --source <sha> \\",
-        "    --packages <a,b> --registry crates-io [--registry-state <json>]",
+        "    --packages <a,b> --registry crates-io \\",
+        "    [--registry-state <json>] [--archive-evidence <json>]",
         "  node tooling/release/release-packages.mjs --prepare --packages <a,b> \\",
         "    --versions <a=1.2.3,b=1.2.4> [--date YYYY-MM-DD]",
         "",
-        "Planning reads manifests, the version carrier and Git provenance only:",
-        "no credential, no network, no live registry query.",
+        "  --registry-state    {\"published\": [{name, version, checksum}], \"writable\": true}",
+        "  --archive-evidence  `check-contract-packageability.mjs --json` output",
+        "",
+        "Planning reads manifests, the version carrier, Git provenance and the",
+        "given JSON files only: no credential, no network, no live registry query.",
+        "Exit 0 only for a plan that is valid and ready to publish.",
       ].join("\n"),
     );
     return 0;
@@ -966,9 +1080,22 @@ function main(argv) {
       return 2;
     }
   }
-  const plan = planPackageRelease(repoRoot, { packages, sourceSha, registry });
+  /** @type {{ source: { sha: string; clean: boolean }; results: unknown[] } | null} */
+  let evidence = null;
+  const evidencePath = flags.get("--archive-evidence");
+  if (evidencePath !== undefined) {
+    try {
+      evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
+    } catch (error) {
+      console.error(
+        `--archive-evidence ${evidencePath}: unusable (${error instanceof Error ? error.message : error})`,
+      );
+      return 2;
+    }
+  }
+  const plan = planPackageRelease(repoRoot, { packages, sourceSha, registry, evidence });
   printPlan(plan);
-  return plan.ok ? 0 : 1;
+  return plan.ready ? 0 : 1;
 }
 
 const invokedDirectly =

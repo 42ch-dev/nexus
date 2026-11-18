@@ -165,6 +165,10 @@ function contractDependencies(manifestContents, entries) {
  * @property {boolean} ok
  * @property {PackageResult[]} results One row per contract entry, in carrier order.
  * @property {string | null} firstFailure Package name of the first failing crate.
+ * @property {{sha: string | null; clean: boolean}} source Revision the packed
+ *   working source came from, and whether that tree had no uncommitted change.
+ *   A consumer of these archive hashes can bind them to that revision only when
+ *   `clean` is true and `sha` is the reviewed revision.
  */
 
 /**
@@ -882,11 +886,30 @@ function runConsumer({
 }
 
 /**
+ * Revision the working source is packed from. The archive bytes come from the
+ * working tree (see {@link stageWorkingSource}), so the revision alone is not
+ * provenance: `clean` says whether that tree still matched it. Both reads fail
+ * closed — an unreadable revision or status reports "not clean".
+ *
+ * @param {string} repoRoot
+ * @returns {{sha: string | null; clean: boolean}}
+ */
+function workingSourceState(repoRoot) {
+  const head = run("git", ["rev-parse", "HEAD"], repoRoot);
+  const status = run("git", ["status", "--porcelain"], repoRoot);
+  return {
+    sha: head.ok ? head.stdout.trim() : null,
+    clean: status.ok && status.stdout.trim().length === 0,
+  };
+}
+
+/**
  * @param {string} repoRoot
  * @returns {PackageabilityReport}
  */
 export function checkContractPackageability(repoRoot) {
   const entries = readVersionBrackets(repoRoot);
+  const source = workingSourceState(repoRoot);
   const scratchParent = packageScratchParent();
   mkdirSync(scratchParent, { recursive: true });
   const scratchRoot = mkdtempSync(join(scratchParent, SCRATCH_PREFIX));
@@ -970,7 +993,7 @@ export function checkContractPackageability(repoRoot) {
   }
 
   const firstFailure = results.find((result) => !result.ok)?.name ?? null;
-  return { ok: firstFailure === null, results, firstFailure };
+  return { ok: firstFailure === null, results, firstFailure, source };
 }
 
 /**
@@ -1010,12 +1033,22 @@ function printRows(report) {
 function main(argv) {
   if (argv.includes("--help") || argv.includes("-h")) {
     console.log(
-      "Usage: node tooling/release/check-contract-packageability.mjs",
+      [
+        "Usage: node tooling/release/check-contract-packageability.mjs [--json]",
+        "",
+        "--json prints the report as JSON for a release plan to consume",
+        "(`release-packages.mjs --check-only --archive-evidence <file>`);",
+        "the human output and the exit code are unchanged.",
+      ].join("\n"),
     );
     return 0;
   }
 
   const report = checkContractPackageability(resolveRepoRoot());
+  if (argv.includes("--json")) {
+    console.log(JSON.stringify(report, null, 2));
+    return report.ok ? 0 : 1;
+  }
   const header = `Contract packageability (${report.results.length} crates):`;
 
   if (report.ok) {
