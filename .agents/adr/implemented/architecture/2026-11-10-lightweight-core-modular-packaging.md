@@ -1,7 +1,8 @@
 # ADR: Lightweight Core and Modular Packaging (“Steady Fast”)
 
-Status: proposed — not implement authority. `tooling/release/version-brackets.json`'s contract bracket versions five crates independently of the product, `assert-lockstep-version.mjs` enforces both brackets, and `check-contract-packageability.mjs` proves those five packageable offline in the `rust-checks` job. What has landed and what is unstarted are in §2 (Evidence of current pressure).
+Status: implemented — iteration v1.249 closed on 2026-11-19. The C crate graph, the eight-package public/private split with independent literal versions and caret ranges, and the engine-free Connect product all shipped and are locked in [`docs/specs/architecture/rust-core-service-boundary.md`](../../../../docs/specs/architecture/rust-core-service-boundary.md) § Public package boundary. Package-ready is not published: the independent release capability is implemented and validated without dispatching, tagging or bumping.
 Date: 2026-11-10
+Implemented: 2026-11-19 in iteration v1.249-lightweight-core, seven plans, integration `a4642e419`.
 Reconciled: 2026-11-18 against main @ 53fc30de0 — §2 figures re-measured; direction still undecided (I-000421).
 Scope: Crate-graph and publish strategy to reduce whole-workspace rebuilds, ship stable feature packages incrementally, and keep the user-facing layer on TypeScript while Rust owns narrative/orchestration truth.
 Source: migrated from the retired tracked specs corpus

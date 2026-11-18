@@ -372,6 +372,27 @@ The normative constraints for this surface are stated in §Current state; a chan
 - `apps/nexus42`
 - `apps/desktop-electron`
 
+## Public package boundary
+
+**Status:** Shipped in iteration v1.249; locked 2026-11-19. This section locks which workspace packages are independently consumable and which stay private, and the Connect product graph those packages sit beside.
+
+Exactly eight packages are public, each consumable offline from an extracted archive without the monorepo, `schemas/`, Node or codegen:
+
+| Package | Consumer job |
+| --- | --- |
+| `nexus-contracts` | Generated Rust wire types |
+| `nexus-workflow-ir` | Parse/validate Workflow IR, roll up nested effects, compute canonical content hashes without orchestration |
+| `nexus-module-sdk` | Third-party `wasm32` guest modules with official ABI macros/envelopes |
+| `nexus-module-manifest` | Validate manifests, inject/verify WASM digests without a host runtime |
+| `nexus-module-test` | Host-side ABI-conformance dev-dependency for module authors |
+| `nexus-pattern` | Local reader/hasher of content pattern packages; not a registry service |
+| `nexus-knowledge` | KE domain types and the `KbStore` seam without production SQLite |
+| `nexus-narrative` | World/Timeline/Fork aggregates and `NarrativeGateway` without production `CoreService` |
+
+Every other workspace package carries an explicit `publish = false`, including `nexus-capability`, `nexus-workflow-simulate`, `nexus-compute-policy`, `nexus-core`, `nexus-orchestration`, `nexus-execution`, `nexus-session-storage`, `nexus-connect`, the host packages, `nexus42` and `nexus-runtime`. Every public-to-public local edge carries a literal registry version with a normal caret requirement; the closure is contracts ← IR ← pattern, contracts ← knowledge ← narrative, and module-test → module-sdk, with module-sdk and module-manifest standalone.
+
+The `nexus42` Connect product is engine-free: it retains core domain, storage, stored authority, signed Connect/libp2p and explicit spoke/WASM compute, and excludes orchestration, execution, session-storage, graph-flow, the simulator, the agent host, the ACP host and `rmcp`. Authorization refusals are deliberately indistinguishable by code — `op_unsupported` covers an unserved op, an op outside the peer's granted scope, and a payload without verifiable world scope — because a distinguishing code would leak one peer's scope to another; the wire message carries the distinction.
+
 ## Change obligations
 
 Any change that alters the behavior, paths, contracts, or commands described in §Current state updates this page in the same PR.
