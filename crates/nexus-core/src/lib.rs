@@ -70,6 +70,7 @@ mod storage_status;
 mod strategy_candidates;
 mod sync;
 mod timeline;
+pub mod tool_catalog;
 mod works;
 mod world_kb;
 mod world_pack;

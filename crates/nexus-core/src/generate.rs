@@ -112,51 +112,6 @@ impl GenerateOutcome {
     }
 }
 
-/// The agent tool's input contract: [`GenerateRequest`] rendered as JSON Schema, plus the address
-/// the CLI and HTTP surfaces carry in arguments and the path.
-///
-/// The schema is the committed wire contract itself, so the tool description IS the contract (D8):
-/// a model fills the request's fields instead of inventing a shape, and the schema cannot describe
-/// a request the kernel would not accept. `strategy_id` and `base_revision` are the two fields a
-/// tool call has to name explicitly — the tool has no path and no prior read — and they are added
-/// here rather than in a second schema file so there is one rendered contract, not two.
-#[must_use]
-pub fn tool_input_schema() -> &'static str {
-    static SCHEMA: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-        let mut schema: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../schemas/daemon-api/orchestration/strategy-generate-request.schema.json"
-        ))
-        .expect("the generate request schema is committed JSON");
-        let root = schema
-            .as_object_mut()
-            .expect("the generate request schema is a JSON object");
-        root.insert(
-            "title".to_owned(),
-            serde_json::Value::String("NexusStrategyGenerate".to_owned()),
-        );
-        let properties = root["properties"]
-            .as_object_mut()
-            .expect("the generate request schema declares properties");
-        properties.insert(
-            "strategy_id".to_owned(),
-            serde_json::json!({
-                "type": "string",
-                "minLength": 1,
-                "pattern": "^[a-z][a-z0-9._-]*$",
-                "description": "Strategy the candidate belongs to. It is the document id and the \
-                                strategy the revision guard reads; the HTTP surface carries it in \
-                                the path instead.",
-            }),
-        );
-        root.insert(
-            "required".to_owned(),
-            serde_json::json!(["strategy_id", "base_revision", "request"]),
-        );
-        schema.to_string()
-    });
-    SCHEMA.as_str()
-}
-
 /// The lint-correct loop ran out of rounds. Nothing was persisted and there is no resume.
 ///
 /// One shape for both exits (spec §3): the ceiling after three failed rounds, and a failing round 1

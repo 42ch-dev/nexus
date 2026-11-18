@@ -46,6 +46,10 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::too_many_lines)]
 
+// Test-only observation of the fallback lanes (see `fallback_consultations`).
+#[cfg(any(test, feature = "test-hooks"))]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use super::work_artifact::{
     classify_work_path, FsWorkArtifactPort, RecordedMutation, RecordingWorkArtifactPort,
     WorkArtifactPort, WorkArtifactWrite, WorkPath,
@@ -58,6 +62,9 @@ use crate::error::{CoreError, CoreResult};
 // readable without a 200-site rename that would obscure the diff.
 use crate::error::CoreError as NexusApiError;
 use crate::service::CoreService;
+use crate::tool_catalog::{
+    host_tool_catalog, lookup_host_tool, Access, AdmissionGate, HostToolId, HostToolMetadata,
+};
 // The request DTOs live at the crate root, not in `works`.
 use crate::{ArchivePoolRequest, PromotePoolRequest, WorkDetails, WorkPatchRequest};
 // The tool invocation request is the generated `schemas/core/tools-api.schema.json`
@@ -72,7 +79,6 @@ use nexus_spoke_adapter::{
     parse_tool_capability_id, KnowledgeEntryPort, SpokeResult, StubKnowledgeEntryMutation,
     StubKnowledgeEntryPort,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
@@ -552,23 +558,10 @@ fn check_nexus_tool_permission(
     tool_name: &str,
     policy: &WorkspacePermissionPolicy,
 ) -> Result<(), NexusApiError> {
-    const NEXUS_WRITE_TOOLS: &[&str] = &[
-        "nexus.work.patch",
-        "nexus.kb_snapshot.write",
-        "nexus.manuscript.chapter.update",
-        "nexus.world.configure",
-        "nexus.work.schedule.set",
-        "nexus.finding.resolve",
-        "nexus.pool.entry.manage",
-        // Writes the chapter body to disk (temp file + fsync + atomic rename).
-        "nexus.manuscript.write",
-        // Mutates the Work's persisted stage/stage_status.
-        "nexus.manuscript.phase.set",
-        // Commits a strategy candidate row through the generate kernel's CAS.
-        "nexus.strategy.generate",
-    ];
+    // The canonical access classification, not a second write-name roster.
+    let is_write = lookup_host_tool(tool_name).is_some_and(|row| row.access == Access::Write);
 
-    let allowed = if NEXUS_WRITE_TOOLS.contains(&tool_name) {
+    let allowed = if is_write {
         is_nexus_write_granted(tool_name, policy)
     } else {
         is_nexus_read_granted(tool_name, policy)
@@ -578,7 +571,7 @@ fn check_nexus_tool_permission(
         return Ok(());
     }
 
-    let reason = if NEXUS_WRITE_TOOLS.contains(&tool_name) {
+    let reason = if is_write {
         "write tool not granted"
     } else {
         "no nexus read grant"
@@ -3100,144 +3093,16 @@ pub type RegistryHandlerFn = for<'a> fn(
     Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>,
 >;
 
-// ─── Field types ───────────────────────────────────────────────────────────
-
-/// Access classification for a capability row.
-///
-/// Used by admission gates and audit to determine the
-/// risk profile of a capability at dispatch time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Access {
-    /// Read-only; no side effects.
-    Read,
-    /// Mutation-capable; may write to DB, filesystem, or state.
-    Write,
-    /// Access depends on runtime policy (e.g. `permissions.toml`
-    /// or DA-005 `ContextPermissionGrant`).
-    PolicyGated,
-}
-
-/// Ordered fail-closed admission gate before handler dispatch.
-///
-/// Each gate must pass (or be explicitly skipped for a given
-/// capability) before the handler is invoked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AdmissionGate {
-    /// Tool ID must be in the allowlist.
-    Allowlist,
-    /// Active creator must exist (for `nexus.*` tools).
-    ActiveCreator,
-    /// Operation must be within workspace bounds.
-    WorkspaceBounds,
-    /// `permissions.toml` / policy must grant the capability.
-    PermissionPolicy,
-    /// World must exist and be owned by the active creator.
-    RequireWorldOwnership,
-    /// Audit log entry must be written (always last gate).
-    AuditLog,
-}
-
-/// Catalog descriptor for a capability (AR-78, DF-89).
-///
-/// Carries the authored tool summary plus real draft-2020-12 JSON-Schema
-/// text for the input (and, where pinned, output) shape. `&'static str`
-/// literals fit the `LazyLock` static-row design exactly — no parse at
-/// registry build, no new dependency. The schema text is the single source
-/// of truth: it flows registry → catalog route → MCP child parse.
-#[derive(Debug, Clone)]
-pub struct CatalogDescriptor {
-    /// Authored tool summary for LLM/script consumers (replaces the
-    /// `TestVector.description` reuse that ended with AR-78 #4).
-    pub description: &'static str,
-    /// Real draft-2020-12 JSON-Schema text (root `"type":"object"`), or
-    /// `None` when the input schema is not yet authored — the catalog then
-    /// emits the named placeholder (`NAMED_PLACEHOLDER_INPUT`) and the id
-    /// MUST appear in `SCHEMA_REMAINDER_LEDGER` (lockstep-pinned).
-    pub input_schema: Option<&'static str>,
-    /// Real draft-2020-12 JSON-Schema text for the success shape when the
-    /// handler's output is a stable object worth pinning; `None` otherwise
-    /// (omission is honest and rule-based — no ledger entry for outputs).
-    pub output_schema: Option<&'static str>,
-}
-
-/// Stable failure mode contract for a capability.
-///
-/// Defines the error surface a caller can expect when
-/// the capability is denied or fails.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum FailureMode {
-    /// Capability is not supported in this runtime configuration.
-    NotSupported,
-    /// Policy (permissions or admission gate) blocked execution.
-    PolicyBlocked,
-    /// Authentication/authorization failed.
-    Forbidden,
-    /// Input validation failed.
-    InvalidInput,
-    /// Internal error (database, filesystem, etc.).
-    Internal,
-}
-
-/// Test vector descriptor for a capability row.
-///
-/// Each row must have at least one success and one
-/// failure test proving the handler works correctly.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TestVector {
-    /// Human-readable description of what the test covers.
-    pub description: &'static str,
-    /// Expected outcome: "success", "`failure:policy_blocked`", etc.
-    pub expected_outcome: &'static str,
-    /// Name of the test function (for grep-ability).
-    pub test_fn_name: &'static str,
-}
-
 // ─── Capability row ────────────────────────────────────────────────────────
 
-/// A single row in the capability registry.
-///
-/// Bundles all 7 fields: id, access, admission gates,
-/// handler binding, catalog descriptor, failure mode contract,
-/// and test vector.
-#[derive(Clone)]
+/// One bound registry row: the canonical metadata plus its real handler.
+#[derive(Clone, Copy)]
 pub struct CapabilityRow {
-    /// Stable `nexus.*` capability id (e.g. `"nexus.work.get"`).
-    pub id: &'static str,
-    /// Access classification.
-    pub access: Access,
-    /// Ordered fail-closed admission gates (&'static since V1.54 P0 T5).
-    pub admission: &'static [AdmissionGate],
+    /// Canonical row (id, access, admission gates, schemas, failure, test).
+    pub metadata: &'static HostToolMetadata,
     /// Handler function binding.
     pub handler: RegistryHandlerFn,
-    /// Catalog descriptor (authored description + real draft-2020-12
-    /// schemas; AR-78 — replaces the removed `AcpWire`).
-    pub catalog: CatalogDescriptor,
-    /// Expected failure mode when denied.
-    pub failure_mode: FailureMode,
-    /// Test vector descriptor.
-    pub handler_test_vector: TestVector,
 }
-
-// ─── Schema remainder ledger (AR-78 #6) ────────────────────────────────────
-
-/// Named input-schema placeholder emitted by the catalog for a builtin row
-/// whose input schema is not yet authored (`input_schema: None`).
-///
-/// Draft-2020-12-valid (`$comment` is ignorable by validators) and
-/// machine-distinguishable from a real schema — never the silent
-/// `{"type":"object"}` placeholder of V1.174.
-pub const NAMED_PLACEHOLDER_INPUT: &str =
-    r#"{"type":"object","$comment":"nexus42:schema-pending"}"#;
-
-/// Registry-source ledger of builtin ids whose input schema is not yet
-/// authored. Lockstep pin: `row.catalog.input_schema.is_none() ⇔ id ∈ LEDGER`
-/// (unit-tested both directions). Task 2 converted all static rows, so
-/// the ledger is empty — the pin stays as the guard against future rows
-/// being added without a schema. Test-only: the catalog route reads
-/// `NAMED_PLACEHOLDER_INPUT`, never this ledger.
-#[cfg(test)]
-#[allow(dead_code)] // lockstep pin: catalog rows with unauthored schemas must be recorded here
-pub(crate) const SCHEMA_REMAINDER_LEDGER: &[&str] = &[];
 
 // ─── Registry ──────────────────────────────────────────────────────────────
 
@@ -3248,6 +3113,15 @@ pub(crate) const SCHEMA_REMAINDER_LEDGER: &[&str] = &[];
 /// mirrors the old `dispatch_tool()` behavior.
 pub struct CapabilityRegistry {
     rows: HashMap<&'static str, CapabilityRow>,
+    /// Consultations of the peer/user fallback lanes.
+    ///
+    /// Compiled IN by `test-hooks`, which this crate's integration tests enable
+    /// through their dev-dependency self-reference; the flag must stay out of
+    /// shipped feature selections, so a normal build carries no counter at all.
+    /// Both entry paths increment it (`note_fallback_consultation`), so a test
+    /// can prove the canonical reservation never reaches those lanes.
+    #[cfg(any(test, feature = "test-hooks"))]
+    fallback_consultations: AtomicUsize,
 }
 
 impl CapabilityRegistry {
@@ -3256,7 +3130,41 @@ impl CapabilityRegistry {
     pub fn new() -> Self {
         Self {
             rows: HashMap::new(),
+            #[cfg(any(test, feature = "test-hooks"))]
+            fallback_consultations: AtomicUsize::new(0),
         }
+    }
+
+    /// How many dispatches consulted the peer/user fallback lanes.
+    ///
+    /// `test-hooks` only: counts lane consultations (a refused lane still
+    /// records one), which is the invariant the canonical reservation owns.
+    /// The allowlist path (`spine_resolves`) and `dispatch` both feed it.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub fn fallback_consultations(&self) -> usize {
+        self.fallback_consultations.load(Ordering::Relaxed)
+    }
+
+    /// Records one peer/user fallback-lane consultation.
+    ///
+    /// The single increment site: both entry paths call it immediately before
+    /// they ask a lane, so the probe measures the same decision in the
+    /// allowlist and in dispatch. It observes; it changes no behaviour.
+    fn note_fallback_consultation(&self) {
+        #[cfg(any(test, feature = "test-hooks"))]
+        self.fallback_consultations.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Whether `id` is a canonical host tool this registry binds no row for.
+    ///
+    /// The one canonical-miss decision shared by the allowlist
+    /// ([`Self::spine_resolves`]) and [`Self::dispatch`]: the namespace reserves
+    /// the id, so neither path may ask the peer or user lanes about it. A bound
+    /// canonical row is resolved by `lookup` and never reaches this test.
+    #[must_use]
+    fn canonical_miss(&self, id: &str) -> bool {
+        self.lookup(id).is_none() && lookup_host_tool(id).is_some()
     }
 
     /// Register a capability row.
@@ -3266,12 +3174,12 @@ impl CapabilityRegistry {
     /// Panics if a row with the same `id` is already registered
     /// (duplicate capability ids are a programmer error).
     pub fn register(&mut self, row: CapabilityRow) {
+        let id = row.metadata.id.as_str();
         assert!(
-            !self.rows.contains_key(row.id),
-            "duplicate capability id in registry: {}",
-            row.id
+            !self.rows.contains_key(id),
+            "duplicate capability id in registry: {id}"
         );
-        self.rows.insert(row.id, row);
+        self.rows.insert(id, row);
     }
 
     /// Look up a capability row by id.
@@ -3304,11 +3212,21 @@ impl CapabilityRegistry {
     /// capabilities (`origin() == User` only). An id is dispatchable iff it
     /// resolves here; unknown ids yield `not_supported` exactly like an
     /// unknown builtin.
+    ///
+    /// A canonical id this registry binds no row for is NOT dispatchable, and
+    /// the lanes are never asked about it: this is the same
+    /// [`Self::canonical_miss`] decision [`Self::dispatch`] uses, so the
+    /// caller-facing allowlist cannot report a reserved id as reachable while
+    /// dispatch refuses it.
     #[must_use]
     pub fn spine_resolves(&self, context: &ToolContext, id: &str) -> bool {
         if self.lookup(id).is_some() {
             return true;
         }
+        if self.canonical_miss(id) {
+            return false;
+        }
+        self.note_fallback_consultation();
         if peer_tools::peer_tool_registry().get(id).is_some() {
             return true;
         }
@@ -3344,7 +3262,9 @@ impl CapabilityRegistry {
     /// # Errors
     ///
     /// Returns a `Coded` refusal with code `not_supported`
-    /// if the tool is not registered. Individual handlers may return
+    /// if the tool is not registered, or if it is a canonical host tool this
+    /// build binds no handler for (the peer and user lanes are never consulted
+    /// for a reserved builtin id). Individual handlers may return
     /// other error variants (e.g. `Forbidden`, `InvalidInput`).
     pub async fn dispatch(
         &self,
@@ -3354,14 +3274,24 @@ impl CapabilityRegistry {
     ) -> Result<serde_json::Value, NexusApiError> {
         let row = self.lookup(&req.tool_name);
         if row.is_none() {
-            // Peer arm (AR-68 #4): reverse-invoke the owning responder.
-            if let Some(entry) = peer_tools::peer_tool_registry().get(&req.tool_name) {
-                return dispatch_peer_tool(&entry, req).await;
-            }
-            // User-capability arm (AR-68 #6): `Capability::run(arguments)`.
-            if let Some(reg) = context.user_capabilities() {
-                if let Ok(cap) = user_cap_catalog_admission(reg.get(&req.tool_name)) {
-                    return dispatch_user_cap(cap, req).await;
+            // v1.249 S4: the canonical-miss decision owns the outcome on this
+            // path and on the allowlist (`spine_resolves`) alike. A reserved
+            // builtin id refuses even when this build binds no handler for it
+            // (feature-gated binding), so the reservation is not left to each
+            // lane's own namespace rules — the user lane's name rule admits
+            // `fs/*` ids, so its occupancy of a canonical name must never decide
+            // the call.
+            if !self.canonical_miss(&req.tool_name) {
+                self.note_fallback_consultation();
+                // Peer arm (AR-68 #4): reverse-invoke the owning responder.
+                if let Some(entry) = peer_tools::peer_tool_registry().get(&req.tool_name) {
+                    return dispatch_peer_tool(&entry, req).await;
+                }
+                // User-capability arm (AR-68 #6): `Capability::run(arguments)`.
+                if let Some(reg) = context.user_capabilities() {
+                    if let Ok(cap) = user_cap_catalog_admission(reg.get(&req.tool_name)) {
+                        return dispatch_user_cap(cap, req).await;
+                    }
                 }
             }
             return Err(NexusApiError::Coded {
@@ -3371,11 +3301,13 @@ impl CapabilityRegistry {
         }
         let row = row.expect("row present");
 
-        // Centralized admission-gate accountability checkpoint.
-        // Each gate type MUST have a corresponding enforcement path (pipeline,
-        // handler, or caller). The invariant test below validates this mapping
-        // at registration time.
-        for gate in row.admission {
+        // Exhaustiveness checkpoint over the declared gates: the match below
+        // names every recognized `AdmissionGate` variant, so a new variant
+        // fails to compile here rather than shipping without a decision. It
+        // checks the DECLARATION, not that each gate has a runtime enforcement
+        // path — enforcement lives in `admission_pipeline`, the handlers and
+        // the caller, as the gate split above states.
+        for gate in row.metadata.admission {
             debug_assert!(
                 matches!(
                     gate,
@@ -3387,7 +3319,7 @@ impl CapabilityRegistry {
                         | AdmissionGate::AuditLog
                 ),
                 "unhandled admission gate {gate:?} for capability {}",
-                row.id
+                row.metadata.id.as_str()
             );
             let _ = gate; // Readability: gate is accounted for by the match above.
         }
@@ -3596,72 +3528,7 @@ pub enum UserCapCatalogRefusal {
 
 // ─── Registry constructor ──────────────────────────────────────────────────
 
-// ─── Registry constructor ──────────────────────────────────────────────────
-
-/// Static admission gate arrays (defined once, referenced by all 19 rows).
-const ADMISSION_READ_CONTEXT: &[AdmissionGate] = &[
-    AdmissionGate::Allowlist,
-    AdmissionGate::ActiveCreator,
-    AdmissionGate::PermissionPolicy,
-    AdmissionGate::AuditLog,
-];
-
-const ADMISSION_READ_WORKSPACE: &[AdmissionGate] = &[
-    AdmissionGate::Allowlist,
-    AdmissionGate::ActiveCreator,
-    AdmissionGate::WorkspaceBounds,
-    AdmissionGate::PermissionPolicy,
-    AdmissionGate::AuditLog,
-];
-
-const ADMISSION_READ_WORLD: &[AdmissionGate] = &[
-    AdmissionGate::Allowlist,
-    AdmissionGate::ActiveCreator,
-    AdmissionGate::RequireWorldOwnership,
-    AdmissionGate::PermissionPolicy,
-    AdmissionGate::AuditLog,
-];
-
-const ADMISSION_WRITE_WORKSPACE: &[AdmissionGate] = &[
-    AdmissionGate::Allowlist,
-    AdmissionGate::ActiveCreator,
-    AdmissionGate::WorkspaceBounds,
-    AdmissionGate::PermissionPolicy,
-    AdmissionGate::AuditLog,
-];
-
-const ADMISSION_WRITE_WORLD: &[AdmissionGate] = &[
-    AdmissionGate::Allowlist,
-    AdmissionGate::ActiveCreator,
-    AdmissionGate::RequireWorldOwnership,
-    AdmissionGate::PermissionPolicy,
-    AdmissionGate::AuditLog,
-];
-
-const ADMISSION_FS_READ: &[AdmissionGate] = &[
-    AdmissionGate::Allowlist,
-    AdmissionGate::WorkspaceBounds,
-    AdmissionGate::PermissionPolicy,
-    AdmissionGate::AuditLog,
-];
-
-const ADMISSION_FS_WRITE: &[AdmissionGate] = &[
-    AdmissionGate::Allowlist,
-    AdmissionGate::WorkspaceBounds,
-    AdmissionGate::PermissionPolicy,
-    AdmissionGate::AuditLog,
-];
-
-const ADMISSION_POOL_WRITE: &[AdmissionGate] = &[
-    AdmissionGate::Allowlist,
-    AdmissionGate::ActiveCreator,
-    AdmissionGate::PermissionPolicy,
-    AdmissionGate::AuditLog,
-];
-
-/// Create a registry pre-populated with all 31 host tools (29 `nexus.*` + 2
-/// `fs/*`; V1.34 + V1.53 P1 + V1.54 P0 + V1.56 P1 + V1.58 P3 + V1.59 P0, plus
-/// `nexus.strategy.generate` at v1.247 P6).
+/// Create a registry pre-populated by binding every canonical catalog row.
 ///
 /// V1.54 P0 T5: Converted to `LazyLock` singleton to eliminate per-dispatch
 /// allocation. All admission gates are `&'static [AdmissionGate]` references.
@@ -3675,649 +3542,79 @@ pub fn host_tool_registry() -> &'static CapabilityRegistry {
 /// Marked `pub` so benchmarks can measure cold-path initialization;
 /// external callers should use `host_tool_registry()` instead.
 #[must_use]
-#[allow(clippy::too_many_lines)]
 pub fn build_registry() -> CapabilityRegistry {
+    build_registry_inner(None)
+}
+
+/// The ONE registration path: every canonical row bound, except the optional
+/// `unbound` one.
+///
+/// `unbound` is the feature-gated binding shape (a canonical tool whose
+/// handler has not landed). Production always passes `None`; the `test-hooks`
+/// wrapper below is how a test names the row, so the fixture can never drift
+/// from the real registration rules.
+fn build_registry_inner(unbound: Option<HostToolId>) -> CapabilityRegistry {
     let mut reg = CapabilityRegistry::new();
-
-    // ── nexus.* tools (V1.34) ──
-    reg.register(CapabilityRow {
-        id: "nexus.context.whoami",
-        access: Access::Read,
-        admission: ADMISSION_READ_CONTEXT,
-        handler: registry_context_whoami,
-        catalog: CatalogDescriptor {
-            description: "Return the active creator id and workspace slug for the current session.",
-            input_schema: Some(r#"{"type":"object","properties":{}}"#),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"creator_id":{"type":"string"},"workspace_slug":{"type":"string"}},"required":["creator_id","workspace_slug"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "whoami returns active creator_id and workspace_slug",
-            expected_outcome: "success",
-            test_fn_name: "whoami_returns_active_creator",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.workspace.info",
-        access: Access::Read,
-        admission: ADMISSION_READ_CONTEXT,
-        handler: registry_workspace_info,
-        catalog: CatalogDescriptor {
-            description: "Return workspace details: creator id, slug, path, runtime mode, and initialization state.",
-            input_schema: Some(r#"{"type":"object","properties":{}}"#),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"creator_id":{"type":"string"},"workspace_slug":{"type":"string"},"workspace_path":{"type":"string"},"runtime_mode":{"type":"string"},"initialized":{"type":"boolean"}},"required":["creator_id","workspace_slug","workspace_path","runtime_mode","initialized"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "workspace info returns workspace details",
-            expected_outcome: "success",
-            test_fn_name: "workspace_info_returns_details",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.work.get",
-        access: Access::Read,
-        admission: ADMISSION_READ_WORKSPACE,
-        handler: registry_work_get,
-        catalog: CatalogDescriptor {
-            description: "Return the Work record fields exposed by the catalog: status, title, current stage, and stage status.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"}},"required":["work_id"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"status":{"type":"string"},"title":{"type":"string"},"current_stage":{"type":"string"},"stage_status":{"type":"string"}},"required":["work_id","status","title","current_stage","stage_status"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "work get returns Work row for active creator",
-            expected_outcome: "success",
-            test_fn_name: "work_get_happy_path",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.work.patch",
-        access: Access::Write,
-        admission: ADMISSION_WRITE_WORKSPACE,
-        handler: registry_work_patch,
-        catalog: CatalogDescriptor {
-            description: "Patch a work's title, inspiration log, or stage metadata (stage field itself is rejected).",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"title":{"type":"string"},"inspiration_log":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"note":{"type":"string"},"source":{"type":"string"}},"anyOf":[{"required":["text"]},{"required":["note"]}]}},"stage_metadata":{"type":"object","properties":{"agent_notes":{"type":"string"},"research_summary_ref":{"type":"string"},"draft_outline_ref":{"type":"string"},"review_summary_ref":{"type":"string"},"last_agent_tool_request_id":{"type":"string"}},"additionalProperties":false}},"required":["work_id"],"additionalProperties":false}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"status":{"type":"string"},"title":{"type":"string"},"current_stage":{"type":"string"},"stage_status":{"type":"string"}},"required":["work_id","status","title","current_stage","stage_status"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "work patch rejects stage field per spec §4.4",
-            expected_outcome: "failure:invalid_input",
-            test_fn_name: "work_patch_rejects_stage_field",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.orchestration.schedule_status",
-        access: Access::Read,
-        admission: ADMISSION_READ_WORKSPACE,
-        handler: registry_schedule_status,
-        catalog: CatalogDescriptor {
-            description: "Return the schedule ids linked to a work and their count.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"}},"required":["work_id"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"schedule_ids":{"type":"array","items":{"type":"string"}},"count":{"type":"integer"}},"required":["work_id","schedule_ids","count"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "schedule status returns schedule ids for work",
-            expected_outcome: "success",
-            test_fn_name: "schedule_status_happy_path",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.strategy.generate",
-        access: Access::Write,
-        admission: ADMISSION_WRITE_WORKSPACE,
-        handler: registry_strategy_generate,
-        catalog: CatalogDescriptor {
-            description: "Generate one committed strategy candidate from a declarative request \
-                          (nodes, edges, nests, meta) through the same lint-correct kernel the CLI \
-                          and HTTP surfaces use. Success means structurally legal and nothing \
-                          more: the candidate still has to be simulated and approved. On lint \
-                          exhaustion the result is the `lint_exhausted` payload with one \
-                          actionable correction per violation, and nothing was persisted.",
-            // The rendered `GenerateRequest` contract (D8): the tool description IS the schema.
-            input_schema: Some(crate::generate::tool_input_schema()),
-            // Omitted: the success shape is the WorkflowDocument contract, which is authored as
-            // its own `$ref`-addressed schema and cannot be carried here verbatim.
-            output_schema: None,
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "the tool commits the requested candidate through the generate kernel",
-            expected_outcome: "success",
-            test_fn_name: "strategy_generate_tool_and_cli_and_http_reach_one_kernel",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.context.assemble",
-        access: Access::Read,
-        admission: ADMISSION_READ_CONTEXT,
-        handler: registry_context_assemble,
-        catalog: CatalogDescriptor {
-            description: "Assemble the current context moment; requires_platform requests platform-integrated assembly.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"requires_platform":{"type":"boolean"}}}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"mode":{"type":"string"},"creator_id":{"type":"string"},"assembled_at":{"type":"string"}},"required":["mode","creator_id","assembled_at"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::PolicyBlocked,
-        handler_test_vector: TestVector {
-            description: "context assemble returns policy_blocked in local-only mode with requires_platform",
-            expected_outcome: "failure:policy_blocked",
-            test_fn_name: "context_assemble_policy_blocked_when_local_only",
-        },
-    });
-
-    // ── nexus.* tools (V1.53 P1: DF-46 read-heavy slice) ──
-    reg.register(CapabilityRow {
-        id: "nexus.world.snapshot.get",
-        access: Access::Read,
-        admission: ADMISSION_READ_WORLD,
-        handler: registry_world_snapshot_get,
-        catalog: CatalogDescriptor {
-            description: "Return the world snapshot fields exposed by the catalog: title, slug, status, fork flag, and creation time.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"world_id":{"type":"string"}},"required":["world_id"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"world_id":{"type":"string"},"title":{"type":"string"},"slug":{"type":"string"},"status":{"type":"string"},"is_fork":{"type":"boolean"},"created_at":{"type":"string"}},"required":["world_id","title","slug","status","is_fork","created_at"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::InvalidInput,
-        handler_test_vector: TestVector {
-            description: "world snapshot get returns world state for valid world_id",
-            expected_outcome: "success",
-            test_fn_name: "world_snapshot_get_returns_world_state",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.timeline.recent.get",
-        access: Access::Read,
-        admission: ADMISSION_READ_WORLD,
-        handler: registry_timeline_recent_get,
-        catalog: CatalogDescriptor {
-            description: "Return the most recent timeline events for a world (default 100, clamped to 500).",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"world_id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":500}},"required":["world_id"]}"#,
-            ),
-            // Output is an event array, not a stable object — omitted per
-            // AR-78 #5 (output schema pinned only for stable object shapes).
-            output_schema: None,
-        },
-        failure_mode: FailureMode::InvalidInput,
-        handler_test_vector: TestVector {
-            description: "timeline recent get returns recent events for valid world_id",
-            expected_outcome: "success",
-            test_fn_name: "timeline_recent_get_returns_recent_events",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.kb_snapshot.read",
-        access: Access::Read,
-        admission: ADMISSION_READ_WORLD,
-        handler: registry_kb_snapshot_read,
-        catalog: CatalogDescriptor {
-            description: "Return the knowledge-base key blocks for an owned world.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"world_id":{"type":"string"}},"required":["world_id"]}"#,
-            ),
-            // Output is a key-block array, not a stable object — omitted per
-            // AR-78 #5 (output schema pinned only for stable object shapes).
-            output_schema: None,
-        },
-        failure_mode: FailureMode::InvalidInput,
-        handler_test_vector: TestVector {
-            description: "kb snapshot read returns key blocks for valid world_id",
-            expected_outcome: "success",
-            test_fn_name: "kb_snapshot_read_returns_key_blocks",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.manuscript.chapter.get",
-        access: Access::Read,
-        admission: ADMISSION_READ_WORKSPACE,
-        handler: registry_manuscript_chapter_get,
-        catalog: CatalogDescriptor {
-            description: "Return the manuscript chapter fields exposed by the catalog: status and planned word count.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1}},"required":["work_id","chapter"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer"},"volume":{"type":"integer"},"status":{"type":"string"},"planned_word_count":{"type":"integer"}},"required":["work_id","chapter","status","planned_word_count"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::InvalidInput,
-        handler_test_vector: TestVector {
-            description:
-                "manuscript chapter get returns chapter record for valid work_id + chapter",
-            expected_outcome: "success",
-            test_fn_name: "manuscript_chapter_get_returns_chapter_record",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.observability.daemon.health",
-        access: Access::Read,
-        admission: ADMISSION_READ_CONTEXT,
-        handler: registry_daemon_health,
-        catalog: CatalogDescriptor {
-            description: "Return daemon runtime health: uptime, lifecycle context, registry size and ids, pool health.",
-            input_schema: Some(r#"{"type":"object","properties":{}}"#),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"uptime_seconds":{"type":"integer"},"started_at":{"type":"string"},"runtime_mode":{"type":"string"},"lifecycle_state":{"type":"string"},"registry_size":{"type":"integer"},"registry_ids":{"type":"array","items":{"type":"string"}},"pool_healthy":{"type":"boolean"}},"required":["uptime_seconds","started_at","runtime_mode","lifecycle_state","registry_size","registry_ids","pool_healthy"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "daemon health returns runtime status and registry size",
-            expected_outcome: "success",
-            test_fn_name: "daemon_health_returns_registry_status",
-        },
-    });
-
-    // ── V1.54 P0: DF-46 write tools ──
-    reg.register(CapabilityRow {
-        id: "nexus.kb_snapshot.write",
-        access: Access::Write,
-        admission: ADMISSION_WRITE_WORLD,
-        handler: registry_kb_snapshot_write,
-        catalog: CatalogDescriptor {
-            description: "Upsert knowledge-base key blocks for an owned world.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"world_id":{"type":"string"},"blocks":{"type":"array","items":{"type":"object","properties":{"schema_version":{"type":"integer"},"entry_id":{"type":"string"},"world_id":{"type":"string"},"block_type":{"type":"string","enum":["character","ability","scene","organization","item","conflict","info_point","event","species","faction","magic_system","technology","deity","level","economy_tier","dialogue","beat","act","era"]},"canonical_name":{"type":"string"},"status":{"type":"string"},"revision":{"type":"integer"},"body":{"type":"object"},"source_anchor":{"type":"object"},"created_from_command_id":{"type":"string"},"created_at":{"type":"string"},"updated_at":{"type":"string"},"source_work_id":{"type":"string"},"source_chapter":{"type":"integer"},"source_provenance_kind":{"type":"string"},"extensions_nexus_extras":{"type":"object"},"modules":{"type":"object"}},"required":["schema_version","entry_id","world_id","block_type","canonical_name","status","created_at"]}}},"required":["world_id","blocks"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"written":{"type":"integer"},"world_id":{"type":"string"},"suppressed_writes":{"type":"array","items":{"type":"object","properties":{"entry_id":{"type":"string"}},"required":["entry_id"]}}},"required":["written","world_id"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "kb snapshot write upserts key blocks for owned world",
-            expected_outcome: "success",
-            test_fn_name: "simulated_knowledge_write_records_and_preserves_the_store",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.manuscript.chapter.update",
-        access: Access::Write,
-        admission: ADMISSION_WRITE_WORKSPACE,
-        handler: registry_manuscript_chapter_update,
-        catalog: CatalogDescriptor {
-            description: "Update a manuscript chapter's content for a work.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1},"content":{"type":"string"}},"required":["work_id","chapter"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer"},"volume":{"type":"integer"},"slug":{"type":"string"},"planned_word_count":{"type":"integer"},"actual_word_count":{"type":"integer"},"status":{"type":"string"},"outline_path":{"type":"string"},"body_path":{"type":"string"},"created_at":{"type":"string"},"updated_at":{"type":"string"}},"required":["work_id","chapter","planned_word_count","status","created_at","updated_at"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::InvalidInput,
-        handler_test_vector: TestVector {
-            description: "manuscript chapter update writes chapter content for valid work",
-            expected_outcome: "success",
-            test_fn_name: "manuscript_chapter_update_writes_content",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.world.configure",
-        access: Access::Write,
-        admission: ADMISSION_WRITE_WORLD,
-        handler: registry_world_configure,
-        catalog: CatalogDescriptor {
-            description: "Update metadata (title, visibility, time policy) for an owned world.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"world_id":{"type":"string"},"title":{"type":"string"},"visibility":{"type":"string","enum":["public","private","invited"]},"time_policy":{"type":"string","enum":["manual","auto_advance"]}},"required":["world_id"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"world_id":{"type":"string"},"updated":{"type":"boolean"}},"required":["world_id","updated"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "world configure updates world metadata for owned world",
-            expected_outcome: "success",
-            test_fn_name: "world_configure_updates_metadata",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.work.schedule.set",
-        access: Access::Write,
-        admission: ADMISSION_WRITE_WORKSPACE,
-        handler: registry_work_schedule_set,
-        catalog: CatalogDescriptor {
-            description: "Link schedule ids to a work.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"schedule_ids":{"type":"array","items":{"type":"string"}}},"required":["work_id","schedule_ids"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"schedule_ids":{"type":"array","items":{"type":"string"}}},"required":["work_id","schedule_ids"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "work schedule set links schedule ids to work",
-            expected_outcome: "success",
-            test_fn_name: "work_schedule_set_links_schedules",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.finding.resolve",
-        access: Access::Write,
-        admission: ADMISSION_WRITE_WORKSPACE,
-        handler: registry_finding_resolve,
-        catalog: CatalogDescriptor {
-            description: "Mark a finding as resolved, optionally with a resolution note.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"finding_id":{"type":"string"},"resolution":{"type":"string"}},"required":["finding_id"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"finding_id":{"type":"string"},"resolved":{"type":"boolean"}},"required":["finding_id","resolved"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "finding resolve marks finding as resolved",
-            expected_outcome: "success",
-            test_fn_name: "finding_resolve_marks_resolved",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.pool.entry.manage",
-        access: Access::Write,
-        admission: ADMISSION_POOL_WRITE,
-        handler: registry_pool_entry_manage,
-        catalog: CatalogDescriptor {
-            description: "Add, remove, promote, or archive a work entry in the selection pool.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"action":{"type":"string","enum":["add","remove","promote","archive"]}},"required":["work_id","action"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"action":{"type":"string"},"success":{"type":"boolean"}},"required":["work_id","action","success"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "pool entry manage adds work to selection pool",
-            expected_outcome: "success",
-            test_fn_name: "pool_entry_manage_adds_to_pool",
-        },
-    });
-
-    // ── V1.56 P1: nexus.registry.refresh ──
-    reg.register(CapabilityRow {
-        id: "nexus.registry.refresh",
-        access: Access::Read,
-        admission: ADMISSION_READ_CONTEXT,
-        handler: registry_registry_refresh,
-        catalog: CatalogDescriptor {
-            description: "Return the capability registry snapshot (synthetic or CDN-backed).",
-            input_schema: Some(
-                r#"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"cacheAgeMs":{"type":"integer","minimum":0},"capabilityCount":{"type":"integer","minimum":0},"source":{"type":"string","enum":["synthetic","cdn","synthetic_fallback"]},"snapshotVersion":{"type":"string"},"generatedAt":{"type":"string","format":"date-time"},"fetchTimeoutMs":{"type":"integer","minimum":0},"maxRetries":{"type":"integer","minimum":0},"retryCount":{"type":"integer","minimum":0},"fallbackReason":{"type":"string"}},"required":["cacheAgeMs","capabilityCount","source","snapshotVersion","generatedAt"],"additionalProperties":false}"#,
-            ),
-        },
-        failure_mode: FailureMode::NotSupported,
-        handler_test_vector: TestVector {
-            description: "registry refresh returns synthetic output by default",
-            expected_outcome: "success",
-            test_fn_name: "registry_refresh_synthetic_smoke",
-        },
-    });
-
-    // ── V1.59 P0: DF-47 manuscript & misc capability parity batch (9 tools) ──
-
-    reg.register(CapabilityRow {
-        id: "nexus.manuscript.list",
-        access: Access::Read,
-        admission: ADMISSION_READ_WORKSPACE,
-        handler: registry_manuscript_list,
-        catalog: CatalogDescriptor {
-            description: "List all manuscripts (works) for the active creator.",
-            input_schema: Some(r#"{"type":"object","properties":{}}"#),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"manuscripts":{"type":"array","items":{"type":"object"}},"count":{"type":"integer"}},"required":["manuscripts","count"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "manuscript list returns manuscripts for active creator",
-            expected_outcome: "success",
-            test_fn_name: "manuscript_list_returns_manuscripts",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.manuscript.read_range",
-        access: Access::Read,
-        admission: ADMISSION_READ_WORKSPACE,
-        handler: registry_manuscript_read_range,
-        catalog: CatalogDescriptor {
-            description: "Read a bounded line range from a manuscript chapter body.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1}},"required":["work_id","chapter"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer"},"volume":{"type":"integer"},"content":{"type":"string"},"range":{"type":"object","properties":{"start_line":{"type":"integer"},"end_line":{"type":"integer"}}},"total_lines":{"type":"integer"},"truncated":{"type":"boolean"}},"required":["work_id","chapter","volume","content","range","total_lines","truncated"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::InvalidInput,
-        handler_test_vector: TestVector {
-            description: "manuscript read_range returns bounded content for valid chapter",
-            expected_outcome: "success",
-            test_fn_name: "manuscript_read_range_returns_bounded_content",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.manuscript.write",
-        access: Access::Write,
-        admission: ADMISSION_WRITE_WORKSPACE,
-        handler: registry_manuscript_write,
-        catalog: CatalogDescriptor {
-            description: "Write manuscript body content for a chapter within the size quota.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1},"content":{"type":"string"}},"required":["work_id","chapter","content"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"written":{"type":"boolean"},"work_id":{"type":"string"},"chapter":{"type":"integer"},"volume":{"type":"integer"},"word_count":{"type":"integer"},"bytes_written":{"type":"integer"}},"required":["written","work_id","chapter","volume","word_count","bytes_written"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::InvalidInput,
-        handler_test_vector: TestVector {
-            description: "manuscript write writes body content for valid chapter within size quota",
-            expected_outcome: "success",
-            test_fn_name: "manuscript_write_writes_content",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.manuscript.phase.get",
-        access: Access::Read,
-        admission: ADMISSION_READ_WORKSPACE,
-        handler: registry_manuscript_phase_get,
-        catalog: CatalogDescriptor {
-            description: "Return the current manuscript phase and stage status for a work.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"}},"required":["work_id"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"phase":{"type":"string"},"stage_status":{"type":"string"}},"required":["work_id","phase","stage_status"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "manuscript phase get returns current phase for owned work",
-            expected_outcome: "success",
-            test_fn_name: "manuscript_phase_get_returns_current_phase",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.manuscript.phase.set",
-        access: Access::Write,
-        admission: ADMISSION_WRITE_WORKSPACE,
-        handler: registry_manuscript_phase_set,
-        catalog: CatalogDescriptor {
-            description: "Move a work forward to the next manuscript phase.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"phase":{"type":"string","enum":["brainstorm","draft","review","finalize"]},"force":{"type":"boolean"}},"required":["work_id","phase"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"previous_phase":{"type":"string"},"current_phase":{"type":"string"},"stage_status":{"type":"string"},"transitioned":{"type":"boolean"}},"required":["work_id","previous_phase","current_phase","stage_status","transitioned"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::InvalidInput,
-        handler_test_vector: TestVector {
-            description: "manuscript phase set moves work forward to next phase",
-            expected_outcome: "success",
-            test_fn_name: "manuscript_phase_set_advances_phase",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.workspace.paths",
-        access: Access::Read,
-        admission: ADMISSION_READ_CONTEXT,
-        handler: registry_workspace_paths,
-        catalog: CatalogDescriptor {
-            description: "Return the workspace root and the allowed roots (Works, Worlds, References, .nexus42).",
-            input_schema: Some(r#"{"type":"object","properties":{}}"#),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"workspace_root":{"type":"string"},"allowed_roots":{"type":"array","items":{"type":"string"}},"preset_id":{"type":"string"}},"required":["workspace_root","allowed_roots","preset_id"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::InvalidInput,
-        handler_test_vector: TestVector {
-            description: "workspace paths returns allowed roots from active workspace",
-            expected_outcome: "success",
-            test_fn_name: "workspace_paths_returns_allowed_roots",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.runtime.health",
-        access: Access::Read,
-        admission: ADMISSION_READ_CONTEXT,
-        handler: registry_runtime_health,
-        catalog: CatalogDescriptor {
-            description: "Return agent-visible runtime health: mode, registry reachability, sync context, cloud flag.",
-            input_schema: Some(r#"{"type":"object","properties":{}}"#),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"runtime_mode":{"type":"string"},"registry_reachable":{"type":"boolean"},"registry_size":{"type":"integer"},"sync_state":{"type":"string"},"cloud_enabled":{"type":"boolean"},"pool_healthy":{"type":"boolean"}},"required":["runtime_mode","registry_reachable","registry_size","sync_state","cloud_enabled","pool_healthy"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "runtime health returns agent-visible health and registry reachability",
-            expected_outcome: "success",
-            test_fn_name: "runtime_health_returns_agent_visible_status",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "nexus.trace.correlation",
-        access: Access::Read,
-        admission: ADMISSION_READ_CONTEXT,
-        handler: registry_trace_correlation,
-        catalog: CatalogDescriptor {
-            description: "Propagate a correlation id (and optional session id) across tool calls.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"correlation_id":{"type":"string"},"session_id":{"type":"string"}}}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"correlation_id":{"type":"string"},"session_id":{"type":"string"},"parent_request_id":{"type":"string"},"trace_timestamp":{"type":"string"},"propagated":{"type":"boolean"}},"required":["correlation_id","trace_timestamp","propagated"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::Forbidden,
-        handler_test_vector: TestVector {
-            description: "trace correlation propagates correlation id across tool calls",
-            expected_outcome: "success",
-            test_fn_name: "trace_correlation_propagates_correlation_id",
-        },
-    });
-
-    // ── fs/* baseline (V1.33) ──
-    reg.register(CapabilityRow {
-        id: "fs/read_text_file",
-        access: Access::Read,
-        admission: ADMISSION_FS_READ,
-        handler: registry_read_file,
-        catalog: CatalogDescriptor {
-            description: "Read a text file within the workspace root and return its content.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::InvalidInput,
-        handler_test_vector: TestVector {
-            description: "read file returns content for valid path",
-            expected_outcome: "success",
-            test_fn_name: "execute_read_file_succeeds",
-        },
-    });
-
-    reg.register(CapabilityRow {
-        id: "fs/write_text_file",
-        access: Access::Write,
-        admission: ADMISSION_FS_WRITE,
-        handler: registry_write_file,
-        catalog: CatalogDescriptor {
-            description: "Write text content to a file within the workspace root.",
-            input_schema: Some(
-                r#"{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}"#,
-            ),
-            output_schema: Some(
-                r#"{"type":"object","properties":{"written":{"type":"boolean"}},"required":["written"]}"#,
-            ),
-        },
-        failure_mode: FailureMode::InvalidInput,
-        handler_test_vector: TestVector {
-            description: "write file writes content and returns success",
-            expected_outcome: "success",
-            test_fn_name: "execute_write_file_succeeds",
-        },
-    });
-
+    for metadata in host_tool_catalog() {
+        if unbound == Some(metadata.id) {
+            continue;
+        }
+        reg.register(CapabilityRow {
+            metadata,
+            handler: handler_for(metadata.id),
+        });
+    }
     reg
+}
+
+/// Builds the registry with one canonical tool deliberately left unbound.
+///
+/// The id stays canonical — reserved by the catalog — but has no handler row, so
+/// it is absent from this registry's runnable ids and binds nothing in the
+/// catalog's listing. That is the state `dispatch` and `spine_resolves` must
+/// refuse instead of resolving through the peer or user lane.
+#[cfg(any(test, feature = "test-hooks"))]
+#[must_use]
+pub fn build_registry_without(unbound: HostToolId) -> CapabilityRegistry {
+    build_registry_inner(Some(unbound))
+}
+
+/// The real handler for one canonical tool.
+///
+/// Exhaustive over [`HostToolId`], so a canonical row cannot ship without a
+/// handler binding.
+fn handler_for(id: HostToolId) -> RegistryHandlerFn {
+    match id {
+        HostToolId::ContextWhoami => registry_context_whoami,
+        HostToolId::WorkspaceInfo => registry_workspace_info,
+        HostToolId::WorkGet => registry_work_get,
+        HostToolId::WorkPatch => registry_work_patch,
+        HostToolId::OrchestrationScheduleStatus => registry_schedule_status,
+        HostToolId::StrategyGenerate => registry_strategy_generate,
+        HostToolId::ContextAssemble => registry_context_assemble,
+        HostToolId::WorldSnapshotGet => registry_world_snapshot_get,
+        HostToolId::TimelineRecentGet => registry_timeline_recent_get,
+        HostToolId::KbSnapshotRead => registry_kb_snapshot_read,
+        HostToolId::ManuscriptChapterGet => registry_manuscript_chapter_get,
+        HostToolId::ObservabilityDaemonHealth => registry_daemon_health,
+        HostToolId::KbSnapshotWrite => registry_kb_snapshot_write,
+        HostToolId::ManuscriptChapterUpdate => registry_manuscript_chapter_update,
+        HostToolId::WorldConfigure => registry_world_configure,
+        HostToolId::WorkScheduleSet => registry_work_schedule_set,
+        HostToolId::FindingResolve => registry_finding_resolve,
+        HostToolId::PoolEntryManage => registry_pool_entry_manage,
+        HostToolId::RegistryRefresh => registry_registry_refresh,
+        HostToolId::ManuscriptList => registry_manuscript_list,
+        HostToolId::ManuscriptReadRange => registry_manuscript_read_range,
+        HostToolId::ManuscriptWrite => registry_manuscript_write,
+        HostToolId::ManuscriptPhaseGet => registry_manuscript_phase_get,
+        HostToolId::ManuscriptPhaseSet => registry_manuscript_phase_set,
+        HostToolId::WorkspacePaths => registry_workspace_paths,
+        HostToolId::RuntimeHealth => registry_runtime_health,
+        HostToolId::TraceCorrelation => registry_trace_correlation,
+        HostToolId::FsReadTextFile => registry_read_file,
+        HostToolId::FsWriteTextFile => registry_write_file,
+    }
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
