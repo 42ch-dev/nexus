@@ -1136,16 +1136,43 @@ impl CapabilityRegistryHolder {
             .clone()
     }
 
-    /// Atomically swap in a freshly rebuilt registry (write lock; held only
-    /// for the pointer write — AR-92 #7). The previous generation is dropped
-    /// AFTER the write lock is released so a last-reference drop (tearing
-    /// down a full builtin+user registry) never stalls readers (M-1).
-    pub fn swap(&self, registry: std::sync::Arc<CapabilityRegistry>) {
-        // Reserve the incoming generation's canonical names BEFORE the
-        // pointer write: a hot-admitted user name joins the live reservation
-        // on the same swap that publishes its row, and a compute-capable name
-        // stays reserved even when a later generation drops the row.
-        let incoming: Vec<&'static str> = registry.iter().map(|c| c.name()).collect();
+    /// Reserve the canonical names of `registry` — the FIRST half of
+    /// [`swap`](Self::swap), strictly before publication.
+    ///
+    /// Reserving first is what closes the admission window: a concurrent
+    /// reservation consumer (`live_reserved_tool_ids`) can only ever observe
+    /// a SUPERSET of the live rows' names. Over-reserving a not-yet-published
+    /// generation is harmless (the same swap publishes it immediately after;
+    /// the set is union-only, so no rollback exists or is needed), while the
+    /// reverse order would publish rows whose names are still unreserved and
+    /// let a peer tool claim one in the gap — an admission a later extension
+    /// cannot undo.
+    pub(crate) fn reserve_generation(&self, registry: &CapabilityRegistry) {
+        let incoming = registry.iter().map(|c| c.name());
+        self.reserved
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) // poison-recovery (crate policy)
+            .extend(incoming);
+    }
+
+    /// Publish `registry` as the live generation — the SECOND half of
+    /// [`swap`](Self::swap). Write lock held only for the pointer write
+    /// (AR-92 #7); the previous generation is dropped AFTER the lock is
+    /// released so a last-reference drop never stalls readers (M-1).
+    ///
+    /// Publication-path invariant (debug builds): every canonical name the
+    /// incoming generation serves is ALREADY reserved. If the reserve half
+    /// ever moves after this point again, every swap trips this in tests.
+    pub(crate) fn publish_generation(&self, registry: std::sync::Arc<CapabilityRegistry>) {
+        debug_assert!(
+            {
+                let incoming: std::collections::HashSet<&'static str> =
+                    registry.iter().map(|c| c.name()).collect();
+                self.reserved_names().is_superset(&incoming)
+            },
+            "reserved before publication: a generation must never go live with \
+             unreserved canonical names"
+        );
         let mut guard = self
             .inner
             .write()
@@ -1153,10 +1180,21 @@ impl CapabilityRegistryHolder {
         let previous = (*guard).replace(registry);
         drop(guard);
         drop(previous);
-        self.reserved
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .extend(incoming);
+    }
+
+    /// Atomically swap in a freshly rebuilt registry: its canonical names are
+    /// reserved BEFORE the generation is published (the two half-steps, in
+    /// that order). A reservation read racing this swap therefore observes
+    /// either (previous rows, reservation without the new names) or (new
+    /// rows, reservation with them) — never published rows under a
+    /// reservation that lacks their names. A hot-admitted user name joins the
+    /// live reservation on the same swap that publishes its row, and a
+    /// compute-capable name stays reserved even when a later generation
+    /// drops the row. Lock order is one-way (`reserved` → `inner`); readers
+    /// take a single lock each, so no inversion is possible.
+    pub fn swap(&self, registry: std::sync::Arc<CapabilityRegistry>) {
+        self.reserve_generation(&registry);
+        self.publish_generation(registry);
     }
 
     /// Create a holder pre-populated with `registry` — boot convenience:

@@ -840,6 +840,69 @@ use crate::CapabilityOrigin;
         );
     }
 
+    /// The window INSIDE `swap`, observed deterministically through the two
+    /// half-steps: after the reserve half and BEFORE the publish half, the
+    /// incoming name is already reserved while the live generation still
+    /// lacks the row. Under the reverted ordering (extend after the pointer
+    /// write) the first assertion fails — the name would be absent from the
+    /// reservation exactly while the window is open and a peer handshake
+    /// could claim it.
+    #[test]
+    fn swap_reservation_precedes_publication() {
+        let tmp = tempfile::tempdir().unwrap();
+        let deps = test_deps();
+        let (reg0, outcome0) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
+        assert!(
+            outcome0.admitted.is_empty(),
+            "boot admits nothing from an empty dir"
+        );
+        let holder = CapabilityRegistryHolder::with_registry(std::sync::Arc::new(reg0));
+        assert!(!holder.reserved_names().contains("demo.compute"));
+
+        write_capability_dir(tmp.path(), "demo.compute");
+        let (reg1, _) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
+
+        // Half-step 1: reserve only — the name joins the live reservation.
+        holder.reserve_generation(&reg1);
+        assert!(
+            holder.reserved_names().contains("demo.compute"),
+            "the incoming name is reserved BEFORE the generation is published"
+        );
+        assert!(
+            holder
+                .get()
+                .expect("previous generation still live")
+                .get("demo.compute")
+                .is_none(),
+            "publication has not happened while the reservation is already in place"
+        );
+
+        // Half-step 2: publish — the row appears, reservation already holds.
+        holder.publish_generation(std::sync::Arc::new(reg1));
+        let live = holder.get().expect("published generation");
+        assert!(live.get("demo.compute").is_some());
+        assert!(holder.reserved_names().contains("demo.compute"));
+    }
+
+    /// The publication path itself enforces the ordering invariant: publishing
+    /// a generation whose names are NOT yet reserved fires the debug
+    /// invariant. This case pins the check — if the invariant is removed, or
+    /// the swap order reverts to extend-after-publish (where EVERY swap trips
+    /// it), the suite goes red here instead of leaving the window open.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "reserved before publication")]
+    fn publish_refuses_an_unreserved_generation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let deps = test_deps();
+        let (reg0, _) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
+        let holder = CapabilityRegistryHolder::with_registry(std::sync::Arc::new(reg0));
+        write_capability_dir(tmp.path(), "demo.compute");
+        let (reg1, _) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
+        // Publish WITHOUT reserving first — the invariant must fire.
+        holder.publish_generation(std::sync::Arc::new(reg1));
+    }
+
     // -------------------------------------------------------------------------
     // No-op stability (AR-95 #5) + transient-error safety (I-1) + M-6
     // -------------------------------------------------------------------------
