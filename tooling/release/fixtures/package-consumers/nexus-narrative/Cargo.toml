@@ -1,0 +1,17 @@
+[package]
+name = "nexus-narrative-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# `nexus-knowledge` is declared on purpose: the narrative gateway's public
+# `KbStore` bound must be positively importable, so both packages are consumed
+# from their own archives by one program.
+[dependencies]
+nexus-contracts = "0.1.0"
+nexus-knowledge = "0.1.0"
+nexus-narrative = "0.1.0"
+tokio = { version = "1", features = ["rt", "macros"] }
+
+# Standalone workspace root: the consumer inherits no product Cargo config.
+[workspace]

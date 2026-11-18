@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -400,6 +400,216 @@ test("a consumer-supplied Cargo config is refused before any resolution", () => 
     assert.deepEqual(row.consumer.resolved, []);
     assert.equal(row.consumer.output, "");
     assert.equal(row.cause, row.consumer.cause);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+/**
+ * Contract crates the real consumer fixtures resolve. Every one is a member of
+ * the temp workspace so workspace inheritance and `[workspace.dependencies]`
+ * stay the product's own; only the entries a case names in its carrier pack.
+ */
+const CONSUMER_CLOSURE = [
+  "nexus-contracts",
+  "nexus-workflow-ir",
+  "nexus-pattern",
+  "nexus-knowledge",
+  "nexus-narrative",
+];
+
+/**
+ * Temp repo carrying the real contract crates, sources included, with one
+ * consumer fixture installed under the discovery path the checker reads. The
+ * workspace root is the real root manifest with its member list narrowed to
+ * the closure, so the fixture inherits the product dependency table instead of
+ * duplicating it; versions stay the real literals, so the fixture's caret
+ * requirements mean what a registry consumer would mean.
+ *
+ * @param {string} entryName Consumer fixture and packed entry name.
+ * @param {string[]} entries Entries the carrier packages for this case.
+ * @returns {string}
+ */
+function realConsumerRepo(entryName, entries) {
+  const dir = mkdtempSync(join(tmpdir(), "nexus-release-"));
+  const members = CONSUMER_CLOSURE.map((name) => `    "crates/${name}",`).join("\n");
+  writeRepoFile(
+    dir,
+    "Cargo.toml",
+    readFileSync(join(REPO_ROOT, "Cargo.toml"), "utf8").replace(
+      /^members = \[[\s\S]*?\n\]/m,
+      `members = [\n${members}\n]`,
+    ),
+  );
+  // The product lock keeps every registry version resolvable offline.
+  cpSync(join(REPO_ROOT, "Cargo.lock"), join(dir, "Cargo.lock"));
+  for (const name of CONSUMER_CLOSURE) {
+    cpSync(join(REPO_ROOT, "crates", name), join(dir, "crates", name), {
+      recursive: true,
+    });
+  }
+  writeRepoFile(
+    dir,
+    VERSION_BRACKETS_PATH,
+    `${JSON.stringify(
+      {
+        contract: entries.map((name) => ({
+          name,
+          manifest: `crates/${name}/Cargo.toml`,
+        })),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  cpSync(
+    join(CONSUMER_FIXTURES_DIR, entryName),
+    join(dir, CONSUMER_FIXTURES_PATH, entryName),
+    { recursive: true },
+  );
+  initGitRepo(dir);
+  return dir;
+}
+
+/**
+ * The report row for one packed entry.
+ *
+ * @param {import("./check-contract-packageability.mjs").PackageabilityReport} report
+ * @param {string} name
+ */
+function rowFor(report, name) {
+  const row = report.results.find((result) => result.name === name);
+  assert.ok(row !== undefined, `${name} is in the report`);
+  return row;
+}
+
+test("the contracts consumer round-trips a generated object from its archive", () => {
+  const dir = realConsumerRepo("nexus-contracts", ["nexus-contracts"]);
+  try {
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
+    assert.equal(report.firstFailure, null);
+
+    const row = rowFor(report, "nexus-contracts");
+    assert.equal(row.ok, true, row.cause ?? "");
+    assert.match(row.archive.sha256, /^[0-9a-f]{64}$/);
+    assert.equal(row.consumer.ok, true, row.consumer.cause ?? "");
+    assert.equal(row.consumer.cause, null);
+    assert.deepEqual(row.consumer.patched, [
+      { name: "nexus-contracts", sha256: row.archive.sha256 },
+    ]);
+    const consumed = row.consumer.resolved.find(
+      (resolved) => resolved.name === "nexus-contracts",
+    );
+    assert.equal(consumed.source, `archive:${row.archive.sha256}`);
+    assert.ok(consumed.manifest.includes("archives"), consumed.manifest);
+    // The compiled program asserts every field; its own line is the proof it
+    // ran to the end of its checks.
+    assert.match(
+      row.consumer.output,
+      /nexus-contracts round-tripped wld_0123456789/,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("the workflow-ir consumer rejects a dangling reference from its archive", () => {
+  const dir = realConsumerRepo("nexus-workflow-ir", [
+    "nexus-contracts",
+    "nexus-workflow-ir",
+  ]);
+  try {
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
+
+    const row = rowFor(report, "nexus-workflow-ir");
+    assert.equal(row.ok, true, row.cause ?? "");
+    assert.equal(row.consumer.ok, true, row.consumer.cause ?? "");
+    assert.deepEqual(
+      row.consumer.patched.map((patched) => patched.name),
+      ["nexus-contracts", "nexus-workflow-ir"],
+    );
+    for (const patched of row.consumer.patched) {
+      assert.equal(
+        patched.sha256,
+        /** @type {{sha256: string}} */ (rowFor(report, patched.name).archive)
+          .sha256,
+      );
+    }
+    assert.match(
+      row.consumer.output,
+      /nexus-workflow-ir validated prompt-step \([0-9a-f]{64}\)/,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("the pattern consumer scans valid and broken packages from its archive", () => {
+  const dir = realConsumerRepo("nexus-pattern", [
+    "nexus-contracts",
+    "nexus-workflow-ir",
+    "nexus-pattern",
+  ]);
+  try {
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
+
+    const row = rowFor(report, "nexus-pattern");
+    assert.equal(row.ok, true, row.cause ?? "");
+    assert.equal(row.consumer.ok, true, row.consumer.cause ?? "");
+    assert.deepEqual(
+      row.consumer.patched.map((patched) => patched.name),
+      ["nexus-contracts", "nexus-pattern", "nexus-workflow-ir"],
+    );
+    assert.match(
+      row.consumer.output,
+      /nexus-pattern scanned 2 packages \(1 available\)/,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("the narrative consumer reads a world and its KbStore entries from archives, not the original source escape", () => {
+  const dir = realConsumerRepo("nexus-narrative", [
+    "nexus-contracts",
+    "nexus-knowledge",
+    "nexus-narrative",
+  ]);
+  try {
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
+
+    const row = rowFor(report, "nexus-narrative");
+    assert.equal(row.ok, true, row.cause ?? "");
+    assert.equal(row.consumer.ok, true, row.consumer.cause ?? "");
+    assert.deepEqual(
+      row.consumer.patched.map((patched) => patched.name),
+      ["nexus-contracts", "nexus-knowledge", "nexus-narrative"],
+    );
+    assert.match(
+      row.consumer.output,
+      /nexus-narrative read back world wld_consumer with entry kb_/,
+    );
+
+    // Both packages are positively consumed from their own archives, and the
+    // knowledge package needs no fixture of its own to earn that evidence.
+    for (const name of ["nexus-contracts", "nexus-knowledge", "nexus-narrative"]) {
+      const resolved = row.consumer.resolved.find((entry) => entry.name === name);
+      assert.equal(
+        resolved.source,
+        `archive:${/** @type {{sha256: string}} */ (rowFor(report, name).archive).sha256}`,
+      );
+      assert.ok(resolved.manifest.includes("archives"), resolved.manifest);
+      assert.equal(
+        resolved.manifest.startsWith(dir),
+        false,
+        `${name} resolved from the original checkout`,
+      );
+    }
+    assert.equal(rowFor(report, "nexus-knowledge").consumer, null);
   } finally {
     cleanupTempRepo(dir);
   }

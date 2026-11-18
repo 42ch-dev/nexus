@@ -1,0 +1,15 @@
+[package]
+name = "nexus-contracts-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# A caret range on the package's independent literal version, like a real
+# registry consumer: the archive must answer it, and the checker patches the
+# selected archive in place of the unpublished registry row.
+[dependencies]
+nexus-contracts = "0.1.0"
+serde_json = "1.0"
+
+# Standalone workspace root: the consumer inherits no product Cargo config.
+[workspace]
