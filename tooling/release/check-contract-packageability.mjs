@@ -23,7 +23,10 @@
  *      ships a `tests/` target, the only target kind that sees a
  *      dev-dependency — `cargo test`; a fixture that ships a `guest/` crate also
  *      gets that crate built for `wasm32-unknown-unknown` from the same
- *      archives, with the host consumer kept out of it.
+ *      archives, with the host consumer kept out of it. The fixture a row
+ *      declares must be one of the fixtures that actually resolved that row's
+ *      archive, so a declaration pointing at another entry's fixture fails
+ *      rather than passing on that other fixture's coverage.
  *
  * Nothing downstream sees the original checkout or the packing tree: a
  * consumer that resolves an input from either fails, as does an archive that
@@ -1359,14 +1362,32 @@ export function checkContractPackageability(repoRoot) {
           continue;
         }
         const covered = coverage.get(row.name);
-        if (covered !== undefined && covered.sha256 === row.archive.sha256) {
-          row.coveredBy = [...covered.cases].sort();
+        const resolvedBy =
+          covered !== undefined && covered.sha256 === row.archive.sha256
+            ? [...covered.cases].sort()
+            : null;
+        // A declared fixture is a claim about *this* entry. When another entry's
+        // fixture also consumes the archive, running the declared one proves
+        // nothing unless it is one of the fixtures that resolved it.
+        const declared = consumer.fixtures.get(row.name);
+        const declaredCase =
+          declared === undefined
+            ? null
+            : `${CONSUMER_FIXTURES_PATH}/${declared}`;
+        if (
+          resolvedBy !== null &&
+          (declaredCase === null || resolvedBy.includes(declaredCase))
+        ) {
+          row.coveredBy = resolvedBy;
           continue;
         }
         row.ok = false;
-        row.cause = declaredOnly.has(row.name)
-          ? `unresolved-coverage: ${row.name} was patched into a consumer but resolution never used its archive`
-          : `pack-only: no passing consumer consumes ${row.name}`;
+        row.cause =
+          resolvedBy !== null
+            ? `misdirected-fixture: ${row.name} declares ${declaredCase}, but only ${resolvedBy.join(", ")} resolved its archive`
+            : declaredOnly.has(row.name)
+              ? `unresolved-coverage: ${row.name} was patched into a consumer but resolution never used its archive`
+              : `pack-only: no passing consumer consumes ${row.name}`;
       }
     }
   } finally {

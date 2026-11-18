@@ -1221,6 +1221,64 @@ test("the declared fixture directory is the one that runs", () => {
   }
 });
 
+test("declaring another entry's fixture fails as a misdirected declaration", () => {
+  // `nexus-workflow-ir` declares the `nexus-contracts` fixture, which consumes
+  // contracts only, while the `nexus-pattern` fixture is what actually resolves
+  // the workflow-ir archive. The row must not stay green on the pattern
+  // fixture's coverage: the declared runner is a claim about its own entry.
+  const dir = realConsumerRepo("nexus-pattern", [
+    "nexus-contracts",
+    "nexus-workflow-ir",
+    "nexus-pattern",
+  ]);
+  try {
+    cpSync(
+      join(CONSUMER_FIXTURES_DIR, "nexus-contracts"),
+      join(dir, CONSUMER_FIXTURES_PATH, "nexus-contracts"),
+      { recursive: true },
+    );
+    writeRepoFile(
+      dir,
+      CONSUMER_ACCOUNTING_PATH,
+      consumerAccounting({
+        "nexus-contracts": "nexus-contracts",
+        "nexus-workflow-ir": "nexus-contracts",
+        "nexus-pattern": "nexus-pattern",
+      }),
+    );
+    gitOk(dir, ["add", "-A"]);
+    gitOk(dir, ["commit", "-qm", "declare the wrong fixture"]);
+
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, false);
+    const misdirected = rowFor(report, "nexus-workflow-ir");
+    assert.equal(misdirected.ok, false);
+    // The declared runner ran and passed; the archive it never used is still
+    // consumed by another fixture, so this is not a coverage gap.
+    assert.equal(misdirected.consumer.ok, true, misdirected.consumer.cause ?? "");
+    assert.equal(
+      misdirected.consumer.case,
+      `${CONSUMER_FIXTURES_PATH}/nexus-contracts`,
+    );
+    assert.equal(
+      misdirected.cause,
+      `misdirected-fixture: nexus-workflow-ir declares ${CONSUMER_FIXTURES_PATH}/nexus-contracts, but only ${CONSUMER_FIXTURES_PATH}/nexus-pattern resolved its archive`,
+    );
+    assert.equal(misdirected.coveredBy, null);
+    // A declaration naming the fixture that did resolve the entry stays green.
+    for (const name of ["nexus-contracts", "nexus-pattern"]) {
+      const row = rowFor(report, name);
+      assert.equal(row.ok, true, row.cause ?? "");
+    }
+    assert.deepEqual(rowFor(report, "nexus-contracts").coveredBy, [
+      `${CONSUMER_FIXTURES_PATH}/nexus-contracts`,
+      `${CONSUMER_FIXTURES_PATH}/nexus-pattern`,
+    ]);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
 test("the consumer accounting must name every carrier entry once", () => {
   const dir = tinyFixture();
   try {
