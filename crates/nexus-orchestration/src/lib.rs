@@ -1,6 +1,7 @@
 //! nexus-orchestration — engine adapter, capability registry, graph executor.
 //! Authoritative design: `docs/specs/orchestration/orchestration-engine.md`.
 
+pub mod applied_document;
 pub mod auto_chain;
 pub mod auto_chronology;
 pub mod capability;

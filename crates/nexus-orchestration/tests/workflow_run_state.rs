@@ -21,7 +21,7 @@
 
 use graph_flow::{Session, SessionStorage};
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument;
-use nexus_orchestration::capability::{AppliedDocument, AppliedDocumentSource};
+use nexus_orchestration::applied_document::{AppliedDocument, AppliedDocumentSource};
 use nexus_orchestration::engine::{SessionId, SessionStatus};
 use nexus_orchestration::OrchestrationEngine;
 use nexus_preset::source_identity::PresetSourceIdentity;

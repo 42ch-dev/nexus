@@ -693,7 +693,7 @@ pub struct EngineSharedState {
     /// the applied graph instead of the descriptor's. `None` on engines that
     /// never wire it (in-memory/test engines): recovery keeps the
     /// descriptor-only behaviour.
-    pub applied_document_source: Option<Arc<dyn crate::capability::AppliedDocumentSource>>,
+    pub applied_document_source: Option<Arc<dyn crate::applied_document::AppliedDocumentSource>>,
 }
 
 impl EngineSharedState {
@@ -768,7 +768,7 @@ impl EngineSharedState {
     /// same source.
     pub fn set_applied_document_source(
         &mut self,
-        source: Arc<dyn crate::capability::AppliedDocumentSource>,
+        source: Arc<dyn crate::applied_document::AppliedDocumentSource>,
     ) {
         self.applied_document_source = Some(source);
     }
@@ -3121,13 +3121,13 @@ fn inner_graph_entered_by_state<'a>(
 /// route freezes.
 ///
 /// The bytes are compiled into this binary, so an engine with no configured
-/// [`AppliedDocumentSource`](crate::capability::AppliedDocumentSource) can
+/// [`AppliedDocumentSource`](crate::applied_document::AppliedDocumentSource) can
 /// still resolve the document the preset runs. A bundle whose document cannot
 /// be constructed is the refusal below, named by preset — its YAML manifest is
 /// never an execution input.
 fn embedded_applied_document(
     loaded: &nexus_preset::LoadedPreset,
-) -> Result<crate::capability::AppliedDocument, String> {
+) -> Result<crate::applied_document::AppliedDocument, String> {
     let document = nexus_preset::embedded_workflow_document(loaded)
         .map_err(|error| format!("embedded_document_unavailable: {error}"))?;
     let (apply_id, content_hash) = nexus_preset::embedded_applied_identity(&loaded.id, &document)
@@ -3137,7 +3137,7 @@ fn embedded_applied_document(
             loaded.id
         )
     })?;
-    Ok(crate::capability::AppliedDocument {
+    Ok(crate::applied_document::AppliedDocument {
         identity: nexus_session_storage::run_state::AppliedRunIdentity {
             apply_id,
             content_hash,
@@ -3653,7 +3653,7 @@ impl GraphFlowEngine {
     /// admission used instead of the descriptor bundle.
     pub fn set_applied_document_source(
         &mut self,
-        source: std::sync::Arc<dyn crate::capability::AppliedDocumentSource>,
+        source: std::sync::Arc<dyn crate::applied_document::AppliedDocumentSource>,
     ) {
         match std::sync::Arc::get_mut(&mut self.state) {
             Some(state) => state.set_applied_document_source(source),
@@ -3918,7 +3918,7 @@ impl GraphFlowEngine {
 
     /// The applied document a run of `preset_id` executes.
     ///
-    /// The configured [`AppliedDocumentSource`](crate::capability::AppliedDocumentSource)
+    /// The configured [`AppliedDocumentSource`](crate::applied_document::AppliedDocumentSource)
     /// owns the route when one is installed (the daemon's core wiring). Without
     /// one, an embedded preset still resolves its own compiled-in document —
     /// [`embedded_applied_document`] — because those bytes are in this binary.
@@ -3933,7 +3933,7 @@ impl GraphFlowEngine {
         &self,
         preset_id: &str,
         loaded: Option<&nexus_preset::LoadedPreset>,
-    ) -> Result<Option<crate::capability::AppliedDocument>, String> {
+    ) -> Result<Option<crate::applied_document::AppliedDocument>, String> {
         let resolved = match &self.state.applied_document_source {
             Some(source) => source.applied_document(preset_id, loaded).await?,
             None => loaded
