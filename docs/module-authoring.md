@@ -35,6 +35,16 @@ reference, use the `compute-module-author` skill in the external
 repository (no agent skill ships in this repo). The ABI contract below stays
 normative — the SDK is a generator for it, not a replacement.
 
+The SDK, manifest and test crates are published independently (see
+[Public Cargo packages](release.md#public-cargo-packages)): depend on
+`nexus-module-sdk = "0.1"` in a module's `[dependencies]`, on
+`nexus-module-manifest = "0.1"` wherever manifests are validated, and on
+`nexus-module-test` in `[dev-dependencies]` of a host-side test target only —
+never in a `wasm32` guest, which cannot compile Wasmtime. Each crate advances on
+its own version (its `CHANGELOG.md` says when), so a caret bound is the
+compatibility contract; a local checkout is selected with a `path` override
+alongside that bound.
+
 ## ABI at a glance
 
 Target **`wasm32-unknown-unknown`** (no WASI required). `std` is available on

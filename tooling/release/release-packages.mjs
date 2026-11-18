@@ -1,0 +1,979 @@
+#!/usr/bin/env node
+/**
+ * Public Cargo package release planning — allowlist, dependency order,
+ * provenance, content-matched resume and selected-only version preparation.
+ *
+ * The inventory is `tooling/release/version-brackets.json` through
+ * `readVersionBrackets`, the same eight entries the packageability checker
+ * packs, so this helper keeps no second list of package names.
+ *
+ * Boundary: no registry client lives here. `planPackageRelease` reads the
+ * repository (manifests plus `git` provenance) and a caller-supplied registry
+ * view; `publishSelected` is the only publication seam and it receives its
+ * client from the caller. The CLI offers `--check-only` and `--prepare` only,
+ * so no path in this file can read a token or upload an archive.
+ *
+ * Registry view shape (`registry` argument / `--registry-state`):
+ *   { name: "crates-io", published?: { name, version, checksum }[] | null,
+ *     writable?: boolean }
+ * `published: null` (the CLI default) means "unknown": nothing is claimed about
+ * live registry state, so every selected package stays pending and only
+ * repository facts are asserted. `writable: false` is an explicit permission
+ * refusal; absent means unconfigured, which is disclosed, not fabricated.
+ *
+ * CLI:
+ *   node tooling/release/release-packages.mjs --check-only \
+ *     --source <40-hex sha> --packages a,b --registry crates-io \
+ *     [--registry-state <json>]
+ *   node tooling/release/release-packages.mjs --prepare --packages a,b \
+ *     --versions a=1.2.3,b=1.2.4 [--date YYYY-MM-DD]
+ *
+ * Exit 0 for a produced plan or applied preparation, 1 for a refusal, 2 for a
+ * usage error.
+ */
+
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { compareSemVer, isReleaseSemVer } from "./semver.mjs";
+import {
+  parseCargoPackageName,
+  parseCargoPackageVersion,
+  readVersionBrackets,
+  resolveRepoRoot,
+} from "./version-surfaces.mjs";
+
+/**
+ * GitHub label of the Cargo package family. The product pipeline owns the
+ * `release` label and the `v*` tag namespace; a package release uses neither.
+ */
+export const PACKAGE_RELEASE_LABEL = "crate-release";
+
+/** Registries this helper can label. A label is a tag fact, never a lookup. */
+const REGISTRY_NAMES = new Set(["crates-io"]);
+
+/** Full Git object name of a reviewed source revision. */
+const SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/;
+
+/**
+ * Tag of one package release. Product releases tag `v<version>`, which triggers
+ * `release.yml`, so package tags live under their own `crate/` namespace.
+ *
+ * @param {string} name
+ * @param {string} version
+ * @returns {string}
+ */
+export function releaseTag(name, version) {
+  if (typeof name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+    throw new Error(`Invalid package name for a release tag: "${name}"`);
+  }
+  if (!isReleaseSemVer(version)) {
+    throw new Error(`Invalid package version for a release tag: "${version}"`);
+  }
+  return `crate/${name}/v${version}`;
+}
+
+/**
+ * A refusal the caller must act on; `code` is the stable name tests assert.
+ */
+class ReleaseRefusal extends Error {
+  /**
+   * @param {string} code
+   * @param {string} message
+   */
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * `git` as one more read of the repository: provenance is what makes a source
+ * revision reviewable, and it needs no network.
+ *
+ * @param {string} repoRoot
+ * @param {string[]} args
+ * @returns {{ ok: boolean; stdout: string }}
+ */
+function git(repoRoot, args) {
+  const result = spawnSync("git", args, { cwd: repoRoot, encoding: "utf8" });
+  if (result.error !== undefined || result.status !== 0) {
+    return { ok: false, stdout: "" };
+  }
+  return { ok: true, stdout: result.stdout ?? "" };
+}
+
+/**
+ * Reviewed source revision plus the selected package inputs that differ from
+ * it. A selected manifest or changelog with an uncommitted change means the
+ * claimed revision does not describe the bytes about to be released, so the
+ * plan refuses instead of planning from a guess.
+ *
+ * @param {string} repoRoot
+ * @param {string[]} paths repository-relative inputs of the selection
+ * @returns {{ sha: string; dirty: string[] }}
+ */
+export function readSourceProvenance(repoRoot, paths) {
+  const head = git(repoRoot, ["rev-parse", "HEAD"]);
+  if (!head.ok) {
+    throw new ReleaseRefusal(
+      "source-unreadable",
+      `${repoRoot}: cannot read HEAD; a Git checkout is required for provenance`,
+    );
+  }
+  const status = git(repoRoot, ["status", "--porcelain", "--", ...paths]);
+  const dirty = status.ok
+    ? status.stdout
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => line.slice(3))
+    : [];
+  return { sha: head.stdout.trim(), dirty };
+}
+
+/**
+ * Inline dependency tables of an inventory manifest that name another
+ * inventory package, with the requirement to satisfy. The `[dependencies.x]`
+ * table form is refused: this helper rewrites bounds in place and must not
+ * claim a package it cannot read the same way Cargo does.
+ *
+ * @param {string} contents
+ * @param {string} manifestPath
+ * @param {string[]} names
+ * @returns {{ name: string; requirement: string }[]}
+ */
+function inventoryDependencies(contents, manifestPath, names) {
+  /** @type {{ name: string; requirement: string }[]} */
+  const dependencies = [];
+  for (const name of names) {
+    const escaped = escapeRegExp(name);
+    if (new RegExp(`^\\s*\\[(?:.*\\.)?(?:dev-|build-)?dependencies\\.${escaped}\\]\\s*$`, "m").test(contents)) {
+      throw new ReleaseRefusal(
+        "dependency-form-unsupported",
+        `${manifestPath}: ${name} uses a dependency table; an inline table with a version requirement is required`,
+      );
+    }
+    const inline = new RegExp(`^\\s*${escaped}\\s*=\\s*\\{([^}\\n]*)\\}\\s*$`, "m").exec(contents);
+    if (inline === null) {
+      continue;
+    }
+    const requirement = /\bversion\s*=\s*"([^"]*)"/.exec(inline[1])?.[1];
+    if (requirement === undefined) {
+      throw new ReleaseRefusal(
+        "unversioned-dependency",
+        `${manifestPath}: ${name} has no version requirement, so the package is not registry-ready`,
+      );
+    }
+    dependencies.push({ name, requirement });
+  }
+  return dependencies;
+}
+
+/**
+ * Caret acceptance of `version`, the requirement form every manifest keeps
+ * (`"0.1.0"` means `^0.1.0`). Pre-1.0 the left-most non-zero component is
+ * pinned: `^0.1.0` accepts `>=0.1.0 <0.2.0`, `^0.0.3` accepts only `0.0.3`.
+ *
+ * @param {string} requirement
+ * @param {string} version
+ * @returns {boolean}
+ */
+function caretAccepts(requirement, version) {
+  if (!isReleaseSemVer(requirement) || !isReleaseSemVer(version)) {
+    return false;
+  }
+  if (compareSemVer(version, requirement) < 0) {
+    return false;
+  }
+  const base = requirement.split("-")[0].split(".");
+  const candidate = version.split("-")[0].split(".");
+  if (base[0] !== "0") {
+    return candidate[0] === base[0];
+  }
+  if (base[1] !== "0") {
+    return candidate[0] === "0" && candidate[1] === base[1];
+  }
+  return candidate.every((part, index) => part === base[index]);
+}
+
+/**
+ * The inventory as rows: name, manifest, literal version and dependency edges.
+ * A consumer crate that inherits the workspace version is not independently
+ * releasable, so an inherited literal is a refusal rather than a fallback.
+ *
+ * @param {string} repoRoot
+ * @returns {{ name: string; manifest: string; contents: string; version: string; dependencies: { name: string; requirement: string }[] }[]}
+ */
+function readInventory(repoRoot) {
+  const entries = readVersionBrackets(repoRoot);
+  const names = entries.map((entry) => entry.name);
+  return entries.map((entry) => {
+    const contents = readFileSync(join(repoRoot, entry.manifest), "utf8");
+    const declared = parseCargoPackageName(contents, entry.manifest);
+    if (declared !== entry.name) {
+      throw new ReleaseRefusal(
+        "inventory-mismatch",
+        `${entry.manifest}: declares ${declared}, carrier entry is ${entry.name}`,
+      );
+    }
+    const version = parseCargoPackageVersion(contents, entry.manifest);
+    if (version === null) {
+      throw new ReleaseRefusal(
+        "version-inherited",
+        `${entry.manifest}: inherits the workspace version, so ${entry.name} cannot version independently`,
+      );
+    }
+    return {
+      name: entry.name,
+      manifest: entry.manifest,
+      contents,
+      version,
+      dependencies: inventoryDependencies(contents, entry.manifest, names),
+    };
+  });
+}
+
+/**
+ * Selected names in dependency-first order: every prerequisite precedes its
+ * consumer, and inventory order breaks ties. A cycle cannot be ordered, so it
+ * refuses.
+ *
+ * @param {{ name: string; dependencies: { name: string; requirement: string }[] }[]} rows
+ * @param {Set<string>} selected
+ * @returns {string[]}
+ */
+function dependencyOrder(rows, selected) {
+  const byName = new Map(rows.map((row) => [row.name, row]));
+  /** @type {Map<string, "visiting" | "done">} */
+  const state = new Map();
+  /** @type {string[]} */
+  const order = [];
+  /**
+   * @param {string} name
+   * @param {string[]} trail
+   */
+  const visit = (name, trail) => {
+    if (state.get(name) === "done") {
+      return;
+    }
+    if (state.get(name) === "visiting") {
+      throw new ReleaseRefusal(
+        "dependency-cycle",
+        `dependency cycle: ${[...trail, name].join(" -> ")}`,
+      );
+    }
+    state.set(name, "visiting");
+    for (const dependency of byName.get(name)?.dependencies ?? []) {
+      if (selected.has(dependency.name)) {
+        visit(dependency.name, [...trail, name]);
+      }
+    }
+    state.set(name, "done");
+    order.push(name);
+  };
+  for (const row of rows) {
+    if (selected.has(row.name)) {
+      visit(row.name, []);
+    }
+  }
+  return order;
+}
+
+/**
+ * Published rows of one package from the caller's registry view.
+ *
+ * @param {{ name: string; version: string; checksum?: string }[] | null} published
+ * @param {string} name
+ * @returns {{ name: string; version: string; checksum?: string }[]}
+ */
+function publishedRows(published, name) {
+  return (published ?? []).filter((row) => row?.name === name);
+}
+
+/**
+ * Archive rows the verifier produced for this source revision, keyed by package.
+ *
+ * @param {{ sourceSha?: string; results?: { name: string; ok: boolean; archive: { sha256: string } | null; package: { version: string } | null }[] } | null} evidence
+ * @returns {Map<string, { version: string; archiveSha256: string; ok: boolean }>}
+ */
+function evidenceRows(evidence) {
+  /** @type {Map<string, { version: string; archiveSha256: string; ok: boolean }>} */
+  const rows = new Map();
+  for (const result of evidence?.results ?? []) {
+    if (result.archive === null || result.package === null) {
+      continue;
+    }
+    rows.set(result.name, {
+      version: result.package.version,
+      archiveSha256: result.archive.sha256,
+      ok: result.ok,
+    });
+  }
+  return rows;
+}
+
+/**
+ * Plan one selected release: allowlist, versions, dependency order, provenance,
+ * content matching and the completed/pending split. Performs no publish and no
+ * registry query — `registry` is whatever the caller already knows.
+ *
+ * @param {string} repoRoot
+ * @param {{
+ *   packages: string[];
+ *   sourceSha: string;
+ *   registry: { name?: string; published?: { name: string; version: string; checksum?: string }[] | null; writable?: boolean } | string;
+ *   evidence?: { sourceSha: string; results: { name: string; ok: boolean; archive: { sha256: string } | null; package: { version: string } | null }[] } | null;
+ * }} options
+ */
+export function planPackageRelease(repoRoot, options) {
+  const registry =
+    typeof options.registry === "string" ? { name: options.registry } : options.registry ?? {};
+  const registryName = registry.name;
+  const packages = Array.isArray(options.packages) ? options.packages : [];
+  const evidence = options.evidence ?? null;
+  /** @type {{ code: string; message: string }[]} */
+  const refusals = [];
+  /** @param {string} code @param {string} message */
+  const refuse = (code, message) => {
+    refusals.push({ code, message });
+  };
+
+  if (!REGISTRY_NAMES.has(registryName)) {
+    refuse(
+      "unknown-registry",
+      `registry "${registryName}" is not one of: ${[...REGISTRY_NAMES].join(", ")}`,
+    );
+  }
+  if (!SOURCE_SHA_PATTERN.test(options.sourceSha ?? "")) {
+    refuse("invalid-source", `source "${options.sourceSha}" is not a full 40-hex commit sha`);
+  }
+  if (packages.length === 0) {
+    refuse("empty-selection", "no packages selected");
+  }
+
+  let rows = [];
+  try {
+    rows = readInventory(repoRoot);
+  } catch (error) {
+    refuse(error.code ?? "inventory-unreadable", error.message);
+  }
+  const byName = new Map(rows.map((row) => [row.name, row]));
+  const selected = new Set();
+  for (const name of packages) {
+    if (selected.has(name)) {
+      refuse("duplicate-selection", `${name} is selected twice`);
+      continue;
+    }
+    if (!byName.has(name)) {
+      refuse(
+        "unknown-selection",
+        `${name} is not in the ${rows.length}-entry package inventory`,
+      );
+      continue;
+    }
+    selected.add(name);
+  }
+
+  if (evidence !== null && evidence.sourceSha !== options.sourceSha) {
+    refuse(
+      "source-mismatch",
+      `archive evidence was produced from ${evidence.sourceSha}, not ${options.sourceSha}`,
+    );
+  }
+
+  let provenance = { sha: "", dirty: /** @type {string[]} */ ([]) };
+  const selectedRows = rows.filter((row) => selected.has(row.name));
+  try {
+    provenance = readSourceProvenance(repoRoot, [
+      "tooling/release/version-brackets.json",
+      ...selectedRows.flatMap((row) => [
+        row.manifest,
+        join(dirname(row.manifest), "CHANGELOG.md"),
+      ]),
+    ]);
+  } catch (error) {
+    refuse(error.code ?? "source-unreadable", error.message);
+  }
+  if (provenance.sha.length > 0 && provenance.sha !== options.sourceSha) {
+    refuse(
+      "unclean-source",
+      `--source ${options.sourceSha} is not HEAD ${provenance.sha}; plan the reviewed revision itself`,
+    );
+  }
+  if (provenance.dirty.length > 0) {
+    refuse(
+      "unclean-provenance",
+      `selected package inputs are not committed: ${provenance.dirty.join(", ")}`,
+    );
+  }
+
+  let order = [];
+  try {
+    order = dependencyOrder(rows, selected);
+  } catch (error) {
+    refuse(error.code ?? "order-unreadable", error.message);
+  }
+
+  const archives = evidenceRows(evidence);
+  /** @type {{ name: string; manifest: string; version: string; tag: string; archiveSha256: string | null; status: "completed" | "pending"; reason: string; prerequisites: { name: string; requirement: string; resolved: string }[] }[]} */
+  const planned = [];
+  for (const name of order) {
+    const row = byName.get(name);
+    if (row === undefined) {
+      continue;
+    }
+    const archive = archives.get(name) ?? null;
+    if (archive !== null && !archive.ok) {
+      refuse("provenance-unverified", `${name}: the archive or its consumer proof failed`);
+    }
+    if (archive !== null && archive.version !== row.version) {
+      refuse(
+        "version-mismatch",
+        `${name}: archive evidence is ${archive.version}, manifest is ${row.version}`,
+      );
+    }
+    const rowsPublished = publishedRows(registry.published ?? null, name);
+    for (const published of rowsPublished) {
+      if (isReleaseSemVer(published.version) && compareSemVer(published.version, row.version) > 0) {
+        refuse(
+          "stale-version",
+          `${name}: registry already carries ${published.version}, which is greater than ${row.version}`,
+        );
+      }
+    }
+    const sameVersion = rowsPublished.find((published) => published.version === row.version);
+    let status = /** @type {"completed" | "pending"} */ ("pending");
+    let reason = "not published at the selected registry";
+    if (sameVersion !== undefined) {
+      if (archive === null) {
+        refuse(
+          "content-unverified",
+          `${name}@${row.version} is already published; without archive evidence its content cannot be matched, so it must not be re-uploaded or skipped`,
+        );
+        reason = "published, content unmatched";
+      } else if (sameVersion.checksum !== archive.archiveSha256) {
+        refuse(
+          "content-mismatch",
+          `${name}@${row.version} is published as ${sameVersion.checksum ?? "no checksum"}, review produced ${archive.archiveSha256}`,
+        );
+        reason = "published with different content";
+      } else {
+        status = "completed";
+        reason = "published with identical content";
+      }
+    }
+    /** @type {{ name: string; requirement: string; resolved: string }[]} */
+    const prerequisites = [];
+    for (const dependency of row.dependencies) {
+      if (!byName.has(dependency.name)) {
+        continue;
+      }
+      let resolved = selected.has(dependency.name) ? "selected" : "unknown";
+      if (!selected.has(dependency.name) && registry.published !== null && registry.published !== undefined) {
+        const satisfied = publishedRows(registry.published, dependency.name).some((published) =>
+          caretAccepts(dependency.requirement, published.version),
+        );
+        if (!satisfied) {
+          refuse(
+            "unmet-prerequisite",
+            `${name}: ${dependency.name} ${dependency.requirement} is neither selected nor published`,
+          );
+        }
+        resolved = satisfied ? "published" : "missing";
+      }
+      prerequisites.push({
+        name: dependency.name,
+        requirement: dependency.requirement,
+        resolved,
+      });
+    }
+    planned.push({
+      name,
+      manifest: row.manifest,
+      version: row.version,
+      tag: releaseTag(name, row.version),
+      archiveSha256: archive?.archiveSha256 ?? null,
+      status,
+      reason,
+      prerequisites,
+    });
+  }
+
+  const completed = planned.filter((row) => row.status === "completed").map((row) => `${row.name}@${row.version}`);
+  const pending = planned.filter((row) => row.status === "pending").map((row) => `${row.name}@${row.version}`);
+  if (registry.writable === false && pending.length > 0) {
+    refuse(
+      "permissions",
+      `registry ${registryName} is read-only for this selection; ${pending.length} package(s) still need publication`,
+    );
+  }
+
+  return {
+    ok: refusals.length === 0,
+    registry: registryName,
+    label: PACKAGE_RELEASE_LABEL,
+    sourceSha: options.sourceSha,
+    source: provenance,
+    archiveEvidence: evidence === null ? "absent" : "present",
+    order: planned.map((row) => row.name),
+    packages: planned,
+    completed,
+    pending,
+    credentials: registry.writable === true ? "write" : "unconfigured",
+    refusals,
+  };
+}
+
+/**
+ * Publish the pending rows of an accepted plan, prerequisite first, confirming
+ * each upload before its consumer. Registry publication is irreversible: a
+ * failure leaves the remaining rows pending for an operator-authorized resume
+ * and never withdraws what already landed.
+ *
+ * `client` is the only publication seam. This helper never constructs one; the
+ * isolated protocol fixture in `release-packages.test.mjs` supplies it.
+ *
+ * @param {ReturnType<typeof planPackageRelease>} plan
+ * @param {{ publish: (entry: { name: string; version: string; tag: string; archiveSha256: string }) => Promise<void>; read: (name: string, version: string) => Promise<{ checksum?: string } | null> }} client
+ */
+export async function publishSelected(plan, client) {
+  const completed = [...plan.completed];
+  /** @type {string[]} */
+  const pending = [];
+  if (!plan.ok) {
+    return {
+      ok: false,
+      completed,
+      pending: [...plan.pending],
+      failed: null,
+      refusals: plan.refusals,
+    };
+  }
+  const entries = plan.packages.filter((entry) => entry.status === "pending");
+  for (const entry of entries) {
+    if (entry.archiveSha256 === null) {
+      return {
+        ok: false,
+        completed,
+        pending: [...pending, ...entries.slice(entries.indexOf(entry)).map((row) => `${row.name}@${row.version}`)],
+        failed: `${entry.name}@${entry.version}`,
+        refusals: [
+          {
+            code: "missing-archive",
+            message: `${entry.name}@${entry.version} has no verified archive; nothing may be uploaded`,
+          },
+        ],
+      };
+    }
+    try {
+      await client.publish({
+        name: entry.name,
+        version: entry.version,
+        tag: entry.tag,
+        archiveSha256: entry.archiveSha256,
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        completed,
+        pending: entries
+          .slice(entries.indexOf(entry))
+          .map((row) => `${row.name}@${row.version}`),
+        failed: `${entry.name}@${entry.version}`,
+        refusals: [
+          {
+            code: "publish-failed",
+            message: `${entry.name}@${entry.version}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          },
+        ],
+      };
+    }
+    const confirmed = await client.read(entry.name, entry.version);
+    if (confirmed?.checksum !== entry.archiveSha256) {
+      return {
+        ok: false,
+        completed,
+        pending: entries
+          .slice(entries.indexOf(entry) + 1)
+          .map((row) => `${row.name}@${row.version}`),
+        failed: `${entry.name}@${entry.version}`,
+        refusals: [
+          {
+            code: "upload-unconfirmed",
+            message: `${entry.name}@${entry.version}: registry reports ${
+              confirmed?.checksum ?? "nothing"
+            } after upload, expected ${entry.archiveSha256}`,
+          },
+        ],
+      };
+    }
+    completed.push(`${entry.name}@${entry.version}`);
+  }
+  return { ok: true, completed, pending, failed: null, refusals: [] };
+}
+
+/**
+ * Replace the literal `[package].version` of one manifest, leaving the rest of
+ * the file untouched.
+ *
+ * @param {string} contents
+ * @param {string} manifestPath
+ * @param {string} version
+ * @returns {string}
+ */
+function replacePackageVersion(contents, manifestPath, version) {
+  const section = /(^|\n)\[package\]\n([\s\S]*?)(?=\n\[|$)/.exec(contents);
+  if (section === null) {
+    throw new ReleaseRefusal("version-unwritable", `${manifestPath}: missing [package] table`);
+  }
+  const [, lead, body] = section;
+  if (!/^version\s*=\s*"[^"]*"/m.test(body)) {
+    throw new ReleaseRefusal(
+      "version-unwritable",
+      `${manifestPath}: [package].version is not a literal`,
+    );
+  }
+  const replaced = body.replace(/^version\s*=\s*"[^"]*"/m, () => `version = "${version}"`);
+  return contents.replace(section[0], () => `${lead}[package]\n${replaced}`);
+}
+
+/**
+ * Rewrite one inline dependency requirement to `version`.
+ *
+ * @param {string} contents
+ * @param {string} manifestPath
+ * @param {string} name
+ * @param {string} version
+ * @returns {string}
+ */
+function replaceDependencyRequirement(contents, manifestPath, name, version) {
+  const pattern = new RegExp(
+    `^(\\s*${escapeRegExp(name)}\\s*=\\s*\\{[^}\\n]*?\\bversion\\s*=\\s*)"[^"]*"`,
+    "m",
+  );
+  if (!pattern.test(contents)) {
+    throw new ReleaseRefusal(
+      "dependency-form-unsupported",
+      `${manifestPath}: cannot rewrite the ${name} requirement in place`,
+    );
+  }
+  return contents.replace(pattern, (_match, prefix) => `${prefix}"${version}"`);
+}
+
+/**
+ * Open a dated section for `version` and keep an empty `[Unreleased]` above it,
+ * the convention each package changelog documents.
+ *
+ * @param {string} contents
+ * @param {string} manifestPath
+ * @param {string} version
+ * @param {string} date
+ * @returns {string}
+ */
+function prepareChangelog(contents, manifestPath, version, date) {
+  const heading = "## [Unreleased]";
+  if (!contents.includes(heading)) {
+    throw new ReleaseRefusal(
+      "changelog-unready",
+      `${manifestPath}: no "${heading}" section to date for ${version}`,
+    );
+  }
+  return contents.replace(heading, () => `${heading}\n\n## [${version}] - ${date}`);
+}
+
+/**
+ * Prepare selected package versions: the selected literals, the dependency
+ * bounds that would no longer accept them, and the selected changelogs.
+ * Nothing else is written — no product version surface, no lockfile, no
+ * unrelated package.
+ *
+ * @param {string} repoRoot
+ * @param {{ packages: string[]; versions: Record<string, string>; date?: string }} options
+ */
+export function preparePackageVersions(repoRoot, options) {
+  const date = options.date ?? new Date().toISOString().slice(0, 10);
+  const requested = options.versions ?? {};
+  let rows = [];
+  try {
+    rows = readInventory(repoRoot);
+  } catch (error) {
+    return { ok: false, changed: [], refusals: [{ code: error.code ?? "inventory-unreadable", message: error.message }] };
+  }
+  const byName = new Map(rows.map((row) => [row.name, row]));
+  /** @type {{ code: string; message: string }[]} */
+  const refusals = [];
+  /** @type {Map<string, string>} */
+  const targets = new Map();
+  for (const name of options.packages ?? []) {
+    const row = byName.get(name);
+    if (row === undefined) {
+      refusals.push({ code: "unknown-selection", message: `${name} is not in the package inventory` });
+      continue;
+    }
+    const version = requested[name];
+    if (version === undefined) {
+      refusals.push({ code: "missing-version", message: `${name} has no target version` });
+      continue;
+    }
+    if (!isReleaseSemVer(version)) {
+      refusals.push({ code: "invalid-version", message: `${name}: "${version}" is not a release SemVer` });
+      continue;
+    }
+    if (compareSemVer(version, row.version) <= 0) {
+      refusals.push({
+        code: "version-not-greater",
+        message: `${name}: ${version} is not greater than ${row.version}`,
+      });
+      continue;
+    }
+    targets.set(name, version);
+  }
+  if (refusals.length > 0 || targets.size === 0) {
+    return { ok: false, changed: [], refusals };
+  }
+
+  /** @type {{ path: string; contents: string }[]} */
+  const writes = [];
+  /**
+   * @param {string} path
+   * @param {(contents: string) => string} transform
+   */
+  const patch = (path, transform) => {
+    const current = writes.find((write) => write.path === path)?.contents ??
+      readFileSync(join(repoRoot, path), "utf8");
+    const next = transform(current);
+    if (next === current) {
+      return;
+    }
+    const existing = writes.find((write) => write.path === path);
+    if (existing === undefined) {
+      writes.push({ path, contents: next });
+    } else {
+      existing.contents = next;
+    }
+  };
+
+  try {
+    for (const [name, version] of targets) {
+      const row = /** @type {{ manifest: string }} */ (byName.get(name));
+      patch(row.manifest, (contents) => replacePackageVersion(contents, row.manifest, version));
+    }
+    // A consumer's caret bound must accept the new prerequisite, or the source
+    // tree cannot resolve the bumped local path dependency.
+    for (const row of rows) {
+      for (const dependency of row.dependencies) {
+        const version = targets.get(dependency.name);
+        if (version === undefined || caretAccepts(dependency.requirement, version)) {
+          continue;
+        }
+        patch(row.manifest, (contents) =>
+          replaceDependencyRequirement(contents, row.manifest, dependency.name, version),
+        );
+      }
+    }
+    for (const [name, version] of targets) {
+      const row = /** @type {{ manifest: string }} */ (byName.get(name));
+      const changelog = join(dirname(row.manifest), "CHANGELOG.md");
+      if (!existsSync(join(repoRoot, changelog))) {
+        throw new ReleaseRefusal("changelog-missing", `${changelog}: selected package has no changelog`);
+      }
+      patch(changelog, (contents) => prepareChangelog(contents, changelog, version, date));
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      changed: [],
+      refusals: [{ code: error.code ?? "prepare-failed", message: error.message }],
+    };
+  }
+
+  for (const write of writes) {
+    writeFileSync(join(repoRoot, write.path), write.contents, "utf8");
+  }
+  return {
+    ok: true,
+    changed: writes.map((write) => write.path),
+    versions: [...targets].map(([name, version]) => ({ name, version })),
+    refusals,
+  };
+}
+
+/**
+ * @param {ReturnType<typeof planPackageRelease>} plan
+ */
+function printPlan(plan) {
+  console.log(
+    `Package release plan — registry ${plan.registry}, label ${plan.label}, archive evidence ${plan.archiveEvidence}`,
+  );
+  console.log(`source    ${plan.sourceSha} (dirty inputs: ${plan.source.dirty.length})`);
+  console.log(`order     ${plan.order.join(", ")}`);
+  for (const row of plan.packages) {
+    console.log(
+      `  ${row.name.padEnd(22)} ${row.version.padEnd(12)} ${row.tag.padEnd(34)} ${
+        row.status
+      } (${row.reason})`,
+    );
+    for (const prerequisite of row.prerequisites) {
+      console.log(
+        `      needs ${prerequisite.name} ${prerequisite.requirement} — ${prerequisite.resolved}`,
+      );
+    }
+  }
+  console.log(`completed ${plan.completed.length === 0 ? "<none>" : plan.completed.join(", ")}`);
+  console.log(`pending   ${plan.pending.length === 0 ? "<none>" : plan.pending.join(", ")}`);
+  console.log(`credentials ${plan.credentials} (publication is an operator action outside this check)`);
+  if (plan.refusals.length > 0) {
+    for (const refusal of plan.refusals) {
+      console.error(`refused: ${refusal.code}: ${refusal.message}`);
+    }
+  }
+}
+
+/**
+ * @param {string[]} argv
+ * @returns {{ flags: Map<string, string>; switches: Set<string> } | string}
+ */
+function parseArgs(argv) {
+  /** @type {Map<string, string>} */
+  const flags = new Map();
+  const switches = new Set();
+  const valued = new Set([
+    "--source",
+    "--packages",
+    "--registry",
+    "--registry-state",
+    "--versions",
+    "--date",
+  ]);
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--check-only" || arg === "--prepare" || arg === "--help" || arg === "-h") {
+      switches.add(arg);
+      continue;
+    }
+    if (!valued.has(arg)) {
+      return `unknown argument: ${arg}`;
+    }
+    const value = argv[index + 1];
+    if (value === undefined || value.startsWith("--")) {
+      return `${arg} needs a value`;
+    }
+    flags.set(arg, value);
+    index += 1;
+  }
+  return { flags, switches };
+}
+
+/**
+ * @param {string[]} argv
+ * @returns {number}
+ */
+function main(argv) {
+  const parsed = parseArgs(argv);
+  if (typeof parsed === "string") {
+    console.error(parsed);
+    return 2;
+  }
+  const { flags, switches } = parsed;
+  if (switches.has("--help") || switches.has("-h")) {
+    console.log(
+      [
+        "Usage:",
+        "  node tooling/release/release-packages.mjs --check-only --source <sha> \\",
+        "    --packages <a,b> --registry crates-io [--registry-state <json>]",
+        "  node tooling/release/release-packages.mjs --prepare --packages <a,b> \\",
+        "    --versions <a=1.2.3,b=1.2.4> [--date YYYY-MM-DD]",
+        "",
+        "Planning reads manifests, the version carrier and Git provenance only:",
+        "no credential, no network, no live registry query.",
+      ].join("\n"),
+    );
+    return 0;
+  }
+  const checkOnly = switches.has("--check-only");
+  const prepare = switches.has("--prepare");
+  if (checkOnly === prepare) {
+    console.error("exactly one of --check-only or --prepare is required");
+    return 2;
+  }
+  const repoRoot = resolveRepoRoot();
+  const packages = (flags.get("--packages") ?? "").split(",").filter((name) => name.length > 0);
+
+  if (prepare) {
+    /** @type {Record<string, string>} */
+    const versions = {};
+    for (const pair of (flags.get("--versions") ?? "").split(",").filter((entry) => entry.length > 0)) {
+      const [name, version] = pair.split("=");
+      if (name === undefined || version === undefined) {
+        console.error(`--versions entry "${pair}" is not <name>=<version>`);
+        return 2;
+      }
+      versions[name] = version;
+    }
+    const result = preparePackageVersions(repoRoot, {
+      packages,
+      versions,
+      date: flags.get("--date"),
+    });
+    if (!result.ok) {
+      for (const refusal of result.refusals) {
+        console.error(`refused: ${refusal.code}: ${refusal.message}`);
+      }
+      return 1;
+    }
+    console.log(`Prepared ${result.changed.length} file(s):`);
+    for (const path of result.changed) {
+      console.log(`  ${path}`);
+    }
+    return 0;
+  }
+
+  const registryName = flags.get("--registry");
+  if (registryName === undefined) {
+    console.error("--registry is required");
+    return 2;
+  }
+  const sourceSha = flags.get("--source");
+  if (sourceSha === undefined) {
+    console.error("--source is required (the reviewed full commit sha)");
+    return 2;
+  }
+  /** @type {{ name: string; published?: { name: string; version: string; checksum?: string }[] | null; writable?: boolean }} */
+  const registry = { name: registryName };
+  const statePath = flags.get("--registry-state");
+  if (statePath !== undefined) {
+    try {
+      const state = JSON.parse(readFileSync(statePath, "utf8"));
+      registry.published = state.published ?? null;
+      if (typeof state.writable === "boolean") {
+        registry.writable = state.writable;
+      }
+    } catch (error) {
+      console.error(
+        `--registry-state ${statePath}: unusable (${error instanceof Error ? error.message : error})`,
+      );
+      return 2;
+    }
+  }
+  const plan = planPackageRelease(repoRoot, { packages, sourceSha, registry });
+  printPlan(plan);
+  return plan.ok ? 0 : 1;
+}
+
+const invokedDirectly =
+  process.argv[1] !== undefined && process.argv[1] === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) {
+  process.exit(main(process.argv.slice(2)));
+}

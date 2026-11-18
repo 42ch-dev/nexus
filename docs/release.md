@@ -416,6 +416,117 @@ after every upload succeeds. A failed update remains unpublished for recovery.
   state only while no asset has been replaced; once a replacement has begun it
   stays unpublished (with a diagnostic) rather than exposing a partial set.
 
+## Public Cargo packages
+
+Eight Cargo packages are published independently of the product: they carry
+their own literal versions, their own changelogs and their own release label and
+tag namespace. Nothing in this section creates a `v*` tag, bumps a product
+version or runs a runtime/Electron producer.
+
+The inventory is `tooling/release/version-brackets.json` (`contract` array) —
+the same eight entries `tooling/release/check-contract-packageability.mjs`
+packs. There is no second list of names.
+
+| Package | Manifest | Prerequisites (from its own manifest) |
+|---------|----------|---------------------------------------|
+| `nexus-contracts` | `crates/nexus-contracts/Cargo.toml` | — |
+| `nexus-workflow-ir` | `crates/nexus-workflow-ir/Cargo.toml` | contracts |
+| `nexus-knowledge` | `crates/nexus-knowledge/Cargo.toml` | contracts |
+| `nexus-pattern` | `crates/nexus-pattern/Cargo.toml` | contracts, workflow-ir |
+| `nexus-narrative` | `crates/nexus-narrative/Cargo.toml` | contracts, knowledge |
+| `nexus-module-sdk` | `modules/nexus-module-sdk/Cargo.toml` | — |
+| `nexus-module-manifest` | `modules/nexus-module-manifest/Cargo.toml` | — |
+| `nexus-module-test` | `modules/nexus-module-test/Cargo.toml` | module-sdk |
+
+Requirements are normal caret bounds (`"0.1.0"` means `^0.1.0`), so a dependent
+only needs a new bound when the prerequisite's new version leaves that range.
+`nexus-module-manifest` has no prerequisite and no consumer, so it can ship at
+any time.
+
+### Labels and tags
+
+A package release uses the `crate-release` label and tags
+`crate/<name>/v<version>` (`tooling/release/release-packages.mjs` →
+`releaseTag`, `PACKAGE_RELEASE_LABEL`). Product releases own the `release`
+label and `v*` tags; `v*` triggers `release.yml`, so package tags never use it.
+
+### Plan a release (no credentials, no network)
+
+The plan reads the eight manifests, the carrier and Git provenance, and reports
+the dependency order with a completed/pending split. It reads no token, makes
+no registry request and changes no version or tag:
+
+```sh
+node tooling/release/release-packages.mjs --check-only \
+  --source "$(git rev-parse HEAD)" \
+  --packages nexus-pattern,nexus-knowledge,nexus-narrative \
+  --registry crates-io
+```
+
+`--source` is the reviewed full commit sha and must equal `HEAD`; a selected
+manifest or changelog with an uncommitted change refuses as unclean
+provenance. `.github/workflows/contract-release.yml` is the manual entry: it
+checks out the given sha and runs the same plan. It requests `contents: read`,
+reads no secret and has no publish step.
+
+What the plan refuses, and why:
+
+| Refusal | Meaning |
+|---------|---------|
+| `unknown-selection` | a name outside the eight-entry inventory |
+| `unclean-source` / `unclean-provenance` | `--source` is not `HEAD`, or a selected input has uncommitted changes |
+| `version-inherited` | a selected package inherits the workspace version instead of its own literal |
+| `unversioned-dependency` | a package relationship has no registry requirement |
+| `unmet-prerequisite` | a prerequisite is neither selected nor present at the registry at a satisfying version |
+| `stale-version` | the registry already carries a greater version than the manifest |
+| `content-mismatch` / `content-unverified` | the published archive differs from the reviewed one, or cannot be compared without archive evidence |
+| `permissions` | the registry view declares the selection read-only |
+
+Add `--registry-state <json>` with `{ "published": [{ "name", "version",
+"checksum" }], "writable": true }` to let the plan content-match against known
+registry rows. Without it, live registry state is *unknown*: every selected
+package is reported pending and no registry claim is made. Archive checksums
+come from the packageability report (`checkContractPackageability`), which is
+why the plan cannot skip an already-published version on its own.
+
+### Publish (operator action, currently unconfigured)
+
+Publication is irreversible and is not part of this pipeline today. The
+authentication destination, namespace ownership and protected credentials are
+still unconfigured — the code refuses rather than pretending otherwise, and
+`contract-release.yml` cannot upload anything.
+
+`publishSelected(plan, client)` is the only publication seam and it never
+constructs its client: the operator-authorized run supplies one. It uploads in
+plan order (prerequisites first), confirms each upload by re-reading the
+registry checksum, and stops at the first failure. A multi-package upload is
+**not** atomic:
+
+- completed package/version pairs are reported as completed and stay published;
+- the failing pair and everything after it stay pending;
+- nothing is withdrawn or yanked automatically — a bad archive is not repaired
+  by deleting a version;
+- a resume re-plans against the registry and skips only pairs whose published
+  checksum matches the reviewed archive byte for byte.
+
+### Prepare versions
+
+Version preparation is a reviewed pull request step, never part of development
+acceptance or a publish run:
+
+```sh
+node tooling/release/release-packages.mjs --prepare \
+  --packages nexus-workflow-ir,nexus-pattern \
+  --versions nexus-workflow-ir=0.5.0,nexus-pattern=0.4.3
+```
+
+It writes only: the selected `[package].version` literals, the dependency bounds
+that would no longer accept those versions, and the selected changelogs (the
+`## [Unreleased]` section becomes `## [<version>] - <date>`, with a fresh empty
+`## [Unreleased]` above it). Product version surfaces, lockfiles and unrelated
+packages are untouched; a target version that is not strictly greater than the
+current literal refuses.
+
 ## Signing arrival
 
 Signing changes exactly one switch, and the flow around it stays as documented:
