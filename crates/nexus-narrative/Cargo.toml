@@ -1,6 +1,6 @@
 [package]
 name = "nexus-narrative"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -10,8 +10,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-nexus-contracts = { path = "../nexus-contracts" }
-nexus-knowledge = { path = "../nexus-knowledge" }
+nexus-contracts = { version = "0.1.0", path = "../nexus-contracts" }
+nexus-knowledge = { version = "0.1.0", path = "../nexus-knowledge" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Node-API cdylib for nexus core + provider port (v1.189 P2-T1)"
+publish = false
 
 [lints.rust]
 unsafe_code = "deny"

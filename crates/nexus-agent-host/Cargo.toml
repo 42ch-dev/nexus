@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Hybrid managed-only host core for local agent execution."
+publish = false
 
 [lints]
 workspace = true

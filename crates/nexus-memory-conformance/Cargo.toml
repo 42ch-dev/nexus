@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Independent durable SPOKE memory provider fixture for N3 conformance (test crate, not a server)."
+publish = false
 
 [lints]
 workspace = true

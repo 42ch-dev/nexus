@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Capability-aggregation boundary between nexus domain concerns and spoke standard objects — extensions.nexus accessors, lifecycle delegation, conversion seam, production NexusAdapter + 6 port impls"
+publish = false
 
 [lints]
 workspace = true

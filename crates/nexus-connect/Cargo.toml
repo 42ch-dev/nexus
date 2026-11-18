@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Peer Connect protocol: WS transport, accept loop, sessions, MCP bridge and the peer tool registry"
+publish = false
 
 [lints]
 workspace = true

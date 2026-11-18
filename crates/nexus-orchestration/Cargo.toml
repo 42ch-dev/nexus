@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Orchestration engine (graph-flow adapter + capability registry + worker manager)."
+publish = false
 
 [lints]
 workspace = true

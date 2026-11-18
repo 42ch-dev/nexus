@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "The in-process spoke_operations::MemoryPort provider (v1.245 extraction)"
+publish = false
 
 [lints]
 workspace = true

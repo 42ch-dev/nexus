@@ -12,10 +12,10 @@
  * crate gets stub target files so `cargo` can load the fixture workspace.
  */
 
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { dirname, join, posix } from "node:path";
+import { dirname, join, posix, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CARGO_LOCK_PATH,
@@ -154,6 +154,61 @@ export function gitOk(repoRoot, args) {
     throw new Error(`git ${args.join(" ")} failed: ${result.stderr.trim()}`);
   }
   return result.stdout.trim();
+}
+
+/**
+ * Cargo's own package rows for every manifest root the release inventory sees:
+ * the root workspace plus each standalone `modules/<name>` root. `--no-deps`
+ * keeps the rows to the manifests themselves, so `publish` and each dependency
+ * requirement are Cargo's reading of the manifest, never a second TOML parser
+ * the policy tests would have to keep in step.
+ *
+ * @param {string} repoRoot
+ * @returns {{ name: string; manifest: string; publish: string[] | null; dependencies: { name: string; kind: string | null; req: string; path: string | null }[] }[]}
+ */
+export function readCargoPackageRows(repoRoot) {
+  /** @type {string[]} */
+  const manifestRoots = [join(repoRoot, "Cargo.toml")];
+  const modulesDir = join(repoRoot, "modules");
+  if (existsSync(modulesDir)) {
+    for (const dirent of readdirSync(modulesDir, { withFileTypes: true })) {
+      const manifestPath = join(modulesDir, dirent.name, "Cargo.toml");
+      if (dirent.isDirectory() && existsSync(manifestPath)) {
+        manifestRoots.push(manifestPath);
+      }
+    }
+  }
+
+  /** @type {ReturnType<typeof readCargoPackageRows>} */
+  const rows = [];
+  for (const manifestPath of manifestRoots) {
+    const result = spawnSync(
+      "cargo",
+      ["metadata", "--no-deps", "--format-version", "1", "--manifest-path", manifestPath],
+      { encoding: "utf8" },
+    );
+    if (result.error !== undefined || result.status !== 0) {
+      throw new Error(
+        `${manifestPath}: \`cargo metadata --no-deps\` failed (${
+          result.error?.message ?? result.stderr.trim()
+        })`,
+      );
+    }
+    for (const pkg of JSON.parse(result.stdout).packages) {
+      rows.push({
+        name: pkg.name,
+        manifest: posix.normalize(relative(repoRoot, pkg.manifest_path)),
+        publish: pkg.publish,
+        dependencies: pkg.dependencies.map((dep) => ({
+          name: dep.name,
+          kind: dep.kind,
+          req: dep.req,
+          path: dep.path ?? null,
+        })),
+      });
+    }
+  }
+  return rows;
 }
 
 /**
