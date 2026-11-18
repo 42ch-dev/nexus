@@ -1,0 +1,253 @@
+/**
+ * A3 — the native authoring boundary.
+ *
+ * The real TS/native service, the repository's Rust seed and its local protocol fixture
+ * carry the whole public authoring chain: generate → simulate → approve. Every observation
+ * below is the persisted store's, read back through the product routes — a committed
+ * revision, the hash the approval froze, and the rows a refused approval leaves untouched.
+ *
+ * Not claimed here: any model or provider turn. The Generate leg runs with no executor
+ * attached (the domain-only shape a deterministic request needs), and the selected native
+ * provider is never prompted, so the fixture is a boot-time selection only and no call
+ * leaves loopback. The wire behaviour of the existing mock-route suites is unchanged and
+ * this target does not restate it.
+ */
+import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { after, before, describe, test } from 'node:test';
+
+const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = join(serviceRoot, '..', '..');
+
+/** The repository's scripted SDK-wire runtime — the ONLY provider fixture this target uses. */
+const dshFixture = join(
+  repoRoot,
+  'crates/nexus-agent-host/tests/fixtures/native_protocol/mock_dsh_agent.py',
+);
+
+const CREATOR = 'ctr_testcreator';
+const SLUG = 'default';
+const STRATEGY = 'native-authoring-fixture';
+
+const generatePath = `/v1/daemon/strategies/${STRATEGY}/generate`;
+const simulatePath = `/v1/daemon/strategies/${STRATEGY}/simulate`;
+const approvePath = `/v1/daemon/strategies/${STRATEGY}/approve`;
+const candidatePath = `/v1/daemon/strategies/${STRATEGY}/candidate`;
+const approvalsPath = `/v1/daemon/strategies/${STRATEGY}/approvals`;
+const appliedPath = `/v1/daemon/strategies/${STRATEGY}/applied`;
+
+function node(id, kind) {
+  return { id, kind, effect_class: 'pure' };
+}
+
+/** A request every lint layer accepts: one outer state wired to its terminal, one run intent. */
+function legalRequest() {
+  return {
+    entry: 'start',
+    terminal: ['done'],
+    nodes: [node('start', 'outer_state'), node('done', 'terminal')],
+    edges: [{ id: 'start->done', from: 'start', to: 'done', kind: 'linear' }],
+    nests: [],
+    meta: {
+      description: 'native authoring fixture',
+      kind: 'creator',
+      run_intents: ['work_init'],
+      requires_capabilities: [],
+    },
+  };
+}
+
+/** The user bundle the strategy id addresses: the layout the core resolves as a preset. */
+function writePreset(nexusHome, id) {
+  const bundle = join(nexusHome, 'presets', id);
+  mkdirSync(bundle, { recursive: true });
+  writeFileSync(
+    join(bundle, 'preset.yaml'),
+    `preset:
+  id: ${id}
+  version: 1
+  kind: creator
+  description: "native authoring fixture"
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: start
+  terminal: done
+states:
+  - id: start
+    enter: []
+    exit_when: { kind: rule }
+    next: done
+  - id: done
+    terminal: true
+`,
+  );
+}
+
+/**
+ * One disposable home: the existing Rust seed (creator, workspace, durable store, worlds/KB),
+ * the strategy bundle this target authors, the selected workspace's registered creative root
+ * (the hosted execution owner's precondition) and the local protocol fixture as the selected
+ * native provider.
+ *
+ * The developer's own `~/.nexus42` is never read or written.
+ */
+function seedHome() {
+  const home = mkdtempSync(join(tmpdir(), 'nexus-authoring-native-'));
+  const seed = spawnSync(
+    'cargo',
+    ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home],
+    { cwd: repoRoot, stdio: 'inherit' },
+  );
+  assert.equal(seed.status, 0, seed.stderr?.toString());
+
+  const nexusHome = join(home, '.nexus42');
+  writePreset(nexusHome, STRATEGY);
+
+  const creativeRoot = join(home, 'creative-root');
+  mkdirSync(creativeRoot, { recursive: true });
+  writeFileSync(
+    join(nexusHome, 'creators', CREATOR, 'workspaces', SLUG, 'meta.json'),
+    JSON.stringify({ local_root: creativeRoot }),
+  );
+
+  mkdirSync(join(nexusHome, 'agent-host'), { recursive: true });
+  writeFileSync(
+    join(nexusHome, 'agent-host', 'config.toml'),
+    `[[providers]]
+id = "dsh-native"
+protocol = "native_cli"
+command = ${JSON.stringify(dshFixture)}
+enabled = true
+`,
+  );
+  return home;
+}
+
+describe('native authoring boundary', () => {
+  let home;
+  let service;
+
+  before(async () => {
+    home = seedHome();
+    const { startService } = await import(join(serviceRoot, 'dist', 'index.js'));
+    service = await startService({ home, host: '127.0.0.1', port: 0, allowRemote: false });
+  });
+
+  after(async () => {
+    if (service) await service.close().catch(() => undefined);
+    if (home) rmSync(home, { recursive: true, force: true });
+  });
+
+  async function call(method, path, body) {
+    const response = await fetch(`${service.url}${path}`, {
+      method,
+      ...(body === undefined
+        ? {}
+        : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+    });
+    const text = await response.text();
+    return { status: response.status, payload: text.length > 0 ? JSON.parse(text) : null, text };
+  }
+
+  test('generate → simulate → approve persists revision and hash, and stale evidence writes nothing', async () => {
+    // The native boundary itself: the staged addon opened the core and the hosted owner
+    // established an engine epoch. Without this the rest would be a mock-route assertion.
+    assert.notEqual(
+      service.service.engineEpoch,
+      null,
+      'the native addon must report an established execution owner',
+    );
+
+    const generated = await call('POST', generatePath, {
+      base_revision: 0,
+      request: legalRequest(),
+    });
+    assert.equal(generated.status, 200, `generate must commit: ${generated.text.slice(0, 600)}`);
+    assert.equal(generated.payload.new_revision, 1, generated.text.slice(0, 600));
+    const document = generated.payload.document;
+    assert.equal(document.id, STRATEGY, generated.text.slice(0, 600));
+    assert.equal(document.revision, 1, generated.text.slice(0, 600));
+    assert.equal(document.state, 'candidate', generated.text.slice(0, 600));
+    assert.equal(document.provenance.source, 'generate', 'only the Generate kernel writes this');
+    assert.ok(Array.isArray(generated.payload.warnings), 'warnings ride the committed candidate');
+
+    const simulated = await call('POST', simulatePath, { document });
+    assert.equal(simulated.status, 200, `simulate must walk: ${simulated.text.slice(0, 600)}`);
+    const trajectory = simulated.payload;
+    assert.match(
+      trajectory.ir_content_hash,
+      /^[0-9a-f]{64}$/,
+      `the trajectory is bound to the document bytes: ${simulated.text.slice(0, 600)}`,
+    );
+    assert.ok(
+      Array.isArray(trajectory.nodes_visited) && trajectory.nodes_visited.length > 0,
+      'the walk visits the document, so the trajectory is not an empty shell',
+    );
+
+    const approved = await call('POST', approvePath, {
+      base_revision: document.revision,
+      trajectory,
+    });
+    assert.equal(approved.status, 200, `approve must freeze: ${approved.text.slice(0, 600)}`);
+    assert.equal(approved.payload.strategy_id, STRATEGY);
+    assert.equal(approved.payload.candidate_revision, document.revision);
+    assert.equal(
+      approved.payload.content_hash,
+      trajectory.ir_content_hash,
+      'the approval freezes exactly the bytes the simulation walked',
+    );
+    assert.match(approved.payload.approval_id, /^apr_/, approved.text.slice(0, 600));
+
+    // Re-read what was PERSISTED, not what the write returned.
+    const candidate = await call('GET', candidatePath);
+    assert.equal(candidate.status, 200, candidate.text.slice(0, 600));
+    assert.equal(candidate.payload.revision, document.revision, 'the candidate row is the CAS revision');
+
+    const approvals = await call('GET', approvalsPath);
+    assert.equal(approvals.status, 200, approvals.text.slice(0, 600));
+    assert.equal(approvals.payload.items.length, 1, 'one approval froze one snapshot');
+    assert.equal(approvals.payload.items[0].candidate_revision, document.revision);
+    assert.equal(approvals.payload.items[0].content_hash, trajectory.ir_content_hash);
+
+    const applied = await call('GET', appliedPath);
+    assert.equal(applied.status, 200, applied.text.slice(0, 600));
+    assert.equal(
+      applied.payload.newest_approval?.content_hash,
+      trajectory.ir_content_hash,
+      'the status read reports the same persisted hash',
+    );
+
+    // Stale evidence: the same revision, a trajectory for other bytes. The refusal must
+    // name the stale hash and leave every stored row exactly as the read above found it.
+    const stale = await call('POST', approvePath, {
+      base_revision: document.revision,
+      trajectory: { ...trajectory, ir_content_hash: '0'.repeat(64) },
+    });
+    assert.equal(
+      stale.status,
+      422,
+      `stale evidence is a typed refusal, never a success: ${stale.text.slice(0, 600)}`,
+    );
+    assert.equal(stale.payload.error.code, 'invalid_input');
+    assert.equal(stale.payload.error.details?.reason, 'simulation_stale');
+    assert.equal(stale.payload.error.details?.recorded_content_hash, '0'.repeat(64));
+    assert.equal(stale.payload.error.details?.current_content_hash, trajectory.ir_content_hash);
+
+    const approvalsAfter = await call('GET', approvalsPath);
+    assert.deepEqual(
+      approvalsAfter.payload.items,
+      approvals.payload.items,
+      'a refused approve writes no row and consumes no candidate revision',
+    );
+    const candidateAfter = await call('GET', candidatePath);
+    assert.equal(
+      candidateAfter.payload.revision,
+      document.revision,
+      'the candidate row is unchanged by the refusal',
+    );
+  });
+});

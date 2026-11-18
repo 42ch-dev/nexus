@@ -101,6 +101,14 @@
 #                                 real WASM host under an explicit compute
 #                                 selection, and the native factory's actual
 #                                 dependency set.
+#                                 `authoring` = the strategy-authoring surface
+#                                 as a SELECTION: the CLI and native selectors
+#                                 that carry it, the compute/execution
+#                                 selections that must not, and the
+#                                 checker-owned consumer in
+#                                 `tooling/fixtures/authoring-cohorts` under
+#                                 both of its selections (its own manifest, so
+#                                 `--manifest-path` never substitutes for it).
 #                                 Other plans add their cohorts as their real
 #                                 source lands; an unknown name fails.
 #   --manifest-path <Cargo.toml>  resolve every probe against that workspace.
@@ -250,6 +258,38 @@ assert_features() {
   echo "ok: $pkg v$got_ver $got_feats for $crate ${feats:-<default>}"
 }
 
+# assert_features_include <crate> <features...> <package> <feature>
+# Asserts the package's ONE resolved feature list CONTAINS <feature>.
+#
+# The shipped selectors resolve long feature sets this guard does not own
+# (`nexus42`'s `cli`, the native host's factory plane), so pinning their exact
+# list again would duplicate the full matrix and break on any unrelated
+# selection change. What the `authoring` cohort owns is one question per row:
+# is the authoring surface selected? A containment probe answers exactly that,
+# and it still fails loudly when the package resolves no row at all.
+assert_features_include() {
+  local crate="$1"; shift
+  local feats="$1"; shift
+  local pkg="$1"; shift
+  local want="$1"
+  local out status=0
+  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build -i "$pkg" -f "{p} feats=[{f}]" 2>&1) || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    fail "feature probe for $pkg in $crate ${feats:-<default>} failed (exit $status): $out"
+  fi
+  local pairs
+  pairs=$(grep -oE "^$pkg v[^ ]+( \([^)]*\))? feats=\[[^]]*\]" <<<"$out" | sort -u)
+  local count
+  count=$(sed '/^$/d' <<<"$pairs" | wc -l | tr -d ' ')
+  if [[ "$count" -ne 1 ]]; then
+    fail "$pkg for $crate ${feats:-<default>}: expected exactly one resolved feature row, got $count ($(tr '\n' ';' <<<"$pairs"))"
+  fi
+  if ! grep -qE "feats=\[([^]]*,)?$want(,[^]]*)?\]" <<<"$pairs"; then
+    fail "$pkg for $crate ${feats:-<default>}: expected feature '$want', got '$pairs'"
+  fi
+  echo "ok: $pkg selects feature $want for $crate ${feats:-<default>}"
+}
+
 # assert_graph_nonempty <crate> <features>
 # Positive control for every absence pin: `cargo tree -i <pkg>` reports the
 # same "did not match any packages" for a package that is absent from the
@@ -343,6 +383,10 @@ assert_no_dependencies() {
 
 COHORT=""
 MANIFEST_PATH=""
+# The checker-owned authoring consumer. Its rows always resolve against THIS
+# manifest: the cohort's subject is the checked-in file, so a caller's
+# `--manifest-path` cannot replace the consumer under test.
+AUTHORING_CONSUMER_MANIFEST="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fixtures/authoring-cohorts/Cargo.toml"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cohort)
@@ -356,18 +400,18 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "usage: $0 [--cohort domain|catalog|policy|capability] [--manifest-path <Cargo.toml>]"
+      echo "usage: $0 [--cohort domain|catalog|policy|capability|authoring] [--manifest-path <Cargo.toml>]"
       exit 0
       ;;
     *)
-      fail "unknown argument '$1' (usage: $0 [--cohort domain|catalog|policy|capability] [--manifest-path <Cargo.toml>])"
+      fail "unknown argument '$1' (usage: $0 [--cohort domain|catalog|policy|capability|authoring] [--manifest-path <Cargo.toml>])"
       ;;
   esac
 done
 if [[ -n "$COHORT" ]]; then
   case "$COHORT" in
-    domain | catalog | policy | capability) ;;
-    *) fail "unknown cohort '$COHORT' (known: domain, catalog, policy, capability)" ;;
+    domain | catalog | policy | capability | authoring) ;;
+    *) fail "unknown cohort '$COHORT' (known: domain, catalog, policy, capability, authoring)" ;;
   esac
 fi
 if [[ -n "$MANIFEST_PATH" && ! -f "$MANIFEST_PATH" ]]; then
@@ -553,6 +597,56 @@ if [[ "$COHORT" == "capability" ]]; then
   assert_features nexus-core-node "" nexus-core "compute,default,execution,nexus-connect,operation-id,provider-host"
 
   echo "graph pins OK (cohort: capability)"
+  exit 0
+fi
+
+# --- scoped cohort: authoring consumer (v1.249 A3) --------------------------
+# One claim in three parts: strategy authoring is a SELECTED surface, never an
+# implicit one.
+#
+# (1) The shipped selectors carry it. The ordinary CLI (`nexus42`, feature
+#     `cli`) and the native host (`nexus-core-node`) each forward
+#     `nexus-core/strategy-authoring`, so `cargo tree -i nexus-core` names the
+#     feature and each selector resolves the private simulator
+#     (`nexus-workflow-simulate`) exactly once. Containment rows, not
+#     whole-set pins: the rest of each selector's feature list belongs to the
+#     full matrix above and must not be restated here.
+# (2) A selection without it stays clean. `nexus-core` with `compute` — the
+#     widest non-authoring plane — and with no default features resolve NO
+#     simulator, so the retired A1 intermediate ("compute links the
+#     simulator") cannot come back silently.
+# (3) The checker-owned consumer. `tooling/fixtures/authoring-cohorts` is its
+#     own workspace with one path edge on `nexus-core` — the shape a real
+#     caller has, not a core test target. Its DEFAULT is execution-only;
+#     `--features authoring` adds core's authoring surface. Both resolved core
+#     sets are pinned exactly, and the Host and WASM planes stay absent in
+#     BOTH: a consumer gets the Host plane by selecting it, never by selecting
+#     authoring.
+if [[ "$COHORT" == "authoring" ]]; then
+  # (1) Shipped authoring selectors.
+  assert_exactly_one nexus42 "" nexus-workflow-simulate
+  assert_features_include nexus42 "" nexus-core strategy-authoring
+  assert_exactly_one nexus-core-node "" nexus-workflow-simulate
+  assert_features_include nexus-core-node "" nexus-core strategy-authoring
+
+  # (2) Non-authoring selections link no simulator.
+  assert_empty nexus-core "--features compute" nexus-workflow-simulate
+  assert_empty nexus-core "--no-default-features" nexus-workflow-simulate
+
+  # (3) The consumer, against ITS OWN manifest — the checked-in file is the
+  # subject here, so a caller's `--manifest-path` cannot substitute for it.
+  MANIFEST_PATH="$AUTHORING_CONSUMER_MANIFEST"
+  assert_graph_nonempty authoring-cohorts ""
+  assert_features authoring-cohorts "" nexus-core "execution,nexus-connect,operation-id"
+  assert_empty authoring-cohorts "" nexus-workflow-simulate
+  assert_empty authoring-cohorts "" nexus-agent-host
+  assert_empty authoring-cohorts "" nexus-wasm-host
+  assert_exactly_one authoring-cohorts "--features authoring" nexus-workflow-simulate
+  assert_features authoring-cohorts "--features authoring" nexus-core "execution,nexus-connect,operation-id,strategy-authoring"
+  assert_empty authoring-cohorts "--features authoring" nexus-agent-host
+  assert_empty authoring-cohorts "--features authoring" nexus-wasm-host
+
+  echo "graph pins OK (cohort: authoring)"
   exit 0
 fi
 

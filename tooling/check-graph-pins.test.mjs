@@ -313,6 +313,105 @@ test('catalog cohort fails when a positive pin resolves no row', () => {
   assert.doesNotMatch(run.stdout, /ok: nexus-memory-provider/);
 });
 
+// --- authoring cohort (v1.249 A3) ------------------------------------------
+
+// The two shipped authoring selectors plus the core they forward to. The
+// manifests are raw because the shape under test IS the feature wiring: a
+// selector's forwarding edge and core's optional simulator dep, which the
+// shared `manifestFor` helper cannot express (no optional-dep form).
+function authoringCrates({ nodeForwards = true, computeLinksSimulator = false } = {}) {
+  const core = `[package]
+name = "nexus-core"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+execution = []
+compute = ["${computeLinksSimulator ? 'dep:nexus-workflow-simulate' : 'execution'}"]
+strategy-authoring = ["execution", "dep:nexus-workflow-simulate"]
+
+[dependencies]
+nexus-workflow-simulate = { path = "../nexus-workflow-simulate", optional = true }
+`;
+  const selector = (name, feature, forwards) => `[package]
+name = "${name}"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["${feature}"]
+${feature} = [${forwards ? '"nexus-core/strategy-authoring"' : ''}]
+
+[dependencies]
+nexus-core = { path = "../nexus-core" }
+`;
+  return {
+    'nexus-core': { manifest: core },
+    nexus42: { manifest: selector('nexus42', 'cli', true) },
+    'nexus-core-node': { manifest: selector('nexus-core-node', 'host', nodeForwards) },
+    'nexus-workflow-simulate': { deps: {} },
+  };
+}
+
+function authoringRun(root) {
+  return runGuard(['--cohort', 'authoring', '--manifest-path', path.join(root, 'Cargo.toml')]);
+}
+
+test('authoring cohort passes and reads the checked-in consumer', () => {
+  const root = createWorkspace(authoringCrates());
+  const run = authoringRun(root);
+
+  assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+  // Positive rows: both shipped selectors link the authoring surface.
+  assert.match(run.stdout, /ok: nexus-core selects feature strategy-authoring for nexus42 <default>/);
+  assert.match(run.stdout, /ok: nexus-core selects feature strategy-authoring for nexus-core-node <default>/);
+  assert.match(run.stdout, /ok: nexus-workflow-simulate single version \(0\.1\.0\) for nexus42/);
+  assert.match(run.stdout, /ok: nexus-workflow-simulate single version \(0\.1\.0\) for nexus-core-node/);
+  // Negative rows: no non-authoring selection links the simulator.
+  assert.match(run.stdout, /ok: nexus-workflow-simulate absent from nexus-core --features compute/);
+  // The consumer rows resolve the CHECKED-IN fixture, not this workspace, so
+  // the pinned core sets are the real consumer's.
+  assert.match(
+    run.stdout,
+    /ok: nexus-core v0\.1\.0 feats=\[execution,nexus-connect,operation-id\] for authoring-cohorts <default>/,
+  );
+  assert.match(
+    run.stdout,
+    /ok: nexus-core v0\.1\.0 feats=\[execution,nexus-connect,operation-id,strategy-authoring\] for authoring-cohorts --features authoring/,
+  );
+  assert.match(run.stdout, /ok: nexus-agent-host absent from authoring-cohorts --features authoring/);
+  assert.match(run.stdout, /ok: nexus-wasm-host absent from authoring-cohorts --features authoring/);
+  assert.match(run.stdout, /graph pins OK \(cohort: authoring\)$/m);
+});
+
+test('dropping the native selector authoring edge fails the cohort', () => {
+  const root = createWorkspace(authoringCrates({ nodeForwards: false }));
+  const run = authoringRun(root);
+
+  assert.notEqual(run.status, 0, run.stdout);
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(
+    run.stdout,
+    /nexus-workflow-simulate expected in nexus-core-node graph, but absent/,
+  );
+  // The CLI row still printed its ok line, so the failure is attributable to
+  // the native selector rather than to a collapsed fixture.
+  assert.match(run.stdout, /ok: nexus-core selects feature strategy-authoring for nexus42/);
+});
+
+test('a compute selection that links the simulator fails the cohort', () => {
+  const root = createWorkspace(authoringCrates({ computeLinksSimulator: true }));
+  const run = authoringRun(root);
+
+  assert.notEqual(run.status, 0, run.stdout);
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(
+    run.stdout,
+    /nexus-workflow-simulate must be MISSING from nexus-core--features compute/,
+  );
+});
+
 test('unknown cohort is rejected before any Cargo probe', () => {
   const run = runGuard(['--cohort', 'runtime']);
 
