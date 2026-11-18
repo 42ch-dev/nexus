@@ -185,14 +185,9 @@ fn seed_scoped_workspace(home: &Path) {
 /// `connect-host` on) when the test target builds; resolved through the
 /// standard workspace target layout.
 fn probe_binary() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let profile = if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "release"
-    };
-    let target = std::env::var_os("CARGO_TARGET_DIR")
-        .map_or_else(|| manifest_dir.join("../../target"), PathBuf::from);
+    // Same profile inference as the shipped host artifact: a custom profile's
+    // probe lives under its own directory, never under `debug`.
+    let (target, profile) = running_profile().unwrap_or_else(|error| panic!("{error}"));
     let exe = if cfg!(windows) {
         "runtime_smoke_probe.exe"
     } else {
@@ -201,12 +196,55 @@ fn probe_binary() -> PathBuf {
     target.join(profile).join("examples").join(exe)
 }
 
-/// The profile directory the running test binary was built for.
-const fn test_profile() -> &'static str {
-    if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "release"
+/// Infer `<target>/<profile>` from the running test binary's path
+/// (`<target>/<profile>/deps/<binary>`).
+///
+/// A compile-time `debug_assertions` switch is NOT enough: a custom profile
+/// (e.g. `--profile ci`) that inherits `dev` keeps debug assertions on while
+/// building into `target/ci/`, so the boolean would resolve another profile's
+/// — possibly stale — artifact. The profile directory name is the truth.
+fn profile_from_exe(exe: &Path) -> Result<(PathBuf, String), String> {
+    let deps = exe.parent().ok_or_else(|| {
+        format!("cannot infer the cargo profile from {exe:?}: no parent directory")
+    })?;
+    if deps.file_name().and_then(|name| name.to_str()) != Some("deps") {
+        return Err(format!(
+            "cannot infer the cargo profile from {exe:?}: expected the cargo test layout \
+             <target>/<profile>/deps/<binary>; set NEXUS42_RUNTIME_BIN to name the shipped artifact"
+        ));
+    }
+    let profile_dir = deps.parent().ok_or_else(|| {
+        format!("cannot infer the cargo profile from {exe:?}: the deps directory has no parent")
+    })?;
+    let profile = profile_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            format!(
+                "cannot infer the cargo profile from {exe:?}: the profile directory has no name"
+            )
+        })?;
+    let target_root = profile_dir.parent().ok_or_else(|| {
+        format!(
+            "cannot infer the cargo target directory from {exe:?}: the profile directory has no parent"
+        )
+    })?;
+    Ok((target_root.to_path_buf(), profile.to_string()))
+}
+
+/// The `<target>/<profile>` of the binary that is actually running.
+fn running_profile() -> Result<(PathBuf, String), String> {
+    let exe = std::env::current_exe()
+        .map_err(|error| format!("cannot read the running test binary path: {error}"))?;
+    profile_from_exe(&exe)
+}
+
+/// The cargo arguments that build into `profile`'s directory.
+fn profile_build_args(profile: &str) -> Vec<String> {
+    match profile {
+        "debug" => Vec::new(),
+        "release" => vec!["--release".to_string()],
+        other => vec!["--profile".to_string(), other.to_string()],
     }
 }
 
@@ -252,7 +290,7 @@ fn shipped_runtime_binary() -> PathBuf {
         return path;
     }
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let release = !cfg!(debug_assertions);
+    let (target, profile) = running_profile().unwrap_or_else(|error| panic!("{error}"));
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut build = Command::new(cargo);
     build
@@ -267,11 +305,11 @@ fn shipped_runtime_binary() -> PathBuf {
             "--features",
             "connect-host",
         ])
-        // Relative `CARGO_TARGET_DIR` values resolve like `probe_binary`'s.
+        .args(profile_build_args(&profile))
+        // Pin the target root the inference resolved, so a relative
+        // `CARGO_TARGET_DIR` cannot land the artifact elsewhere.
+        .env("CARGO_TARGET_DIR", &target)
         .current_dir(&manifest_dir);
-    if release {
-        build.arg("--release");
-    }
     let build = build
         .output()
         .expect("run cargo build for the shipped Connect-only runtime");
@@ -282,9 +320,7 @@ fn shipped_runtime_binary() -> PathBuf {
         String::from_utf8_lossy(&build.stdout),
         String::from_utf8_lossy(&build.stderr)
     );
-    let target = std::env::var_os("CARGO_TARGET_DIR")
-        .map_or_else(|| manifest_dir.join("../../target"), PathBuf::from);
-    profile_artifact(&target, test_profile()).unwrap_or_else(|error| panic!("{error}"))
+    profile_artifact(&target, &profile).unwrap_or_else(|error| panic!("{error}"))
 }
 
 /// The fail-closed profile controls: the required profile's artifact is used,
@@ -307,11 +343,62 @@ fn profile_artifact_refuses_to_fall_back_to_another_profile() {
         dir.path().join("debug").join(&exe)
     );
 
+    let custom_error = profile_artifact(dir.path(), "ci")
+        .expect_err("a custom profile must not resolve the debug artifact");
+    assert!(
+        custom_error.contains("missing for the ci profile")
+            && custom_error.contains("refuses to fall back"),
+        "{custom_error}"
+    );
+
     std::fs::create_dir_all(dir.path().join("release")).expect("mkdir release");
     std::fs::write(dir.path().join("release").join(&exe), b"release").expect("write release");
     assert_eq!(
         profile_artifact(dir.path(), "release").unwrap(),
         dir.path().join("release").join(&exe)
+    );
+}
+
+/// The inference the smoke uses: the profile directory name comes from the
+/// running binary's path, custom profiles included, and a layout that does not
+/// name it fails closed instead of guessing a profile.
+#[test]
+fn profile_from_exe_infers_the_profile_directory_and_rejects_other_layouts() {
+    for (exe, target, profile) in [
+        (
+            "/w/target/debug/deps/nexus_runtime_smoke-abc",
+            "/w/target",
+            "debug",
+        ),
+        (
+            "/w/target/release/deps/nexus_runtime_smoke-abc",
+            "/w/target",
+            "release",
+        ),
+        (
+            "/w/target/ci/deps/nexus_runtime_smoke-abc",
+            "/w/target",
+            "ci",
+        ),
+    ] {
+        assert_eq!(
+            profile_from_exe(Path::new(exe)),
+            Ok((PathBuf::from(target), profile.to_string()))
+        );
+    }
+    for layout in [
+        "/w/target/debug/nexus_runtime_smoke",
+        "/w/nexus_runtime_smoke",
+    ] {
+        let error =
+            profile_from_exe(Path::new(layout)).expect_err("an ambiguous layout must fail closed");
+        assert!(error.contains("expected the cargo test layout"), "{error}");
+    }
+    assert_eq!(profile_build_args("debug"), Vec::<String>::new());
+    assert_eq!(profile_build_args("release"), vec!["--release".to_string()]);
+    assert_eq!(
+        profile_build_args("ci"),
+        vec!["--profile".to_string(), "ci".to_string()]
     );
 }
 
