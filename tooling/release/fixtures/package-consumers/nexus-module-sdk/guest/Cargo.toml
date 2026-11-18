@@ -1,0 +1,14 @@
+[package]
+name = "nexus-module-sdk-consumer-guest"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# The official SDK is the guest's only dependency: `nexus_entry!` supplies the
+# whole ABI surface, and a host-only crate (nexus-module-test, wasmtime) cannot
+# compile for wasm32-unknown-unknown, so mixing the host side in fails here.
+[dependencies]
+nexus-module-sdk = "0.1.0"
+
+[lib]
+crate-type = ["cdylib"]

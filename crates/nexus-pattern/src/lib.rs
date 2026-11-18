@@ -43,6 +43,26 @@ pub const FRAGMENT_FILE: &str = "workflow.ir.json";
 /// device member or a runaway file from exhausting the daemon while it lists.
 pub const MAX_MEMBER_BYTES: u64 = 1 << 20;
 
+/// Bytes of the committed fixture packages under `tests/fixtures/patterns/`, as packed into this
+/// crate.
+///
+/// The committed fixtures are distribution inputs like any other source file, so the packed archive
+/// must carry them. Embedding them keeps that checkable from outside: an archive that drops
+/// `tests/fixtures/patterns/**` fails to compile here instead of shipping a silently smaller
+/// package that only the checkout's copy could satisfy. These are static test inputs, not runtime
+/// registry content.
+pub mod fixtures {
+    /// `tests/fixtures/patterns/broken-manifest/pattern.toml` — deliberately malformed.
+    pub const BROKEN_MANIFEST: &str =
+        include_str!("../tests/fixtures/patterns/broken-manifest/pattern.toml");
+    /// `tests/fixtures/patterns/prompt-step/pattern.toml`.
+    pub const PROMPT_STEP_MANIFEST: &str =
+        include_str!("../tests/fixtures/patterns/prompt-step/pattern.toml");
+    /// `tests/fixtures/patterns/prompt-step/workflow.ir.json`.
+    pub const PROMPT_STEP_FRAGMENT: &str =
+        include_str!("../tests/fixtures/patterns/prompt-step/workflow.ir.json");
+}
+
 /// One discovered package directory.
 ///
 /// Fields are private and read-only: only the scanner builds the load state, so a fragment and its

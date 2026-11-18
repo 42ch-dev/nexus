@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -483,6 +483,49 @@ function rowFor(report, name) {
   return row;
 }
 
+/**
+ * Temp repo carrying standalone `modules/*` contract crates, sources included,
+ * with one consumer fixture installed under the discovery path the checker
+ * reads. Standalone crates cannot be workspace members, so the root is an empty
+ * virtual workspace and the carriers are the only entries that pack.
+ *
+ * @param {string} entryName Consumer fixture and packed entry name.
+ * @param {string[]} modules `modules/<name>` crates the case needs.
+ * @returns {string}
+ */
+function moduleConsumerRepo(entryName, modules) {
+  const dir = mkdtempSync(join(tmpdir(), "nexus-release-"));
+  writeRepoFile(dir, "Cargo.toml", '[workspace]\nmembers = []\nresolver = "2"\n');
+  for (const name of modules) {
+    cpSync(join(REPO_ROOT, "modules", name), join(dir, "modules", name), {
+      recursive: true,
+      // A local build dir is not source: the real checkout leaves it untracked.
+      filter: (source) => source.split("/").at(-1) !== "target",
+    });
+  }
+  writeRepoFile(
+    dir,
+    VERSION_BRACKETS_PATH,
+    `${JSON.stringify(
+      {
+        contract: modules.map((name) => ({
+          name,
+          manifest: `modules/${name}/Cargo.toml`,
+        })),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  cpSync(
+    join(CONSUMER_FIXTURES_DIR, entryName),
+    join(dir, CONSUMER_FIXTURES_PATH, entryName),
+    { recursive: true },
+  );
+  initGitRepo(dir);
+  return dir;
+}
+
 test("the contracts consumer round-trips a generated object from its archive", () => {
   const dir = realConsumerRepo("nexus-contracts", ["nexus-contracts"]);
   try {
@@ -546,7 +589,7 @@ test("the workflow-ir consumer rejects a dangling reference from its archive", (
   }
 });
 
-test("the pattern consumer scans valid and broken packages from its archive", () => {
+test("the pattern consumer scans valid and broken packages packed in its archive", () => {
   const dir = realConsumerRepo("nexus-pattern", [
     "nexus-contracts",
     "nexus-workflow-ir",
@@ -563,9 +606,134 @@ test("the pattern consumer scans valid and broken packages from its archive", ()
       row.consumer.patched.map((patched) => patched.name),
       ["nexus-contracts", "nexus-pattern", "nexus-workflow-ir"],
     );
+    // The registry root the consumer scans is written from the archive's own
+    // packed fixture bytes, so this line is archive evidence, not a copy beside
+    // the consumer.
     assert.match(
       row.consumer.output,
-      /nexus-pattern scanned 2 packages \(1 available\)/,
+      /nexus-pattern scanned 2 packed packages \(1 available\)/,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a pattern archive that drops its shipped fixture inputs fails the packed consumer", () => {
+  const dir = realConsumerRepo("nexus-pattern", [
+    "nexus-contracts",
+    "nexus-workflow-ir",
+    "nexus-pattern",
+  ]);
+  try {
+    // The archive embeds these inputs through `nexus_pattern::fixtures`, so
+    // dropping one from the tracked source must break the consumer build rather
+    // than leave a smaller archive that still passes.
+    rmSync(
+      join(
+        dir,
+        "crates/nexus-pattern/tests/fixtures/patterns/prompt-step/workflow.ir.json",
+      ),
+    );
+    assert.equal(git(dir, ["add", "-A"]).status, 0);
+    assert.equal(git(dir, ["commit", "-qm", "drop packed input"]).status, 0);
+
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, false);
+    assert.equal(report.firstFailure, "nexus-pattern");
+
+    const row = rowFor(report, "nexus-pattern");
+    assert.equal(row.ok, false);
+    assert.equal(row.consumer.ok, false);
+    assert.match(row.consumer.cause, /consumer run failed/);
+    assert.match(
+      row.consumer.output,
+      /workflow\.ir\.json|fixtures\/patterns/,
+      row.consumer.output,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("the module-sdk consumer builds a wasm32 guest through nexus_entry and the host API separately", () => {
+  const dir = moduleConsumerRepo("nexus-module-sdk", ["nexus-module-sdk"]);
+  try {
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
+
+    const row = rowFor(report, "nexus-module-sdk");
+    assert.equal(row.ok, true, row.cause ?? "");
+    assert.equal(row.consumer.ok, true, row.consumer.cause ?? "");
+    assert.deepEqual(row.consumer.patched, [
+      { name: "nexus-module-sdk", sha256: row.archive.sha256 },
+    ]);
+    assert.match(
+      row.consumer.output,
+      /nexus-module-sdk host API validated consumer-probe/,
+    );
+
+    // The guest is real wasm32 output built from the same extracted archive.
+    assert.match(row.consumer.guest.artifact, /\.wasm$/);
+    assert.ok(row.consumer.guest.bytes > 8, String(row.consumer.guest.bytes));
+    assert.match(row.consumer.guest.sha256, /^[0-9a-f]{64}$/);
+
+    // And the guest declares the SDK only: no host-side crate can ride along.
+    const guestManifest = readFileSync(
+      join(CONSUMER_FIXTURES_DIR, "nexus-module-sdk/guest/Cargo.toml"),
+      "utf8",
+    );
+    const dependencies = guestManifest
+      .split(/^\[/m)
+      .find((section) => section.startsWith("dependencies]"))
+      ?.split("\n")
+      .map((line) => line.match(/^([\w-]+)\s*=/)?.[1])
+      .filter((name) => name !== undefined);
+    assert.deepEqual(dependencies, ["nexus-module-sdk"]);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("the module-manifest consumer validates, injects and verifies the digest and refuses the invalid corpus", () => {
+  const dir = moduleConsumerRepo("nexus-module-manifest", [
+    "nexus-module-manifest",
+  ]);
+  try {
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
+
+    const row = rowFor(report, "nexus-module-manifest");
+    assert.equal(row.ok, true, row.cause ?? "");
+    assert.equal(row.consumer.ok, true, row.consumer.cause ?? "");
+    assert.equal(row.consumer.guest, null);
+    assert.match(
+      row.consumer.output,
+      /nexus-module-manifest validated, injected 93a44bbb96c751218e4c00d479e4c14358122a389acca16205b1e4d0dc5f9476, verified the pairing, and refused the invalid corpus entry/,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("the module-test consumer runs an ABI module and rejects a malformed output", () => {
+  const dir = moduleConsumerRepo("nexus-module-test", [
+    "nexus-module-sdk",
+    "nexus-module-test",
+  ]);
+  try {
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
+
+    const row = rowFor(report, "nexus-module-test");
+    assert.equal(row.ok, true, row.cause ?? "");
+    assert.equal(row.consumer.ok, true, row.consumer.cause ?? "");
+    assert.deepEqual(
+      row.consumer.patched.map((patched) => patched.name),
+      ["nexus-module-sdk", "nexus-module-test"],
+    );
+    assert.match(
+      row.consumer.output,
+      /nexus-module-test ran a tiny ABI-valid module and rejected a malformed output envelope/,
     );
   } finally {
     cleanupTempRepo(dir);

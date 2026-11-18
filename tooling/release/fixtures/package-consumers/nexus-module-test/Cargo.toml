@@ -1,0 +1,17 @@
+[package]
+name = "nexus-module-test-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# `nexus-module-test` is a host-target dev-dependency of module crates: it is
+# compiled into a test binary, never into a `.wasm` artifact. Nothing in this
+# fixture is guest code.
+[dependencies]
+nexus-module-sdk = "0.1.0"
+nexus-module-test = "0.1.0"
+serde_json = "1"
+wat = "1"
+
+# Standalone workspace root: the consumer inherits no product Cargo config.
+[workspace]

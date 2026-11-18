@@ -17,7 +17,9 @@
  *   4. runs the optional consumer fixture named after the entry
  *      (`tooling/release/fixtures/package-consumers/<name>/`) as a fresh
  *      workspace whose `[patch.crates-io]` entries point only at extracted
- *      selected archives, offline and locked.
+ *      selected archives, offline and locked; a fixture that ships a `guest/`
+ *      crate also gets that crate built for `wasm32-unknown-unknown` from the
+ *      same archives, with the host consumer kept out of it.
  *
  * Nothing downstream sees the original checkout or the packing tree: a
  * consumer that resolves an input from either fails, as does an archive that
@@ -66,6 +68,13 @@ const PACKAGE_ARGS = ["package", "--no-verify", "--allow-dirty", "--offline"];
 
 /** Consumer fixtures read by entry name; K4/K5 add the real consumers here. */
 const CONSUMER_FIXTURES_PATH = "tooling/release/fixtures/package-consumers";
+
+/**
+ * Subdirectory of a consumer fixture whose crate is a `wasm32-unknown-unknown`
+ * guest. A guest is a separate crate from the host consumer, so no host-side
+ * dependency can reach the artifact.
+ */
+const GUEST_DIR = "guest";
 
 /**
  * Prefix of the disposable scratch dir. It lives inside `CARGO_TARGET_DIR`
@@ -124,6 +133,9 @@ function contractDependencies(manifestContents, entries) {
  * @property {{name: string, req: string, kind: string, path: string | null}[]} declared
  * @property {{name: string, sha256: string}[]} patched
  * @property {{name: string, version: string, manifest: string, source: string}[]} resolved
+ * @property {{artifact: string, bytes: number, sha256: string} | null} guest
+ *   `wasm32-unknown-unknown` artifact of the fixture's `guest/` crate, when it
+ *   ships one; null for host-only fixtures.
  * @property {boolean} ok
  * @property {string | null} cause Short named failure reason.
  * @property {string} output Cargo's combined output from the consuming run.
@@ -526,6 +538,89 @@ function inside(candidate, root) {
 }
 
 /**
+ * Build a consumer fixture's `wasm32-unknown-unknown` guest, when it ships one
+ * in `guest/`. The guest crate is a separate workspace member, so the host
+ * consumer's dependencies stay out of the artifact, and the target itself
+ * refuses host-only crates (nexus-module-test, wasmtime).
+ *
+ * @param {{
+ *   consumerRoot: string;
+ *   targetRoot: string;
+ *   entryName: string;
+ *   patchArgs: string[];
+ * }} input
+ * @returns {{
+ *   ok: boolean;
+ *   cause: string | null;
+ *   artifact: {artifact: string, bytes: number, sha256: string} | null;
+ * }}
+ */
+function buildGuest({ consumerRoot, targetRoot, entryName, patchArgs }) {
+  const guestManifest = join(consumerRoot, GUEST_DIR, "Cargo.toml");
+  if (!existsSync(guestManifest)) {
+    return { ok: true, cause: null, artifact: null };
+  }
+
+  const guestTargetDir = join(targetRoot, "guests", entryName);
+  const built = run(
+    "cargo",
+    [
+      "build",
+      "--offline",
+      "--locked",
+      "--quiet",
+      "--target",
+      "wasm32-unknown-unknown",
+      "--manifest-path",
+      guestManifest,
+      "--target-dir",
+      guestTargetDir,
+      ...patchArgs,
+    ],
+    consumerRoot,
+  );
+  if (!built.ok) {
+    return {
+      ok: false,
+      cause: `guest wasm32 build failed: ${
+        firstErrorLine(built.output) ?? "cargo build failed"
+      }`,
+      artifact: null,
+    };
+  }
+
+  const outDir = join(guestTargetDir, "wasm32-unknown-unknown", "debug");
+  const produced = existsSync(outDir)
+    ? readdirSync(outDir).filter((file) => file.endsWith(".wasm"))
+    : [];
+  if (produced.length !== 1) {
+    return {
+      ok: false,
+      cause: `guest wasm32 build produced ${produced.length} artifacts`,
+      artifact: null,
+    };
+  }
+
+  const bytes = readFileSync(join(outDir, produced[0]));
+  if (!bytes.subarray(0, 4).equals(Buffer.from([0x00, 0x61, 0x73, 0x6d]))) {
+    return {
+      ok: false,
+      cause: `guest artifact ${produced[0]} is not a WebAssembly module`,
+      artifact: null,
+    };
+  }
+  return {
+    ok: true,
+    cause: null,
+    artifact: {
+      artifact: produced[0],
+      bytes: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    },
+  };
+}
+
+/**
  * Consume one extracted archive set with a fresh consumer workspace. Every
  * failure returns named evidence instead of throwing, so a Cargo failure can
  * never leave an empty passing report.
@@ -564,6 +659,7 @@ function runConsumer({
     declared: [],
     patched: [],
     resolved: [],
+    guest: null,
     ok: false,
     cause: null,
     output: "",
@@ -634,9 +730,15 @@ function runConsumer({
     };
   }
 
-  const selected = evidence.declared.filter((dependency) =>
-    archives.has(dependency.name),
-  );
+  // One patch per archive; a workspace fixture may name the same archive from
+  // more than one member.
+  const selected = [
+    ...new Map(
+      evidence.declared
+        .filter((dependency) => archives.has(dependency.name))
+        .map((dependency) => [dependency.name, dependency]),
+    ).values(),
+  ];
   evidence.patched = selected.map((dependency) => ({
     name: dependency.name,
     sha256: /** @type {{sha256: string}} */ (archives.get(dependency.name))
@@ -700,6 +802,12 @@ function runConsumer({
         firstErrorLine(ran.output) ?? "cargo run failed"
       }`,
     };
+  }
+
+  const guest = buildGuest({ consumerRoot, targetRoot, entryName, patchArgs });
+  evidence.guest = guest.artifact;
+  if (!guest.ok) {
+    return { ...evidence, cause: guest.cause };
   }
 
   const resolvedMeta = run(
@@ -816,6 +924,14 @@ export function checkContractPackageability(repoRoot) {
     );
     if (hasConsumer && archives.size > 0) {
       const policy = workspacePolicy(stageRoot);
+      // Standalone contract crates (`modules/*`) are not workspace members, so
+      // the staged workspace cannot report their `publish`; their archive's own
+      // normalized row is the source for them.
+      for (const row of results) {
+        if (row.package !== null) {
+          policy.publishByName.set(row.name, row.package.publish);
+        }
+      }
       for (const row of results) {
         if (!row.ok) {
           continue;
@@ -869,10 +985,14 @@ function printRows(report) {
       result.consumer === null
         ? ""
         : ` consumer ${result.consumer.ok ? "ok" : "FAILED"}`;
+    const guest =
+      result.consumer?.guest == null
+        ? ""
+        : ` guest ${result.consumer.guest.bytes}B ${result.consumer.guest.sha256.slice(0, 12)}`;
     console.log(
       `  ${result.name.padEnd(24)} ${result.manifest.padEnd(44)} ${
         result.ok ? "ok" : "FAILED"
-      }  ${archive}${consumer}`,
+      }  ${archive}${consumer}${guest}`,
     );
   }
 }
