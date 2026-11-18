@@ -5,14 +5,11 @@
 //! node. The essay preset's package name is its declared id, so the projected document id resolves
 //! back to the bundle whose templates it names (I-000424).
 
-#![cfg(feature = "simulate")]
-
-use nexus_capability::CapabilityRegistryHolder;
 use nexus_orchestration::preset_runtime::{validate_ir_buildability, IrTemplateSource};
-use nexus_orchestration::{simulate_document, SimulationOptions};
 use nexus_preset::capability_catalog::BuiltinCapabilityCatalog;
 use nexus_preset::workflow_ir::import_preset_manifest;
 use nexus_workflow_ir::{WorkflowDocument, WorkflowEdgeKind, WorkflowExitWhenKind};
+use nexus_workflow_simulate::simulate_document;
 
 fn imported(id: &str) -> WorkflowDocument {
     let loaded = nexus_preset::load_embedded_preset(id, &BuiltinCapabilityCatalog)
@@ -22,13 +19,7 @@ fn imported(id: &str) -> WorkflowDocument {
 }
 
 fn simulate(document: &WorkflowDocument) -> nexus_contracts::SimulationTrajectory {
-    simulate_document(
-        document,
-        &SimulationOptions {
-            capabilities: CapabilityRegistryHolder::new(),
-        },
-    )
-    .expect("the preset simulates")
+    simulate_document(document).expect("the preset simulates")
 }
 
 #[test]

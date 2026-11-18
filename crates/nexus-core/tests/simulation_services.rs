@@ -1,6 +1,6 @@
 //! The Simulate route's own gates, executed through a real `CoreService`: the path-id check,
 //! the candidate check and the wire→IR bridge the daemon route depends on.
-#![cfg(feature = "execution")]
+#![cfg(feature = "strategy-authoring")]
 
 use nexus_contracts::{
     SimulationTrajectoryEffectSummary, StrategySimulationRequest,

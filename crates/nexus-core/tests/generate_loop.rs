@@ -5,6 +5,8 @@
 //! Plan: `.mstar/plans/canvas-p6-retirement.md` Part C (T5/T6); spec:
 //! `.mstar/iterations/v1.247-hygiene/specs/generate-and-lint-loop.md` §3–§7.
 
+#![cfg(feature = "strategy-authoring")]
+
 use std::sync::Mutex;
 
 use async_trait::async_trait;

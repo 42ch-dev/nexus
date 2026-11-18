@@ -880,6 +880,10 @@ async fn execute_schedule_status(
 /// corrector. Lint exhaustion comes back as the D20 payload (`code: lint_exhausted`) rather than a
 /// bare refusal, because the model reads `correction` and the spine's error surface carries no
 /// `details`: a refusal here would hand the model less than the payload it needs to act on.
+///
+/// Authoring-only: the canonical `nexus.strategy.generate` row stays reserved without this
+/// build's `strategy-authoring` feature, and [`build_registry`] leaves it unbound.
+#[cfg(feature = "strategy-authoring")]
 async fn execute_strategy_generate(
     req: &ToolsApi,
     context: &ToolContext,
@@ -1664,6 +1668,7 @@ pub(crate) fn registry_schedule_status<'a>(
 }
 
 /// Registry wrapper: `nexus.strategy.generate` — async passthrough.
+#[cfg(feature = "strategy-authoring")]
 pub(crate) fn registry_strategy_generate<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -3546,23 +3551,24 @@ pub fn build_registry() -> CapabilityRegistry {
     build_registry_inner(None)
 }
 
-/// The ONE registration path: every canonical row bound, except the optional
-/// `unbound` one.
+/// The ONE registration path: every canonical row this build binds a handler
+/// for, except the optional `unbound` one.
 ///
-/// `unbound` is the feature-gated binding shape (a canonical tool whose
-/// handler has not landed). Production always passes `None`; the `test-hooks`
-/// wrapper below is how a test names the row, so the fixture can never drift
-/// from the real registration rules.
+/// `unbound` is the test-only shape (a canonical tool the fixture deliberately
+/// leaves unbound). Production always passes `None`; the `test-hooks` wrapper
+/// below is how a test names the row, so the fixture can never drift from the
+/// real registration rules. `handler_for` returning `None` is the feature-gated
+/// shape: the row stays canonical and reserved, but this build binds nothing.
 fn build_registry_inner(unbound: Option<HostToolId>) -> CapabilityRegistry {
     let mut reg = CapabilityRegistry::new();
     for metadata in host_tool_catalog() {
         if unbound == Some(metadata.id) {
             continue;
         }
-        reg.register(CapabilityRow {
-            metadata,
-            handler: handler_for(metadata.id),
-        });
+        let Some(handler) = handler_for(metadata.id) else {
+            continue;
+        };
+        reg.register(CapabilityRow { metadata, handler });
     }
     reg
 }
@@ -3579,18 +3585,19 @@ pub fn build_registry_without(unbound: HostToolId) -> CapabilityRegistry {
     build_registry_inner(Some(unbound))
 }
 
-/// The real handler for one canonical tool.
+/// The real handler for one canonical tool, or `None` when this build links no
+/// binding for it.
 ///
 /// Exhaustive over [`HostToolId`], so a canonical row cannot ship without a
-/// handler binding.
-fn handler_for(id: HostToolId) -> RegistryHandlerFn {
-    match id {
+/// handler decision; the feature-gated arms decide with a real `Option`.
+fn handler_for(id: HostToolId) -> Option<RegistryHandlerFn> {
+    let handler = match id {
         HostToolId::ContextWhoami => registry_context_whoami,
         HostToolId::WorkspaceInfo => registry_workspace_info,
         HostToolId::WorkGet => registry_work_get,
         HostToolId::WorkPatch => registry_work_patch,
         HostToolId::OrchestrationScheduleStatus => registry_schedule_status,
-        HostToolId::StrategyGenerate => registry_strategy_generate,
+        HostToolId::StrategyGenerate => return STRATEGY_GENERATE_HANDLER,
         HostToolId::ContextAssemble => registry_context_assemble,
         HostToolId::WorldSnapshotGet => registry_world_snapshot_get,
         HostToolId::TimelineRecentGet => registry_timeline_recent_get,
@@ -3614,8 +3621,18 @@ fn handler_for(id: HostToolId) -> RegistryHandlerFn {
         HostToolId::TraceCorrelation => registry_trace_correlation,
         HostToolId::FsReadTextFile => registry_read_file,
         HostToolId::FsWriteTextFile => registry_write_file,
-    }
+    };
+    Some(handler)
 }
+
+/// The Generate binding: present only where the authoring feature links the
+/// kernel. Without it the canonical id keeps its reservation and dispatch
+/// refuses before any peer or user lane is asked.
+#[cfg(feature = "strategy-authoring")]
+const STRATEGY_GENERATE_HANDLER: Option<RegistryHandlerFn> = Some(registry_strategy_generate);
+
+#[cfg(not(feature = "strategy-authoring"))]
+const STRATEGY_GENERATE_HANDLER: Option<RegistryHandlerFn> = None;
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 #[cfg(test)]

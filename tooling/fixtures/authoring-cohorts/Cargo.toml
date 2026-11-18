@@ -1,0 +1,35 @@
+[package]
+name = "authoring-cohorts"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Checker-owned consumer, NOT a product and NOT a core test target: its own
+# workspace keeps it out of the repository workspace, so `cargo run` here
+# builds exactly the dependency set a consumer selects. `default = ["execution"]`
+# is the execution-only consumer; `authoring` adds core's `strategy-authoring`
+# surface on top. `tooling/check-graph-pins.sh --cohort authoring` asserts both
+# resolved core feature sets, and `src/main.rs` asserts the runtime behaviour
+# each one must produce.
+[workspace]
+
+[features]
+default = ["execution", "observable"]
+execution = ["nexus-core/execution"]
+authoring = ["execution", "observable", "nexus-core/strategy-authoring"]
+# Core's `test-hooks` compiles the registry's peer/user lane-consultation
+# counter in. This consumer is a checker (publish = false, tooling-only, never a
+# shipped selection): the counter is what makes the reservation discriminating —
+# "not_supported" alone cannot tell an early canonical-miss refusal from a
+# fall-through that found nothing. No other test-hooks seam is armed here.
+observable = ["nexus-core/test-hooks"]
+
+[dependencies]
+# `default-features = false`: the domain default is empty, so the selection
+# under test is exactly what the features above forward.
+nexus-core = { path = "../../../crates/nexus-core", default-features = false }
+nexus-contracts = { path = "../../../crates/nexus-contracts" }
+nexus-home-layout = { path = "../../../crates/nexus-home-layout" }
+nexus-local-db = { path = "../../../crates/nexus-local-db" }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

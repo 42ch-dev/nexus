@@ -254,6 +254,11 @@ cli = [
   # engine owner, Host, scheduler or WASM; the direct-writer open still starts
   # nothing (v1.235 work-artifact IR, ADR #485 §7.8).
   "nexus-core/execution",
+  # v249: `preset generate` and `preset import` are the CLI's authoring leaves
+  # (`CoreService::generate_strategy_candidate` / `import_strategy_candidate`),
+  # so the CLI cohort keeps them explicitly. Execution alone no longer links
+  # the Generate/Import/Approve/Simulate surface.
+  "nexus-core/strategy-authoring",
   "dep:nexus-orchestration",
   "dep:nexus-session-storage",
   "dep:nexus-moment-context-assembly",

@@ -896,7 +896,7 @@ pub fn document_bodies<'a>(
 
 /// The unbound required slots of a whole document, for a caller that does not run a compose
 /// operation. Same declaration rule and same fragment walk as [`unbound_required_slots`].
-#[cfg(feature = "execution")]
+#[cfg(feature = "strategy-authoring")]
 pub fn document_unbound_slots(
     document: &WorkflowDocument,
     packages: &[PatternPackage],

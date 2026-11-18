@@ -3,22 +3,13 @@
 //! generated contract the route carries.
 
 use super::*;
-use nexus_capability::{Capability, CapabilityError};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 
 fn document(text: &str) -> WorkflowDocument {
     serde_json::from_str(text).expect("fixture is a valid workflow document")
 }
 
 fn simulate(document: &WorkflowDocument) -> SimulationTrajectory {
-    simulate_document(
-        document,
-        &SimulationOptions {
-            capabilities: CapabilityRegistryHolder::new(),
-        },
-    )
-    .expect("simulation succeeds")
+    simulate_document(document).expect("simulation succeeds")
 }
 
 /// A judged state that reaches a manual wait node, with a global pause signal.
@@ -221,13 +212,7 @@ fn a_judged_node_requires_exactly_one_default_edge() {
     let none =
         judge_with_defaults(r#"[{"id": "j->d", "from": "judge", "to": "done", "kind": "go"}]"#);
     assert_eq!(
-        simulate_document(
-            &none,
-            &SimulationOptions {
-                capabilities: CapabilityRegistryHolder::new()
-            }
-        )
-        .unwrap_err(),
+        simulate_document(&none).unwrap_err(),
         SimulationError::JudgeBranch {
             node: "judge".into(),
             count: 0
@@ -241,13 +226,7 @@ fn a_judged_node_requires_exactly_one_default_edge() {
         ]"#,
     );
     assert_eq!(
-        simulate_document(
-            &two,
-            &SimulationOptions {
-                capabilities: CapabilityRegistryHolder::new()
-            }
-        )
-        .unwrap_err(),
+        simulate_document(&two).unwrap_err(),
         SimulationError::JudgeBranch {
             node: "judge".into(),
             count: 2
@@ -261,13 +240,7 @@ fn a_default_edge_to_an_undeclared_node_is_rejected() {
         r#"[{"id": "j->missing", "from": "judge", "to": "missing", "kind": "default"}]"#,
     );
     assert_eq!(
-        simulate_document(
-            &dangling,
-            &SimulationOptions {
-                capabilities: CapabilityRegistryHolder::new()
-            }
-        )
-        .unwrap_err(),
+        simulate_document(&dangling).unwrap_err(),
         SimulationError::JudgeBranch {
             node: "judge".into(),
             count: 0
@@ -314,49 +287,16 @@ const CAPABILITY_BEARING: &str = r#"{
     "provenance": {"source": "compose"}
 }"#;
 
-struct RecordingCap {
-    hits: Arc<AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl Capability for RecordingCap {
-    fn name(&self) -> &'static str {
-        "record.probe"
-    }
-
-    fn input_schema(&self) -> &'static str {
-        r#"{"type":"object"}"#
-    }
-
-    fn output_schema(&self) -> &'static str {
-        r#"{"type":"object"}"#
-    }
-
-    async fn run(&self, _input: serde_json::Value) -> Result<serde_json::Value, CapabilityError> {
-        self.hits.fetch_add(1, Ordering::SeqCst);
-        Ok(serde_json::json!({ "recorded": true }))
-    }
-}
-
 #[test]
-fn a_capability_bearing_document_simulates_with_zero_dispatch() {
-    let hits = Arc::new(AtomicUsize::new(0));
-    let registry = nexus_capability::test_support::registry_with(vec![Box::new(RecordingCap {
-        hits: Arc::clone(&hits),
-    })]);
-
-    let trajectory = simulate_document(
-        &document(CAPABILITY_BEARING),
-        &SimulationOptions {
-            capabilities: CapabilityRegistryHolder::with_registry(registry),
-        },
-    )
-    .expect("a capability-bearing document still simulates");
+fn a_capability_bearing_document_simulates_without_resolving_the_capability() {
+    // The zero-dispatch property is structural: this crate links no registry to resolve
+    // against, so the walk can only read the declared action.
+    let trajectory = simulate_document(&document(CAPABILITY_BEARING))
+        .expect("a capability-bearing document still simulates");
 
     assert_eq!(trajectory.nodes_visited, ["done", "work"]);
     assert_eq!(
-        hits.load(Ordering::SeqCst),
-        0,
-        "the walk never resolves a capability"
+        trajectory.effect_summary,
+        SimulationTrajectoryEffectSummary::WriteCandidate
     );
 }

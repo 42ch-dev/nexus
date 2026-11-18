@@ -585,6 +585,33 @@ jobs:
       - name: Check graph pins (capability cohort)
         timeout-minutes: 10
         run: bash tooling/check-graph-pins.sh --cohort capability
+      # V1.249 A3: the strategy-authoring surface as a SELECTION. The no-arg
+      # matrix and the synthetic suite below pin the shipped graphs, but neither
+      # runs the real cohort or the checker-owned consumer — a later CLI/native
+      # forwarding regression would keep them green. The cohort resolves the
+      # checked-in consumer manifest (both selections) and the two `cargo run`
+      # steps execute its runtime assertions.
+      #
+      # The consumer is its own workspace with its own 327-package lock, so the
+      # two `--offline` runs need ITS closure in the local registry cache. This
+      # job restores no Rust cache, and `check-wire-drift.sh` only builds
+      # `nexus-contracts`, so the closure is fetched explicitly here first: the
+      # download is bounded by this step's budget and warms the same CARGO_HOME
+      # the offline runs read. This is also the only CI compile of
+      # `nexus-core[execution]` WITHOUT `strategy-authoring`, so skipping the
+      # consumer would hide a cfg regression.
+      - name: Fetch the authoring consumer closure
+        timeout-minutes: 15
+        run: cargo fetch --locked --manifest-path tooling/fixtures/authoring-cohorts/Cargo.toml
+      - name: Check graph pins (authoring cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort authoring
+      - name: Authoring consumer (execution-only)
+        timeout-minutes: 15
+        run: cargo run --locked --offline --manifest-path tooling/fixtures/authoring-cohorts/Cargo.toml
+      - name: Authoring consumer (authoring)
+        timeout-minutes: 15
+        run: cargo run --locked --offline --manifest-path tooling/fixtures/authoring-cohorts/Cargo.toml --features authoring
       # v1.249 R3 + compute-policy QC: the scoped cohort selectors and the
       # `--manifest-path` override are proven on disposable real-Cargo
       # workspaces — positive fixtures, one rejection per forbidden edge, the
@@ -840,19 +867,19 @@ jobs:
       - name: Run sample self-check (preset.yaml equals its workflow.json export)
         if: matrix.group == 'orchestration-core'
         run: cargo test -p nexus-orchestration --test sample_self_check
-      # I-000475: the preset round trips, the Simulate unit walk, the IR/YAML projection
+      # I-000475: the preset round trips, the private pure walk, the IR/YAML projection
       # parity proofs and both embedded-preset trajectories never ran in CI, so their green
-      # was local-only. The `simulate` feature is not in `Run tests`' package set, and
-      # `--lib simulation::` / `--lib ...parity` select zero tests when the feature is off,
-      # so every invocation here is feature-explicit. Measured 40s warm locally.
+      # was local-only. The SIMULATION CHECKS: the walk is now its own private crate (no
+      # feature gate on `nexus-orchestration`), and `--lib ...parity` selects zero tests
+      # without the targets named here. Measured 40s warm locally.
       - name: Run preset simulation and projection suites
         if: matrix.group == 'orchestration-core'
         timeout-minutes: 10
         run: |
           cargo test -p nexus-preset
-          cargo test -p nexus-orchestration --features simulate --lib simulation::
-          cargo test -p nexus-orchestration --features simulate --lib preset_runtime::tests::parity
-          cargo test -p nexus-orchestration --features simulate --test embedded_preset_trajectory --test sample_trajectory
+          cargo test -p nexus-workflow-simulate --lib
+          cargo test -p nexus-orchestration --lib preset_runtime::tests::parity
+          cargo test -p nexus-orchestration --test embedded_preset_trajectory --test sample_trajectory
       - name: Run tests
         run: cargo test ${{ matrix.packages }}
 
