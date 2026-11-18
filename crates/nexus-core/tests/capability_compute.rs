@@ -731,7 +731,7 @@ fn write_user_capability_trio(scan_root: &Path, name: &str, input_schema: &str) 
 #[tokio::test]
 #[serial_test::serial]
 async fn schema_invalid_arguments_never_reach_the_capability() {
-    use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
+    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 
     let f = fixture().await;
     // The descriptor contract (AR-34) requires a `wasm` module ref: without it
@@ -775,7 +775,7 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
 
     let mut context = f.context.clone();
     context.set_user_capabilities(Some(
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
+        nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
     ));
 
     let request = ToolsApi {
@@ -818,8 +818,8 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
 #[tokio::test]
 #[serial_test::serial]
 async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
-    use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
-    use nexus_orchestration::CapabilityRegistryHolder;
+    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
+    use nexus_capability::CapabilityRegistryHolder;
 
     let f = fixture().await;
     let scan_root = f.tmp.path().join("hotcaps");
@@ -929,9 +929,9 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
 #[tokio::test]
 #[serial_test::serial]
 async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
-    use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
+    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
     use nexus_capability::Capability as _;
-    use nexus_orchestration::CapabilityRegistryHolder;
+    use nexus_capability::CapabilityRegistryHolder;
 
     const TOOL: &str = "nexus.workspace.info";
 
@@ -1162,7 +1162,7 @@ async fn read_grant_admits_reads_and_refuses_a_write() {
 /// rather than standing in with heuristic candidates.
 #[tokio::test]
 async fn failing_prompt_executor_is_a_typed_failure_not_a_fabricated_success() {
-    use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
+    use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
     use nexus_capability::{CapabilityError, PromptExecutor, PromptRequest, PromptResult};
 
     struct FailingExecutor;

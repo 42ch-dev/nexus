@@ -28,7 +28,7 @@ use nexus_knowledge::world_kb::knowledge_entry::{
 use nexus_knowledge::world_kb::{KbQuery, KbStore};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::{init_engine_pool, narrative_write};
-use nexus_orchestration::capability::CapabilityRegistry;
+use nexus_capability::CapabilityRegistry;
 use nexus_preset::load_embedded_preset;
 use serde_json::{json, Value};
 

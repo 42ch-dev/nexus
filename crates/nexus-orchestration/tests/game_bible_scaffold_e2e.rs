@@ -13,7 +13,7 @@
 
 use sqlx::Row;
 
-use nexus_orchestration::capability::builtins::GameBibleProjectScaffold;
+use nexus_capability::builtins::GameBibleProjectScaffold;
 use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};
 
 // ---------------------------------------------------------------------------

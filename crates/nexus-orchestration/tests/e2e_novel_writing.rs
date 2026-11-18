@@ -20,13 +20,13 @@ fn setup_engine() -> (
     Arc<nexus_orchestration::GraphFlowEngine>,
     nexus_preset::LoadedPreset,
 ) {
-    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let caps = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded = nexus_preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let engine = Arc::new(nexus_orchestration::GraphFlowEngine::new_with_storage(
         storage,
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
+        nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
     ));
     (engine, loaded)
 }
@@ -334,7 +334,7 @@ fn core_context_template_is_rendered_into_prompt() {
 
 #[test]
 fn e2e_novel_writing_has_four_states() {
-    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let caps = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded = nexus_preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
 
@@ -395,7 +395,7 @@ fn template_syntax_error_returns_deterministic_failure() {
 
 #[test]
 fn novel_writing_judge_quality_gate_on_finalize() {
-    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let caps = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded = nexus_preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
 
@@ -486,7 +486,7 @@ fn novel_writing_judge_quality_gate_on_finalize() {
 
 #[test]
 fn novel_chapter_transition_capability_registered() {
-    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let caps = nexus_capability::CapabilityRegistry::with_builtins();
     let cap = caps.get("novel.chapter_transition");
     assert!(
         cap.is_some(),

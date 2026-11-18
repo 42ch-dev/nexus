@@ -23,7 +23,7 @@ fn simulate(document: &WorkflowDocument) -> nexus_contracts::SimulationTrajector
     simulate_document(
         document,
         &SimulationOptions {
-            capabilities: nexus_orchestration::CapabilityRegistryHolder::new(),
+            capabilities: nexus_capability::CapabilityRegistryHolder::new(),
         },
     )
     .expect("the sample simulates")

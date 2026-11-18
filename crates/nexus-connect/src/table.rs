@@ -19,7 +19,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::peer_tools::{PeerInvokeError, PeerInvokeResult, PeerResponder, PeerToolRegistry};
-use nexus_orchestration::CapabilityRegistryHolder;
+use nexus_capability::CapabilityRegistryHolder;
 use nexus_spoke_adapter::{SpokeRejectCode, SpokeResult};
 use spoke_connect::remote::ConnectResponder;
 

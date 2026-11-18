@@ -98,7 +98,7 @@ use nexus_local_db::writer_protocol::init_guarded_pool;
 use nexus_capability::{CapabilityError, DaemonToolDispatch};
 use nexus_orchestration::engine::{GraphFlowEngine, OrchestrationEngine};
 use nexus_orchestration::preset_runtime::build_wired_outer_graph;
-use nexus_orchestration::{CapabilityRegistry, CapabilityRegistryHolder};
+use nexus_capability::{CapabilityRegistry, CapabilityRegistryHolder};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use nexus_session_storage::run_state::RunRecord;
 use nexus_session_storage::run_state::WorkflowStateStore;

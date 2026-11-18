@@ -3,7 +3,7 @@
 //! Validates that both presets load successfully and simulate a happy-path
 //! state advance to confirm the state machine wiring is correct.
 
-use nexus_orchestration::capability::CapabilityRegistry;
+use nexus_capability::CapabilityRegistry;
 use nexus_preset::load_embedded_preset;
 use nexus_preset::manifest;
 

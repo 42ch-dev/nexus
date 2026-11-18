@@ -28,7 +28,7 @@ use nexus_contracts::local::orchestration::{
 use nexus_core::owner::executor::WorkspaceCommitExecutor;
 use nexus_execution::session::WorkspaceSessionManager;
 use nexus_local_db::works::{self, WorkRecord};
-use nexus_orchestration::capability::builtins::{
+use nexus_capability::builtins::{
     EssayProjectScaffold, GameBibleProjectScaffold, NovelProjectScaffold, ScriptProjectScaffold,
 };
 use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};

@@ -9,7 +9,8 @@ use nexus_contracts::generated::daemon_api::orchestration::strategy_simulation_r
 use nexus_contracts::{
     SimulationTrajectory, StrategySimulationRequest, WorkflowDocument as WireWorkflowDocument,
 };
-use nexus_orchestration::{simulate_document, CapabilityRegistryHolder, SimulationOptions};
+use nexus_capability::CapabilityRegistryHolder;
+use nexus_orchestration::{simulate_document, SimulationOptions};
 use nexus_workflow_ir::WorkflowDocument;
 
 impl CoreService {

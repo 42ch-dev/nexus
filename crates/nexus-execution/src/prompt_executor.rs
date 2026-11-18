@@ -1304,8 +1304,8 @@ mod tests {
         let (executor, sqlite, storage, _pool, _db) = test_executor(host.clone()).await;
         let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let session_cancels: std::sync::Arc<
             std::sync::RwLock<
@@ -1417,8 +1417,8 @@ mod tests {
         let (executor, sqlite, storage, pool, _db) = test_executor(host.clone()).await;
         let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let session_cancels: std::sync::Arc<
             std::sync::RwLock<
@@ -1619,8 +1619,8 @@ mod tests {
         let (executor, sqlite, storage, pool, _db) = test_executor(host.clone()).await;
         let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let session_cancels: std::sync::Arc<
             std::sync::RwLock<
@@ -1832,8 +1832,8 @@ mod tests {
         let (executor, sqlite, storage, _pool, _db) = test_executor(host.clone()).await;
         let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let session_cancels: std::sync::Arc<
             std::sync::RwLock<
@@ -1937,8 +1937,8 @@ mod tests {
         let (executor, sqlite, storage, _pool, _db) = test_executor(host.clone()).await;
         let store: Arc<dyn nexus_session_storage::run_state::WorkflowStateStore> = sqlite.clone();
 
-        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
         ));
         let session_cancels: std::sync::Arc<
             std::sync::RwLock<

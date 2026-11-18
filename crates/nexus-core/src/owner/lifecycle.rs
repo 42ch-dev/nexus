@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak};
 
 use nexus_contracts::{CoreCloseReport, CoreCloseReportState};
-use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps};
+use nexus_capability::{CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps};
 use nexus_capability::{DaemonToolDispatch, PromptExecutor, WorkspaceExecutor, WorkspaceStateProvider};
 use nexus_orchestration::schedule::supervisor::{ScheduleRunStarter, ScheduleSupervisor};
 use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};

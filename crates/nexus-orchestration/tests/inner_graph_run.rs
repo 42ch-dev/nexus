@@ -7,7 +7,8 @@
 //! - `engine.spawn_child_session` + `engine.get_context` work on trait + impl
 
 use nexus_orchestration::engine::StepOutcome;
-use nexus_orchestration::{CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
+use nexus_capability::CapabilityRegistry;
+use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
 /// Deterministic prompt executor for the P1 cutover (no echo/worker fallback):
@@ -79,7 +80,7 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let mut engine = GraphFlowEngine::new_with_storage(
         storage,
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
+        nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
     );
     // P1 cutover: inner `acp_prompt` nodes require a prompt executor.
     engine.set_prompt_executor(
@@ -154,7 +155,7 @@ async fn spawn_child_and_get_context() {
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let engine = Arc::new(GraphFlowEngine::new_with_storage(
         storage,
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         )),
     ));

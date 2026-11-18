@@ -24,7 +24,8 @@ use sqlx::SqlitePool;
 #[cfg(feature = "execution")]
 use nexus_contracts::SimulationTrajectory;
 #[cfg(feature = "execution")]
-use nexus_orchestration::{simulate_document, CapabilityRegistryHolder, SimulationOptions};
+use nexus_capability::CapabilityRegistryHolder;
+use nexus_orchestration::{simulate_document, SimulationOptions};
 
 use crate::error::local_db_err;
 use crate::{

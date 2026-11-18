@@ -181,7 +181,7 @@ pub struct ToolContext {
     /// Read LIVE at each dispatch (never cached on the context) so a
     /// hot-reloaded registry is visible to the very next call — the same
     /// discipline the engine uses through the shared holder.
-    pub(crate) user_capabilities: Option<nexus_orchestration::CapabilityRegistryHolder>,
+    pub(crate) user_capabilities: Option<nexus_capability::CapabilityRegistryHolder>,
     /// The Simulate plane's Work artifact port, when this context is one.
     ///
     /// `None` is production: every Work byte write commits through
@@ -219,7 +219,7 @@ impl ToolContext {
         workspace_path: Option<String>,
         runtime_facts: ToolRuntimeFacts,
         core: Option<Arc<CoreService>>,
-        user_capabilities: Option<nexus_orchestration::CapabilityRegistryHolder>,
+        user_capabilities: Option<nexus_capability::CapabilityRegistryHolder>,
     ) -> Self {
         Self {
             pool,
@@ -262,7 +262,7 @@ impl ToolContext {
         workspace_path: Option<String>,
         runtime_facts: ToolRuntimeFacts,
         core: Option<Arc<CoreService>>,
-        user_capabilities: Option<nexus_orchestration::CapabilityRegistryHolder>,
+        user_capabilities: Option<nexus_capability::CapabilityRegistryHolder>,
     ) -> Self {
         Self {
             recording_work_artifact: Some(Arc::new(RecordingWorkArtifactPort::new())),
@@ -337,7 +337,7 @@ impl ToolContext {
     /// very next call — the same hot-reload discipline the engine uses.
     pub fn set_user_capabilities(
         &mut self,
-        holder: Option<nexus_orchestration::CapabilityRegistryHolder>,
+        holder: Option<nexus_capability::CapabilityRegistryHolder>,
     ) {
         self.user_capabilities = holder;
     }
@@ -375,10 +375,10 @@ impl ToolContext {
 
     /// The live user-capability registry, if one is published.
     #[must_use]
-    pub fn user_capabilities(&self) -> Option<Arc<nexus_orchestration::CapabilityRegistry>> {
+    pub fn user_capabilities(&self) -> Option<Arc<nexus_capability::CapabilityRegistry>> {
         self.user_capabilities
             .as_ref()
-            .and_then(nexus_orchestration::CapabilityRegistryHolder::get)
+            .and_then(nexus_capability::CapabilityRegistryHolder::get)
     }
 
     /// The prompt executor this context's transport attached, if any.
@@ -1756,7 +1756,7 @@ async fn execute_registry_refresh(
     _creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
     use nexus_capability::Capability;
-    let cap = nexus_orchestration::capability::builtins::RegistryRefresh::new();
+    let cap = nexus_capability::builtins::RegistryRefresh::new();
     let input = serde_json::json!({"force": false});
     cap.run(input).await.map_err(|e| NexusApiError::Internal {
         category: format!(

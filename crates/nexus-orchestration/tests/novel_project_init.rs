@@ -99,8 +99,8 @@ async fn insert_test_work(pool: &sqlx::SqlitePool, work_id: &str) {
 fn make_cap(
     pool: sqlx::SqlitePool,
     works_root: &Path,
-) -> nexus_orchestration::capability::builtins::NovelProjectScaffold {
-    nexus_orchestration::capability::builtins::NovelProjectScaffold::new_with_root(
+) -> nexus_capability::builtins::NovelProjectScaffold {
+    nexus_capability::builtins::NovelProjectScaffold::new_with_root(
         pool,
         works_root.to_path_buf(),
     )

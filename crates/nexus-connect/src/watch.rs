@@ -46,7 +46,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
-use nexus_orchestration::capability::watch::DigestPoll;
+use nexus_capability::watch::DigestPoll;
 use tokio::sync::Notify;
 
 use crate::config::{load_peer_keys, PeerToolsConfig};

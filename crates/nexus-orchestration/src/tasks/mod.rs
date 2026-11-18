@@ -12,7 +12,7 @@
 //! - If `_trace_file` is present in context, append start/finish trace events
 //!   best-effort using the DTOs from `nexus-contracts::local::acp_runtime::trace`.
 
-use crate::capability::CapabilityRegistry;
+use nexus_capability::CapabilityRegistry;
 use nexus_capability::{CapabilityError, ToolPolicy};
 use crate::engine::OrchestrationEngine;
 use async_trait::async_trait;
@@ -684,7 +684,7 @@ impl LlmExtractTask {
         // capability refuses a missing target rather than extracting under an
         // invented policy, so the task surfaces that refusal to its caller.
         let target = match context.get::<serde_json::Value>("_extract_target") {
-            Some(value) => match crate::quality_loop::ExtractionTarget::from_context(&value) {
+            Some(value) => match nexus_capability::extraction_target::ExtractionTarget::from_context(&value) {
                 Ok(target) => target,
                 Err(e) => {
                     return Ok(crate::quality_loop::LlmExtractOutcome::Refused(format!(
@@ -3098,7 +3098,7 @@ mod tests {
         let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
         let engine = crate::GraphFlowEngine::new_with_storage(
             storage,
-            crate::capability::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
+            nexus_capability::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
                 CapabilityRegistry::with_builtins(),
             )),
         );
@@ -3147,7 +3147,7 @@ mod tests {
     async fn llm_judge_task_with_mock_worker_go() {
         // Prove LlmJudgeTask invokes judge.llm capability and maps GO → Continue.
         // Use the registry with a mock worker that returns "GO".
-        use crate::capability::CapabilityRuntimeDeps;
+        use nexus_capability::CapabilityRuntimeDeps;
 
         struct MockGoProvider;
 
@@ -3192,7 +3192,7 @@ mod tests {
     #[tokio::test]
     async fn llm_judge_task_with_mock_worker_nogo() {
         // Prove LlmJudgeTask maps NOGO → false.
-        use crate::capability::CapabilityRuntimeDeps;
+        use nexus_capability::CapabilityRuntimeDeps;
 
         struct MockNogoProvider;
 
@@ -3321,7 +3321,7 @@ mod tests {
     }
 
     fn extract_registry_with_mock(response: &str) -> Arc<CapabilityRegistry> {
-        use crate::capability::CapabilityRuntimeDeps;
+        use nexus_capability::CapabilityRuntimeDeps;
         let map = session_cancels_with_default();
         // The capability resolves the coordinator token of the fixture's run id
         // (fail-closed contract) before the prompt reaches the mock executor.
@@ -3571,7 +3571,7 @@ mod tests {
     /// T5: novel-writing gathering exit with GO → Continue.
     #[tokio::test]
     async fn state_composite_llm_judge_go_continues() {
-        use crate::capability::CapabilityRuntimeDeps;
+        use nexus_capability::CapabilityRuntimeDeps;
 
         let provider = std::sync::Arc::new(ControlledMockProvider::new(
             "GO — sufficient material gathered.",
@@ -3625,7 +3625,7 @@ mod tests {
     /// T5: novel-writing gathering exit with NOGO → `WaitForInput`.
     #[tokio::test]
     async fn state_composite_llm_judge_nogo_waits() {
-        use crate::capability::CapabilityRuntimeDeps;
+        use nexus_capability::CapabilityRuntimeDeps;
 
         let provider = std::sync::Arc::new(ControlledMockProvider::new(
             "NO — need more research material.",
@@ -4237,7 +4237,7 @@ mod tests {
                 .entry(sid.to_string())
                 .or_default();
         }
-        let deps = crate::capability::CapabilityRuntimeDeps {
+        let deps = nexus_capability::CapabilityRuntimeDeps {
             pool: None,
             prompt_executor: Some(executor),
             session_cancels,

@@ -59,6 +59,7 @@ nexus-home-layout = { path = "../nexus-home-layout", optional = true }
 # The shared capability registry holder and its digest-poll watcher: the
 # reserved-namespace derivation reads LIVE user-capability names from it.
 nexus-orchestration = { path = "../nexus-orchestration", optional = true }
+nexus-capability = { path = "../nexus-capability" }
 chrono = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }

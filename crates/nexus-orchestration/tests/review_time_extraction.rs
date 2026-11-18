@@ -373,13 +373,13 @@ impl nexus_capability::PromptExecutor for MockReviewExtract {
 fn review_registry(
     schedule_id: &str,
     executor: std::sync::Arc<dyn nexus_capability::PromptExecutor>,
-) -> nexus_orchestration::capability::CapabilityRegistry {
+) -> nexus_capability::CapabilityRegistry {
     let mut cancels = std::collections::HashMap::new();
     cancels.insert(
         format!("run_{schedule_id}"),
         tokio_util::sync::CancellationToken::new(),
     );
-    let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
+    let deps = nexus_capability::CapabilityRuntimeDeps {
         pool: None,
         prompt_executor: Some(executor),
         session_cancels: std::sync::Arc::new(std::sync::RwLock::new(cancels)),
@@ -387,7 +387,7 @@ fn review_registry(
         cdn_config: None,
         workspace_executor: None,
     };
-    nexus_orchestration::capability::CapabilityRegistry::with_runtime_deps(&deps)
+    nexus_capability::CapabilityRegistry::with_runtime_deps(&deps)
 }
 
 async fn pending_rows(

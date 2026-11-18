@@ -20,7 +20,7 @@
 //!    branch or default.
 
 use graph_flow::{Context, NextAction};
-use nexus_orchestration::CapabilityRegistry;
+use nexus_capability::CapabilityRegistry;
 
 /// Load a preset YAML, extract the start task, run it with the given context
 /// values, and return the resulting `NextAction`.

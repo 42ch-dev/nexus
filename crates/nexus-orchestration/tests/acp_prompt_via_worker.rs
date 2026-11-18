@@ -99,7 +99,7 @@ async fn acp_prompt_task_no_executor_refuses() {
 /// Test that the ACP prompt and judge capabilities are registered.
 #[test]
 fn acp_capabilities_registered() {
-    let reg = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let reg = nexus_capability::CapabilityRegistry::with_builtins();
     assert!(
         reg.get("acp.prompt").is_some(),
         "acp.prompt should be registered"
@@ -130,7 +130,7 @@ states:
   - id: start
     terminal: true
 "#;
-    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let caps = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded = nexus_preset::load_preset_from_str(yaml, &caps);
     assert!(
         loaded.is_ok(),

@@ -75,7 +75,7 @@ use nexus_local_db::operation_receipts::{
     settle_operation, BeginOutcome, OperationReceipt, RecoveryDecision, CONSUMER_COMPUTE_RUN,
     STATUS_FAILED, STATUS_FINISHED,
 };
-use nexus_orchestration::compute_input_builder::ComputeInputBuilder;
+use nexus_capability::compute_input_builder::ComputeInputBuilder;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -689,7 +689,7 @@ pub async fn accept_compute_run(
 
     // Every delta target must resolve inside the run's world — a foreign
     // target rejects the whole accept (full rollback on drop).
-    let state_delta_count = nexus_orchestration::state_delta::apply_state_delta_in_tx(
+    let state_delta_count = nexus_capability::state_delta::apply_state_delta_in_tx(
         &mut tx,
         &run.world_id,
         &output.state_delta,
@@ -1570,8 +1570,8 @@ const fn compute_error_code(e: &nexus_wasm_host::ComputeError) -> &'static str {
 }
 
 /// Map an input-builder failure onto the core taxonomy.
-fn map_build_error(e: nexus_orchestration::compute_input_builder::ComputeBuildError) -> CoreError {
-    use nexus_orchestration::compute_input_builder::ComputeBuildError;
+fn map_build_error(e: nexus_capability::compute_input_builder::ComputeBuildError) -> CoreError {
+    use nexus_capability::compute_input_builder::ComputeBuildError;
     match e {
         ComputeBuildError::NoComputableEntries
         | ComputeBuildError::ReferencedEntryNotInWorld(_)

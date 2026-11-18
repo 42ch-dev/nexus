@@ -34,7 +34,7 @@
 
 use clap::Subcommand;
 use nexus_module_manifest::ModuleManifest;
-use nexus_orchestration::capability::user_capability::{
+use nexus_capability::user_capability::{
     CapabilityDescriptorError, UserCapabilityDescriptor,
 };
 use serde_json::Value;

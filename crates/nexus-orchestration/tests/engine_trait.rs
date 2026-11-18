@@ -1,5 +1,6 @@
+use nexus_capability::CapabilityRegistry;
 use nexus_orchestration::{
-    engine::SessionFilter, CapabilityRegistry, GraphFlowEngine, OrchestrationEngine,
+    engine::SessionFilter, GraphFlowEngine, OrchestrationEngine,
 };
 use std::sync::Arc;
 
@@ -8,7 +9,7 @@ async fn new_session_and_list_active_roundtrip() {
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let engine = GraphFlowEngine::new_with_storage(
         storage,
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         )),
     );

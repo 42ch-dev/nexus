@@ -18,7 +18,8 @@
 //! conflict. The snapshot freezes bytes; it does not apply, bind a schedule or execute.
 
 use nexus_contracts::{ApprovedStrategySnapshot, SimulationTrajectory};
-use nexus_orchestration::{simulate_document, CapabilityRegistryHolder, SimulationOptions};
+use nexus_capability::CapabilityRegistryHolder;
+use nexus_orchestration::{simulate_document, SimulationOptions};
 use nexus_workflow_ir::{validate, Violation, WorkflowDocument};
 use serde_json::Value;
 

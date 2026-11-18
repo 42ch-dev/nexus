@@ -1,6 +1,6 @@
 //! Execution-only preset graph construction and provider binding creation.
 
-use crate::capability::CapabilityRegistry;
+use nexus_capability::CapabilityRegistry;
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
     WorkflowDocument, WorkflowNodeKind,
 };
@@ -27,7 +27,7 @@ pub fn default_bindings_for_preset(
     preset_id: &str,
     provider_id: &str,
 ) -> Option<std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>> {
-    let caps = crate::capability::CapabilityRegistry::with_builtins();
+    let caps = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset(preset_id, &caps).ok()?;
     let roles = required_prompt_roles(&loaded.manifest);
     if roles.is_empty() {
@@ -2422,7 +2422,7 @@ states:
             IrTemplateSource, OuterGraphProjection, ProjectedEdge, ProjectedTask,
         };
         use super::{ir_document, no_cancels, ChildRunningEngine, UnreachableEngine};
-        use crate::capability::CapabilityRegistry;
+        use nexus_capability::CapabilityRegistry;
         use nexus_capability::{
             Capability, CapabilityError, DaemonToolDispatch, PromptExecutor, PromptRequest,
             PromptResult,
@@ -3018,7 +3018,7 @@ states:
             recorder: &Recorder,
             scripted: &[(&'static str, serde_json::Value)],
         ) -> Arc<CapabilityRegistry> {
-            crate::capability::test_support::registry_with(
+            nexus_capability::test_support::registry_with(
                 scripted
                     .iter()
                     .map(|(name, output)| {

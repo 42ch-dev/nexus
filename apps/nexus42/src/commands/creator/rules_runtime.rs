@@ -10,7 +10,7 @@
 //!   (overlay §4).
 //!
 //! The read/modify logic lives in
-//! [`nexus_orchestration::rules_layers`](../../../../../nexus_orchestration/rules_layers/index.html)
+//! [`nexus_capability::rules_layers`](../../../../../nexus_orchestration/rules_layers/index.html)
 //! so it is hermetically testable without a daemon; its write half commits
 //! through the Work artifact port. This module is the thin CLI orchestration
 //! layer that resolves IDs and workspace paths, reads finding/Work data from
@@ -35,7 +35,7 @@ use nexus_capability::WorkspaceExecutor;
 /// Every arm runs on the typed core seam: the finding family
 /// ([`CoreService::get_finding`], `list_findings`, `update_finding`,
 /// `prune_findings`) for the data, and the `AGENTS.md` logic in
-/// [`nexus_orchestration::rules_layers`] whose write half commits through the
+/// [`nexus_capability::rules_layers`] whose write half commits through the
 /// Work artifact port ([`CoreService::work_artifact_executor`]).
 ///
 /// # Errors
@@ -191,7 +191,7 @@ async fn handle_findings_accept(
     // 5. Append (idempotent on finding_id) through the Work artifact port, so
     //    the bytes land under the Work lock and the shared durability path.
     let timestamp = chrono::Utc::now().to_rfc3339();
-    let outcome = nexus_orchestration::rules_layers::append_rule_suggestion(
+    let outcome = nexus_capability::rules_layers::append_rule_suggestion(
         executor.as_ref(),
         &ws_dir,
         work_ref,
@@ -229,7 +229,7 @@ async fn handle_findings_accept(
     Ok(Some(if json {
         let appended = matches!(
             outcome,
-            nexus_orchestration::rules_layers::AppendOutcome::Appended
+            nexus_capability::rules_layers::AppendOutcome::Appended
         );
         let body = serde_json::json!({
             "finding_id": finding_id,
@@ -256,7 +256,7 @@ async fn handle_findings_accept(
 fn render_accept_report(
     finding_id: &str,
     work_ref: &str,
-    outcome: nexus_orchestration::rules_layers::AppendOutcome,
+    outcome: nexus_capability::rules_layers::AppendOutcome,
     resolved_now: bool,
     already_resolved: bool,
 ) -> String {
@@ -264,13 +264,13 @@ fn render_accept_report(
         .join(work_ref)
         .join("AGENTS.md");
     let mut lines = vec![match outcome {
-        nexus_orchestration::rules_layers::AppendOutcome::Appended => {
+        nexus_capability::rules_layers::AppendOutcome::Appended => {
             format!(
                 "✓ Appended rule suggestion from finding {finding_id} to {rel}",
                 rel = agents_md_rel.display()
             )
         }
-        nexus_orchestration::rules_layers::AppendOutcome::AlreadyPresent => {
+        nexus_capability::rules_layers::AppendOutcome::AlreadyPresent => {
             format!(
                 "• Finding {finding_id} already recorded in {rel} (idempotent — no change)",
                 rel = agents_md_rel.display()
@@ -570,11 +570,11 @@ async fn handle_rules_reset(
     // create it. A read failure for an existing-but-corrupt file is also
     // treated as "absent" so the atomic reset can still recover it.
     let current: Option<String> = std::fs::read_to_string(&agents_md_path).ok();
-    let scaffold = nexus_orchestration::rules_layers::render_default_agents_md(work_ref);
+    let scaffold = nexus_capability::rules_layers::render_default_agents_md(work_ref);
     let would_change = current.as_deref().is_none_or(|c| c != scaffold);
     let diff = if would_change {
         current.as_deref().map_or_default(|c| {
-            nexus_orchestration::rules_layers::diff_agents_md_vs_scaffold(c, work_ref)
+            nexus_capability::rules_layers::diff_agents_md_vs_scaffold(c, work_ref)
         })
     } else {
         String::new()
@@ -666,7 +666,7 @@ async fn handle_rules_reset(
     }
 
     // ── Perform the reset through the Work artifact port. ──────────────
-    nexus_orchestration::rules_layers::reset_agents_md(executor.as_ref(), &ws_dir, work_ref)
+    nexus_capability::rules_layers::reset_agents_md(executor.as_ref(), &ws_dir, work_ref)
         .await
         .map_err(|e| {
             CliError::Other(format!("Failed to reset {}: {e}", agents_md_path.display()))

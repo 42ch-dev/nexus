@@ -56,7 +56,7 @@ use crate::watch::{
     PeerConfigSnapshot,
 };
 use crate::ws_transport::{ws_config, WsTransport};
-use nexus_orchestration::CapabilityRegistryHolder;
+use nexus_capability::CapabilityRegistryHolder;
 const SUBSCRIBE_TOOL: &str = "tools.nexus.subscribe";
 const DELIVER_TOOL: &str = "tools.nexus.deliver_events";
 

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::capability::builtins::work_commit::{commit_work_bytes, require_executor};
+use nexus_capability::builtins::work_commit::{commit_work_bytes, require_executor};
 use nexus_capability::WorkspaceExecutor;
 
 /// Current schema version for the completion-lock file.
@@ -144,7 +144,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn recording_executor() -> Arc<dyn WorkspaceExecutor> {
-        crate::capability::builtins::work_commit::test_support::RecordingExecutor::new()
+        nexus_capability::builtins::work_commit::test_support::RecordingExecutor::new()
     }
 
     #[test]

@@ -1,12 +1,11 @@
-//! nexus-orchestration — engine adapter, capability registry, graph executor.
+//! nexus-orchestration — engine adapter, graph executor; the capability
+//! registry lives in `nexus-capability`.
 //! Authoritative design: `docs/specs/orchestration/orchestration-engine.md`.
 
 pub mod applied_document;
 pub mod auto_chain;
 pub mod auto_chronology;
-pub mod capability;
 pub mod completion_lock;
-pub mod compute_input_builder;
 pub mod embedded_rules;
 pub mod embedded_skills;
 pub mod engine;
@@ -17,7 +16,6 @@ pub mod preset_runtime;
 pub mod quality_loop;
 pub mod resume_rules;
 pub mod review_report;
-pub mod rules_layers;
 pub mod schedule;
 /// Static Simulate (feature `simulate`): reachability walk over a candidate IR.
 #[cfg(feature = "simulate")]
@@ -25,12 +23,10 @@ pub mod simulation;
 pub mod skill_link;
 pub mod skill_sync;
 pub mod stage_gates;
-pub mod state_delta;
 pub mod sync_module;
 pub mod system_preset;
 pub mod tasks;
 
-pub use capability::{CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps};
 pub use engine::{
     ChildSessionParams, EngineError, FailedStepWitness, FailurePersistenceDisposition,
     FailureSettlement, FailureSettlementSummary, GraphFlowEngine, OrchestrationEngine,
