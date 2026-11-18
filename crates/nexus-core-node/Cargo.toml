@@ -24,7 +24,16 @@ napi-derive = { workspace = true }
 # owner the control plane uses. The domain/default cohort stays empty and the
 # Connect-only cohort keeps its own explicit spoke `compute` without acquiring
 # this Host/scheduler edge (architecture §Cohorts).
-nexus-core = { path = "../nexus-core", features = ["execution", "provider-host", "compute"] }
+nexus-core = { path = "../nexus-core", features = [
+    "execution",
+    # v249: the native host serves the authoring routes
+    # (`simulate_strategy` / `approve_strategy` / `generate_strategy_candidate` /
+    # `strategy_workflow_ir`), so it selects authoring explicitly; execution
+    # alone links none of them.
+    "strategy-authoring",
+    "provider-host",
+    "compute",
+] }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-capability = { path = "../nexus-capability" }
 nexus-agent-host = { path = "../nexus-agent-host" }

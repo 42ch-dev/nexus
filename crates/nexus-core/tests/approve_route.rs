@@ -7,7 +7,7 @@
 //!
 //! Plan: `.mstar/plans/v239-p3-approve-route.md` T1–T6.
 
-#![cfg(feature = "execution")]
+#![cfg(feature = "strategy-authoring")]
 
 use std::path::{Path, PathBuf};
 

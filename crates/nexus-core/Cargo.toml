@@ -32,9 +32,6 @@ execution = [
     "nexus-connect/peer-tools",
     "dep:nexus-orchestration",
     "dep:nexus-session-storage",
-    # The Simulate route is served at this execution edge only: the walk runs in-process,
-    # constructs no executor or provider, and stays out of the default/domain cohort.
-    "dep:nexus-workflow-simulate",
     "dep:nexus-provider-ports",
     "dep:graph-flow",
     "dep:tokio-util",
@@ -49,6 +46,11 @@ execution = [
     # nothing in `nexus-execution` names core.
     "dep:nexus-execution",
 ]
+# The authoring surface: Generate, Import, Approve and Simulate, and the private
+# pure simulator they bind to. Execution alone links none of it — the engine
+# cohort approves nothing — so a compute/execution-only consumer carries no
+# simulator, and the canonical Generate row stays reserved but unbound.
+strategy-authoring = ["execution", "dep:nexus-workflow-simulate"]
 # The crash/rendezvous seams the workspace-commit recovery proofs drive. They
 # are compiled out of a production build and enabled by this package's own
 # dev-dependency self-reference, exactly as the daemon did before the move.
@@ -222,6 +224,7 @@ nexus-config-metadata = { path = "../nexus-config-metadata" }
 # surface.
 nexus-core = { path = ".", features = [
     "execution",
+    "strategy-authoring",
     "compute",
     "test-hooks",
     "provider-host",
