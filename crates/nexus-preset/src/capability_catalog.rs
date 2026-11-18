@@ -21,6 +21,61 @@ impl CapabilityCatalog for BuiltinCapabilityCatalog {
     }
 }
 
+/// The canonical builtin capability names — THE declaration (C3): the single
+/// authority that boot, rebuild, reservation and collision ownership iterate.
+/// Every name here resolves through [`builtin_input_schema`]; the registry's
+/// carried builtin rows are a subset of this declaration (a name may be
+/// declared while no handler object is constructed — it stays describable
+/// and reserved purely by this list).
+pub const BUILTIN_CAPABILITY_NAMES: &[&str] = &[
+    "acp.prompt",
+    "context.summarize",
+    "creator.inject_prompt",
+    "creator.read_memory",
+    "creator.write_brief",
+    "creator.write_memory",
+    "essay.draft_status.finalize",
+    "essay.project_scaffold",
+    "game_bible.project_scaffold",
+    "game_bible.section_status.update",
+    "judge.llm",
+    "judge.rule",
+    "kb.extract_work",
+    "narrative.compute",
+    "nexus.fork.create",
+    "nexus.llm.extract",
+    "nexus.timeline.event.append",
+    "nexus.world.delta.apply",
+    "nexus.world.delta.propose",
+    "nexus.world.state.query",
+    "novel.chapter_transition",
+    "novel.project_scaffold",
+    "outbox.compact",
+    "outbox.flush",
+    "registry.refresh",
+    "script.project_scaffold",
+    "script.section_status.update",
+    "soul.experience.aggregate",
+    "sync.pull",
+    "sync.push",
+    "workspace.commit",
+    "workspace.open",
+];
+
+/// Iterate the canonical builtin declaration (C3).
+///
+/// This is THE projection every builtin-name consumer must read — boot scan
+/// collision ownership, watcher rebuild collision ownership, registry
+/// reservation and dispatch's known-name discrimination all derive from it,
+/// never from constructed handler objects. Kept in lockstep with
+/// [`builtin_input_schema`]'s keys by the crate's declaration test (every
+/// name here resolves a schema) and by the capability registry's subset
+/// assertion (every carried builtin row names a declaration entry).
+#[must_use]
+pub fn builtin_names() -> impl Iterator<Item = &'static str> {
+    BUILTIN_CAPABILITY_NAMES.iter().copied()
+}
+
 /// Resolve the canonical builtin input schema. Unknown names fail closed.
 #[must_use]
 pub fn builtin_input_schema(name: &str) -> Option<&'static str> {

@@ -716,8 +716,12 @@ impl CapabilityRegistry {
     /// collision lands in `outcome.skipped` with the named `NameCollision`
     /// reason and is `warn!`-logged before the append.
     fn append_user_caps(&mut self, scan_dir: &std::path::Path) -> scan::ScanOutcome {
+        // Collision ownership derives from THE DECLARATION (C3 contract),
+        // never from constructed handler objects: a builtin declared without
+        // a handler object still blocks a user capability from claiming its
+        // name.
         let builtin_names: std::collections::HashSet<&str> =
-            self.capabilities.iter().map(|c| c.name()).collect();
+            nexus_preset::capability_catalog::builtin_names().collect();
         let outcome = scan::scan_user_capabilities(scan_dir, &builtin_names);
         self.append_user_cap_entries(&outcome.admitted);
         outcome
@@ -733,8 +737,11 @@ impl CapabilityRegistry {
         engine: Option<&std::sync::Arc<nexus_wasm_host::WasmEngine>>,
         module_cache: Option<&std::sync::Arc<nexus_wasm_host::ModuleCache>>,
     ) -> scan::ScanOutcome {
+        // Collision ownership derives from THE DECLARATION (C3 contract),
+        // never from constructed handler objects — same as the engine-less
+        // arm.
         let builtin_names: std::collections::HashSet<&str> =
-            self.capabilities.iter().map(|c| c.name()).collect();
+            nexus_preset::capability_catalog::builtin_names().collect();
         let outcome = scan::scan_user_capabilities_with_executor(
             scan_dir,
             &builtin_names,
@@ -1075,28 +1082,38 @@ impl CapabilityRegistry {
     /// name is KNOWN and the invocation must return the existing
     /// [`CapabilityError::WorkerUnavailable`] BEFORE any effect; `false`
     /// means the name is unknown and the caller keeps its existing not-found
-    /// refusal. Derived from the declaration set (the full index), never
-    /// from compiled bindings.
+    /// refusal. A name is known when it is declared in THIS generation's
+    /// rows OR in the preset catalog declaration — never derived from
+    /// compiled bindings alone.
     #[must_use]
     pub fn is_reserved_only(&self, name: &str) -> bool {
         self.get(name).is_none()
-            && self
+            && (self
                 .index
                 .as_ref()
                 .is_some_and(|idx| idx.contains_key(name))
+                || nexus_preset::capability_catalog::builtin_input_schema(name).is_some())
     }
 
     /// The FULL canonical + admitted-user name projection of THIS generation
-    /// (C3 contract): every declared row's name, including reserved-only
-    /// compute-capable rows whose binding is unavailable in this build. The
+    /// (C3 contract): canonical names come from THE DECLARATION
+    /// ([`nexus_preset::capability_catalog::builtin_names`]) — a builtin is
+    /// reserved and describable even when no handler object is constructed
+    /// for it — and admitted user names come from this generation's rows.
+    /// The two sets are disjoint by admission gate 1 (builtin wins). The
     /// hot-reload ACCUMULATION across generations lives on
     /// [`CapabilityRegistryHolder::reserved_names`].
     pub fn reserved_names(&self) -> impl Iterator<Item = &'static str> {
         // Row names are `&'static str` (builtin literals + interned user
         // strings): snapshotted into an owned Vec, so the iterator captures
         // no borrow of the registry.
-        let names: Vec<&'static str> = self.capabilities.iter().map(|cap| cap.name()).collect();
-        names.into_iter()
+        let user_names: Vec<&'static str> = self
+            .capabilities
+            .iter()
+            .filter(|cap| cap.origin() == CapabilityOrigin::User)
+            .map(|cap| cap.name())
+            .collect();
+        nexus_preset::capability_catalog::builtin_names().chain(user_names)
     }
 
     /// Return the number of registered rows — the full carrier set,
@@ -1118,8 +1135,10 @@ impl CapabilityRegistry {
 impl nexus_preset::capability_catalog::CapabilityCatalog for CapabilityRegistry {
     /// Known metadata WITHOUT constructing executors (C3 contract): the
     /// schema resolves for any declared row — including reserved-only
-    /// compute-capable names — because it reads the descriptor surface, not
-    /// the executable lookup.
+    /// compute-capable names — AND for canonical builtin names present only
+    /// in the declaration with no handler object constructed (QC2-02): the
+    /// declaration's own schema answers, because this reads the descriptor
+    /// surface, not the executable lookup.
     fn input_schema(&self, name: &str) -> Option<&str> {
         let idx = self.index.as_ref()?;
         let pos = idx.get(name)?;
