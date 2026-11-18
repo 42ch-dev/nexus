@@ -8,7 +8,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -123,11 +123,11 @@ function domainCrates({ coreDeps = {}, coreDevDeps = {}, extra = {} } = {}) {
   };
 }
 
-function runGuard(args) {
+function runGuard(args, { env: envExtra } = {}) {
   return spawnSync('bash', [GUARD, ...args], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
-    env: cargoEnv(),
+    env: { ...cargoEnv(), ...envExtra },
     // QC3-S003: a wedged bash/cargo fails loudly instead of stalling the suite.
     timeout: 180_000,
     killSignal: 'SIGKILL',
@@ -308,8 +308,8 @@ const POLICY_FORBIDDEN = [
   'rmcp',
 ];
 
-function policyRun(root) {
-  return runGuard(['--cohort', 'policy', '--manifest-path', path.join(root, 'Cargo.toml')]);
+function policyRun(root, opts) {
+  return runGuard(['--cohort', 'policy', '--manifest-path', path.join(root, 'Cargo.toml')], opts);
 }
 
 test('policy cohort passes on a policy-shaped workspace', () => {
@@ -354,7 +354,8 @@ test('a deliberate forbidden policy edge is rejected nonzero', () => {
   assert.notEqual(run.status, 0, 'a real policy -> nexus-wasm-host edge was accepted');
   assert.match(run.stdout, /graph pin failed/);
   assert.match(run.stdout, /nexus-compute-policy --all-features --target all must resolve with ZERO dependencies, got 2/);
-  assert.match(run.stdout, /└── nexus-wasm-host v/);
+  // The failure dump is a `--prefix none` tree: flat rows, no glyphs.
+  assert.match(run.stdout, /nexus-wasm-host v0\.1\.0/);
 });
 
 test('each forbidden policy back-edge fails the cohort', async (t) => {
@@ -369,9 +370,9 @@ test('each forbidden policy back-edge fails the cohort', async (t) => {
       assert.notEqual(run.status, 0, `a real nexus-compute-policy -> ${pkg} edge was accepted`);
       assert.match(run.stdout, /graph pin failed/);
       // The zero-dependency pin refuses the edge through real resolution and
-      // names the offending dependency in the dumped tree.
+      // names the offending dependency in the dumped (prefix-none) tree.
       assert.match(run.stdout, /must resolve with ZERO dependencies, got 2/);
-      assert.match(run.stdout, new RegExp(`└── ${pkg} v`));
+      assert.match(run.stdout, new RegExp(`${pkg} v0\\.1\\.0`));
     });
   }
 });
@@ -433,5 +434,92 @@ test('a feature-scoped policy edge is caught by the widened selectors', () => {
     run.stdout,
     /nexus-compute-policy --all-features --target all must resolve with ZERO dependencies, got 2/,
   );
-  assert.match(run.stdout, /└── nexus-wasm-host v/);
+  assert.match(run.stdout, /nexus-wasm-host v0\.1\.0/);
+});
+
+test('ASCII rendering cannot hide a real dependency row from the census', () => {
+  // QC2-F004 (round 2 item B): with CARGO_TERM_UNICODE=false Cargo prints
+  // children as `|-- pkg v…`; the round-1 glyph-stripping matcher ignored
+  // those rows and the zero-dependency pin false-greened. The `--prefix
+  // none` census is rendering-independent, so this test FAILS against the
+  // old matcher (it asserted a green run) and passes against the new one.
+  const root = createWorkspace({
+    'nexus-compute-policy': { deps: { 'nexus-wasm-host': null } },
+    'nexus-wasm-host': { deps: {} },
+    'nexus-contracts': { deps: {} },
+    'nexus-workflow-ir': { deps: {} },
+    'nexus-pattern': { deps: {} },
+    'nexus-knowledge': { deps: {} },
+    'nexus-narrative': { deps: {} },
+  });
+  const ascii = policyRun(root, { env: { CARGO_TERM_UNICODE: 'false' } });
+
+  assert.notEqual(ascii.status, 0, 'an ASCII-rendered dependency row was hidden from the census');
+  assert.match(ascii.stdout, /graph pin failed/);
+  assert.match(ascii.stdout, /must resolve with ZERO dependencies, got 2/);
+  assert.match(ascii.stdout, /nexus-wasm-host v0\.1\.0/);
+
+  // Same workspace, Unicode rendering: identical verdict — the census does
+  // not depend on rendering.
+  const unicode = policyRun(root);
+  assert.notEqual(unicode.status, 0, unicode.stdout);
+  assert.match(unicode.stdout, /must resolve with ZERO dependencies, got 2/);
+});
+
+test('a target-scoped policy edge is caught by --target all', () => {
+  // QC1-02 residue (round 2 item F): the edge exists only under
+  // `cfg(windows)`, so host-target selectors never see it; the widened
+  // `--target all` leaf pin must.
+  const root = createWorkspace({
+    'nexus-compute-policy': {
+      manifest: [
+        '[package]',
+        'name = "nexus-compute-policy"',
+        'version = "0.1.0"',
+        'edition = "2021"',
+        '',
+        '[lib]',
+        'path = "src/lib.rs"',
+        '',
+        '[features]',
+        'default = []',
+        '',
+        "[target.'cfg(windows)'.dependencies]",
+        'nexus-wasm-host = { path = "../nexus-wasm-host" }',
+        '',
+      ].join('\n'),
+    },
+    'nexus-wasm-host': { deps: {} },
+    'nexus-contracts': { deps: {} },
+    'nexus-workflow-ir': { deps: {} },
+    'nexus-pattern': { deps: {} },
+    'nexus-knowledge': { deps: {} },
+    'nexus-narrative': { deps: {} },
+  });
+  const run = policyRun(root);
+
+  assert.notEqual(run.status, 0, 'a cfg(windows)-scoped policy edge was accepted');
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(run.stdout, /must resolve with ZERO dependencies, got 2/);
+  assert.match(run.stdout, /nexus-wasm-host v0\.1\.0/);
+});
+
+test('a failing census leaves no temp files behind', () => {
+  // Round 2 item E: the census stderr file must be cleaned up on the
+  // FAILURE path too (`fail` exits the script mid-probe).
+  const guardTmp = mkdtempSync(path.join(tmpdir(), 'nexus-graph-pins-guard-tmp-'));
+  const root = createWorkspace({
+    'nexus-compute-policy': { deps: { 'nexus-wasm-host': null } },
+    'nexus-wasm-host': { deps: {} },
+    'nexus-contracts': { deps: {} },
+    'nexus-workflow-ir': { deps: {} },
+    'nexus-pattern': { deps: {} },
+    'nexus-knowledge': { deps: {} },
+    'nexus-narrative': { deps: {} },
+  });
+  const run = policyRun(root, { env: { TMPDIR: guardTmp } });
+
+  assert.notEqual(run.status, 0);
+  assert.match(run.stdout, /graph pin failed/);
+  assert.deepEqual(readdirSync(guardTmp), [], `temp files leaked: ${readdirSync(guardTmp)}`);
 });

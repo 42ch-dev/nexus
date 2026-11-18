@@ -117,12 +117,16 @@ fail() {
 # Single place every probe resolves its workspace, so `--manifest-path` reaches
 # all of them (fixture workspaces) and the default run stays byte-identical.
 cargo_tree() {
-  # QC-fix (QC3-S003): every probe is forced `--offline`, matching the
-  # fixture path's env — resolution must never hit the network.
+  # QC-fix round 2 (A / QC1-05): `--offline` stays on the FIXTURE branch only.
+  # Fixture workspaces are path-only and already run with a prepared cache, so
+  # offline is safe there. Repository probes resolve the WHOLE workspace (they
+  # need registry metadata for crates outside the probed tree), and the
+  # hosting CI job has no rust-cache/fetch — a global `--offline` broke the
+  # legacy matrix on a cold cache.
   if [[ -n "${MANIFEST_PATH:-}" ]]; then
     cargo tree --manifest-path "$MANIFEST_PATH" --offline "$@"
   else
-    cargo tree --offline "$@"
+    cargo tree "$@"
   fi
 }
 
@@ -244,21 +248,30 @@ assert_graph_nonempty() {
   local crate="$1"; shift
   local feats="$1"
   local out err status=0
-  # QC-fix (QC2-F002): keep stderr OUT of the census — a warning line that
-  # happens to contain package-like text must not count as a row. Only the
-  # exit status carries the failure verdict.
+  # QC-fix round 2 (E): the temp file is removed on BOTH paths via an EXIT
+  # trap — `fail` exits the script and would otherwise leak it.
   err=$(mktemp)
-  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build 2>"$err") || status=$?
+  trap 'rm -f "$err"' EXIT
+  # QC-fix round 2 (B / QC2-F004): `--prefix none` makes the census
+  # rendering-independent — no Unicode glyphs and no ASCII `|--` prefixes,
+  # so line-anchored `name vX` rows are stable under any Cargo rendering.
+  # stderr stays OUT of the census (QC2-F002); the exit status carries the
+  # verdict.
+  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build --prefix none 2>"$err") || status=$?
   if [[ "$status" -ne 0 ]]; then
     fail "graph probe for $crate ${feats:-<default>} failed (exit $status): $out$(cat "$err")"
   fi
+  # QC2-F002: forward residual stderr on SUCCESS so legitimate warnings stay
+  # visible without entering the census.
+  if [[ -s "$err" ]]; then
+    cat "$err" >&2
+  fi
   rm -f "$err"
-  # Tree rows carry box-drawing prefixes, so match the `name vX` pair at the
-  # START of a (glyph-stripped) line only — package-like text in a PATH
-  # (e.g. a checkout under `nexus v2/`) must never count as a package row
-  # (QC2-F002).
+  trap - EXIT
+  # Line-anchored rows of an explicitly un-prefixed tree: path text cannot
+  # contribute a phantom package (QC2-F002), each package counted once.
   local packages
-  packages=$(sed -E 's/^[ │├└─]*//' <<<"$out" | grep -E '^[A-Za-z0-9_.-]+ v[0-9]' \
+  packages=$(grep -E '^[A-Za-z0-9_.-]+ v[0-9]' <<<"$out" \
     | sed -E 's/^([A-Za-z0-9_.-]+) v[0-9].*/\1/' | sort -u)
   local rows
   rows=$(sed '/^$/d' <<<"$packages" | wc -l | tr -d ' ')
@@ -278,18 +291,24 @@ assert_no_dependencies() {
   local crate="$1"; shift
   local feats="$1"
   local out err status=0
-  # QC-fix (QC2-F002): stderr stays out of the census (same as above).
+  # QC-fix round 2 (E): EXIT trap so a failing census cleans up too.
   err=$(mktemp)
-  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build 2>"$err") || status=$?
+  trap 'rm -f "$err"' EXIT
+  # QC-fix round 2 (B / QC2-F004): `--prefix none` + line-anchored rows —
+  # identical under Unicode and ASCII rendering, so a `|--`-prefixed ASCII
+  # child row can never be dropped. stderr stays out of the census (QC2-F002).
+  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build --prefix none 2>"$err") || status=$?
   if [[ "$status" -ne 0 ]]; then
     fail "graph probe for $crate ${feats:-<default>} failed (exit $status): $out$(cat "$err")"
   fi
+  # QC2-F002: forward residual stderr on success, outside the census.
+  if [[ -s "$err" ]]; then
+    cat "$err" >&2
+  fi
   rm -f "$err"
-  # Same census as assert_graph_nonempty: glyph-stripped, line-ANCHORED rows
-  # so path text cannot contribute a phantom package (QC2-F002), each
-  # package counted once.
+  trap - EXIT
   local packages
-  packages=$(sed -E 's/^[ │├└─]*//' <<<"$out" | grep -E '^[A-Za-z0-9_.-]+ v[0-9]' \
+  packages=$(grep -E '^[A-Za-z0-9_.-]+ v[0-9]' <<<"$out" \
     | sed -E 's/^([A-Za-z0-9_.-]+) v[0-9].*/\1/' | sort -u)
   local rows
   rows=$(sed '/^$/d' <<<"$packages" | wc -l | tr -d ' ')
@@ -392,6 +411,9 @@ if [[ "$COHORT" == "policy" ]]; then
   # features — a target- or feature-scoped dependency edge is invisible to
   # the host-default selectors (the feature-gated fixture in
   # check-graph-pins.test.mjs proves the widened selectors bite).
+  # QC2-F005: the public inverse checks below run the ALL-target union
+  # (`--target all`), which is conservative: a dependency that only exists on
+  # a platform that never ships the public package would still be counted.
   assert_no_dependencies nexus-compute-policy "--all-features --target all"
 
   # The eleven former `assert_empty nexus-compute-policy …` back-edge probes

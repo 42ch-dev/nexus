@@ -114,6 +114,9 @@ mod tests {
         assert_eq!(DEFAULT_WALL_TIME, Duration::from_secs(30));
         let cfg = SandboxConfig::default();
         assert_eq!(cfg.fuel, 10_000_000);
+        // QC1-03 round 2 (D): the exact BYTE default, not the floored MiB
+        // projection — `memory_mib()` alone would pass a drifted byte value.
+        assert_eq!(cfg.max_memory_bytes, 67_108_864);
         assert_eq!(cfg.memory_mib(), 64);
         assert_eq!(cfg.wall_time, Duration::from_secs(30));
     }

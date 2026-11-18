@@ -77,6 +77,11 @@ jobs:
               - '.sqlx/**'
               - 'strategy-samples/**'
               - 'tooling/check-*.sh'
+              # QC3-S005: the graph-pins fixture suite is test-only — without
+              # this path a change to check-graph-pins.test.mjs schedules the
+              # typescript jobs but never the schema-consistency-check job
+              # that runs it.
+              - 'tooling/check-graph-pins.test.mjs'
               - 'tooling/release/**'
               - 'tooling/work-artifact-write-allowlist.tsv'
               - '.github/workflows/ci.yml'
