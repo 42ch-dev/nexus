@@ -623,26 +623,41 @@ test("an unknown registry view cannot make a pending selection publishable", asy
   }
 });
 
-test("a staged copy is verified against the reviewed revision's bytes", () => {
+test("a staged copy is verified against the revision in both directions", () => {
   const { dir, sha } = fixture();
   const stage = mkdtempSync(join(tmpdir(), "nexus-stage-"));
   try {
-    cpSync(join(dir, "crates/nexus-knowledge"), join(stage, "crates/nexus-knowledge"), {
+    cpSync(dir, stage, {
       recursive: true,
+      filter: (source) => !source.split("/").includes(".git"),
     });
-    assert.deepEqual(verifyStagedSource(dir, sha, stage).filter((path) => path.startsWith("crates/nexus-knowledge")), []);
+    assert.deepEqual(verifyStagedSource(dir, sha, stage), []);
 
-    // The boundary this closes: bytes that changed after the status sample but
-    // before/while the copy runs.
-    mutateRepoFile(stage, "crates/nexus-knowledge/src/lib.rs", (contents) => `${contents}
-// late edit
-`);
-    const mismatched = verifyStagedSource(dir, sha, stage);
-    assert.ok(mismatched.includes("crates/nexus-knowledge/src/lib.rs"), mismatched.join(","));
+    // Content drift after the status sample.
+    mutateRepoFile(stage, "crates/nexus-knowledge/src/lib.rs", (contents) => `${contents}\n// late edit\n`);
+    const drifted = verifyStagedSource(dir, sha, stage);
+    assert.ok(
+      drifted.includes("crates/nexus-knowledge/src/lib.rs"),
+      drifted.slice(0, 5).join(","),
+    );
 
-    // A file the revision has but the copy lacks is a mismatch too, never a skip.
-    rmSync(join(stage, "crates/nexus-knowledge/Cargo.toml"));
-    assert.ok(verifyStagedSource(dir, sha, stage).includes("crates/nexus-knowledge/Cargo.toml"));
+    // A file added after the revision: the field is where the old
+    // commit-blob-only walk went blind, because the addition is not in the
+    // commit at all.
+    writeRepoFile(stage, "crates/nexus-knowledge/src/added.rs", "pub fn added() {}\n");
+    const added = verifyStagedSource(dir, sha, stage);
+    assert.ok(
+      added.includes(`crates/nexus-knowledge/src/added.rs (staged, absent from ${sha})`),
+      added.slice(0, 5).join(","),
+    );
+
+    // A revision path the copy lacks is a mismatch, never a silent skip.
+    removeRepoFile(stage, "crates/nexus-knowledge/Cargo.toml");
+    const missing = verifyStagedSource(dir, sha, stage);
+    assert.ok(
+      missing.some((path) => path.startsWith("crates/nexus-knowledge/Cargo.toml (in ")),
+      missing.slice(0, 5).join(","),
+    );
   } finally {
     rmSync(stage, { recursive: true, force: true });
     cleanupTempRepo(dir);

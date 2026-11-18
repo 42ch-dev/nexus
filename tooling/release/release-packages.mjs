@@ -1024,6 +1024,7 @@ function main(argv) {
         "    --versions <a=1.2.3,b=1.2.4> [--date YYYY-MM-DD]",
         "",
         "  --registry-state    {\"published\": [{name, version, checksum}], \"writable\": true}",
+        "                      a snapshot the operator must capture fresh; never verified",
         "  --archive-evidence  `check-contract-packageability.mjs --json` output",
         "",
         "Planning reads manifests, the version carrier, Git provenance and the",

@@ -93,7 +93,9 @@ jobs:
             inputs+=(--archive-evidence "$RUNNER_TEMP/archive-evidence.json")
           fi
           gate=()
-          if [ "${#inputs[@]}" -eq 2 ]; then
+          # Gate on input *presence*, never on `${#inputs[@]}`: one file adds two
+          # array elements, so counting elements inverts the condition.
+          if [ -n "$REGISTRY_STATE_JSON" ] && [ -n "$ARCHIVE_EVIDENCE_JSON" ]; then
             # Both offline inputs present: demand a publishable plan.
             gate+=(--require-publishable)
           fi

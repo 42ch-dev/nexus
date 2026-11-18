@@ -918,10 +918,42 @@ function blobId(bytes) {
 }
 
 /**
- * Paths of `directory` whose bytes are not the revision's bytes, plus paths the
- * revision has but `directory` does not. An empty result means the copied tree
- * is byte-identical to `sha` for every staged path — which is what makes an
- * archive hash attributable to a revision even though the copy happened later.
+ * Every file and symlink under `directory`, relative and POSIX-joined, minus the
+ * entries staging never copies (VCS metadata, build output, other checkouts).
+ *
+ * @param {string} directory
+ * @returns {string[]}
+ */
+function stagedPaths(directory) {
+  /** @type {string[]} */
+  const paths = [];
+  /** @param {string} relative */
+  const walk = (relative) => {
+    const absolute = relative.length === 0 ? directory : join(directory, relative);
+    for (const dirent of readdirSync(absolute, { withFileTypes: true })) {
+      const path = relative.length === 0 ? dirent.name : `${relative}/${dirent.name}`;
+      if (SKIPPED_STAGE_ENTRIES.has(path.split("/")[0])) {
+        continue;
+      }
+      if (dirent.isDirectory()) {
+        walk(path);
+        continue;
+      }
+      paths.push(path);
+    }
+  };
+  walk("");
+  return paths.sort();
+}
+
+/**
+ * Differences between the revision `sha` and the copied tree at `directory`,
+ * in both directions: a staged path the revision does not have (a file added
+ * after the revision, which the status sample may have missed), a revision path
+ * the copy lacks, and a path whose bytes differ. An empty result means the copy
+ * is exactly the revision's tree for everything the packer stages — which is
+ * what makes an archive hash attributable to a revision even though the copy
+ * happens later.
  *
  * Symlinks are compared by their stored target. Ignored/scratch entries are
  * skipped exactly as {@link stageWorkingSource} skips them.
@@ -936,8 +968,8 @@ export function verifyStagedSource(repoRoot, sha, directory) {
   if (!listed.ok) {
     return ["<unreadable tree>"];
   }
-  /** @type {string[]} */
-  const mismatches = [];
+  /** @type {Map<string, {mode: string; id: string}>} */
+  const revision = new Map();
   for (const entry of listed.stdout.split("\0")) {
     if (entry.length === 0) {
       continue;
@@ -951,25 +983,42 @@ export function verifyStagedSource(repoRoot, sha, directory) {
     if (type !== "blob" || SKIPPED_STAGE_ENTRIES.has(path.split("/")[0])) {
       continue;
     }
-    const staged = join(directory, path);
+    revision.set(path, { mode, id });
+  }
+
+  /** @type {string[]} */
+  const mismatches = [];
+  const staged = stagedPaths(directory);
+  const stagedSet = new Set(staged);
+  for (const path of staged) {
+    const entry = revision.get(path);
+    if (entry === undefined) {
+      mismatches.push(`${path} (staged, absent from ${sha})`);
+      continue;
+    }
+    const stagedFile = join(directory, path);
     /** @type {import("node:fs").Stats} */
     let stats;
     try {
-      stats = lstatSync(staged);
+      stats = lstatSync(stagedFile);
     } catch {
       mismatches.push(path);
       continue;
     }
-    if (mode === "120000") {
-      const target = stats.isSymbolicLink() ? readlinkSync(staged) : null;
-      if (target === null || blobId(Buffer.from(target)) !== id) {
+    if (entry.mode === "120000") {
+      const target = stats.isSymbolicLink() ? readlinkSync(stagedFile) : null;
+      if (target === null || blobId(Buffer.from(target)) !== entry.id) {
         mismatches.push(path);
       }
       continue;
     }
-    if (!stats.isFile() || blobId(readFileSync(staged)) !== id) {
+    if (!stats.isFile() || blobId(readFileSync(stagedFile)) !== entry.id) {
       mismatches.push(path);
-      continue;
+    }
+  }
+  for (const path of [...revision.keys()].sort()) {
+    if (!stagedSet.has(path)) {
+      mismatches.push(`${path} (in ${sha}, absent from the staged tree)`);
     }
   }
   return mismatches;

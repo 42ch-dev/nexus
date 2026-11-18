@@ -494,19 +494,32 @@ node tooling/release/release-packages.mjs --check-only \
 `--json` prints the same report as JSON and changes nothing about the human
 output or the exit code. It records the revision it packed (`source.sha`) and
 `source.clean`, which is true only when **both** hold: the worktree had no
-uncommitted change when sampled, and every copied file's bytes hash to that
-revision's Git blob (`verifyStagedSource`). The second check closes the gap
-between sampling the status and copying the bytes — a file changed in that
-window makes the receipt say `clean: false` and name the paths in
-`source.mismatch`, so the plan refuses it. What this proves is: the staged bytes
-are that commit's bytes. It does not prove who ran the checker, and it proves
-nothing about registry state.
+uncommitted change when sampled, and the copied tree matches that revision in
+both directions — every staged path has that revision's blob with the same
+bytes, and every revision path is in the copy (`verifyStagedSource`). The second
+part closes the gap between sampling the status and copying the tree: a file
+changed *or added* in that window makes the receipt say `clean: false` and name
+the paths in `source.mismatch`, so the plan refuses it. What this proves is: the
+staged tree is that commit's tree. It does not prove who ran the checker, and it
+proves nothing about registry state.
 
 `--registry-state <json>` takes `{ "published": [{ "name", "version",
 "checksum" }], "writable": true }`. Without it, live registry state is *unknown*:
 every selected package is reported `pending` with the reason `registry state
-unknown; content not matched`, no registry claim is made, and prerequisites stay
-`unverified`, which blocks publication rather than assuming absence.
+unknown; content not matched`, no registry claim is made, prerequisites stay
+`unverified` and every pending row stays blocked — publication is refused rather
+than assuming absence.
+
+**A supplied view is a snapshot, not a fact.** Nothing in this tooling fetches or
+verifies it: it can be stale, incomplete or simply wrong, and the plan will
+happily treat it as the registry's content. The operator who supplies it owns
+that: capture it immediately before the decision, include every published
+version of every selected package *and* of each prerequisite (including yanked or
+otherwise non-obvious rows), make it `writable` only when write authority is
+actually configured, and re-check the same facts in the registry immediately
+before any separately authorized publication. A stale snapshot can skip a
+content change (the upload then fails or is rejected) or, worse, refuse a valid
+step — neither may be treated as proof about the registry.
 
 `.github/workflows/contract-release.yml` is the manual entry: it checks out the
 given sha and runs the same plan. It requests `contents: read`, reads no secret
@@ -516,9 +529,12 @@ so an input can never reach the shell as code.
 Its exit contract is the planning one: a dispatch succeeds when the plan is
 valid and the printed `ready` line states what is missing. It takes optional
 `registry_state` and `archive_evidence` inputs (the two JSON documents above,
-pasted as text); when **both** are supplied the same run adds
-`--require-publishable`, so a green dispatch then means the selection is
-publishable. Neither case publishes anything or needs a credential.
+pasted as text), selected by **presence**: with one or none the run is a planning
+run, and only when both are supplied does it add `--require-publishable`, so a
+green dispatch in that case means the selection is publishable. Neither case
+publishes anything or needs a credential, and supplying both passes along the
+snapshot caveat above — the dispatch is only as current as the JSON pasted into
+it.
 
 What the plan refuses, and why:
 
