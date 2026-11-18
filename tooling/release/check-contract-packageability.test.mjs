@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
 } from "node:fs";
@@ -1188,6 +1189,33 @@ test("removing a declared fixture fails until the accounting is edited", () => {
     const [row] = report.results;
     assert.equal(row.consumer, null);
     assert.equal(row.coveredBy, null);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("the declared fixture directory is the one that runs", () => {
+  // A renamed fixture — directory and accounting record changed together — is
+  // an accepted deliberate act. The record names the directory that runs, so
+  // the evidence cannot describe a fixture the run never staged, and a declared
+  // runner cannot be skipped while the row stays green through another
+  // fixture's coverage.
+  const dir = consumerFixtureRepo("positive-api-call", "nexus-fixture-public");
+  try {
+    renameSync(
+      join(dir, CONSUMER_FIXTURES_PATH, "nexus-fixture-public"),
+      join(dir, CONSUMER_FIXTURES_PATH, "fixture-renamed"),
+    );
+    writeRepoFile(
+      dir,
+      CONSUMER_ACCOUNTING_PATH,
+      consumerAccounting({ "nexus-fixture-public": "fixture-renamed" }),
+    );
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
+    const row = rowFor(report, "nexus-fixture-public");
+    assert.equal(row.consumer.ok, true, row.consumer.cause ?? "");
+    assert.equal(row.consumer.case, `${CONSUMER_FIXTURES_PATH}/fixture-renamed`);
   } finally {
     cleanupTempRepo(dir);
   }

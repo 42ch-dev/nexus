@@ -802,6 +802,63 @@ test("a quoted dependency key is read as the same declaration", () => {
   }
 });
 
+test("a literal-quoted dependency key is read as the same declaration", () => {
+  // `'nexus-workflow-ir' = { … }` is the same TOML key as the bare and
+  // double-quoted spellings, and a literal-quoted `version` value is the same
+  // requirement, so both are handled (not refused): the rewrite carries the
+  // key's own quoting, and only the version string changes.
+  const { dir } = fixture({ version: "0.4.2" });
+  try {
+    const manifest = "crates/nexus-pattern/Cargo.toml";
+    mutateRepoFile(dir, manifest, (contents) =>
+      contents.replace(
+        /^nexus-workflow-ir = \{ version = "0\.4\.2", /m,
+        "'nexus-workflow-ir' = { version = '0.4.2', ",
+      ),
+    );
+    const result = preparePackageVersions(dir, {
+      packages: ["nexus-workflow-ir"],
+      versions: { "nexus-workflow-ir": "0.5.0" },
+    });
+    assert.equal(result.ok, true, JSON.stringify(result.refusals));
+    assert.match(
+      readRepoFile(dir, manifest),
+      /'nexus-workflow-ir' = \{ version = "0\.5\.0", path = "\.\.\/nexus-workflow-ir" \}/,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a dependency renamed with a literal-quoted target refuses", () => {
+  // The rename is unsupported in either quote form: `package =
+  // 'nexus-workflow-ir'` names the same package, so it must not slip past the
+  // scan and leave the edge unplanned.
+  const { dir } = fixture({ version: "0.4.2" });
+  try {
+    const manifest = "crates/nexus-pattern/Cargo.toml";
+    mutateRepoFile(dir, manifest, (contents) =>
+      contents.replace(
+        /^nexus-workflow-ir = .*$/m,
+        `local-ir = { package = 'nexus-workflow-ir', version = "0.4.2", path = "../nexus-workflow-ir" }`,
+      ),
+    );
+    const result = preparePackageVersions(dir, {
+      packages: ["nexus-workflow-ir"],
+      versions: { "nexus-workflow-ir": "0.5.0" },
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.changed, []);
+    assert.deepEqual(
+      result.refusals.map((row) => row.code),
+      ["dependency-form-unsupported"],
+    );
+    assert.match(readRepoFile(dir, manifest), /version = "0\.4\.2"/);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
 test("a renamed dependency on an inventory package refuses", () => {
   // `alias = { package = "nexus-workflow-ir", … }` has no key the scanner can
   // rewrite by name, so it refuses instead of skipping the edge.

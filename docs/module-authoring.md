@@ -46,10 +46,12 @@ its own version (its `CHANGELOG.md` says when), so a caret bound is the
 compatibility contract; a local checkout is selected with a `path` override
 alongside that bound.
 
-**None of these crates is on a registry today, and nothing in this repository
-can publish one.** The bounds above state the intended compatibility contract;
-until an operator-authorized delivery route exists, a `path` dependency (or a
-`[patch]`/vendor entry) is how a module builds against them.
+**This repository declares no published version for these crates, provides no
+publication path, and does not query the registry; whether crates.io carries
+them is not something it can state.** The bounds above are the intended
+compatibility contract; until an operator-authorized delivery route exists, a
+`path` dependency (or a `[patch]`/vendor entry) is how a module builds against
+them.
 
 ## ABI at a glance
 

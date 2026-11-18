@@ -420,11 +420,11 @@ after every upload succeeds. A failed update remains unpublished for recovery.
 
 Eight Cargo packages are versioned independently of the product: they carry
 their own literal versions, their own changelogs and their own release label and
-tag namespace, so each can be released without the others. **None of them is
-published yet, and nothing in this repository can publish one** (see
-§ Publish): this section describes the inventory, the plan and the gates, not a
-registry state. Nothing here creates a `v*` tag, bumps a product version or runs
-a runtime/Electron producer.
+tag namespace, so each can be released without the others. **This repository
+declares no published version, provides no publication path and does not query
+the registry** (see § Publish), so it makes no claim about what crates.io holds:
+this section describes the inventory, the plan and the gates. Nothing here
+creates a `v*` tag, bumps a product version or runs a runtime/Electron producer.
 
 The inventory is `tooling/release/version-brackets.json` (`contract` array) —
 the same eight entries `tooling/release/check-contract-packageability.mjs`
@@ -584,12 +584,20 @@ package:
 The checker reads that file from the staged tree and fails when an entry is
 missing from it, when it names a package outside the carrier, when a declared
 fixture directory is absent, or when an entry declared fixture-less has a
-directory anyway. A repository that declares no fixtures at all is a legitimate
-pack-only run, which is what the fixtures' own isolation tests are; a repository
-that *removed* its fixtures is a failure until someone edits this file
-deliberately. That is the difference between "no fixtures by design" and
-"fixtures were deleted", and it is why the pack-only path cannot be reached by
-accident.
+directory anyway. A declared directory is also the one that runs: the runner
+stages `fixtures/package-consumers/<declared directory>` and reports that path as
+the consumer case, so the record and the consumer evidence cannot name different
+directories, and a declared runner is never skipped in favour of another
+fixture's coverage.
+
+What that cannot establish is intent. A repository that declares no fixtures at
+all is a legitimate pack-only run, which is what the fixtures' own isolation
+tests are; a repository that *removed* a fixture and left this file alone fails,
+and rewriting the entry to `"fixture": null` with a reason turns the same tree
+into that legitimate pack-only run — editing this file *is* the decision. A
+fixture directory renamed together with its record is accepted the same way, as
+a deliberate act: the pair is a single reviewed commit, no content ledger is
+kept, and the checker cannot tell that rename from a decision to rename.
 
 `--registry-state <json>` takes `{ "published": [{ "name", "version",
 "checksum" }], "writable": true }`. Without it, live registry state is *unknown*:

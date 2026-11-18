@@ -120,6 +120,20 @@ function escapeRegExp(value) {
 }
 
 /**
+ * A TOML name in every spelling Cargo treats as the same key or the same
+ * string: bare, `"basic"` or `'literal'`. Both quote forms are ordinary TOML,
+ * so a scan that accepts one and ignores the other skips a declaration instead
+ * of refusing it — the one outcome this file must never produce.
+ *
+ * @param {string} name
+ * @returns {string}
+ */
+function nameForms(name) {
+  const escaped = escapeRegExp(name);
+  return `(?:${escaped}|"${escaped}"|'${escaped}')`;
+}
+
+/**
  * `git` as one more read of the repository: provenance is what makes a source
  * revision reviewable, and it needs no network.
  *
@@ -179,10 +193,12 @@ export function readSourceProvenance(repoRoot) {
  * preparation both read the declarations here instead of the first match.
  *
  * The only form this helper reads is a single-line inline table under the
- * package's own key, with a version requirement. The key may be bare or quoted
- * (`nexus-contracts` and `"nexus-contracts"` are the same TOML key, and Cargo
- * treats them identically), so a quoted key is read and rewritten as the same
- * declaration rather than refused: the edit is the same one-line change.
+ * package's own key, with a version requirement. The key may be bare, basic
+ * (`"nexus-contracts"`) or literal (`'nexus-contracts'`): all three are the
+ * same TOML key and Cargo treats them identically, so every quote form is read
+ * and rewritten as the same declaration rather than refused — the edit is the
+ * same one-line change, and reading only some spellings would leave the others
+ * silently unplanned.
  *
  * Everything else refuses by name, because preparation rewrites bounds in place
  * and a declaration it silently skipped is one it would leave pointed at the
@@ -200,12 +216,10 @@ export function readSourceProvenance(repoRoot) {
  * @returns {{ line: number; requirement: string | null }[]}
  */
 function dependencyDeclarations(contents, manifestPath, name) {
-  const escaped = escapeRegExp(name);
-  const keyLine = new RegExp(`^\\s*"?${escaped}"?\\s*[.=]`);
-  const inline = new RegExp(
-    `^\\s*"?${escaped}"?\\s*=\\s*\\{([^}\\n]*)\\}\\s*$`,
-  );
-  const renamed = new RegExp(`\\bpackage\\s*=\\s*"${escaped}"`);
+  const key = nameForms(name);
+  const keyLine = new RegExp(`^\\s*${key}\\s*[.=]`);
+  const inline = new RegExp(`^\\s*${key}\\s*=\\s*\\{([^}\\n]*)\\}\\s*$`);
+  const renamed = new RegExp(`\\bpackage\\s*=\\s*${key}`);
   /** @type {{ line: number; requirement: string | null }[]} */
   const declarations = [];
   contents.split("\n").forEach((line, index) => {
@@ -227,7 +241,7 @@ function dependencyDeclarations(contents, manifestPath, name) {
     }
     declarations.push({
       line: index + 1,
-      requirement: /\bversion\s*=\s*"([^"]*)"/.exec(match[1])?.[1] ?? null,
+      requirement: /\bversion\s*=\s*["']([^"']*)["']/.exec(match[1])?.[1] ?? null,
     });
   });
   return declarations;
@@ -248,8 +262,7 @@ function inventoryDependencies(contents, manifestPath, names) {
   /** @type {{ name: string; requirement: string }[]} */
   const dependencies = [];
   for (const name of names) {
-    const escaped = escapeRegExp(name);
-    if (new RegExp(`^\\s*\\[(?:.*\\.)?(?:dev-|build-)?dependencies\\.(?:${escaped}|"${escaped}")\\]\\s*$`, "m").test(contents)) {
+    if (new RegExp(`^\\s*\\[(?:.*\\.)?(?:dev-|build-)?dependencies\\.${nameForms(name)}\\]\\s*$`, "m").test(contents)) {
       throw new ReleaseRefusal(
         "dependency-form-unsupported",
         `${manifestPath}: ${name} uses a dependency table; an inline table with a version requirement is required`,
@@ -853,7 +866,7 @@ function replacePackageVersion(contents, manifestPath, version) {
  */
 function replaceDependencyRequirement(contents, manifestPath, name, version) {
   const pattern = new RegExp(
-    `^(\\s*"?${escapeRegExp(name)}"?\\s*=\\s*\\{[^}\\n]*?\\bversion\\s*=\\s*)"[^"]*"`,
+    `^(\\s*${nameForms(name)}\\s*=\\s*\\{[^}\\n]*?\\bversion\\s*=\\s*)["'][^"']*["']`,
     "gm",
   );
   const declarations = dependencyDeclarations(contents, manifestPath, name);

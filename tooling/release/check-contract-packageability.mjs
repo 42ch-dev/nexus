@@ -14,16 +14,16 @@
  *   3. keeps the produced `.crate` through the whole run, records its SHA-256,
  *      extracts it outside the repository and packing tree, and reads the
  *      normalized manifest through `cargo metadata --no-deps`,
- *   4. runs the optional consumer fixture named after the entry
- *      (`tooling/release/fixtures/package-consumers/<name>/`, read from the same
- *      staged tree the archives were packed from, so package and consumer
- *      evidence share one set of reviewed inputs) as a fresh workspace whose
- *      `[patch.crates-io]` entries point only at extracted selected archives,
- *      offline and locked, with `cargo run` or — when the fixture ships a
- *      `tests/` target, the only target kind that sees a dev-dependency —
- *      `cargo test`; a fixture that ships a `guest/` crate also gets that crate
- *      built for `wasm32-unknown-unknown` from the same archives, with the host
- *      consumer kept out of it.
+ *   4. runs the optional consumer fixture declared for the entry
+ *      (`tooling/release/fixtures/package-consumers/<declared dir>/`, read from
+ *      the same staged tree the archives were packed from, so package and
+ *      consumer evidence share one set of reviewed inputs) as a fresh workspace
+ *      whose `[patch.crates-io]` entries point only at extracted selected
+ *      archives, offline and locked, with `cargo run` or — when the fixture
+ *      ships a `tests/` target, the only target kind that sees a
+ *      dev-dependency — `cargo test`; a fixture that ships a `guest/` crate also
+ *      gets that crate built for `wasm32-unknown-unknown` from the same
+ *      archives, with the host consumer kept out of it.
  *
  * Nothing downstream sees the original checkout or the packing tree: a
  * consumer that resolves an input from either fails, as does an archive that
@@ -78,7 +78,7 @@ import { readVersionBrackets, resolveRepoRoot } from "./version-surfaces.mjs";
 
 const PACKAGE_ARGS = ["package", "--no-verify", "--allow-dirty", "--offline"];
 
-/** Consumer fixtures read by entry name; K4/K5 add the real consumers here. */
+/** Consumer fixtures, each declared by name in the accounting below. */
 const CONSUMER_FIXTURES_PATH = "tooling/release/fixtures/package-consumers";
 
 /**
@@ -89,8 +89,12 @@ const CONSUMER_FIXTURES_PATH = "tooling/release/fixtures/package-consumers";
  *
  * It is what separates "this repository has no consumer fixture by design" from
  * "the fixtures were removed": a declared fixture that is missing from the tree
- * fails the run, and an entry the file does not mention fails too, so deleting a
- * fixture means editing this file deliberately.
+ * fails the run, the declared directory is the one that runs, and an entry the
+ * file does not mention fails too, so deleting a fixture means editing this file
+ * deliberately. A coordinated rename of a directory *and* its record is
+ * therefore an accepted deliberate act: the pair is one reviewed commit, and
+ * that review is the guard — no content ledger is kept, so the checker cannot
+ * tell that rename from a decision to rename.
  */
 const CONSUMER_ACCOUNTING_PATH = "tooling/release/fixtures/package-consumers.json";
 
@@ -596,6 +600,12 @@ function inside(candidate, root) {
  * no-fixture record and reason; anything else fails closed. Without this, a
  * repository could drop its fixtures and still report a clean pack-only run.
  *
+ * The directory named here is the one the consumer run stages, so the record and
+ * the evidence cannot disagree. That also bounds what this can prove: a rename
+ * of a directory together with its record is indistinguishable from a
+ * deliberate decision to rename it, and is accepted as one (the pair is a single
+ * reviewed commit). No content ledger is kept.
+ *
  * @param {string} stageRoot
  * @param {import("./version-surfaces.mjs").ContractBracketEntry[]} entries
  * @returns {{fixtures: Map<string, string>, noFixture: Map<string, string>}}
@@ -767,10 +777,11 @@ function buildGuest({ consumerRoot, targetRoot, entryName, patchArgs }) {
  *   scratchRoot: string;
  *   targetRoot: string;
  *   entryName: string;
+ *   fixture: string;
  *   archives: Map<string, {root: string, sha256: string, version: string}>;
  *   policy: {ok: boolean, cause: string | null, publishByName: Map<string, string[] | null>};
  * }} input
- * @returns {ConsumerEvidence | null}
+ * @returns {ConsumerEvidence}
  */
 function runConsumer({
   repoRoot,
@@ -778,22 +789,22 @@ function runConsumer({
   scratchRoot,
   targetRoot,
   entryName,
+  fixture,
   archives,
   policy,
 }) {
   // Fixture existence and contents come from the same copied tree the archives
   // were packed from, so package and consumer evidence share one set of
-  // reviewed inputs; the original checkout is no longer a consumer input.
-  const fixturePath = join(stageRoot, CONSUMER_FIXTURES_PATH, entryName);
-  if (!existsSync(fixturePath)) {
-    return null;
-  }
-
+  // reviewed inputs; the original checkout is no longer a consumer input. The
+  // directory is the one the accounting declares, not one derived from the
+  // entry name: otherwise a declared fixture could be skipped while the row
+  // still looked green, and the declaration would name something never run.
+  const fixturePath = join(stageRoot, CONSUMER_FIXTURES_PATH, fixture);
   const consumerRoot = join(scratchRoot, "consumers", entryName);
   cpSync(fixturePath, consumerRoot, { recursive: true });
   /** @type {ConsumerEvidence} */
   const evidence = {
-    case: `${CONSUMER_FIXTURES_PATH}/${entryName}`,
+    case: `${CONSUMER_FIXTURES_PATH}/${fixture}`,
     root: consumerRoot,
     declared: [],
     patched: [],
@@ -1287,7 +1298,8 @@ export function checkContractPackageability(repoRoot) {
         }
       }
       for (const row of results) {
-        if (!row.ok || !consumer.fixtures.has(row.name)) {
+        const fixture = consumer.fixtures.get(row.name);
+        if (!row.ok || fixture === undefined) {
           continue;
         }
         const evidence = runConsumer({
@@ -1296,12 +1308,10 @@ export function checkContractPackageability(repoRoot) {
           scratchRoot,
           targetRoot,
           entryName: row.name,
+          fixture,
           archives,
           policy,
         });
-        if (evidence === null) {
-          continue;
-        }
         row.consumer = evidence;
         if (!evidence.ok) {
           row.ok = false;

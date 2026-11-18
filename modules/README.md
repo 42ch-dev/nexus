@@ -47,8 +47,9 @@ below for the lanes that still execute a module.
 The three module crates are separate Cargo packages, listed in
 `tooling/release/version-brackets.json` with independent literal versions and
 normal caret requirements. They are released independently of the product and of
-each other, but **none of them is published yet, and nothing in this repository
-can publish one**:
+each other, but **this repository declares no published version, provides no
+publication path and does not query the registry**, so it makes no claim about
+what a registry holds:
 
 ```toml
 [dependencies]
