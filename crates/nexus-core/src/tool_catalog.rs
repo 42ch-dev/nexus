@@ -893,3 +893,59 @@ pub fn lookup_host_tool(id: &str) -> Option<&'static HostToolMetadata> {
         .iter()
         .find(|row| row.id.as_str() == id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Generate tool's rendered contract adds ONLY its address field: the
+    /// committed wire schema keeps owning the rest of the `required` list, in
+    /// its own order. Replacing the array (the pre-fix shape) fails here the
+    /// moment the wire schema gains or reorders a required entry.
+    #[test]
+    fn generate_schema_prepends_strategy_id_to_the_wire_required_list() {
+        let wire: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../schemas/daemon-api/orchestration/strategy-generate-request.schema.json"
+        ))
+        .expect("the generate request schema is committed JSON");
+        let rendered: serde_json::Value =
+            serde_json::from_str(tool_input_schema()).expect("the rendered schema is JSON");
+
+        let mut expected = wire["required"]
+            .as_array()
+            .expect("the wire schema declares required")
+            .clone();
+        assert!(
+            !expected.contains(&serde_json::Value::String("strategy_id".to_owned())),
+            "the wire schema carries no strategy_id; the tool adds it"
+        );
+        expected.insert(0, serde_json::Value::String("strategy_id".to_owned()));
+
+        assert_eq!(rendered["required"], serde_json::Value::Array(expected));
+    }
+
+    /// The canonical-input requirement is a type, not a convention: every row
+    /// authors one, so no placeholder path exists.
+    #[test]
+    fn every_canonical_row_authors_an_input_schema() {
+        for row in host_tool_catalog() {
+            assert!(
+                !row.catalog.input_schema.is_empty(),
+                "canonical tool '{}' must author its input schema",
+                row.id.as_str()
+            );
+            let parsed: serde_json::Value = serde_json::from_str(row.catalog.input_schema)
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "canonical tool '{}' has an unparseable input schema: {e}",
+                        row.id.as_str()
+                    )
+                });
+            assert_eq!(
+                parsed["type"], "object",
+                "canonical tool '{}' must declare a root object schema",
+                row.id.as_str()
+            );
+        }
+    }
+}
