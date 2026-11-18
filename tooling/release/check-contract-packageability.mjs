@@ -58,6 +58,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   statSync,
 } from "node:fs";
@@ -165,10 +166,13 @@ function contractDependencies(manifestContents, entries) {
  * @property {boolean} ok
  * @property {PackageResult[]} results One row per contract entry, in carrier order.
  * @property {string | null} firstFailure Package name of the first failing crate.
- * @property {{sha: string | null; clean: boolean}} source Revision the packed
- *   working source came from, and whether that tree had no uncommitted change.
- *   A consumer of these archive hashes can bind them to that revision only when
- *   `clean` is true and `sha` is the reviewed revision.
+ * @property {{sha: string | null; clean: boolean; mismatch?: string[]}} source
+ *   Revision the packed source came from, and whether the staged bytes are that
+ *   revision's bytes: `clean` is true only for a tree with no uncommitted change
+ *   **and** staged files whose blobs match `sha` (see `verifyStagedSource`).
+ *   `mismatch` names the paths that broke the binding. A consumer may bind
+ *   archive hashes to the revision only when `clean` is true and `sha` is the
+ *   reviewed revision; a dirty tree makes no claim at all.
  */
 
 /**
@@ -904,12 +908,82 @@ function workingSourceState(repoRoot) {
 }
 
 /**
+ * Git blob id of a byte sequence: how Git's object database addresses content.
+ *
+ * @param {Buffer} bytes
+ * @returns {string}
+ */
+function blobId(bytes) {
+  return createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
+}
+
+/**
+ * Paths of `directory` whose bytes are not the revision's bytes, plus paths the
+ * revision has but `directory` does not. An empty result means the copied tree
+ * is byte-identical to `sha` for every staged path — which is what makes an
+ * archive hash attributable to a revision even though the copy happened later.
+ *
+ * Symlinks are compared by their stored target. Ignored/scratch entries are
+ * skipped exactly as {@link stageWorkingSource} skips them.
+ *
+ * @param {string} repoRoot
+ * @param {string} sha
+ * @param {string} directory
+ * @returns {string[]}
+ */
+export function verifyStagedSource(repoRoot, sha, directory) {
+  const listed = run("git", ["ls-tree", "-r", "-z", "--full-tree", sha], repoRoot);
+  if (!listed.ok) {
+    return ["<unreadable tree>"];
+  }
+  /** @type {string[]} */
+  const mismatches = [];
+  for (const entry of listed.stdout.split("\0")) {
+    if (entry.length === 0) {
+      continue;
+    }
+    const tab = entry.indexOf("\t");
+    if (tab < 0) {
+      continue;
+    }
+    const [mode, type, id] = entry.slice(0, tab).split(" ");
+    const path = entry.slice(tab + 1);
+    if (type !== "blob" || SKIPPED_STAGE_ENTRIES.has(path.split("/")[0])) {
+      continue;
+    }
+    const staged = join(directory, path);
+    /** @type {import("node:fs").Stats} */
+    let stats;
+    try {
+      stats = lstatSync(staged);
+    } catch {
+      mismatches.push(path);
+      continue;
+    }
+    if (mode === "120000") {
+      const target = stats.isSymbolicLink() ? readlinkSync(staged) : null;
+      if (target === null || blobId(Buffer.from(target)) !== id) {
+        mismatches.push(path);
+      }
+      continue;
+    }
+    if (!stats.isFile() || blobId(readFileSync(staged)) !== id) {
+      mismatches.push(path);
+      continue;
+    }
+  }
+  return mismatches;
+}
+
+/**
  * @param {string} repoRoot
  * @returns {PackageabilityReport}
  */
 export function checkContractPackageability(repoRoot) {
   const entries = readVersionBrackets(repoRoot);
-  const source = workingSourceState(repoRoot);
+  let source = /** @type {{sha: string | null; clean: boolean; mismatch?: string[]}} */ (
+    workingSourceState(repoRoot)
+  );
   const scratchParent = packageScratchParent();
   mkdirSync(scratchParent, { recursive: true });
   const scratchRoot = mkdtempSync(join(scratchParent, SCRATCH_PREFIX));
@@ -921,6 +995,16 @@ export function checkContractPackageability(repoRoot) {
   const archives = new Map();
   try {
     stageWorkingSource(repoRoot, stageRoot);
+    // The copy happens after the status sample, so a file can change in
+    // between. Only a clean tree is claimed, and only when the bytes actually
+    // staged hash to that revision's blobs; anything else downgrades the stamp
+    // to "not clean" instead of naming a revision the archive does not match.
+    if (source.clean && source.sha !== null) {
+      const mismatch = verifyStagedSource(repoRoot, source.sha, stageRoot);
+      if (mismatch.length > 0) {
+        source = { sha: source.sha, clean: false, mismatch };
+      }
+    }
 
     for (const entry of entries) {
       const inspected = packAndInspect({
@@ -1045,6 +1129,11 @@ function main(argv) {
   }
 
   const report = checkContractPackageability(resolveRepoRoot());
+  if (report.source.mismatch !== undefined) {
+    console.error(
+      `warning: staged source differs from ${report.source.sha} at ${report.source.mismatch.length} path(s); the archives are not that revision's bytes`,
+    );
+  }
   if (argv.includes("--json")) {
     console.log(JSON.stringify(report, null, 2));
     return report.ok ? 0 : 1;

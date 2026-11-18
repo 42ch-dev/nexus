@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import { test } from "node:test";
@@ -12,6 +12,7 @@ import {
   readSourceProvenance,
   releaseTag,
 } from "./release-packages.mjs";
+import { verifyStagedSource } from "./check-contract-packageability.mjs";
 import { readVersionBrackets } from "./version-surfaces.mjs";
 import {
   cleanupTempRepo,
@@ -586,6 +587,68 @@ test("publication refuses a refused plan and a plan that is not ready", async ()
   }
 });
 
+test("an unknown registry view cannot make a pending selection publishable", async () => {
+  const { dir, sha } = fixture();
+  try {
+    // `nexus-module-manifest` has no prerequisite, so only the registry view
+    // stands between verified evidence and a publishable plan.
+    const evidenceRows = [{ name: "nexus-module-manifest", version: "9.8.7" }];
+    const unknown = planPackageRelease(dir, {
+      packages: ["nexus-module-manifest"],
+      sourceSha: sha,
+      registry: "crates-io",
+      evidence: evidence(sha, evidenceRows),
+    });
+    assert.deepEqual(refusalCodes(unknown), []);
+    assert.equal(unknown.ready, false);
+    assert.deepEqual(blockerCodes(unknown), ["registry-unverified"]);
+    const client = fixtureRegistry();
+    const refused = await publishSelected(unknown, client);
+    assert.equal(refused.ok, false);
+    assert.equal(refused.refusals[0].code, "not-ready");
+    assert.deepEqual(client.uploads, []);
+
+    // A known, empty view for the same selection is publishable.
+    const known = planPackageRelease(dir, {
+      packages: ["nexus-module-manifest"],
+      sourceSha: sha,
+      registry: { name: "crates-io", published: [], writable: true },
+      evidence: evidence(sha, evidenceRows),
+    });
+    assert.deepEqual(blockerCodes(known), []);
+    assert.equal(known.ready, true);
+    assert.deepEqual(known.pending, ["nexus-module-manifest@9.8.7"]);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a staged copy is verified against the reviewed revision's bytes", () => {
+  const { dir, sha } = fixture();
+  const stage = mkdtempSync(join(tmpdir(), "nexus-stage-"));
+  try {
+    cpSync(join(dir, "crates/nexus-knowledge"), join(stage, "crates/nexus-knowledge"), {
+      recursive: true,
+    });
+    assert.deepEqual(verifyStagedSource(dir, sha, stage).filter((path) => path.startsWith("crates/nexus-knowledge")), []);
+
+    // The boundary this closes: bytes that changed after the status sample but
+    // before/while the copy runs.
+    mutateRepoFile(stage, "crates/nexus-knowledge/src/lib.rs", (contents) => `${contents}
+// late edit
+`);
+    const mismatched = verifyStagedSource(dir, sha, stage);
+    assert.ok(mismatched.includes("crates/nexus-knowledge/src/lib.rs"), mismatched.join(","));
+
+    // A file the revision has but the copy lacks is a mismatch too, never a skip.
+    rmSync(join(stage, "crates/nexus-knowledge/Cargo.toml"));
+    assert.ok(verifyStagedSource(dir, sha, stage).includes("crates/nexus-knowledge/Cargo.toml"));
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+    cleanupTempRepo(dir);
+  }
+});
+
 test("preparation writes only selected literals, dependency bounds and changelogs", () => {
   // Pre-1.0: `^0.4.2` excludes 0.5.0, so the dependent bound must follow.
   const { dir } = fixture({ version: "0.4.2" });
@@ -702,12 +765,32 @@ test("check-only CLI plans from the reviewed source and exits on readiness", () 
       dir,
       { env: { CARGO_REGISTRY_TOKEN: "" } },
     );
-    assert.equal(planned.status, 1, planned.stderr);
+    assert.equal(planned.status, 0, planned.stderr);
+    assert.match(planned.stdout, /plan {6}ok/);
     assert.match(planned.stdout, /archive evidence absent/);
     assert.match(planned.stdout, /order {5}nexus-pattern, nexus-knowledge, nexus-narrative/);
     assert.match(planned.stdout, /ready {5}no/);
     assert.match(planned.stdout, /prerequisite-unverified/);
+    assert.match(planned.stdout, /registry-unverified/);
     assert.match(planned.stdout, /credentials unconfigured/);
+
+    // The gate refuses the same plan: a green planning run is not a release.
+    const gated = runReleaseScript(
+      "release-packages.mjs",
+      [
+        "--check-only",
+        "--require-publishable",
+        "--source",
+        sha,
+        "--packages",
+        "nexus-pattern,nexus-knowledge,nexus-narrative",
+        "--registry",
+        "crates-io",
+      ],
+      dir,
+    );
+    assert.equal(gated.status, 1, gated.stdout);
+    assert.match(gated.stdout, /ready {5}no/);
 
     // The operator route for exact-match resume: registry state plus the
     // checker's JSON report, both outside the packed tree.
@@ -748,6 +831,35 @@ test("check-only CLI plans from the reviewed source and exits on readiness", () 
     assert.equal(ready.status, 0, ready.stderr);
     assert.match(ready.stdout, /ready {5}yes/);
     assert.match(ready.stdout, /pending {3}nexus-knowledge@9\.8\.7, nexus-narrative@9\.8\.7/);
+
+    // The same inputs satisfy the publishability gate.
+    const readyGated = runReleaseScript(
+      "release-packages.mjs",
+      [
+        "--check-only",
+        "--require-publishable",
+        "--source",
+        sha,
+        "--packages",
+        "nexus-knowledge,nexus-narrative",
+        "--registry",
+        "crates-io",
+        "--registry-state",
+        statePath,
+        "--archive-evidence",
+        evidencePath,
+      ],
+      dir,
+    );
+    assert.equal(readyGated.status, 0, readyGated.stderr);
+
+    const prepareGated = runReleaseScript(
+      "release-packages.mjs",
+      ["--prepare", "--require-publishable", "--packages", "nexus-knowledge"],
+      dir,
+    );
+    assert.equal(prepareGated.status, 2);
+    assert.match(prepareGated.stderr, /--require-publishable belongs to --check-only/);
 
     const unknown = runReleaseScript(
       "release-packages.mjs",
@@ -842,8 +954,27 @@ test("the supported CLI paths run with the network denied, and the denial is rea
       dir,
       { env },
     );
-    assert.equal(withoutState.status, 1, withoutState.stderr);
+    assert.equal(withoutState.status, 0, withoutState.stderr);
+    assert.match(withoutState.stdout, /plan {6}ok/);
     assert.match(withoutState.stdout, /ready {5}no/);
+
+    const gatedDenied = runReleaseScript(
+      "release-packages.mjs",
+      [
+        "--check-only",
+        "--require-publishable",
+        "--source",
+        sha,
+        "--packages",
+        "nexus-knowledge",
+        "--registry",
+        "crates-io",
+      ],
+      dir,
+      { env },
+    );
+    assert.equal(gatedDenied.status, 1, gatedDenied.stdout);
+    assert.match(gatedDenied.stdout, /ready {5}no/);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
     cleanupTempRepo(dir);

@@ -471,9 +471,15 @@ revision lets the archive hashes be attributed to it.
 
 The plan separates *valid* from *publishable*: `ok` means no refusal, `ready`
 additionally means every prerequisite has a satisfying selected or
-known-published version and every pending row has a verified archive. The plan
-exits `0` only when it is ready, `1` for a refusal or a blocker, `2` for a usage
-error, and it prints a `ready` line with one line per blocker.
+known-published version, every pending row has a verified archive, and the
+registry view is known — an unknown view cannot rule out that the version
+already exists with different content, and registry publication is irreversible.
+The output prints `plan ok|refused` and a `ready` line with one line per blocker.
+
+Exit codes: `0` for a valid plan, `1` for a refusal, `2` for a usage error.
+`--require-publishable` is the separate gate a publish path must pass — it also
+demands `ready`, so it exits `1` while any blocker stands. A green
+`--check-only` run is a successful *check*, never a publication grant.
 
 The archive side comes from the packageability checker:
 
@@ -486,11 +492,15 @@ node tooling/release/release-packages.mjs --check-only \
 ```
 
 `--json` prints the same report as JSON and changes nothing about the human
-output or the exit code. It records the revision it packed and whether that tree
-was clean (`source.sha`, `source.clean`), so the plan can bind the archive
-hashes to the reviewed revision instead of trusting a label. What that proves is
-exactly this: the hashes were produced from a clean tree at that commit. It does
-not prove who ran the checker, and it does not prove registry state.
+output or the exit code. It records the revision it packed (`source.sha`) and
+`source.clean`, which is true only when **both** hold: the worktree had no
+uncommitted change when sampled, and every copied file's bytes hash to that
+revision's Git blob (`verifyStagedSource`). The second check closes the gap
+between sampling the status and copying the bytes — a file changed in that
+window makes the receipt say `clean: false` and name the paths in
+`source.mismatch`, so the plan refuses it. What this proves is: the staged bytes
+are that commit's bytes. It does not prove who ran the checker, and it proves
+nothing about registry state.
 
 `--registry-state <json>` takes `{ "published": [{ "name", "version",
 "checksum" }], "writable": true }`. Without it, live registry state is *unknown*:
@@ -499,9 +509,16 @@ unknown; content not matched`, no registry claim is made, and prerequisites stay
 `unverified`, which blocks publication rather than assuming absence.
 
 `.github/workflows/contract-release.yml` is the manual entry: it checks out the
-given sha and runs the same plan. It requests `contents: read`, reads no secret,
-has no publish step, and passes its dispatch inputs as environment variables so
-an input can never reach the shell as code.
+given sha and runs the same plan. It requests `contents: read`, reads no secret
+and has no publish step, and passes its dispatch inputs as environment variables
+so an input can never reach the shell as code.
+
+Its exit contract is the planning one: a dispatch succeeds when the plan is
+valid and the printed `ready` line states what is missing. It takes optional
+`registry_state` and `archive_evidence` inputs (the two JSON documents above,
+pasted as text); when **both** are supplied the same run adds
+`--require-publishable`, so a green dispatch then means the selection is
+publishable. Neither case publishes anything or needs a credential.
 
 What the plan refuses, and why:
 
@@ -523,7 +540,16 @@ What the plan refuses, and why:
 
 Blockers (not refusals) name what still stands between a valid plan and an
 upload: `prerequisite-unverified` (registry state unknown for an unselected
-prerequisite) and `archive-unverified` (a pending row has no verified archive).
+prerequisite), `archive-unverified` (a pending row has no verified archive) and
+`registry-unverified` (a pending row cannot be checked for pre-existing content
+because no registry view was supplied).
+
+The whole-worktree clean requirement is deliberately conservative: an unrelated
+untracked document also refuses the plan, because the checker packs the working
+tree and cannot prove which files reach an archive. A separate clean worktree at
+the reviewed commit is the supported operator route when the main checkout is
+busy; do not narrow the check without accounting for every archive, dependency
+and consumer input.
 
 ### Publish (operator action, currently unconfigured)
 

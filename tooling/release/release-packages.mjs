@@ -32,18 +32,21 @@
  * packed and whether that tree was clean, plus each archive's sha256.
  *
  * A plan has two verdicts: `ok` (no refusal) and `ready` (also every
- * prerequisite resolved to a satisfying selected or known-published version and
- * every pending row has a verified archive). Only publication needs `ready`.
+ * prerequisite resolved to a satisfying selected or known-published version,
+ * every pending row carrying a verified archive, and the registry view known —
+ * an unknown view cannot rule out that the version already exists with other
+ * content). `--check-only` exits 0 for `ok` and prints what is missing;
+ * `--require-publishable` is the gate, and `publishSelected` refuses `not-ready`.
  *
  * CLI:
- *   node tooling/release/release-packages.mjs --check-only \
+ *   node tooling/release/release-packages.mjs --check-only [--require-publishable] \
  *     --source <40-hex sha> --packages a,b --registry crates-io \
  *     [--registry-state <json>] [--archive-evidence <json>]
  *   node tooling/release/release-packages.mjs --prepare --packages a,b \
  *     --versions a=1.2.3,b=1.2.4 [--date YYYY-MM-DD]
  *
- * Exit 0 for a ready plan or applied preparation, 1 for a refusal or a
- * blocker, 2 for a usage error.
+ * Exit 0 for a valid plan or applied preparation, 1 for a refusal (or, with
+ * `--require-publishable`, a blocker), 2 for a usage error.
  */
 
 import { spawnSync } from "node:child_process";
@@ -361,6 +364,7 @@ export function planPackageRelease(repoRoot, options) {
   const registry =
     typeof options.registry === "string" ? { name: options.registry } : options.registry ?? {};
   const registryName = registry.name;
+  const registryKnown = registry.published !== null && registry.published !== undefined;
   const packages = Array.isArray(options.packages) ? options.packages : [];
   const evidence = options.evidence ?? null;
   /** @type {{ code: string; message: string }[]} */
@@ -482,7 +486,6 @@ export function planPackageRelease(repoRoot, options) {
     }
     const sameVersion = rowsPublished.find((published) => published.version === row.version);
     let status = /** @type {"completed" | "pending"} */ ("pending");
-    const registryKnown = registry.published !== null && registry.published !== undefined;
     let reason = registryKnown
       ? "not published at the selected registry"
       : "registry state unknown; content not matched";
@@ -584,6 +587,14 @@ export function planPackageRelease(repoRoot, options) {
           message: `${row.name} needs ${prerequisite.name} ${prerequisite.requirement}; registry state is unknown, so it cannot be shown to exist`,
         });
       }
+    }
+    if (row.status === "pending" && !registryKnown) {
+      // An unknown view cannot rule out that this exact version already exists
+      // with different content, and registry publication is irreversible.
+      blockers.push({
+        code: "registry-unverified",
+        message: `${row.name}@${row.version} is pending and the registry view is unknown, so existing content cannot be matched; pass --registry-state before publishing`,
+      });
     }
     if (row.status === "pending" && row.archiveSha256 === null) {
       blockers.push({
@@ -934,6 +945,7 @@ function printPlan(plan) {
       );
     }
   }
+  console.log(`plan      ${plan.ok ? "ok" : "refused"}`);
   console.log(`completed ${plan.completed.length === 0 ? "<none>" : plan.completed.join(", ")}`);
   console.log(`pending   ${plan.pending.length === 0 ? "<none>" : plan.pending.join(", ")}`);
   console.log(
@@ -967,7 +979,13 @@ function parseArgs(argv) {
   ]);
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--check-only" || arg === "--prepare" || arg === "--help" || arg === "-h") {
+    if (
+      arg === "--check-only" ||
+      arg === "--require-publishable" ||
+      arg === "--prepare" ||
+      arg === "--help" ||
+      arg === "-h"
+    ) {
       switches.add(arg);
       continue;
     }
@@ -999,7 +1017,7 @@ function main(argv) {
     console.log(
       [
         "Usage:",
-        "  node tooling/release/release-packages.mjs --check-only --source <sha> \\",
+        "  node tooling/release/release-packages.mjs --check-only [--require-publishable] \\",
         "    --packages <a,b> --registry crates-io \\",
         "    [--registry-state <json>] [--archive-evidence <json>]",
         "  node tooling/release/release-packages.mjs --prepare --packages <a,b> \\",
@@ -1010,7 +1028,9 @@ function main(argv) {
         "",
         "Planning reads manifests, the version carrier, Git provenance and the",
         "given JSON files only: no credential, no network, no live registry query.",
-        "Exit 0 only for a plan that is valid and ready to publish.",
+        "",
+        "Exit 0 for a valid plan; --require-publishable additionally demands a",
+        "ready plan. A green check-only run never means publication was granted.",
       ].join("\n"),
     );
     return 0;
@@ -1019,6 +1039,10 @@ function main(argv) {
   const prepare = switches.has("--prepare");
   if (checkOnly === prepare) {
     console.error("exactly one of --check-only or --prepare is required");
+    return 2;
+  }
+  if (prepare && switches.has("--require-publishable")) {
+    console.error("--require-publishable belongs to --check-only");
     return 2;
   }
   const repoRoot = resolveRepoRoot();
@@ -1095,7 +1119,10 @@ function main(argv) {
   }
   const plan = planPackageRelease(repoRoot, { packages, sourceSha, registry, evidence });
   printPlan(plan);
-  return plan.ready ? 0 : 1;
+  // Two distinct outcomes: `--check-only` succeeds for a valid plan and states
+  // what is still missing, while `--require-publishable` is the gate a publish
+  // path must pass. Neither one grants publication by itself.
+  return plan.ok && (!switches.has("--require-publishable") || plan.ready) ? 0 : 1;
 }
 
 const invokedDirectly =
