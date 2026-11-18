@@ -88,20 +88,27 @@ states:
 }
 
 /**
- * One disposable home: the existing Rust seed (creator, workspace, durable store, worlds/KB),
+ * Seed one disposable home whose directory the CALLER already allocated.
+ *
+ * Every step here is fallible, so the name is chosen (and therefore owned) before
+ * this runs: `before` assigns the `mkdtempSync` result to the teardown field first,
+ * so a seed refusal, a spawn abort or a failed write still leaves `after` holding
+ * the path. This function never creates, renames or removes the root itself.
+ *
+ * One seeded home: the existing Rust seed (creator, workspace, durable store, worlds/KB),
  * the strategy bundle this target authors, the selected workspace's registered creative root
  * (the hosted execution owner's precondition) and the local protocol fixture as the selected
  * native provider.
  *
  * The developer's own `~/.nexus42` is never read or written.
  */
-function seedHome() {
-  const home = mkdtempSync(join(tmpdir(), 'nexus-authoring-native-'));
-  // `--locked --offline`: the seed resolves from the prepared local cache the
-  // build prerequisites populated, never from the caller's registry config. The
-  // explicit timeout + SIGKILL keeps a wedged cargo from blocking this
-  // synchronous call past the suite's own budget, and both pipes are captured
-  // so a failure reports the child's status and output.
+function seedHome(home) {
+  // `--locked --offline` forbid lockfile changes and any network access; they do
+  // NOT override the caller's Cargo configuration, so the prepared build
+  // prerequisites are what make the local cache sufficient. The explicit timeout
+  // + SIGKILL keeps a wedged cargo from blocking this synchronous call past the
+  // suite's own budget, and both pipes are captured so a failure reports the
+  // child's status and output.
   const seed = spawnSync(
     'cargo',
     [
@@ -145,7 +152,6 @@ command = ${JSON.stringify(dshFixture)}
 enabled = true
 `,
   );
-  return home;
 }
 
 describe('native authoring boundary', () => {
@@ -158,7 +164,13 @@ describe('native authoring boundary', () => {
     // value selects `keyed_all`. Every fetch below is keyless loopback, so a
     // developer/CI key would 401 before authoring was ever reached.
     delete process.env.NEXUS42_DAEMON_API_KEY;
-    home = seedHome();
+    // Allocate the name FIRST and hand it to the teardown field before any
+    // fallible step: ownership starts when the name is chosen, so a seed refusal
+    // (or an abort, or a failed write) still leaves `after` with the path to
+    // remove. Nothing is pre-deleted and the name is unique, so a run killed
+    // outright can only leave its own inert tree behind for no later run to touch.
+    home = mkdtempSync(join(tmpdir(), 'nexus-authoring-native-'));
+    seedHome(home);
     const { startService } = await import(join(serviceRoot, 'dist', 'index.js'));
     service = await startService({ home, host: '127.0.0.1', port: 0, allowRemote: false });
   });
