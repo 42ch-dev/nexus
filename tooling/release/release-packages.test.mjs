@@ -750,6 +750,35 @@ test("preparation writes only selected literals, dependency bounds and changelog
   }
 });
 
+test("preparation rewrites every declaration of a bumped prerequisite", () => {
+  // `nexus-knowledge` declares the contracts edge twice — a normal and a dev
+  // dependency — so one non-global rewrite would leave the other bound at the
+  // old minor while reporting success.
+  const { dir } = fixture({ version: "0.4.2" });
+  try {
+    const before = readRepoFile(dir, "crates/nexus-knowledge/Cargo.toml");
+    assert.equal(
+      before.match(/nexus-contracts = \{ version = "0\.4\.2"/g)?.length,
+      2,
+      before,
+    );
+    const result = preparePackageVersions(dir, {
+      packages: ["nexus-contracts"],
+      versions: { "nexus-contracts": "0.5.0" },
+    });
+    assert.equal(result.ok, true, JSON.stringify(result.refusals));
+    const after = readRepoFile(dir, "crates/nexus-knowledge/Cargo.toml");
+    assert.equal(after.match(/nexus-contracts = \{ version = "0\.4\.2"/g), null);
+    assert.equal(
+      after.match(/nexus-contracts = \{ version = "0\.5\.0"/g)?.length,
+      2,
+      after,
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
 test("preparation refuses a non-increasing version and a missing changelog", () => {
   const { dir } = fixture({ version: "0.4.2" });
   try {
@@ -951,7 +980,52 @@ test("check-only CLI plans from the reviewed source and exits on readiness", () 
       dir,
     );
     assert.equal(brokenEvidence.status, 2);
-    assert.match(brokenEvidence.stderr, /--archive-evidence .*unusable/);
+    assert.match(
+      brokenEvidence.stderr,
+      /refused: input-unusable: --archive-evidence .*missing\.json/,
+    );
+
+    // A well-formed JSON document of the wrong shape is a named refusal, never
+    // a TypeError from whatever reads it next.
+    const wrongShape = join(scratch, "wrong-shape.json");
+    writeFileSync(wrongShape, JSON.stringify({ results: 5 }), "utf8");
+    const badEvidence = runReleaseScript(
+      "release-packages.mjs",
+      [
+        "--check-only",
+        "--source",
+        sha,
+        "--packages",
+        "nexus-knowledge",
+        "--registry",
+        "crates-io",
+        "--archive-evidence",
+        wrongShape,
+      ],
+      dir,
+    );
+    assert.equal(badEvidence.status, 2);
+    assert.match(badEvidence.stderr, /refused: evidence-unreadable: --archive-evidence/);
+
+    const badState = join(scratch, "bad-state.json");
+    writeFileSync(badState, JSON.stringify({ published: 5, writable: true }), "utf8");
+    const refusedState = runReleaseScript(
+      "release-packages.mjs",
+      [
+        "--check-only",
+        "--source",
+        sha,
+        "--packages",
+        "nexus-knowledge",
+        "--registry",
+        "crates-io",
+        "--registry-state",
+        badState,
+      ],
+      dir,
+    );
+    assert.equal(refusedState.status, 2);
+    assert.match(refusedState.stderr, /refused: registry-state-unusable: --registry-state/);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
     cleanupTempRepo(dir);

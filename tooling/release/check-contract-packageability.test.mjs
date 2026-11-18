@@ -1,16 +1,29 @@
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { VERSION_BRACKETS_PATH } from "./version-surfaces.mjs";
-import { checkContractPackageability } from "./check-contract-packageability.mjs";
+import {
+  checkContractPackageability,
+  verifyStagedSource,
+} from "./check-contract-packageability.mjs";
 import {
   REPO_ROOT,
   cleanupTempRepo,
   createTempRepo,
   git,
+  gitOk,
   initGitRepo,
+  runReleaseScript,
   writeRepoFile,
 } from "./test-harness.mjs";
 
@@ -641,7 +654,10 @@ test("a pattern archive that drops an otherwise-unreferenced template fails the 
 
     const report = checkContractPackageability(dir);
     assert.equal(report.ok, false);
-    assert.equal(report.firstFailure, "nexus-pattern");
+    // This fixture carries one consumer, so failing it also withdraws the
+    // coverage proof of the archives it consumes; the failing consumer keeps
+    // its own named cause below.
+    assert.notEqual(report.firstFailure, null);
 
     const row = rowFor(report, "nexus-pattern");
     assert.equal(row.ok, false);
@@ -799,6 +815,171 @@ test("the narrative consumer reads a world and its KbStore entries from archives
     }
     assert.equal(rowFor(report, "nexus-knowledge").consumer, null);
   } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a tracked relative symlink stages verbatim, so a clean checkout is clean evidence", () => {
+  const dir = tinyFixture();
+  try {
+    writeRepoFile(dir, ".agents/skills/probe/SKILL.md", "# probe\n");
+    mkdirSync(join(dir, ".claude/skills"), { recursive: true });
+    symlinkSync(
+      "../../.agents/skills/probe",
+      join(dir, ".claude/skills/probe"),
+    );
+    gitOk(dir, ["add", "-A"]);
+    gitOk(dir, [
+      "-c",
+      "user.email=fixture@example.com",
+      "-c",
+      "user.name=Fixture",
+      "commit",
+      "-qm",
+      "track a relative link",
+    ]);
+
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
+    // The whole point: an unchanged checkout of a revision that contains a
+    // relative link must verify as that revision, or no plan can use the
+    // receipt (`unclean-evidence`).
+    assert.equal(report.source.clean, true, JSON.stringify(report.source));
+    assert.equal(report.source.mismatch, undefined);
+    const sha = report.source.sha;
+
+    // Staging preserves link bytes; the comparison still catches a retarget,
+    // so this is not a check that stopped checking.
+    const stage = mkdtempSync(join(tmpdir(), "nexus-stage-link-"));
+    try {
+      cpSync(dir, stage, {
+        recursive: true,
+        verbatimSymlinks: true,
+        filter: (source) => !source.split("/").includes(".git"),
+      });
+      assert.deepEqual(verifyStagedSource(dir, sha, stage), []);
+      rmSync(join(stage, ".claude/skills/probe"));
+      symlinkSync("../../.agents/skills/other", join(stage, ".claude/skills/probe"));
+      assert.ok(
+        verifyStagedSource(dir, sha, stage).includes(".claude/skills/probe"),
+        "a retargeted link is a mismatch",
+      );
+    } finally {
+      rmSync(stage, { recursive: true, force: true });
+    }
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("an archive no passing consumer consumes fails as a pack-only result", () => {
+  const dir = consumerFixtureRepo("positive-api-call", "nexus-fixture-public");
+  try {
+    // A second entry that packs but that no consumer fixture names: its own
+    // fixture is absent and nothing else consumes it.
+    writeRepoFile(dir, `${TINY_CRATE_DIR}/Cargo.toml`, TINY_MANIFEST);
+    writeRepoFile(dir, `${TINY_CRATE_DIR}/src/lib.rs`, "pub fn tiny() {}\n");
+    const carrier = JSON.parse(readFileSync(join(dir, VERSION_BRACKETS_PATH), "utf8"));
+    writeRepoFile(
+      dir,
+      VERSION_BRACKETS_PATH,
+      `${JSON.stringify(
+        {
+          contract: [
+            ...carrier.contract,
+            {
+              name: "nexus-tiny-contract",
+              manifest: `${TINY_CRATE_DIR}/Cargo.toml`,
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, false);
+    const uncovered = rowFor(report, "nexus-tiny-contract");
+    assert.equal(uncovered.ok, false);
+    assert.equal(
+      uncovered.cause,
+      "pack-only: no passing consumer consumes nexus-tiny-contract",
+    );
+    // The covered entry keeps its own consumer proof; coverage is a per-archive
+    // requirement, not a global switch.
+    const covered = rowFor(report, "nexus-fixture-public");
+    assert.equal(covered.ok, true, covered.cause ?? "");
+    assert.equal(covered.consumer.ok, true);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("--require-clean refuses a dirty tree and emits no receipt", () => {
+  const dir = tinyFixture();
+  try {
+    writeRepoFile(dir, `${TINY_CRATE_DIR}/src/late.rs`, "pub fn late() {}\n");
+    const refused = runReleaseScript(
+      "check-contract-packageability.mjs",
+      ["--require-clean", "--json"],
+      dir,
+    );
+    assert.equal(refused.status, 1, refused.stderr);
+    assert.match(refused.stderr, /refused: unclean-evidence/);
+    assert.equal(refused.stdout.trim(), "", "no receipt on an unclean tree");
+
+    // The plain check still reports the same tree and exits 0: the assertion is
+    // opt-in for the step that produces evidence.
+    const plain = runReleaseScript(
+      "check-contract-packageability.mjs",
+      ["--json"],
+      dir,
+    );
+    assert.equal(plain.status, 0, plain.stderr);
+    assert.equal(JSON.parse(plain.stdout).source.clean, false);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a filtered path is compared by the blob Git stores, not its working-tree bytes", () => {
+  // The repository tracks binary assets through an LFS clean filter, so a
+  // stored blob is a pointer rather than the checkout's bytes. Comparing the
+  // staged file raw reported every clean checkout as unclean; the comparison
+  // must run Git's own conversion over the staged copy.
+  const dir = tinyFixture();
+  const stage = mkdtempSync(join(tmpdir(), "nexus-stage-filter-"));
+  try {
+    writeRepoFile(dir, ".gitattributes", "*.upper filter=upper\n");
+    writeRepoFile(dir, "notes.upper", "hello\n");
+    assert.equal(git(dir, ["config", "filter.upper.clean", "tr a-z A-Z"]).status, 0);
+    gitOk(dir, ["add", "-A"]);
+    gitOk(dir, [
+      "-c",
+      "user.email=fixture@example.com",
+      "-c",
+      "user.name=Fixture",
+      "commit",
+      "-qm",
+      "track a filtered file",
+    ]);
+    const sha = gitOk(dir, ["rev-parse", "HEAD"]);
+    assert.equal(
+      git(dir, ["show", `${sha}:notes.upper`]).stdout,
+      "HELLO\n",
+      "the stored blob is the filtered content",
+    );
+
+    cpSync(dir, stage, {
+      recursive: true,
+      verbatimSymlinks: true,
+      filter: (source) => !source.split("/").includes(".git"),
+    });
+    assert.equal(readFileSync(join(stage, "notes.upper"), "utf8"), "hello\n");
+    assert.deepEqual(verifyStagedSource(dir, sha, stage), []);
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
     cleanupTempRepo(dir);
   }
 });

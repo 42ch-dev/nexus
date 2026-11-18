@@ -251,7 +251,12 @@ jobs:
           # so clippy above never fetches their graphs (e.g. `dlmalloc`).
           node -e 'for (const { manifest } of require("./tooling/release/version-brackets.json").contract) console.log(manifest)' \
             | while read -r manifest; do cargo fetch --manifest-path "$manifest"; done
-          node tooling/release/check-contract-packageability.mjs
+          # `--require-clean`: this step is the evidence source a release plan
+          # consumes, and the planner refuses a receipt whose staged tree is not
+          # the checked-out revision (`unclean-evidence`). Without the flag a
+          # symlink or mode drift would leave this step green while producing
+          # evidence nothing downstream can use.
+          node tooling/release/check-contract-packageability.mjs --require-clean
       # The release scripts decide what a governed release writes, so their
       # fixtures (both version brackets, every carrier rejection, the
       # packageability loop) must be green on the PR that changes them, not only

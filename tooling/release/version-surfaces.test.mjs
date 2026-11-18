@@ -253,20 +253,15 @@ test("the version brackets carrier names manifests whose package names agree", (
 });
 
 /**
- * The eight approved public packages, in carrier order. Pinned here on purpose:
- * publishing one more crate is a new consumer commitment, so it needs a
- * deliberate edit of this list — not just another carrier line.
+ * The public packages the carrier names, in carrier order. `version-brackets.json`
+ * is the only inventory: a second pinned list here would let a carrier edit pass
+ * while the privacy and caret rules still partitioned by the stale copy. The
+ * eight-count below keeps "publishing one more crate is a new consumer
+ * commitment" a deliberate act without keeping a second roster.
  */
-const PUBLIC_MANIFEST_PATHS = [
-  "crates/nexus-contracts/Cargo.toml",
-  "crates/nexus-workflow-ir/Cargo.toml",
-  "crates/nexus-pattern/Cargo.toml",
-  "crates/nexus-knowledge/Cargo.toml",
-  "crates/nexus-narrative/Cargo.toml",
-  "modules/nexus-module-sdk/Cargo.toml",
-  "modules/nexus-module-manifest/Cargo.toml",
-  "modules/nexus-module-test/Cargo.toml",
-];
+const PUBLIC_MANIFEST_PATHS = readVersionBrackets(REPO_ROOT).map(
+  (entry) => entry.manifest,
+);
 
 /** Approved public normal/build closure: repository edges only. */
 const PUBLIC_LOCAL_CLOSURE = {
@@ -282,10 +277,11 @@ const PUBLIC_LOCAL_CLOSURE = {
 
 test("the carrier is exactly the eight approved public manifests", () => {
   const entries = readVersionBrackets(REPO_ROOT);
-  assert.deepEqual(
-    entries.map((entry) => entry.manifest).sort(),
-    [...PUBLIC_MANIFEST_PATHS].sort(),
-    "the public set is exactly the eight approved packages",
+  assert.equal(entries.length, 8, "the public set is the eight approved packages");
+  assert.equal(
+    new Set(entries.map((entry) => entry.manifest)).size,
+    entries.length,
+    "each public package is one carrier entry",
   );
   for (const entry of entries) {
     assert.equal(
@@ -316,6 +312,11 @@ test("every package outside the eight public manifests is publish = false", () =
 });
 
 test("the public normal/build closure is exactly the approved local edge set", () => {
+  assert.deepEqual(
+    Object.keys(PUBLIC_LOCAL_CLOSURE).sort(),
+    readVersionBrackets(REPO_ROOT).map((entry) => entry.name).sort(),
+    "the approved edge set covers exactly the carrier's packages",
+  );
   const byName = new Map(readCargoPackageRows(REPO_ROOT).map((row) => [row.name, row]));
   for (const [name, expected] of Object.entries(PUBLIC_LOCAL_CLOSURE)) {
     const row = byName.get(name);

@@ -29,7 +29,13 @@
  *
  * Archive evidence (`evidence` argument / `--archive-evidence`) is the JSON that
  * `check-contract-packageability.mjs --json` prints: it carries the revision it
- * packed and whether that tree was clean, plus each archive's sha256.
+ * packed and whether that tree was clean, plus each archive's sha256. It is a
+ * planner input only — this helper never runs the checker and never refreshes it.
+ *
+ * Both JSON documents are shape-checked before planning reads them: a wrong
+ * shape is a named refusal (`registry-state-unusable` / `evidence-unreadable`,
+ * `input-unusable` for unreadable JSON) and a usage error, never a TypeError
+ * from a downstream property read.
  *
  * A plan has two verdicts: `ok` (no refusal) and `ready` (also every
  * prerequisite resolved to a satisfying selected or known-published version,
@@ -167,10 +173,31 @@ export function readSourceProvenance(repoRoot) {
 }
 
 /**
+ * Every inline declaration of `name` in one manifest, in file order: a package
+ * may declare the same edge more than once (`nexus-knowledge` names
+ * `nexus-contracts` as both a normal and a dev dependency), so planning and
+ * preparation both read the declarations here instead of the first match.
+ * `requirement` is null for a declaration without a `version` key.
+ *
+ * @param {string} contents
+ * @param {string} name
+ * @returns {{ requirement: string | null }[]}
+ */
+function inlineDeclarations(contents, name) {
+  const pattern = new RegExp(
+    `^\\s*${escapeRegExp(name)}\\s*=\\s*\\{([^}\\n]*)\\}\\s*$`,
+    "gm",
+  );
+  return [...contents.matchAll(pattern)].map((match) => ({
+    requirement: /\bversion\s*=\s*"([^"]*)"/.exec(match[1])?.[1] ?? null,
+  }));
+}
+
+/**
  * Inline dependency tables of an inventory manifest that name another
- * inventory package, with the requirement to satisfy. The `[dependencies.x]`
- * table form is refused: this helper rewrites bounds in place and must not
- * claim a package it cannot read the same way Cargo does.
+ * inventory package, with the requirement to satisfy: one edge per declaration.
+ * The `[dependencies.x]` table form is refused: this helper rewrites bounds in
+ * place and must not claim a package it cannot read the same way Cargo does.
  *
  * @param {string} contents
  * @param {string} manifestPath
@@ -188,18 +215,27 @@ function inventoryDependencies(contents, manifestPath, names) {
         `${manifestPath}: ${name} uses a dependency table; an inline table with a version requirement is required`,
       );
     }
-    const inline = new RegExp(`^\\s*${escaped}\\s*=\\s*\\{([^}\\n]*)\\}\\s*$`, "m").exec(contents);
-    if (inline === null) {
-      continue;
+    for (const declaration of inlineDeclarations(contents, name)) {
+      if (declaration.requirement === null) {
+        throw new ReleaseRefusal(
+          "unversioned-dependency",
+          `${manifestPath}: ${name} has no version requirement, so the package is not registry-ready`,
+        );
+      }
+      // Normal and dev declarations usually carry the same bound; one edge per
+      // distinct requirement keeps the plan free of duplicate prerequisite rows
+      // while a bound that differs is still checked on its own.
+      if (
+        dependencies.some(
+          (dependency) =>
+            dependency.name === name &&
+            dependency.requirement === declaration.requirement,
+        )
+      ) {
+        continue;
+      }
+      dependencies.push({ name, requirement: declaration.requirement });
     }
-    const requirement = /\bversion\s*=\s*"([^"]*)"/.exec(inline[1])?.[1];
-    if (requirement === undefined) {
-      throw new ReleaseRefusal(
-        "unversioned-dependency",
-        `${manifestPath}: ${name} has no version requirement, so the package is not registry-ready`,
-      );
-    }
-    dependencies.push({ name, requirement });
   }
   return dependencies;
 }
@@ -762,7 +798,12 @@ function replacePackageVersion(contents, manifestPath, version) {
 }
 
 /**
- * Rewrite one inline dependency requirement to `version`.
+ * Rewrite the inline requirement of every declaration of `name` to `version`.
+ * A manifest may declare the same edge twice (`nexus-knowledge` names
+ * `nexus-contracts` in `[dependencies]` and `[dev-dependencies]`); rewriting
+ * one bound leaves the other requiring a version the same local path no longer
+ * carries, so every declaration this scan can read is rewritten or the write
+ * refuses before touching the file.
  *
  * @param {string} contents
  * @param {string} manifestPath
@@ -773,9 +814,11 @@ function replacePackageVersion(contents, manifestPath, version) {
 function replaceDependencyRequirement(contents, manifestPath, name, version) {
   const pattern = new RegExp(
     `^(\\s*${escapeRegExp(name)}\\s*=\\s*\\{[^}\\n]*?\\bversion\\s*=\\s*)"[^"]*"`,
-    "m",
+    "gm",
   );
-  if (!pattern.test(contents)) {
+  const declarations = inlineDeclarations(contents, name);
+  const rewritable = contents.match(pattern) ?? [];
+  if (declarations.length === 0 || rewritable.length !== declarations.length) {
     throw new ReleaseRefusal(
       "dependency-form-unsupported",
       `${manifestPath}: cannot rewrite the ${name} requirement in place`,
@@ -1003,6 +1046,116 @@ function parseArgs(argv) {
 }
 
 /**
+ * One JSON input file, parsed. A missing or malformed file is a named refusal
+ * rather than a `TypeError` from whatever reads the value next.
+ *
+ * @param {string} path
+ * @returns {unknown}
+ */
+function readJsonFile(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new ReleaseRefusal(
+      "input-unusable",
+      error instanceof SyntaxError
+        ? "is not JSON"
+        : error instanceof Error
+          ? error.message
+          : String(error),
+    );
+  }
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Registry view shape, checked before planning reads `published` rows: a wrong
+ * shape would otherwise surface as a `TypeError` deep in the plan.
+ *
+ * @param {unknown} value
+ * @returns {{ published: { name: string; version: string; checksum?: string }[] | null; writable?: boolean }}
+ */
+function readRegistryView(value) {
+  if (!isRecord(value)) {
+    throw new ReleaseRefusal(
+      "registry-state-unusable",
+      'expected an object {"published": [...] | null, "writable": boolean}',
+    );
+  }
+  const published = value.published ?? null;
+  if (
+    published !== null &&
+    (!Array.isArray(published) ||
+      !published.every(
+        (row) =>
+          isRecord(row) &&
+          typeof row.name === "string" &&
+          typeof row.version === "string" &&
+          (row.checksum === undefined || typeof row.checksum === "string"),
+      ))
+  ) {
+    throw new ReleaseRefusal(
+      "registry-state-unusable",
+      '"published" must be null or an array of {name, version, checksum?}',
+    );
+  }
+  if (value.writable !== undefined && typeof value.writable !== "boolean") {
+    throw new ReleaseRefusal(
+      "registry-state-unusable",
+      '"writable" must be a boolean when present',
+    );
+  }
+  return /** @type {{ published: { name: string; version: string; checksum?: string }[] | null; writable?: boolean }} */ (
+    { published, writable: value.writable }
+  );
+}
+
+/**
+ * Archive evidence shape, checked before planning reads `source`/`results`.
+ * Only the fields the plan consumes are required; extra checker fields pass
+ * through untouched.
+ *
+ * @param {unknown} value
+ * @returns {{ source: { sha: string; clean: boolean }; results: { name: string; ok: boolean; archive: { sha256: string } | null; package: { version: string } | null }[] }}
+ */
+function readArchiveEvidence(value) {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.source) ||
+    typeof value.source.sha !== "string" ||
+    typeof value.source.clean !== "boolean" ||
+    !Array.isArray(value.results)
+  ) {
+    throw new ReleaseRefusal(
+      "evidence-unreadable",
+      'expected checker output {"source": {"sha", "clean"}, "results": [...]}',
+    );
+  }
+  for (const row of value.results) {
+    if (
+      !isRecord(row) ||
+      typeof row.name !== "string" ||
+      typeof row.ok !== "boolean" ||
+      (row.archive !== null && typeof row.archive?.sha256 !== "string") ||
+      (row.package !== null && typeof row.package?.version !== "string")
+    ) {
+      throw new ReleaseRefusal(
+        "evidence-unreadable",
+        "every result needs {name, ok, archive: {sha256} | null, package: {version} | null}",
+      );
+    }
+  }
+  return /** @type {ReturnType<typeof readArchiveEvidence>} */ (value);
+}
+
+/**
  * @param {string[]} argv
  * @returns {number}
  */
@@ -1093,14 +1246,14 @@ function main(argv) {
   const statePath = flags.get("--registry-state");
   if (statePath !== undefined) {
     try {
-      const state = JSON.parse(readFileSync(statePath, "utf8"));
-      registry.published = state.published ?? null;
-      if (typeof state.writable === "boolean") {
-        registry.writable = state.writable;
+      const view = readRegistryView(readJsonFile(statePath));
+      registry.published = view.published;
+      if (view.writable !== undefined) {
+        registry.writable = view.writable;
       }
     } catch (error) {
       console.error(
-        `--registry-state ${statePath}: unusable (${error instanceof Error ? error.message : error})`,
+        `refused: ${error.code ?? "input-unusable"}: --registry-state ${statePath}: ${error.message}`,
       );
       return 2;
     }
@@ -1110,10 +1263,10 @@ function main(argv) {
   const evidencePath = flags.get("--archive-evidence");
   if (evidencePath !== undefined) {
     try {
-      evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
+      evidence = readArchiveEvidence(readJsonFile(evidencePath));
     } catch (error) {
       console.error(
-        `--archive-evidence ${evidencePath}: unusable (${error instanceof Error ? error.message : error})`,
+        `refused: ${error.code ?? "input-unusable"}: --archive-evidence ${evidencePath}: ${error.message}`,
       );
       return 2;
     }

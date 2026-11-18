@@ -440,8 +440,9 @@ packs. There is no second list of names.
 
 Requirements are normal caret bounds (`"0.1.0"` means `^0.1.0`), so a dependent
 only needs a new bound when the prerequisite's new version leaves that range.
-`nexus-module-manifest` has no prerequisite and no consumer, so it can ship at
-any time.
+`nexus-module-manifest` has no prerequisite and no dependent *within this
+inventory*, so it can ship at any time; standalone module authors consume it,
+which is why the `nexus-module-manifest` fixture exists.
 
 ### Labels and tags
 
@@ -484,15 +485,37 @@ demands `ready`, so it exits `1` while any blocker stands. A green
 The archive side comes from the packageability checker:
 
 ```sh
-node tooling/release/check-contract-packageability.mjs --json > /tmp/evidence.json
+node tooling/release/check-contract-packageability.mjs --require-clean --json > /tmp/evidence.json
 node tooling/release/release-packages.mjs --check-only \
   --source "$(git rev-parse HEAD)" \
   --packages nexus-knowledge,nexus-narrative --registry crates-io \
   --registry-state /tmp/registry-state.json --archive-evidence /tmp/evidence.json
 ```
 
+**Every invocation is a fresh full-inventory repack.** The checker accepts no
+reuse input, no cache and no `--packages` narrowing: each run copies the working
+source into a new disposable scratch tree, packs all eight carrier entries
+offline, extracts every archive and re-runs each entry's consumer fixture, then
+deletes the scratch tree. Selecting two packages in the *planner* does not make
+the *check* cheaper — the two commands above cost one full eight-entry repack,
+and a release selection of one package costs the same. The scratch tree lives
+under `CARGO_TARGET_DIR` when that is set, so a worktree can keep its cargo cache;
+nothing else is reused between runs.
+
+`--archive-evidence` is a **planner input only**. The checker never reads it,
+and the planner never runs the checker: the file is the JSON the checker already
+printed. Passing it back therefore re-asserts a receipt whose revision must
+still equal `--source` (`source-mismatch`) and whose `source.clean` must still be
+`true` (`unclean-evidence`); re-running the planner does not refresh it.
+
 `--json` prints the same report as JSON and changes nothing about the human
-output or the exit code. It records the revision it packed (`source.sha`) and
+output or the exit code. `--require-clean` is the assertion a step that produces
+evidence needs: unless `source.clean` is `true` it prints a named
+`unclean-evidence` refusal and exits `1` **without emitting a report**, so no one
+can capture a receipt the planner will reject. It is a flag on the invocation,
+not a different check: the CI step runs the same repack with it.
+
+`--json` records the revision it packed (`source.sha`) and
 `source.clean`, which is true only when **both** hold: the worktree had no
 uncommitted change when sampled, and the copied tree matches that revision in
 both directions — every staged path has that revision's blob with the same
@@ -500,8 +523,31 @@ bytes, and every revision path is in the copy (`verifyStagedSource`). The second
 part closes the gap between sampling the status and copying the tree: a file
 changed *or added* in that window makes the receipt say `clean: false` and name
 the paths in `source.mismatch`, so the plan refuses it. What this proves is: the
-staged tree is that commit's tree. It does not prove who ran the checker, and it
-proves nothing about registry state.
+staged tree is that commit's tree. It does **not** prove:
+
+- gitlinks. A submodule (`160000 commit`) is one tree entry, and its initialized
+  contents are skipped on both sides — they are not compared and not archived.
+- executable modes. A regular file is compared by content blob id, so a
+  permission bit changed in the working tree still verifies `clean`.
+- authorship. Nothing authenticates who ran the checker, on what machine, from
+  what history; `source.sha` is whatever `HEAD` was at that moment.
+- registry state. The receipt says nothing about what the registry holds;
+  `--registry-state` is a separate, unverified snapshot.
+
+Symlinks *are* compared, by their stored target: staging copies link bytes
+verbatim rather than resolving them, so a tracked relative link (this repository
+keeps `.claude/skills/{check-pr,cli-review,greploop}`) verifies clean in a fresh
+checkout. A retargeted link is a `source.mismatch`.
+
+Consumers are part of that proof. A presence-based rule would let a missing
+fixture pass silently, so when any fixture exists every archive must be consumed
+by a *passing* consumer: `nexus-knowledge` has no runner of its own and is
+proven through the `nexus-narrative` fixture that consumes it. An archive no
+passing consumer resolves fails the run with
+`pack-only: no passing consumer consumes <name>` — a pack-only row is a
+recognisable result, not a passing one. A repository with no consumer fixtures
+at all is checked as pack-only, which is what the fixtures' own isolation tests
+are.
 
 `--registry-state <json>` takes `{ "published": [{ "name", "version",
 "checksum" }], "writable": true }`. Without it, live registry state is *unknown*:
@@ -541,6 +587,7 @@ What the plan refuses, and why:
 | Refusal | Meaning |
 |---------|---------|
 | `unknown-selection` | a name outside the eight-entry inventory |
+| `registry-state-unusable` / `input-unusable` | a JSON input has the wrong shape (e.g. `"published"` is not an array of `{name, version, checksum?}`) or is not readable JSON; a usage error, exit `2`, never a `TypeError` |
 | `invalid-source` | `--source` is not a full 40-hex commit sha |
 | `source-unreadable` | the checkout or its status could not be read (fail closed, never "clean") |
 | `unclean-source` / `unclean-provenance` | `--source` is not `HEAD`, or any file in the packed tree is uncommitted |
@@ -575,10 +622,15 @@ still unconfigured — the code refuses rather than pretending otherwise, and
 `contract-release.yml` cannot upload anything.
 
 `publishSelected(plan, client)` is the only publication seam and it never
-constructs its client: the operator-authorized run supplies one. It uploads in
-plan order (prerequisites first), confirms each upload by re-reading the
-registry checksum, and stops at the first failure. A multi-package upload is
-**not** atomic:
+constructs its client: the caller supplies one. There is **no** in-repository
+client and no shipped call site — the repository's only implementation is the
+isolated protocol fixture the tests use (`tooling/release/release-packages.test.mjs`,
+in-memory, no network), so nothing here can publish. Until an operator-authorized
+run supplies a real client, this section describes a seam and its refusal
+behavior, not an available operation; the CLI exposes no publish switch at all.
+It uploads in plan order (prerequisites first), confirms each upload by
+re-reading the registry checksum, and stops at the first failure. A
+multi-package upload is **not** atomic:
 
 - completed package/version pairs are reported as completed and stay published;
 - the failing pair and everything after it stay pending;
@@ -611,11 +663,37 @@ that would no longer accept those versions, and the selected changelogs (the
 packages are untouched; a target version that is not strictly greater than the
 current literal refuses, and so does a selected package without a changelog.
 
+A package may declare the same prerequisite twice — `nexus-knowledge` names
+`nexus-contracts` in both `[dependencies]` and `[dev-dependencies]` — and every
+declaration in an inventory manifest is rewritten, not just the first: leaving
+one bound behind points the same local path at two different requirements. A
+declaration whose form this helper cannot rewrite (a `[dependencies.x]` table, or
+an inline table spanning lines) refuses before any file is written.
+
 Preparation does not rewrite lockfiles: they are generated. The same pull request
 must let Cargo regenerate the affected locks — `cargo update --workspace
 --offline` for the root and the standalone `modules/*` roots whose dependents
 resolve the bumped package — or a `--locked` build rejects the prepared
 checkout.
+
+**It does not touch the consumer fixtures' own bounds.** The archive consumers
+under `tooling/release/fixtures/package-consumers/` pin their requirements as
+literals (`nexus-pattern`, `nexus-workflow-ir` and `nexus-narrative` all request
+`"0.1.0"` for what they consume, and the SDK guest is a crate of its own). Those
+files are not inventory manifests, so preparation leaves them alone — and they
+do not resolve like the workspace does: the checker patches each consumed
+package to the *newly extracted* archive, so a fixture still asking `^0.1.0`
+cannot use a `0.2.0` archive even when the old version sits in the cargo cache.
+
+The operator therefore carries the fixtures in the same reviewed pull request:
+after `--prepare`, update every fixture requirement for a package whose new
+version leaves the old caret range, guest manifests included, and only then
+regenerate the locks and run the checker. `node
+tooling/release/check-contract-packageability.mjs --require-clean` is the proof
+that the pair is consistent: a forgotten fixture bound fails its consumer with a
+named cause instead of quietly passing. The synthetic fixtures that deliberately
+carry a wrong or private bound (`incompatible-sibling-requirement`,
+`forbidden-private-dependency`, …) are controls and stay as they are.
 
 ## Signing arrival
 

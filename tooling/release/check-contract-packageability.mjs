@@ -45,10 +45,12 @@
  * skipped on both sides of that verification, because its contents are not part
  * of this revision's tree.
  *
- * CLI: node tooling/release/check-contract-packageability.mjs
+ * CLI: node tooling/release/check-contract-packageability.mjs [--json] [--require-clean]
  *
  * Exit 0 when all contract crates are packageable (and every present consumer
- * fixture passes); non-zero otherwise.
+ * fixture passes, and every archive is consumed by a passing consumer);
+ * non-zero otherwise. `--require-clean` additionally refuses unless the packed
+ * source is the clean reviewed revision, and then emits no report.
  *
  * @module tooling/release/check-contract-packageability
  */
@@ -188,13 +190,15 @@ function contractDependencies(manifestContents, entries) {
  * @param {string} command
  * @param {string[]} args
  * @param {string} cwd
+ * @param {string} [input] Stdin content, for the batched `hash-object` read.
  * @returns {{ ok: boolean; stdout: string; stderr: string; output: string }}
  */
-function run(command, args, cwd) {
+function run(command, args, cwd, input) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
     env: { ...process.env, CARGO_TERM_COLOR: "never" },
+    input,
     // The staging path list is a whole checkout; the default pipe buffer is
     // smaller than a big `git ls-files` result.
     maxBuffer: 64 * 1024 * 1024,
@@ -296,6 +300,12 @@ function workingSourcePaths(repoRoot) {
  * executable bits and symlinks are preserved because packed build scripts and
  * tools depend on them.
  *
+ * `verbatimSymlinks` copies a link's target bytes instead of resolving them
+ * against the source directory: a tracked relative link (this repository keeps
+ * three under `.claude/skills/`) must stay relative, or {@link verifyStagedSource}
+ * compares an absolute path with the revision's stored target and reports a
+ * clean checkout as unclean.
+ *
  * @param {string} repoRoot
  * @param {string} stageRoot
  */
@@ -319,7 +329,7 @@ function stageWorkingSource(repoRoot, stageRoot) {
     }
     const destination = join(stageRoot, path);
     mkdirSync(dirname(destination), { recursive: true });
-    cpSync(source, destination, { recursive: true });
+    cpSync(source, destination, { recursive: true, verbatimSymlinks: true });
     if (!stats.isSymbolicLink()) {
       chmodSync(destination, stats.mode);
     }
@@ -674,7 +684,7 @@ function runConsumer({
   }
 
   const consumerRoot = join(scratchRoot, "consumers", entryName);
-  cpSync(fixturePath, consumerRoot, { recursive: true });
+  cpSync(fixturePath, consumerRoot, { recursive: true, verbatimSymlinks: true });
   /** @type {ConsumerEvidence} */
   const evidence = {
     case: `${CONSUMER_FIXTURES_PATH}/${entryName}`,
@@ -973,10 +983,13 @@ function stagedPaths(directory, gitlinks) {
  * what makes an archive hash attributable to a revision even though the copy
  * happens later.
  *
- * Symlinks are compared by their stored target. Ignored/scratch entries are
- * skipped exactly as {@link stageWorkingSource} skips them. A gitlink subtree is
- * skipped on both sides: the revision records one tree entry there, so an
- * initialized submodule's contents are neither extras nor compared.
+ * Symlinks are compared by their stored target. Regular files are compared by
+ * the content id Git computes for the staged copy with the repository's own
+ * conversion (clean filters included), because a filtered path's stored blob is
+ * not its working-tree bytes. Ignored/scratch entries are skipped exactly as
+ * {@link stageWorkingSource} skips them. A gitlink subtree is skipped on both
+ * sides: the revision records one tree entry there, so an initialized
+ * submodule's contents are neither extras nor compared.
  *
  * @param {string} repoRoot
  * @param {string} sha
@@ -1019,6 +1032,8 @@ export function verifyStagedSource(repoRoot, sha, directory) {
   const mismatches = [];
   const staged = stagedPaths(directory, gitlinks);
   const stagedSet = new Set(staged);
+  /** Staged regular files whose content id is read in one batch below. */
+  const toHash = [];
   for (const path of staged) {
     const entry = revision.get(path);
     if (entry === undefined) {
@@ -1041,8 +1056,42 @@ export function verifyStagedSource(repoRoot, sha, directory) {
       }
       continue;
     }
-    if (!stats.isFile() || blobId(readFileSync(stagedFile)) !== entry.id) {
+    if (!stats.isFile()) {
       mismatches.push(path);
+      continue;
+    }
+    toHash.push(path);
+  }
+  if (toHash.length > 0) {
+    // Regular files are hashed by Git with the repository's own content
+    // conversion, against the staged copy as its work tree: this repository
+    // tracks binary assets through an LFS clean filter, so the stored blob of
+    // such a path is a pointer rather than the working-tree bytes. Hashing the
+    // staged file raw would report every clean checkout as unclean; hashing it
+    // through `--work-tree` keeps the packed copy the thing being measured.
+    // shortcut: `--stdin-paths` splits on newline, so a tracked path containing
+    // one aborts the batch as unverifiable instead of being compared wrongly.
+    const hashed = run(
+      "git",
+      ["--work-tree", directory, "hash-object", "--stdin-paths"],
+      repoRoot,
+      // Absolute paths: `hash-object` opens exactly these, and `--work-tree`
+      // is what maps them back to the staged tree's attributes.
+      `${toHash.map((path) => join(directory, path)).join("\n")}\n`,
+    );
+    const ids = hashed.ok ? hashed.stdout.split("\n").filter((id) => id.length > 0) : [];
+    if (ids.length !== toHash.length) {
+      mismatches.push(
+        `<unreadable staged content: ${
+          hashed.output.split("\n")[0] || "git hash-object failed"
+        }>`,
+      );
+    } else {
+      toHash.forEach((path, index) => {
+        if (ids[index] !== revision.get(path)?.id) {
+          mismatches.push(path);
+        }
+      });
     }
   }
   for (const path of [...revision.keys()].sort()) {
@@ -1149,6 +1198,25 @@ export function checkContractPackageability(repoRoot) {
           row.cause = consumer.cause;
         }
       }
+      // An entry with no fixture of its own is consumed by another entry's
+      // fixture (knowledge by narrative), so a passing package row is not proof
+      // its archive is usable. When fixtures exist, every archive must be
+      // consumed by a passing consumer; a row without one stays a pack-only
+      // result and is named as such instead of counting as covered.
+      const consumed = new Set(
+        results.flatMap((row) =>
+          row.consumer?.ok === true
+            ? row.consumer.patched.map((dependency) => dependency.name)
+            : [],
+        ),
+      );
+      for (const row of results) {
+        if (row.archive === null || !row.ok || consumed.has(row.name)) {
+          continue;
+        }
+        row.ok = false;
+        row.cause = `pack-only: no passing consumer consumes ${row.name}`;
+      }
     }
   } finally {
     rmSync(scratchRoot, { recursive: true, force: true });
@@ -1196,11 +1264,14 @@ function main(argv) {
   if (argv.includes("--help") || argv.includes("-h")) {
     console.log(
       [
-        "Usage: node tooling/release/check-contract-packageability.mjs [--json]",
+        "Usage: node tooling/release/check-contract-packageability.mjs [--json] [--require-clean]",
         "",
         "--json prints the report as JSON for a release plan to consume",
         "(`release-packages.mjs --check-only --archive-evidence <file>`);",
         "the human output and the exit code are unchanged.",
+        "--require-clean refuses (exit 1) unless the packed source is the clean",
+        "revision, and prints no report: a plan rejects such evidence as",
+        "`unclean-evidence`, so a step producing it must not stay green.",
       ].join("\n"),
     );
     return 0;
@@ -1211,6 +1282,14 @@ function main(argv) {
     console.error(
       `warning: staged source differs from ${report.source.sha} at ${report.source.mismatch.length} path(s); the archives are not that revision's bytes`,
     );
+  }
+  if (argv.includes("--require-clean") && !report.source.clean) {
+    console.error(
+      `refused: unclean-evidence: the packed source is not a clean ${report.source.sha ?? "readable revision"} at ${
+        report.source.mismatch?.length ?? 0
+      } path(s); no receipt is emitted`,
+    );
+    return 1;
   }
   if (argv.includes("--json")) {
     console.log(JSON.stringify(report, null, 2));
