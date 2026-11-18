@@ -409,8 +409,7 @@ fn profile_from_exe_infers_the_profile_directory_and_rejects_other_layouts() {
         let error =
             profile_from_exe(Path::new(layout)).expect_err("an ambiguous layout must fail closed");
         assert!(
-            error.contains("expected `deps` or `build`")
-                || error.contains("no `target` component"),
+            error.contains("expected `deps` or `build`") || error.contains("no `target` component"),
             "{error}"
         );
     }
