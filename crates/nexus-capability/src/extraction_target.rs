@@ -24,6 +24,7 @@ pub struct ExtractionTarget {
 
 impl ExtractionTarget {
     /// The trusted-context JSON field the extraction capability consumes.
+    #[must_use]
     pub fn context_value(&self) -> serde_json::Value {
         serde_json::json!({
             "world_id": self.world_id,

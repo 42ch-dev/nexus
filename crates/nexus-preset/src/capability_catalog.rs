@@ -105,12 +105,12 @@ static BUILTIN_CAPABILITIES: &[(&str, &str)] = &[
 ];
 
 /// Iterate the canonical builtin declaration (C3) — the name column of
-/// [`BUILTIN_CAPABILITIES`]. This is THE projection every builtin-name
-/// consumer must read: boot scan collision ownership, watcher rebuild
-/// collision ownership, registry reservation and dispatch's known-name
-/// discrimination all derive from it, never from constructed handler
-/// objects.
-#[must_use]
+/// [`BUILTIN_CAPABILITIES`].
+///
+/// This is THE projection every builtin-name consumer must read: boot scan
+/// collision ownership, watcher rebuild collision ownership, registry
+/// reservation and dispatch's known-name discrimination all derive from it,
+/// never from constructed handler objects.
 pub fn builtin_names() -> impl Iterator<Item = &'static str> {
     BUILTIN_CAPABILITIES.iter().map(|(name, _)| *name)
 }

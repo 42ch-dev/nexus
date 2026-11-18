@@ -160,37 +160,45 @@ impl PeerResponder for ConnectResponderAdapter {
 /// builtin roster alone is the reserved set (the caller-side snapshot helper
 /// [`live_reserved_tool_ids`] covers exactly that case).
 #[allow(clippy::too_many_arguments)] // one decision, the eight admission inputs
-pub fn admit_consistent_with_reservation(
+pub fn admit_consistent_with_reservation<S: std::hash::BuildHasher>(
     table: &PeerToolTable,
     capability_registry: Option<&CapabilityRegistryHolder>,
-    builtin_tool_ids: &HashSet<String>,
+    builtin_tool_ids: &HashSet<String, S>,
     peer_id: &str,
     manifest: &nexus_spoke_adapter::HostCapabilityManifest,
     responder: &Arc<dyn PeerResponder>,
-    daemon_capabilities: &HashSet<String>,
-    tool_allowlist: &HashSet<String>,
+    daemon_capabilities: &HashSet<String, S>,
+    tool_allowlist: &HashSet<String, S>,
 ) -> AdmissionOutcome {
+    // `admit_and_register` takes std-hasher sets; the caller's hasher is
+    // build-agnostic, so normalize the three read-only inputs once (small
+    // rosters, low-frequency decision path).
+    let builtin_tool_ids: HashSet<String> = builtin_tool_ids.iter().cloned().collect();
+    let daemon_capabilities: HashSet<String> = daemon_capabilities.iter().cloned().collect();
+    let tool_allowlist: HashSet<String> = tool_allowlist.iter().cloned().collect();
     let decide = |reserved: &HashSet<String>| {
         table.admit_and_register(
             peer_id,
             manifest,
             responder,
-            daemon_capabilities,
-            tool_allowlist,
+            &daemon_capabilities,
+            &tool_allowlist,
             reserved,
         )
     };
-    match capability_registry {
-        Some(holder) => holder.with_live_reservation(|live_reservation| {
-            let mut reserved: HashSet<String> = builtin_tool_ids.clone();
-            reserved.extend(live_reservation.iter().map(|name| (*name).to_owned()));
-            decide(&reserved)
-        }),
-        None => decide(&live_reserved_tool_ids(
-            builtin_tool_ids.iter().cloned(),
-            None,
-        )),
-    }
+    // The builtin roster is hash-build-agnostic input; the live reservation
+    // is only ever read with the std hasher inside the holder.
+    let builtin_roster = live_reserved_tool_ids(builtin_tool_ids.iter().cloned(), None);
+    capability_registry.map_or_else(
+        || decide(&builtin_roster),
+        |holder| {
+            holder.with_live_reservation(|live_reservation| {
+                let mut reserved = builtin_roster.clone();
+                reserved.extend(live_reservation.iter().map(|name| (*name).to_owned()));
+                decide(&reserved)
+            })
+        },
+    )
 }
 
 /// The caller-side reserved-tool-id SNAPSHOT: the injected builtin ids plus

@@ -180,25 +180,29 @@ pub fn rebuild_registry_with_merge(
 ) -> (CapabilityRegistry, ScanOutcome) {
     #[cfg(feature = "wasm")]
     {
-        return rebuild_registry_inner(
+        rebuild_registry_inner(
             CapabilityRegistry::with_runtime_deps(deps),
             scan_dir,
             mirror,
             None,
-        );
+        )
     }
     #[cfg(not(feature = "wasm"))]
-    rebuild_registry_inner(
-        CapabilityRegistry::with_runtime_deps(deps),
-        scan_dir,
-        mirror,
-        (),
-    )
+    {
+        rebuild_registry_inner(
+            CapabilityRegistry::with_runtime_deps(deps),
+            scan_dir,
+            mirror,
+            (),
+        )
+    }
 }
 
-/// Engine boot arm of [`rebuild_registry_with_merge`] (feature `wasm`):
-/// rebuilds the builtins through [`CapabilityRegistry::with_runtime_deps_and_wasm`]
-/// and forwards the daemon-wide executor handles into the scan (AR-37).
+/// Engine boot arm of [`rebuild_registry_with_merge`] (feature `wasm`).
+///
+/// Rebuilds the builtins through
+/// [`CapabilityRegistry::with_runtime_deps_and_wasm`] and forwards the
+/// daemon-wide executor handles into the scan (AR-37).
 #[must_use]
 #[cfg(feature = "wasm")]
 pub fn rebuild_registry_with_merge_with_executor(
@@ -746,6 +750,7 @@ mod tests {
     /// 3. A hot swap that DROPS the row leaves the name reserved: metadata
     ///    gone, reservation intact.
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // one generation-sequence narrative; splitting hides the swap story
     async fn unbound_compute_name_remains_reserved_after_hot_swap() {
         use nexus_preset::capability_catalog::CapabilityCatalog;
 
@@ -883,7 +888,7 @@ mod tests {
     /// fix round 2 relabel): this case drives the two half-steps manually in
     /// the safe order, so changing only the composition inside `swap` cannot
     /// make it fail. What it pins is the half-step SEMANTICS the safe
-    /// composition relies on: reserve_generation alone joins the live
+    /// composition relies on: `reserve_generation` alone joins the live
     /// reservation before publication, and the intermediate state (name
     /// reserved, row not yet live) is observable. Discrimination against a
     /// bad `swap` order is carried by the publication-path invariant —

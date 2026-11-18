@@ -456,7 +456,7 @@ impl Capability for UserCapability {
         // matches keep compiling).
         #[cfg(feature = "wasm")]
         {
-            return self.run_wasm(input).await;
+            return self.run_wasm(input);
         }
 
         #[cfg(not(feature = "wasm"))]
@@ -477,7 +477,7 @@ impl UserCapability {
     /// WASM executor body (feature `wasm`): resolves the engine + cache, then
     /// compiles/runs the admitted module fail-closed (AR-37 envelope).
     #[cfg(feature = "wasm")]
-    pub(crate) async fn run_wasm(&self, input: Value) -> Result<Value, CapabilityError> {
+    pub(crate) fn run_wasm(&self, input: Value) -> Result<Value, CapabilityError> {
         let (Some(engine), Some(module_cache)) = (&self.engine, &self.module_cache) else {
             tracing::warn!(
                 capability = %self.name,

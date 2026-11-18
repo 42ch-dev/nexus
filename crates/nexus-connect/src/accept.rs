@@ -512,7 +512,7 @@ async fn monitor_session(
             // slipping between a snapshot read and the insert. See
             // `table::admit_consistent_with_reservation`.
             match crate::table::admit_consistent_with_reservation(
-                &crate::peer_tool_table(),
+                crate::peer_tool_table(),
                 options.capability_registry.as_ref(),
                 &options.builtin_tool_ids,
                 &peer_id,

@@ -80,6 +80,7 @@ struct PriorWorkRef {
 
 impl WorkRefClaim {
     /// The ref this run must use for every `Works/<ref>/` read and port commit.
+    #[must_use]
     pub fn effective(&self) -> &str {
         &self.effective
     }
@@ -326,6 +327,7 @@ pub mod test_support {
     impl RecordingExecutor {
         /// A recorder with no bound workspace: `commit_work_artifact` still
         /// writes, but a caller that must resolve `Works/` refuses first.
+        #[must_use]
         pub fn new() -> std::sync::Arc<Self> {
             std::sync::Arc::new(Self::default())
         }
@@ -341,6 +343,7 @@ pub mod test_support {
 
         /// A recorder whose commit of `rel_child` refuses like the port does
         /// for a Work with no `works` row.
+        #[must_use]
         pub fn refusing(rel_child: &'static str) -> std::sync::Arc<Self> {
             std::sync::Arc::new(Self {
                 commits: std::sync::Mutex::new(Vec::new()),
@@ -373,7 +376,7 @@ pub mod test_support {
             })
         }
 
-        pub fn reached(&self) -> Option<&std::sync::Arc<tokio::sync::Notify>> {
+        pub const fn reached(&self) -> Option<&std::sync::Arc<tokio::sync::Notify>> {
             self.hang.as_ref()
         }
 

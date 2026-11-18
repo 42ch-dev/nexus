@@ -444,8 +444,6 @@ fn inject_source_chapters(base_payload: &str, chapters: &[i32]) -> String {
 
 // ── Trusted extraction target (v1.191 P1 T13) ─────────────────────────
 
-/// The trusted target of one production extraction run (durable §§3, 8;
-
 // ── Hook entry point ──────────────────────────────────────────────────
 
 /// Review-time KB extraction hook (V1.50 T-B P1; V1.51 T-A P0 LLM swap).

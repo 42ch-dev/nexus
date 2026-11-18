@@ -1217,7 +1217,9 @@ impl CapabilityRegistryHolder {
         // Names are `&'static str`, so the snapshot needs no lock lifetime:
         // collected under a short read guard, then streamed without holding
         // the lock (an admission closure can run under the write lock while
-        // a caller still iterates an older projection).
+        // a caller still iterates an older projection). The collect is
+        // deliberate — the read guard cannot be returned with the iterator.
+        #[allow(clippy::needless_collect)]
         let names: Vec<&'static str> = self
             .reserved
             .read()
@@ -1589,7 +1591,7 @@ mod tests {
             cdn_config: None,
             workspace_executor: None,
         };
-        let mut reg = CapabilityRegistry::with_runtime_deps(&deps);
+        let reg = CapabilityRegistry::with_runtime_deps(&deps);
         let base_len = reg.len();
         let base_names: Vec<&str> = reg.iter().map(Capability::name).collect();
         let (reg, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, tmp.path());

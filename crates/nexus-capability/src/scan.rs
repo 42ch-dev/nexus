@@ -113,10 +113,12 @@ pub struct ScanOutcome {
 pub fn scan_user_capabilities(dir: &Path, builtin_names: &HashSet<&str>) -> ScanOutcome {
     #[cfg(feature = "wasm")]
     {
-        return scan_user_capabilities_inner(dir, builtin_names, (None, None));
+        scan_user_capabilities_inner(dir, builtin_names, &(None, None))
     }
     #[cfg(not(feature = "wasm"))]
-    scan_user_capabilities_inner(dir, builtin_names, ())
+    {
+        scan_user_capabilities_inner(dir, builtin_names, ())
+    }
 }
 
 /// Engine boot arm of [`scan_user_capabilities`] (feature `wasm`, AR-37):
@@ -131,15 +133,20 @@ pub fn scan_user_capabilities_with_executor(
     engine: Option<&std::sync::Arc<nexus_wasm_host::WasmEngine>>,
     module_cache: Option<&std::sync::Arc<nexus_wasm_host::ModuleCache>>,
 ) -> ScanOutcome {
-    scan_user_capabilities_inner(dir, builtin_names, (engine.cloned(), module_cache.cloned()))
+    scan_user_capabilities_inner(
+        dir,
+        builtin_names,
+        &(engine.cloned(), module_cache.cloned()),
+    )
 }
 
 #[must_use]
 #[allow(clippy::implicit_hasher)]
+#[allow(clippy::too_many_lines)] // one linear scan loop: splitting it scatters the AR-43 gate sequence
 fn scan_user_capabilities_inner(
     dir: &Path,
     builtin_names: &HashSet<&str>,
-    #[cfg(feature = "wasm")] executor: (
+    #[cfg(feature = "wasm")] executor: &(
         Option<std::sync::Arc<nexus_wasm_host::WasmEngine>>,
         Option<std::sync::Arc<nexus_wasm_host::ModuleCache>>,
     ),

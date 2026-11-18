@@ -33,6 +33,11 @@ pub fn write_module_pair(dir: &Path) -> String {
 /// Like [`write_module_pair`] but with caller-chosen wasm bytes — the
 /// hot-reload edit tests need a trio whose digest differs from the
 /// fixture's constant bytes while the sha pairing still passes.
+///
+/// # Panics
+///
+/// Panics if the module files cannot be written (e.g. `dir` does not exist
+/// or is not writable) — test fixtures treat that as an authoring error.
 #[must_use]
 pub fn write_module_pair_with_bytes(dir: &Path, wasm: &[u8]) -> String {
     let sha = sha256_hex(wasm);
@@ -69,6 +74,11 @@ pub fn descriptor_json(name: &str, sha: &str) -> String {
 /// Write an admitted `<name>/capability.json` trio (AR-35 layout): a
 /// hash-consistent `manifest.json` + `<module-id>.wasm` pair so the AR-43
 /// admission gates pass inside the scan.
+///
+/// # Panics
+///
+/// Panics if the capability directory cannot be created or any of the three
+/// files cannot be written — test fixtures treat that as an authoring error.
 pub fn write_capability_dir(root: &Path, name: &str) {
     let dir = root.join(name);
     std::fs::create_dir_all(&dir).unwrap();
