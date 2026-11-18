@@ -566,6 +566,9 @@ went wrong:
 - `unresolved-coverage: <name> was patched into a consumer but resolution never
   used its archive` — a declared patch that resolution ignored (a
   target-specific or otherwise unused declaration);
+- `misdirected-fixture: <name> declares <case>, but only <cases> resolved its
+  archive` — the declared fixture belongs to another entry: this archive was
+  consumed, but not by the runner the entry names;
 - `pack-only: no passing consumer consumes <name>` — no fixture named it at all.
 
 Both are failures, not pack-only passes.
@@ -588,7 +591,10 @@ directory anyway. A declared directory is also the one that runs: the runner
 stages `fixtures/package-consumers/<declared directory>` and reports that path as
 the consumer case, so the record and the consumer evidence cannot name different
 directories, and a declared runner is never skipped in favour of another
-fixture's coverage.
+fixture's coverage. The declared fixture must also be one of the fixtures that
+resolved the entry's archive: a declaration pointing at another entry's fixture
+fails as `misdirected-fixture`, even when some other fixture does consume this
+archive.
 
 What that cannot establish is intent. A repository that declares no fixtures at
 all is a legitimate pack-only run, which is what the fixtures' own isolation
