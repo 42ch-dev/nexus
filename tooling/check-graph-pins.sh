@@ -112,6 +112,12 @@
 #                                 `tooling/fixtures/authoring-cohorts` under
 #                                 both of its selections (its own manifest, so
 #                                 `--manifest-path` never substitutes for it).
+#                                 `connect` = the Connect product/library split:
+#                                 the shipped Connect-only runtime keeps its
+#                                 core domain/storage and explicit spoke compute
+#                                 while linking no engine/authoring/Host/rmcp
+#                                 plane, and the enabled Connect library still
+#                                 excludes core itself.
 #                                 Other plans add their cohorts as their real
 #                                 source lands; an unknown name fails.
 #   --manifest-path <Cargo.toml>  resolve every probe against that workspace.
@@ -431,18 +437,18 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "usage: $0 [--cohort domain|catalog|policy|capability|authoring] [--manifest-path <Cargo.toml>]"
+      echo "usage: $0 [--cohort domain|catalog|policy|capability|authoring|connect] [--manifest-path <Cargo.toml>]"
       exit 0
       ;;
     *)
-      fail "unknown argument '$1' (usage: $0 [--cohort domain|catalog|policy|capability|authoring] [--manifest-path <Cargo.toml>])"
+      fail "unknown argument '$1' (usage: $0 [--cohort domain|catalog|policy|capability|authoring|connect] [--manifest-path <Cargo.toml>])"
       ;;
   esac
 done
 if [[ -n "$COHORT" ]]; then
   case "$COHORT" in
-    domain | catalog | policy | capability | authoring) ;;
-    *) fail "unknown cohort '$COHORT' (known: domain, catalog, policy, capability, authoring)" ;;
+    domain | catalog | policy | capability | authoring | connect) ;;
+    *) fail "unknown cohort '$COHORT' (known: domain, catalog, policy, capability, authoring, connect)" ;;
   esac
 fi
 if [[ -n "$MANIFEST_PATH" && ! -f "$MANIFEST_PATH" ]]; then
@@ -699,6 +705,84 @@ if [[ "$COHORT" == "authoring" ]]; then
   exit 0
 fi
 
+# --- scoped cohort: Connect product/library split (v1.249 S6) ----------------
+# One claim in two halves: the shipped Connect product is engine-free WITHOUT
+# being core-free, and the library it serves does not depend back on core.
+#
+# (1) The ENABLED Connect library (`connect-client,embedded-mcp`, the widest
+#     selection `nexus-connect` ships). Its positive rows prove a real resolved
+#     graph (capability holder, WS transport and the rmcp bridge), and its
+#     absences cover core plus the four engine/store/graph planes. This is the
+#     direction the extraction locked: `nexus-core → nexus-connect` only. It
+#     runs FIRST because the product reaches the library through its own
+#     `nexus-connect` edge: a real back-edge would otherwise fail the product
+#     rows below and hide which half regressed.
+#
+# (2) The Connect-only product selector `nexus42 --no-default-features
+#     --features connect-host`. Positive rows first: the product RETAINS the
+#     core domain, the guarded local storage and the explicit spoke compute
+#     (`compute` → the real WASM host) it serves today. The absences then cover
+#     every plane the cutover removed — orchestration/execution/session-storage
+#     (engine + durable store), graph-flow, the authoring simulator, the
+#     Host/ACP planes and rmcp. The selector identity is pinned too: `cli` must
+#     stay unselected, because the CLI/native union is intentionally larger and
+#     belongs to the source-owned no-argument rows, not to this cohort.
+#
+# Both halves run under the guard's `--edges normal,build` scope (dev-only
+# edges excluded, build edges included) and each absence row sits after its
+# own positive control, so neither half can pass on an empty selection.
+if [[ "$COHORT" == "connect" ]]; then
+  CONNECT_PRODUCT="--no-default-features --features connect-host"
+  CONNECT_LIBRARY="--no-default-features --features connect-client,embedded-mcp"
+
+  # (1) Library first: the product reaches the library through its own
+  # `nexus-connect` edge, so a real back-edge into the library would also fail
+  # the product rows below. Probing the library half first keeps such a
+  # regression attributable to the library row instead of the downstream app.
+  # Positives: the enabled Connect resolves its real planes...
+  assert_graph_nonempty nexus-connect "$CONNECT_LIBRARY"
+  assert_exactly_one nexus-connect "$CONNECT_LIBRARY" nexus-capability
+  assert_exactly_one nexus-connect "$CONNECT_LIBRARY" spoke-connect
+  assert_exactly_one nexus-connect "$CONNECT_LIBRARY" libp2p
+  assert_exactly_one nexus-connect "$CONNECT_LIBRARY" rmcp
+  # ...and depends back on none of core or the engine/store/graph planes.
+  assert_empty nexus-connect "$CONNECT_LIBRARY" nexus-core
+  assert_empty nexus-connect "$CONNECT_LIBRARY" nexus-orchestration
+  assert_empty nexus-connect "$CONNECT_LIBRARY" nexus-execution
+  assert_empty nexus-connect "$CONNECT_LIBRARY" nexus-session-storage
+  assert_empty nexus-connect "$CONNECT_LIBRARY" graph-flow
+
+  # (2) Product: retained domain/storage/transport/compute.
+  assert_graph_nonempty nexus42 "$CONNECT_PRODUCT"
+  assert_exactly_one nexus42 "$CONNECT_PRODUCT" nexus-core
+  assert_exactly_one nexus42 "$CONNECT_PRODUCT" nexus-memory-provider
+  assert_exactly_one nexus42 "$CONNECT_PRODUCT" nexus-local-db
+  assert_exactly_one nexus42 "$CONNECT_PRODUCT" spoke-operations
+  assert_exactly_one nexus42 "$CONNECT_PRODUCT" nexus-connect
+  assert_exactly_one nexus42 "$CONNECT_PRODUCT" spoke-connect
+  assert_exactly_one nexus42 "$CONNECT_PRODUCT" libp2p
+  # The compute half is the EXPLICIT spoke-adapter edge, not an inherited
+  # default: pin the feature AND the real WASM host it binds.
+  assert_exactly_one nexus42 "$CONNECT_PRODUCT" nexus-spoke-adapter
+  assert_features nexus42 "$CONNECT_PRODUCT" nexus-spoke-adapter "compute"
+  assert_exactly_one nexus42 "$CONNECT_PRODUCT" nexus-wasm-host
+  # Connect-only never implies the CLI cohort.
+  assert_features nexus42 "$CONNECT_PRODUCT" nexus42 "connect-host"
+
+  # (2) Product: engine/store/graph, authoring, Host/ACP and rmcp stay out.
+  assert_empty nexus42 "$CONNECT_PRODUCT" nexus-orchestration
+  assert_empty nexus42 "$CONNECT_PRODUCT" nexus-execution
+  assert_empty nexus42 "$CONNECT_PRODUCT" nexus-session-storage
+  assert_empty nexus42 "$CONNECT_PRODUCT" graph-flow
+  assert_empty nexus42 "$CONNECT_PRODUCT" nexus-workflow-simulate
+  assert_empty nexus42 "$CONNECT_PRODUCT" nexus-agent-host
+  assert_empty nexus42 "$CONNECT_PRODUCT" nexus-acp-host
+  assert_empty nexus42 "$CONNECT_PRODUCT" rmcp
+
+  echo "graph pins OK (cohort: connect)"
+  exit 0
+fi
+
 # --- ordinary CLI (cli,default) --------------------------------------------
 
 assert_empty nexus42 "" spoke-connect
@@ -769,14 +853,18 @@ assert_exactly_one nexus-core "--features execution" nexus-execution
 # tolerated: it is the visible mark of the one edge the extraction added, and a
 # `dep:` rewrite would keep the same dependency while hiding it from this pin.
 
-# v1.207 P2: `connect-host` is the Connect-host product cohort — the WS accept
-# loop + peer-tools event lane the shipped `nexus-runtime` boots, carrying NO
-# rmcp (the reverse-invoke/operator bridge is not a Connect-host surface). It
-# is what `apps/nexus42`'s `connect-host` feature links; the app must never
-# select `connect-client` (which would pull rmcp into the product graph).
+# v1.207 P2 / v249 cutover: `connect-host` is the Connect-host product cohort —
+# the WS accept loop + peer-tools event lane the shipped `nexus-runtime` boots,
+# carrying NO rmcp (the reverse-invoke/operator bridge is not a Connect-host
+# surface) and NO execution (v249 removed the implicit engine edge; the retained
+# reverse/embedded owner methods live in the explicit `connect-client` cohort
+# below). It is what `apps/nexus42`'s `connect-host` feature links; the app must
+# never select `connect-client` (which would pull rmcp into the product graph).
 assert_empty nexus-core "--no-default-features --features connect-host" rmcp
 assert_exactly_one nexus-core "--no-default-features --features connect-host" spoke-connect
-assert_features nexus-core "--no-default-features --features connect-host" nexus-core "connect-host,execution,nexus-connect,operation-id"
+assert_empty nexus-core "--no-default-features --features connect-host" nexus-execution
+assert_empty nexus-core "--no-default-features --features connect-host" nexus-orchestration
+assert_features nexus-core "--no-default-features --features connect-host" nexus-core "connect-host,nexus-connect"
 
 for feats in "--no-default-features --features connect-client" "--no-default-features --features embedded-mcp"; do
   assert_exactly_one nexus-core "$feats" rmcp

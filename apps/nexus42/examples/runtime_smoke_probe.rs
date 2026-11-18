@@ -10,6 +10,8 @@
 //! DIAL_OK session=<id> remote=<id>   # signed-hello handshake completed
 //! SERVED_OPS=upsert,promote,relate,check,assemble,compute   # manifest extensions.nexus.served_ops
 //! SESSION_OK                         # session still usable after refusals
+//! UPSERT_OK                          # --compute-session: combatants seeded
+//! COMPUTE_OK session=<id> entry=<id> current_hp=<n>  # real retained compute
 //! ```
 //!
 //! The identity comes from a fixed Ed25519 seed (default 7) so the host's
@@ -21,6 +23,12 @@
 //! ./target/debug/examples/runtime_smoke_probe \
 //!     --addr /ip4/127.0.0.1/tcp/<host-port> --host-peer <host-peer-id>
 //! ```
+//!
+//! The optional `--compute-session <id> --world <world-id>` pair adds the
+//! retained-compute half the hermetic smoke test drives: the probe seeds two
+//! combatants over the served `upsert` op and runs `compute` against the
+//! session the host's workspace has staged. It is opt-in because the packaged
+//! probe also dials hosts that staged no compute fixture.
 
 use libp2p::identity::Keypair;
 use spoke_connect::{parse_multiaddr, ConnectConfig, SpokeConnectNode};
@@ -35,13 +43,14 @@ fn fixed_keypair(seed: u8) -> Keypair {
     Keypair::ed25519_from_bytes([seed; 32]).expect("fixed seed is a valid ed25519 secret")
 }
 
-/// Minimal peer manifest (the probe is a reference peer — its own manifest
-/// shape does not matter to the assertions; mirrors the upstream
-/// spoke-connect test fixture).
+/// Minimal peer manifest (the probe is a reference peer — mirrors the
+/// upstream spoke-connect test fixture). `l2-computable` is declared because
+/// the opt-in compute half performs the `compute` op: spoke-connect negotiates
+/// that capability and refuses the op without it.
 fn probe_manifest() -> HostCapabilityManifest {
     HostCapabilityManifest {
         authority: None,
-        capabilities: vec!["spoke-baseline".into()],
+        capabilities: vec!["spoke-baseline".into(), "l2-computable".into()],
         extensions: HashMap::default(),
         host_id: "smoke-dialer".parse().expect("host id parses"),
         namespaces: Vec::new(),
@@ -57,17 +66,27 @@ async fn main() {
     let mut addr: Option<String> = None;
     let mut host_peer: Option<String> = None;
     let mut print_peer_only = false;
+    let mut compute_session: Option<String> = None;
+    let mut compute_world: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--addr" => addr = Some(args.next().expect("--addr value")),
             "--host-peer" => host_peer = Some(args.next().expect("--host-peer value")),
+            "--compute-session" => {
+                compute_session = Some(args.next().expect("--compute-session value"))
+            }
+            "--world" => compute_world = Some(args.next().expect("--world value")),
             "--print-peer-only" => print_peer_only = true,
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(2);
             }
         }
+    }
+    if compute_session.is_some() && compute_world.is_none() {
+        eprintln!("--world <world-id> is required with --compute-session");
+        std::process::exit(2);
     }
 
     let key = fixed_keypair(DIALER_SEED);
@@ -159,5 +178,91 @@ async fn main() {
         }
     }
 
+    // Opt-in retained-compute half: the host stages the compute session in its
+    // workspace DB, and this probe supplies only the two stored entries and
+    // the request. The module bytes live host-locally (never peer-supplied).
+    if let (Some(session_id), Some(world)) = (compute_session, compute_world) {
+        if let Err(error) = run_compute(&session, &session_id, &world).await {
+            println!("COMPUTE_FAILED: {error}");
+            node.shutdown().await.expect("shutdown");
+            std::process::exit(1);
+        }
+    }
+
     node.shutdown().await.expect("shutdown");
+}
+
+/// One wire-shape combatant: the flat `body.attributes` the installed
+/// deterministic `basic-combat` module's manifest requires, plus the
+/// `body.state.character` block `compute` merges into.
+fn combat_entry(
+    entry_id: &str,
+    world: &str,
+    max_hp: i64,
+    base_atk: i64,
+    base_def: i64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": 1,
+        "entry_id": entry_id,
+        "entry_type": "character",
+        "canonical_name": entry_id,
+        "status": "confirmed",
+        "revision": null,
+        "body": {
+            "summary": format!("{entry_id} summary"),
+            "attributes": [
+                { "trait_type": "max_hp", "value": max_hp },
+                { "trait_type": "base_atk", "value": base_atk },
+                { "trait_type": "base_def", "value": base_def },
+            ],
+            "state": { "character": { "current_hp": max_hp, "max_hp": max_hp } },
+        },
+        "extensions": { "nexus": { "world_id": world } },
+    })
+}
+
+/// Seed `kb_atk`/`kb_def` through the served `upsert` op and run the staged
+/// `compute` session. Deterministic math: 30 HP − (ATK 20 − DEF 5) = 15.
+async fn run_compute(
+    session: &spoke_connect::PeerSession,
+    session_id: &str,
+    world: &str,
+) -> Result<(), String> {
+    session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "knowledge_entries": [
+                    combat_entry("kb_atk", world, 100, 20, 10),
+                    combat_entry("kb_def", world, 30, 5, 5),
+                ],
+            }),
+        )
+        .await
+        .map_err(|e| format!("upsert rejected: {e:?}"))?;
+    println!("UPSERT_OK");
+
+    let computed = session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "session_id": session_id,
+                "entry_id": "kb_atk",
+                "computable": { "attacker_id": "kb_atk", "defender_id": "kb_def" },
+                "settle": false,
+            }),
+        )
+        .await
+        .map_err(|e| format!("compute rejected: {e:?}"))?;
+    let current_hp = computed.payload["computable"]["character"]["current_hp"]
+        .as_i64()
+        .ok_or_else(|| {
+            format!(
+                "compute response has no numeric current_hp: {}",
+                computed.payload
+            )
+        })?;
+    println!("COMPUTE_OK session={session_id} entry=kb_atk current_hp={current_hp}");
+    Ok(())
 }

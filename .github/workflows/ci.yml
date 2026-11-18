@@ -585,6 +585,16 @@ jobs:
       - name: Check graph pins (capability cohort)
         timeout-minutes: 10
         run: bash tooling/check-graph-pins.sh --cohort capability
+      # V1.249 S6: the Connect product/library split against the real workspace
+      # — the shipped Connect-only runtime keeps core domain/storage and the
+      # explicit spoke compute (the real WASM host) while linking no
+      # engine/store/graph/authoring/Host/rmcp plane, and the enabled Connect
+      # library still depends back on none of core or those planes. This is
+      # also the row that pins `connect-host` does not imply `cli`; the larger
+      # CLI/native union stays in the source-owned no-argument matrix.
+      - name: Check graph pins (connect cohort)
+        timeout-minutes: 10
+        run: bash tooling/check-graph-pins.sh --cohort connect
       # V1.249 A3: the strategy-authoring surface as a SELECTION. The no-arg
       # matrix and the synthetic suite below pin the shipped graphs, but neither
       # runs the real cohort or the checker-owned consumer — a later CLI/native

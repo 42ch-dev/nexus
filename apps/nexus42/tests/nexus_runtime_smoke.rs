@@ -49,19 +49,35 @@ const NEXUS_DIR: &str = ".nexus42";
 /// How long the spawned runtime may take to print readiness.
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The retained-compute fixture the opt-in probe half drives: one stored
+/// scoped World, one staged compute session and the deterministic
+/// `basic-combat` module installed host-locally. The allowlist row below
+/// scopes the probe peer to this World/module and grants the stored Creator,
+/// with an op scope of EXACTLY `upsert` + `compute` — so the probe's `check`
+/// invoke still produces the locked `op_unsupported` refusal.
+const COMPUTE_CREATOR: &str = "ctr_smoke";
+const COMPUTE_WORLD: &str = "wld_smoke";
+const COMPUTE_MODULE: &str = "basic-combat";
+/// Only the wasm-target half passes this id to the probe (and stages it), so
+/// a no-wasm build would otherwise carry it as dead code.
+#[cfg(not(nexus42_no_wasm_target))]
+const COMPUTE_SESSION: &str = "ses_smoke";
+
 /// Seed a hermetic `~/.nexus42` home for the spawned runtime: the CLI
 /// config keys the boot resolves the active workspace from (same keys the
-/// creator app writes), plus the Connect allowlist holding the fixed-seed
-/// probe peer.
+/// creator app writes), plus the scoped Connect allowlist holding the
+/// fixed-seed probe peer.
 fn seed_home(tmp: &Path) {
     let nexus = tmp.join(NEXUS_DIR);
     std::fs::create_dir_all(&nexus).expect("create nexus home");
 
     std::fs::write(
         nexus.join("config.toml"),
-        "active_creator_id = \"ctr_smoke\"\n\
+        format!(
+            "active_creator_id = \"{COMPUTE_CREATOR}\"\n\
          [active_workspace_slug_by_creator]\n\
-         ctr_smoke = \"default\"\n",
+         {COMPUTE_CREATOR} = \"default\"\n"
+        ),
     )
     .expect("write config.toml");
 
@@ -69,7 +85,19 @@ fn seed_home(tmp: &Path) {
     std::fs::create_dir_all(&connect_dir).expect("create connect dir");
     std::fs::write(
         connect_dir.join("allowlist.json"),
-        format!("{{\"peer_ids\": [\"{DIALER_PEER_ID}\"]}}"),
+        format!(
+            r#"{{"peer_ids": [{{
+                "peer_id": "{DIALER_PEER_ID}",
+                "world_scope": ["{COMPUTE_WORLD}"],
+                "op_scope": ["upsert", "compute"],
+                "module_scope": ["{COMPUTE_MODULE}"],
+                "grant": {{
+                    "creator_id": "{COMPUTE_CREATOR}",
+                    "actor": {{ "kind": "creator", "id": "{COMPUTE_CREATOR}" }},
+                    "world_id": "{COMPUTE_WORLD}"
+                }}
+            }}]}}"#
+        ),
     )
     .expect("write allowlist.json");
 
@@ -79,6 +107,77 @@ fn seed_home(tmp: &Path) {
     // the REAL bound port — never the configured `0` (the config echo the
     // locked contract forbids).
     std::fs::write(connect_dir.join("daemon.json"), "{\"port\": 0}").expect("write daemon.json");
+}
+
+/// Install the embedded deterministic module into the hermetic home's
+/// host-local store (`~/.nexus42/modules/<id>/`) — the operator-install step
+/// the compute route requires (bytes are never peer-supplied).
+#[cfg(not(nexus42_no_wasm_target))]
+fn install_compute_module(home: &Path) {
+    let dir = nexus_home_layout::user_modules_dir(home).join(COMPUTE_MODULE);
+    std::fs::create_dir_all(&dir).expect("mkdir module store dir");
+    let bytes = nexus_wasm_host::embedded_module_bytes(COMPUTE_MODULE)
+        .unwrap_or_else(|| panic!("embedded module {COMPUTE_MODULE:?} must ship bytes"));
+    let manifest = nexus_wasm_host::embedded_module_manifest(COMPUTE_MODULE)
+        .unwrap_or_else(|| panic!("embedded module {COMPUTE_MODULE:?} must ship a manifest"));
+    std::fs::write(dir.join(format!("{COMPUTE_MODULE}.wasm")), bytes).expect("write module wasm");
+    std::fs::write(dir.join("manifest.json"), manifest).expect("write module manifest");
+}
+
+/// Seed the workspace the spawned runtime opens with the stored authority the
+/// compute lane reads: a Creator + holder row, the scoped World, and the
+/// staged compute session. Staged through an engine-owned pool (the
+/// `compute_sessions` table is engine-writer-fenced) which is closed and its
+/// OS admission released before the runtime starts — the runtime keeps its
+/// own direct (cooperative) pool.
+#[cfg(not(nexus42_no_wasm_target))]
+fn seed_compute_workspace(home: &Path) {
+    install_compute_module(home);
+    let db_path = nexus42::paths::state_db_path(home, COMPUTE_CREATOR, "default");
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent).expect("mkdir workspace state dir");
+    }
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("compute staging runtime");
+
+    runtime.block_on(async {
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .expect("engine-owned workspace DB initializes");
+        let pool = guarded.clone_pool();
+        nexus_local_db::creators::ensure_creator_row(&pool, COMPUTE_CREATOR, "smoke creator")
+            .await
+            .expect("seed the acting Creator and its holder");
+        nexus_local_db::kb_store::seed::world(
+            &pool,
+            COMPUTE_WORLD,
+            COMPUTE_CREATOR,
+            "Smoke World",
+            "smoke",
+            "private",
+            "manual",
+        )
+        .await;
+        let state = serde_json::json!({
+            "module_id": COMPUTE_MODULE,
+            "attacker_id": "kb_atk",
+            "defender_id": "kb_def",
+            "character": { "current_hp": 30, "max_hp": 30 },
+        });
+        nexus_local_db::compute_session::insert_compute_session(
+            &pool,
+            COMPUTE_SESSION,
+            "kb_atk",
+            &state.to_string(),
+        )
+        .await
+        .expect("stage the compute session");
+        pool.close().await;
+        drop(guarded);
+        nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
+    });
 }
 
 /// The `runtime_smoke_probe` example binary — compiled by cargo (with
@@ -648,6 +747,10 @@ fn version_flag_prints_crate_version() {
 fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
     let tmp = tempfile::tempdir().expect("temp dir");
     seed_home(tmp.path());
+    // The retained-compute half: installed deterministic module + stored
+    // scoped World + staged session, all before the runtime opens the DB.
+    #[cfg(not(nexus42_no_wasm_target))]
+    seed_compute_workspace(tmp.path());
 
     // Boot the real binary against the temp home. The guard kills the
     // child on EVERY exit path — success or panic — never orphaning it.
@@ -702,16 +805,22 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
         .expect("peer_id line")
         .trim();
 
-    let probe = probe_binary();
+    let probe_path = probe_binary();
     assert!(
-        probe.exists(),
+        probe_path.exists(),
         "probe example not built — expected at {}",
-        probe.display()
+        probe_path.display()
     );
-    let out = Command::new(&probe)
-        .args(["--addr", &listen_addrs[0], "--host-peer", host_peer])
-        .output()
-        .expect("run runtime_smoke_probe");
+    let mut probe = Command::new(&probe_path);
+    probe.args(["--addr", &listen_addrs[0], "--host-peer", host_peer]);
+    #[cfg(not(nexus42_no_wasm_target))]
+    probe.args([
+        "--compute-session",
+        COMPUTE_SESSION,
+        "--world",
+        COMPUTE_WORLD,
+    ]);
+    let out = probe.output().expect("run runtime_smoke_probe");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let status = out.status;
@@ -728,6 +837,20 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
             stdout.contains(expected),
             "probe output missing {expected:?}:\n{stdout}\nstderr:\n{stderr}"
         );
+    }
+    // 3b. A REAL retained compute op ran end-to-end in the spawned process:
+    //     the probe seeded both combatants over the served `upsert` and the
+    //     host's compute lane executed the installed deterministic module,
+    //     returning the staged 30 HP − (ATK 20 − DEF 5) = 15.
+    #[cfg(not(nexus42_no_wasm_target))]
+    {
+        let compute_ok = format!("COMPUTE_OK session={COMPUTE_SESSION} entry=kb_atk current_hp=15");
+        for expected in ["UPSERT_OK".to_string(), compute_ok] {
+            assert!(
+                stdout.contains(&expected),
+                "probe output missing {expected:?}:\n{stdout}\nstderr:\n{stderr}"
+            );
+        }
     }
     // `_guard` drops here (and on any panic unwind above): the child is
     // killed and reaped on every path.
