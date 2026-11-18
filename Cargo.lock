@@ -4029,7 +4029,6 @@ dependencies = [
  "chrono",
  "nexus-contracts",
  "nexus-knowledge",
- "nexus-spoke-adapter",
  "serde",
  "serde_json",
  "spoke-schemas",

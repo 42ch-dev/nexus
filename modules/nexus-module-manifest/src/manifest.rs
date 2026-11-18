@@ -614,13 +614,11 @@ mod tests {
         }
     }
 
-    /// Shared invalid-manifest corpus (qc1 S-1): the file lives in
-    /// `nexus-module-sdk/tests/fixtures/` and is asserted by BOTH
-    /// validators (this crate and the SDK mirror) — a build break if the
-    /// corpus is deleted, so the two cannot silently diverge. Add new
-    /// invalid cases to the shared file, not just one side.
-    const INVALID_MANIFESTS: &str =
-        include_str!("../../nexus-module-sdk/tests/fixtures/invalid-manifests.json");
+    /// Invalid-manifest corpus (qc1 S-1): this package owns its copy; the SDK
+    /// mirror has an identical one, and `tooling/check-module-sdk-drift.sh`
+    /// asserts value parity — a build break if the corpus is deleted, so the
+    /// two cannot silently diverge. Add new invalid cases to both files.
+    const INVALID_MANIFESTS: &str = include_str!("../tests/fixtures/invalid-manifests.json");
 
     #[test]
     fn validate_rejects_shared_invalid_manifest_corpus() {

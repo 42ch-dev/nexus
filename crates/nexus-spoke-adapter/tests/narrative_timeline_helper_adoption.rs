@@ -1,10 +1,9 @@
 //! # Spoke 0.4.1 timeline helper adoption (test-adoption, compass AC-I2)
 //!
 //! This is a **test-adoption**: it proves the spoke 0.4.1 timeline beat-assist
-//! helpers are reachable from `nexus-narrative` through the
-//! `nexus-spoke-adapter` boundary, and that they behave per spoke 0.4.1
-//! semantics (cross-checked against `spoke-operations`' own `timeline.rs`
-//! test cases).
+//! helpers are re-exported through the `nexus-spoke-adapter` boundary and that
+//! they behave per spoke 0.4.1 semantics (cross-checked against
+//! `spoke-operations`' own `timeline.rs` test cases).
 //!
 //! It does **not** change runtime behavior. The `TimelineEvent` instances used
 //! here are spoke wire types (`nexus_spoke_adapter::TimelineEvent`, re-exported

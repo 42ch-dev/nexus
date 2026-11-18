@@ -2,7 +2,7 @@
 # ---------------------------------------------------------------------------
 # check-module-sdk-drift.sh — Compute-module SDK drift gate (V1.170 P0, AR-7)
 #
-# Two gates (both python3 — python3 is already used in ci.yml):
+# Three gates (all python3 — python3 is already used in ci.yml):
 #
 #   1. Mirror-gap: parses the compute input/output wire schemas' `properties`
 #      keys (top level + the nested typed parts `world_ref` and
@@ -15,6 +15,9 @@
 #      (modules/nexus-module-test/fixtures/combat-input.json, the AR-10 SSOT)
 #      must be value-identical to the inline `combat_input()` JSON in
 #      crates/nexus-wasm-host/tests/basic_combat.rs.
+#   3. Corpus-parity: the module-manifest and module-SDK invalid-manifest
+#      corpora are package-local copies; the validators accept separate
+#      bytes, so the two must stay value-identical here.
 #
 # The third drift-guard layer is behavioral: the `module-dx` CI job (AR-12)
 # compiles basic-combat against the current SDK and re-runs the real-host
@@ -29,7 +32,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "==> 1/2 Envelope mirror-gap: wire schemas vs SDK typed structs..."
+echo "==> 1/3 Envelope mirror-gap: wire schemas vs SDK typed structs..."
 python3 - <<'PY'
 import json
 import re
@@ -93,7 +96,7 @@ print(f"OK: compute-output.state_delta[].op: {len(wire_ops)} wire op(s) mirrored
 PY
 
 echo ""
-echo "==> 2/2 Fixture parity: mini-host fixture vs basic_combat.rs inline JSON"
+echo "==> 2/3 Fixture parity: mini-host fixture vs basic_combat.rs inline JSON"
 python3 - <<'PY'
 import json
 import re
@@ -136,6 +139,43 @@ if fixture != inline:
     )
     sys.exit(1)
 print("OK: fixtures/combat-input.json is value-identical to the basic_combat.rs inline JSON")
+PY
+
+echo ""
+echo "==> 3/3 Invalid-manifest corpus parity: module-manifest vs module-sdk..."
+python3 - <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(".")
+manifest_corpus_path = (
+    root / "modules/nexus-module-manifest/tests/fixtures/invalid-manifests.json"
+)
+sdk_corpus_path = root / "modules/nexus-module-sdk/tests/fixtures/invalid-manifests.json"
+
+try:
+    manifest_corpus = json.loads(manifest_corpus_path.read_text())
+    sdk_corpus = json.loads(sdk_corpus_path.read_text())
+except OSError as error:
+    print(f"FAIL: invalid-manifest corpus unreadable: {error}")
+    sys.exit(1)
+
+if not isinstance(manifest_corpus, list) or not manifest_corpus:
+    print(f"FAIL: {manifest_corpus_path} is not a non-empty JSON array")
+    sys.exit(1)
+
+if manifest_corpus != sdk_corpus:
+    print(
+        "FAIL: invalid-manifest corpus drift — "
+        "modules/nexus-module-manifest/tests/fixtures/invalid-manifests.json is not "
+        "value-identical to modules/nexus-module-sdk/tests/fixtures/invalid-manifests.json"
+    )
+    sys.exit(1)
+print(
+    f"OK: invalid-manifest corpora are value-identical "
+    f"({len(manifest_corpus)} cases)"
+)
 PY
 
 echo "✅ All module SDK drift checks passed."
