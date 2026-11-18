@@ -17,9 +17,11 @@
  *   4. runs the optional consumer fixture named after the entry
  *      (`tooling/release/fixtures/package-consumers/<name>/`) as a fresh
  *      workspace whose `[patch.crates-io]` entries point only at extracted
- *      selected archives, offline and locked; a fixture that ships a `guest/`
- *      crate also gets that crate built for `wasm32-unknown-unknown` from the
- *      same archives, with the host consumer kept out of it.
+ *      selected archives, offline and locked, with `cargo run` or — when the
+ *      fixture ships a `tests/` target, the only target kind that sees a
+ *      dev-dependency — `cargo test`; a fixture that ships a `guest/` crate
+ *      also gets that crate built for `wasm32-unknown-unknown` from the same
+ *      archives, with the host consumer kept out of it.
  *
  * Nothing downstream sees the original checkout or the packing tree: a
  * consumer that resolves an input from either fails, as does an archive that
@@ -133,6 +135,8 @@ function contractDependencies(manifestContents, entries) {
  * @property {{name: string, req: string, kind: string, path: string | null}[]} declared
  * @property {{name: string, sha256: string}[]} patched
  * @property {{name: string, version: string, manifest: string, source: string}[]} resolved
+ * @property {string} mode `run` for a `src/main.rs` fixture, `test` when it ships a `tests/`
+ *   target (the only target kind that sees a dev-dependency).
  * @property {{artifact: string, bytes: number, sha256: string} | null} guest
  *   `wasm32-unknown-unknown` artifact of the fixture's `guest/` crate, when it
  *   ships one; null for host-only fixtures.
@@ -659,6 +663,7 @@ function runConsumer({
     declared: [],
     patched: [],
     resolved: [],
+    mode: "run",
     guest: null,
     ok: false,
     cause: null,
@@ -781,16 +786,21 @@ function runConsumer({
     };
   }
 
+  // A fixture that ships a `tests/` target is exercised with `cargo test`: a dev-dependency is
+  // visible to a test target only, so that is the shape a module crate's ABI harness has.
+  const mode = existsSync(join(consumerRoot, "tests")) ? "test" : "run";
+  evidence.mode = mode;
   const ran = run(
     "cargo",
     [
-      "run",
+      mode,
       "--offline",
       "--locked",
       "--quiet",
       ...patchArgs,
       "--target-dir",
       join(targetRoot, "consumers", entryName),
+      ...(mode === "test" ? ["--", "--nocapture"] : []),
     ],
     consumerRoot,
   );
@@ -798,8 +808,8 @@ function runConsumer({
   if (!ran.ok) {
     return {
       ...evidence,
-      cause: `consumer run failed: ${
-        firstErrorLine(ran.output) ?? "cargo run failed"
+      cause: `consumer ${mode} failed: ${
+        firstErrorLine(ran.output) ?? `cargo ${mode} failed`
       }`,
     };
   }

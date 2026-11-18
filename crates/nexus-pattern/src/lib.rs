@@ -43,24 +43,59 @@ pub const FRAGMENT_FILE: &str = "workflow.ir.json";
 /// device member or a runaway file from exhausting the daemon while it lists.
 pub const MAX_MEMBER_BYTES: u64 = 1 << 20;
 
-/// Bytes of the committed fixture packages under `tests/fixtures/patterns/`, as packed into this
-/// crate.
+/// Every committed member of the fixture registry under `tests/fixtures/patterns/`, as packed into
+/// this crate: `(package_dir, file, contents)`.
 ///
 /// The committed fixtures are distribution inputs like any other source file, so the packed archive
-/// must carry them. Embedding them keeps that checkable from outside: an archive that drops
-/// `tests/fixtures/patterns/**` fails to compile here instead of shipping a silently smaller
+/// must carry them. Every member is embedded, so an archive that omits any one of them — a manifest,
+/// an IR fragment, or a template — fails to compile here instead of shipping a silently smaller
 /// package that only the checkout's copy could satisfy. These are static test inputs, not runtime
-/// registry content.
+/// registry content: the reader still loads packages from a directory, and the fragments' declared
+/// asset hashes are what pin the template bytes.
 pub mod fixtures {
-    /// `tests/fixtures/patterns/broken-manifest/pattern.toml` — deliberately malformed.
-    pub const BROKEN_MANIFEST: &str =
-        include_str!("../tests/fixtures/patterns/broken-manifest/pattern.toml");
-    /// `tests/fixtures/patterns/prompt-step/pattern.toml`.
-    pub const PROMPT_STEP_MANIFEST: &str =
-        include_str!("../tests/fixtures/patterns/prompt-step/pattern.toml");
-    /// `tests/fixtures/patterns/prompt-step/workflow.ir.json`.
-    pub const PROMPT_STEP_FRAGMENT: &str =
-        include_str!("../tests/fixtures/patterns/prompt-step/workflow.ir.json");
+    /// Every committed fixture member as `(package_dir, file, contents)`.
+    pub const MEMBERS: [(&str, &str, &str); 8] = [
+        (
+            "broken-manifest",
+            "pattern.toml",
+            include_str!("../tests/fixtures/patterns/broken-manifest/pattern.toml"),
+        ),
+        (
+            "prompt-step",
+            "pattern.toml",
+            include_str!("../tests/fixtures/patterns/prompt-step/pattern.toml"),
+        ),
+        (
+            "prompt-step",
+            "workflow.ir.json",
+            include_str!("../tests/fixtures/patterns/prompt-step/workflow.ir.json"),
+        ),
+        (
+            "prompt-step",
+            "templates/prompt.md",
+            include_str!("../tests/fixtures/patterns/prompt-step/templates/prompt.md"),
+        ),
+        (
+            "step-with-judge",
+            "pattern.toml",
+            include_str!("../tests/fixtures/patterns/step-with-judge/pattern.toml"),
+        ),
+        (
+            "step-with-judge",
+            "workflow.ir.json",
+            include_str!("../tests/fixtures/patterns/step-with-judge/workflow.ir.json"),
+        ),
+        (
+            "step-with-judge",
+            "templates/draft.md",
+            include_str!("../tests/fixtures/patterns/step-with-judge/templates/draft.md"),
+        ),
+        (
+            "step-with-judge",
+            "templates/verdict.md",
+            include_str!("../tests/fixtures/patterns/step-with-judge/templates/verdict.md"),
+        ),
+    ];
 }
 
 /// One discovered package directory.

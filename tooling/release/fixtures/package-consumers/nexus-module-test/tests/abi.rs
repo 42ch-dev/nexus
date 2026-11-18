@@ -1,18 +1,21 @@
-//! Consumer for the packed `nexus-module-test` archive: runs a tiny ABI-valid
-//! module through the mini-host and rejects a module whose `compute` writes an
-//! output envelope that is not a `ComputeOutput`.
+//! ABI-conformance target for the packed `nexus-module-test` archive: runs a tiny ABI-valid module
+//! through the mini-host and rejects a module whose `compute` writes an output envelope that is
+//! not a `ComputeOutput`.
 //!
-//! Honest boundary: the mini-host validates ABI conformance only. It enforces no
-//! fuel, memory or wall-time budget, so nothing here is evidence about the
-//! production sandbox — those limits belong to `nexus-wasm-host`.
+//! This is a dev-dependency test target on purpose: `nexus-module-test` is declared under
+//! `[dev-dependencies]`, so the mini-host resolving from its archive here is exactly the usage a
+//! module crate gets.
+//!
+//! Honest boundary: the mini-host validates ABI conformance only. It enforces no fuel, memory or
+//! wall-time budget, so nothing here is evidence about the production sandbox — those limits
+//! belong to `nexus-wasm-host`.
 
 use nexus_module_sdk::{ComputeInput, ModuleManifest, WorldRef};
 use nexus_module_test::{run, MiniHostError};
 use serde_json::json;
 
-/// WAT convention shared with the crate's own conformance test: the envelope
-/// lives in a data segment, `compute` copies it to the host's output buffer and
-/// returns its length.
+/// WAT convention shared with the crate's own conformance test: the envelope lives in a data
+/// segment, `compute` copies it to the host's output buffer and returns its length.
 fn module_writing(envelope: &str) -> Vec<u8> {
     let escaped = envelope.replace('\\', "\\\\").replace('"', "\\\"");
     let wat = format!(
@@ -70,7 +73,8 @@ fn probe_input() -> ComputeInput {
     }
 }
 
-fn main() {
+#[test]
+fn a_tiny_abi_module_runs_through_the_dev_dependency() {
     let manifest = probe_manifest("echo");
     manifest.validate().expect("the probe manifest validates");
 
@@ -85,18 +89,22 @@ fn main() {
     assert!(output.new_key_blocks.is_empty());
     assert_eq!(output.battle_report["kind"], "probe");
 
-    // A malformed envelope is rejected by the output-contract check, not by the
-    // guest: the module compiles, runs, and returns bytes that are not a
-    // `ComputeOutput`.
+    println!(
+        "nexus-module-test ran a tiny ABI-valid module and rejected a malformed output envelope"
+    );
+}
+
+#[test]
+fn a_malformed_output_envelope_is_rejected() {
+    let manifest = probe_manifest("malformed");
+
+    // A malformed envelope is rejected by the output-contract check, not by the guest: the module
+    // compiles, runs, and returns bytes that are not a `ComputeOutput`.
     let malformed = module_writing(r#"{"schema_version":1,"state_delta":"not-a-list"}"#);
     let error = run(&malformed, &manifest, &probe_input())
         .expect_err("a malformed output envelope must be rejected");
     assert!(
         matches!(error, MiniHostError::InvalidOutput(_)),
         "expected InvalidOutput, got {error:?}"
-    );
-
-    println!(
-        "nexus-module-test ran a tiny ABI-valid module and rejected a malformed output envelope"
     );
 }

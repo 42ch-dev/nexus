@@ -4,11 +4,14 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
-# `nexus-module-test` is a host-target dev-dependency of module crates: it is
-# compiled into a test binary, never into a `.wasm` artifact. Nothing in this
-# fixture is guest code.
+# Module-crate shape: `nexus-module-sdk` is the crate's own dependency (what a
+# compute module ships), while `nexus-module-test` is a host-target
+# dev-dependency — it must resolve for the test target only and never reach the
+# module artifact.
 [dependencies]
 nexus-module-sdk = "0.1.0"
+
+[dev-dependencies]
 nexus-module-test = "0.1.0"
 serde_json = "1"
 wat = "1"
