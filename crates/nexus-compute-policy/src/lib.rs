@@ -106,10 +106,16 @@ mod tests {
 
     #[test]
     fn defaults_match_compass_q6() {
+        // Compare against the compass Q6 product literals directly — `Default`
+        // and the constants are both derived from these, so asserting against
+        // the constants alone would let the two drift together (QC1-03).
+        assert_eq!(DEFAULT_FUEL, 10_000_000);
+        assert_eq!(DEFAULT_MEMORY_MIB, 64);
+        assert_eq!(DEFAULT_WALL_TIME, Duration::from_secs(30));
         let cfg = SandboxConfig::default();
-        assert_eq!(cfg.fuel, DEFAULT_FUEL);
-        assert_eq!(cfg.memory_mib(), DEFAULT_MEMORY_MIB);
-        assert_eq!(cfg.wall_time, DEFAULT_WALL_TIME);
+        assert_eq!(cfg.fuel, 10_000_000);
+        assert_eq!(cfg.memory_mib(), 64);
+        assert_eq!(cfg.wall_time, Duration::from_secs(30));
     }
 
     #[test]

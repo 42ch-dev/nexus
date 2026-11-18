@@ -117,10 +117,12 @@ fail() {
 # Single place every probe resolves its workspace, so `--manifest-path` reaches
 # all of them (fixture workspaces) and the default run stays byte-identical.
 cargo_tree() {
+  # QC-fix (QC3-S003): every probe is forced `--offline`, matching the
+  # fixture path's env — resolution must never hit the network.
   if [[ -n "${MANIFEST_PATH:-}" ]]; then
-    cargo tree --manifest-path "$MANIFEST_PATH" "$@"
+    cargo tree --manifest-path "$MANIFEST_PATH" --offline "$@"
   else
-    cargo tree "$@"
+    cargo tree --offline "$@"
   fi
 }
 
@@ -241,15 +243,23 @@ assert_features() {
 assert_graph_nonempty() {
   local crate="$1"; shift
   local feats="$1"
-  local out status=0
-  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build 2>&1) || status=$?
+  local out err status=0
+  # QC-fix (QC2-F002): keep stderr OUT of the census — a warning line that
+  # happens to contain package-like text must not count as a row. Only the
+  # exit status carries the failure verdict.
+  err=$(mktemp)
+  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build 2>"$err") || status=$?
   if [[ "$status" -ne 0 ]]; then
-    fail "graph probe for $crate ${feats:-<default>} failed (exit $status): $out"
+    fail "graph probe for $crate ${feats:-<default>} failed (exit $status): $out$(cat "$err")"
   fi
-  # Tree rows carry box-drawing prefixes, so match the `name vX` pair anywhere
-  # in the line and count each package once.
+  rm -f "$err"
+  # Tree rows carry box-drawing prefixes, so match the `name vX` pair at the
+  # START of a (glyph-stripped) line only — package-like text in a PATH
+  # (e.g. a checkout under `nexus v2/`) must never count as a package row
+  # (QC2-F002).
   local packages
-  packages=$(grep -oE '[A-Za-z0-9_.-]+ v[0-9]' <<<"$out" | sed -E 's/ v[0-9]$//' | sort -u)
+  packages=$(sed -E 's/^[ │├└─]*//' <<<"$out" | grep -E '^[A-Za-z0-9_.-]+ v[0-9]' \
+    | sed -E 's/^([A-Za-z0-9_.-]+) v[0-9].*/\1/' | sort -u)
   local rows
   rows=$(sed '/^$/d' <<<"$packages" | wc -l | tr -d ' ')
   if [[ "$rows" -lt 2 ]]; then
@@ -267,19 +277,29 @@ assert_graph_nonempty() {
 assert_no_dependencies() {
   local crate="$1"; shift
   local feats="$1"
-  local out status=0
-  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build 2>&1) || status=$?
+  local out err status=0
+  # QC-fix (QC2-F002): stderr stays out of the census (same as above).
+  err=$(mktemp)
+  out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build 2>"$err") || status=$?
   if [[ "$status" -ne 0 ]]; then
-    fail "graph probe for $crate ${feats:-<default>} failed (exit $status): $out"
+    fail "graph probe for $crate ${feats:-<default>} failed (exit $status): $out$(cat "$err")"
   fi
-  # Same row census as assert_graph_nonempty: box-drawing prefixes stripped,
-  # each package counted once.
+  rm -f "$err"
+  # Same census as assert_graph_nonempty: glyph-stripped, line-ANCHORED rows
+  # so path text cannot contribute a phantom package (QC2-F002), each
+  # package counted once.
   local packages
-  packages=$(grep -oE '[A-Za-z0-9_.-]+ v[0-9]' <<<"$out" | sed -E 's/ v[0-9]$//' | sort -u)
+  packages=$(sed -E 's/^[ │├└─]*//' <<<"$out" | grep -E '^[A-Za-z0-9_.-]+ v[0-9]' \
+    | sed -E 's/^([A-Za-z0-9_.-]+) v[0-9].*/\1/' | sort -u)
   local rows
   rows=$(sed '/^$/d' <<<"$packages" | wc -l | tr -d ' ')
   if [[ "$rows" -ne 1 ]]; then
     fail "$crate ${feats:-<default>} must resolve with ZERO dependencies, got $rows package(s): $out"
+  fi
+  # QC-fix (QC2-F002): the sole row must BE the requested root — a census
+  # that matched anything else resolved the wrong graph.
+  if [[ "$packages" != "$crate" ]]; then
+    fail "$crate ${feats:-<default>}: zero-dependency census matched '$packages', expected the root itself"
   fi
   echo "ok: $crate ${feats:-<default>} resolves with zero dependencies (root only)"
 }
@@ -367,28 +387,22 @@ fi
 # resolved with `-p` from this workspace, so their isolation stays with the
 # public-package readiness checks outside this guard.
 if [[ "$COHORT" == "policy" ]]; then
-  assert_no_dependencies nexus-compute-policy ""
+  # QC-fix (v1.249 QC1-02 / QC2-F001): the leaf pin runs under EVERY target
+  # and EVERY feature selection, not just the host target with default
+  # features — a target- or feature-scoped dependency edge is invisible to
+  # the host-default selectors (the feature-gated fixture in
+  # check-graph-pins.test.mjs proves the widened selectors bite).
+  assert_no_dependencies nexus-compute-policy "--all-features --target all"
 
-  # Engine + durable execution + storage: no back-edge into the policy leaf.
-  assert_empty nexus-compute-policy "" nexus-orchestration
-  assert_empty nexus-compute-policy "" nexus-execution
-  assert_empty nexus-compute-policy "" nexus-session-storage
-  assert_empty nexus-compute-policy "" graph-flow
-  # Host planes.
-  assert_empty nexus-compute-policy "" nexus-agent-host
-  assert_empty nexus-compute-policy "" nexus-acp-host
-  assert_empty nexus-compute-policy "" nexus-wasm-host
-  # Connect planes.
-  assert_empty nexus-compute-policy "" nexus-connect
-  assert_empty nexus-compute-policy "" spoke-connect
-  assert_empty nexus-compute-policy "" libp2p
-  assert_empty nexus-compute-policy "" rmcp
-
-  # No workspace-member public package gains a private-policy edge
-  # (compass D3: contracts, workflow-ir, pattern, knowledge, narrative;
-  # module-sdk/manifest/test are standalone and covered above by the note).
+  # The eleven former `assert_empty nexus-compute-policy …` back-edge probes
+  # (nexus-orchestration, nexus-execution, nexus-session-storage, graph-flow,
+  # nexus-agent-host, nexus-acp-host, nexus-wasm-host, nexus-connect,
+  # spoke-connect, libp2p, rmcp) are DELETED: under a zero-dependency root
+  # each could only ever return absent, and the zero-dependency leaf pin
+  # above already refuses ANY dependency edge, including all eleven. The
+  # separate public-to-policy inverse control below stays.
   for pkg in nexus-contracts nexus-workflow-ir nexus-pattern nexus-knowledge nexus-narrative; do
-    assert_empty "$pkg" "" nexus-compute-policy
+    assert_empty "$pkg" "--all-features --target all" nexus-compute-policy
   done
 
   echo "graph pins OK (cohort: policy)"

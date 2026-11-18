@@ -554,6 +554,13 @@ jobs:
       # provides it.
       - name: Check graph pins
         run: bash tooling/check-graph-pins.sh
+      # V1.249 compute-policy QC fix (QC3-S002): the policy leaf cohort and
+      # its real-Cargo fixture suite run in CI too — the no-argument matrix
+      # above stays the sole full-matrix invocation.
+      - name: Check graph pins — policy cohort
+        run: bash tooling/check-graph-pins.sh --cohort policy
+      - name: Graph pins fixture tests
+        run: node --test tooling/check-graph-pins.test.mjs
       # V1.236 P5-T2 (ADR #485 §6.1 P5): the Work artifact byte-write guard.
       # Prove the gate bites on synthetic fixtures (synthetic direct write,
       # mixed function, and an exempt symbol with a second write), then run it

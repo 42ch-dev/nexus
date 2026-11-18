@@ -99,6 +99,9 @@ function createWorkspace(crates, { lockfile = true, afterLock } = {}) {
     const lock = spawnSync('cargo', ['generate-lockfile', '--offline', '--manifest-path', manifestPath], {
       encoding: 'utf8',
       env: cargoEnv(),
+      // QC3-S003: a wedged cargo fails loudly instead of stalling the suite.
+      timeout: 120_000,
+      killSignal: 'SIGKILL',
     });
     assert.equal(lock.status, 0, `fixture lockfile generation failed: ${lock.stderr}`);
   }
@@ -121,7 +124,14 @@ function domainCrates({ coreDeps = {}, coreDevDeps = {}, extra = {} } = {}) {
 }
 
 function runGuard(args) {
-  return spawnSync('bash', [GUARD, ...args], { cwd: REPO_ROOT, encoding: 'utf8', env: cargoEnv() });
+  return spawnSync('bash', [GUARD, ...args], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    env: cargoEnv(),
+    // QC3-S003: a wedged bash/cargo fails loudly instead of stalling the suite.
+    timeout: 180_000,
+    killSignal: 'SIGKILL',
+  });
 }
 
 function domainRun(root) {
@@ -318,9 +328,14 @@ test('policy cohort passes on a policy-shaped workspace', () => {
   const run = policyRun(root);
 
   assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
-  assert.match(run.stdout, /ok: nexus-compute-policy <default> resolves with zero dependencies \(root only\)/);
-  assert.match(run.stdout, /ok: nexus-orchestration absent from nexus-compute-policy/);
-  assert.match(run.stdout, /ok: nexus-compute-policy absent from nexus-contracts/);
+  // QC-fix: the leaf pin runs widened (`--all-features --target all`), and
+  // the eleven subsumed back-edge probes no longer print anything.
+  assert.match(
+    run.stdout,
+    /ok: nexus-compute-policy --all-features --target all resolves with zero dependencies \(root only\)/,
+  );
+  assert.doesNotMatch(run.stdout, /absent from nexus-compute-policy/);
+  assert.match(run.stdout, /ok: nexus-compute-policy absent from nexus-contracts --all-features --target all/);
   assert.match(run.stdout, /graph pins OK \(cohort: policy\)$/m);
 });
 
@@ -338,7 +353,7 @@ test('a deliberate forbidden policy edge is rejected nonzero', () => {
 
   assert.notEqual(run.status, 0, 'a real policy -> nexus-wasm-host edge was accepted');
   assert.match(run.stdout, /graph pin failed/);
-  assert.match(run.stdout, /nexus-compute-policy <default> must resolve with ZERO dependencies, got 2/);
+  assert.match(run.stdout, /nexus-compute-policy --all-features --target all must resolve with ZERO dependencies, got 2/);
   assert.match(run.stdout, /└── nexus-wasm-host v/);
 });
 
@@ -373,6 +388,50 @@ test('a public package gaining a private-policy edge fails the cohort', () => {
   assert.match(run.stdout, /graph pin failed/);
   assert.match(
     run.stdout,
-    /nexus-compute-policy must be MISSING from nexus-contracts graph/,
+    /nexus-compute-policy must be MISSING from nexus-contracts--all-features --target all graph/,
   );
+});
+
+test('a feature-scoped policy edge is caught by the widened selectors', () => {
+  // QC1-02 / QC2-F001: the optional edge only resolves under a NON-default
+  // feature (`special`), so the pre-fix host-default selectors passed this
+  // workspace; the widened `--all-features --target all` leaf pin must
+  // refuse it. (Observed both ways: the same fixture passes exit 0 under
+  // the pre-fix selectors — see task-2-report QC fix round.)
+  const root = createWorkspace({
+    'nexus-compute-policy': {
+      manifest: [
+        '[package]',
+        'name = "nexus-compute-policy"',
+        'version = "0.1.0"',
+        'edition = "2021"',
+        '',
+        '[lib]',
+        'path = "src/lib.rs"',
+        '',
+        '[features]',
+        'default = []',
+        'special = ["dep:nexus-wasm-host"]',
+        '',
+        '[dependencies]',
+        'nexus-wasm-host = { path = "../nexus-wasm-host", optional = true }',
+        '',
+      ].join('\n'),
+    },
+    'nexus-wasm-host': { deps: {} },
+    'nexus-contracts': { deps: {} },
+    'nexus-workflow-ir': { deps: {} },
+    'nexus-pattern': { deps: {} },
+    'nexus-knowledge': { deps: {} },
+    'nexus-narrative': { deps: {} },
+  });
+  const run = policyRun(root);
+
+  assert.notEqual(run.status, 0, 'a feature-scoped policy edge was accepted');
+  assert.match(run.stdout, /graph pin failed/);
+  assert.match(
+    run.stdout,
+    /nexus-compute-policy --all-features --target all must resolve with ZERO dependencies, got 2/,
+  );
+  assert.match(run.stdout, /└── nexus-wasm-host v/);
 });

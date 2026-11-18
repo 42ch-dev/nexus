@@ -71,26 +71,30 @@ pub struct SandboxOverrides {
     pub wall_time_ms: Option<u64>,
 }
 
-/// Tighten sandbox overrides to the host maxima via `min(override, default)`
-/// — the same semantics as `WasmEngine::resolve_sandbox` (compute.rs L71-82).
-///
-/// The maxima are read from [`nexus_compute_policy::SandboxConfig::default()`]
-/// (AR-38: read, never duplicate). Absent fields stay absent (host defaults).
+/// Tighten sandbox overrides to the host maxima by delegating numeric
+/// resolution to the policy owner (`SandboxConfig::resolve`, which clamps
+/// memory in BYTES) and projecting the result back into descriptor units for
+/// present fields only (QC1-01: `clamp_sandbox` must not own a second clamp
+/// that compares MiB while `resolve` compares bytes — the paths diverged on
+/// a non-MiB-aligned cap). Absent fields stay absent (host defaults).
+/// Zero-override validation stays in `UserCapabilityDescriptor::validate`;
+/// the custom WASM engine base selection stays in `nexus-wasm-host`.
 /// `pub(crate)` because both the admission gate 4 (`admission.rs`) and
 /// `UserCapability::new` (F1 — re-clamp so a directly-constructed capability
 /// carries clamped bounds) apply it.
 #[must_use]
 pub(crate) fn clamp_sandbox(overrides: &SandboxOverrides) -> SandboxOverrides {
-    let defaults = nexus_compute_policy::SandboxConfig::default();
-    let max_wall_time_ms = u64::try_from(defaults.wall_time.as_millis()).unwrap_or(u64::MAX);
+    let resolved = nexus_compute_policy::SandboxConfig::default().resolve(
+        overrides.fuel,
+        overrides.memory_mib,
+        overrides.wall_time_ms,
+    );
     SandboxOverrides {
-        fuel: overrides.fuel.map(|fuel| fuel.min(defaults.fuel)),
-        memory_mib: overrides
-            .memory_mib
-            .map(|memory_mib| memory_mib.min(defaults.memory_mib())),
+        fuel: overrides.fuel.map(|_| resolved.fuel),
+        memory_mib: overrides.memory_mib.map(|_| resolved.memory_mib()),
         wall_time_ms: overrides
             .wall_time_ms
-            .map(|wall_time_ms| wall_time_ms.min(max_wall_time_ms)),
+            .map(|_| u64::try_from(resolved.wall_time.as_millis()).unwrap_or(u64::MAX)),
     }
 }
 
@@ -1537,5 +1541,52 @@ mod tests {
         let descriptor = parse(&minimal_json()).expect("minimal descriptor must parse");
         let cap = UserCapability::new(&descriptor, PathBuf::new(), None, None);
         assert!(matches!(cap.origin(), CapabilityOrigin::User));
+    }
+
+    /// QC1-01 guard: `clamp_sandbox` and the policy owner must stay the same
+    /// clamp. It delegates to `SandboxConfig::resolve` (bytes), so the only
+    /// way the two paths can diverge again is a second, non-delegating clamp
+    /// — this asserts the projection is exactly the owner's resolved values,
+    /// that boundary overrides pass through unchanged, and absent stays
+    /// absent.
+    #[test]
+    fn clamp_sandbox_matches_policy_resolve_projection() {
+        // At/above every maximum: clamps to the owner's default exactly.
+        let clamped = clamp_sandbox(&SandboxOverrides {
+            fuel: Some(99_000_000),
+            memory_mib: Some(999),
+            wall_time_ms: Some(999_999),
+        });
+        assert_eq!(clamped.fuel, Some(nexus_compute_policy::DEFAULT_FUEL));
+        assert_eq!(clamped.memory_mib, Some(nexus_compute_policy::DEFAULT_MEMORY_MIB));
+        // The byte ceiling the projection must round-trip (QC1-01: bytes, not
+        // a MiB-recomputed shadow).
+        assert_eq!(
+            nexus_compute_policy::SandboxConfig::default().max_memory_bytes,
+            64 * 1024 * 1024
+        );
+        assert_eq!(
+            clamped.wall_time_ms,
+            Some(u64::try_from(
+                nexus_compute_policy::DEFAULT_WALL_TIME.as_millis()
+            )
+            .unwrap())
+        );
+        // Below every maximum: tightening overrides pass through untouched.
+        let tighter = clamp_sandbox(&SandboxOverrides {
+            fuel: Some(1_000),
+            memory_mib: Some(2),
+            wall_time_ms: Some(5_000),
+        });
+        assert_eq!(
+            tighter,
+            SandboxOverrides {
+                fuel: Some(1_000),
+                memory_mib: Some(2),
+                wall_time_ms: Some(5_000)
+            }
+        );
+        // Absent stays absent — admission never invents host defaults.
+        assert_eq!(clamp_sandbox(&SandboxOverrides::default()), SandboxOverrides::default());
     }
 }
