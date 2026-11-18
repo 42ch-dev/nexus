@@ -77,6 +77,9 @@ jobs:
               - '.sqlx/**'
               - 'strategy-samples/**'
               - 'tooling/check-*.sh'
+              # The guard's fixture regression runs in schema-consistency-check
+              # (gated by this filter), so a test-only edit must trigger it.
+              - 'tooling/check-graph-pins.test.mjs'
               - 'tooling/release/**'
               - 'tooling/work-artifact-write-allowlist.tsv'
               - '.github/workflows/ci.yml'
