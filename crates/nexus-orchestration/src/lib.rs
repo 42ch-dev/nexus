@@ -37,7 +37,7 @@ pub use capability::{
 };
 pub use engine::{
     ChildSessionParams, EngineError, FailedStepWitness, FailurePersistenceDisposition,
-    FailureSettlement, FailureSettlementSummary, GraphFlowEngine, OrchestrationEngine, SessionId,
+    FailureSettlement, FailureSettlementSummary, GraphFlowEngine, OrchestrationEngine,
 };
 #[cfg(feature = "simulate")]
 pub use simulation::{simulate_document, SimulationError, SimulationOptions};

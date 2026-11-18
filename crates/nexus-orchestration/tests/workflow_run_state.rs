@@ -22,7 +22,6 @@
 use graph_flow::{Session, SessionStorage};
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument;
 use nexus_orchestration::applied_document::{AppliedDocument, AppliedDocumentSource};
-use nexus_orchestration::engine::{SessionId, SessionStatus};
 use nexus_orchestration::OrchestrationEngine;
 use nexus_preset::source_identity::PresetSourceIdentity;
 use nexus_session_storage::run_state::{
@@ -31,6 +30,7 @@ use nexus_session_storage::run_state::{
 };
 use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
 use nexus_session_storage::StorageError as EngineError;
+use nexus_session_storage::{SessionId, SessionStatus};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -3042,7 +3042,7 @@ async fn restart_hydrates_child_checkpoints() {
         let (_storage, engine) = fresh_engine(Arc::new(pool));
 
         // Recover the parent session — this must hydrate the children map.
-        let summary = nexus_orchestration::engine::SessionSummary {
+        let summary = nexus_session_storage::SessionSummary {
             session_id: parent_sid.clone(),
             creator_id: String::new(),
             preset_id: "novel-writing".to_string(),
@@ -3336,7 +3336,7 @@ async fn corrupt_child_is_non_replayable_during_recovery() {
 
     // Recovery must skip runner reconstruction for this parent (non-replayable)
     // and there must be no runner.
-    let summary = nexus_orchestration::engine::SessionSummary {
+    let summary = nexus_session_storage::SessionSummary {
         session_id: parent_sid.clone(),
         creator_id: String::new(),
         preset_id: "test-preset".to_string(),
@@ -4036,7 +4036,7 @@ states:
         );
         engine.set_nexus_home(nexus_home_dir.path().to_path_buf());
 
-        let summary = nexus_orchestration::engine::SessionSummary {
+        let summary = nexus_session_storage::SessionSummary {
             session_id: parent_sid.clone(),
             creator_id: String::new(),
             preset_id: "dir-preset".to_string(),
@@ -4077,7 +4077,7 @@ states:
         );
         engine.set_nexus_home(nexus_home_dir.path().to_path_buf());
 
-        let summary = nexus_orchestration::engine::SessionSummary {
+        let summary = nexus_session_storage::SessionSummary {
             session_id: parent_sid.clone(),
             creator_id: String::new(),
             preset_id: "dir-preset".to_string(),
@@ -6397,7 +6397,7 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
             nexus_orchestration::CapabilityRegistry::with_builtins(),
         )),
     );
-    let summary = nexus_orchestration::engine::SessionSummary {
+    let summary = nexus_session_storage::SessionSummary {
         session_id: parent_sid.clone(),
         creator_id: String::new(),
         preset_id: "novel-writing".to_string(),

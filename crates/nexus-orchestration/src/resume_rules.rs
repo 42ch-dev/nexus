@@ -47,7 +47,7 @@
 //! NOT derivable from persisted data and is never part of a verdict here —
 //! consumers carry it as the separate `runner_check` caveat.
 
-use crate::engine::SessionStatus;
+use nexus_session_storage::SessionStatus;
 use nexus_session_storage::run_state::RunStateV1;
 use serde_json::{Map, Value};
 
@@ -536,7 +536,7 @@ mod tests {
 
     #[test]
     fn a7_terminal_status_wins_over_all_evidence() {
-        use crate::engine::SessionStatus::*;
+        use nexus_session_storage::SessionStatus::*;
         for status in [Completed, Failed, Cancelled] {
             // Even with interrupted evidence + chain keys, terminal wins.
             let s = state(Some("t"), true, false);
@@ -549,7 +549,7 @@ mod tests {
 
     #[test]
     fn a7_missing_state_blob_is_unreadable_non_replayable() {
-        use crate::engine::SessionStatus::Running;
+        use nexus_session_storage::SessionStatus::Running;
         assert_eq!(
             classify_recovery(&Running, None, true),
             RecoveryClass::Unreadable
@@ -558,7 +558,7 @@ mod tests {
 
     #[test]
     fn a7_interrupted_wins_over_old_join_keys_and_never_retries() {
-        use crate::engine::SessionStatus::*;
+        use nexus_session_storage::SessionStatus::*;
         // In-flight mark + live chain keys → Interrupted, not ConvergeMerge.
         assert_eq!(
             classify_recovery(&Running, Some(&state(Some("t3"), false, false)), true),
@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn a7_human_wait_stays_distinct_and_is_never_stepped_at_boot() {
-        use crate::engine::SessionStatus::WaitingForInput;
+        use nexus_session_storage::SessionStatus::WaitingForInput;
         // No live join keys → HumanWait (A4 token preserved, not advanced).
         assert_eq!(
             classify_recovery(&WaitingForInput, Some(&state(None, false, true)), false),
@@ -601,7 +601,7 @@ mod tests {
 
     #[test]
     fn a7_terminal_status_wins_even_when_state_absent_or_corrupt() {
-        use crate::engine::SessionStatus::*;
+        use nexus_session_storage::SessionStatus::*;
         // A terminal row with NO durable state blob is still terminal
         // (A7 rule 1 beats rule 2) — lookup stays authoritative without a
         // live runner.
@@ -616,7 +616,7 @@ mod tests {
 
     #[test]
     fn a7_corrupt_state_precedes_interrupted_status() {
-        use crate::engine::SessionStatus::Interrupted;
+        use nexus_session_storage::SessionStatus::Interrupted;
         // A7 rule 2 (corrupt/unsupported metadata) fires before rule 3
         // (interrupted evidence): `Interrupted` status + missing state blob
         // is Unreadable, not Interrupted.
@@ -633,7 +633,7 @@ mod tests {
 
     #[test]
     fn a7_safe_boundary_and_converge_merge_running() {
-        use crate::engine::SessionStatus::{Paused, Running};
+        use nexus_session_storage::SessionStatus::{Paused, Running};
         assert_eq!(
             classify_recovery(&Running, Some(&RunStateV1::default()), false),
             RecoveryClass::SafeBoundary

@@ -351,7 +351,7 @@ fn recovery_class_for(
             }
             // A v1 row's status must be a known A2 status; anything else is
             // corrupt/ambiguous and non-replayable (mirrors `load_run`).
-            let Some(status) = nexus_orchestration::engine::SessionStatus::from_db_str(status)
+            let Some(status) = nexus_session_storage::SessionStatus::from_db_str(status)
             else {
                 return RecoveryClass::Unreadable;
             };

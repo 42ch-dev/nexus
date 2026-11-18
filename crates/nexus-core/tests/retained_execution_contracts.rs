@@ -96,15 +96,14 @@ use nexus_local_db::findings::{create_finding, Finding};
 use nexus_local_db::works::{create_work_atomic, WorkRecord};
 use nexus_local_db::writer_protocol::init_guarded_pool;
 use nexus_orchestration::capability::{CapabilityError, DaemonToolDispatch};
-use nexus_orchestration::engine::{
-    GraphFlowEngine, OrchestrationEngine, SessionStatus, SessionSummary,
-};
+use nexus_orchestration::engine::{GraphFlowEngine, OrchestrationEngine};
 use nexus_orchestration::preset_runtime::build_wired_outer_graph;
 use nexus_orchestration::{CapabilityRegistry, CapabilityRegistryHolder};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use nexus_session_storage::run_state::RunRecord;
 use nexus_session_storage::run_state::WorkflowStateStore;
 use nexus_session_storage::storage::sqlite::SqliteSessionStorage;
+use nexus_session_storage::{SessionStatus, SessionSummary};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -740,7 +739,7 @@ async fn durable_record(
     run_id: &str,
 ) -> nexus_session_storage::run_state::RunRecord {
     SqliteSessionStorage::new(Arc::new(pool.clone()))
-        .load_run(&nexus_orchestration::engine::SessionId(run_id.to_string()))
+        .load_run(&nexus_session_storage::SessionId(run_id.to_string()))
         .await
         .expect("durable run load")
         .expect("the admitted run row exists")
@@ -2228,7 +2227,7 @@ async fn seed_prompt_run(
     };
     store
         .start_run(
-            &nexus_orchestration::SessionId(session_id.to_string()),
+            &nexus_session_storage::SessionId(session_id.to_string()),
             &descriptor,
             checkpoint,
             &nexus_session_storage::run_state::RunStateV1::default(),
@@ -2323,7 +2322,7 @@ async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() 
     // successfully completed prompt must not leave its durable `in_flight`
     // attempt marker behind.
     let state = store
-        .load_run(&nexus_orchestration::SessionId(
+        .load_run(&nexus_session_storage::SessionId(
             "retained:single-flight".to_string(),
         ))
         .await
@@ -2458,7 +2457,7 @@ async fn prompt_executor_types_eof_after_initialize_as_a_launch_failure() {
         "a failed launch must produce no prompt effect"
     );
     let state = store
-        .load_run(&nexus_orchestration::SessionId(
+        .load_run(&nexus_session_storage::SessionId(
             "retained:eof-launch".to_string(),
         ))
         .await
@@ -2559,7 +2558,7 @@ async fn graph_prompt_context_serializes_output_without_host_handles() {
 
     // Durable cleanup: the completed prompt owns no `in_flight` attempt.
     let state = store
-        .load_run(&nexus_orchestration::SessionId(run_id.to_string()))
+        .load_run(&nexus_session_storage::SessionId(run_id.to_string()))
         .await
         .expect("load run")
         .expect("record")
@@ -4428,7 +4427,7 @@ async fn wait_for_signalable_gate_park(pool: &sqlx::SqlitePool, run_id: &str) {
     use graph_flow::SessionStorage as _;
 
     let store = SqliteSessionStorage::new(Arc::new(pool.clone()));
-    let session_id = nexus_orchestration::engine::SessionId(run_id.to_string());
+    let session_id = nexus_session_storage::SessionId(run_id.to_string());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         let record = store
@@ -5696,7 +5695,7 @@ async fn stage_run_row(
 /// becomes on the wire.
 fn run_record(run_id: &str, state_revision: u64) -> RunRecord {
     RunRecord {
-        session_id: nexus_orchestration::engine::SessionId(run_id.to_string()),
+        session_id: nexus_session_storage::SessionId(run_id.to_string()),
         status: SessionStatus::Running,
         state_revision,
         execution_version: 1,

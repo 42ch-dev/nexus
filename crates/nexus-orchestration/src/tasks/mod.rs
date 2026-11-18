@@ -13,11 +13,12 @@
 //!   best-effort using the DTOs from `nexus-contracts::local::acp_runtime::trace`.
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
-use crate::engine::{OrchestrationEngine, SessionId};
+use crate::engine::OrchestrationEngine;
 use async_trait::async_trait;
 use graph_flow::{Graph, NextAction, Task, TaskResult};
 use nexus_preset::manifest::{ConvergeConfig, ConvergeStrategy};
 use nexus_preset::manifest::{EnterAction, ExitWhen, MergeKind, NextTarget, StateDefinition};
+use nexus_session_storage::SessionId;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::Arc;

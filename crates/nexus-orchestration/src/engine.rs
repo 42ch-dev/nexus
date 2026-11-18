@@ -164,9 +164,9 @@ fn clear_step_effect_marker(root: &graph_flow::Session) {
 // Helper types
 // ---------------------------------------------------------------------------
 
-// Session identity/status/summary types live in `nexus-session-storage`;
-// re-exported here so every existing consumer path stays unchanged.
-pub use nexus_session_storage::{SessionId, SessionStatus, SessionSummary};
+// Session identity/status/summary types are owned by `nexus-session-storage`;
+// engine internals import them privately and consumers name the owner directly.
+use nexus_session_storage::{SessionId, SessionStatus, SessionSummary};
 
 /// Composite key that uniquely identifies a session within the engine.
 #[derive(Debug, Clone)]
