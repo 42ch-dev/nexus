@@ -168,6 +168,10 @@ function contractDependencies(manifestContents, entries) {
  * @property {NormalizedDependency[]} dependencies
  * @property {ConsumerEvidence | null} consumer Actual archive-only consumer, when
  *   a fixture exists for this entry.
+ * @property {string[] | null} coveredBy Fixture cases whose *resolved* graph
+ *   pulled this entry's archive in (`resolved[].source === "archive:<sha256>"`),
+ *   sorted; null when no passing consumer resolved it. This is what the coverage
+ *   gate reads — `consumer.patched` only records what was proposed.
  */
 
 /**
@@ -1156,6 +1160,7 @@ export function checkContractPackageability(repoRoot) {
         package: inspected.package,
         dependencies: inspected.dependencies,
         consumer: null,
+        coveredBy: null,
       };
       results.push(row);
       if (inspected.ok && inspected.archive !== null && inspected.root !== null) {
@@ -1204,22 +1209,53 @@ export function checkContractPackageability(repoRoot) {
       }
       // An entry with no fixture of its own is consumed by another entry's
       // fixture (knowledge by narrative), so a passing package row is not proof
-      // its archive is usable. When fixtures exist, every archive must be
-      // consumed by a passing consumer; a row without one stays a pack-only
-      // result and is named as such instead of counting as covered.
-      const consumed = new Set(
+      // its archive is usable. Coverage is decided by what the consumer actually
+      // resolved, not by what the fixture proposed: `patched` only says a patch
+      // was supplied, while `resolved` is read from the consumer's own metadata
+      // after the origin loop has proven each of those rows came from the
+      // extracted archive. A patch that resolution ignored (a target-specific
+      // declaration, an unused patch) therefore proves nothing.
+      /** @type {Map<string, {sha256: string, cases: Set<string>}>} */
+      const coverage = new Map();
+      for (const row of results) {
+        if (row.consumer?.ok !== true) {
+          continue;
+        }
+        for (const entry of row.consumer.resolved) {
+          if (!entry.source.startsWith("archive:")) {
+            continue;
+          }
+          const covered = coverage.get(entry.name) ?? {
+            sha256: entry.source.slice("archive:".length),
+            cases: new Set(),
+          };
+          covered.cases.add(row.consumer.case);
+          coverage.set(entry.name, covered);
+        }
+      }
+      /** Package names a passing consumer declared but never resolved. */
+      const declaredOnly = new Set(
         results.flatMap((row) =>
           row.consumer?.ok === true
-            ? row.consumer.patched.map((dependency) => dependency.name)
+            ? row.consumer.patched
+                .map((dependency) => dependency.name)
+                .filter((name) => !coverage.has(name))
             : [],
         ),
       );
       for (const row of results) {
-        if (row.archive === null || !row.ok || consumed.has(row.name)) {
+        if (row.archive === null || !row.ok) {
+          continue;
+        }
+        const covered = coverage.get(row.name);
+        if (covered !== undefined && covered.sha256 === row.archive.sha256) {
+          row.coveredBy = [...covered.cases].sort();
           continue;
         }
         row.ok = false;
-        row.cause = `pack-only: no passing consumer consumes ${row.name}`;
+        row.cause = declaredOnly.has(row.name)
+          ? `unresolved-coverage: ${row.name} was patched into a consumer but resolution never used its archive`
+          : `pack-only: no passing consumer consumes ${row.name}`;
       }
     }
   } finally {

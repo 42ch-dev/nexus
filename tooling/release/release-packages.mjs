@@ -173,24 +173,47 @@ export function readSourceProvenance(repoRoot) {
 }
 
 /**
- * Every inline declaration of `name` in one manifest, in file order: a package
- * may declare the same edge more than once (`nexus-knowledge` names
+ * Every declaration of `name` in one manifest, in file order: a package may
+ * declare the same edge more than once (`nexus-knowledge` names
  * `nexus-contracts` as both a normal and a dev dependency), so planning and
  * preparation both read the declarations here instead of the first match.
- * `requirement` is null for a declaration without a `version` key.
+ *
+ * The only form this helper reads is a bare-key single-line inline table with a
+ * version requirement. Anything else that names the package as a dependency key
+ * — a trailing comment, a table spread over several lines, a plain requirement
+ * string, a dotted key — refuses by name: preparation rewrites bounds in place,
+ * and a declaration it silently skipped is one it would leave pointed at the
+ * old version. `requirement` is null for an inline table without a `version`
+ * key, which the caller refuses as unversioned.
  *
  * @param {string} contents
+ * @param {string} manifestPath
  * @param {string} name
- * @returns {{ requirement: string | null }[]}
+ * @returns {{ line: number; requirement: string | null }[]}
  */
-function inlineDeclarations(contents, name) {
-  const pattern = new RegExp(
-    `^\\s*${escapeRegExp(name)}\\s*=\\s*\\{([^}\\n]*)\\}\\s*$`,
-    "gm",
-  );
-  return [...contents.matchAll(pattern)].map((match) => ({
-    requirement: /\bversion\s*=\s*"([^"]*)"/.exec(match[1])?.[1] ?? null,
-  }));
+function dependencyDeclarations(contents, manifestPath, name) {
+  const escaped = escapeRegExp(name);
+  const keyLine = new RegExp(`^\\s*${escaped}\\s*[.=]`);
+  const inline = new RegExp(`^\\s*${escaped}\\s*=\\s*\\{([^}\\n]*)\\}\\s*$`);
+  /** @type {{ line: number; requirement: string | null }[]} */
+  const declarations = [];
+  contents.split("\n").forEach((line, index) => {
+    if (!keyLine.test(line)) {
+      return;
+    }
+    const match = inline.exec(line);
+    if (match === null) {
+      throw new ReleaseRefusal(
+        "dependency-form-unsupported",
+        `${manifestPath}:${index + 1}: cannot read the ${name} declaration as one inline table with a version requirement`,
+      );
+    }
+    declarations.push({
+      line: index + 1,
+      requirement: /\bversion\s*=\s*"([^"]*)"/.exec(match[1])?.[1] ?? null,
+    });
+  });
+  return declarations;
 }
 
 /**
@@ -215,7 +238,7 @@ function inventoryDependencies(contents, manifestPath, names) {
         `${manifestPath}: ${name} uses a dependency table; an inline table with a version requirement is required`,
       );
     }
-    for (const declaration of inlineDeclarations(contents, name)) {
+    for (const declaration of dependencyDeclarations(contents, manifestPath, name)) {
       if (declaration.requirement === null) {
         throw new ReleaseRefusal(
           "unversioned-dependency",
@@ -816,7 +839,7 @@ function replaceDependencyRequirement(contents, manifestPath, name, version) {
     `^(\\s*${escapeRegExp(name)}\\s*=\\s*\\{[^}\\n]*?\\bversion\\s*=\\s*)"[^"]*"`,
     "gm",
   );
-  const declarations = inlineDeclarations(contents, name);
+  const declarations = dependencyDeclarations(contents, manifestPath, name);
   const rewritable = contents.match(pattern) ?? [];
   if (declarations.length === 0 || rewritable.length !== declarations.length) {
     throw new ReleaseRefusal(

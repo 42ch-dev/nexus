@@ -418,10 +418,13 @@ after every upload succeeds. A failed update remains unpublished for recovery.
 
 ## Public Cargo packages
 
-Eight Cargo packages are published independently of the product: they carry
+Eight Cargo packages are versioned independently of the product: they carry
 their own literal versions, their own changelogs and their own release label and
-tag namespace. Nothing in this section creates a `v*` tag, bumps a product
-version or runs a runtime/Electron producer.
+tag namespace, so each can be released without the others. **None of them is
+published yet, and nothing in this repository can publish one** (see
+§ Publish): this section describes the inventory, the plan and the gates, not a
+registry state. Nothing here creates a `v*` tag, bumps a product version or runs
+a runtime/Electron producer.
 
 The inventory is `tooling/release/version-brackets.json` (`contract` array) —
 the same eight entries `tooling/release/check-contract-packageability.mjs`
@@ -441,8 +444,9 @@ packs. There is no second list of names.
 Requirements are normal caret bounds (`"0.1.0"` means `^0.1.0`), so a dependent
 only needs a new bound when the prerequisite's new version leaves that range.
 `nexus-module-manifest` has no prerequisite and no dependent *within this
-inventory*, so it can ship at any time; standalone module authors consume it,
-which is why the `nexus-module-manifest` fixture exists.
+inventory*, so nothing in the inventory constrains its version; standalone
+module authors consume it, which is why the `nexus-module-manifest` fixture
+exists.
 
 ### Labels and tags
 
@@ -478,9 +482,10 @@ already exists with different content, and registry publication is irreversible.
 The output prints `plan ok|refused` and a `ready` line with one line per blocker.
 
 Exit codes: `0` for a valid plan, `1` for a refusal, `2` for a usage error.
-`--require-publishable` is the separate gate a publish path must pass — it also
-demands `ready`, so it exits `1` while any blocker stands. A green
-`--check-only` run is a successful *check*, never a publication grant.
+`--require-publishable` is the separate gate any future publish path would have
+to pass — it also demands `ready`, so it exits `1` while any blocker stands. A
+green `--check-only` run is a successful *check*, never a publication grant, and
+this repository ships no path that consumes it (see § Publish).
 
 The archive side comes from the packageability checker:
 
@@ -518,8 +523,12 @@ not a different check: the CI step runs the same repack with it.
 `--json` records the revision it packed (`source.sha`) and
 `source.clean`, which is true only when **both** hold: the worktree had no
 uncommitted change when sampled, and the copied tree matches that revision in
-both directions — every staged path has that revision's blob with the same
-bytes, and every revision path is in the copy (`verifyStagedSource`). The second
+both directions — every staged path carries that revision's blob id, and every
+revision path is in the copy (`verifyStagedSource`). Regular files are matched
+through the checkout's own Git clean conversion (the conversion that produced
+the committed blob), so the comparison is over the content Git would store, not
+over the working-tree bytes: a path whose content converts to a different blob
+is a mismatch. The second
 part closes the gap between sampling the status and copying the tree: a file
 changed *or added* in that window makes the receipt say `clean: false` and name
 the paths in `source.mismatch`, so the plan refuses it. What this proves is: the
@@ -529,6 +538,11 @@ staged tree is that commit's tree. It does **not** prove:
   contents are skipped on both sides — they are not compared and not archived.
 - executable modes. A regular file is compared by content blob id, so a
   permission bit changed in the working tree still verifies `clean`.
+- LFS hydration. This repository stores `packages/nexus-ui/assets/**` as LFS
+  pointer files; a checkout holding only the pointers (no `git lfs pull`) has
+  exactly the committed blobs and legitimately reports `clean: true` while the
+  binaries are absent. `clean` never proves the tree is hydrated, and no archive
+  in this inventory contains those assets.
 - authorship. Nothing authenticates who ran the checker, on what machine, from
   what history; `source.sha` is whatever `HEAD` was at that moment.
 - registry state. The receipt says nothing about what the registry holds;
@@ -539,15 +553,25 @@ verbatim rather than resolving them, so a tracked relative link (this repository
 keeps `.claude/skills/{check-pr,cli-review,greploop}`) verifies clean in a fresh
 checkout. A retargeted link is a `source.mismatch`.
 
-Consumers are part of that proof. A presence-based rule would let a missing
-fixture pass silently, so when any fixture exists every archive must be consumed
-by a *passing* consumer: `nexus-knowledge` has no runner of its own and is
-proven through the `nexus-narrative` fixture that consumes it. An archive no
-passing consumer resolves fails the run with
-`pack-only: no passing consumer consumes <name>` — a pack-only row is a
-recognisable result, not a passing one. A repository with no consumer fixtures
-at all is checked as pack-only, which is what the fixtures' own isolation tests
-are.
+Consumers are part of that proof, and what decides it is the *resolved* graph,
+not the proposal. A fixture may declare a dependency the target never uses, so
+`patched` (what the checker supplied) is not evidence; coverage requires a
+passing consumer's own metadata to resolve that name from the archive the
+checker produced — same package name, same `archive:<sha256>`. So when any
+fixture exists every archive must be resolved by a *passing* consumer:
+`nexus-knowledge` has no runner of its own and is proven through the
+`nexus-narrative` fixture that consumes it. A failing row is named for what
+went wrong:
+
+- `unresolved-coverage: <name> was patched into a consumer but resolution never
+  used its archive` — a declared patch that resolution ignored (a
+  target-specific or otherwise unused declaration);
+- `pack-only: no passing consumer consumes <name>` — no fixture named it at all.
+
+Both are failures, not pack-only passes. A repository with no consumer fixtures
+at all is still checked as pack-only, which is what the fixtures' own isolation
+tests are; that is the only case where an archive without consumer proof is
+accepted.
 
 `--registry-state <json>` takes `{ "published": [{ "name", "version",
 "checksum" }], "writable": true }`. Without it, live registry state is *unknown*:
@@ -614,23 +638,32 @@ the reviewed commit is the supported operator route when the main checkout is
 busy; do not narrow the check without accounting for every archive, dependency
 and consumer input.
 
-### Publish (operator action, currently unconfigured)
+### Publish (no publication path exists in this repository)
 
-Publication is irreversible and is not part of this pipeline today. The
-authentication destination, namespace ownership and protected credentials are
-still unconfigured — the code refuses rather than pretending otherwise, and
-`contract-release.yml` cannot upload anything.
+**There is no publication path here.** Nothing in this repository uploads a
+`crate`, and no configuration can turn one on:
 
-`publishSelected(plan, client)` is the only publication seam and it never
-constructs its client: the caller supplies one. There is **no** in-repository
-client and no shipped call site — the repository's only implementation is the
-isolated protocol fixture the tests use (`tooling/release/release-packages.test.mjs`,
-in-memory, no network), so nothing here can publish. Until an operator-authorized
-run supplies a real client, this section describes a seam and its refusal
-behavior, not an available operation; the CLI exposes no publish switch at all.
-It uploads in plan order (prerequisites first), confirms each upload by
-re-reading the registry checksum, and stops at the first failure. A
-multi-package upload is **not** atomic:
+- `publishSelected(plan, client)` is a seam, not an operation: the function only
+  ever uses the client it is handed and never constructs one, and nothing in the
+  repository hands it a real client. Its only implementation is the isolated
+  protocol fixture in `tooling/release/release-packages.test.mjs` (in memory, no
+  network), which exists to test the refusal and resume logic.
+- The CLI (`release-packages.mjs`) has `--check-only` and `--prepare` only — no
+  publish switch, no token read, no upload path.
+- `contract-release.yml` requests `contents: read`, has no publish step and
+  cannot upload anything.
+- The registry destination, namespace ownership and protected credentials that
+  an upload would need are unconfigured, so the code refuses rather than
+  pretending otherwise.
+
+A plan can be `ready` and still have nothing that could publish it; `ready` means
+the offline checks would permit an upload, never that one is available or
+authorized. What follows describes the seam's contract for whoever builds a
+delivery route — it is not a runbook for a capability this repository has.
+
+Were a client ever supplied, it would upload in plan order (prerequisites first),
+confirm each upload by re-reading the registry checksum, and stop at the first
+failure. A multi-package upload is **not** atomic:
 
 - completed package/version pairs are reported as completed and stay published;
 - the failing pair and everything after it stay pending;
@@ -643,7 +676,7 @@ multi-package upload is **not** atomic:
   exact content match may treat it as done.
 
 Every outcome carries the full completed/pending split, so an interrupted run
-can be reported honestly and re-entered from the registry state.
+could be reported honestly and re-entered from the registry state.
 
 ### Prepare versions
 

@@ -814,6 +814,14 @@ test("the narrative consumer reads a world and its KbStore entries from archives
       );
     }
     assert.equal(rowFor(report, "nexus-knowledge").consumer, null);
+    // Knowledge has no runner of its own: its coverage names the fixture whose
+    // resolved graph pulled the archive in.
+    assert.deepEqual(rowFor(report, "nexus-knowledge").coveredBy, [
+      `${CONSUMER_FIXTURES_PATH}/nexus-narrative`,
+    ]);
+    assert.deepEqual(rowFor(report, "nexus-contracts").coveredBy, [
+      `${CONSUMER_FIXTURES_PATH}/nexus-narrative`,
+    ]);
   } finally {
     cleanupTempRepo(dir);
   }
@@ -914,6 +922,10 @@ test("an archive no passing consumer consumes fails as a pack-only result", () =
     const covered = rowFor(report, "nexus-fixture-public");
     assert.equal(covered.ok, true, covered.cause ?? "");
     assert.equal(covered.consumer.ok, true);
+    assert.deepEqual(covered.coveredBy, [
+      `${CONSUMER_FIXTURES_PATH}/nexus-fixture-public`,
+    ]);
+    assert.equal(uncovered.coveredBy, null);
   } finally {
     cleanupTempRepo(dir);
   }
@@ -983,6 +995,83 @@ test("a filtered path is compared by the blob Git stores, not its working-tree b
     assert.deepEqual(verifyStagedSource(dir, sha, stage), []);
   } finally {
     rmSync(stage, { recursive: true, force: true });
+    cleanupTempRepo(dir);
+  }
+});
+
+test("a patch a consumer declares but never resolves does not count as coverage", () => {
+  const dir = createTempRepo();
+  try {
+    writeRepoFile(dir, `${TINY_CRATE_DIR}/Cargo.toml`, TINY_MANIFEST);
+    writeRepoFile(dir, `${TINY_CRATE_DIR}/src/lib.rs`, "pub fn tiny() {}\n");
+    writeRepoFile(
+      dir,
+      VERSION_BRACKETS_PATH,
+      `${JSON.stringify(
+        {
+          contract: [
+            {
+              name: "nexus-tiny-contract",
+              manifest: `${TINY_CRATE_DIR}/Cargo.toml`,
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    // An optional dependency no feature enables: Cargo still lists it as a
+    // declared dependency (so the checker supplies the patch), but it never
+    // enters the resolved graph, and the fixture itself still builds and runs.
+    // `patched` therefore says the archive was offered, not that anything used
+    // it.
+    writeRepoFile(
+      dir,
+      `${CONSUMER_FIXTURES_PATH}/nexus-tiny-contract/Cargo.toml`,
+      [
+        "[package]",
+        'name = "nexus-tiny-consumer"',
+        'version = "0.0.0"',
+        'edition = "2021"',
+        "",
+        "[dependencies]",
+        "# Optional and enabled by no feature: declared, never resolved.",
+        'nexus-tiny-contract = { version = "0.1.0", optional = true }',
+        "",
+        "[workspace]",
+        "",
+      ].join("\n"),
+    );
+    writeRepoFile(
+      dir,
+      `${CONSUMER_FIXTURES_PATH}/nexus-tiny-contract/src/main.rs`,
+      'fn main() {\n    println!("declared, never resolved");\n}\n',
+    );
+    initGitRepo(dir);
+
+    const report = checkContractPackageability(dir);
+    assert.equal(report.ok, false);
+    const row = rowFor(report, "nexus-tiny-contract");
+    assert.equal(row.ok, false);
+    // The fixture ran and the archive was offered to it — the row still fails,
+    // because nothing resolved that archive.
+    assert.equal(row.consumer.ok, true, row.consumer.cause ?? "");
+    assert.deepEqual(
+      row.consumer.patched.map((patched) => patched.name),
+      ["nexus-tiny-contract"],
+    );
+    assert.equal(
+      row.consumer.resolved.some((entry) => entry.source.startsWith("archive:")),
+      false,
+      JSON.stringify(row.consumer.resolved),
+    );
+    assert.equal(
+      row.cause,
+      "unresolved-coverage: nexus-tiny-contract was patched into a consumer but resolution never used its archive",
+    );
+    // Nothing resolved the archive, so no fixture is named as its proof.
+    assert.equal(row.coveredBy, null);
+  } finally {
     cleanupTempRepo(dir);
   }
 });

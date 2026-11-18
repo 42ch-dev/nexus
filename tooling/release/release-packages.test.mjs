@@ -779,6 +779,49 @@ test("preparation rewrites every declaration of a bumped prerequisite", () => {
   }
 });
 
+test("preparation refuses dependency declarations it cannot rewrite", () => {
+  // Both replacements are valid Cargo (a trailing comment and a plain
+  // requirement string), and both are forms this helper cannot rewrite in
+  // place. The scan refuses by name and file:line instead of skipping the
+  // declaration and leaving the bound behind.
+  const cases = [
+    [
+      "trailing comment",
+      'nexus-workflow-ir = { version = "0.4.2", path = "../nexus-workflow-ir" } # pinned',
+    ],
+    ["plain requirement string", 'nexus-workflow-ir = "0.4.2"'],
+  ];
+  for (const [label, replacement] of cases) {
+    const { dir } = fixture({ version: "0.4.2" });
+    try {
+      const manifest = "crates/nexus-pattern/Cargo.toml";
+      mutateRepoFile(dir, manifest, (contents) =>
+        contents.replace(/^nexus-workflow-ir = .*$/m, replacement),
+      );
+      const result = preparePackageVersions(dir, {
+        packages: ["nexus-workflow-ir"],
+        versions: { "nexus-workflow-ir": "0.5.0" },
+      });
+      assert.equal(result.ok, false, label);
+      assert.deepEqual(result.changed, [], label);
+      assert.deepEqual(
+        result.refusals.map((row) => row.code),
+        ["dependency-form-unsupported"],
+        label,
+      );
+      assert.match(
+        result.refusals[0].message,
+        /crates\/nexus-pattern\/Cargo\.toml:\d+: cannot read the nexus-workflow-ir declaration/,
+        label,
+      );
+      // The refusal happened before anything was written.
+      assert.match(readRepoFile(dir, manifest), /0\.4\.2/, label);
+    } finally {
+      cleanupTempRepo(dir);
+    }
+  }
+});
+
 test("preparation refuses a non-increasing version and a missing changelog", () => {
   const { dir } = fixture({ version: "0.4.2" });
   try {
