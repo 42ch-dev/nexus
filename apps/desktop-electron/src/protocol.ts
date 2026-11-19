@@ -51,7 +51,7 @@ export function assertDistPresent(distRoot: string): void {
   if (!existsSync(indexPath)) {
     throw new Error(
       `missing web artifact ${indexPath}. Build the unchanged apps/web/dist first: ` +
-        '`pnpm --filter web build` (requires @42ch/nexus-contracts and @42ch/nexus-ui).',
+        '`pnpm run build:web`.',
     );
   }
 }

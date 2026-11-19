@@ -77,7 +77,7 @@ cd "${REPO_ROOT}"
 # The embedded SPA is read at cargo build time; ensure the dist exists.
 if [ -z "${SKIP_WEB_BUILD:-}" ]; then
   echo "Building web SPA..."
-  pnpm --filter web build
+  pnpm run build:web
 fi
 
 # Build the nexus42 release binary so the test exercises the same artifact that

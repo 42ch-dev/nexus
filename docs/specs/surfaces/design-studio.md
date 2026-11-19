@@ -183,7 +183,7 @@ Root DESIGN v0.5 locks the production-level contract:
 | Action | Command |
 | --- | --- |
 | Start | `pnpm --filter design-studio dev` |
-| Build | `pnpm --filter design-studio build` |
+| Build | `pnpm run build:design-studio` |
 | Test | `pnpm --filter design-studio test` |
 
 #### 5.2 Read-only tuning workflow
@@ -194,7 +194,7 @@ Root DESIGN v0.5 locks the production-level contract:
 4. Edit `DESIGN.md` and/or `DESIGN.dark.md` on disk.
 5. Refresh (HMR or reload) until the gallery reflects the SSOT.
 6. Validate Brand, Components, Voice, and Surfaces in both themes.
-7. Shared-consumer check: `pnpm --filter web typecheck` and `pnpm --filter web build` **without** editing web source.
+7. Shared-consumer check: `pnpm --filter web typecheck` and `pnpm run build:web` **without** editing web source.
 
 **Success signal:** steps 1–7 do not require reading `index.css` or Tailwind config to understand token impact.
 
@@ -372,7 +372,7 @@ Focus rings remain visible. Text/control pairings used in the locked language me
 - [ ] Keyboard focus visible; reduced-motion recipes collapse
 - [ ] Read-only footer / DESIGN edit hint remains
 - [ ] `wire_contracts_changed: false`
-- [ ] `pnpm --filter web typecheck` and `pnpm --filter web build` pass **without** web source edits
+- [ ] `pnpm --filter web typecheck` and `pnpm run build:web` pass **without** web source edits
 - [ ] No claim of web or desktop redesign acceptance
 
 ---

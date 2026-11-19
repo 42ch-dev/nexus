@@ -87,7 +87,7 @@ Gallery **displays** shadcn primitives from `apps/web/src/components/ui/*` witho
 | Action | Command |
 | --- | --- |
 | Dev server | `pnpm --filter design-studio dev` (port **5174**) |
-| Build | `pnpm --filter design-studio build` |
+| Build | `pnpm run build:design-studio` |
 | Test | `pnpm --filter design-studio test` |
 
 No daemon required.

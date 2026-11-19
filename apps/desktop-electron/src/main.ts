@@ -208,7 +208,7 @@ export function resolveDesktopDistRoot(input: {
     }
     throw new Error(
       `packaged build is missing its bundled web artifact at ${packaged}. ` +
-        'Repackage with the current web dist: pnpm --filter web build, then ' +
+        'Repackage with the current web dist: pnpm run build:web, then ' +
         'node apps/desktop-electron/scripts/package.mjs --arch <arm64|x64>.',
     );
   }
