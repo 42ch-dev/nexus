@@ -13,9 +13,8 @@ import { useActiveCreatorId } from '@/api/queries';
  * (web-ui.md §24).
  *
  * Creator-scoped (`creator_id` on every memory endpoint). The active creator id
- * is derived from existing sessions (mirrors the canvas `useDerivedCreatorId`
- * pattern); the daemon rejects a mismatched creator with 403. Three affordances
- * consuming the shipped memory Daemon API:
+ * comes from the profile switcher; the daemon rejects a mismatched creator
+ * with 403. Three affordances consuming the shipped memory Daemon API:
  *   1. Pending-review list (cursor-paginated) with a live count badge + delete.
  *   2. "Review & Summarize" CTA → POST /memory/review with a processing state,
  *      then a result-counters toast; invalidates pending + count + fragments.

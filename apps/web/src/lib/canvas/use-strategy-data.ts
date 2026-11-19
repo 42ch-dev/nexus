@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useNexusClient } from '@/lib/client-context';
+import { useActiveCreatorId } from '@/lib/active-creator-context';
 import { NexusClientError } from '@/lib/nexus';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useToast } from '@/lib/use-toast';
@@ -55,13 +56,14 @@ export function useActiveSession(presetId: string | undefined) {
   }, [sessions.data]);
 }
 
-/** A usable creator_id for a new Run, derived from existing schedules/sessions. */
+/** Prefer the active creator for a new Run, falling back to preset history. */
 export function useDerivedCreatorId(presetId: string | undefined): string | undefined {
+  const activeCreatorId = useActiveCreatorId();
   const sessions = usePresetSessions(presetId);
   const schedules = usePresetSchedules(presetId);
   return useMemo(
-    () => sessions.data?.[0]?.creator_id ?? schedules.data?.[0]?.creator_id,
-    [sessions.data, schedules.data],
+    () => activeCreatorId ?? sessions.data?.[0]?.creator_id ?? schedules.data?.[0]?.creator_id,
+    [activeCreatorId, sessions.data, schedules.data],
   );
 }
 

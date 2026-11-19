@@ -9,15 +9,22 @@
  * whole reports the refusal — never an overall success, never an automatic
  * re-append.
  *
- * These cases drive the real `BrowserClient` against msw, so the observed
- * request order, refusal codes and refresh behavior are transport-level rather
- * than mocked-hook behavior.
+ * Transport cases drive the real `BrowserClient` against msw to observe request
+ * order, refusal codes and refresh behavior. The Run submission case spies on
+ * client methods while exercising the real canvas hooks and Idea input.
  */
 import { http, HttpResponse } from 'msw';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 
-import { usePresetSchedules, useSteerStrategy } from '@/lib/canvas/use-strategy-data';
+import { IdeaInput } from '@/components/canvas/idea-input';
+import { useStrategyCanvas } from '@/components/canvas/strategy-canvas/hooks/use-strategy-canvas';
+import {
+  useDerivedCreatorId,
+  usePresetSchedules,
+  usePresetSessions,
+  useSteerStrategy,
+} from '@/lib/canvas/use-strategy-data';
 import { i18n } from '@/lib/i18n/config';
 import { BrowserClient } from '@/lib/nexus';
 import { useHandlers } from '@/test/msw-server';
@@ -76,6 +83,125 @@ function SteerHarness() {
 
 beforeEach(async () => {
   await i18n.changeLanguage('en');
+});
+
+function CreatorHarness() {
+  const creatorId = useDerivedCreatorId('preset-1');
+  const sessions = usePresetSessions('preset-1');
+  const schedules = usePresetSchedules('preset-1');
+  return (
+    <>
+      <span data-testid="creator">{creatorId ?? 'none'}</span>
+      <span data-testid="history">{sessions.status}/{schedules.status}</span>
+    </>
+  );
+}
+
+function RunHarness() {
+  const { creatorId, activeScheduleId } = useStrategyCanvas('preset-1', null);
+  return (
+    <IdeaInput
+      presetId="preset-1"
+      creatorId={creatorId}
+      scheduleId={activeScheduleId}
+      onArtifact={() => {}}
+    />
+  );
+}
+
+describe('useDerivedCreatorId', () => {
+  beforeEach(() => {
+    useHandlers(
+      http.get('/v1/daemon/runtime/status', () => HttpResponse.json({})),
+    );
+  });
+
+  it('uses the active creator without any preset history', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () => HttpResponse.json({ items: [] })),
+      http.get(SCHEDULES_PATH, () => HttpResponse.json({ items: [] })),
+    );
+    renderInApp(<CreatorHarness />, {
+      client: new BrowserClient(),
+      activeCreatorId: 'active-creator',
+    });
+    await waitFor(() => expect(screen.getByTestId('history')).toHaveTextContent('success/success'));
+    await waitFor(() => expect(screen.getByTestId('creator')).toHaveTextContent('active-creator'));
+  });
+
+  it('submits an Idea as a schedule for the active creator without preset history', async () => {
+    const client = new BrowserClient();
+    const emptyHistory = { items: [], pagination: { limit: 20, has_more: false } };
+    const sessions = vi.spyOn(client, 'listSessions').mockResolvedValue(emptyHistory);
+    const schedules = vi.spyOn(client, 'listSchedules').mockResolvedValue(emptyHistory);
+    const addSchedule = vi.spyOn(client, 'addSchedule').mockResolvedValue({
+      schedule_id: 'sch-new',
+      status: 'running',
+      core_context_version: 1,
+    });
+    renderInApp(<RunHarness />, { client, activeCreatorId: 'active-creator' });
+    await waitFor(() => {
+      expect(sessions).toHaveBeenCalled();
+      expect(schedules).toHaveBeenCalled();
+    });
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: IDEA } });
+    fireEvent.click(screen.getByRole('button', {
+      name: (name, element) => name === 'Run' && !element.hasAttribute('aria-pressed'),
+    }));
+
+    await waitFor(() => expect(addSchedule).toHaveBeenCalledWith(expect.objectContaining({
+      creator_id: 'active-creator',
+      preset_id: 'preset-1',
+      seed: IDEA,
+    })));
+    expect(addSchedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('prefers the active creator over history belonging to another creator', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () => HttpResponse.json({ items: [] })),
+      http.get(SCHEDULES_PATH, () => HttpResponse.json(listResponse(0))),
+    );
+    renderInApp(<CreatorHarness />, {
+      client: new BrowserClient(),
+      activeCreatorId: 'active-creator',
+    });
+    await waitFor(() => expect(screen.getByTestId('history')).toHaveTextContent('success/success'));
+    await waitFor(() => expect(screen.getByTestId('creator')).toHaveTextContent('active-creator'));
+  });
+
+  it('falls back to preset history when no creator is active', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () => HttpResponse.json({ items: [] })),
+      http.get(SCHEDULES_PATH, () => HttpResponse.json(listResponse(0))),
+    );
+    renderInApp(<CreatorHarness />, { client: new BrowserClient(), activeCreatorId: null });
+    await waitFor(() => expect(screen.getByTestId('creator')).toHaveTextContent('creator-1'));
+  });
+
+  it('leaves the creator unresolved when no selection or history exists', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () => HttpResponse.json({ items: [] })),
+      http.get(SCHEDULES_PATH, () => HttpResponse.json({ items: [] })),
+    );
+    renderInApp(<CreatorHarness />, { client: new BrowserClient(), activeCreatorId: null });
+    await waitFor(() => expect(screen.getByTestId('history')).toHaveTextContent('success/success'));
+    expect(screen.getByTestId('creator')).toHaveTextContent('none');
+  });
+
+  it('keeps the active creator usable when history requests fail', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () => new HttpResponse(null, { status: 500 })),
+      http.get(SCHEDULES_PATH, () => new HttpResponse(null, { status: 500 })),
+    );
+    renderInApp(<CreatorHarness />, {
+      client: new BrowserClient(),
+      activeCreatorId: 'active-creator',
+    });
+    await waitFor(() => expect(screen.getByTestId('history')).toHaveTextContent('error/error'));
+    expect(screen.getByTestId('creator')).toHaveTextContent('active-creator');
+  });
 });
 
 describe('useSteerStrategy — append before resume (W5 / S0-3)', () => {
