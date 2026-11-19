@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, watch } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -28,6 +29,8 @@ test('the root build produces shared dist directories without replacing them mid
     (error) => error,
   );
   assert.ifError(buildError);
+  // The child can exit before all pending fs.watch callbacks are delivered.
+  for (let turn = 0; turn < 3; turn++) await setImmediate();
   for (const { name, dist, allowedRenames, renames } of outputs) {
     assert.ok(renames >= 1, `no rename events observed for ${name}/dist`);
     assert.ok(
