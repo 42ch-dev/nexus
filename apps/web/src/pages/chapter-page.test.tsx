@@ -171,9 +171,10 @@ function readingProgressHandler(scrollProgress = 0) {
 
 function saveReadingProgressHandler() {
   return http.put('/v1/daemon/reading/progress', async ({ request }) => {
-    const body = (await request.json()) as { work_id: string; chapter: number; scroll_progress: number };
+    const body = (await request.json()) as { work_id: string; volume: number; chapter: number; scroll_progress: number };
     return HttpResponse.json({
       work_id: body.work_id,
+      volume: body.volume,
       chapter: body.chapter,
       scroll_progress: body.scroll_progress,
       updated_at: '2026-07-04T00:00:00Z',
@@ -588,6 +589,7 @@ describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
         const volume = requestVolume(request);
         return HttpResponse.json({
           work_id: 'w-123', volume, chapter: 1, scroll_progress: volume === 1 ? 3_500 : 0,
+          updated_at: '2026-07-04T00:00:00Z',
         });
       }),
       http.get('/v1/daemon/reading/annotations', ({ request }) => {
@@ -598,6 +600,7 @@ describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
             work_id: 'w-123', volume, chapter: 1,
             start_offset: 0, end_offset: 4, selected_text: 'Body',
             color: 'yellow', note: `Note from volume ${volume}`,
+            created_at: '2026-07-04T00:00:00Z', updated_at: '2026-07-04T00:00:00Z',
           }],
         });
       }),
