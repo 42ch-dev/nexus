@@ -12,7 +12,7 @@
  * swatch or component variant. Follow apps/web conventions: vitest + jsdom +
  * @testing-library/react.
  */
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -46,17 +46,9 @@ async function renderStudio(initialRoute = '/') {
       </StudioEmbedProvider>
     </ThemeProvider>,
   );
-  // Lazy route chunks resolve asynchronously (S-002); flush them so gallery
-  // assertions see the fully-mounted page, not the Suspense fallback. Wait
-  // until every RouteLoading fallback has been replaced by the mounted page.
-  await act(async () => {
-    let guard = 0;
-    while (document.querySelector('[data-testid^="route-loading-"]') && guard < 40) {
-      // Let the lazy import's microtask/timer chain settle (macrotask tick).
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      guard += 1;
-    }
-  });
+  await waitFor(() => {
+    expect(screen.queryAllByTestId(/^route-loading-/)).toHaveLength(0);
+  }, { timeout: 4000 });
   return result;
 }
 
