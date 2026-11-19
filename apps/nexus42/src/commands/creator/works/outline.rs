@@ -806,10 +806,14 @@ fn render_work_outline(outline: &WorkOutline) {
             .iter()
             .map(|id| id.get().to_string())
             .collect();
+        let label = if vol.label.is_empty() {
+            String::new()
+        } else {
+            format!(": {}", vol.label)
+        };
         println!(
-            "  Volume {}: {} — chapters [{}]",
+            "  Volume {}{label} — chapters [{}]",
             vol.volume_id.get(),
-            vol.label,
             ids.join(", ")
         );
     }

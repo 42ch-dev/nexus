@@ -638,6 +638,8 @@ async fn ref_less_work_outline_read_degrades_to_default() {
         outline.volumes[0].chapter_ids,
         [] as [std::num::NonZero<u64>; 0]
     );
+    // The default volume is unnamed so each client renders its localized label.
+    assert_eq!(outline.volumes[0].label, "");
     assert!(outline.timeline_events.is_empty());
     assert!(outline.chapter_titles.is_empty());
     assert_ne!(outline.updated_at, "");
@@ -3132,6 +3134,7 @@ async fn retained_outline_structure_and_chapter_patch_round_trip() {
         .find(|volume| volume.volume_id == NonZeroU64::new(2).unwrap())
         .expect("created Volume 2");
     assert_eq!(target.chapter_ids, vec![NonZeroU64::new(1).unwrap()]);
+    assert_eq!(target.label, "", "a created volume is unnamed");
     // The chapter moved out of Volume 1; its siblings stayed.
     let source = outline
         .volumes

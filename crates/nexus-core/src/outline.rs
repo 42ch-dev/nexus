@@ -241,6 +241,9 @@ async fn read_outline_file(
 }
 
 /// Build a default frontmatter from the current `work_chapters` rows.
+///
+/// Generated volumes are unnamed (empty `label`): clients render their own
+/// localized default such as "Volume 1".
 fn default_frontmatter(now: &str, chapters: &[WorkChapterRecord]) -> OutlineFrontmatter {
     let mut ids: Vec<std::num::NonZeroU64> = chapters
         .iter()
@@ -252,7 +255,7 @@ fn default_frontmatter(now: &str, chapters: &[WorkChapterRecord]) -> OutlineFron
     ids.sort_unstable();
     let volume = WorkOutlineVolumesItem {
         volume_id: std::num::NonZeroU64::MIN,
-        label: "Volume 1".to_string(),
+        label: String::new(),
         chapter_ids: ids,
     };
     OutlineFrontmatter {
@@ -1020,7 +1023,7 @@ fn move_chapter_in_frontmatter(
     } else {
         frontmatter.volumes.push(WorkOutlineVolumesItem {
             volume_id,
-            label: format!("Volume {volume_id}"),
+            label: String::new(),
             chapter_ids: vec![chapter_id],
         });
     }
@@ -1043,7 +1046,7 @@ fn move_chapter_in_frontmatter(
     } else {
         frontmatter.volumes.push(WorkOutlineVolumesItem {
             volume_id: vol1,
-            label: "Volume 1".to_string(),
+            label: String::new(),
             chapter_ids: Vec::new(),
         });
         frontmatter.volumes.len() - 1
