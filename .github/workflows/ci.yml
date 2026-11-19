@@ -505,12 +505,10 @@ jobs:
       - uses: ./.github/actions/setup-monorepo
         with:
           rust-toolchain: ""
-      - name: Build contracts package
-        run: pnpm --filter @42ch/nexus-contracts run build
-      - name: Typecheck web
-        run: pnpm --filter web typecheck
-      - name: Build web
-        run: pnpm --filter web build
+      - name: Build and typecheck web
+        run: pnpm run build:web
+      - name: Verify shared outputs remain stable during the root build
+        run: node --test scripts/workspace-build.test.mjs
       - name: Test web
         run: pnpm --filter web test
 

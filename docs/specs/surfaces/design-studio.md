@@ -182,9 +182,9 @@ Root DESIGN v0.5 locks the production-level contract:
 
 | Action | Command |
 | --- | --- |
-| Start | `pnpm --filter design-studio dev` |
+| Start | `pnpm run dev:design-studio` |
 | Build | `pnpm run build:design-studio` |
-| Test | `pnpm --filter design-studio test` |
+| Test | `pnpm run test:design-studio` |
 
 #### 5.2 Read-only tuning workflow
 
