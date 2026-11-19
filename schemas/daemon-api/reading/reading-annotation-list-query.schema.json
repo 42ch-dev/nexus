@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/reading/reading-annotation-list-query.schema.json",
   "schema_version": 1,
   "title": "Nexus ReadingAnnotationListQuery",
-  "description": "Query parameters for GET /v1/daemon/reading/annotations. Returns all annotations for the current creator on a given (work, chapter). Creator scope is inferred from the active session.",
+  "description": "Query parameters for GET /v1/daemon/reading/annotations. Returns all annotations for the current creator on a given (work, volume, chapter). Creator scope is inferred from the active session.",
   "type": "object",
   "required": ["work_id", "chapter"],
   "properties": {

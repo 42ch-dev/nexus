@@ -5,7 +5,7 @@
  */
 
 /**
- * Query parameters for GET /v1/daemon/reading/annotations. Returns all annotations for the current creator on a given (work, chapter). Creator scope is inferred from the active session.
+ * Query parameters for GET /v1/daemon/reading/annotations. Returns all annotations for the current creator on a given (work, volume, chapter). Creator scope is inferred from the active session.
  */
 export interface ReadingAnnotationListQuery {
   work_id: string;

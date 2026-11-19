@@ -5,7 +5,7 @@
  */
 
 /**
- * Request body for PUT /v1/daemon/reading/progress. Upserts persisted scroll position per (creator, work, chapter). Creator scope is inferred from the active session.
+ * Request body for PUT /v1/daemon/reading/progress. Upserts persisted scroll position per (creator, work, volume, chapter). Creator scope is inferred from the active session.
  */
 export interface ReadingProgressRequest {
   work_id: string;
