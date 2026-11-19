@@ -3,11 +3,12 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/reading/reading-progress-request.schema.json",
   "schema_version": 1,
   "title": "Nexus ReadingProgressRequest",
-  "description": "Request body for PUT /v1/daemon/reading/progress. Upserts persisted scroll position per (creator, work, chapter). Creator scope is inferred from the active session.",
+  "description": "Request body for PUT /v1/daemon/reading/progress. Upserts persisted scroll position per (creator, work, volume, chapter). Creator scope is inferred from the active session.",
   "type": "object",
   "required": ["work_id", "chapter", "scroll_progress"],
   "properties": {
     "work_id": { "type": "string" },
+    "volume": { "type": "integer", "minimum": 1, "description": "Volume number. Omit to use volume 1." },
     "chapter": { "type": "integer", "minimum": 1 },
     "scroll_progress": {
       "type": "integer",

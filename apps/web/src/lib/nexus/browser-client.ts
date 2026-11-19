@@ -1567,25 +1567,28 @@ export class BrowserClient implements NexusClient {
   }
 
   // ── Reading depth (V1.89) ──────────────────────────────────────────────────
-  getReadingProgress(workId: string, chapter: number): Promise<ReadingProgressResponse> {
+  getReadingProgress(workId: string, chapter: number, volume?: number): Promise<ReadingProgressResponse> {
     return this.get<ReadingProgressResponse>('/v1/daemon/reading/progress', {
       work_id: workId,
       chapter,
+      volume,
     });
   }
   putReadingProgress(request: ReadingProgressRequest): Promise<ReadingProgressResponse> {
     return this.put<ReadingProgressResponse>('/v1/daemon/reading/progress', request);
   }
-  deleteReadingProgress(workId: string, chapter: number): Promise<void> {
-    return this.delete<void>('/v1/daemon/reading/progress', { work_id: workId, chapter });
+  deleteReadingProgress(workId: string, chapter: number, volume?: number): Promise<void> {
+    return this.delete<void>('/v1/daemon/reading/progress', { work_id: workId, chapter, volume });
   }
   listReadingAnnotations(
     workId: string,
     chapter: number,
+    volume?: number,
   ): Promise<ReadingAnnotationListResponse> {
     return this.get<ReadingAnnotationListResponse>('/v1/daemon/reading/annotations', {
       work_id: workId,
       chapter,
+      volume,
     });
   }
   createReadingAnnotation(request: ReadingAnnotationCreateRequest): Promise<ReadingAnnotation> {

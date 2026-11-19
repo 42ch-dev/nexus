@@ -1,0 +1,158 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT\n            annotation_id as \"annotation_id!\",\n            creator_id as \"creator_id!\",\n            work_id as \"work_id!\",\n            volume as \"volume!\",\n            chapter as \"chapter!\",\n            start_offset as \"start_offset!\",\n            end_offset as \"end_offset!\",\n            selected_text as \"selected_text!\",\n            color as \"color!\",\n            note,\n            created_at as \"created_at: _\",\n            updated_at as \"updated_at: _\"\n        FROM reading_annotations\n        WHERE annotation_id = ?1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "annotation_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "annotation_id"
+          }
+        }
+      },
+      {
+        "name": "creator_id!",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "creator_id"
+          }
+        }
+      },
+      {
+        "name": "work_id!",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "work_id"
+          }
+        }
+      },
+      {
+        "name": "volume!",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "volume"
+          }
+        }
+      },
+      {
+        "name": "chapter!",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "chapter"
+          }
+        }
+      },
+      {
+        "name": "start_offset!",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "start_offset"
+          }
+        }
+      },
+      {
+        "name": "end_offset!",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "end_offset"
+          }
+        }
+      },
+      {
+        "name": "selected_text!",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "selected_text"
+          }
+        }
+      },
+      {
+        "name": "color!",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "color"
+          }
+        }
+      },
+      {
+        "name": "note",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "note"
+          }
+        }
+      },
+      {
+        "name": "created_at: _",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "name": "updated_at: _",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "2719235ae30f69660b807c9e658955d95064ecd985469427ec03c809b8c2ee6d"
+}

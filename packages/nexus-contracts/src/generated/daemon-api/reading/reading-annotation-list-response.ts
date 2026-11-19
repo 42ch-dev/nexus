@@ -5,7 +5,7 @@
  */
 
 /**
- * Response for GET /v1/daemon/reading/annotations. Returns all annotations for the current creator on the requested (work, chapter) as a flat list. No pagination — per-chapter annotation count is expected to stay bounded (dozens, not hundreds).
+ * Response for GET /v1/daemon/reading/annotations. Returns all annotations for the current creator on the requested (work, volume, chapter) as a flat list. No pagination — per-chapter annotation count is expected to stay bounded (dozens, not hundreds).
  */
 export interface ReadingAnnotationListResponse {
   items: NexusReadingAnnotation[];
@@ -19,6 +19,7 @@ export interface NexusReadingAnnotation {
    */
   annotation_id: string;
   work_id: string;
+  volume: number;
   chapter: number;
   /**
    * Character offset where the highlight begins (inclusive).

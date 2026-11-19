@@ -792,13 +792,14 @@ describe('NexusClient reading-depth-method parity guard (V1.89)', () => {
     };
 
     const client = new BrowserClient({ fetchImpl });
-    await client.getReadingProgress('w1', 1);
-    await client.putReadingProgress({ work_id: 'w1', chapter: 1, scroll_progress: 5000 });
-    await client.deleteReadingProgress('w1', 1);
-    await client.listReadingAnnotations('w1', 1);
+    await client.getReadingProgress('w1', 1, 2);
+    await client.putReadingProgress({ work_id: 'w1', chapter: 1, volume: 2, scroll_progress: 5000 });
+    await client.deleteReadingProgress('w1', 1, 2);
+    await client.listReadingAnnotations('w1', 1, 2);
     await client.createReadingAnnotation({
       work_id: 'w1',
       chapter: 1,
+      volume: 2,
       start_offset: 0,
       end_offset: 5,
       selected_text: 'Hello',
@@ -808,18 +809,18 @@ describe('NexusClient reading-depth-method parity guard (V1.89)', () => {
     await client.deleteReadingAnnotation('a1');
 
     expect(seen).toEqual([
-      { method: 'GET', url: '/v1/daemon/reading/progress?work_id=w1&chapter=1' },
+      { method: 'GET', url: '/v1/daemon/reading/progress?work_id=w1&chapter=1&volume=2' },
       {
         method: 'PUT',
         url: '/v1/daemon/reading/progress',
-        body: { work_id: 'w1', chapter: 1, scroll_progress: 5000 },
+        body: { work_id: 'w1', chapter: 1, volume: 2, scroll_progress: 5000 },
       },
-      { method: 'DELETE', url: '/v1/daemon/reading/progress?work_id=w1&chapter=1' },
-      { method: 'GET', url: '/v1/daemon/reading/annotations?work_id=w1&chapter=1' },
+      { method: 'DELETE', url: '/v1/daemon/reading/progress?work_id=w1&chapter=1&volume=2' },
+      { method: 'GET', url: '/v1/daemon/reading/annotations?work_id=w1&chapter=1&volume=2' },
       {
         method: 'POST',
         url: '/v1/daemon/reading/annotations',
-        body: { work_id: 'w1', chapter: 1, start_offset: 0, end_offset: 5, selected_text: 'Hello', color: 'yellow' },
+        body: { work_id: 'w1', chapter: 1, volume: 2, start_offset: 0, end_offset: 5, selected_text: 'Hello', color: 'yellow' },
       },
       {
         method: 'PATCH',

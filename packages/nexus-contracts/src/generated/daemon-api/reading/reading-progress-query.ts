@@ -9,5 +9,9 @@
  */
 export interface ReadingProgressQuery {
   work_id: string;
+  /**
+   * Volume number. Omit to use volume 1.
+   */
+  volume?: number;
   chapter: number;
 }

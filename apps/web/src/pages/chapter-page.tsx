@@ -66,14 +66,15 @@ export function ChapterPage() {
   const body = useChapterBody(workId || undefined, chapterNumber || undefined, volumeQuery);
   const work = useWork(workId || undefined);
   const neighbors = useChapterNeighbors(workId || undefined, chapterNumber || undefined, currentVolume);
+  const resolvedVolume = chapter.data?.volume;
 
   // V1.89 — persisted reading progress sync.
-  useReadingProgressSync(workId || undefined, chapterNumber || undefined, {
+  useReadingProgressSync(workId || undefined, chapterNumber || undefined, resolvedVolume, {
     enabled: !chapter.isLoading && Boolean(chapter.data) && !body.isLoading && Boolean(body.data),
   });
 
   // V1.89 — annotation surface.
-  const annotations = useAnnotations(workId || undefined, chapterNumber || undefined);
+  const annotations = useAnnotations(workId || undefined, chapterNumber || undefined, resolvedVolume);
   const createAnnotation = useCreateAnnotation();
   const updateAnnotation = useUpdateAnnotation();
   const deleteAnnotation = useDeleteAnnotation();
@@ -94,11 +95,12 @@ export function ChapterPage() {
   useChapterKeyboardNav(workId, neighbors, navigate);
 
   function handleHighlight() {
-    if (!selection.selection || !workId || !chapterNumber) return;
+    if (!selection.selection || !workId || !chapterNumber || resolvedVolume === undefined) return;
     createAnnotation.mutate(
       {
         work_id: workId,
         chapter: chapterNumber,
+        volume: resolvedVolume,
         start_offset: selection.selection.startOffset,
         end_offset: selection.selection.endOffset,
         selected_text: selection.selection.text,
@@ -199,9 +201,9 @@ export function ChapterPage() {
         <AnnotationInspector
           annotations={annotations.data ?? []}
           onUpdate={(annotationId, patch) =>
-            updateAnnotation.mutate({ annotationId, workId, chapter: chapterNumber, patch })
+            updateAnnotation.mutate({ annotationId, patch })
           }
-          onDelete={(annotationId) => deleteAnnotation.mutate({ annotationId, workId, chapter: chapterNumber })}
+          onDelete={(annotationId) => deleteAnnotation.mutate({ annotationId, workId, chapter: ch.chapter, volume: ch.volume })}
           isUpdating={updateAnnotation.isPending}
           isDeleting={deleteAnnotation.isPending}
         />

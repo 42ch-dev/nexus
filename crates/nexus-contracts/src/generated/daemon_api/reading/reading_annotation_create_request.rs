@@ -18,6 +18,9 @@ pub struct ReadingAnnotationCreateRequest {
     pub selected_text: ReadingAnnotationCreateRequestSelectedText,
     ///Character offset into the current body plain text where the highlight begins (inclusive).
     pub start_offset: u64,
+    ///Volume number. Omit to use volume 1.
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub volume: ::std::option::Option<::std::num::NonZeroU64>,
     pub work_id: ::std::string::String,
 }
 impl ReadingAnnotationCreateRequest {
@@ -164,6 +167,10 @@ pub mod builder {
             ::std::string::String,
         >,
         start_offset: ::std::result::Result<u64, ::std::string::String>,
+        volume: ::std::result::Result<
+            ::std::option::Option<::std::num::NonZeroU64>,
+            ::std::string::String,
+        >,
         work_id: ::std::result::Result<::std::string::String, ::std::string::String>,
     }
     impl ::std::default::Default for ReadingAnnotationCreateRequest {
@@ -175,6 +182,7 @@ pub mod builder {
                 note: Ok(Default::default()),
                 selected_text: Err("no value supplied for selected_text".to_string()),
                 start_offset: Err("no value supplied for start_offset".to_string()),
+                volume: Ok(Default::default()),
                 work_id: Err("no value supplied for work_id".to_string()),
             }
         }
@@ -250,6 +258,16 @@ pub mod builder {
                 });
             self
         }
+        pub fn volume<T>(mut self, value: T) -> Self
+        where
+            T: ::std::convert::TryInto<::std::option::Option<::std::num::NonZeroU64>>,
+            T::Error: ::std::fmt::Display,
+        {
+            self.volume = value
+                .try_into()
+                .map_err(|e| format!("error converting supplied value for volume: {e}"));
+            self
+        }
         pub fn work_id<T>(mut self, value: T) -> Self
         where
             T: ::std::convert::TryInto<::std::string::String>,
@@ -276,6 +294,7 @@ pub mod builder {
                 note: value.note?,
                 selected_text: value.selected_text?,
                 start_offset: value.start_offset?,
+                volume: value.volume?,
                 work_id: value.work_id?,
             })
         }
@@ -290,6 +309,7 @@ pub mod builder {
                 note: Ok(value.note),
                 selected_text: Ok(value.selected_text),
                 start_offset: Ok(value.start_offset),
+                volume: Ok(value.volume),
                 work_id: Ok(value.work_id),
             }
         }

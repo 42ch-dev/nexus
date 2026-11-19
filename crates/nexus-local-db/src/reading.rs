@@ -17,6 +17,7 @@ pub async fn upsert_reading_progress(
     pool: &Pool<Sqlite>,
     creator_id: &str,
     work_id: &str,
+    volume: i64,
     chapter: i64,
     progress: i64,
 ) -> Result<DateTime<Utc>, LocalDbError> {
@@ -29,14 +30,15 @@ pub async fn upsert_reading_progress(
     let now = Utc::now();
     let updated_at = sqlx::query_scalar!(
         r#"
-        INSERT INTO reading_progress (creator_id, work_id, chapter, scroll_progress, updated_at)
-        VALUES (?1, ?2, ?3, ?4, ?5)
-        ON CONFLICT(creator_id, work_id, chapter)
+        INSERT INTO reading_progress (creator_id, work_id, volume, chapter, scroll_progress, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(creator_id, work_id, volume, chapter)
         DO UPDATE SET scroll_progress = excluded.scroll_progress, updated_at = excluded.updated_at
         RETURNING updated_at as "updated_at: DateTime<Utc>"
         "#,
         creator_id,
         work_id,
+        volume,
         chapter,
         progress,
         now
@@ -58,6 +60,7 @@ pub async fn get_reading_progress(
     pool: &Pool<Sqlite>,
     creator_id: &str,
     work_id: &str,
+    volume: i64,
     chapter: i64,
 ) -> Result<(i64, Option<DateTime<Utc>>), LocalDbError> {
     let row = sqlx::query_as!(
@@ -65,10 +68,11 @@ pub async fn get_reading_progress(
         r#"
         SELECT scroll_progress as "scroll_progress: _", updated_at as "updated_at: _"
         FROM reading_progress
-        WHERE creator_id = ?1 AND work_id = ?2 AND chapter = ?3
+        WHERE creator_id = ?1 AND work_id = ?2 AND volume = ?3 AND chapter = ?4
         "#,
         creator_id,
         work_id,
+        volume,
         chapter
     )
     .fetch_optional(pool)
@@ -97,15 +101,17 @@ pub async fn delete_reading_progress(
     pool: &Pool<Sqlite>,
     creator_id: &str,
     work_id: &str,
+    volume: i64,
     chapter: i64,
 ) -> Result<(), LocalDbError> {
     sqlx::query!(
         r"
         DELETE FROM reading_progress
-        WHERE creator_id = ?1 AND work_id = ?2 AND chapter = ?3
+        WHERE creator_id = ?1 AND work_id = ?2 AND volume = ?3 AND chapter = ?4
         ",
         creator_id,
         work_id,
+        volume,
         chapter
     )
     .execute(pool)
@@ -124,6 +130,7 @@ pub async fn list_annotations(
     pool: &Pool<Sqlite>,
     creator_id: &str,
     work_id: &str,
+    volume: i64,
     chapter: i64,
 ) -> Result<Vec<AnnotationRow>, LocalDbError> {
     let rows = sqlx::query_as!(
@@ -133,6 +140,7 @@ pub async fn list_annotations(
             annotation_id as "annotation_id!",
             creator_id as "creator_id!",
             work_id as "work_id!",
+            volume as "volume!",
             chapter as "chapter!",
             start_offset as "start_offset!",
             end_offset as "end_offset!",
@@ -142,11 +150,12 @@ pub async fn list_annotations(
             created_at as "created_at: _",
             updated_at as "updated_at: _"
         FROM reading_annotations
-        WHERE creator_id = ?1 AND work_id = ?2 AND chapter = ?3
+        WHERE creator_id = ?1 AND work_id = ?2 AND volume = ?3 AND chapter = ?4
         ORDER BY created_at ASC
         "#,
         creator_id,
         work_id,
+        volume,
         chapter
     )
     .fetch_all(pool)
@@ -172,6 +181,7 @@ pub async fn get_annotation(
             annotation_id as "annotation_id!",
             creator_id as "creator_id!",
             work_id as "work_id!",
+            volume as "volume!",
             chapter as "chapter!",
             start_offset as "start_offset!",
             end_offset as "end_offset!",
@@ -205,6 +215,7 @@ pub async fn create_annotation(
     pool: &Pool<Sqlite>,
     creator_id: &str,
     work_id: &str,
+    volume: i64,
     chapter: i64,
     annotation_id: &str,
     start_offset: i64,
@@ -224,12 +235,13 @@ pub async fn create_annotation(
         AnnotationRow,
         r#"
         INSERT INTO reading_annotations
-            (annotation_id, creator_id, work_id, chapter, start_offset, end_offset, selected_text, color, note, created_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            (annotation_id, creator_id, work_id, volume, chapter, start_offset, end_offset, selected_text, color, note, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
         RETURNING
             annotation_id as "annotation_id!",
             creator_id as "creator_id!",
             work_id as "work_id!",
+            volume as "volume!",
             chapter as "chapter!",
             start_offset as "start_offset!",
             end_offset as "end_offset!",
@@ -242,6 +254,7 @@ pub async fn create_annotation(
         annotation_id,
         creator_id,
         work_id,
+        volume,
         chapter,
         start_offset,
         end_offset,
@@ -293,6 +306,7 @@ pub async fn update_annotation(
             annotation_id as "annotation_id!",
             creator_id as "creator_id!",
             work_id as "work_id!",
+            volume as "volume!",
             chapter as "chapter!",
             start_offset as "start_offset!",
             end_offset as "end_offset!",
@@ -347,6 +361,7 @@ pub struct AnnotationRow {
     pub annotation_id: String,
     pub creator_id: String,
     pub work_id: String,
+    pub volume: i64,
     pub chapter: i64,
     pub start_offset: i64,
     pub end_offset: i64,
@@ -422,29 +437,29 @@ mod tests {
         let work_id = "work1";
         seed_work(&pool, creator_id, work_id).await;
 
-        let updated = upsert_reading_progress(&pool, creator_id, work_id, 1, 5000)
+        let updated = upsert_reading_progress(&pool, creator_id, work_id, 1, 1, 5000)
             .await
             .expect("upsert");
-        let (progress, ts) = get_reading_progress(&pool, creator_id, work_id, 1)
+        let (progress, ts) = get_reading_progress(&pool, creator_id, work_id, 1, 1)
             .await
             .expect("get");
         assert_eq!(progress, 5000);
         assert_eq!(ts, Some(updated));
 
-        let updated2 = upsert_reading_progress(&pool, creator_id, work_id, 1, 7500)
+        let updated2 = upsert_reading_progress(&pool, creator_id, work_id, 1, 1, 7500)
             .await
             .expect("upsert2");
-        let (progress2, ts2) = get_reading_progress(&pool, creator_id, work_id, 1)
+        let (progress2, ts2) = get_reading_progress(&pool, creator_id, work_id, 1, 1)
             .await
             .expect("get2");
         assert_eq!(progress2, 7500);
         assert!(ts2 >= Some(updated));
         assert_eq!(ts2, Some(updated2));
 
-        delete_reading_progress(&pool, creator_id, work_id, 1)
+        delete_reading_progress(&pool, creator_id, work_id, 1, 1)
             .await
             .expect("delete");
-        let (progress3, ts3) = get_reading_progress(&pool, creator_id, work_id, 1)
+        let (progress3, ts3) = get_reading_progress(&pool, creator_id, work_id, 1, 1)
             .await
             .expect("get3");
         assert_eq!(progress3, 0);
@@ -455,12 +470,12 @@ mod tests {
     async fn test_progress_validation() {
         let (pool, _dir) = setup_pool().await;
         seed_work(&pool, "c", "w").await;
-        let err = upsert_reading_progress(&pool, "c", "w", 1, -1)
+        let err = upsert_reading_progress(&pool, "c", "w", 1, 1, -1)
             .await
             .expect_err("should fail");
         assert!(matches!(err, LocalDbError::ValidationError(_)));
 
-        let err = upsert_reading_progress(&pool, "c", "w", 1, 10001)
+        let err = upsert_reading_progress(&pool, "c", "w", 1, 1, 10001)
             .await
             .expect_err("should fail");
         assert!(matches!(err, LocalDbError::ValidationError(_)));
@@ -478,6 +493,7 @@ mod tests {
             creator_id,
             work_id,
             1,
+            1,
             "ann_1",
             10,
             20,
@@ -490,7 +506,7 @@ mod tests {
         assert_eq!(row.annotation_id, "ann_1");
         assert_eq!(row.selected_text, "selected text");
 
-        let list = list_annotations(&pool, creator_id, work_id, 1)
+        let list = list_annotations(&pool, creator_id, work_id, 1, 1)
             .await
             .expect("list");
         assert_eq!(list.len(), 1);
@@ -503,7 +519,7 @@ mod tests {
         assert_eq!(updated.note, None);
 
         delete_annotation(&pool, "ann_1").await.expect("delete");
-        let list2 = list_annotations(&pool, creator_id, work_id, 1)
+        let list2 = list_annotations(&pool, creator_id, work_id, 1, 1)
             .await
             .expect("list2");
         assert!(list2.is_empty());
@@ -514,7 +530,7 @@ mod tests {
         let (pool, _dir) = setup_pool().await;
         seed_work(&pool, "c", "w").await;
         let err = create_annotation(
-            &pool, "c", "w", 1, "ann_bad", 20, 10, "text", "yellow", None,
+            &pool, "c", "w", 1, 1, "ann_bad", 20, 10, "text", "yellow", None,
         )
         .await
         .expect_err("should fail");

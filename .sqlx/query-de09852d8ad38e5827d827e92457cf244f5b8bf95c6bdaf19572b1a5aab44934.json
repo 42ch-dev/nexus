@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT scroll_progress as \"scroll_progress: _\", updated_at as \"updated_at: _\"\n        FROM reading_progress\n        WHERE creator_id = ?1 AND work_id = ?2 AND volume = ?3 AND chapter = ?4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "scroll_progress: _",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "reading_progress",
+            "name": "scroll_progress"
+          }
+        }
+      },
+      {
+        "name": "updated_at: _",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_progress",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "de09852d8ad38e5827d827e92457cf244f5b8bf95c6bdaf19572b1a5aab44934"
+}

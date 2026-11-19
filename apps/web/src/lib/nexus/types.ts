@@ -1099,16 +1099,16 @@ export interface NexusClient extends CoreSliceClient {
    * progress for the current creator on a chapter. Returns `scroll_progress=0`
    * with a server-generated `updated_at` when no progress has been saved.
    */
-  getReadingProgress(workId: string, chapter: number): Promise<ReadingProgressResponse>;
+  getReadingProgress(workId: string, chapter: number, volume?: number): Promise<ReadingProgressResponse>;
   /** `PUT /v1/daemon/reading/progress` — upsert scroll progress. */
   putReadingProgress(request: ReadingProgressRequest): Promise<ReadingProgressResponse>;
   /** `DELETE /v1/daemon/reading/progress?work_id=&chapter=` — delete progress. */
-  deleteReadingProgress(workId: string, chapter: number): Promise<void>;
+  deleteReadingProgress(workId: string, chapter: number, volume?: number): Promise<void>;
   /**
    * `GET /v1/daemon/reading/annotations?work_id=&chapter=` — list annotations for
    * a chapter. No pagination; per-chapter counts are expected to stay small.
    */
-  listReadingAnnotations(workId: string, chapter: number): Promise<ReadingAnnotationListResponse>;
+  listReadingAnnotations(workId: string, chapter: number, volume?: number): Promise<ReadingAnnotationListResponse>;
   /** `POST /v1/daemon/reading/annotations` — create a highlight annotation. */
   createReadingAnnotation(request: ReadingAnnotationCreateRequest): Promise<ReadingAnnotation>;
   /** `PATCH /v1/daemon/reading/annotations/{annotation_id}` — edit color/note. */

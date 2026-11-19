@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/reading/reading-annotation-list-response.schema.json",
   "schema_version": 1,
   "title": "Nexus ReadingAnnotationListResponse",
-  "description": "Response for GET /v1/daemon/reading/annotations. Returns all annotations for the current creator on the requested (work, chapter) as a flat list. No pagination — per-chapter annotation count is expected to stay bounded (dozens, not hundreds).",
+  "description": "Response for GET /v1/daemon/reading/annotations. Returns all annotations for the current creator on the requested (work, volume, chapter) as a flat list. No pagination — per-chapter annotation count is expected to stay bounded (dozens, not hundreds).",
   "type": "object",
   "required": ["items"],
   "properties": {

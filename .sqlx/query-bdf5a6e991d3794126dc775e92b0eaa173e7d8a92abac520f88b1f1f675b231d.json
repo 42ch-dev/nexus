@@ -1,0 +1,158 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO reading_annotations\n            (annotation_id, creator_id, work_id, volume, chapter, start_offset, end_offset, selected_text, color, note, created_at, updated_at)\n        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)\n        RETURNING\n            annotation_id as \"annotation_id!\",\n            creator_id as \"creator_id!\",\n            work_id as \"work_id!\",\n            volume as \"volume!\",\n            chapter as \"chapter!\",\n            start_offset as \"start_offset!\",\n            end_offset as \"end_offset!\",\n            selected_text as \"selected_text!\",\n            color as \"color!\",\n            note,\n            created_at as \"created_at: _\",\n            updated_at as \"updated_at: _\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "annotation_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "annotation_id"
+          }
+        }
+      },
+      {
+        "name": "creator_id!",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "creator_id"
+          }
+        }
+      },
+      {
+        "name": "work_id!",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "work_id"
+          }
+        }
+      },
+      {
+        "name": "volume!",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "volume"
+          }
+        }
+      },
+      {
+        "name": "chapter!",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "chapter"
+          }
+        }
+      },
+      {
+        "name": "start_offset!",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "start_offset"
+          }
+        }
+      },
+      {
+        "name": "end_offset!",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "end_offset"
+          }
+        }
+      },
+      {
+        "name": "selected_text!",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "selected_text"
+          }
+        }
+      },
+      {
+        "name": "color!",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "color"
+          }
+        }
+      },
+      {
+        "name": "note",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "note"
+          }
+        }
+      },
+      {
+        "name": "created_at: _",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "name": "updated_at: _",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_annotations",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 12
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "bdf5a6e991d3794126dc775e92b0eaa173e7d8a92abac520f88b1f1f675b231d"
+}

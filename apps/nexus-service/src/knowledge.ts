@@ -167,7 +167,7 @@ export function pruneFindings(
 
 // ── Reading depth ──────────────────────────────────────────────────────────
 
-/** `GET /v1/daemon/reading/progress?work_id=&chapter=`. */
+/** `GET /v1/daemon/reading/progress?work_id=&chapter=&volume=` — `volume` is optional, defaults to 1. */
 export function getReadingProgress(
   service: ServiceCore,
   searchParams: URLSearchParams,
@@ -177,7 +177,7 @@ export function getReadingProgress(
   );
 }
 
-/** `PUT /v1/daemon/reading/progress`. */
+/** `PUT /v1/daemon/reading/progress` — body `volume` is optional, defaults to 1. */
 export function putReadingProgress(
   service: ServiceCore,
   request: ReadingProgressRequest,
@@ -187,7 +187,10 @@ export function putReadingProgress(
   );
 }
 
-/** `DELETE /v1/daemon/reading/progress?work_id=&chapter=` — 204. */
+/**
+ * `DELETE /v1/daemon/reading/progress?work_id=&chapter=&volume=` — 204.
+ * `volume` is optional, defaults to 1.
+ */
 export async function deleteReadingProgress(
   service: ServiceCore,
   searchParams: URLSearchParams,
@@ -197,7 +200,7 @@ export async function deleteReadingProgress(
   );
 }
 
-/** `GET /v1/daemon/reading/annotations?work_id=&chapter=`. */
+/** `GET /v1/daemon/reading/annotations?work_id=&chapter=&volume=` — `volume` is optional, defaults to 1. */
 export function listAnnotations(
   service: ServiceCore,
   searchParams: URLSearchParams,
@@ -455,9 +458,23 @@ function requireInteger(raw: string, field: string): number {
   return parsed;
 }
 
+/** Required integer query parameter that must be at least 1. */
+function requirePositiveInteger(raw: string, field: string): number {
+  const parsed = requireInteger(raw, field);
+  if (parsed < 1) {
+    throw new HttpError(
+      400,
+      'invalid_input',
+      `${field} must be an integer greater than or equal to 1`,
+    );
+  }
+  return parsed;
+}
+
 function readingQuery(searchParams: URLSearchParams): ReadingProgressQuery {
   const work_id = searchParams.get('work_id');
   const chapter = searchParams.get('chapter');
+  const volume = searchParams.get('volume');
   if (work_id === null || chapter === null) {
     throw new HttpError(
       400,
@@ -465,7 +482,11 @@ function readingQuery(searchParams: URLSearchParams): ReadingProgressQuery {
       'work_id and chapter are required',
     );
   }
-  return { work_id, chapter: requireInteger(chapter, 'chapter') };
+  return {
+    work_id,
+    chapter: requireInteger(chapter, 'chapter'),
+    ...(volume === null ? {} : { volume: requirePositiveInteger(volume, 'volume') }),
+  };
 }
 
 /** Retained daemon default for the stale banner (96h in seconds). */

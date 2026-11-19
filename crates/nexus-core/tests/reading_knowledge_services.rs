@@ -80,6 +80,79 @@ fn annotation_request(work_id: &str) -> ReadingAnnotationCreateRequest {
     .unwrap()
 }
 
+#[tokio::test]
+async fn reading_isolates_same_chapter_number_across_volumes() {
+    let temp = tempfile::tempdir().unwrap();
+    let (core, principal, work_id) = core_with_work(temp.path()).await;
+    let location = |volume| serde_json::json!({"work_id": work_id, "volume": volume, "chapter": 1});
+
+    let mut annotation_ids = Vec::new();
+    for (volume, scroll_progress) in [(1, 2500), (2, 7500)] {
+        let mut request = location(volume);
+        request["scroll_progress"] = scroll_progress.into();
+        core.put_reading_progress(
+            &principal,
+            work_id.clone(),
+            serde_json::from_value(request).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let mut request = serde_json::to_value(annotation_request(&work_id)).unwrap();
+        request["volume"] = volume.into();
+        let annotation = core
+            .create_annotation(&principal, serde_json::from_value(request).unwrap())
+            .await
+            .unwrap();
+        annotation_ids.push(annotation.annotation_id);
+    }
+
+    let mut progress_by_volume = Vec::new();
+    let mut annotations_by_volume = Vec::new();
+    for volume in [1, 2] {
+        let progress = core
+            .get_reading_progress(
+                &principal,
+                serde_json::from_value(location(volume)).unwrap(),
+            )
+            .await
+            .unwrap();
+        progress_by_volume.push(progress.scroll_progress);
+        let annotations = core
+            .list_annotations(
+                &principal,
+                serde_json::from_value(location(volume)).unwrap(),
+            )
+            .await
+            .unwrap();
+        annotations_by_volume.push(
+            annotations
+                .items
+                .into_iter()
+                .map(|item| item.annotation_id)
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    assert_eq!(
+        (progress_by_volume, annotations_by_volume),
+        (
+            vec![2500, 7500],
+            annotation_ids.into_iter().map(|id| vec![id]).collect()
+        ),
+        "each volume must retain its own progress and highlights"
+    );
+    core.delete_reading_progress(&principal, serde_json::from_value(location(1)).unwrap())
+        .await
+        .unwrap();
+    let other = core
+        .get_reading_progress(&principal, serde_json::from_value(location(2)).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(other.scroll_progress, 7500);
+    core.close().await.unwrap();
+}
+
 /// Port of the retired daemon reading fixture's
 /// `annotation_create_list_patch_delete_round_trip` (create at :195, null-note
 /// boundary exercised separately below): create, list, patch and delete one
@@ -104,6 +177,7 @@ async fn annotation_create_list_patch_delete_round_trip() {
             ReadingAnnotationListQuery {
                 work_id: work_id.clone(),
                 chapter: 1.try_into().unwrap(),
+                volume: None,
             },
         )
         .await
@@ -130,6 +204,7 @@ async fn annotation_create_list_patch_delete_round_trip() {
             ReadingAnnotationListQuery {
                 work_id: work_id.clone(),
                 chapter: 1.try_into().unwrap(),
+                volume: None,
             },
         )
         .await
@@ -159,6 +234,7 @@ async fn annotation_note_clear_and_scope_isolation() {
         work_id.clone(),
         ReadingProgressRequest {
             chapter: 1.try_into().unwrap(),
+            volume: None,
             scroll_progress: 7500,
             work_id: work_id.clone(),
         },
@@ -171,6 +247,7 @@ async fn annotation_note_clear_and_scope_isolation() {
             ReadingProgressQuery {
                 work_id: work_id.clone(),
                 chapter: 1.try_into().unwrap(),
+                volume: None,
             },
         )
         .await
@@ -192,7 +269,7 @@ async fn annotation_note_clear_and_scope_isolation() {
     // Unknown Work stays NotFound with the legacy resource string.
     assert!(matches!(
         core.get_reading_progress(&principal, ReadingProgressQuery {
-            work_id: "wrk_unknown".into(), chapter: 1.try_into().unwrap()
+            work_id: "wrk_unknown".into(), chapter: 1.try_into().unwrap(), volume: None
         }).await,
         Err(CoreError::NotFound { resource }) if resource == "work wrk_unknown"
     ));
@@ -684,6 +761,7 @@ async fn retained_reading_progress_defaults_delete_and_annotation_bounds() {
     let query = |work_id: String| ReadingProgressQuery {
         work_id,
         chapter: 1.try_into().unwrap(),
+        volume: None,
     };
 
     // Default: zero progress with a fresh timestamp.
@@ -692,6 +770,7 @@ async fn retained_reading_progress_defaults_delete_and_annotation_bounds() {
         .await
         .unwrap();
     assert_eq!(default.scroll_progress, 0);
+    assert_eq!(default.volume.get(), 1);
     assert_eq!(default.work_id, work_id);
     assert!(
         !default.updated_at.is_empty(),
@@ -705,6 +784,7 @@ async fn retained_reading_progress_defaults_delete_and_annotation_bounds() {
             work_id.clone(),
             ReadingProgressRequest {
                 chapter: 1.try_into().unwrap(),
+                volume: None,
                 scroll_progress: 7500,
                 work_id: work_id.clone(),
             },
@@ -747,6 +827,7 @@ async fn retained_reading_progress_defaults_delete_and_annotation_bounds() {
             ReadingAnnotationListQuery {
                 work_id: work_id.clone(),
                 chapter: 1.try_into().unwrap(),
+                volume: None,
             },
         )
         .await
