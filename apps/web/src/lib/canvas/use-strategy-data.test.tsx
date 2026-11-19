@@ -14,9 +14,11 @@
  * than mocked-hook behavior.
  */
 import { http, HttpResponse } from 'msw';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 
+import { IdeaInput } from '@/components/canvas/idea-input';
+import { useStrategyCanvas } from '@/components/canvas/strategy-canvas/hooks/use-strategy-canvas';
 import {
   useDerivedCreatorId,
   usePresetSchedules,
@@ -95,6 +97,18 @@ function CreatorHarness() {
   );
 }
 
+function RunHarness() {
+  const { creatorId, activeScheduleId } = useStrategyCanvas('preset-1', null);
+  return (
+    <IdeaInput
+      presetId="preset-1"
+      creatorId={creatorId}
+      scheduleId={activeScheduleId}
+      onArtifact={() => {}}
+    />
+  );
+}
+
 describe('useDerivedCreatorId', () => {
   beforeEach(() => {
     useHandlers(
@@ -113,6 +127,33 @@ describe('useDerivedCreatorId', () => {
     });
     await waitFor(() => expect(screen.getByTestId('history')).toHaveTextContent('success/success'));
     await waitFor(() => expect(screen.getByTestId('creator')).toHaveTextContent('active-creator'));
+  });
+
+  it('submits an Idea as a schedule for the active creator without preset history', async () => {
+    const client = new BrowserClient();
+    const emptyHistory = { items: [], pagination: { limit: 20, has_more: false } };
+    const sessions = vi.spyOn(client, 'listSessions').mockResolvedValue(emptyHistory);
+    const schedules = vi.spyOn(client, 'listSchedules').mockResolvedValue(emptyHistory);
+    const addSchedule = vi.spyOn(client, 'addSchedule').mockResolvedValue({
+      schedule_id: 'sch-new',
+      status: 'running',
+      core_context_version: 1,
+    });
+    renderInApp(<RunHarness />, { client, activeCreatorId: 'active-creator' });
+    await waitFor(() => {
+      expect(sessions).toHaveBeenCalled();
+      expect(schedules).toHaveBeenCalled();
+    });
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: IDEA } });
+    fireEvent.click(screen.getAllByRole('button', { name: /^Run$/ })[1]!);
+
+    await waitFor(() => expect(addSchedule).toHaveBeenCalledWith(expect.objectContaining({
+      creator_id: 'active-creator',
+      preset_id: 'preset-1',
+      seed: IDEA,
+    })));
+    expect(addSchedule).toHaveBeenCalledTimes(1);
   });
 
   it('prefers the active creator over history belonging to another creator', async () => {
