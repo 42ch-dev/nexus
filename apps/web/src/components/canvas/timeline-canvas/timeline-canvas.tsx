@@ -321,7 +321,10 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // return path (PD-6 parent hop). Root reads hide on error too — the
   // root carries no fork chrome to degrade.
   const forkLineage = useForkLineage(worldId, activeBranchId);
-  const forkLineageUnavailable = forkLineage.isError && Boolean(activeBranchId);
+  const forkLineageUnavailable =
+    Boolean(activeBranchId) &&
+    (forkLineage.isError ||
+      (forkLineage.isPending && forkLineage.errorUpdatedAt > 0));
   const forkLineageData = useMemo(
     () =>
       forkLineageUnavailable

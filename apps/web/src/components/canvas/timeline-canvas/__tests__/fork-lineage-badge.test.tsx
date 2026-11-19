@@ -27,7 +27,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { useNavigate } from 'react-router';
 import type { ReactElement } from 'react';
 
-import { renderInApp } from '@/test/test-providers';
+import { makeQueryClient, renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
 import { i18n } from '@/lib/i18n/config';
@@ -117,6 +117,8 @@ function forkChrome(
     branchFetchCount: 0,
     /** W-2 — remaining failures for the fork_created marker read. */
     lineageFailures: 0,
+    lineageFetchCount: 0,
+    lineageResponseGate: null as Promise<void> | null,
     /** qc3 S-1 — artificial latency for the events route. */
     eventsDelayMs: 0,
   };
@@ -135,6 +137,10 @@ function forkChrome(
       const url = new URL(request.url);
       const branchId = url.searchParams.get('branch_id');
       if (branchId) state.branchFetchCount += 1;
+      if (url.searchParams.get('event_type') === 'fork_created') {
+        state.lineageFetchCount += 1;
+        await state.lineageResponseGate;
+      }
       // W-2 — fail the lineage marker read on demand (transient 5xx) so
       // the degraded-badge path is exercisable.
       if (
@@ -203,14 +209,15 @@ function renderForkChrome(
     over.branch === undefined
       ? ['/worlds/world-7/timeline']
       : [`/worlds/world-7/timeline?branch=${over.branch}`];
+  const queryClient = makeQueryClient();
   const result = renderInApp(
     <>
       {over.extra ?? null}
       <TimelineCanvas worldId="world-7" />
     </>,
-    { client: new BrowserClient(), initialRouterEntries: initial },
+    { client: new BrowserClient(), initialRouterEntries: initial, queryClient },
   );
-  return { ...result, state };
+  return { ...result, state, queryClient };
 }
 
 beforeEach(async () => {
@@ -320,13 +327,49 @@ describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
     // The parent hop is not offered while the lineage is unknown.
     expect(within(badge).queryByTestId('fork-lineage-open-parent')).not.toBeInTheDocument();
 
-    // Retry (the failure was consumed) recovers the full badge.
-    fireEvent.click(within(badge).getByTestId('fork-lineage-retry'));
+    let releaseRetry!: () => void;
+    state.lineageResponseGate = new Promise<void>((resolve) => {
+      releaseRetry = resolve;
+    });
+    try {
+      fireEvent.click(within(badge).getByTestId('fork-lineage-retry'));
+      await waitFor(() => expect(state.lineageFetchCount).toBe(2));
+      expect(badge).toBeInTheDocument();
+      expect(within(badge).getByTestId('fork-lineage-unavailable')).toBeInTheDocument();
+      expect(within(badge).queryByTestId('fork-lineage-open-parent')).not.toBeInTheDocument();
+    } finally {
+      releaseRetry();
+    }
     expect(await within(badge).findByTestId('fork-lineage-parent')).toHaveTextContent(
       `Parent branch: ${ROOT_BRANCH_ID}`,
     );
     expect(within(badge).getByTestId('fork-lineage-open-parent')).toBeInTheDocument();
     expect(within(badge).queryByTestId('fork-lineage-unavailable')).not.toBeInTheDocument();
+  });
+
+  it('keeps the degraded badge after a failed retry and recovers on another retry', async () => {
+    const { state, queryClient } = renderForkChrome({ branch: FORK_BRANCH_ID });
+    state.lineageFailures = 2;
+    const badge = await screen.findByTestId('fork-lineage-badge');
+    fireEvent.click(within(badge).getByTestId('fork-lineage-retry'));
+    await waitFor(() => expect(state.lineageFailures).toBe(0));
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    await waitFor(() => expect(screen.getByTestId('fork-lineage-badge')).toBe(badge));
+    expect(within(badge).getByTestId('fork-lineage-unavailable')).toBeInTheDocument();
+    fireEvent.click(within(badge).getByTestId('fork-lineage-retry'));
+    expect(await within(badge).findByTestId('fork-lineage-parent')).toBeInTheDocument();
+  });
+
+  it('hides degraded chrome when retry confirms there is no fork marker', async () => {
+    const { state, queryClient } = renderForkChrome({ branch: FORK_BRANCH_ID });
+    state.lineageFailures = 1;
+    const badge = await screen.findByTestId('fork-lineage-badge');
+    state.eventsByBranch[FORK_BRANCH_ID] = [];
+    fireEvent.click(within(badge).getByTestId('fork-lineage-retry'));
+    await waitFor(() => expect(state.lineageFetchCount).toBe(2));
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    await waitFor(() => expect(screen.queryByTestId('fork-lineage-badge')).not.toBeInTheDocument());
+    expect(state.lineageFetchCount).toBe(2);
   });
 
   it('fork_badge_no_degraded_chrome_on_root_error — root marker failure renders nothing (no fork chrome on root)', async () => {
