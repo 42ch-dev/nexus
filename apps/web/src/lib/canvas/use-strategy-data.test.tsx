@@ -9,9 +9,9 @@
  * whole reports the refusal — never an overall success, never an automatic
  * re-append.
  *
- * These cases drive the real `BrowserClient` against msw, so the observed
- * request order, refusal codes and refresh behavior are transport-level rather
- * than mocked-hook behavior.
+ * Transport cases drive the real `BrowserClient` against msw to observe request
+ * order, refusal codes and refresh behavior. The Run submission case spies on
+ * client methods while exercising the real canvas hooks and Idea input.
  */
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -146,7 +146,9 @@ describe('useDerivedCreatorId', () => {
     });
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: IDEA } });
-    fireEvent.click(screen.getAllByRole('button', { name: /^Run$/ })[1]!);
+    fireEvent.click(screen.getByRole('button', {
+      name: (name, element) => name === 'Run' && !element.hasAttribute('aria-pressed'),
+    }));
 
     await waitFor(() => expect(addSchedule).toHaveBeenCalledWith(expect.objectContaining({
       creator_id: 'active-creator',
