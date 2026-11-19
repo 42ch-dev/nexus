@@ -39,7 +39,7 @@ use nexus_contracts::daemon_api::canvas::outline::{
     NexusOutlinePatchChapterSet, NexusOutlinePatchChapterSetContent,
     NexusOutlinePatchChapterSetStatus, OutlinePatchChapterRequest, OutlinePatchResponse,
     OutlinePatchStructureRequest, OutlinePatchStructureRequestOperation, TimelinePatchEventRequest,
-    TimelinePatchEventRequestOperation, WorkOutline,
+    TimelinePatchEventRequestOperation, WorkOutline, WorkOutlineVolumesItem,
 };
 use std::num::NonZeroU64;
 
@@ -806,21 +806,21 @@ fn render_work_outline(outline: &WorkOutline) {
             .iter()
             .map(|id| id.get().to_string())
             .collect();
-        let label = if vol.label.is_empty() {
-            String::new()
-        } else {
-            format!(": {}", vol.label)
-        };
-        println!(
-            "  Volume {}{label} — chapters [{}]",
-            vol.volume_id.get(),
-            ids.join(", ")
-        );
+        println!("  {} — chapters [{}]", volume_heading(vol), ids.join(", "));
     }
     println!("  timeline events: {}", outline.timeline_events.len());
     println!("  foreshadows: {}", outline.foreshadows.len());
     println!("  chapter titles: {}", outline.chapter_titles.len());
     println!("  updated_at: {}", outline.updated_at);
+}
+
+/// `Volume N`, followed by `: <label>` only when the volume has a non-blank label.
+fn volume_heading(vol: &WorkOutlineVolumesItem) -> String {
+    let id = vol.volume_id.get();
+    match vol.label.trim() {
+        "" => format!("Volume {id}"),
+        label => format!("Volume {id}: {label}"),
+    }
 }
 
 /// Render an `OutlinePatchResponse` for human output.
@@ -857,6 +857,18 @@ mod tests {
     struct TimelineCli {
         #[command(subcommand)]
         command: TimelineCommand,
+    }
+
+    #[test]
+    fn volume_heading_omits_blank_labels() {
+        let volume = |label: &str| WorkOutlineVolumesItem {
+            volume_id: NonZeroU64::MIN,
+            label: label.to_string(),
+            chapter_ids: Vec::new(),
+        };
+        assert_eq!(volume_heading(&volume("")), "Volume 1");
+        assert_eq!(volume_heading(&volume("   ")), "Volume 1");
+        assert_eq!(volume_heading(&volume(" Act I ")), "Volume 1: Act I");
     }
 
     #[test]
