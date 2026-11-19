@@ -27,12 +27,13 @@ test('the root build produces shared dist directories without replacing them mid
     () => null,
     (error) => error,
   );
+  assert.ifError(buildError);
   for (const { name, dist, allowedRenames, renames } of outputs) {
+    assert.ok(renames >= 1, `no rename events observed for ${name}/dist`);
     assert.ok(
       renames <= allowedRenames,
       `${name}/dist was removed or created ${renames} times (expected at most ${allowedRenames})`,
     );
     assert.ok(existsSync(join(dist, 'index.d.ts')), `${name} declarations were not built`);
   }
-  assert.ifError(buildError);
 });
