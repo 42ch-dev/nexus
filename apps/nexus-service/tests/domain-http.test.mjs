@@ -273,6 +273,42 @@ describe('domain-http (P5-T1)', () => {
     assert.equal(page2.payload.total_worlds, page1.payload.total_worlds);
   });
 
+  test('Timeline reads the fork parent using its generated root branch ID', async () => {
+    const worlds = await jsonFetch(`${baseUrl}/v1/daemon/narrative/worlds`);
+    assert.equal(worlds.status, 200, worlds.text);
+    const world = worlds.payload.worlds.find(({ title }) => title === 'Root Timeline World');
+    assert.ok(world, worlds.text);
+
+    const worldUrl = `${baseUrl}/v1/daemon/worlds/${world.world_id}`;
+    const timelineUrl = `${worldUrl}/timeline/events`;
+    const eventsUrl = `${timelineUrl}?event_type=compute_result&status=canon`;
+    const root = await jsonFetch(eventsUrl);
+    assert.equal(root.status, 200, root.text);
+    const rootEvent = root.payload.items.find(({ title }) => title === 'Root Timeline Event');
+    assert.ok(rootEvent, root.text);
+
+    const fork = await jsonFetch(`${worldUrl}/forks`, {
+      method: 'POST',
+      body: { parent_branch_id: rootEvent.branch_id, forked_from_event_id: rootEvent.id },
+    });
+    assert.equal(fork.status, 200, fork.text);
+    const lineageUrl = `${timelineUrl}?event_type=fork_created&status=canon&limit=1`;
+    const lineage = await jsonFetch(`${lineageUrl}&branch_id=${encodeURIComponent(fork.payload.branch_id)}`);
+    assert.equal(lineage.status, 200, lineage.text);
+    const parent = lineage.payload.items[0]?.extensions?.fork_lineage?.parent_branch_id;
+    assert.equal(parent, rootEvent.branch_id);
+
+    const parentFilter = `&branch_id=${encodeURIComponent(parent)}`;
+    const parentEvents = await jsonFetch(`${eventsUrl}${parentFilter}`);
+    assert.equal(parentEvents.status, 200, parentEvents.text);
+    assert.deepEqual(parentEvents.payload.items.map(({ id, branch_id }) => ({ id, branch_id })), [
+      { id: rootEvent.id, branch_id: parent },
+    ]);
+    const parentLineage = await jsonFetch(`${lineageUrl}${parentFilter}`);
+    assert.equal(parentLineage.status, 200, parentLineage.text);
+    assert.deepEqual(parentLineage.payload.items, []);
+  });
+
   test('scene/beat authoring reaches the core owner over HTTP and persists', async () => {
     // The native store's Work family resolves every filesystem path through
     // the selected workspace's registered `local_root`, so the durable proof
