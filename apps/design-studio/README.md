@@ -116,16 +116,16 @@ only by the explicit generate command below.
    dev projection.
 6. **Validate** — confirm Brand VI, Components, Voice, and Surfaces still look
    correct in both themes
-7. **Verify product** — run `pnpm --filter @42ch/nexus-ui build`, then
-   `pnpm --filter web typecheck` and `pnpm --filter web build` to ensure
-   `apps/web` consumers still resolve tokens (no web source edits)
+7. **Verify product** — run `pnpm --filter web typecheck` and
+   `pnpm run build:web` to ensure `apps/web` consumers still resolve tokens
+   (no web source edits)
 
 ## Commands
 
 | Action | Command |
 | --- | --- |
 | Dev server | `pnpm --filter design-studio dev` |
-| Build | `pnpm --filter design-studio build` |
+| Build | `pnpm run build:design-studio` |
 | Test | `pnpm --filter design-studio test` |
 
 No daemon required for any command.

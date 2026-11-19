@@ -15,18 +15,10 @@ local-first surface — **not** the private cloud SaaS.
 
 ```sh
 pnpm --filter web dev        # Vite dev server (http://localhost:5173)
-pnpm --filter web build      # tsc --noEmit + vite build → dist/
+pnpm run build:web           # build workspace dependencies, then the web SPA → dist/
 pnpm --filter web typecheck  # tsc --noEmit
 pnpm --filter web preview    # serve the production build
 ```
-
-> `build`/`typecheck` resolve types from `@42ch/nexus-contracts`, whose entry
-> points to `dist/`. Build the contracts package first (CI does this; locally):
->
-> ```sh
-> pnpm --filter @42ch/nexus-contracts run build
-> pnpm --filter web typecheck
-> ```
 
 ## Dev workflow
 
