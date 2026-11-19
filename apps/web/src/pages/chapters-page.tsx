@@ -47,12 +47,12 @@ export function ChaptersPage() {
   const patch = usePatchChapter(workId || undefined);
   const rows = useMemo(() => flattenPages(chapters.data), [chapters.data]);
 
-  const [editing, setEditing] = useState<number | null>(null);
+  const [editing, setEditing] = useState<Pick<ChapterSummary, 'volume' | 'chapter'> | null>(null);
   const [edits, setEdits] = useState<Edits>({});
   const [confirmChapter, setConfirmChapter] = useState<ChapterSummary | null>(null);
 
   function startEdit(row: ChapterSummary) {
-    setEditing(row.chapter);
+    setEditing({ volume: row.volume, chapter: row.chapter });
     setEdits({
       slug: row.slug ?? '',
       planned_word_count: row.planned_word_count,
@@ -167,11 +167,11 @@ export function ChaptersPage() {
                 </TableHeader>
                 <TableBody>
                   {rows.map((row) => {
-                    const isEditing = editing === row.chapter;
+                    const isEditing = editing?.volume === row.volume && editing?.chapter === row.chapter;
                     const isProtected = row.status === 'finalized' || row.status === 'published';
                     return (
                       <TableRow
-                        key={row.chapter}
+                        key={`${row.volume}:${row.chapter}`}
                         // V1.121 v0.4: protected-row tint converges onto the
                         // registered data-table-row-protected token (DESIGN.md
                         // components.data-table.row-protected — purple-700

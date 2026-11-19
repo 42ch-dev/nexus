@@ -10,7 +10,7 @@ import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
 import { ChaptersPage } from '@/pages/chapters-page';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const client = () => new BrowserClient();
@@ -34,6 +34,52 @@ function worksHandler() {
 }
 
 describe('ChaptersPage', () => {
+  it('edits only the selected volume when chapter numbers repeat', async () => {
+    const chapters = [1, 2].map((volume) => ({
+      work_id: 'w-123', chapter: 1, volume, title: `Volume ${volume} opening`,
+      slug: `v${volume}-ch01`, planned_word_count: volume * 2000,
+      status: 'not_started', created_at: '2026-06-25T00:00:00Z',
+      updated_at: '2026-06-25T00:00:00Z',
+    }));
+    const received: { volume: string | null; body: unknown }[] = [];
+    useHandlers(
+      worksHandler(),
+      http.get('/v1/daemon/works/:workId/chapters', () =>
+        HttpResponse.json({ items: chapters, pagination: { limit: 20, has_more: false } }),
+      ),
+      http.patch('/v1/daemon/works/:workId/chapters/:n', async ({ request }) => {
+        const volume = new URL(request.url).searchParams.get('volume');
+        const body = await request.json();
+        received.push({ volume, body });
+        return HttpResponse.json(chapters[Number(volume) - 1]);
+      }),
+    );
+
+    renderChapters();
+    const first = (await screen.findByText('Volume 1 opening')).closest('tr')!;
+    const second = screen.getByText('Volume 2 opening').closest('tr')!;
+    await userEvent.click(within(first).getByRole('button', { name: /Edit structure/i }));
+    expect(screen.getAllByRole('button', { name: /Save edits/i })).toHaveLength(1);
+    expect(within(first).getByLabelText('Volume')).toHaveValue(1);
+    expect(within(second).queryByLabelText('Volume')).not.toBeInTheDocument();
+    expect(within(second).getByText('v2-ch01')).toBeInTheDocument();
+
+    await userEvent.clear(within(first).getByLabelText('Slug'));
+    await userEvent.type(within(first).getByLabelText('Slug'), 'opening');
+    await userEvent.click(within(first).getByRole('button', { name: /Save edits/i }));
+    await waitFor(() => expect(received).toEqual([
+      { volume: '1', body: { slug: 'opening', planned_word_count: 2000, volume: 1 } },
+    ]));
+    await waitFor(() => expect(screen.queryByLabelText('Slug')).not.toBeInTheDocument());
+    await userEvent.click(within(second).getByRole('button', { name: /Edit structure/i }));
+    expect(screen.getAllByLabelText('Slug')).toHaveLength(1);
+    expect(within(second).getByLabelText('Slug')).toHaveValue('v2-ch01');
+    await userEvent.click(within(second).getByRole('button', { name: /Save edits/i }));
+    await waitFor(() => expect(received[1]).toEqual({
+      volume: '2', body: { slug: 'v2-ch01', planned_word_count: 4000, volume: 2 },
+    }));
+  });
+
   it('renders the chapter structure table', async () => {
     useHandlers(
       worksHandler(),
