@@ -4,10 +4,11 @@
  * The outline structure inspector renders large chapter lists through
  * `react-window` FixedSizeList so only the visible viewport is mounted.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+import { i18n } from '@/lib/i18n/config';
 import { OutlineStructurePanel } from './structure-inspector';
 import type { ChapterSummary, WorkOutline } from '@42ch/nexus-contracts';
 
@@ -99,5 +100,26 @@ describe('OutlineStructurePanel virtualization (R-V165-QC3-VIRT B6)', () => {
     // should be mounted rather than all 120.
     expect(buttons.length).toBeGreaterThan(0);
     expect(buttons.length).toBeLessThan(120);
+  });
+});
+
+describe('OutlineStructurePanel volume label', () => {
+  afterEach(async () => {
+    await i18n.changeLanguage('en');
+  });
+
+  it('renders the localized default for an unnamed volume under zh-CN', async () => {
+    await i18n.changeLanguage('zh-CN');
+    render(
+      <OutlineStructurePanel
+        outline={outline({ volumes: [{ volume_id: 1, label: '', chapter_ids: [1] }] })}
+        chapters={[chapter(1)]}
+        selectedChapterId={null}
+        onSelectChapter={vi.fn()}
+        onMoveChapter={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: '第 1 卷' })).toBeInTheDocument();
   });
 });
