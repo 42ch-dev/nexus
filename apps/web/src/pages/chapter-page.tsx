@@ -69,7 +69,7 @@ export function ChapterPage() {
 
   // V1.89 — persisted reading progress sync.
   useReadingProgressSync(workId || undefined, chapterNumber || undefined, {
-    enabled: !chapter.isLoading && Boolean(chapter.data),
+    enabled: !chapter.isLoading && Boolean(chapter.data) && !body.isLoading && Boolean(body.data),
   });
 
   // V1.89 — annotation surface.
