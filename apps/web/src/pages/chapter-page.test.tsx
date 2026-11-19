@@ -9,25 +9,28 @@
  * is exercised or asserted.
  */
 import { http, HttpResponse } from 'msw';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router';
 
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
 import { ChapterPage } from '@/pages/chapter-page';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const client = () => new BrowserClient();
 
 function renderChapter(workId = 'w-123', chapter = 1) {
   return renderInApp(
-    <Routes>
-      <Route path="works/:workId/chapters/:chapter" element={<ChapterPage />} />
-    </Routes>,
+    <main ref={setUpScrollContainer}>
+      <Routes>
+        <Route path="works/:workId/chapters/:chapter" element={<ChapterPage />} />
+      </Routes>
+    </main>,
     {
       client: client(),
+      setupCompleted: true,
       initialRouterEntries: [`/works/${workId}/chapters/${chapter}`],
     },
   );
@@ -203,20 +206,13 @@ function deleteAnnotationHandler() {
   return http.delete('/v1/daemon/reading/annotations/:id', () => new HttpResponse(null, { status: 204 }));
 }
 
-let originalScrollY: PropertyDescriptor | undefined;
-let originalScrollHeight: PropertyDescriptor | undefined;
-let originalInnerHeight: PropertyDescriptor | undefined;
-let originalScrollTo: typeof window.scrollTo;
-
-/** Override scroll metrics so useReadingProgressSync can compute a ratio. */
-function setScrollMetrics(metrics: { scrollY: number; scrollHeight: number; innerHeight: number }) {
-  Object.defineProperty(window, 'scrollY', { value: metrics.scrollY, writable: true, configurable: true });
-  Object.defineProperty(document.documentElement, 'scrollHeight', {
-    value: metrics.scrollHeight,
-    writable: true,
-    configurable: true,
+function setUpScrollContainer(main: HTMLElement | null) {
+  if (!main) return;
+  Object.defineProperties(main, {
+    scrollHeight: { value: 2000, configurable: true },
+    clientHeight: { value: 1000, configurable: true },
+    scrollTo: { value: vi.fn(({ top }: ScrollToOptions) => { main.scrollTop = top ?? 0; }), configurable: true },
   });
-  Object.defineProperty(window, 'innerHeight', { value: metrics.innerHeight, writable: true, configurable: true });
 }
 
 function selectTextInProse(startOffset: number, endOffset: number) {
@@ -249,25 +245,7 @@ function selectTextInProse(startOffset: number, endOffset: number) {
   document.dispatchEvent(new Event('selectionchange'));
 }
 
-beforeEach(() => {
-  originalScrollTo = window.scrollTo;
-  window.scrollTo = vi.fn();
-  originalScrollY = Object.getOwnPropertyDescriptor(window, 'scrollY');
-  originalScrollHeight = Object.getOwnPropertyDescriptor(document.documentElement, 'scrollHeight');
-  originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
-});
-
 afterEach(() => {
-  window.scrollTo = originalScrollTo;
-  if (originalScrollY) {
-    Object.defineProperty(window, 'scrollY', originalScrollY);
-  }
-  if (originalScrollHeight) {
-    Object.defineProperty(document.documentElement, 'scrollHeight', originalScrollHeight);
-  }
-  if (originalInnerHeight) {
-    Object.defineProperty(window, 'innerHeight', originalInnerHeight);
-  }
   vi.useRealTimers();
 });
 function readingHandlers(opts?: { chapter?: number; status?: string; findings?: number; kb?: number; scrollProgress?: number; annotations?: unknown[] }) {
@@ -598,13 +576,12 @@ describe('ChapterPage (V1.79 P0 QC fix-wave — pagination correctness)', () => 
 describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
   it('restores persisted scroll progress on load', async () => {
     useHandlers(...readingHandlers({ scrollProgress: 5_000 }));
-    setScrollMetrics({ scrollY: 0, scrollHeight: 2_000, innerHeight: 1_000 });
 
     renderChapter();
     await screen.findByText('Body prose.');
 
     await waitFor(() => {
-      expect(window.scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 500 }));
+      expect(screen.getByRole('main').scrollTop).toBe(500);
     });
   });
 
@@ -627,16 +604,13 @@ describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
       annotationsHandler(),
       createAnnotationHandler(),
     );
-    setScrollMetrics({ scrollY: 0, scrollHeight: 2_000, innerHeight: 1_000 });
 
     renderChapter();
     await screen.findByText('Body prose.');
 
-    // Simulate scroll to 50%.
-    setScrollMetrics({ scrollY: 500, scrollHeight: 2_000, innerHeight: 1_000 });
-    window.dispatchEvent(new Event('scroll'));
-    setScrollMetrics({ scrollY: 600, scrollHeight: 2_000, innerHeight: 1_000 });
-    window.dispatchEvent(new Event('scroll'));
+    const main = screen.getByRole('main');
+    fireEvent.scroll(main, { target: { scrollTop: 500 } });
+    fireEvent.scroll(main, { target: { scrollTop: 600 } });
 
     vi.advanceTimersByTime(600);
 
@@ -644,7 +618,66 @@ describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
       expect(saveRequests.length).toBeGreaterThanOrEqual(1);
     });
     const last = saveRequests.at(-1);
-    expect(last?.scroll_progress).toBeGreaterThanOrEqual(5_000);
+    expect(last?.scroll_progress).toBe(6_000);
+  });
+
+  it('waits for the body before restoring the main scroll position', async () => {
+    let releaseBody!: () => void;
+    const bodyReady = new Promise<void>((resolve) => { releaseBody = resolve; });
+    useHandlers(
+      http.get('/v1/daemon/works/:workId/chapters/:n/body', async () => {
+        await bodyReady;
+        return HttpResponse.json({
+          work_id: 'w-123', chapter: 1, volume: 1, content: 'Delayed body.',
+          body_path: 'Works/WRK/Stories/ch01.md', frontmatter: {}, read_only: true,
+          updated_at: '2026-06-25T00:00:00Z',
+        });
+      }),
+      ...readingHandlers({ scrollProgress: 5_000 }),
+    );
+    renderChapter();
+    await screen.findByRole('navigation', { name: 'Chapter navigation' });
+    const main = screen.getByRole('main');
+    expect(main.scrollTo).not.toHaveBeenCalled();
+    releaseBody();
+    await screen.findByText('Delayed body.');
+    await waitFor(() => expect(main.scrollTop).toBe(500));
+  });
+
+  it('flushes the main position before unload even before the debounce fires', async () => {
+    const requests: { scroll_progress: number }[] = [];
+    useHandlers(
+      http.put('/v1/daemon/reading/progress', async ({ request }) => {
+        const body = await request.json() as { scroll_progress: number };
+        requests.push(body);
+        return HttpResponse.json({ ...body, work_id: 'w-123', chapter: 1 });
+      }),
+      ...readingHandlers(),
+    );
+    renderChapter();
+    await screen.findByText('Body prose.');
+    fireEvent.scroll(screen.getByRole('main'), { target: { scrollTop: 400 } });
+    fireEvent(window, new Event('beforeunload'));
+    await waitFor(() => expect(requests.at(-1)?.scroll_progress).toBe(4_000));
+  });
+
+  it('keeps non-scrollable content at zero', async () => {
+    useHandlers(...readingHandlers({ scrollProgress: 5_000 }));
+    renderChapter();
+    Object.defineProperty(screen.getByRole('main'), 'scrollHeight', { value: 1000 });
+    await screen.findByText('Body prose.');
+    expect(screen.getByRole('main').scrollTop).toBe(0);
+    expect(screen.getByRole('main').scrollTo).not.toHaveBeenCalled();
+  });
+
+  it('does not restore when the body request fails', async () => {
+    useHandlers(
+      http.get('/v1/daemon/works/:workId/chapters/:n/body', () => HttpResponse.error()),
+      ...readingHandlers({ scrollProgress: 5_000 }),
+    );
+    renderChapter();
+    await screen.findByText('Could not load the chapter body.');
+    expect(screen.getByRole('main').scrollTo).not.toHaveBeenCalled();
   });
 
   it('creates a highlight from text selection', async () => {

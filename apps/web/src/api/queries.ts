@@ -2166,7 +2166,7 @@ export function useImportPack() {
 }
 
 /**
- * Sync the document scroll position with persisted reading progress.
+ * Sync the main scroll position with persisted reading progress.
  *
  * On mount / chapter change, restores the saved scroll ratio once the progress
  * query resolves. While the user reads, debounces scroll events (~500 ms) and
@@ -2192,8 +2192,10 @@ export function useReadingProgressSync(
   const saveMutate = save.mutate;
   const flushSave = useCallback(() => {
     if (!workId || chapter === undefined || chapter <= 0) return;
-    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
-    const ratio = scrollable > 0 ? window.scrollY / scrollable : 0;
+    const scrollContainer = document.querySelector('main');
+    if (!scrollContainer) return;
+    const scrollable = scrollContainer.scrollHeight - scrollContainer.clientHeight;
+    const ratio = scrollable > 0 ? scrollContainer.scrollTop / scrollable : 0;
     saveMutate({ workId, chapter, scrollProgress: ratioToScrollProgress(ratio) });
   }, [workId, chapter, saveMutate]);
 
@@ -2201,31 +2203,35 @@ export function useReadingProgressSync(
   // re-scrolling when the save mutation updates the cached scroll_progress.
   useEffect(() => {
     if (!enabled || !progress.isSuccess || restoredRef.current) return;
+    const scrollContainer = document.querySelector('main');
+    if (!scrollContainer) return;
     if (!progress.data || progress.data.scroll_progress <= 0) {
       restoredRef.current = true;
       return;
     }
-    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+    const scrollable = scrollContainer.scrollHeight - scrollContainer.clientHeight;
     if (scrollable <= 0) {
       restoredRef.current = true;
       return;
     }
     const ratio = progress.data.scroll_progress / SCROLL_PROGRESS_UNIT;
-    window.scrollTo({ top: ratio * scrollable });
+    scrollContainer.scrollTo({ top: ratio * scrollable });
     restoredRef.current = true;
   }, [enabled, progress.isSuccess, progress.data, workId, chapter]);
 
   // Debounced scroll save.
   useEffect(() => {
     if (!enabled) return;
+    const scrollContainer = document.querySelector('main');
+    if (!scrollContainer) return;
     let timer = 0;
     function onScroll() {
       window.clearTimeout(timer);
       timer = window.setTimeout(flushSave, 500);
     }
-    window.addEventListener('scroll', onScroll, { passive: true });
+    scrollContainer.addEventListener('scroll', onScroll, { passive: true });
     return () => {
-      window.removeEventListener('scroll', onScroll);
+      scrollContainer.removeEventListener('scroll', onScroll);
       window.clearTimeout(timer);
     };
   }, [enabled, flushSave]);
